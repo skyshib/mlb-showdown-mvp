@@ -1,0 +1,11 @@
+{
+  "name": "mlb-showdown-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "balance": "node scripts/balance-sim.js",
+    "test": "node --test",
+    "serve": "python3 -m http.server 5177"
+  }
+}

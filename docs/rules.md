@@ -1,0 +1,189 @@
+# Showdown MVP Rules
+
+This file is the simulator contract for the first build. It is intentionally narrower than full MLB Showdown.
+
+## Current Research Baseline
+
+MLB Showdown used a d20, hitter cards, pitcher cards, and strategy cards. A plate appearance starts with a control check, then a second d20 roll is read on either the pitcher chart or hitter chart.
+
+The card fields we model:
+
+- Hitters: position, fielding, on-base, speed, handedness, point value, result chart.
+- Pitchers: role, control, IP, handedness, point value, result chart.
+
+Edition changes we still need to verify before locking a public rules claim:
+
+- 2001 added more baserunning choices.
+- 2002 changed on-base values.
+- 2003 added card icons.
+
+## Generated Card Model
+
+The current player pool is fictional and generated from distributions in `src/data/playerGeneration.js`. This is not an official MLB Showdown card distribution, and there are no fixed hitter or pitcher archetype charts anymore.
+
+Pool generation:
+
+- Pool size is `max(teamCount * rosterSize + 12, 56)`.
+- While pitcher count is below `ceil(poolSize * 0.32)`, each generated card has a 45% chance to be a pitcher.
+- After that pitcher target is met, each generated card has a 25% chance to be a pitcher.
+- Hitter positions are assigned by cycling through `C, 1B, 2B, 3B, SS, LF, CF, RF`.
+- Player names are drawn from 222 first names and 235 last names, and each generated pool avoids exact duplicate full names.
+- Hitter bats are picked uniformly from `R, L, S`.
+- Pitcher throws are picked uniformly from `R, L`.
+- 35% of generated pitchers are relievers with `IP 1`; the rest are starters with IP centered around 6.
+
+Normal distributions are rounded to the nearest integer and clipped to the listed range.
+
+Hitter attributes:
+
+| Attribute | Distribution |
+| --- | --- |
+| Hitter chart out slots | Normal mean `6`, SD `1.5`, clipped `1-10` |
+| On-base | Normal mean `10.5 - (outSlots - 6) * 0.25`, SD `1.2`, clipped `7-14` |
+| Speed | Normal by position, SD `3.5`, clipped `1-20`; fewer chart outs add a small positive adjustment |
+| Walk/hit split | Hits are normal mean `80%` of non-out slots, SD `10%`, clipped `55%-95%`; the rest are walks |
+| Extra-base hit split | Extra-base hits are normal mean `32%` of hit slots, SD `12%`, clipped `5%-70%` |
+| Home runs | Normal share of extra-base slots; can be zero |
+| Outs mix | SO/GB/FB proportions are independently varied, then normalized to fill the out slots |
+
+Speed means by position:
+
+| Position | Mean |
+| --- | ---: |
+| C | 10 |
+| 1B | 10 |
+| 2B | 12 |
+| 3B | 11 |
+| SS | 12 |
+| LF | 12 |
+| CF | 14 |
+| RF | 12 |
+
+Fielding distributions by position:
+
+| Position | Mean | SD | Clipped Range |
+| --- | ---: | ---: | ---: |
+| C | 6 | 1.5 | 1-10 |
+| 1B | 0.5 | 0.5 | 0-1 |
+| 2B | 2.5 | 1.5 | 0-6 |
+| 3B | 1.5 | 1 | 0-3 |
+| SS | 3 | 1.5 | 0-6 |
+| LF | 1 | 0.67 | 0-2 |
+| CF | 2 | 0.67 | 1-3 |
+| RF | 1 | 0.67 | 0-2 |
+
+Pitcher attributes:
+
+| Attribute | Distribution |
+| --- | --- |
+| Pitcher chart out slots | Normal mean `16`, SD `1`, clipped `12-19` |
+| Control | Normal mean `3.5`, SD `1.1`, clipped `0-6` |
+| Starter IP | Normal mean `6`, SD `0.5`, clipped `5-7`; 2% chance of `8` |
+| Reliever IP | Fixed at `1` |
+| Walk/hit split | Walks are normal mean `35%` of non-out slots, SD `13%`, clipped `10%-65%`; the rest are hits |
+| Extra-base hit split | Extra-base hits are normal mean `28%` of hit slots, SD `10%`, clipped `0%-60%` |
+| Outs mix | PU/SO/GB/FB proportions are independently varied, then normalized to fill the out slots |
+
+Point values:
+
+- Hitter points are `onBase * 20 + fielding * 7 + speedPoints + chartPower`.
+- `speedPoints` are `round((speed - 1) * 1.5)`, floored at 0.
+- Hitter chart weights are SO `-4`, GB `-2`, FB `-2`, BB `4`, 1B `5`, 2B `9`, 3B `11`, HR `14`, multiplied by the number of d20 slots for each result.
+- Pitcher points are `control * 35 + IP * 8 + pitcherChartPower`.
+- Pitcher chart weights are PU `8`, SO `10`, GB `8`, FB `6`, BB `-5`, 1B `-7`, 2B `-11`, HR `-16`, multiplied by the number of d20 slots for each result.
+
+## MVP Assumptions
+
+Control check:
+
+1. Roll a d20.
+2. Add the pitcher's control.
+3. If the total is greater than the hitter's on-base value, use the pitcher chart.
+4. Otherwise use the hitter chart.
+
+Result check:
+
+1. Roll a second d20.
+2. Read the result from the selected chart.
+
+Tie on the control check goes to the hitter. This matches the "higher than on-base" wording I remember, but we should verify it.
+
+## Implemented Results
+
+- `PU`, `SO`: batter is out, runners hold.
+- `GB`: batter is out. Runners on second and third advance one base unless the play creates the third out. With a runner on first, the runner from first is out and the defense attempts a double play: d20 plus total infield fielding must beat the batter's speed to also retire the batter.
+- `FB`: batter is out. If the catch is not the third out, eligible runners on second and/or third may tag up using the advancement decision matrix. The defense throws at the lowest-probability attempt; d20 plus total outfield fielding must beat the runner's speed target to retire the runner. Ties go to the runner.
+- `BB`: forced runners advance.
+- `1B`: all runners advance one base. Runners who end on second or third may attempt one extra base using the advancement decision matrix.
+- `2B`: runner on first reaches third; all other runners score. The runner who reaches third may attempt home using the advancement decision matrix.
+- `3B`: all runners score.
+- `HR`: all runners and the batter score.
+
+This baserunning model is playable but not final. Groundouts include double-play attempts, fly balls include automated tag-up decisions, and singles/doubles include automated extra-base attempts.
+
+## Advancement Decision Matrix
+
+Optional advancement uses a 3x3 decision matrix. Rows are the number of outs at the moment of the decision, and columns are the destination base.
+
+| Outs | Second | Third | Home |
+| --- | ---: | ---: | ---: |
+| 0 | 90% | 85% | 75% |
+| 1 | 80% | 75% | 65% |
+| 2 | 70% | 65% | 55% |
+
+For tag-ups, the flyout out is recorded before reading the matrix. A flyout with zero outs uses the one-out row; a flyout with one out uses the two-out row; a flyout with two outs creates the third out, so there is no tag-up attempt.
+
+For extra-base attempts after hits, the matrix uses the outs before the swing. These attempts also get the official +5 target bonus when going home and +5 when there were two outs before the swing.
+
+## Steals
+
+Before a plate appearance, the auto-manager may attempt one steal using the advancement decision matrix:
+
+- Runner on first may steal second if second is open.
+- Runner on second may steal third if third is open.
+- Stealing home is not implemented.
+- Stealing third gets a +5 target bonus.
+- The defense rolls d20 plus catcher Fielding. The defense must beat the runner target; ties go to the runner.
+- A successful or failed steal is logged as its own event. The batter still comes up next unless the steal attempt creates the third out.
+
+## Game Rules
+
+- Games are nine innings.
+- Extra innings continue until one team leads after a completed inning.
+- The home team does not bat in the bottom of the ninth or later if already ahead.
+- The game ends immediately on a home walk-off in the bottom of the ninth or later.
+- Lineups cycle in order.
+- Tournament games cycle through each team's drafted starters. With the current 2-starter roster, a team's starts alternate starter 1, starter 2, starter 1, starter 2, including the final.
+- Pitching uses a planned staff model. The first pitcher is the starter. All later pitchers are one bullpen group, sorted from lowest Control to highest Control so the best bullpen pitcher pitches last.
+- Starter target innings are `9 - total bullpen IP`. If the starter must pitch past his own IP, fatigue applies.
+- Bullpen pitchers pitch their IP in order. If the game goes into extras, the final bullpen pitcher stays in and becomes tired.
+- Fatigue is `-1` to pitch total for each inning or partial inning beyond the pitcher's IP.
+- Expert run charging is implemented for fatigue: runs are charged to the pitcher responsible for the runner reaching base, and every 3 charged runs reduce that pitcher's fatigue IP threshold by 1 inning. This does not change the planned staff timing or when bullpen pitchers enter.
+- Catcher throw-out mechanics use the catcher's numeric fielding value; there is no separate catcher Arm stat in this prototype.
+- Strategy cards are not implemented. Treat them as v4 or later.
+
+## Deferred
+
+- Sacrifice bunts.
+- Hit-and-run.
+- Manager strategy sliders.
+- Fielding checks.
+- Official/manual pitching changes.
+- 2003+ icons.
+
+## UI Notes
+
+The app now treats this file as the v1 rule contract. The draft and tournament screens show this as an assumption rather than as a claim about the full original rules.
+
+Current implementation details:
+
+- Draft rooms are saved in browser localStorage.
+- A legal MVP roster needs 9 hitters, 2 starters, and 2 bullpen pitchers.
+- Tournament rotation uses both drafted starters across games.
+- Bench and backup players are intentionally not implemented for now.
+- The top roster board supports manual lineup assignment: click a hitter slot to highlight valid destinations, then click a destination to move or swap. Drag/drop uses the same eligibility rules.
+- Corner outfielders are interchangeable for roster legality and defensive assignment: an LF can fill RF, and an RF can fill LF.
+- If no printed 1B is available, any hitter can cover first base with Fielding set to exactly `-1`. This is not a subtraction from the card's printed Fielding.
+- Manual draft picks are blocked if they would make those minimums impossible.
+- Auto-pick scores available players by point value plus roster-need urgency, including the starter/bullpen split.
+- Box scores are generated from the simulator event log.
