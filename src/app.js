@@ -400,7 +400,8 @@ function renderTournament() {
       <div class="game-tabs">${gameButtons}</div>
       ${renderGameDetail(selectedGame)}
     </div>
-  </section>`;
+  </section>
+  ${renderTournamentStats(games)}`;
 
   bindTournamentActions();
 }
@@ -498,6 +499,204 @@ function renderGameDetail(game) {
     <h4>Play-by-play</h4>
     ${renderGameLog(game)}
   </div>`;
+}
+
+function renderTournamentStats(games) {
+  const stats = aggregateTournamentStats(games);
+  const hitters = stats.hitters.sort(compareTournamentHitters);
+  const pitchers = stats.pitchers.sort(compareTournamentPitchers);
+
+  return `<section class="panel tournament-stats-panel">
+    <div class="section-title-row">
+      <div>
+        <p class="eyebrow">Tournament stats</p>
+        <h2>All games combined</h2>
+      </div>
+      <span>${games.length} games</span>
+    </div>
+    <div class="leader-grid">
+      ${renderLeaderCard("HR leaders", hitters, (row) => row.hr, (row) => `${row.rbi} RBI`)}
+      ${renderLeaderCard("RBI leaders", hitters, (row) => row.rbi, (row) => `${row.h} H`)}
+      ${renderLeaderCard("Hit leaders", hitters, (row) => row.h, (row) => `${formatAverage(row.h, row.ab)} AVG`)}
+      ${renderLeaderCard("Strikeout leaders", pitchers, (row) => row.so, (row) => `${formatInnings(row.outs)} IP`)}
+    </div>
+    <div class="stat-table-grid">
+      <div class="stat-table-block">
+        <h3>Hitters</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table">
+            <thead><tr><th>Player</th><th>Team</th><th class="num">PA</th><th class="num">AB</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">RBI</th><th class="num">AVG</th><th class="num">OBP</th></tr></thead>
+            <tbody>${hitters.map(renderTournamentHitterRow).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="stat-table-block">
+        <h3>Pitchers</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table">
+            <thead><tr><th>Player</th><th>Team</th><th class="num">IP</th><th class="num">BF</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">R</th><th class="num">RA/9</th></tr></thead>
+            <tbody>${pitchers.map(renderTournamentPitcherRow).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderLeaderCard(title, rows, valueForRow, detailForRow) {
+  const leaders = rows
+    .filter((row) => valueForRow(row) > 0)
+    .slice(0, 5);
+  if (!leaders.length) {
+    return `<article class="leader-card">
+      <h3>${escapeHtml(title)}</h3>
+      <p class="empty">No leaders yet.</p>
+    </article>`;
+  }
+  const max = Math.max(...leaders.map(valueForRow), 1);
+  return `<article class="leader-card">
+    <h3>${escapeHtml(title)}</h3>
+    <ol>
+      ${leaders.map((row) => {
+        const value = valueForRow(row);
+        const width = Math.round((value / max) * 100);
+        return `<li>
+          <div class="leader-line">
+            <strong>${escapeHtml(row.name)}</strong>
+            <span>${escapeHtml(row.team)}</span>
+            <b>${value}</b>
+          </div>
+          <div class="leader-bar-track"><span class="leader-bar" style="--leader-width: ${width}%"></span></div>
+          <em>${escapeHtml(detailForRow(row))}</em>
+        </li>`;
+      }).join("")}
+    </ol>
+  </article>`;
+}
+
+function renderTournamentHitterRow(row) {
+  return `<tr>
+    <td>${escapeHtml(row.name)}</td>
+    <td>${escapeHtml(row.team)}</td>
+    <td class="num">${row.pa}</td>
+    <td class="num">${row.ab}</td>
+    <td class="num">${row.h}</td>
+    <td class="num">${row.bb}</td>
+    <td class="num">${row.so}</td>
+    <td class="num">${row.hr}</td>
+    <td class="num">${row.rbi}</td>
+    <td class="num">${formatAverage(row.h, row.ab)}</td>
+    <td class="num">${formatAverage(row.h + row.bb, row.ab + row.bb)}</td>
+  </tr>`;
+}
+
+function renderTournamentPitcherRow(row) {
+  return `<tr>
+    <td>${escapeHtml(row.name)}</td>
+    <td>${escapeHtml(row.team)}</td>
+    <td class="num">${formatInnings(row.outs)}</td>
+    <td class="num">${row.bf}</td>
+    <td class="num">${row.h}</td>
+    <td class="num">${row.bb}</td>
+    <td class="num">${row.so}</td>
+    <td class="num">${row.hr}</td>
+    <td class="num">${row.r}</td>
+    <td class="num">${formatRunsPerNine(row.r, row.outs)}</td>
+  </tr>`;
+}
+
+function aggregateTournamentStats(games) {
+  const hitters = new Map();
+  const pitchers = new Map();
+
+  for (const game of games) {
+    for (const side of ["away", "home"]) {
+      const teamBox = game.boxScore?.[side];
+      if (!teamBox) continue;
+      for (const line of teamBox.hitters ?? []) {
+        const row = getAggregateLine(hitters, line, teamBox.team, {
+          pa: 0,
+          ab: 0,
+          h: 0,
+          bb: 0,
+          so: 0,
+          hr: 0,
+          rbi: 0
+        });
+        row.pa += line.pa;
+        row.ab += line.ab;
+        row.h += line.h;
+        row.bb += line.bb;
+        row.so += line.so;
+        row.hr += line.hr;
+        row.rbi += line.rbi;
+      }
+      for (const line of teamBox.pitchers ?? []) {
+        const row = getAggregateLine(pitchers, line, teamBox.team, {
+          bf: 0,
+          outs: 0,
+          h: 0,
+          bb: 0,
+          so: 0,
+          hr: 0,
+          r: 0
+        });
+        row.bf += line.bf;
+        row.outs += line.outs;
+        row.h += line.h;
+        row.bb += line.bb;
+        row.so += line.so;
+        row.hr += line.hr;
+        row.r += line.r;
+      }
+    }
+  }
+
+  return {
+    hitters: [...hitters.values()],
+    pitchers: [...pitchers.values()]
+  };
+}
+
+function getAggregateLine(map, line, team, stats) {
+  if (!map.has(line.id)) {
+    map.set(line.id, {
+      id: line.id,
+      name: line.name,
+      team: line.team ?? team,
+      ...stats
+    });
+  }
+  return map.get(line.id);
+}
+
+function compareTournamentHitters(a, b) {
+  return b.hr - a.hr
+    || b.rbi - a.rbi
+    || b.h - a.h
+    || b.pa - a.pa
+    || a.name.localeCompare(b.name);
+}
+
+function compareTournamentPitchers(a, b) {
+  return b.so - a.so
+    || a.r - b.r
+    || b.outs - a.outs
+    || a.name.localeCompare(b.name);
+}
+
+function formatAverage(numerator, denominator) {
+  if (!denominator) return "---";
+  return (numerator / denominator).toFixed(3).replace(/^0/, "");
+}
+
+function formatRunsPerNine(runs, outs) {
+  if (!outs) return "---";
+  return ((runs * 27) / outs).toFixed(2);
+}
+
+function formatInnings(outs) {
+  return `${Math.floor(outs / 3)}.${outs % 3}`;
 }
 
 function renderGameLog(game) {

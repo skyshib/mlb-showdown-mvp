@@ -402,6 +402,138 @@ button.roster-slot[draggable="true"]:active {
   grid-template-columns: minmax(360px, 0.85fr) minmax(0, 1.6fr);
 }
 
+.section-title-row {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.section-title-row h2 {
+  margin-bottom: 0;
+}
+
+.section-title-row > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.tournament-stats-panel {
+  overflow: hidden;
+}
+
+.leader-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.leader-card {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: white;
+}
+
+.leader-card h3 {
+  margin-bottom: 10px;
+}
+
+.leader-card ol {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.leader-card li {
+  display: grid;
+  gap: 4px;
+}
+
+.leader-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.leader-line strong,
+.leader-line span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leader-line strong {
+  grid-column: 1;
+  font-size: 13px;
+}
+
+.leader-line span {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.leader-line span,
+.leader-card em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.leader-line b {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.leader-bar-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4e9e5;
+}
+
+.leader-bar {
+  display: block;
+  width: var(--leader-width);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.stat-table-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 14px;
+}
+
+.stat-table-block {
+  min-width: 0;
+}
+
+.stat-table-block h3 {
+  margin-bottom: 8px;
+}
+
+.tournament-stat-table {
+  min-width: 720px;
+}
+
+.tournament-stat-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
 .wide {
   overflow-x: auto;
 }
@@ -1007,5 +1139,10 @@ button.roster-slot[draggable="true"]:active {
 
   .lineup-slots {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .leader-grid,
+  .stat-table-grid {
+    grid-template-columns: 1fr;
   }
 }
