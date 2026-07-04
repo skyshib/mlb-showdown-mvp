@@ -60,7 +60,22 @@ Then:
 4. Picks are turn-gated: you can only draft (or auto-pick) when your manager is on the clock, and you can only edit your own lineup. The room creator's seat is the host, and can auto-finish the draft, undo any pick, or act for a stalled seat.
 5. Once the draft completes, anyone can run `Sim tournament` or the batch sim locally — results are identical on every machine because all sims are seeded.
 
-How it works: the server keeps an ordered log of draft actions per room and streams it to every browser over server-sent events. Each client rebuilds the identical draft by replaying the log through the same deterministic rules used in local play, so the server stays a thin coordinator (in-memory rooms, no database). Rooms live until the server process stops.
+How it works: the server keeps an ordered log of draft actions per room and streams it to every browser over server-sent events. Each client rebuilds the identical draft by replaying the log through the same deterministic rules used in local play, so the server stays a thin coordinator.
+
+Rooms persist to disk (one JSON file per room, `data/rooms/` by default, override with `ROOMS_DIR`), so drafts survive server restarts: the server replays each saved action log on boot and seat tokens keep working.
+
+### Hosting on the internet
+
+For friends on different networks, either tunnel a locally running server (`cloudflared tunnel --url http://localhost:5177`) or deploy it. The server is one dependency-free Node process, so any Node/Docker host works — give it a persistent disk and point `ROOMS_DIR` at it. The repo ships a `Dockerfile` (listens on `$PORT`, default 8080, rooms under `/data/rooms`) and a `fly.toml` for Fly.io:
+
+```bash
+fly auth login
+fly launch --copy-config --no-deploy   # first time only; pick an app name
+fly volumes create rooms_data --size 1 # first time only
+fly deploy
+```
+
+Static-only hosts (GitHub Pages, Netlify static) cannot run the rooms API.
 
 ## Current Status
 

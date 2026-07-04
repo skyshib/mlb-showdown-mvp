@@ -1,0 +1,26 @@
+# Fly.io config for the online rooms server.
+# One-time setup (after `fly auth login`):
+#   fly launch --copy-config --no-deploy
+#   fly volumes create rooms_data --size 1
+#   fly deploy
+app = "mlb-showdown-mvp"
+primary_region = "sjc"
+
+[env]
+  PORT = "8080"
+  ROOMS_DIR = "/data/rooms"
+
+[[mounts]]
+  source = "rooms_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

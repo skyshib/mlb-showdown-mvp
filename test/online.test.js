@@ -1,12 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
 import { applyDraftAction, createDraft, currentManager } from "../src/rules/draft.js";
 
-async function startServer(t) {
-  const { server } = createOnlineServer();
+async function startServer(t, dataDir) {
+  const roomsDir = dataDir ?? (await mkdtemp(join(tmpdir(), "showdown-rooms-")));
+  const { server } = createOnlineServer({ dataDir: roomsDir });
   server.listen(0);
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -251,4 +255,51 @@ test("online room can use the real player pool and enforces its manager limit", 
   const replica = createDraft(["A", "B"], buildRealPlayerPool(), room.data.rosterSize, room.data.seed);
   for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
   assert.equal(replica.managers[0].roster.length, 1);
+});
+
+test("rooms survive a server restart with seats and turn state intact", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+
+  const first = await startServer(t, dataDir);
+  const created = await api(first, "POST", "/api/rooms", {
+    seed: "restart-room",
+    managers: ["Ana", "Bo"],
+    poolMode: "random"
+  });
+  const roomId = created.data.roomId;
+  const ana = await api(first, "POST", `/api/rooms/${roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  await api(first, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "autopick" } });
+  // persistRoom writes async; give the chained write a beat to land.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+
+  // "Restart": a brand-new server process over the same data directory.
+  const second = await startServer(t, dataDir);
+
+  const room = await api(second, "GET", `/api/rooms/${roomId}`);
+  assert.equal(room.status, 200);
+  assert.equal(room.data.actions.length, 1);
+  assert.deepEqual(
+    room.data.managers.map((manager) => [manager.name, manager.claimed]),
+    [["Ana", true], ["Bo", false]]
+  );
+
+  // Ana's old seat token still works, and it is still Bo's turn (snake pick 2),
+  // so Ana acting is rejected while a host action for the stalled seat works.
+  const outOfTurn = await api(second, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "pick", playerId: "nonexistent" }
+  });
+  assert.equal(outOfTurn.status, 409);
+  assert.match(outOfTurn.data.error, /player is not available/i);
+
+  const finish = await api(second, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "finish" }
+  });
+  assert.equal(finish.status, 200);
+  const done = await api(second, "GET", `/api/rooms/${roomId}`);
+  assert.equal(done.data.complete, true);
 });

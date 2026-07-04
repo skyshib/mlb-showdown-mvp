@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -26,14 +27,15 @@ const MIME_TYPES = {
   ".txt": "text/plain; charset=utf-8"
 };
 
-export function createOnlineServer() {
-  const rooms = new Map();
+export function createOnlineServer(options = {}) {
+  const dataDir = options.dataDir ?? process.env.ROOMS_DIR ?? join(root, "data", "rooms");
+  const store = { dataDir, rooms: loadRooms(dataDir) };
 
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, "http://localhost");
       if (url.pathname.startsWith("/api/")) {
-        await handleApi(rooms, request, response, url);
+        await handleApi(store, request, response, url);
       } else {
         await serveStatic(request, response, url);
       }
@@ -44,35 +46,105 @@ export function createOnlineServer() {
   });
 
   const heartbeat = setInterval(() => {
-    for (const room of rooms.values()) {
+    for (const room of store.rooms.values()) {
       for (const stream of room.streams) stream.write(": ping\n\n");
     }
   }, HEARTBEAT_MS);
   heartbeat.unref();
 
-  return { server, rooms };
+  return { server, rooms: store.rooms, dataDir };
 }
 
-async function handleApi(rooms, request, response, url) {
+// Rooms are persisted as one JSON file each: metadata, seats, and the action
+// log. The draft itself is not stored — it is rebuilt on load by replaying the
+// log through the same deterministic rules the clients use.
+function loadRooms(dataDir) {
+  const rooms = new Map();
+  mkdirSync(dataDir, { recursive: true });
+  for (const file of readdirSync(dataDir)) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const saved = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
+      const room = reviveRoom(saved);
+      rooms.set(room.id, room);
+    } catch (error) {
+      console.error(`Skipping room file ${file}: ${error.message}`);
+    }
+  }
+  if (rooms.size) console.log(`Restored ${rooms.size} room${rooms.size === 1 ? "" : "s"} from ${dataDir}`);
+  return rooms;
+}
+
+function reviveRoom(saved) {
+  const managerNames = saved.managerNames ?? [];
+  const realPool = saved.realPool === "mariners" ? "mariners" : "stars";
+  const pool = saved.poolMode === "real"
+    ? realPool === "mariners"
+      ? buildMarinersDraftPool(saved.seed)
+      : buildRealPlayerPool()
+    : generatePlayerPool(saved.seed, managerNames.length, saved.rosterSize);
+  const draft = createDraft(managerNames, pool, saved.rosterSize, saved.seed);
+  const actions = saved.actions ?? [];
+  for (const entry of actions) applyDraftAction(draft, entry.action);
+  return {
+    id: saved.id,
+    seed: saved.seed,
+    rosterSize: saved.rosterSize,
+    poolMode: saved.poolMode === "real" ? "real" : "random",
+    realPool,
+    managerNames,
+    draft,
+    actions,
+    seats: new Map(Object.entries(saved.seats ?? {})),
+    hostToken: saved.hostToken,
+    streams: new Set(),
+    createdAt: saved.createdAt ?? Date.now()
+  };
+}
+
+// Atomic write (tmp + rename) chained per room so saves never interleave.
+function persistRoom(store, room) {
+  if (!store.dataDir) return;
+  const payload = JSON.stringify({
+    id: room.id,
+    seed: room.seed,
+    rosterSize: room.rosterSize,
+    poolMode: room.poolMode,
+    realPool: room.realPool,
+    managerNames: room.managerNames,
+    hostToken: room.hostToken,
+    seats: Object.fromEntries(room.seats),
+    actions: room.actions,
+    createdAt: room.createdAt
+  });
+  const target = join(store.dataDir, `${room.id}.json`);
+  const tmp = `${target}.tmp`;
+  room.saveChain = (room.saveChain ?? Promise.resolve())
+    .then(() => writeFile(tmp, payload))
+    .then(() => rename(tmp, target))
+    .catch((error) => console.error(`Failed to save room ${room.id}: ${error.message}`));
+}
+
+async function handleApi(store, request, response, url) {
   const segments = url.pathname.split("/").filter(Boolean);
   // /api/rooms | /api/rooms/:id | /api/rooms/:id/(join|actions|stream)
   if (segments[1] !== "rooms") return sendJson(response, 404, { error: "Unknown API route" });
   const roomId = segments[2];
   const subroute = segments[3];
 
-  if (!roomId && request.method === "POST") return createRoom(rooms, request, response);
+  if (!roomId && request.method === "POST") return createRoom(store, request, response);
 
-  const room = rooms.get(roomId);
+  const room = store.rooms.get(roomId);
   if (!room) return sendJson(response, 404, { error: `Room "${roomId ?? ""}" not found` });
 
   if (!subroute && request.method === "GET") return sendJson(response, 200, roomSnapshot(room));
-  if (subroute === "join" && request.method === "POST") return joinRoom(room, request, response);
-  if (subroute === "actions" && request.method === "POST") return postAction(room, request, response);
+  if (subroute === "join" && request.method === "POST") return joinRoom(store, room, request, response);
+  if (subroute === "actions" && request.method === "POST") return postAction(store, room, request, response);
   if (subroute === "stream" && request.method === "GET") return openStream(room, request, response, url);
   return sendJson(response, 404, { error: "Unknown API route" });
 }
 
-async function createRoom(rooms, request, response) {
+async function createRoom(store, request, response) {
   const body = await readJsonBody(request);
   const managers = Array.isArray(body.managers)
     ? body.managers.map((name) => String(name).trim()).filter(Boolean)
@@ -98,11 +170,12 @@ async function createRoom(rooms, request, response) {
   }
   const draft = createDraft(managers, pool, rosterSize, seed);
   const room = {
-    id: newRoomId(rooms),
+    id: newRoomId(store.rooms),
     seed,
     rosterSize,
     poolMode,
     realPool,
+    managerNames: managers,
     draft,
     actions: [],
     seats: new Map(),
@@ -110,11 +183,12 @@ async function createRoom(rooms, request, response) {
     streams: new Set(),
     createdAt: Date.now()
   };
-  rooms.set(room.id, room);
+  store.rooms.set(room.id, room);
+  persistRoom(store, room);
   sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room) });
 }
 
-async function joinRoom(room, request, response) {
+async function joinRoom(store, room, request, response) {
   const body = await readJsonBody(request);
   const manager = room.draft.managers.find((item) => item.id === body.managerId);
   if (!manager) return sendJson(response, 404, { error: "Unknown manager seat" });
@@ -123,11 +197,12 @@ async function joinRoom(room, request, response) {
   const isHost = Boolean(body.hostToken) && body.hostToken === room.hostToken;
   const seat = { managerId: manager.id, token: newToken(), isHost };
   room.seats.set(manager.id, seat);
+  persistRoom(store, room);
   broadcast(room, "seats", { seats: claimedSeats(room) });
   sendJson(response, 200, { token: seat.token, managerId: manager.id, host: isHost });
 }
 
-async function postAction(room, request, response) {
+async function postAction(store, room, request, response) {
   const body = await readJsonBody(request);
   const action = body.action;
   const seat = [...room.seats.values()].find((item) => item.token === body.token);
@@ -145,6 +220,7 @@ async function postAction(room, request, response) {
 
   const entry = { seq: room.actions.length + 1, action };
   room.actions.push(entry);
+  persistRoom(store, room);
   broadcast(room, "action", entry);
   sendJson(response, 200, { seq: entry.seq });
 }
@@ -284,9 +360,10 @@ async function serveStatic(request, response, url) {
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (invokedDirectly) {
   const port = Number(process.env.PORT ?? process.argv[2] ?? 8790);
-  const { server } = createOnlineServer();
+  const { server, dataDir } = createOnlineServer();
   server.listen(port, () => {
     console.log(`Online rooms at http://127.0.0.1:${port}/index.html`);
+    console.log(`Rooms persist in ${dataDir} and survive restarts.`);
     console.log("Share your LAN address (e.g. http://<your-ip>:" + port + "/index.html) with other players.");
   });
 }
