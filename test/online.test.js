@@ -1,4 +1,5 @@
 import test from "node:test";
+import { maxRealPoolManagers } from "../src/data/realPlayers.js";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp } from "node:fs/promises";
@@ -228,11 +229,12 @@ test("online room can use the real player pool and enforces its manager limit", 
 
   const tooMany = await api(base, "POST", "/api/rooms", {
     seed: "real-room",
-    managers: ["A", "B", "C", "D", "E", "F", "G", "H"],
+    managers: Array.from({ length: maxRealPoolManagers() + 1 }, (_, index) => `M${index + 1}`),
     poolMode: "real"
   });
   assert.equal(tooMany.status, 400);
-  assert.match(tooMany.data.error, /up to \d+ managers/);
+  // Either guard may fire first: the pool-depth limit or the room-size cap.
+  assert.match(tooMany.data.error, /managers/);
 
   const created = await api(base, "POST", "/api/rooms", {
     seed: "real-room",

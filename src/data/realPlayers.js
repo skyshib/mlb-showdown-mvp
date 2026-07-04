@@ -7,11 +7,13 @@ import {
   toChart
 } from "./playerGeneration.js?v=20260704-real-players";
 
-// Real-player pool. Cards are derived from approximate 2025 MLB season stat
-// lines (hand-entered, rounded; injury-shortened seasons lean on recent form)
-// so each card reflects the player's actual skills. Speed and fielding are
-// scouting-style ratings on the same scales the generated pool uses.
-export const REAL_POOL_SEASON = "2025";
+// Real-player pool. Cards are derived from approximate, hand-entered MLB stat
+// lines so each card reflects the player's actual skills: the 2025 season for
+// current players (injury-shortened seasons lean on recent form) plus famous
+// seasons from across baseball history. Era lines are raw and unadjusted —
+// 1911 Ty Cobb and 2004 Barry Bonds rake exactly as hard as they really did.
+// Speed and fielding are scouting-style ratings on the generated pool's scales.
+export const REAL_POOL_SEASON = "1901–2025";
 
 // Environment constants used to translate real rates into card numbers. They
 // describe this pool playing against itself, so the derivation stays
@@ -84,7 +86,59 @@ const HITTER_ROWS = [
   ["Corbin Carroll", "ARI", "LF/RF", "L", 18, 2, 650, 150, 26, 17, 31, 55, 130],
   ["Shohei Ohtani", "LAD", "DH", "L", 14, 0, 730, 180, 25, 5, 55, 110, 185],
   ["Yordan Alvarez", "HOU", "DH", "L", 7, 0, 600, 165, 30, 1, 30, 70, 110],
-  ["Kyle Schwarber", "PHI", "DH", "L", 7, 0, 730, 155, 20, 1, 56, 105, 185]
+  ["Kyle Schwarber", "PHI", "DH", "L", 7, 0, 730, 155, 20, 1, 56, 105, 185],
+  // Era players: famous seasons, raw and era-unadjusted. Negro League lines
+  // (Gibson, Charleston, Paige) use the now-official MLB statistics; deadball
+  // strikeout totals are estimates. Not all stars on purpose — Mendoza,
+  // Uecker, Deer, Gaedel, and friends are here for the die-hards.
+  ["Johnny Bench '72", "CIN", "C", "R", 8, 10, 651, 145, 22, 2, 40, 100, 84],
+  ["Yogi Berra '54", "NYY", "C", "L", 7, 8, 656, 179, 28, 6, 22, 56, 29],
+  ["Mike Piazza '97", "LAD", "C", "R", 6, 4, 633, 201, 32, 1, 40, 69, 77],
+  ["Ivan Rodriguez '99", "TEX", "C", "R", 10, 10, 630, 199, 29, 1, 35, 24, 91],
+  ["Josh Gibson '43", "HG", "C", "R", 8, 7, 285, 109, 15, 3, 13, 50, 12],
+  ["Bob Uecker '67", "ATL", "C", "R", 4, 3, 165, 25, 5, 0, 3, 18, 46],
+  ["Willians Astudillo '18", "MIN", "C", "R", 8, 5, 97, 33, 7, 1, 3, 2, 3],
+  ["Lou Gehrig '27", "NYY", "1B", "L", 9, 1, 717, 218, 52, 18, 47, 109, 84],
+  ["Albert Pujols '09", "STL", "1B", "R", 8, 1, 700, 186, 45, 1, 47, 115, 64],
+  ["Joey Votto '17", "CIN", "1B", "L", 6, 1, 707, 179, 34, 1, 36, 134, 83],
+  ["Mark McGwire '98", "STL", "1B", "R", 4, 0, 681, 152, 21, 0, 70, 162, 155],
+  ["Rogers Hornsby '24", "STL", "2B", "R", 11, 3, 640, 227, 43, 14, 25, 89, 32],
+  ["Jackie Robinson '49", "BRO", "2B", "R", 16, 4, 704, 203, 38, 12, 16, 86, 27],
+  ["Joe Morgan '75", "CIN", "2B", "L", 15, 5, 639, 163, 27, 6, 17, 132, 52],
+  ["Craig Biggio '97", "HOU", "2B", "R", 14, 4, 744, 191, 37, 8, 22, 84, 107],
+  ["Mike Schmidt '80", "PHI", "3B", "R", 9, 3, 624, 157, 25, 8, 48, 89, 119],
+  ["George Brett '80", "KC", "3B", "L", 11, 2, 515, 175, 33, 9, 24, 58, 22],
+  ["Wade Boggs '87", "BOS", "3B", "L", 8, 2, 667, 200, 40, 6, 24, 105, 48],
+  ["Brooks Robinson '64", "BAL", "3B", "R", 8, 3, 668, 194, 35, 3, 28, 51, 64],
+  ["Chipper Jones '99", "ATL", "3B", "S", 10, 2, 701, 181, 41, 1, 45, 126, 94],
+  ["Honus Wagner '08", "PIT", "SS", "R", 15, 5, 641, 201, 39, 19, 10, 54, 40],
+  ["Cal Ripken Jr. '91", "BAL", "SS", "R", 8, 5, 717, 210, 46, 5, 34, 53, 46],
+  ["Ozzie Smith '87", "STL", "SS", "S", 16, 6, 706, 182, 40, 4, 0, 89, 36],
+  ["Derek Jeter '99", "NYY", "SS", "R", 13, 2, 739, 219, 37, 9, 24, 91, 116],
+  ["Mario Mendoza '79", "SEA", "SS", "R", 9, 5, 345, 63, 10, 2, 1, 17, 54],
+  ["David Eckstein '02", "ANA", "SS", "R", 12, 3, 702, 178, 21, 6, 8, 45, 44],
+  ["Ty Cobb '11", "DET", "CF", "L", 19, 2, 654, 248, 47, 24, 8, 44, 35],
+  ["Oscar Charleston '25", "HBG", "CF", "L", 16, 3, 420, 158, 26, 12, 20, 55, 25],
+  ["Joe DiMaggio '41", "NYY", "CF", "R", 12, 3, 622, 193, 43, 11, 30, 76, 13],
+  ["Mickey Mantle '56", "NYY", "CF", "S", 15, 3, 652, 188, 22, 5, 52, 112, 99],
+  ["Willie Mays '54", "NYG", "CF", "R", 16, 3, 640, 195, 33, 13, 41, 66, 57],
+  ["Ken Griffey Jr. '97", "SEA", "CF", "L", 13, 3, 704, 185, 34, 3, 56, 76, 121],
+  ["Mike Trout '18", "LAA", "CF", "R", 14, 2, 608, 147, 24, 4, 39, 122, 124],
+  ["Babe Ruth '27", "NYY", "LF/RF", "L", 8, 1, 691, 192, 29, 8, 60, 137, 89],
+  ["Ted Williams '41", "BOS", "LF/RF", "L", 8, 1, 606, 185, 33, 3, 37, 147, 27],
+  ["Stan Musial '48", "STL", "LF/RF", "L", 11, 1, 698, 230, 46, 18, 39, 79, 34],
+  ["Hank Aaron '57", "MLN", "LF/RF", "R", 12, 2, 675, 198, 27, 6, 44, 57, 58],
+  ["Roberto Clemente '67", "PIT", "LF/RF", "R", 12, 2, 648, 209, 26, 10, 23, 41, 103],
+  ["Rickey Henderson '82", "OAK", "LF/RF", "R", 20, 1, 656, 143, 24, 4, 10, 116, 94],
+  ["Tony Gwynn '94", "SD", "LF/RF", "L", 10, 1, 475, 165, 35, 1, 12, 48, 19],
+  ["Barry Bonds '04", "SF", "LF/RF", "L", 8, 1, 617, 135, 27, 3, 45, 232, 41],
+  ["Ichiro Suzuki '04", "SEA", "LF/RF", "L", 17, 2, 762, 262, 24, 5, 8, 49, 63],
+  ["Rob Deer '91", "DET", "LF/RF", "R", 7, 1, 539, 80, 14, 2, 25, 89, 175],
+  ["Vince Coleman '85", "STL", "LF/RF", "S", 20, 1, 686, 170, 20, 10, 1, 50, 115],
+  ["Frank Thomas '94", "CHW", "DH", "R", 6, 0, 517, 141, 34, 1, 38, 109, 61],
+  ["Edgar Martinez '95", "SEA", "DH", "R", 6, 0, 639, 182, 52, 0, 29, 116, 87],
+  ["David Ortiz '06", "BOS", "DH", "L", 5, 0, 686, 160, 29, 2, 54, 119, 117],
+  ["Eddie Gaedel '51", "SLB", "DH", "R", 1, 0, 1, 0, 0, 0, 0, 1, 0]
 ];
 
 // name, team, role, throws, IP, GS, H, HR, BB, SO
@@ -124,7 +178,58 @@ const PITCHER_ROWS = [
   ["Trevor Megill", "MIL", "RP", "R", 55, 0, 40, 4, 18, 65],
   ["Felix Bautista", "BAL", "RP", "R", 35, 0, 20, 2, 15, 50],
   ["David Bednar", "NYY", "RP", "R", 60, 0, 45, 5, 18, 80],
-  ["Randy Rodriguez", "SF", "RP", "R", 65, 0, 40, 3, 15, 85]
+  ["Randy Rodriguez", "SF", "RP", "R", 65, 0, 40, 3, 15, 85],
+  // Era pitchers: famous seasons, raw and era-unadjusted. Deadball workhorses
+  // earn their IP 8 honestly.
+  ["Walter Johnson '13", "WSH", "SP", "R", 346, 36, 232, 3, 38, 243],
+  ["Satchel Paige '44", "KCM", "SP", "R", 89, 12, 58, 2, 21, 70],
+  ["Sandy Koufax '65", "LAD", "SP", "L", 336, 41, 216, 26, 71, 382],
+  ["Bob Gibson '68", "STL", "SP", "R", 305, 34, 198, 11, 62, 268],
+  ["Steve Carlton '72", "PHI", "SP", "L", 346, 41, 257, 17, 87, 310],
+  ["Nolan Ryan '73", "CAL", "SP", "R", 326, 39, 238, 18, 162, 383],
+  ["Mark Fidrych '76", "DET", "SP", "R", 250, 29, 217, 12, 53, 97],
+  ["Fernando Valenzuela '81", "LAD", "SP", "L", 192, 25, 140, 11, 61, 180],
+  ["Greg Maddux '95", "ATL", "SP", "R", 210, 28, 147, 8, 23, 181],
+  ["Pedro Martinez '00", "BOS", "SP", "R", 217, 29, 128, 17, 32, 284],
+  ["Randy Johnson '01", "ARI", "SP", "L", 250, 34, 181, 19, 71, 372],
+  ["Jamie Moyer '03", "SEA", "SP", "L", 215, 33, 199, 19, 66, 129],
+  ["Roy Halladay '10", "PHI", "SP", "R", 251, 33, 231, 24, 30, 219],
+  ["R.A. Dickey '12", "NYM", "SP", "R", 234, 33, 192, 24, 54, 230],
+  ["Clayton Kershaw '14", "LAD", "SP", "L", 198, 27, 139, 9, 31, 239],
+  ["Bartolo Colon '16", "NYM", "SP", "R", 192, 33, 200, 24, 32, 128],
+  ["Hoyt Wilhelm '65", "CHW", "RP", "R", 144, 0, 88, 5, 32, 106],
+  ["Goose Gossage '78", "NYY", "RP", "R", 134, 0, 87, 5, 59, 122],
+  ["Dan Quisenberry '83", "KC", "RP", "R", 139, 0, 118, 7, 11, 48],
+  ["Dennis Eckersley '90", "OAK", "RP", "R", 73, 0, 41, 2, 4, 73],
+  ["Mitch Williams '91", "PHI", "RP", "L", 88, 0, 56, 4, 62, 84],
+  ["Trevor Hoffman '98", "SD", "RP", "R", 73, 0, 41, 2, 21, 86],
+  ["Mariano Rivera '08", "NYY", "RP", "R", 71, 0, 41, 4, 6, 77],
+  ["Craig Kimbrel '12", "ATL", "RP", "R", 63, 0, 27, 3, 14, 116],
+  // Second wave of era arms, so the mound matches the batter's box. Yes, that
+  // is pitcher Babe Ruth — draft both Ruths and live the dream.
+  ["Cy Young '01", "BOS", "SP", "R", 371, 41, 324, 5, 37, 158],
+  ["Christy Mathewson '08", "NYG", "SP", "R", 391, 44, 285, 4, 42, 259],
+  ["Babe Ruth '16", "BOS", "SP", "L", 324, 40, 230, 3, 118, 170],
+  ["Lefty Grove '31", "PHA", "SP", "L", 289, 30, 249, 10, 62, 175],
+  ["Warren Spahn '53", "MLN", "SP", "L", 266, 32, 211, 14, 70, 148],
+  ["Whitey Ford '61", "NYY", "SP", "L", 283, 39, 242, 23, 92, 209],
+  ["Juan Marichal '66", "SFG", "SP", "R", 307, 36, 228, 21, 36, 222],
+  ["Tom Seaver '71", "NYM", "SP", "R", 286, 35, 210, 18, 61, 289],
+  ["Ron Guidry '78", "NYY", "SP", "L", 273, 35, 187, 13, 72, 248],
+  ["Dwight Gooden '85", "NYM", "SP", "R", 276, 35, 198, 13, 69, 268],
+  ["Orel Hershiser '88", "LAD", "SP", "R", 267, 34, 208, 18, 73, 178],
+  ["Roger Clemens '97", "TOR", "SP", "R", 264, 34, 204, 9, 68, 292],
+  ["Johan Santana '04", "MIN", "SP", "L", 228, 34, 156, 24, 54, 265],
+  ["Tim Lincecum '09", "SFG", "SP", "R", 225, 32, 168, 10, 68, 261],
+  ["Felix Hernandez '14", "SEA", "SP", "R", 236, 34, 170, 16, 46, 248],
+  ["Justin Verlander '11", "DET", "SP", "R", 251, 34, 174, 24, 57, 250],
+  ["Al Hrabosky '75", "STL", "RP", "L", 97, 0, 72, 3, 33, 82],
+  ["Bruce Sutter '77", "CHC", "RP", "R", 107, 0, 69, 5, 23, 129],
+  ["Rollie Fingers '81", "MIL", "RP", "R", 78, 0, 55, 3, 13, 61],
+  ["Lee Smith '91", "STL", "RP", "R", 73, 0, 70, 5, 13, 67],
+  ["Billy Wagner '99", "HOU", "RP", "L", 75, 0, 35, 5, 23, 124],
+  ["John Smoltz '03", "ATL", "RP", "R", 64, 0, 48, 2, 8, 73],
+  ["Francisco Rodriguez '08", "LAA", "RP", "R", 68, 0, 54, 4, 34, 77]
 ];
 
 export function buildRealPlayerPool() {

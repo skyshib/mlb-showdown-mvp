@@ -1,3 +1,4 @@
+import { headshotUrl } from "../data/headshots.js";
 import { formatRange, normalizeResult } from "../rules/cards.js";
 
 const HITTER_OUTCOMES = ["BB", "1B", "2B", "3B", "HR"];
@@ -84,9 +85,8 @@ export function renderDraftHistoryTable(picks) {
   if (!picks.length) {
     return `<p class="empty">No picks made yet.</p>`;
   }
-  const showPrice = picks.some((pick) => pick.price != null);
   const rows = picks
-    .map(({ pickNumber, round, manager, player, price }) => `<tr class="draft-player-row">
+    .map(({ pickNumber, round, manager, player }) => `<tr class="draft-player-row">
         <td class="num">${pickNumber}</td>
         <td class="num">${round}</td>
         <td>${escapeHtml(manager.name)}</td>
@@ -94,7 +94,6 @@ export function renderDraftHistoryTable(picks) {
         <td>${escapeHtml(playerPosition(player))}</td>
         <td class="num">${playerPrimary(player)}</td>
         <td class="num">${player.points}</td>
-        ${showPrice ? `<td class="num">${price ?? ""}</td>` : ""}
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
       </tr>`)
     .join("");
@@ -109,7 +108,6 @@ export function renderDraftHistoryTable(picks) {
         <th>Pos</th>
         <th class="num">OB/CT</th>
         <th class="num">Pts</th>
-        ${showPrice ? `<th class="num">Paid</th>` : ""}
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
       </tr>
     </thead>
@@ -175,7 +173,7 @@ export function renderPlayerCard(player) {
     <div class="card-photo">
       <div class="card-logo"><span>MLB Showdown</span></div>
       <div class="card-portrait-stage">
-        <img class="player-portrait" src="${playerImageUrl(player)}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()" />
+        ${renderPortraitImage(player)}
         <span>${escapeHtml(initials(player.name))}</span>
       </div>
     </div>
@@ -409,7 +407,17 @@ function formatSignedNumber(value) {
   return number > 0 ? `+${number}` : String(number);
 }
 
+function renderPortraitImage(player) {
+  const imageUrl = playerImageUrl(player);
+  if (!imageUrl) return "";
+  return `<img class="player-portrait" src="${imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()" />`;
+}
+
+// Real-pool players (they carry a team) get real photos; fictional generated
+// players keep the illustrated avatars. A real player with no known photo
+// shows the initials placeholder instead of a cartoon.
 function playerImageUrl(player) {
+  if (player.team) return headshotUrl(player.name);
   const seed = encodeURIComponent(`${player.name}-${player.kind}-${playerPosition(player)}`);
   return `https://api.dicebear.com/9.x/adventurer/svg?seed=${seed}&backgroundColor=transparent`;
 }

@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { headshotUrl } from "../src/data/headshots.js";
+import { buildMarinersPool } from "../src/data/marinersPlayers.js";
 import { buildRealPlayerPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
 import { RESULTS } from "../src/rules/cards.js";
 import { autopick, buildTeam, createDraft, validateRoster } from "../src/rules/draft.js";
@@ -80,7 +82,7 @@ test("real pool drafts to completion and simulates a tournament", () => {
   assert.ok(tournament.games.length > 0);
 });
 
-test("real pool drafts to completion at the six-manager maximum", () => {
+test("real pool drafts to completion with six managers", () => {
   const pool = buildRealPlayerPool();
   const managers = ["A", "B", "C", "D", "E", "F"];
   const draft = createDraft(managers, pool, 13);
@@ -88,4 +90,61 @@ test("real pool drafts to completion at the six-manager maximum", () => {
   for (const manager of draft.managers) {
     assert.deepEqual(validateRoster(manager), [], `${manager.name} roster is legal`);
   }
+});
+
+test("real pool drafts to completion at the max manager count", () => {
+  const pool = buildRealPlayerPool();
+  const limit = maxRealPoolManagers(pool);
+  assert.ok(limit >= 8, "era expansion should support big rooms");
+  const managers = Array.from({ length: limit }, (_, index) => `M${index + 1}`);
+  const draft = createDraft(managers, pool, 13);
+  while (!draft.complete) autopick(draft);
+  for (const manager of draft.managers) {
+    assert.deepEqual(validateRoster(manager), [], `${manager.name} roster is legal`);
+  }
+});
+
+test("real players resolve to real photos, not cartoons", () => {
+  const stars = buildRealPlayerPool();
+  const starsMissing = stars.filter((player) => !headshotUrl(player.name)).map((player) => player.name);
+  assert.deepEqual(starsMissing, [], "every stars-pool player has a photo");
+
+  // A few deep-cut Mariners have no photo on MLB or Wikimedia; they show the
+  // initials placeholder. Keep overall coverage above 90%.
+  const combined = [...stars, ...buildMarinersPool()];
+  const missing = combined.filter((player) => !headshotUrl(player.name));
+  assert.ok(
+    missing.length / combined.length < 0.1,
+    `photo coverage dropped below 90%, missing: ${missing.map((player) => player.name).join(", ")}`
+  );
+
+  assert.match(headshotUrl("Aaron Judge"), /img\.mlbstatic\.com/);
+  assert.match(headshotUrl("Babe Ruth '27"), /121578/, "era suffixes resolve to the right person");
+  assert.match(headshotUrl("Mario Mendoza '79"), /wikimedia/, "MLB-photo-less players fall back to Wikimedia");
+});
+
+test("era cards read like the seasons die-hards remember", () => {
+  const pool = buildRealPlayerPool();
+  const ruth = findPlayer(pool, "Babe Ruth '27");
+  const bonds = findPlayer(pool, "Barry Bonds '04");
+  const gwynn = findPlayer(pool, "Tony Gwynn '94");
+  const deer = findPlayer(pool, "Rob Deer '91");
+  const rickey = findPlayer(pool, "Rickey Henderson '82");
+  const mendoza = findPlayer(pool, "Mario Mendoza '79");
+  const bigTrain = findPlayer(pool, "Walter Johnson '13");
+  const gaedel = findPlayer(pool, "Eddie Gaedel '51");
+
+  // 60 homers shows up as serious HR range; the .609 OBP season is a wall of walks.
+  assert.ok(chartSlots(ruth, RESULTS.HR) >= 3, "Ruth's chart carries his 60");
+  assert.ok(bonds.onBase >= 15, "2004 Bonds tops the on-base scale");
+  assert.ok(chartSlots(bonds, RESULTS.BB) >= 10, "2004 Bonds walks and walks");
+  // Contact vs three true outcomes.
+  assert.ok(chartSlots(gwynn, RESULTS.SO) <= 1, "Gwynn does not strike out");
+  assert.ok(chartSlots(deer, RESULTS.SO) >= 3 && chartSlots(deer, RESULTS.HR) >= 2, "Deer whiffs or homers");
+  // Skill extremes carry through: speed, futility, workload, and one famous walk.
+  assert.equal(rickey.speed, 20, "Rickey is the fastest card in the set");
+  const sortedPoints = pool.map((player) => player.points).sort((a, b) => a - b);
+  assert.ok(mendoza.points < sortedPoints[Math.floor(pool.length / 2)], "the Mendoza Line sits below the median");
+  assert.equal(bigTrain.ip, 8, "deadball workhorses go deep");
+  assert.equal(chartSlots(gaedel, RESULTS.BB), 19, "Gaedel's strike zone remains theoretical");
 });
