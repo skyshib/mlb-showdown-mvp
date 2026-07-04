@@ -26,9 +26,13 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE) {
 }
 
 export function currentManager(draft) {
+  return managerForPickNumber(draft, draft.pickNumber);
+}
+
+function managerForPickNumber(draft, pickNumber) {
   const teamCount = draft.managers.length;
-  const round = Math.floor(draft.pickNumber / teamCount);
-  const indexInRound = draft.pickNumber % teamCount;
+  const round = Math.floor(pickNumber / teamCount);
+  const indexInRound = pickNumber % teamCount;
   const managerIndex = round % 2 === 0 ? indexInRound : teamCount - 1 - indexInRound;
   return draft.managers[managerIndex];
 }
@@ -93,6 +97,23 @@ export function pickPlayer(draft, playerId) {
   draft.pickNumber += 1;
   draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
   return draft;
+}
+
+export function undoLastPick(draft) {
+  if (!draft || draft.pickNumber <= 0) return null;
+  const manager = managerForPickNumber(draft, draft.pickNumber - 1);
+  const player = manager?.roster.pop();
+  if (!manager || !player) return null;
+
+  draft.pickedIds.delete(player.id);
+  draft.pickNumber -= 1;
+  draft.complete = false;
+  if (manager.lineupAssignments) {
+    for (const [slot, playerId] of Object.entries(manager.lineupAssignments)) {
+      if (playerId === player.id) delete manager.lineupAssignments[slot];
+    }
+  }
+  return { manager, player };
 }
 
 export function autopick(draft) {

@@ -489,29 +489,35 @@ const SPEED_MEANS = {
 
 export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
   const rng = createRng(seed);
-  const target = Math.max(teamCount * rosterSize + 12, 56);
+  const normalizedTeamCount = Math.max(1, Math.floor(Number(teamCount) || 4));
+  const hitterCopiesPerPosition = normalizedTeamCount * 2;
+  const pitcherCopiesPerRole = normalizedTeamCount * 4;
   const players = [];
   const usedNames = new Set();
   let hitterCount = 0;
   let pitcherCount = 0;
 
-  while (players.length < target) {
-    const needsPitcher = pitcherCount < Math.ceil(target * 0.32);
-    const makePitcher = needsPitcher ? rng.next() < 0.45 : rng.next() < 0.25;
-    if (makePitcher) {
-      pitcherCount += 1;
-      players.push(makePitcherCard(rng, pitcherCount, usedNames));
-    } else {
+  for (const position of POSITIONS) {
+    for (let copy = 0; copy < hitterCopiesPerPosition; copy += 1) {
       hitterCount += 1;
-      players.push(makeHitterCard(rng, hitterCount, usedNames));
+      players.push(makeHitterCard(rng, hitterCount, usedNames, position));
     }
+  }
+
+  for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
+    pitcherCount += 1;
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "SP"));
+  }
+
+  for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
+    pitcherCount += 1;
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP"));
   }
 
   return players.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
 }
 
-function makeHitterCard(rng, index, usedNames) {
-  const position = POSITIONS[(index - 1) % POSITIONS.length];
+function makeHitterCard(rng, index, usedNames, position) {
   const chart = makeHitterChart(rng);
   const outSlots = countChartSlots(chart, [RESULTS.SO, RESULTS.GB, RESULTS.FB]);
   const onBase = normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.2, 7, 14);
@@ -532,8 +538,8 @@ function makeHitterCard(rng, index, usedNames) {
   };
 }
 
-function makePitcherCard(rng, index, usedNames) {
-  const isReliever = rng.next() < 0.35;
+function makePitcherCard(rng, index, usedNames, role) {
+  const isReliever = role === "RP";
   const control = normalInt(rng, 3.5, 1.1, 0, 6);
   const ip = isReliever ? 1 : starterIp(rng);
   const chart = makePitcherChart(rng);

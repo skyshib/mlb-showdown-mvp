@@ -45,6 +45,28 @@ test("generated player pools do not repeat full names", () => {
   assert.equal(new Set(names).size, names.length);
 });
 
+test("generated player pools include two players per team at every hitter position", () => {
+  const teamCount = 2;
+  const pool = generatePlayerPool("position-depth-check", teamCount, 13);
+  const hitters = pool.filter((player) => player.kind === "hitter");
+  const positionCounts = Object.fromEntries(Object.keys(FIELDING_RANGES).map((position) => [position, 0]));
+
+  for (const hitter of hitters) {
+    positionCounts[hitter.position] += 1;
+  }
+
+  assert.deepEqual(positionCounts, {
+    C: 4,
+    "1B": 4,
+    "2B": 4,
+    "3B": 4,
+    SS: 4,
+    LF: 4,
+    CF: 4,
+    RF: 4
+  });
+});
+
 function assertChartCoversD20(chart) {
   assert.equal(chart[0].from, 1);
   assert.equal(chart.at(-1).to, 20);

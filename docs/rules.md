@@ -23,14 +23,13 @@ The current player pool is fictional and generated from distributions in `src/da
 
 Pool generation:
 
-- Pool size is `max(teamCount * rosterSize + 12, 56)`.
-- While pitcher count is below `ceil(poolSize * 0.32)`, each generated card has a 45% chance to be a pitcher.
-- After that pitcher target is met, each generated card has a 25% chance to be a pitcher.
-- Hitter positions are assigned by cycling through `C, 1B, 2B, 3B, SS, LF, CF, RF`.
+- Each hitter position gets `teamCount * 2` generated cards: `C, 1B, 2B, 3B, SS, LF, CF, RF`.
+- Starting pitchers get `teamCount * 4` generated cards.
+- Bullpen pitchers get `teamCount * 4` generated cards.
 - Player names are drawn from 222 first names and 235 last names, and each generated pool avoids exact duplicate full names.
 - Hitter bats are picked uniformly from `R, L, S`.
 - Pitcher throws are picked uniformly from `R, L`.
-- 35% of generated pitchers are relievers with `IP 1`; the rest are starters with IP centered around 6.
+- Relievers have `IP 1`; starters have IP centered around 6.
 
 Normal distributions are rounded to the nearest integer and clipped to the listed range.
 

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, pickPlayer, repairDraftRosters, validateRoster } from "../src/rules/draft.js";
+import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
@@ -40,6 +40,23 @@ function makeHitter(overrides = {}) {
 
 function makePitcher(overrides = {}) {
   return { ...pitcher, ...overrides };
+}
+
+function makeDraftPool(prefix = "pool", hitterCount = 24, pitcherCount = 8) {
+  const hitters = Array.from({ length: hitterCount }, (_, index) => makeHitter({
+    id: `${prefix}-h-${index}`,
+    name: `${prefix} Hitter ${index}`,
+    position: positions[index % positions.length],
+    points: 250 - index
+  }));
+  const pitchers = Array.from({ length: pitcherCount }, (_, index) => makePitcher({
+    id: `${prefix}-p-${index}`,
+    name: `${prefix} Pitcher ${index}`,
+    role: index % 2 === 0 ? "SP" : "RP",
+    ip: index % 2 === 0 ? 6 : 1,
+    points: 180 - index
+  }));
+  return [...hitters, ...pitchers];
 }
 
 function repeatingRng(...rolls) {
@@ -560,6 +577,38 @@ test("draft allows one duplicate hitter as DH and blocks another duplicate", () 
   const secondDuplicate = canPickPlayer(draft, currentManager(draft), dhCatcher);
   assert.equal(secondDuplicate.ok, false);
   assert.match(secondDuplicate.reason, /lineup/);
+});
+
+test("undoLastPick reverses the most recent snake-draft pick", () => {
+  const draft = createDraft(["One", "Two"], makeDraftPool("undo"), 13);
+  pickPlayer(draft, "undo-h-0");
+  pickPlayer(draft, "undo-h-1");
+  pickPlayer(draft, "undo-h-2");
+
+  const undone = undoLastPick(draft);
+
+  assert.equal(undone.player.id, "undo-h-2");
+  assert.equal(undone.manager.name, "Two");
+  assert.equal(draft.pickNumber, 2);
+  assert.equal(draft.pickedIds.has("undo-h-2"), false);
+  assert.deepEqual(draft.managers[1].roster.map((player) => player.id), ["undo-h-1"]);
+  assert.equal(currentManager(draft).name, "Two");
+});
+
+test("undoLastPick reopens a completed draft and clears undone lineup assignments", () => {
+  const draft = createDraft(["One", "Two"], makeDraftPool("complete-undo"), 13);
+  while (!draft.complete) autopick(draft);
+  const manager = draft.managers[1];
+  const lastPlayer = manager.roster[manager.roster.length - 1];
+  manager.lineupAssignments = { DH: lastPlayer.id };
+
+  const undone = undoLastPick(draft);
+
+  assert.equal(draft.complete, false);
+  assert.equal(draft.pickNumber, 25);
+  assert.equal(undone.player.id, lastPlayer.id);
+  assert.equal(draft.pickedIds.has(lastPlayer.id), false);
+  assert.deepEqual(manager.lineupAssignments, {});
 });
 
 test("corner outfielders can fill left or right field", () => {

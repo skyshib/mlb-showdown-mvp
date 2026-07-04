@@ -13,6 +13,7 @@ import {
   pickPlayer,
   repairDraftRosters,
   staffStatus,
+  undoLastPick,
   validateRoster
 } from "./rules/draft.js?v=20260627-repair-current";
 import { simulateRoundRobin } from "./rules/tournament.js";
@@ -24,6 +25,7 @@ import {
   playerPrimary,
   renderBoxScore,
   renderCardGrid,
+  renderPlayerCard,
   renderPlayerTable
 } from "./ui/render.js?v=20260627-repair-current";
 
@@ -144,6 +146,7 @@ function renderDraft() {
   app.innerHTML = `<section class="toolbar">
     <button data-action="reset">New room</button>
     <button data-action="autopick" ${draft.complete ? "disabled" : ""}>Auto-pick next</button>
+    <button data-action="undo-pick" ${draft.pickNumber > 0 ? "" : "disabled"}>Undo last pick</button>
     <button data-action="finish" ${draft.complete ? "disabled" : ""}>Auto-finish draft</button>
     <button data-action="repair" ${canRepairDraft(draft, current) ? "" : "disabled"}>Fix roster gaps</button>
     <button data-action="tournament" ${canSimulate(draft) ? "" : "disabled"}>Sim tournament</button>
@@ -223,6 +226,14 @@ function bindDraftActions() {
     if (action === "autopick") {
       autopick(state.draft);
       selectedLineupMove = null;
+      saveState();
+      renderDraft();
+    }
+    if (action === "undo-pick") {
+      undoLastPick(state.draft);
+      state.tournament = null;
+      selectedLineupMove = null;
+      draggedLineupMove = null;
       saveState();
       renderDraft();
     }
@@ -572,17 +583,16 @@ function renderAdvanceAttempts(attempts) {
 }
 
 function renderRoster(manager, draft) {
-  const issues = validateRoster(manager);
   const counts = rosterCounts(manager.roster);
   return `<article class="roster">
     <h3>${escapeHtml(manager.name)}</h3>
-    <p>${manager.roster.length}/${draft.rosterSize} drafted ${issues.length ? `<span class="warn">${escapeHtml(issues.join(", "))}</span>` : `<span class="ok">legal</span>`}</p>
+    <p>${manager.roster.length}/${draft.rosterSize} drafted</p>
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
       <span class="${counts.starters >= 2 ? "ok" : "warn"}">${counts.starters}/2 starters</span>
       <span class="${counts.bullpen >= 2 ? "ok" : "warn"}">${counts.bullpen}/2 bullpen</span>
     </div>
-    <ol>${manager.roster.map((player) => `<li>${escapeHtml(player.name)} <span>${escapeHtml(player.kind)} | ${player.points} pts</span></li>`).join("")}</ol>
+    <ol>${manager.roster.map((player) => `<li><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong> <span>${escapeHtml(player.kind)} | ${player.points} pts</span></li>`).join("")}</ol>
   </article>`;
 }
 

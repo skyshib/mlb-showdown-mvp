@@ -130,7 +130,7 @@ export function formatBalanceReport(result) {
 function simulateDraftTournament(config, index) {
   const seed = `${config.seed}-${index + 1}`;
   const managers = Array.from({ length: config.teams }, (_, teamIndex) => `Team ${teamIndex + 1}`);
-  const pool = generatePlayerPool(`${seed}-pool`, config.teams * 2, config.rosterSize);
+  const pool = generatePlayerPool(`${seed}-pool`, config.teams, config.rosterSize);
   const draft = createDraft(managers, pool, config.rosterSize);
 
   while (!draft.complete) {
