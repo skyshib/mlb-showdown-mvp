@@ -54,7 +54,7 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260705-awards-show-batch-team-skills";
+} from "./rules/batch.js?v=20260704-wpa-calibration";
 import { computeAwards } from "./rules/awards.js?v=20260705-wpa-two-decimals";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import {

@@ -7,12 +7,17 @@ const ADVANCE_DECISION_MATRIX = {
   2: { second: 0.7, third: 0.65, home: 0.55 }
 };
 
-// Win-probability model constants, measured from this engine across the random
-// and real pools (scripts in repo history): runs per half-inning mean/variance.
-const WP_RUNS_PER_HALF = 0.5;
-const WP_VAR_PER_HALF = 1.2;
-// MLB 1993-2010 run-expectancy-by-base/out table, scaled to this engine's run
-// environment. Keys are first/second/third occupancy bits.
+// Win-probability environment: expected runs and variance per half-inning.
+// Pool run environments differ too much for one hardcoded pair (real ~0.24
+// runs/half, Mariners ~0.17, generated ~0.70), so batch sims measure the
+// drafted teams' actual environment (measureRunEnvironment in tournament.js)
+// and pass it through as state.wpEnv. The default only covers games simulated
+// without a calibration pass, where WPA is display flavor rather than an
+// award-deciding stat.
+export const WP_DEFAULT_ENV = { runsPerHalf: 0.37, varPerHalf: 0.81 };
+// MLB 1993-2010 run-expectancy-by-base/out table, rescaled per environment so
+// the bases-empty/no-out cell equals the environment's runs per half. Keys
+// are first/second/third occupancy bits.
 const WP_RE_TABLE = {
   "000": [0.544, 0.291, 0.112],
   "100": [0.941, 0.562, 0.245],
@@ -23,7 +28,7 @@ const WP_RE_TABLE = {
   "011": [2.05, 1.447, 0.626],
   "111": [2.39, 1.631, 0.814]
 };
-const WP_RE_SCALE = WP_RUNS_PER_HALF / 0.544;
+const WP_RE_BASELINE = 0.544;
 
 // Approximate probability that the home team wins from the given state,
 // using a normal projection of the final run differential: current lead,
@@ -32,6 +37,12 @@ const WP_RE_SCALE = WP_RUNS_PER_HALF / 0.544;
 export function winProbabilityHome(state) {
   const diff = state.score.home - state.score.away;
   if (state.walkoff) return 1;
+  if (state.gameOver) return diff > 0 ? 1 : 0;
+  // Terminal states are decided before completed halves roll forward, so a
+  // live lead in the top of an extra inning is never mistaken for a finished
+  // game — the home team still owns the bottom half.
+  if (state.half === "bottom" && state.inning >= 9 && diff > 0) return 1;
+  if (state.half === "bottom" && state.inning >= 9 && state.outs >= 3 && diff < 0) return 0;
 
   const view = { inning: state.inning, half: state.half, outs: state.outs, bases: state.bases };
   if (view.outs >= 3) {
@@ -44,17 +55,18 @@ export function winProbabilityHome(state) {
       view.inning += 1;
     }
   }
-
-  if (view.half === "top" && view.inning > 9 && diff !== 0) return diff > 0 ? 1 : 0;
   if (view.half === "bottom" && view.inning >= 9 && diff > 0) return 1;
 
+  const env = state.wpEnv ?? WP_DEFAULT_ENV;
   const battingHome = view.half === "bottom";
   const baseKey = view.bases.map((runner) => (runner ? "1" : "0")).join("");
-  const currentRe = (WP_RE_TABLE[baseKey]?.[Math.min(2, view.outs)] ?? 0) * WP_RE_SCALE;
+  const currentRe = (WP_RE_TABLE[baseKey]?.[Math.min(2, view.outs)] ?? 0) * (env.runsPerHalf / WP_RE_BASELINE);
   const awayFuture = Math.max(0, 9 - view.inning);
-  const homeFuture = view.half === "top" ? Math.max(0, 10 - view.inning) : Math.max(0, 9 - view.inning);
-  const expected = diff + (battingHome ? currentRe : -currentRe) + WP_RUNS_PER_HALF * (homeFuture - awayFuture);
-  const sigma = Math.sqrt(WP_VAR_PER_HALF * (homeFuture + awayFuture + 1));
+  // In extras the away team has no future half beyond the one in progress,
+  // but the home team always has the bottom of the current inning left.
+  const homeFuture = view.half === "top" ? Math.max(1, 10 - view.inning) : Math.max(0, 9 - view.inning);
+  const expected = diff + (battingHome ? currentRe : -currentRe) + env.runsPerHalf * (homeFuture - awayFuture);
+  const sigma = Math.sqrt(env.varPerHalf * (homeFuture + awayFuture + 1));
   return 1 - 0.5 * normalCdf((0.5 - expected) / sigma) - 0.5 * normalCdf((-0.5 - expected) / sigma);
 }
 
@@ -79,9 +91,9 @@ function trackTopSwing(state, player, wpa, result) {
   }
 }
 
-export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
+export function simulateGame(awayTeam, homeTeam, seed = "showdown", options = {}) {
   const rng = createRng(seed);
-  const state = createInitialState(awayTeam, homeTeam);
+  const state = createInitialState(awayTeam, homeTeam, options.wpEnv ?? null);
   const events = [];
 
   while (shouldContinue(state)) {
@@ -246,10 +258,11 @@ export function playStealAttempt(state, rng) {
   return event;
 }
 
-export function createInitialState(awayTeam, homeTeam) {
+export function createInitialState(awayTeam, homeTeam, wpEnv = null) {
   return {
     away: createRuntimeTeam(awayTeam),
     home: createRuntimeTeam(homeTeam),
+    wpEnv,
     inning: 1,
     half: "top",
     outs: 0,
@@ -281,7 +294,7 @@ function createRuntimeTeam(team) {
 
 function shouldContinue(state) {
   if (state.walkoff) return false;
-  if (state.half === "top" && state.inning > 9 && state.score.away !== state.score.home) return false;
+  if (state.gameOver) return false;
   if (state.half === "bottom" && state.inning >= 9 && state.score.home > state.score.away) return false;
   return true;
 }
@@ -808,6 +821,13 @@ function advanceHalfInning(state) {
   if (state.half === "top") {
     state.half = "bottom";
   } else {
+    // Per docs/rules.md, the game only ends on a lead after a COMPLETED
+    // inning (or a walk-off). The flag is needed because a rolled-over
+    // "top of the 11th, away up 1" state is indistinguishable from a live
+    // one where the away team just took the lead and home still bats.
+    if (state.inning >= 9 && state.score.home !== state.score.away) {
+      state.gameOver = true;
+    }
     state.half = "top";
     state.inning += 1;
   }

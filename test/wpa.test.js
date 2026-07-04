@@ -42,6 +42,27 @@ test("the final event lands on the actual winner", () => {
   }
 });
 
+test("every game settles the full half-win of WPA on the winner", () => {
+  const teams = draftTeams("wpa-settlement", 2);
+  for (let index = 0; index < 40; index += 1) {
+    const result = simulateGame(teams[0], teams[1], `wpa-settlement-${index}`);
+    const homeWon = result.winner === result.home.name;
+    const box = homeWon ? result.boxScore.home : result.boxScore.away;
+    const net = [...box.hitters, ...box.pitchers].reduce((sum, line) => sum + (line.wpa ?? 0), 0);
+    assert.ok(Math.abs(net - 0.5) < 1e-9, `game ${index}: winner net WPA ${net} should be +0.5`);
+
+    // Per docs/rules.md the away team can only win after a completed inning,
+    // never by ending the game mid-half in extras.
+    const last = result.events[result.events.length - 1];
+    if (!homeWon) {
+      assert.ok(
+        last.half === "bottom" && last.outsAfter >= 3,
+        `game ${index}: away win must come after a completed bottom half`
+      );
+    }
+  }
+});
+
 test("player WPA is zero-sum between offense and defense", () => {
   const result = playGame("wpa-zero-sum");
   const lines = [
@@ -87,4 +108,33 @@ test("winProbabilityHome respects terminal and dominant states", () => {
   state.score = { away: 0, home: 8 };
   const bigLead = winProbabilityHome(state);
   assert.ok(bigLead > 0.95, `an eight-run lead in the 5th should be near certain, got ${bigLead}`);
+});
+
+test("extra innings stay live until the home team has batted", () => {
+  const teams = draftTeams("wpa-extras", 2);
+  const state = createInitialState(teams[0], teams[1]);
+
+  state.inning = 10;
+  state.half = "top";
+  state.outs = 0;
+  state.score = { away: 1, home: 0 };
+  const awayLeadTop10 = winProbabilityHome(state);
+  assert.ok(
+    awayLeadTop10 > 0.02 && awayLeadTop10 < 0.45,
+    `home still bats in the bottom of the 10th, got ${awayLeadTop10}`
+  );
+
+  state.score = { away: 0, home: 0 };
+  const tiedTop10 = winProbabilityHome(state);
+  assert.ok(tiedTop10 > 0.35 && tiedTop10 < 0.65, `tied extras stay near a coin flip, got ${tiedTop10}`);
+  assert.ok(awayLeadTop10 < tiedTop10, "an away lead must cost the home team win probability");
+
+  state.half = "bottom";
+  state.outs = 3;
+  state.score = { away: 1, home: 0 };
+  assert.equal(winProbabilityHome(state), 0, "down one after the bottom of the 10th is a loss");
+
+  state.outs = 1;
+  state.score = { away: 0, home: 1 };
+  assert.equal(winProbabilityHome(state), 1, "leading in the bottom of the 10th is a walk-off state");
 });
