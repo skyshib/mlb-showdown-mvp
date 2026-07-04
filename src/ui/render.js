@@ -197,13 +197,13 @@ function cardRarity(player) {
   return { key: "bronze", frame: "#9c6a3f" };
 }
 
-export function renderBoxScore(game) {
+export function renderBoxScore(game, playersById = new Map()) {
   if (!game?.boxScore) return "";
   return `<div class="box-score">
-    ${renderHitterBox(game.boxScore.away)}
-    ${renderHitterBox(game.boxScore.home)}
-    ${renderPitcherBox(game.boxScore.away)}
-    ${renderPitcherBox(game.boxScore.home)}
+    ${renderHitterBox(game.boxScore.away, playersById)}
+    ${renderHitterBox(game.boxScore.home, playersById)}
+    ${renderPitcherBox(game.boxScore.away, playersById)}
+    ${renderPitcherBox(game.boxScore.home, playersById)}
   </div>`;
 }
 
@@ -313,11 +313,11 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function renderHitterBox(teamBox) {
+function renderHitterBox(teamBox, playersById) {
   const rows = teamBox.hitters
     .map(
       (line) => `<tr>
-        <td>${escapeHtml(line.name)}</td>
+        <td>${renderBoxScorePlayerName(line, teamBox.team, playersById)}</td>
         <td class="num">${line.ab}</td>
         <td class="num">${line.r ?? 0}</td>
         <td class="num">${line.h}</td>
@@ -338,11 +338,11 @@ function renderHitterBox(teamBox) {
   </section>`;
 }
 
-function renderPitcherBox(teamBox) {
+function renderPitcherBox(teamBox, playersById) {
   const rows = teamBox.pitchers
     .map(
       (line) => `<tr>
-        <td>${escapeHtml(line.name)}</td>
+        <td>${renderBoxScorePlayerName(line, teamBox.team, playersById)}</td>
         <td class="num">${formatInnings(line.outs)}</td>
         <td class="num">${line.h}</td>
         <td class="num">${line.bb}</td>
@@ -359,6 +359,24 @@ function renderPitcherBox(teamBox) {
       <tbody>${rows}</tbody>
     </table>
   </section>`;
+}
+
+function renderBoxScorePlayerName(line, team, playersById) {
+  const player = playerForBoxLine(line, team, playersById);
+  if (!player) return escapeHtml(line.name);
+  return `<strong
+    class="player-name-preview box-score-player-name"
+    tabindex="0"
+    data-preview-id="${escapeHtml(player.id)}"
+    data-preview-card="${escapeHtml(renderPlayerCard(player))}"
+  >${escapeHtml(line.name)}</strong>`;
+}
+
+function playerForBoxLine(line, team, playersById) {
+  return playersById.get(line.id)
+    ?? playersById.get(`${line.team ?? team ?? ""}::${line.name ?? ""}`)
+    ?? playersById.get(line.name)
+    ?? null;
 }
 
 function formatInnings(outs) {

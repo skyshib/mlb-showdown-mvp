@@ -40,7 +40,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260705-draft-history";
+} from "./ui/render.js?v=20260705-tournament-hover-fix";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const REAL_POOL_INFO = (() => {
@@ -872,7 +872,7 @@ function renderGameDetail(game) {
   return `<div class="game-detail">
     <h3>${escapeHtml(game.away.name)} ${game.away.runs}, ${escapeHtml(game.home.name)} ${game.home.runs}</h3>
     <h4>Box score</h4>
-    ${renderBoxScore(game)}
+    ${renderBoxScore(game, draftedPlayersById())}
     <h4>Play-by-play</h4>
     ${renderGameLog(game)}
   </div>`;
@@ -1207,16 +1207,17 @@ function getTeamSkillLine(map, team) {
 }
 
 function getAggregateLine(map, line, team, stats, playersById = new Map()) {
-  if (!map.has(line.id)) {
-    map.set(line.id, {
-      id: line.id,
+  const id = line.id ?? playerLookupKey(team, line.name);
+  if (!map.has(id)) {
+    map.set(id, {
+      id,
       name: line.name,
       team: line.team ?? team,
-      player: playersById.get(line.id) ?? null,
+      player: playerForBoxLine(playersById, line, team),
       ...stats
     });
   }
-  return map.get(line.id);
+  return map.get(id);
 }
 
 function draftedPlayersById() {
@@ -1224,9 +1225,22 @@ function draftedPlayersById() {
   for (const manager of state.draft?.managers ?? []) {
     for (const player of manager.roster) {
       players.set(player.id, player);
+      players.set(playerLookupKey(manager.name, player.name), player);
+      if (!players.has(player.name)) players.set(player.name, player);
     }
   }
   return players;
+}
+
+function playerForBoxLine(playersById, line, team) {
+  return playersById.get(line.id)
+    ?? playersById.get(playerLookupKey(line.team ?? team, line.name))
+    ?? playersById.get(line.name)
+    ?? null;
+}
+
+function playerLookupKey(team, name) {
+  return `${team ?? ""}::${name ?? ""}`;
 }
 
 function compareTournamentHitters(a, b, leagueWoba) {
