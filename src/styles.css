@@ -863,13 +863,13 @@ button.roster-slot[draggable="true"]:active {
 .player-table td:nth-child(4),
 .player-table td:nth-child(5),
 .player-table td:nth-child(7),
-.player-table .chart-min {
+.player-table .chart-range-cell {
   font-weight: 800;
   white-space: nowrap;
 }
 
-.player-table .chart-min {
-  width: 42px;
+.player-table .chart-range-cell {
+  min-width: 54px;
   text-align: right;
 }
 

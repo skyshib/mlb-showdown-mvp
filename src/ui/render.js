@@ -100,20 +100,21 @@ function tableHeaderClass(mode, index) {
 }
 
 function renderOutcomeCells(player, outcomes) {
-  const minimums = chartMinimums(player.chart);
+  const ranges = chartRanges(player.chart);
   return outcomes
-    .map((outcome) => `<td class="num chart-min">${minimums.get(outcome) ?? ""}</td>`)
+    .map((outcome) => `<td class="num chart-range-cell">${ranges.get(outcome) ?? ""}</td>`)
     .join("");
 }
 
-function chartMinimums(chart) {
-  const minimums = new Map();
+function chartRanges(chart) {
+  const ranges = new Map();
   for (const entry of chart) {
     const result = normalizeResult(entry.result);
-    const current = minimums.get(result);
-    if (current === undefined || entry.from < current) minimums.set(result, entry.from);
+    const resultRanges = ranges.get(result) ?? [];
+    resultRanges.push(formatRange(entry));
+    ranges.set(result, resultRanges);
   }
-  return minimums;
+  return new Map([...ranges].map(([result, resultRanges]) => [result, resultRanges.join(", ")]));
 }
 
 export function renderCardGrid(players, options = {}) {
