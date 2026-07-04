@@ -28,29 +28,25 @@ test("simulateBatch is deterministic for the same seed", () => {
   assert.deepEqual(first, second);
 });
 
-test("simulateBatch accounts for every season, title, and finals slot", () => {
+test("simulateBatch accounts for every simulated game", () => {
   const teams = draftTeams("batch-accounting");
   const summary = simulateBatch(teams, { seed: "batch-accounting", runs: 25 });
 
   assert.equal(summary.runs, 25);
   assert.equal(summary.teams.length, 4);
 
-  const titleShare = summary.teams.reduce((sum, row) => sum + row.titleShare, 0);
-  const finalsShare = summary.teams.reduce((sum, row) => sum + row.finalsShare, 0);
-  assert.ok(Math.abs(titleShare - 1) < 1e-9, "one champion per season");
-  assert.ok(Math.abs(finalsShare - 2) < 1e-9, "two finalists per season");
-
-  // 4 teams play 6 round-robin games per season, so wins and losses each sum to 6.
+  // Each simulated game creates one win, one loss, and two team-games.
   const meanWins = summary.teams.reduce((sum, row) => sum + row.wins.mean, 0);
   const meanLosses = summary.teams.reduce((sum, row) => sum + row.losses.mean, 0);
-  assert.ok(Math.abs(meanWins - 6) < 1e-9);
-  assert.ok(Math.abs(meanLosses - 6) < 1e-9);
-  assert.equal(summary.teams.reduce((sum, row) => sum + row.wins.sum, 0), 25 * 6);
-  assert.equal(summary.teams.reduce((sum, row) => sum + row.losses.sum, 0), 25 * 6);
+  assert.ok(meanWins > 0);
+  assert.ok(meanLosses > 0);
+  assert.equal(summary.teams.reduce((sum, row) => sum + row.wins.sum, 0), 25);
+  assert.equal(summary.teams.reduce((sum, row) => sum + row.losses.sum, 0), 25);
+  assert.equal(summary.teams.reduce((sum, row) => sum + row.games, 0), 50);
 
   for (const row of summary.teams) {
-    assert.equal(row.wins.count, 25);
-    assert.ok(row.games >= row.wins.sum + row.losses.sum);
+    assert.ok(Number.isFinite(row.winPct));
+    assert.equal(row.games, row.wins.sum + row.losses.sum);
     assert.ok(Number.isFinite(row.steals));
     assert.ok(Number.isFinite(row.caughtStealing));
     assert.ok(Number.isFinite(row.advances));
@@ -92,7 +88,7 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
   }
 });
 
-test("batchProgressSnapshot reports running title tallies mid-batch", () => {
+test("batchProgressSnapshot reports running win rates mid-batch", () => {
   const teams = draftTeams("batch-snapshot");
   const state = createBatchState(teams);
   runBatchChunk(state, teams, "batch-snapshot", 0, 8);
@@ -100,9 +96,11 @@ test("batchProgressSnapshot reports running title tallies mid-batch", () => {
 
   assert.equal(snapshot.runs, 8);
   assert.equal(snapshot.rows.length, 4);
-  assert.equal(snapshot.rows.reduce((sum, row) => sum + row.titles, 0), 8);
-  const shareSum = snapshot.rows.reduce((sum, row) => sum + row.share, 0);
-  assert.ok(Math.abs(shareSum - 1) < 1e-9);
+  assert.equal(snapshot.rows.reduce((sum, row) => sum + row.wins, 0), 8);
+  assert.equal(snapshot.rows.reduce((sum, row) => sum + row.losses, 0), 8);
+  for (const row of snapshot.rows) {
+    assert.ok(row.share >= 0 && row.share <= 1);
+  }
 });
 
 test("normalizeBatchRuns clamps bad input to sane run counts", () => {

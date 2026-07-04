@@ -19,7 +19,7 @@ test("renderRaceChart draws a polyline per team with end labels", () => {
   for (const name of RACE.teamNames) {
     assert.ok(svg.includes(name), `${name} labeled`);
   }
-  assert.ok(svg.includes("even draft (25%)"));
+  assert.ok(svg.includes("even matchup (25%)"));
 });
 
 test("renderRaceChart escapes team names", () => {
@@ -36,6 +36,6 @@ test("renderRaceChart escapes team names", () => {
 });
 
 test("renderRaceChart shows a placeholder until there is enough data", () => {
-  assert.match(renderRaceChart({ teamNames: [], series: [] }), /Waiting for the first seasons/);
-  assert.match(renderRaceChart({ teamNames: ["A"], series: [{ n: 1, shares: [1] }] }), /Waiting for the first seasons/);
+  assert.match(renderRaceChart({ teamNames: [], series: [] }), /Waiting for the first games/);
+  assert.match(renderRaceChart({ teamNames: ["A"], series: [{ n: 1, shares: [1] }] }), /Waiting for the first games/);
 });

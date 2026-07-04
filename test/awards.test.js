@@ -51,7 +51,7 @@ const SUMMARY = {
   ],
   topSwing: {
     playerId: "h2", name: "Homer Launch", wpa: 0.61, result: "HR",
-    inning: 9, half: "bottom", season: 17, matchup: "Team 2 at Team 1", isFinal: false
+    inning: 9, half: "bottom", game: 17, matchup: "Team 2 at Team 1"
   }
 };
 
@@ -61,7 +61,7 @@ test("computeAwards crowns the right winners", () => {
   const awards = computeAwards(SUMMARY, PICKS);
   const byKey = Object.fromEntries(awards.map((item) => [item.key, item]));
 
-  assert.equal(byKey.mvp.name, "Ace Steady", "MVP is the highest WPA per season");
+  assert.equal(byKey.mvp.name, "Ace Steady", "MVP is the highest WPA producer");
   assert.equal(byKey["cy-young"].name, "Ace Steady");
   assert.equal(byKey.fireman.name, "Door Slammer");
   assert.equal(byKey.obp.name, "Obi Onbase");

@@ -1,13 +1,12 @@
 // Post-simulation awards, computed from a batch summary. Every run in this
 // engine is charged to a pitcher and there are no errors, so runs allowed
 // per nine is displayed as ERA. "WP" is win probability from the model in
-// game.js; per-season WPA is the sum of a player's win-probability swings.
+// game.js; per-162 WPA normalizes a player's game-level swings to a familiar pace.
 
 export function computeAwards(summary, pickNumbers = null) {
   if (!summary?.hitters?.length || !summary?.pitchers?.length) return [];
   if (summary.hitters[0].wpaPerSeason === undefined) return [];
 
-  const runs = Math.max(1, summary.runs ?? 1);
   const teamCount = summary.teams?.length ?? 0;
   const awards = [];
 
@@ -21,25 +20,25 @@ export function computeAwards(summary, pickNumbers = null) {
       "Win probability added: every swing weighted by how much it moved the game."));
   }
 
-  const starters = summary.pitchers.filter((line) => line.role === "SP" && line.outs >= runs * 9);
+  const starters = summary.pitchers.filter((line) => line.role === "SP" && line.outs >= teamGameMinimum(line, 9));
   const cyYoung = minBy(fallbackIfEmpty(starters, summary.pitchers.filter((line) => line.role === "SP" && line.outs > 0)), (line) => line.runsPerNine);
   if (cyYoung) {
     awards.push(award("cy-young", "Cy Young (SP)", cyYoung, `${cyYoung.runsPerNine.toFixed(2)} ERA`,
-      `${cyYoung.inningsPerSeason.toFixed(1)} IP per season, ${cyYoung.strikeoutsPerNine.toFixed(1)} K/9.`));
+      `${pitcherWorkload(cyYoung)} IP per 162 games, ${cyYoung.strikeoutsPerNine.toFixed(1)} K/9.`));
   }
 
-  const relievers = summary.pitchers.filter((line) => line.role === "RP" && line.outs >= runs * 3);
+  const relievers = summary.pitchers.filter((line) => line.role === "RP" && line.outs >= teamGameMinimum(line, 3));
   const fireman = minBy(fallbackIfEmpty(relievers, summary.pitchers.filter((line) => line.role === "RP" && line.outs > 0)), (line) => line.runsPerNine);
   if (fireman) {
     awards.push(award("fireman", "Shutdown reliever (RP)", fireman, `${fireman.runsPerNine.toFixed(2)} ERA`,
       `${fireman.strikeoutsPerNine.toFixed(1)} K/9 out of the bullpen.`));
   }
 
-  const qualifiedHitters = summary.hitters.filter((line) => line.pa >= runs * 3);
+  const qualifiedHitters = summary.hitters.filter((line) => line.pa >= teamGameMinimum(line, 3));
   const onBase = maxBy(fallbackIfEmpty(qualifiedHitters, summary.hitters), (line) => line.obp);
   if (onBase) {
     awards.push(award("obp", "On-base machine", onBase, `${formatBattingStat(onBase.obp)} OBP`,
-      `${formatBattingStat(onBase.avg)} AVG with ${(rateOf(onBase.bb, runs)).toFixed(1)} walks per season.`));
+      `${formatBattingStat(onBase.avg)} AVG with ${per162(onBase.bb, onBase.teamGames).toFixed(1)} walks per 162 games.`));
   }
 
   const hrKing = maxBy(summary.hitters, (line) => line.hr);
@@ -48,7 +47,7 @@ export function computeAwards(summary, pickNumbers = null) {
       ? `${Math.round(hrKing.hrPer162)} HR per 162 games`
       : `${hrKing.hrPerSeason.toFixed(2)} HR/season`;
     awards.push(award("hr", "Home run king", hrKing, hrStat,
-      `${hrKing.hr} homers across ${summary.runs} seasons.`));
+      `${hrKing.hr} homers across ${summary.runs} simulated games.`));
   }
 
   const runScorer = maxBy(summary.hitters, (line) => line.r);
@@ -102,6 +101,7 @@ export function computeAwards(summary, pickNumbers = null) {
 
   if (summary.topSwing) {
     const swing = summary.topSwing;
+    const swingNumber = swing.game ?? swing.season;
     awards.push({
       key: "swing",
       label: "Swing of the sims",
@@ -109,7 +109,7 @@ export function computeAwards(summary, pickNumbers = null) {
       name: swing.name,
       team: teamOf(summary, swing.playerId) ?? "",
       stat: `${swing.result} worth +${(swing.wpa * 100).toFixed(0)}% win probability`,
-      note: `${swing.half === "bottom" ? "Bottom" : "Top"} ${ordinal(swing.inning)}, ${swing.matchup}, season ${swing.season}${swing.isFinal ? " final" : ""}.`
+      note: `${swing.half === "bottom" ? "Bottom" : "Top"} ${ordinal(swing.inning)}, ${swing.matchup}, game ${swingNumber}.`
     });
   }
 
@@ -142,8 +142,18 @@ function fallbackIfEmpty(preferred, fallback) {
   return preferred?.length ? preferred : fallback;
 }
 
-function rateOf(total, runs) {
-  return runs > 0 ? total / runs : 0;
+function teamGameMinimum(line, outsOrPaPerGame) {
+  const games = Number(line.teamGames);
+  return (Number.isFinite(games) && games > 0 ? games : 1) * outsOrPaPerGame;
+}
+
+function per162(total, games) {
+  return games ? (Number(total) * 162) / games : 0;
+}
+
+function pitcherWorkload(line) {
+  if (Number.isFinite(line.ipPer162)) return line.ipPer162.toFixed(1);
+  return (Number(line.inningsPerSeason) || 0).toFixed(1);
 }
 
 function teamOf(summary, playerId) {

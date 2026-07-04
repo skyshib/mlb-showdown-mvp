@@ -1,6 +1,6 @@
 # MLB Showdown MVP
 
-A private local prototype for drafting fictional MLB Showdown-style cards and simulating a round-robin tournament.
+A private local prototype for drafting fictional MLB Showdown-style cards and simulating a batch of games.
 
 This is not trying to be a polished public clone yet. The current goal is to make a playable MVP, keep the rules explicit, and gradually replace approximations with official MLB Showdown mechanics as we verify them.
 
@@ -40,11 +40,10 @@ npm run balance
 3. Fill a legal lineup:
    - C, 1B, 2B, 3B, SS, LF, CF, RF, DH
 4. Click a player in the top roster board to move or swap eligible lineup slots.
-5. Click `Sim tournament` once every roster is legal.
-6. Review standings, team rosters, box scores, and play-by-play.
-7. Click `Sim 1000 seasons` to replay the whole tournament many times and see who really drafted best: title equity per team, aggregate hitting/pitching lines per player, and sim awards. One tournament is a tiny sample; the batch view is the fair verdict. The seasons dropdown on the results screen re-runs with 100-5000 replays.
-8. Watch the title race unfold live: the sim is intentionally paced (about 15 seconds) with a line chart of each team's cumulative title share, a leader callout, and running tallies. It slows down near the finish for drama; `Skip to results` jumps straight to the verdict. The final chart is saved with the results.
-9. Stick around for the awards show: Sim MVP by win probability added, Cy Young and shutdown reliever by ERA, on-base machine, home run king, speed demon, run scorer, rally killer (most GIDP), steal and bust of the draft (pick number versus WPA finish), and the single biggest swing across every simulated season.
+5. Click `Sim 1000 games` once every roster is legal.
+6. Watch the win-rate race unfold live: the sim is intentionally paced (about 15 seconds) with a line chart of each team's cumulative win percentage, a leader callout, and running tallies. It slows down near the finish for drama; `Skip to results` jumps straight to the verdict. The final chart is saved with the results.
+7. Review aggregate team, player, baserunning, and defensive stats normalized to 162-game pace. The games dropdown on the results screen re-runs with 100-5000 simulated games.
+8. Stick around for the awards show: Sim MVP by win probability added, Cy Young and shutdown reliever by ERA, on-base machine, home run king, speed demon, run scorer, rally killer (most GIDP), steal and bust of the draft (pick number versus WPA finish), and the single biggest swing across the simulated games.
 
 Draft rooms are saved in browser `localStorage`, which means saves are local to the browser and exact origin. For example, `127.0.0.1:5177` and `127.0.0.1:5178` do not share saved drafts.
 
@@ -58,7 +57,7 @@ Then:
 2. Share the invite link shown in the room banner (use your LAN IP or a tunnel, e.g. `http://192.168.1.20:8790/index.html?room=ab12cd`).
 3. Each player opens the link and claims a manager seat; extra visitors can spectate.
 4. Picks are turn-gated: you can only draft (or auto-pick) when your manager is on the clock, and you can only edit your own lineup. The room creator's seat is the host, and can auto-finish the draft, undo any pick, or act for a stalled seat.
-5. Once the draft completes, anyone can run `Sim tournament` or the batch sim locally — results are identical on every machine because all sims are seeded.
+5. Once the draft completes, anyone can run `Sim 1000 games` locally — results are identical on every machine because all sims are seeded.
 
 How it works: the server keeps an ordered log of draft actions per room and streams it to every browser over server-sent events. Each client rebuilds the identical draft by replaying the log through the same deterministic rules used in local play, so the server stays a thin coordinator.
 
@@ -89,7 +88,7 @@ Implemented:
 - LF/RF flexibility.
 - Any hitter can play 1B out of position with literal `-1` fielding.
 - Two starters and two bullpen pitchers per roster.
-- Tournament simulation with starter rotation across games.
+- Batch game simulation with starter rotation across games.
 - Box scores and play-by-play.
 - Singles, doubles, triples, homers, walks, strikeouts, popups, groundouts, and flyouts.
 - Double-play attempts on ground balls.
@@ -98,7 +97,7 @@ Implemented:
 - Steal attempts using catcher fielding.
 - Bullpen planning, pitcher fatigue, extra innings, and run-charged fatigue penalties.
 - New card visual style in the 2005-strip direction with rarity borders.
-- Batch season simulator (`Sim 1000 seasons`): deterministic replays of the round-robin with title/finals equity, win distributions, per-player aggregate stats (AVG/OBP/SLG/OPS, RA/9, K/9, BB/9), and sim awards (MVP, ace, HR king).
+- Batch game simulator (`Sim 1000 games`): deterministic balanced matchup streams with win percentage, 162-game pace stats, per-player aggregate stats (AVG/OBP/SLG/OPS, RA/9, K/9, BB/9), and sim awards (MVP, ace, HR king).
 - Duplicate manager names are auto-suffixed so standings and stats never merge two managers.
 
 Documented in more detail:

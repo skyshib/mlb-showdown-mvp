@@ -1,6 +1,6 @@
 import { distribution, rate } from "./stats.js";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260705-batch-team-skills";
-import { simulateRoundRobin } from "./tournament.js?v=20260705-awards-show";
+import { simulateGame } from "./game.js?v=20260705-awards-show";
 
 export const DEFAULT_BATCH_RUNS = 1000;
 export const MAX_BATCH_RUNS = 20000;
@@ -25,14 +25,13 @@ export function createBatchState(teams) {
     teams: new Map(),
     hitters: new Map(),
     pitchers: new Map(),
-    topSwing: null
+    topSwing: null,
+    rotation: createRotationTracker(teams)
   };
 
   for (const team of teams) {
     state.teams.set(team.name, {
       ...createTeamSkillLine(team.name),
-      titles: 0,
-      finalsAppearances: 0,
       games: 0,
       wins: [],
       losses: [],
@@ -51,9 +50,16 @@ export function createBatchState(teams) {
 }
 
 export function runBatchChunk(state, teams, seed, startIndex, count) {
+  const schedule = createSchedule(teams);
+  if (!schedule.length) return state;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    const result = simulateRoundRobin(teams, `${seed}-season-${index + 1}`);
-    foldTournament(state, result);
+    const matchup = schedule[index % schedule.length];
+    const result = simulateGame(
+      teamForGame(matchup.away, state.rotation),
+      teamForGame(matchup.home, state.rotation),
+      `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`
+    );
+    foldGame(state, result);
   }
   return state;
 }
@@ -63,8 +69,10 @@ export function batchProgressSnapshot(state) {
     runs: state.runs,
     rows: [...state.teams.values()].map((row) => ({
       team: row.team,
-      titles: row.titles,
-      share: rate(row.titles, state.runs)
+      wins: formatDistributionTotal(row.wins),
+      losses: formatDistributionTotal(row.losses),
+      games: row.games,
+      share: rate(formatDistributionTotal(row.wins), row.games)
     }))
   };
 }
@@ -73,16 +81,15 @@ export function summarizeBatch(state) {
   const teams = [...state.teams.values()]
     .map((row) => ({
       team: row.team,
-      titleShare: rate(row.titles, state.runs),
-      finalsShare: rate(row.finalsAppearances, state.runs),
       games: row.games,
       wins: distribution(row.wins),
       losses: distribution(row.losses),
       runsFor: distribution(row.runsFor),
       runsAgainst: distribution(row.runsAgainst),
+      winPct: rate(formatDistributionTotal(row.wins), row.games),
       ...teamSkillTotals(row)
     }))
-    .sort((a, b) => b.titleShare - a.titleShare || b.wins.mean - a.wins.mean);
+    .sort((a, b) => b.winPct - a.winPct || b.wins.sum - a.wins.sum);
 
   const hitters = [...state.hitters.values()]
     .map((line) => {
@@ -136,45 +143,32 @@ export function summarizeBatch(state) {
   };
 }
 
-function foldTournament(state, result) {
+function foldGame(state, game) {
   state.runs += 1;
 
-  const champion = result.final?.winner ?? result.standings[0]?.team;
-  const championRow = state.teams.get(champion);
-  if (championRow) championRow.titles += 1;
-
-  if (result.final) {
-    for (const name of [result.final.away.name, result.final.home.name]) {
-      const row = state.teams.get(name);
-      if (row) row.finalsAppearances += 1;
-    }
+  foldTeamResult(state, game.away.name, game.away.runs, game.home.runs);
+  foldTeamResult(state, game.home.name, game.home.runs, game.away.runs);
+  foldBoxScore(state, game.boxScore?.away);
+  foldBoxScore(state, game.boxScore?.home);
+  for (const event of game.events ?? []) {
+    aggregateEventSkillStats(state.teams, event);
   }
-
-  for (const standing of result.standings) {
-    const row = state.teams.get(standing.team);
-    if (!row) continue;
-    row.wins.push(standing.wins);
-    row.losses.push(standing.losses);
-    row.runsFor.push(standing.runsFor);
-    row.runsAgainst.push(standing.runsAgainst);
+  if (game.topSwing && (!state.topSwing || game.topSwing.wpa > state.topSwing.wpa)) {
+    state.topSwing = {
+      ...game.topSwing,
+      game: state.runs,
+      matchup: `${game.away.name} at ${game.home.name}`
+    };
   }
+}
 
-  const games = result.final ? [...result.games, result.final] : result.games;
-  for (const game of games) {
-    foldBoxScore(state, game.boxScore?.away);
-    foldBoxScore(state, game.boxScore?.home);
-    for (const event of game.events ?? []) {
-      aggregateEventSkillStats(state.teams, event);
-    }
-    if (game.topSwing && (!state.topSwing || game.topSwing.wpa > state.topSwing.wpa)) {
-      state.topSwing = {
-        ...game.topSwing,
-        season: state.runs,
-        matchup: `${game.away.name} at ${game.home.name}`,
-        isFinal: game === result.final
-      };
-    }
-  }
+function foldTeamResult(state, teamName, runsFor, runsAgainst) {
+  const row = state.teams.get(teamName);
+  if (!row) return;
+  row.wins.push(runsFor > runsAgainst ? 1 : 0);
+  row.losses.push(runsFor > runsAgainst ? 0 : 1);
+  row.runsFor.push(runsFor);
+  row.runsAgainst.push(runsAgainst);
 }
 
 function foldBoxScore(state, teamBox) {
@@ -289,4 +283,35 @@ function teamSkillTotals(row) {
 
 function per162(total, games) {
   return rate(total * 162, games);
+}
+
+function createSchedule(teams) {
+  const schedule = [];
+  for (let i = 0; i < teams.length; i += 1) {
+    for (let j = i + 1; j < teams.length; j += 1) {
+      schedule.push({ away: teams[i], home: teams[j] });
+    }
+  }
+  return schedule;
+}
+
+function createRotationTracker(teams) {
+  return new Map(teams.map((team) => [team.name, 0]));
+}
+
+function teamForGame(team, rotation) {
+  const starters = team.starters?.length ? team.starters : team.pitchers?.slice(0, 1) ?? [];
+  const bullpen = team.bullpen?.length ? team.bullpen : team.pitchers?.slice(1) ?? [];
+  const startCount = rotation.get(team.name) ?? 0;
+  rotation.set(team.name, startCount + 1);
+  const starter = starters.length ? starters[startCount % starters.length] : null;
+  return {
+    ...team,
+    starterIndex: starters.length ? startCount % starters.length : 0,
+    pitchers: [starter, ...bullpen].filter(Boolean)
+  };
+}
+
+function formatDistributionTotal(value) {
+  return value?.reduce((sum, item) => sum + item, 0) ?? 0;
 }

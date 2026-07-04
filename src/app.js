@@ -124,7 +124,7 @@ function defaultState() {
     tournament: null,
     batch: null,
     batchSorts: {
-      teams: { sort: "titleShare", direction: "desc" },
+      teams: { sort: "winPct", direction: "desc" },
       hitters: { sort: "ops", direction: "desc" },
       pitchers: { sort: "era", direction: "asc" }
     },
@@ -563,7 +563,7 @@ function renderDraft() {
     <button data-action="autopick" ${draft.complete || !onlineCanPickNow(current) ? "disabled" : ""}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot ? "Undo nomination" : "Undo last pick"}</button>
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
-    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} seasons</button>
+    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
   </section>
   ${renderDraftFocus(draft, focusManager)}
   ${lot ? renderAuctionLotPanel(draft) : ""}
@@ -977,7 +977,7 @@ function startBatchRun(runs) {
   const batchState = createBatchState(teams);
   const seed = `${state.seed}-batch`;
   const token = ++batchRunToken;
-  const seasonsPerFrame = Math.max(2, Math.round(count / 90));
+  const gamesPerFrame = Math.max(2, Math.round(count / 90));
   const plotStart = Math.max(4, Math.round(count * 0.02));
   const series = [];
   let completed = 0;
@@ -1021,7 +1021,7 @@ function startBatchRun(runs) {
       finalize();
       return;
     }
-    const size = Math.min(seasonsPerFrame, count - completed);
+    const size = Math.min(gamesPerFrame, count - completed);
     runBatchChunk(batchState, teams, seed, completed, size);
     completed += size;
     const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
@@ -1056,23 +1056,23 @@ function downsampleSeries(series, maxPoints = 160) {
 
 function renderBatchRace({ snapshot, series, completed, total, teamNames }) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
-  const tallies = (snapshot?.rows ?? teamNames.map((name) => ({ team: name, titles: 0, share: 0 })))
+  const tallies = (snapshot?.rows ?? teamNames.map((name) => ({ team: name, wins: 0, losses: 0, share: 0 })))
     .slice()
-    .sort((a, b) => b.titles - a.titles);
+    .sort((a, b) => b.share - a.share || b.wins - a.wins);
   const leader = completed > 0 ? tallies[0] : null;
   const heading = completed >= total
     ? "Photo finish"
     : leader
-      ? `${escapeHtml(leader.team)} leads the title race`
-      : `Simulating ${total} seasons`;
+      ? `${escapeHtml(leader.team)} leads by win percentage`
+      : `Simulating ${total} games`;
   const chips = tallies
-    .map((row) => `<span class="race-chip"><i style="background:${raceColor(teamNames.indexOf(row.team))}"></i>${escapeHtml(row.team)} <strong>${row.titles}</strong></span>`)
+    .map((row) => `<span class="race-chip"><i style="background:${raceColor(teamNames.indexOf(row.team))}"></i>${escapeHtml(row.team)} <strong>${row.wins}-${row.losses}</strong></span>`)
     .join("");
 
   app.innerHTML = `<section class="panel sim-progress race-screen">
-    <p class="eyebrow">Season simulator</p>
+    <p class="eyebrow">Game simulator</p>
     <h1>${heading}</h1>
-    <p class="lede">${completed} of ${total} seasons complete. Title share so far, season by season:</p>
+    <p class="lede">${completed} of ${total} games complete. Win percentage so far:</p>
     <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
     ${renderRaceChart({ teamNames, totalRuns: total, series })}
     <div class="race-chips">${chips}</div>
@@ -1105,8 +1105,7 @@ function renderBatch() {
       (row, index) => `<tr>
         <td>${index + 1}</td>
         <td><strong>${escapeHtml(row.team)}</strong></td>
-        <td class="num">${formatShare(row.titleShare)}</td>
-        <td class="num">${formatShare(row.finalsShare)}</td>
+        <td class="num">${formatShare(row.winPct)}</td>
         <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.wins), teamScheduleGames(row)))}</td>
         <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.losses), teamScheduleGames(row)))}</td>
         <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.runsFor), teamScheduleGames(row)))}</td>
@@ -1170,15 +1169,14 @@ function renderBatch() {
     <div class="award-grid">${awards.map((item) => renderAwardCard(item, playersById)).join("")}</div>
   </div>` : `<div class="panel awards-panel"><h2>The awards show</h2><p class="batch-note">This sim predates the awards stats. Hit Run again to hold the ceremony.</p></div>`;
   const teamTableSection = `<div class="panel">
-    <p class="eyebrow">${runs} simulated seasons</p>
+    <p class="eyebrow">${runs} simulated games</p>
     <h1>${escapeHtml(top.team)} had the best draft</h1>
-    <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons.</p>
+    <p class="batch-note">${escapeHtml(top.team)} led the sim with a ${formatShare(top.winPct)} win rate.</p>
     <table>
       <thead><tr>
         <th>#</th>
         ${renderBatchSortHeader("teams", "team", "Team")}
-        ${renderBatchSortHeader("teams", "titleShare", "Title", "num")}
-        ${renderBatchSortHeader("teams", "finalsShare", "Final", "num")}
+        ${renderBatchSortHeader("teams", "winPct", "Win%", "num")}
         ${renderBatchSortHeader("teams", "w162", "W/162", "num")}
         ${renderBatchSortHeader("teams", "l162", "L/162", "num")}
         ${renderBatchSortHeader("teams", "rf162", "RF/162", "num")}
@@ -1249,7 +1247,7 @@ function renderBatch() {
         <p class="eyebrow">Team skills</p>
         <h2>Baserunning and defense, 162-game pace</h2>
       </div>
-      <span>${runs} seasons</span>
+      <span>${runs} games</span>
     </div>
     <div class="team-skill-grid">
       <div class="stat-table-block">
@@ -1281,7 +1279,7 @@ function renderBatch() {
 
   app.innerHTML = `<section class="toolbar">
     <button data-action="batch-back">${backLabel}</button>
-    <label class="batch-runs-label">Seasons
+    <label class="batch-runs-label">Games
       <select data-batch-runs>
         ${[100, 500, 1000, 2500, 5000].map((option) => `<option value="${option}" ${option === runs ? "selected" : ""}>${option}</option>`).join("")}
       </select>
@@ -1296,7 +1294,7 @@ function renderBatch() {
 }
 
 function renderBatchStatsTabs(activeTab) {
-  return `<div class="game-tabs batch-stat-tabs" role="tablist" aria-label="Season simulator stats">
+  return `<div class="game-tabs batch-stat-tabs" role="tablist" aria-label="Game simulator stats">
     ${batchStatsTabs().map((tab) => `<button
       type="button"
       class="game-tab ${tab.id === activeTab ? "active" : ""}"
@@ -1365,13 +1363,12 @@ function compareSortValues(a, b) {
 
 function batchTeamSortValue(row, sort) {
   if (sort === "team") return row.team;
-  if (sort === "titleShare") return row.titleShare;
-  if (sort === "finalsShare") return row.finalsShare;
+  if (sort === "winPct") return row.winPct ?? row.titleShare ?? 0;
   if (sort === "w162") return per162(formatDistributionTotal(row.wins), teamScheduleGames(row));
   if (sort === "l162") return per162(formatDistributionTotal(row.losses), teamScheduleGames(row));
   if (sort === "rf162") return per162(formatDistributionTotal(row.runsFor), teamScheduleGames(row));
   if (sort === "ra162") return per162(formatDistributionTotal(row.runsAgainst), teamScheduleGames(row));
-  return row.titleShare;
+  return row.winPct ?? row.titleShare ?? 0;
 }
 
 function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
@@ -1430,10 +1427,18 @@ function updateBatchSort(table, sort) {
 
 function defaultBatchSorts() {
   return {
-    teams: { sort: "titleShare", direction: "desc" },
+    teams: { sort: "winPct", direction: "desc" },
     hitters: { sort: "ops", direction: "desc" },
     pitchers: { sort: "era", direction: "asc" }
   };
+}
+
+function normalizeBatchSorts(value) {
+  const sorts = { ...defaultBatchSorts(), ...(value ?? {}) };
+  if (sorts.teams?.sort === "titleShare" || sorts.teams?.sort === "finalsShare") {
+    sorts.teams = { sort: "winPct", direction: "desc" };
+  }
+  return sorts;
 }
 
 function defaultBatchSortDirection(table, sort) {
@@ -2545,10 +2550,6 @@ function rosterCounts(roster) {
   };
 }
 
-function allTournamentGames(tournament) {
-  return [...tournament.games, tournament.final].filter(Boolean);
-}
-
 function saveState() {
   if (state.online) return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState(state)));
@@ -2582,7 +2583,7 @@ function serializeState(value) {
 
 function reviveState(value) {
   const filters = { ...defaultState().filters, ...(value.filters ?? {}) };
-  const batchSorts = { ...defaultBatchSorts(), ...(value.batchSorts ?? {}) };
+  const batchSorts = normalizeBatchSorts(value.batchSorts);
   if (filters.type === "all") filters.type = "hitter";
   filters.sortDirection = filters.sortDirection ?? defaultSortDirection(filters.sort);
   const draft = value.draft

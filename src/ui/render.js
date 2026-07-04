@@ -218,7 +218,7 @@ export function renderRaceChart(race) {
   const teamNames = race?.teamNames ?? [];
   const series = race?.series ?? [];
   if (!teamNames.length || series.length < 2) {
-    return `<div class="race-chart-placeholder">Waiting for the first seasons to finish...</div>`;
+    return `<div class="race-chart-placeholder">Waiting for the first games to finish...</div>`;
   }
 
   const width = 760;
@@ -254,7 +254,7 @@ export function renderRaceChart(race) {
   const parityY = yFor(parity);
   const parityLine = parity <= yMax
     ? `<line x1="${margin.left}" y1="${parityY.toFixed(1)}" x2="${margin.left + plotWidth}" y2="${parityY.toFixed(1)}" class="race-parity" />
-      <text x="${margin.left + 6}" y="${(parityY - 5).toFixed(1)}" class="race-axis-text race-parity-text">even draft (${Math.round(parity * 100)}%)</text>`
+      <text x="${margin.left + 6}" y="${(parityY - 5).toFixed(1)}" class="race-axis-text race-parity-text">even matchup (${Math.round(parity * 100)}%)</text>`
     : "";
 
   const xTicks = [xMin, Math.round((xMin + totalRuns) / 2), totalRuns].map((n) => {
@@ -288,7 +288,7 @@ export function renderRaceChart(race) {
   const endX = Math.min(xFor(lastPoint.n), margin.left + plotWidth);
   const labelTexts = labels.map((label) => `<text x="${(endX + 8).toFixed(1)}" y="${(label.yPos + 4).toFixed(1)}" fill="${label.color}" class="race-label">${escapeHtml(label.name)} ${(label.value * 100).toFixed(1)}%</text>`);
 
-  return `<svg viewBox="0 0 ${width} ${height}" class="race-chart" role="img" aria-label="Cumulative title share by team as seasons are simulated">
+  return `<svg viewBox="0 0 ${width} ${height}" class="race-chart" role="img" aria-label="Cumulative win percentage by team as games are simulated">
     ${gridLines.join("")}
     ${parityLine}
     ${xTicks.join("")}
