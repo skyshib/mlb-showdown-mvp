@@ -39,7 +39,7 @@ import {
   runBatchChunk,
   summarizeBatch
 } from "./rules/batch.js?v=20260705-awards-show-batch-team-skills";
-import { computeAwards } from "./rules/awards.js?v=20260705-awards-show";
+import { computeAwards } from "./rules/awards.js?v=20260705-wpa-two-decimals";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import { simulateRoundRobin } from "./rules/tournament.js?v=20260705-awards-show";
 import {
@@ -1479,7 +1479,7 @@ function formatBattingStat(value) {
 
 function formatWpaStat(value) {
   const number = Number(value) || 0;
-  return `${number >= 0 ? "+" : ""}${number.toFixed(3)}`;
+  return `${number >= 0 ? "+" : ""}${number.toFixed(2)}`;
 }
 
 function showHoverCard(row, clientX, clientY) {

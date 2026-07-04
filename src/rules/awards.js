@@ -154,7 +154,7 @@ function teamOf(summary, playerId) {
 
 function formatWpa(value) {
   const number = Number(value) || 0;
-  return `${number >= 0 ? "+" : ""}${number.toFixed(3)}`;
+  return `${number >= 0 ? "+" : ""}${number.toFixed(2)}`;
 }
 
 function formatBattingStat(value) {
