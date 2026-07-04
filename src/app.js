@@ -53,6 +53,7 @@ import {
   createBatchState,
   normalizeBatchRuns,
   runBatchChunk,
+  simulateBatchGame,
   summarizeBatch
 } from "./rules/batch.js?v=20260704-wpa-calibration";
 import { computeAwards } from "./rules/awards.js?v=20260705-wpa-two-decimals";
@@ -1144,6 +1145,7 @@ function renderBatch() {
   const sortedPitchers = sortBatchRows(summary.pitchers, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
   const sortedBaserunning = [...summary.teams].sort(compareTournamentBaserunning);
   const sortedDefense = [...summary.teams].sort(compareTournamentDefense);
+  const activeBatchTab = normalizeBatchStatsTab(state.batchStatsTab);
 
   const teamRows = sortedTeams
     .map(
@@ -1204,7 +1206,6 @@ function renderBatch() {
     )
     .join("");
 
-  const activeBatchTab = normalizeBatchStatsTab(state.batchStatsTab);
   const raceSection = state.batch.race ? `<section class="panel race-results-panel">
     <h2>How the race unfolded</h2>
     ${renderRaceChart(state.batch.race)}
@@ -1319,7 +1320,8 @@ function renderBatch() {
     overview: overviewSection,
     hitters: hittersSection,
     pitchers: pitchersSection,
-    skills: teamSkillsSection
+    skills: teamSkillsSection,
+    log: activeBatchTab === "log" ? renderBatchGameLogSection(runs) : ""
   };
 
   app.innerHTML = `<section class="toolbar">
@@ -1350,17 +1352,53 @@ function renderBatchStatsTabs(activeTab) {
   </div>`;
 }
 
+function renderBatchGameLogSection(totalGames) {
+  const gameNumber = clampGameNumber((state.selectedGameIndex ?? 0) + 1, totalGames);
+  state.selectedGameIndex = gameNumber - 1;
+  const teams = state.draft.managers.map((manager) => buildTeam(manager));
+  const batchSeed = state.batch.seed ?? `${state.seed}-batch`;
+  const game = simulateBatchGame(teams, batchSeed, gameNumber);
+  const disabledPrev = gameNumber <= 1 ? "disabled" : "";
+  const disabledNext = gameNumber >= totalGames ? "disabled" : "";
+
+  return `<section class="panel wide">
+    <div class="section-title-row">
+      <div>
+        <p class="eyebrow">Game log</p>
+        <h2>${game ? `${escapeHtml(game.away.name)} ${game.away.runs}, ${escapeHtml(game.home.name)} ${game.home.runs}` : "No game available"}</h2>
+      </div>
+      <div class="game-log-controls">
+        <button type="button" class="small" data-action="batch-game-prev" ${disabledPrev}>Prev</button>
+        <label>Game
+          <input data-batch-game-number type="number" min="1" max="${totalGames}" value="${gameNumber}" />
+        </label>
+        <span>of ${totalGames}</span>
+        <button type="button" class="small" data-action="batch-game-next" ${disabledNext}>Next</button>
+      </div>
+    </div>
+    <p class="batch-note">This recreates a single seeded game from the current batch, including the same starter rotation used by the aggregate sim.</p>
+    ${renderGameDetail(game)}
+  </section>`;
+}
+
 function batchStatsTabs() {
   return [
     { id: "overview", label: "Overview" },
     { id: "hitters", label: "Hitters" },
     { id: "pitchers", label: "Pitchers" },
-    { id: "skills", label: "Team skills" }
+    { id: "skills", label: "Team skills" },
+    { id: "log", label: "Game log" }
   ];
 }
 
 function normalizeBatchStatsTab(value) {
   return batchStatsTabs().some((tab) => tab.id === value) ? value : "overview";
+}
+
+function clampGameNumber(value, totalGames) {
+  const max = Math.max(1, Number(totalGames) || 1);
+  const number = Math.round(Number(value) || 1);
+  return Math.min(max, Math.max(1, number));
 }
 
 function renderAwardCard(item, playersById = new Map()) {
@@ -1543,6 +1581,13 @@ function bindBatchActions() {
       const select = app.querySelector("[data-batch-runs]");
       requestBatchRun(select?.value ?? DEFAULT_BATCH_RUNS);
     }
+    if (action === "batch-game-prev" || action === "batch-game-next") {
+      const totalGames = state.batch?.runs ?? DEFAULT_BATCH_RUNS;
+      const direction = action === "batch-game-prev" ? -1 : 1;
+      state.selectedGameIndex = clampGameNumber((state.selectedGameIndex ?? 0) + 1 + direction, totalGames) - 1;
+      saveState();
+      renderBatch();
+    }
     if (action === "reset") {
       if (state.online) {
         leaveOnlineRoom();
@@ -1552,6 +1597,13 @@ function bindBatchActions() {
       state = defaultState();
       renderSetup();
     }
+  };
+  app.onchange = (event) => {
+    const input = event.target.closest("[data-batch-game-number]");
+    if (!input) return;
+    state.selectedGameIndex = clampGameNumber(input.value, state.batch?.runs ?? DEFAULT_BATCH_RUNS) - 1;
+    saveState();
+    renderBatch();
   };
   bindHoverCardPreviews();
 }

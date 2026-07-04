@@ -479,6 +479,28 @@ button.roster-slot[draggable="true"]:active {
   font-weight: 750;
 }
 
+.game-log-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.game-log-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.game-log-controls input {
+  width: 88px;
+  min-height: 30px;
+  padding: 4px 8px;
+  text-align: right;
+}
+
 .tournament-stats-panel {
   overflow: hidden;
 }

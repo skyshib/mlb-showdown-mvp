@@ -56,16 +56,23 @@ export function runBatchChunk(state, teams, seed, startIndex, count) {
   const schedule = createSchedule(teams);
   if (!schedule.length) return state;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    const matchup = schedule[index % schedule.length];
-    const result = simulateGame(
-      teamForGame(matchup.away, state.rotation),
-      teamForGame(matchup.home, state.rotation),
-      `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`,
-      { wpEnv: state.wpEnv }
-    );
+    const result = simulateScheduledGame(schedule, state.rotation, seed, index, state.wpEnv);
     foldGame(state, result);
   }
   return state;
+}
+
+export function simulateBatchGame(teams, seed, gameNumber) {
+  const schedule = createSchedule(teams);
+  if (!schedule.length) return null;
+  const targetIndex = Math.max(0, Math.round(Number(gameNumber) || 1) - 1);
+  const wpEnv = measureRunEnvironment(teams);
+  const rotation = createRotationTracker(teams);
+  let result = null;
+  for (let index = 0; index <= targetIndex; index += 1) {
+    result = simulateScheduledGame(schedule, rotation, seed, index, wpEnv);
+  }
+  return result;
 }
 
 export function batchProgressSnapshot(state) {
@@ -355,6 +362,16 @@ function teamForGame(team, rotation) {
     starterIndex: starters.length ? startCount % starters.length : 0,
     pitchers: [starter, ...bullpen].filter(Boolean)
   };
+}
+
+function simulateScheduledGame(schedule, rotation, seed, index, wpEnv = null) {
+  const matchup = schedule[index % schedule.length];
+  return simulateGame(
+    teamForGame(matchup.away, rotation),
+    teamForGame(matchup.home, rotation),
+    `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`,
+    wpEnv ? { wpEnv } : undefined
+  );
 }
 
 function formatDistributionTotal(value) {
