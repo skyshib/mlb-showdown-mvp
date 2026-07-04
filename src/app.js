@@ -56,7 +56,6 @@ import {
 } from "./rules/batch.js?v=20260705-awards-show-batch-team-skills";
 import { computeAwards } from "./rules/awards.js?v=20260705-wpa-two-decimals";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
-import { simulateRoundRobin } from "./rules/tournament.js?v=20260705-awards-show";
 import {
   basesText,
   escapeHtml,
@@ -142,8 +141,6 @@ function renderCurrentScreen() {
     renderSeatSelect();
   } else if (state.view === "batch" && state.batch && state.draft) {
     renderBatch();
-  } else if (state.tournament) {
-    renderTournament();
   } else if (state.draft) {
     renderDraft();
   } else {
@@ -555,7 +552,6 @@ function renderDraft() {
     <button data-action="autopick" ${draft.complete || !onlineCanPickNow(current) ? "disabled" : ""}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot ? "Undo nomination" : "Undo last pick"}</button>
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
-    <button data-action="tournament" ${canSimulate(draft) ? "" : "disabled"}>Sim tournament</button>
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} seasons</button>
   </section>
   ${renderDraftFocus(draft, focusManager)}
@@ -801,15 +797,6 @@ function bindDraftActions() {
       saveState();
       renderDraft();
     }
-    if (action === "tournament") {
-      const teams = state.draft.managers.map((manager) => buildTeam(manager));
-      state.tournament = simulateRoundRobin(teams, state.seed);
-      state.view = null;
-      state.selectedGameIndex = state.tournament.final ? state.tournament.games.length : 0;
-      state.selectedTeamName = state.tournament.standings[0]?.team ?? teams[0]?.name;
-      saveState();
-      renderTournament();
-    }
     if (action === "batch") {
       startBatchRun(DEFAULT_BATCH_RUNS);
     }
@@ -883,93 +870,6 @@ function bindDraftActions() {
     if (draggedLineupMove) selectedLineupMove = null;
     draggedLineupMove = null;
   };
-}
-
-function renderTournament() {
-  const tournament = state.tournament;
-  const games = allTournamentGames(tournament);
-  const selectedGame = games[state.selectedGameIndex] ?? games[0];
-  const standings = tournament.standings
-    .map(
-      (row, index) => `<tr>
-        <td>${index + 1}</td>
-        <td>${escapeHtml(row.team)}</td>
-        <td class="num">${row.wins}</td>
-        <td class="num">${row.losses}</td>
-        <td class="num">${row.runsFor}</td>
-        <td class="num">${row.runsAgainst}</td>
-      </tr>`
-    )
-    .join("");
-  const gameButtons = games
-    .map(
-      (game, index) => `<button class="game-tab ${index === state.selectedGameIndex ? "active" : ""}" data-action="select-game" data-game-index="${index}">
-        ${index === tournament.games.length ? "Final: " : ""}${escapeHtml(game.away.name)} ${game.away.runs}, ${escapeHtml(game.home.name)} ${game.home.runs}
-      </button>`
-    )
-    .join("");
-
-  app.innerHTML = `<section class="toolbar">
-    <button data-action="back-draft">Back to draft</button>
-    <button data-action="rerun-same">Replay same seed</button>
-    <button data-action="batch">Sim ${DEFAULT_BATCH_RUNS} seasons</button>
-    <button data-action="reset">New room</button>
-  </section>
-  <section class="grid tournament-grid">
-    <div class="panel">
-      <p class="eyebrow">Tournament</p>
-      <h1>${escapeHtml(tournament.final?.winner ?? tournament.standings[0].team)} wins</h1>
-      <table>
-        <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>RF</th><th>RA</th></tr></thead>
-        <tbody>${standings}</tbody>
-      </table>
-    </div>
-    <div class="panel wide">
-      <h2>Games</h2>
-      <div class="game-tabs">${gameButtons}</div>
-      ${renderGameDetail(selectedGame)}
-    </div>
-  </section>
-  ${renderTournamentStats(games)}`;
-
-  bindTournamentActions();
-}
-
-function bindTournamentActions() {
-  resetAppHandlers();
-  hideHoverCard();
-  app.onclick = (event) => {
-    const button = event.target.closest("button[data-action]");
-    if (!button) return;
-    const action = button.dataset.action;
-    if (action === "back-draft") {
-      state.tournament = null;
-      state.selectedGameIndex = 0;
-      saveState();
-      renderDraft();
-    }
-    if (action === "rerun-same") {
-      const teams = state.draft.managers.map(buildTeam);
-      state.tournament = simulateRoundRobin(teams, state.seed);
-      state.selectedGameIndex = state.tournament.final ? state.tournament.games.length : 0;
-      saveState();
-      renderTournament();
-    }
-    if (action === "reset") {
-      clearSavedState();
-      state = defaultState();
-      renderSetup();
-    }
-    if (action === "select-game") {
-      state.selectedGameIndex = Number(button.dataset.gameIndex);
-      saveState();
-      renderTournament();
-    }
-    if (action === "batch") {
-      startBatchRun(DEFAULT_BATCH_RUNS);
-    }
-  };
-  bindHoverCardPreviews();
 }
 
 function bindHoverCardPreviews(onEscape = null) {
@@ -1088,6 +988,7 @@ function startBatchRun(runs) {
 
   const finalize = () => {
     if (token !== batchRunToken || !state.draft) return;
+    state.tournament = null;
     state.batch = {
       runs: count,
       seed,
@@ -1177,7 +1078,7 @@ function renderBatch() {
   const { summary, runs } = state.batch;
   const top = summary.teams[0];
   const awards = computeAwards(summary, buildPickNumberMap(state.draft));
-  const backLabel = state.tournament ? "Back to tournament" : "Back to draft";
+  const backLabel = "Back to draft";
   const playersById = draftedPlayersById();
   const leagueWoba = tournamentWoba(summary.hitters);
   const fipConstant = tournamentFipConstant(summary.pitchers);
@@ -2705,6 +2606,7 @@ function reviveState(value) {
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
     draft,
+    tournament: null,
     view: value.view === "batch" && value.batch ? "batch" : null
   };
 }
