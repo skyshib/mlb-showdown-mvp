@@ -519,6 +519,65 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
   return players.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
 }
 
+// ---- Deep set, per-draft deal ---------------------------------------------
+
+// Every pool flavor keeps a deep card set behind the scenes and deals a
+// seeded slice of it into any given draft: same seed, same deck; new seed,
+// new deck. Quotas are per position (or pitching role) so every deal keeps
+// the same depth at every spot and supports the same number of managers.
+export function dealPool(pool, quotas, dealSeed) {
+  const rng = createRng(dealSeed);
+  const dealt = quotas.flatMap(([group, quota]) =>
+    shuffleCards(pool.filter((player) => dealGroup(player) === group), rng).slice(0, quota)
+  );
+  return dealt.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+}
+
+function dealGroup(player) {
+  return player.kind === "pitcher" ? player.role : player.position;
+}
+
+// Fisher-Yates on a copy, driven by the seeded rng.
+function shuffleCards(players, rng) {
+  const copy = [...players];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = rng.int(0, i);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+// The fictional randoms are one persistent league rather than a fresh
+// invention per room: the same made-up players live behind the scenes
+// (generated once from a fixed seed), and each draft deals a slice of them.
+// Rooms meet the same characters night after night without ever seeing the
+// whole league at once. Bump the version in the seed to trigger a full
+// expansion draft of new fictional players.
+const FICTIONAL_UNIVERSE_SEED = "fictional-universe-v1";
+const FICTIONAL_UNIVERSE_TEAMS = 8;
+const FICTIONAL_DEAL_QUOTAS = [
+  ["C", 10],
+  ["1B", 10],
+  ["2B", 10],
+  ["3B", 10],
+  ["SS", 10],
+  ["LF/RF", 20],
+  ["CF", 10],
+  ["SP", 16],
+  ["RP", 16]
+];
+
+let fictionalUniverseCache = null;
+
+export function buildFictionalUniverse() {
+  fictionalUniverseCache ??= generatePlayerPool(FICTIONAL_UNIVERSE_SEED, FICTIONAL_UNIVERSE_TEAMS, 13);
+  return fictionalUniverseCache;
+}
+
+export function buildFictionalDraftPool(seed) {
+  return dealPool(buildFictionalUniverse(), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
+}
+
 function makeHitterCard(rng, index, usedNames, position) {
   const chart = makeHitterChart(rng);
   const outSlots = countChartSlots(chart, [RESULTS.SO, RESULTS.GB, RESULTS.FB]);

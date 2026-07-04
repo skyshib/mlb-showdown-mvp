@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generatePlayerPool } from "../src/data/playerGeneration.js";
+import { buildFictionalDraftPool, buildFictionalUniverse, generatePlayerPool } from "../src/data/playerGeneration.js";
+import { maxRealPoolManagers } from "../src/data/realPlayers.js";
+import { autopick, createDraft, validateRoster } from "../src/rules/draft.js";
 
 const FIELDING_RANGES = {
   C: [1, 10],
@@ -70,6 +72,49 @@ test("generated player pools include two players per team per lineup slot at eve
     "LF/RF": 8,
     CF: 4
   });
+});
+
+test("the fictional universe is one persistent league", () => {
+  const universe = buildFictionalUniverse();
+  assert.deepEqual(universe, buildFictionalUniverse(), "universe is stable across builds");
+  assert.ok(universe.length >= 150, "universe is deep enough to deal from");
+  const names = universe.map((player) => player.name);
+  assert.equal(new Set(names).size, names.length, "every fictional player is one person");
+});
+
+test("each fictional draft deals a seeded slice of the universe", () => {
+  const dealA = buildFictionalDraftPool("night-a");
+  const dealB = buildFictionalDraftPool("night-b");
+
+  // Same seed, same deck — required for online rooms to rebuild identically.
+  assert.deepEqual(dealA, buildFictionalDraftPool("night-a"));
+
+  const idsA = new Set(dealA.map((player) => player.id));
+  const idsB = new Set(dealB.map((player) => player.id));
+  assert.notDeepEqual([...idsA].sort(), [...idsB].sort(), "two seeds deal different decks");
+
+  // Recurring characters: the decks overlap without being identical.
+  const shared = [...idsA].filter((id) => idsB.has(id));
+  assert.ok(shared.length > 0, "some fictional players recur across decks");
+
+  const universe = buildFictionalUniverse();
+  for (const deal of [dealA, dealB]) {
+    assert.ok(deal.length < universe.length, "a deal is a strict slice of the universe");
+    assert.ok(maxRealPoolManagers(deal) >= 8, "every deal supports eight-manager rooms");
+    for (const player of deal) {
+      assert.ok(universe.some((card) => card.id === player.id), `${player.name} comes from the universe`);
+    }
+  }
+});
+
+test("dealt fictional pools draft to completion at the eight-manager maximum", () => {
+  const pool = buildFictionalDraftPool("fictional-max");
+  const managers = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  const draft = createDraft(managers, pool, 13);
+  while (!draft.complete) autopick(draft);
+  for (const manager of draft.managers) {
+    assert.deepEqual(validateRoster(manager), [], `${manager.name} roster is legal`);
+  }
 });
 
 function assertChartCoversD20(chart) {

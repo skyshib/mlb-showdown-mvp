@@ -5,8 +5,8 @@ import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { generatePlayerPool } from "../src/data/playerGeneration.js";
-import { buildRealPlayerPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
+import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
+import { buildRealDraftPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
 import { applyDraftAction, createDraft, currentManager, draftHistory } from "../src/rules/draft.js";
 
@@ -78,11 +78,13 @@ function loadRooms(dataDir) {
 function reviveRoom(saved) {
   const managerNames = saved.managerNames ?? [];
   const realPool = saved.realPool === "mariners" ? "mariners" : "stars";
+  // Must deal exactly as createRoom did, or the replayed action log references
+  // cards that are not in the revived pool.
   const pool = saved.poolMode === "real"
     ? realPool === "mariners"
       ? buildMarinersDraftPool(saved.seed)
-      : buildRealPlayerPool()
-    : generatePlayerPool(saved.seed, managerNames.length, saved.rosterSize);
+      : buildRealDraftPool(saved.seed)
+    : buildFictionalDraftPool(saved.seed);
   const draft = createDraft(managerNames, pool, saved.rosterSize, saved.seed);
   const actions = saved.actions ?? [];
   for (const entry of actions) applyDraftAction(draft, entry.action);
@@ -156,17 +158,19 @@ async function createRoom(store, request, response) {
   const poolMode = body.poolMode === "real" ? "real" : "random";
   const realPool = body.realPool === "mariners" ? "mariners" : "stars";
 
-  let pool;
-  if (poolMode === "real") {
-    pool = realPool === "mariners" ? buildMarinersDraftPool(seed) : buildRealPlayerPool();
-    const managerLimit = maxRealPoolManagers(pool);
-    if (managers.length > managerLimit) {
-      return sendJson(response, 400, {
-        error: `The ${realPool === "mariners" ? "all-era Mariners" : "real player"} pool supports up to ${managerLimit} managers`
-      });
-    }
-  } else {
-    pool = generatePlayerPool(seed, managers.length, rosterSize);
+  // Every pool flavor deals a seeded slice of a deep set; the deal is
+  // deterministic in the seed so clients rebuild the identical deck.
+  const pool = poolMode === "real"
+    ? realPool === "mariners" ? buildMarinersDraftPool(seed) : buildRealDraftPool(seed)
+    : buildFictionalDraftPool(seed);
+  const managerLimit = maxRealPoolManagers(pool);
+  if (managers.length > managerLimit) {
+    const poolLabel = poolMode === "real"
+      ? realPool === "mariners" ? "all-era Mariners" : "real player"
+      : "fictional";
+    return sendJson(response, 400, {
+      error: `The ${poolLabel} pool deals position depth for up to ${managerLimit} managers`
+    });
   }
   const draft = createDraft(managers, pool, rosterSize, seed);
   const room = {

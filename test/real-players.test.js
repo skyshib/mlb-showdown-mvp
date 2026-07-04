@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { headshotUrl } from "../src/data/headshots.js";
 import { buildMarinersPool } from "../src/data/marinersPlayers.js";
-import { buildRealPlayerPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
+import { buildRealPlayerPool, buildRealDraftPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
 import { RESULTS } from "../src/rules/cards.js";
 import { autopick, buildTeam, createDraft, validateRoster } from "../src/rules/draft.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
@@ -162,4 +162,38 @@ test("era cards read like the seasons die-hards remember", () => {
   assert.ok(mendoza.points < sortedPoints[Math.floor(pool.length / 2)], "the Mendoza Line sits below the median");
   assert.equal(bigTrain.ip, 8, "deadball workhorses go deep");
   assert.equal(chartSlots(gaedel, RESULTS.BB), 19, "Gaedel's strike zone remains theoretical");
+});
+
+test("each stars draft deals a seeded slice with six-manager position depth", () => {
+  const dealA = buildRealDraftPool("stars-night-a");
+  const dealB = buildRealDraftPool("stars-night-b");
+
+  // Same seed, same deck — required for online rooms to rebuild identically.
+  assert.deepEqual(dealA, buildRealDraftPool("stars-night-a"));
+
+  const idsA = new Set(dealA.map((player) => player.id));
+  const idsB = new Set(dealB.map((player) => player.id));
+  assert.notDeepEqual([...idsA].sort(), [...idsB].sort(), "two seeds deal different decks");
+
+  const full = buildRealPlayerPool();
+  for (const deal of [dealA, dealB]) {
+    assert.equal(deal.length, 89, "a deal is 89 cards");
+    assert.ok(deal.length < full.length, "a deal is a strict slice of the set");
+    assert.ok(maxRealPoolManagers(deal) >= 6, "every deal supports six-manager rooms");
+    for (const player of deal) {
+      assert.ok(full.some((card) => card.id === player.id), `${player.name} comes from the full set`);
+    }
+  }
+});
+
+test("dealt stars pools draft to completion at the six-manager maximum", () => {
+  for (const seed of ["stars-max-1", "stars-max-2"]) {
+    const pool = buildRealDraftPool(seed);
+    const managers = ["A", "B", "C", "D", "E", "F"];
+    const draft = createDraft(managers, pool, 13);
+    while (!draft.complete) autopick(draft);
+    for (const manager of draft.managers) {
+      assert.deepEqual(validateRoster(manager), [], `${manager.name} roster is legal with seed ${seed}`);
+    }
+  }
 });

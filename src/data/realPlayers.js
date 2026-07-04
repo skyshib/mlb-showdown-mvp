@@ -2,6 +2,7 @@ import { RESULTS } from "../rules/cards.js";
 import {
   chartFromCounts,
   chartPower,
+  dealPool,
   pitcherPoints,
   speedPoints,
   toChart
@@ -36,6 +37,10 @@ const HITTER_ROWS = [
   ["Salvador Perez", "KC", "C", "R", 5, 5, 620, 145, 26, 0, 30, 32, 120],
   ["Austin Wells", "NYY", "C", "L", 8, 7, 430, 85, 17, 1, 21, 38, 105],
   ["Carson Kelly", "CHC", "C", "R", 6, 6, 380, 85, 15, 1, 17, 46, 75],
+  ["Alejandro Kirk", "TOR", "C", "R", 3, 7, 510, 133, 22, 0, 11, 45, 55],
+  ["Patrick Bailey", "SF", "C", "S", 5, 8, 480, 100, 20, 2, 8, 35, 120],
+  ["Logan O'Hoppe", "LAA", "C", "R", 4, 6, 520, 115, 20, 0, 20, 30, 140],
+  ["Freddy Fermin", "KC", "C", "R", 5, 7, 380, 95, 15, 1, 7, 22, 55],
   ["Vladimir Guerrero Jr.", "TOR", "1B", "R", 7, 1, 680, 175, 30, 1, 23, 85, 90],
   ["Freddie Freeman", "LAD", "1B", "L", 9, 1, 615, 160, 32, 2, 24, 60, 95],
   ["Matt Olson", "ATL", "1B", "L", 7, 1, 700, 170, 39, 0, 29, 90, 150],
@@ -43,6 +48,10 @@ const HITTER_ROWS = [
   ["Bryce Harper", "PHI", "1B", "L", 10, 1, 550, 130, 28, 0, 27, 65, 120],
   ["Rafael Devers", "SF", "1B", "L", 7, 0, 690, 150, 26, 1, 33, 105, 190],
   ["Josh Naylor", "SEA", "1B", "L", 9, 1, 640, 170, 28, 1, 20, 48, 85],
+  ["Michael Busch", "CHC", "1B", "L", 5, 1, 600, 140, 26, 3, 30, 65, 150],
+  ["Spencer Torkelson", "DET", "1B", "R", 4, 0, 600, 133, 25, 1, 28, 65, 160],
+  ["Nathaniel Lowe", "WSH", "1B", "L", 4, 1, 600, 140, 25, 1, 16, 60, 140],
+  ["Carlos Santana", "CLE", "1B", "S", 4, 1, 580, 118, 20, 1, 15, 70, 100],
   ["Ketel Marte", "ARI", "2B", "S", 10, 4, 600, 150, 26, 2, 28, 77, 90],
   ["Jose Altuve", "HOU", "2B", "R", 11, 2, 660, 160, 25, 1, 27, 50, 125],
   ["Marcus Semien", "TEX", "2B", "R", 11, 5, 640, 135, 24, 2, 17, 60, 110],
@@ -50,6 +59,10 @@ const HITTER_ROWS = [
   ["Brice Turang", "MIL", "2B", "L", 16, 6, 650, 170, 28, 4, 18, 62, 115],
   ["Jackson Holliday", "BAL", "2B", "L", 13, 3, 630, 145, 25, 4, 17, 48, 140],
   ["Jazz Chisholm Jr.", "NYY", "2B", "L", 15, 4, 600, 130, 22, 3, 31, 68, 145],
+  ["Luis Arraez", "SD", "2B", "L", 8, 3, 650, 190, 30, 3, 4, 32, 30],
+  ["Nico Hoerner", "CHC", "2B", "R", 13, 6, 620, 165, 25, 3, 7, 40, 55],
+  ["Brendan Donovan", "STL", "2B", "L", 7, 4, 550, 140, 28, 1, 10, 50, 75],
+  ["Andres Gimenez", "TOR", "2B", "L", 12, 6, 500, 100, 18, 2, 10, 35, 90],
   ["Jose Ramirez", "CLE", "3B", "S", 14, 2, 680, 175, 35, 4, 30, 70, 80],
   ["Manny Machado", "SD", "3B", "R", 10, 3, 680, 170, 30, 1, 27, 58, 115],
   ["Alex Bregman", "BOS", "3B", "R", 8, 3, 475, 118, 30, 0, 18, 45, 80],
@@ -57,6 +70,10 @@ const HITTER_ROWS = [
   ["Austin Riley", "ATL", "3B", "R", 8, 2, 440, 105, 22, 0, 16, 34, 115],
   ["Matt Chapman", "SF", "3B", "R", 9, 3, 580, 125, 22, 1, 22, 70, 140],
   ["Eugenio Suarez", "SEA", "3B", "R", 7, 2, 670, 140, 24, 0, 49, 50, 192],
+  ["Max Muncy", "LAD", "3B", "L", 4, 2, 450, 90, 15, 0, 19, 70, 120],
+  ["Ke'Bryan Hayes", "CIN", "3B", "R", 8, 3, 520, 115, 22, 3, 8, 30, 95],
+  ["Ryan McMahon", "NYY", "3B", "L", 5, 3, 560, 110, 20, 1, 18, 60, 170],
+  ["Brett Baty", "NYM", "3B", "L", 5, 2, 420, 95, 16, 1, 18, 35, 100],
   ["Bobby Witt Jr.", "KC", "SS", "R", 17, 6, 700, 189, 45, 8, 23, 55, 105],
   ["Gunnar Henderson", "BAL", "SS", "L", 14, 4, 640, 160, 30, 5, 17, 58, 130],
   ["Francisco Lindor", "NYM", "SS", "S", 13, 5, 700, 170, 30, 2, 31, 50, 120],
@@ -65,6 +82,10 @@ const HITTER_ROWS = [
   ["Trea Turner", "PHI", "SS", "R", 17, 4, 650, 180, 28, 5, 15, 45, 110],
   ["CJ Abrams", "WSH", "SS", "L", 16, 3, 610, 148, 26, 5, 17, 48, 115],
   ["Mookie Betts", "LAD", "SS", "R", 12, 4, 640, 150, 30, 1, 20, 62, 70],
+  ["Masyn Winn", "STL", "SS", "R", 13, 6, 600, 145, 28, 3, 15, 40, 110],
+  ["Jeremy Pena", "HOU", "SS", "R", 13, 5, 550, 150, 25, 2, 15, 30, 95],
+  ["Xavier Edwards", "MIA", "SS", "S", 16, 3, 600, 160, 20, 6, 2, 45, 75],
+  ["Miguel Rojas", "LAD", "SS", "R", 6, 5, 320, 72, 12, 1, 5, 20, 40],
   ["Steven Kwan", "CLE", "LF/RF", "L", 14, 2, 640, 160, 26, 4, 9, 50, 55],
   ["Riley Greene", "DET", "LF/RF", "L", 11, 1, 650, 155, 28, 3, 36, 40, 198],
   ["Jackson Chourio", "MIL", "LF/RF", "R", 15, 1, 600, 155, 30, 5, 21, 32, 105],
@@ -78,15 +99,31 @@ const HITTER_ROWS = [
   ["Ceddanne Rafaela", "BOS", "CF", "R", 15, 3, 580, 143, 28, 5, 16, 28, 118],
   ["Jarren Duran", "BOS", "CF", "L", 16, 2, 680, 165, 34, 13, 16, 45, 160],
   ["Michael Harris II", "ATL", "CF", "L", 14, 3, 620, 142, 26, 4, 20, 20, 130],
+  ["Brenton Doyle", "COL", "CF", "R", 15, 3, 560, 125, 22, 3, 20, 35, 160],
+  ["Victor Scott II", "STL", "CF", "L", 18, 3, 480, 100, 15, 5, 5, 35, 110],
+  ["Jake Meyers", "HOU", "CF", "R", 13, 3, 450, 108, 18, 2, 8, 30, 100],
+  ["Trent Grisham", "NYY", "CF", "L", 9, 2, 550, 125, 18, 1, 30, 60, 130],
   ["Aaron Judge", "NYY", "LF/RF", "R", 10, 2, 679, 179, 30, 1, 53, 124, 152],
   ["Juan Soto", "NYM", "LF/RF", "L", 11, 0, 715, 155, 25, 1, 43, 127, 130],
   ["Ronald Acuna Jr.", "ATL", "LF/RF", "R", 14, 2, 480, 115, 18, 1, 21, 70, 105],
   ["Kyle Tucker", "CHC", "LF/RF", "L", 12, 2, 600, 135, 28, 4, 22, 85, 95],
   ["Fernando Tatis Jr.", "SD", "LF/RF", "R", 14, 2, 690, 160, 28, 2, 25, 75, 140],
   ["Corbin Carroll", "ARI", "LF/RF", "L", 18, 2, 650, 150, 26, 17, 31, 55, 130],
+  ["Wilyer Abreu", "BOS", "LF/RF", "L", 8, 2, 500, 112, 22, 2, 22, 45, 130],
+  ["Jurickson Profar", "ATL", "LF/RF", "S", 7, 1, 350, 85, 15, 1, 10, 40, 65],
+  ["Tommy Edman", "LAD", "LF/RF", "S", 14, 2, 480, 105, 20, 3, 12, 30, 70],
+  ["Lourdes Gurriel Jr.", "ARI", "LF/RF", "R", 6, 1, 580, 138, 26, 1, 18, 35, 110],
+  ["Colton Cowser", "BAL", "LF/RF", "L", 10, 2, 480, 100, 18, 2, 20, 50, 145],
+  ["Sal Frelick", "MIL", "LF/RF", "L", 13, 2, 580, 155, 22, 4, 6, 45, 70],
+  ["Alex Verdugo", "ATL", "LF/RF", "L", 6, 1, 350, 80, 14, 1, 5, 25, 55],
+  ["Kike Hernandez", "LAD", "LF/RF", "R", 7, 2, 380, 70, 12, 1, 10, 30, 90],
   ["Shohei Ohtani", "LAD", "DH", "L", 14, 0, 730, 180, 25, 5, 55, 110, 185],
   ["Yordan Alvarez", "HOU", "DH", "L", 7, 0, 600, 165, 30, 1, 30, 70, 110],
   ["Kyle Schwarber", "PHI", "DH", "L", 7, 0, 730, 155, 20, 1, 56, 105, 185],
+  ["Marcell Ozuna", "ATL", "DH", "R", 3, 0, 550, 120, 20, 0, 25, 65, 125],
+  ["Ben Rice", "NYY", "DH", "L", 6, 0, 500, 115, 22, 2, 25, 55, 115],
+  ["Ryan O'Hearn", "SD", "DH", "L", 4, 0, 480, 125, 22, 1, 15, 45, 85],
+  ["Jorge Soler", "LAA", "DH", "R", 3, 0, 480, 98, 16, 0, 20, 45, 130],
   // Era players: famous seasons, raw and era-unadjusted. Negro League lines
   // (Gibson, Charleston, Paige) use the now-official MLB statistics; deadball
   // strikeout totals are estimates. Not all stars on purpose — Mendoza,
@@ -165,6 +202,9 @@ const PITCHER_ROWS = [
   ["Trevor Rogers", "BAL", "SP", "L", 110, 18, 75, 6, 25, 95],
   ["Ranger Suarez", "PHI", "SP", "L", 157, 26, 140, 10, 35, 151],
   ["Shota Imanaga", "CHC", "SP", "L", 145, 25, 116, 25, 26, 130],
+  ["Mitch Keller", "PIT", "SP", "R", 190, 31, 185, 18, 45, 155],
+  ["Jose Berrios", "TOR", "SP", "R", 180, 32, 175, 25, 50, 150],
+  ["Tomoyuki Sugano", "BAL", "SP", "R", 160, 28, 165, 22, 25, 100],
   ["Mason Miller", "SD", "RP", "R", 60, 0, 35, 5, 25, 95],
   ["Josh Hader", "HOU", "RP", "L", 60, 0, 35, 5, 20, 85],
   ["Edwin Diaz", "NYM", "RP", "R", 66, 0, 40, 3, 25, 95],
@@ -179,6 +219,12 @@ const PITCHER_ROWS = [
   ["Felix Bautista", "BAL", "RP", "R", 35, 0, 20, 2, 15, 50],
   ["David Bednar", "NYY", "RP", "R", 60, 0, 45, 5, 18, 80],
   ["Randy Rodriguez", "SF", "RP", "R", 65, 0, 40, 3, 15, 85],
+  ["Ryan Helsley", "NYM", "RP", "R", 60, 0, 50, 6, 22, 70],
+  ["Camilo Doval", "SF", "RP", "R", 62, 0, 48, 4, 28, 70],
+  ["Kirby Yates", "LAD", "RP", "R", 55, 0, 40, 6, 22, 65],
+  ["Tanner Scott", "LAD", "RP", "L", 60, 0, 55, 8, 20, 60],
+  ["Pete Fairbanks", "TB", "RP", "R", 58, 0, 45, 4, 20, 55],
+  ["Kenley Jansen", "LAA", "RP", "R", 62, 0, 48, 6, 20, 60],
   // Era pitchers: famous seasons, raw and era-unadjusted. Deadball workhorses
   // earn their IP 8 honestly.
   ["Walter Johnson '13", "WSH", "SP", "R", 346, 36, 232, 3, 38, 243],
@@ -236,6 +282,26 @@ export function buildRealPlayerPool() {
   const hitters = HITTER_ROWS.map((row) => makeRealHitter(row));
   const pitchers = PITCHER_ROWS.map((row) => makeRealPitcher(row));
   return [...hitters, ...pitchers].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+}
+
+// The deck shape one draft night sees: a seeded slice of the full set with
+// position depth for six managers. Shared with the Mariners set so every
+// real-player flavor deals the same-sized deck.
+export const REAL_DEAL_QUOTAS = [
+  ["C", 7],
+  ["1B", 7],
+  ["2B", 7],
+  ["3B", 7],
+  ["SS", 7],
+  ["LF/RF", 13],
+  ["CF", 7],
+  ["DH", 4],
+  ["SP", 16],
+  ["RP", 14]
+];
+
+export function buildRealDraftPool(seed) {
+  return dealPool(buildRealPlayerPool(), REAL_DEAL_QUOTAS, `stars-deal:${seed}`);
 }
 
 export function maxRealPoolManagers(pool = buildRealPlayerPool()) {

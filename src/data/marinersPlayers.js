@@ -1,5 +1,5 @@
-import { LEAGUE, makeRealHitter, makeRealPitcher } from "./realPlayers.js?v=20260704-real-players";
-import { createRng } from "../rules/rng.js";
+import { LEAGUE, makeRealHitter, makeRealPitcher, REAL_DEAL_QUOTAS } from "./realPlayers.js?v=20260704-real-players";
+import { dealPool } from "./playerGeneration.js?v=20260704-real-players";
 
 // Mariners-only card set spanning the whole franchise, 1977-2025. Rows follow
 // the realPlayers.js convention: approximate season stat lines, hand-entered
@@ -174,23 +174,6 @@ const PITCHER_ROWS = [
   ["Matt Brash", 2023, "RP", "R", 71, 0, 59, 3, 28, 107]
 ];
 
-// How many cards of each group a single draft deals out. The quotas keep the
-// same shape the 89-card pool proved out — position depth for six managers —
-// while the full set above stays roughly half again bigger, so which legends
-// and which scrubs show up swings from seed to seed.
-const DEAL_QUOTAS = [
-  ["C", 7],
-  ["1B", 7],
-  ["2B", 7],
-  ["3B", 7],
-  ["SS", 7],
-  ["LF/RF", 13],
-  ["CF", 7],
-  ["DH", 4],
-  ["SP", 16],
-  ["RP", 14]
-];
-
 // The complete card set: every Mariner ever made into a card.
 export function buildMarinersPool() {
   const hitters = HITTER_ROWS.map((row) => makeMariner(row, makeRealHitter, "sea-h"));
@@ -198,31 +181,12 @@ export function buildMarinersPool() {
   return [...hitters, ...pitchers].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
 }
 
-// One draft night's deck: a seeded deal from the full set, quota'd per
-// position so any deal supports the same manager count. Deterministic in the
-// room seed — the same seed always deals the same deck, which is what lets
-// online rooms rebuild an identical pool on every machine.
+// One draft night's deck: a seeded deal from the full set with the shared
+// real-pool quotas, so any deal supports the same manager count. The same
+// seed always deals the same deck, which is what lets online rooms rebuild
+// an identical pool on every machine.
 export function buildMarinersDraftPool(seed) {
-  const rng = createRng(`mariners-deal:${seed}`);
-  const pool = buildMarinersPool();
-  const dealt = DEAL_QUOTAS.flatMap(([group, quota]) =>
-    shuffle(pool.filter((player) => dealGroup(player) === group), rng).slice(0, quota)
-  );
-  return dealt.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
-}
-
-function dealGroup(player) {
-  return player.kind === "pitcher" ? player.role : player.position;
-}
-
-// Fisher-Yates on a copy, driven by the seeded rng.
-function shuffle(players, rng) {
-  const copy = [...players];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = rng.int(0, i);
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
+  return dealPool(buildMarinersPool(), REAL_DEAL_QUOTAS, `mariners-deal:${seed}`);
 }
 
 function makeMariner(row, make, idPrefix) {

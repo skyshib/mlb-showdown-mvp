@@ -1,5 +1,5 @@
-import { generatePlayerPool } from "./data/playerGeneration.js?v=20260705-uncapped-speed";
-import { buildRealPlayerPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
+import { buildFictionalDraftPool, buildFictionalUniverse } from "./data/playerGeneration.js?v=20260705-uncapped-speed";
+import { buildRealPlayerPool, buildRealDraftPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
 import { buildMarinersPool, buildMarinersDraftPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners-deal";
 import {
   applyDraftAction,
@@ -71,14 +71,20 @@ import {
 } from "./ui/render.js?v=20260706-auction-draft";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
+// Every pool flavor keeps a deep set behind the scenes and deals a seeded
+// slice per draft. Deals share a fixed per-position shape, so any probe seed
+// reports the manager limit that every deal of that pool supports.
+const FICTIONAL_POOL_INFO = (() => {
+  const dealt = buildFictionalDraftPool("probe");
+  return { size: buildFictionalUniverse().length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
+})();
 const REAL_POOL_INFO = (() => {
-  const pool = buildRealPlayerPool();
-  return { size: pool.length, managerLimit: maxRealPoolManagers(pool) };
+  const fullSet = buildRealPlayerPool();
+  const dealt = buildRealDraftPool("probe");
+  return { size: fullSet.length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
 })();
 const MARINERS_POOL_INFO = (() => {
   const fullSet = buildMarinersPool();
-  // Every deal has the same per-position shape, so any probe seed reports
-  // the manager limit all Mariners drafts share.
   const dealt = buildMarinersDraftPool("probe");
   return { size: fullSet.length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
 })();
@@ -204,8 +210,8 @@ function rebuildOnlineDraft(room) {
   const pool = room.poolMode === "real"
     ? room.realPool === "mariners"
       ? buildMarinersDraftPool(room.seed)
-      : buildRealPlayerPool()
-    : generatePlayerPool(room.seed, room.managers.length, room.rosterSize);
+      : buildRealDraftPool(room.seed)
+    : buildFictionalDraftPool(room.seed);
   state.draft = createDraft(state.managers, pool, room.rosterSize, room.seed);
   for (const entry of room.actions) applyDraftAction(state.draft, entry.action);
   state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
@@ -423,7 +429,7 @@ function renderSetup(setupError = "") {
         <legend>Player pool</legend>
         <label class="pool-option">
           <input type="radio" name="poolMode" value="random" ${state.poolMode === "real" ? "" : "checked"} />
-          <span><strong>Fictional randoms</strong><small>A fresh generated pool built from the seed above.</small></span>
+          <span><strong>Fictional randoms</strong><small>The seed above deals ${FICTIONAL_POOL_INFO.dealt} of a fixed ${FICTIONAL_POOL_INFO.size}-player invented league — the same made-up guys resurface night after night. Up to ${FICTIONAL_POOL_INFO.managerLimit} managers.</small></span>
         </label>
         <label class="pool-option">
           <input type="radio" name="poolMode" value="real" ${state.poolMode === "real" ? "checked" : ""} />
@@ -432,7 +438,7 @@ function renderSetup(setupError = "") {
         <div class="pool-suboptions">
           <label class="pool-option">
             <input type="radio" name="realPool" value="stars" ${state.realPool === "mariners" ? "" : "checked"} />
-            <span><strong>${REAL_POOL_SEASON} stars</strong><small>${REAL_POOL_INFO.size} standouts from around today's league, from approximate ${REAL_POOL_SEASON} stats. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
+            <span><strong>${REAL_POOL_SEASON} stars</strong><small>The seed above deals ${REAL_POOL_INFO.dealt} of ${REAL_POOL_INFO.size} cards from around today's league — stars, regulars, and role players from approximate ${REAL_POOL_SEASON} stats. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
           </label>
           <label class="pool-option">
             <input type="radio" name="realPool" value="mariners" ${state.realPool === "mariners" ? "checked" : ""} />
@@ -476,18 +482,23 @@ function renderSetup(setupError = "") {
     state.realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
     state.draftType = form.get("draftType") === "auction" ? "auction" : "snake";
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
-    const realPoolInfo = state.realPool === "mariners" ? MARINERS_POOL_INFO : REAL_POOL_INFO;
-    if (state.poolMode === "real" && state.managers.length > realPoolInfo.managerLimit) {
+    const poolInfo = state.poolMode === "real"
+      ? state.realPool === "mariners" ? MARINERS_POOL_INFO : REAL_POOL_INFO
+      : FICTIONAL_POOL_INFO;
+    const poolLabel = state.poolMode === "real"
+      ? state.realPool === "mariners" ? "all-era Mariners" : "real player"
+      : "fictional";
+    if (state.managers.length > poolInfo.managerLimit) {
       renderSetup(
-        `The ${state.realPool === "mariners" ? "all-era Mariners" : "real player"} pool has position depth for up to ${realPoolInfo.managerLimit} managers. Trim the manager list or pick a different pool.`
+        `The ${poolLabel} pool deals position depth for up to ${poolInfo.managerLimit} managers. Trim the manager list or pick a different pool.`
       );
       return;
     }
     const pool = state.poolMode === "real"
       ? state.realPool === "mariners"
         ? buildMarinersDraftPool(state.seed)
-        : buildRealPlayerPool()
-      : generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
+        : buildRealDraftPool(state.seed)
+      : buildFictionalDraftPool(state.seed);
     state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed, {
       draftType: state.draftType,
       budget: state.auctionBudget
