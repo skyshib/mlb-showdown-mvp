@@ -389,7 +389,12 @@
           bats: "S",
           position: "CF",
           fieldMod: 1,
-          team: { abbr: "LA", logoFill: "#3f6fb5" },
+          // Photo: Wikimedia Commons, "Milton Bradley May 6, 2005" (Flickr, CC-BY),
+          // stand-in until generated player images go in this slot.
+          photo: "./mockup-assets/milton-bradley-2005.jpg",
+          photoPosition: "42% 10%",
+          photoZoom: 1.22,
+          team: { abbr: "LA", logoFill: "#005a9c" },
           caption: "Reference replica: same data as the real '05 Milton Bradley card (minus footer, numeric speed).",
           chart: [
             { range: "1–2", result: "SO" },
@@ -495,7 +500,7 @@
           lights.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="hsl(140 22% ${(30 + rand() * 22).toFixed(0)}%)"/>`);
         }
         return `<svg viewBox="0 0 386 138" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="386" height="138" fill="#12301c"/>
+          <rect width="386" height="138" fill="#0f2716"/>
           <g filter="url(#stripblur)" opacity="0.75">
             ${lights.join("")}
             <rect y="52" width="386" height="26" fill="#1b4a2c"/>
@@ -524,8 +529,9 @@
           <div class="card05" style="--team-logo-fill:${card.team.logoFill}" data-card-index="${index}">
             <img class="overlay-ref" alt="" />
             <div class="photo">
-              ${placeholderPhoto(37 + index * 140)}
-              <span class="photo-slot-tag">Photo slot</span>
+              ${card.photo
+                ? `<img src="${card.photo}" alt="" style="object-position:${card.photoPosition ?? "50% 15%"};transform:scale(${card.photoZoom ?? 1});transform-origin:${card.photoPosition ?? "50% 15%"}" />`
+                : `${placeholderPhoto(37 + index * 140)}<span class="photo-slot-tag">Photo slot</span>`}
             </div>
             <div class="team-logo">${card.team.abbr}</div>
             <div class="strip">
