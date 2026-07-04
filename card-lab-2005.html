@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MLB Showdown Card Lab — 2005 Redesign</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,700;0,800;1,800;1,900&family=Archivo+Narrow:ital,wght@0,700;1,700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0f14;
+        --ink: #edf3f4;
+        --muted: #8da0aa;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(900px 520px at 18% -10%, rgba(70, 135, 185, 0.24), transparent 70%),
+          radial-gradient(900px 520px at 96% 110%, rgba(230, 75, 92, 0.16), transparent 70%),
+          var(--bg);
+        color: var(--ink);
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 28px 0 48px;
+      }
+
+      header {
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+        font-size: clamp(30px, 5vw, 48px);
+        font-weight: 900;
+        font-style: italic;
+        letter-spacing: 0.01em;
+        line-height: 0.92;
+        text-transform: uppercase;
+      }
+
+      .lede {
+        margin: 8px 0 0;
+        max-width: 660px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .compare-bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+        margin: 14px 0 22px;
+        padding: 10px 14px;
+        border: 1px dashed rgba(255, 255, 255, 0.25);
+        border-radius: 10px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .compare-bar label {
+        cursor: pointer;
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .compare-bar input[type="range"] {
+        width: 140px;
+      }
+
+      .card-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 30px;
+        align-items: flex-start;
+      }
+
+      .caption {
+        margin-top: 10px;
+        max-width: 400px;
+        color: var(--muted);
+        font-size: 12.5px;
+        line-height: 1.4;
+      }
+
+      /* ============================================================
+         2005-style card. 400x560 (5:7). Reference geometry measured
+         from a 748x1044 scan; positions below are that scan * 0.535.
+         ============================================================ */
+
+      .card05 {
+        position: relative;
+        width: 400px;
+        height: 560px;
+        border-radius: 15px;
+        background: linear-gradient(160deg, #131313, #000000);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+        font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+        user-select: none;
+        overflow: hidden;
+      }
+
+      /* photo window: frame is ~7px sides, ~9px top, ~13px bottom */
+      .card05 .photo {
+        position: absolute;
+        inset: 9px 7px 13px;
+        border-radius: 9px;
+        overflow: hidden;
+        background: #24313c;
+      }
+
+      .card05 .photo svg,
+      .card05 .photo img {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .card05 .photo-slot-tag {
+        position: absolute;
+        top: 7px;
+        left: 7px;
+        padding: 2px 7px;
+        border-radius: 4px;
+        background: rgba(5, 10, 8, 0.5);
+        color: rgba(237, 243, 244, 0.7);
+        font-family: Inter, sans-serif;
+        font-size: 8.5px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .card05 .team-logo {
+        position: absolute;
+        right: 20px;
+        bottom: 134px;
+        font-size: 46px;
+        font-weight: 900;
+        font-style: italic;
+        letter-spacing: -0.03em;
+        color: var(--team-logo-fill, #3f6fb5);
+        -webkit-text-stroke: 2.5px #ffffff;
+        paint-order: stroke fill;
+        text-shadow: 0 3px 7px rgba(0, 0, 0, 0.65);
+        line-height: 1;
+      }
+
+      /* ---- bottom strip -------------------------------------------------
+         In the scan: name bar 790→844, stats 844→888, rule at 888,
+         ranges 890→922, results 922→954 (× 0.535 ≈ here). The green
+         area is the artwork's stadium backdrop, not the photo.        */
+
+      .card05 .strip {
+        position: absolute;
+        left: 7px;
+        right: 7px;
+        bottom: 13px;
+        height: 116px;
+      }
+
+      .card05 .strip .strip-bg {
+        position: absolute;
+        inset: 0;
+        border-radius: 0 0 9px 9px;
+        overflow: hidden;
+      }
+
+      .card05 .strip .strip-bg svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* silver name bar */
+      .card05 .name-bar {
+        position: absolute;
+        left: 62px;
+        right: 0;
+        top: 0;
+        height: 29px;
+        display: flex;
+        align-items: center;
+        padding: 0 8px 1px 12px;
+        background: linear-gradient(180deg, #fdfdfd 0%, #f2f4f6 40%, #c2cbd4 78%, #98a5b1 100%);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.9),
+          0 -1px 0 rgba(0, 0, 0, 0.5),
+          0 1px 2px rgba(0, 0, 0, 0.55);
+      }
+
+      .card05 .name-bar .name {
+        color: #0d1740;
+        font-size: 25px;
+        font-weight: 900;
+        font-style: italic;
+        letter-spacing: -0.005em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        transform: scaleY(1.04);
+        transform-origin: left center;
+      }
+
+      /* red on-base number, overlapping above the name bar */
+      .card05 .onbase-num {
+        position: absolute;
+        left: 12px;
+        top: -9px;
+        z-index: 3;
+        width: 48px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 45%),
+          linear-gradient(180deg, #e03a24, #a91108);
+        border: 2.5px solid #ffffff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+        color: #ffffff;
+        font-size: 33px;
+        font-weight: 900;
+        font-style: italic;
+        padding-right: 4px;
+        text-shadow: 0 2px 2px rgba(0, 0, 0, 0.45);
+      }
+
+      .card05 .onbase-label {
+        position: absolute;
+        left: 2px;
+        top: 33px;
+        z-index: 4;
+        width: 70px;
+        height: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(180deg, #2a2a2a, #050505);
+        border: 2px solid #ffffff;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.55);
+        transform: rotate(-4deg) skewX(-8deg);
+        color: #ffffff;
+        font-size: 12.5px;
+        font-weight: 800;
+        font-style: italic;
+        letter-spacing: 0.05em;
+        padding-bottom: 1px;
+      }
+
+      /* stat line */
+      .card05 .stat-line {
+        position: absolute;
+        left: 80px;
+        right: 12px;
+        top: 31px;
+        height: 26px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: #ffffff;
+        font-size: 16.5px;
+        font-weight: 800;
+        letter-spacing: 0.025em;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        white-space: nowrap;
+      }
+
+      /* d20 chart */
+      .card05 .chart {
+        position: absolute;
+        left: 11px;
+        right: 11px;
+        top: 60px;
+        border-top: 2px solid #ffffff;
+        padding-top: 6px;
+        display: grid;
+        grid-template-columns: 0.9fr 0.9fr 0.9fr 1.1fr 1.25fr 0.8fr 1.1fr 0.8fr 0.9fr;
+        row-gap: 3px;
+        color: #ffffff;
+        text-align: center;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      }
+
+      .card05 .chart .range {
+        font-size: 17px;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        line-height: 1;
+      }
+
+      .card05 .chart .result {
+        font-size: 17px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        line-height: 1.15;
+      }
+
+      /* reference compare */
+      .ref-panel {
+        position: relative;
+        width: 400px;
+      }
+
+      .ref-panel img {
+        width: 400px;
+        height: 560px;
+        object-fit: cover;
+        border-radius: 15px;
+        display: block;
+      }
+
+      .ref-empty {
+        width: 400px;
+        height: 560px;
+        border-radius: 15px;
+        border: 1.5px dashed rgba(255, 255, 255, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+        padding: 30px;
+        line-height: 1.5;
+      }
+
+      .overlay-ref {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        border-radius: 15px;
+        pointer-events: none;
+        object-fit: cover;
+        width: 400px;
+        height: 560px;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Card Lab — 2005 Redesign</h1>
+        <p class="lede">
+          Workshop page for the new card look, modeled on the 2005 MLB Showdown strip layout. Photo
+          area is a placeholder slot for generated player images (later). By design: nothing below
+          the chart, speed is numeric only.
+        </p>
+      </header>
+
+      <div class="compare-bar">
+        <label>Reference image: <input type="file" id="ref-file" accept="image/*" /></label>
+        <span>or drag &amp; drop it anywhere on the page.</span>
+        <label><input type="checkbox" id="overlay-toggle" /> overlay on first card</label>
+        <label>opacity <input type="range" id="overlay-opacity" min="0" max="100" value="50" /></label>
+      </div>
+
+      <div class="card-row" id="cards"></div>
+    </main>
+
+    <script>
+      const CARDS = [
+        {
+          name: "Milton Bradley",
+          onBase: 10,
+          points: 180,
+          speed: 15,
+          bats: "S",
+          position: "CF",
+          fieldMod: 1,
+          team: { abbr: "LA", logoFill: "#3f6fb5" },
+          caption: "Reference replica: same data as the real '05 Milton Bradley card (minus footer, numeric speed).",
+          chart: [
+            { range: "1–2", result: "SO" },
+            { range: "3–4", result: "GB" },
+            { range: "5–6", result: "FB" },
+            { range: "7–10", result: "BB" },
+            { range: "11–16", result: "1B" },
+            { range: "17", result: "1B+" },
+            { range: "18–19", result: "2B" },
+            { range: "—", result: "3B" },
+            { range: "20+", result: "HR" }
+          ]
+        },
+        {
+          name: "Rex Calloway",
+          onBase: 11,
+          points: 320,
+          speed: 17,
+          bats: "L",
+          position: "SS",
+          fieldMod: 4,
+          team: { abbr: "SEA", logoFill: "#1c5c47" },
+          caption: "Same template on a fictional generated-style player.",
+          chart: [
+            { range: "1–2", result: "SO" },
+            { range: "3–5", result: "GB" },
+            { range: "6", result: "FB" },
+            { range: "7–11", result: "BB" },
+            { range: "12–16", result: "1B" },
+            { range: "17", result: "1B+" },
+            { range: "18", result: "2B" },
+            { range: "19", result: "3B" },
+            { range: "20+", result: "HR" }
+          ]
+        }
+      ];
+
+      // --- placeholder art -------------------------------------------------
+      // Stand-in for the future generated photo: blurred crowd bokeh, a green
+      // outfield wall band, and a slightly blurred batting-stance silhouette.
+
+      function seededRand(seed) {
+        let s = seed;
+        return () => {
+          s = (s * 1103515245 + 12345) % 2147483648;
+          return s / 2147483648;
+        };
+      }
+
+      function placeholderPhoto(seed) {
+        const rand = seededRand(seed);
+        const blobs = [];
+        for (let i = 0; i < 110; i += 1) {
+          const x = rand() * 400;
+          const y = rand() * 330;
+          const r = 7 + rand() * 16;
+          const hue = (seed * 3 + rand() * 60) % 360;
+          const sat = 8 + rand() * 12;
+          const light = 22 + rand() * 34;
+          blobs.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="hsl(${hue.toFixed(0)} ${sat.toFixed(0)}% ${light.toFixed(0)}%)"/>`);
+        }
+        return `<svg viewBox="0 0 400 538" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+          <rect width="400" height="538" fill="#39434c"/>
+          <g filter="url(#crowdblur)">
+            <rect width="400" height="335" fill="#414c56"/>
+            ${blobs.join("")}
+          </g>
+          <rect y="322" width="400" height="30" fill="#16301f"/>
+          <rect y="350" width="400" height="188" fill="url(#turf)"/>
+          <g filter="url(#bodyblur)" fill="#171c22" opacity="0.93">
+            <!-- bat: from hands up-right behind the head -->
+            <rect x="216" y="118" width="10" height="128" rx="5" transform="rotate(32 221 246)"/>
+            <!-- helmet -->
+            <circle cx="196" cy="176" r="19"/>
+            <!-- torso, leaning over the plate -->
+            <path d="M 186 196 C 214 200 228 226 226 262 L 220 320 L 236 448 L 210 452 L 194 342 L 172 450 L 146 446 L 168 316 L 166 252 C 164 220 168 200 186 196 Z"/>
+            <!-- arms up to the bat handle -->
+            <path d="M 196 206 C 212 200 224 214 228 232 L 236 250 L 222 258 L 210 238 C 204 226 196 218 188 216 Z"/>
+            <circle cx="230" cy="248" r="10"/>
+            <!-- back elbow -->
+            <path d="M 186 210 C 172 218 166 232 168 246 L 182 246 C 182 234 188 224 196 220 Z"/>
+          </g>
+          <defs>
+            <filter id="crowdblur"><feGaussianBlur stdDeviation="8"/></filter>
+            <filter id="bodyblur"><feGaussianBlur stdDeviation="1.1"/></filter>
+            <linearGradient id="turf" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#31573a"/>
+              <stop offset="1" stop-color="#48744c"/>
+            </linearGradient>
+          </defs>
+        </svg>`;
+      }
+
+      // stadium backdrop for the green strip area (part of the card artwork,
+      // separate from the photo, like the original)
+      function stripBackdrop(seed) {
+        const rand = seededRand(seed + 99);
+        const lights = [];
+        for (let i = 0; i < 26; i += 1) {
+          const x = rand() * 386;
+          const y = 8 + rand() * 40;
+          const r = 2 + rand() * 5;
+          lights.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}" fill="hsl(140 22% ${(30 + rand() * 22).toFixed(0)}%)"/>`);
+        }
+        return `<svg viewBox="0 0 386 138" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="386" height="138" fill="#12301c"/>
+          <g filter="url(#stripblur)" opacity="0.75">
+            ${lights.join("")}
+            <rect y="52" width="386" height="26" fill="#1b4a2c"/>
+            <rect y="76" width="386" height="62" fill="#0c2413"/>
+          </g>
+          <rect width="386" height="138" fill="url(#stripshade)"/>
+          <defs>
+            <filter id="stripblur"><feGaussianBlur stdDeviation="6"/></filter>
+            <linearGradient id="stripshade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="rgba(4,12,7,0.25)"/>
+              <stop offset="1" stop-color="rgba(3,9,5,0.72)"/>
+            </linearGradient>
+          </defs>
+        </svg>`;
+      }
+
+      function fieldModText(card) {
+        const sign = card.fieldMod >= 0 ? "+" : "−";
+        return `${card.position} ${sign}${Math.abs(card.fieldMod)}`;
+      }
+
+      function renderCard05(card, index) {
+        const chartRanges = card.chart.map((c) => `<div class="range">${c.range}</div>`).join("");
+        const chartResults = card.chart.map((c) => `<div class="result">${c.result}</div>`).join("");
+        return `<div>
+          <div class="card05" style="--team-logo-fill:${card.team.logoFill}" data-card-index="${index}">
+            <img class="overlay-ref" alt="" />
+            <div class="photo">
+              ${placeholderPhoto(37 + index * 140)}
+              <span class="photo-slot-tag">Photo slot</span>
+            </div>
+            <div class="team-logo">${card.team.abbr}</div>
+            <div class="strip">
+              <div class="strip-bg">${stripBackdrop(index)}</div>
+              <div class="name-bar"><span class="name">${card.name}</span></div>
+              <div class="onbase-num">${card.onBase}</div>
+              <div class="onbase-label">ON-BASE</div>
+              <div class="stat-line">
+                <span>${card.points} PT.</span>
+                <span>SPEED ${card.speed}</span>
+                <span>BATS ${card.bats}</span>
+                <span>${fieldModText(card)}</span>
+              </div>
+              <div class="chart">
+                ${chartRanges}
+                ${chartResults}
+              </div>
+            </div>
+          </div>
+          <p class="caption">${card.caption}</p>
+        </div>`;
+      }
+
+      function renderRefPanel() {
+        return `<div class="ref-panel" id="ref-panel">
+          <div class="ref-empty">Drop the reference card image here (or use the file picker above) to compare side by side.</div>
+        </div>`;
+      }
+
+      document.getElementById("cards").innerHTML = CARDS.map(renderCard05).join("") + renderRefPanel();
+
+      // --- reference compare tool -------------------------------------------
+
+      function setReference(url) {
+        const panel = document.getElementById("ref-panel");
+        panel.innerHTML = `<img src="${url}" alt="reference card" />`;
+        document.querySelectorAll(".overlay-ref").forEach((img) => {
+          img.src = url;
+        });
+        syncOverlay();
+      }
+
+      function syncOverlay() {
+        const on = document.getElementById("overlay-toggle").checked;
+        const opacity = document.getElementById("overlay-opacity").value / 100;
+        document.querySelectorAll(".overlay-ref").forEach((img, i) => {
+          img.style.display = on && i === 0 && img.src ? "block" : "none";
+          img.style.opacity = opacity;
+        });
+      }
+
+      document.getElementById("ref-file").addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        if (file) setReference(URL.createObjectURL(file));
+      });
+      document.getElementById("overlay-toggle").addEventListener("change", syncOverlay);
+      document.getElementById("overlay-opacity").addEventListener("input", syncOverlay);
+      document.addEventListener("dragover", (event) => event.preventDefault());
+      document.addEventListener("drop", (event) => {
+        event.preventDefault();
+        const file = event.dataTransfer.files[0];
+        if (file && file.type.startsWith("image/")) setReference(URL.createObjectURL(file));
+      });
+    </script>
+  </body>
+</html>
