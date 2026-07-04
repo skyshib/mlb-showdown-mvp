@@ -173,12 +173,6 @@ td span {
   font-variant-numeric: tabular-nums;
 }
 
-.stat-audit {
-  cursor: help;
-  text-decoration: underline dotted rgba(46, 66, 55, 0.35);
-  text-underline-offset: 3px;
-}
-
 .chart {
   max-width: 420px;
   color: #37433d;
@@ -917,6 +911,13 @@ button.roster-slot[draggable="true"]:active {
   mix-blend-mode: luminosity;
   object-fit: contain;
   object-position: center 55%;
+}
+
+/* Action shots are landscape game photos; fill the frame like the 2004-05
+   printed cards instead of letterboxing. */
+.player-portrait.action-shot {
+  object-fit: cover;
+  object-position: center 30%;
 }
 
 .player-portrait.loaded {

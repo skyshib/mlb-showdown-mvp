@@ -345,3 +345,13 @@ export function headshotUrl(name) {
   if (typeof entry === "string") return entry;
   return `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_auto:best/v1/people/${entry}/headshot/67/current`;
 }
+
+// Full-bleed game photo, like the 2004-05 printed cards. Only MLB-id players
+// have one (~90% do); Wikimedia-sourced players keep their single photo. A
+// player without an action shot 404s once and the card falls back to the
+// headshot via the img onerror chain.
+export function actionShotUrl(name) {
+  const entry = HEADSHOTS[String(name).replace(/\s*'\d\d$/, "")];
+  if (typeof entry !== "number") return null;
+  return `https://img.mlbstatic.com/mlb-photos/image/upload/w_426,q_auto:best/v1/people/${entry}/action/hero/current`;
+}

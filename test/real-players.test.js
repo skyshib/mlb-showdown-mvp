@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { headshotUrl } from "../src/data/headshots.js";
+import { actionShotUrl, headshotUrl } from "../src/data/headshots.js";
 import { buildMarinersPool } from "../src/data/marinersPlayers.js";
 import { buildRealPlayerPool, buildRealDraftPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
 import { RESULTS } from "../src/rules/cards.js";
@@ -136,6 +136,11 @@ test("real players resolve to real photos, not cartoons", () => {
   assert.match(headshotUrl("Aaron Judge"), /img\.mlbstatic\.com/);
   assert.match(headshotUrl("Babe Ruth '27"), /121578/, "era suffixes resolve to the right person");
   assert.match(headshotUrl("Mario Mendoza '79"), /wikimedia/, "MLB-photo-less players fall back to Wikimedia");
+  // Cards lead with full-bleed action shots where MLB has one, and the
+  // headshot stays available as the in-browser fallback.
+  assert.match(actionShotUrl("Aaron Judge"), /action\/hero/);
+  assert.match(actionShotUrl("Babe Ruth '27"), /121578/, "even Ruth has an action shot on file");
+  assert.equal(actionShotUrl("Mario Mendoza '79"), null, "Wikimedia-sourced players keep their single photo");
 });
 
 test("era cards read like the seasons die-hards remember", () => {

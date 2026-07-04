@@ -1,4 +1,4 @@
-import { headshotUrl } from "../data/headshots.js";
+import { actionShotUrl, headshotUrl } from "../data/headshots.js";
 import { formatRange, normalizeResult } from "../rules/cards.js";
 
 const HITTER_OUTCOMES = ["BB", "1B", "2B", "3B", "HR"];
@@ -410,7 +410,11 @@ function formatSignedNumber(value) {
 function renderPortraitImage(player) {
   const imageUrl = playerImageUrl(player);
   if (!imageUrl) return "";
-  return `<img class="player-portrait" src="${imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()" />`;
+  const actionUrl = player.team ? actionShotUrl(player.name) : null;
+  if (!actionUrl) {
+    return `<img class="player-portrait" src="${imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()" />`;
+  }
+  return `<img class="player-portrait action-shot" src="${actionUrl}" data-fallback="${imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="if (this.dataset.fallback) { this.src = this.dataset.fallback; this.dataset.fallback = ''; this.classList.remove('action-shot'); } else { this.remove(); }" />`;
 }
 
 // Real-pool players (they carry a team) get real photos; fictional generated
