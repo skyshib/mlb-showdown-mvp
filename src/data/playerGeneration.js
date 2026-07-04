@@ -573,7 +573,7 @@ function makeName(rng, usedNames) {
   return fallback;
 }
 
-function toChart(rows) {
+export function toChart(rows) {
   return rows.map(([from, to, result]) => ({ from, to, result }));
 }
 
@@ -635,7 +635,7 @@ function makePitcherChart(rng) {
   ]);
 }
 
-function chartFromCounts(counts) {
+export function chartFromCounts(counts) {
   const rows = [];
   let cursor = 1;
   for (const [result, slots] of counts) {
@@ -678,7 +678,7 @@ function starterIp(rng) {
   return rng.next() < 0.02 ? 8 : ip;
 }
 
-function speedPoints(speed) {
+export function speedPoints(speed) {
   const value = Number(speed);
   return Number.isFinite(value) ? Math.max(0, Math.round((value - 1) * 1.5)) : 0;
 }
@@ -701,7 +701,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function chartPower(chart) {
+export function chartPower(chart) {
   const values = {
     [RESULTS.SO]: -4,
     [RESULTS.GB]: -2,
@@ -715,7 +715,7 @@ function chartPower(chart) {
   return chart.reduce((sum, [from, to, result]) => sum + (to - from + 1) * values[result], 0);
 }
 
-function pitcherChartPower(chart) {
+export function pitcherChartPower(chart) {
   const values = {
     [RESULTS.PU]: 8,
     [RESULTS.SO]: 10,

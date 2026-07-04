@@ -91,6 +91,22 @@ Point values:
 - Pitcher points are `control * 35 + IP * 8 + pitcherChartPower`.
 - Pitcher chart weights are PU `8`, SO `10`, GB `8`, FB `6`, BB `-5`, 1B `-7`, 2B `-11`, HR `-16`, multiplied by the number of d20 slots for each result.
 
+## Real Player Pool
+
+Setup offers a second pool: real MLB players from `src/data/realPlayers.js`. It is a fixed 94-card pool (58 hitters, 22 starters, 14 relievers) with enough position depth for up to 6 managers. The seed still controls every sim; it just no longer changes the pool.
+
+Cards are derived from hand-entered, approximate 2025 season stat lines (injury-shortened seasons lean on recent form), echoing how the original game built cards from the prior season:
+
+- Hitter on-base is `10.5 + (OBP - .312) * 25`, rounded and clipped `7-16`.
+- Hitter chart on-base slots solve for the player's real OBP against a typical pool pitcher (control ~4.6, ~21% on-base pitcher chart), clipped to `8-19` slots.
+- On-base slots split across BB/1B/2B/3B/HR proportionally to the player's real event counts using deterministic largest-remainder rounding; outs split SO vs GB/FB by real strikeout share.
+- Pitcher control is `3.2 + (.300 - OBP allowed) * 28`, rounded and clipped `0-6`, with batters faced approximated as `3 * IP + H + BB`.
+- Pitcher chart on-base slots solve for real OBP allowed against a typical pool hitter, clipped to `1-6` slots; strikeout share drives the SO column, and non-HR hits split 70/30 into singles and doubles.
+- Starter IP is real innings per start clipped `5-8`; relievers are IP `1`.
+- Speed and fielding are hand-assigned scouting ratings on the generated pool's scales, and points reuse the generated pool's formulas exactly.
+
+Real hitters can carry the `DH` position (Ohtani, Alvarez, Schwarber). A DH card can fill only the DH or 1B lineup slots, and at first base it takes the standard out-of-position `-1` fielding. This pool is a deliberately star-heavy universe: average on-base and control run higher than the fictional pool, so run scoring lands closer to real baseball.
+
 ## MVP Assumptions
 
 Control check:

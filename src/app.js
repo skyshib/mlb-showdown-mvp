@@ -1,4 +1,5 @@
-import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-card-variance";
+import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-real-players";
+import { buildRealPlayerPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
 import {
   autopick,
   assignLineupSlots,
@@ -42,6 +43,10 @@ import {
 } from "./ui/render.js?v=20260705-draft-history";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
+const REAL_POOL_INFO = (() => {
+  const pool = buildRealPlayerPool();
+  return { size: pool.length, managerLimit: maxRealPoolManagers(pool) };
+})();
 const app = document.querySelector("#app");
 const cardPreview = document.createElement("div");
 cardPreview.className = "hover-card-preview";
@@ -60,6 +65,7 @@ function defaultState() {
   return {
     seed: "coefficient-classic",
     managers: ["Kasey", "Milo", "Nico", "Rafa"],
+    poolMode: "random",
     rosterSize: 13,
     draft: null,
     draftTab: "available",
@@ -110,12 +116,12 @@ function resetAppHandlers() {
   app.ondragend = null;
 }
 
-function renderSetup() {
+function renderSetup(setupError = "") {
   resetAppHandlers();
   app.innerHTML = `<section class="panel setup">
     <div>
       <p class="eyebrow">MLB Showdown-ish MVP</p>
-      <h1>Draft fictional cards. Sim a tournament.</h1>
+      <h1>Draft fictional or real cards. Sim a tournament.</h1>
       <p class="lede">Private local prototype. It now saves your room in this browser, so reloads should not wipe the draft.</p>
     </div>
     <form id="setup-form" class="setup-grid">
@@ -131,6 +137,18 @@ function renderSetup() {
         Roster size
         <input name="rosterSize" type="number" min="13" max="13" value="13" />
       </label>
+      <fieldset class="pool-mode">
+        <legend>Player pool</legend>
+        <label class="pool-option">
+          <input type="radio" name="poolMode" value="random" ${state.poolMode === "real" ? "" : "checked"} />
+          <span><strong>Fictional randoms</strong><small>A fresh generated pool built from the seed above.</small></span>
+        </label>
+        <label class="pool-option">
+          <input type="radio" name="poolMode" value="real" ${state.poolMode === "real" ? "checked" : ""} />
+          <span><strong>Real MLB players</strong><small>${REAL_POOL_INFO.size} stars with cards built from approximate ${REAL_POOL_SEASON} stats. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
+        </label>
+      </fieldset>
+      ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
       <button type="submit">Start draft</button>
     </form>
   </section>
@@ -151,7 +169,16 @@ function renderSetup() {
     state.seed = String(form.get("seed")).trim() || "showdown";
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
     state.rosterSize = 13;
-    const pool = generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
+    state.poolMode = form.get("poolMode") === "real" ? "real" : "random";
+    if (state.poolMode === "real" && state.managers.length > REAL_POOL_INFO.managerLimit) {
+      renderSetup(
+        `The real player pool has position depth for up to ${REAL_POOL_INFO.managerLimit} managers. Trim the manager list or draft fictional randoms.`
+      );
+      return;
+    }
+    const pool = state.poolMode === "real"
+      ? buildRealPlayerPool()
+      : generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
     state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed);
     state.tournament = null;
     state.batch = null;
@@ -1621,7 +1648,7 @@ function findRosterPlayer(managerId, playerId) {
 function renderFilters() {
   const positions = state.filters.type === "pitcher"
     ? ["all", "SP", "RP"]
-    : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF"];
+    : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", ...(state.poolMode === "real" ? ["DH"] : [])];
   const sortOptions = [
     ["points", "Best points"],
     ["primary", "Best OB/CTRL"],
@@ -1696,7 +1723,7 @@ function filteredPlayers(players) {
   return players.filter((player) => {
     if (player.kind !== state.filters.type) return false;
     if (state.filters.position !== "all" && !matchesPositionFilter(player, state.filters.position)) return false;
-    if (search && !`${player.name} ${playerPosition(player)} ${player.kind}`.toLowerCase().includes(search)) return false;
+    if (search && !`${player.name} ${player.team ?? ""} ${playerPosition(player)} ${player.kind}`.toLowerCase().includes(search)) return false;
     return true;
   });
 }
@@ -1877,6 +1904,7 @@ function reviveState(value) {
     ...defaultState(),
     ...value,
     rosterSize: 13,
+    poolMode: value.poolMode === "real" ? "real" : "random",
     filters,
     draft,
     view: value.view === "batch" && value.batch ? "batch" : null
