@@ -665,7 +665,7 @@ function splitSlots(rng, total, weights) {
 
 function randomSpeed(rng, position, outSlots) {
   const outAdjustment = (6 - outSlots) * 0.6;
-  return normalInt(rng, (SPEED_MEANS[position] ?? 12) + outAdjustment, 4.5, 1, 20);
+  return Math.max(1, Math.round(normal(rng, (SPEED_MEANS[position] ?? 12) + outAdjustment, 4.5)));
 }
 
 function randomFielding(rng, position) {

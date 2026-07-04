@@ -1,4 +1,4 @@
-import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-real-players";
+import { generatePlayerPool } from "./data/playerGeneration.js?v=20260705-uncapped-speed";
 import { buildRealPlayerPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
 import { buildMarinersPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners";
 import {

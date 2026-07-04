@@ -24,7 +24,7 @@ test("generated players use distribution-built charts instead of archetypes", ()
     if (player.kind === "hitter") {
       const [min, max] = FIELDING_RANGES[player.position];
       assert.ok(player.onBase >= 6 && player.onBase <= 15);
-      assert.ok(player.speed >= 1 && player.speed <= 20);
+      assert.ok(player.speed >= 1);
       assert.ok(player.fielding >= min && player.fielding <= max);
       hitterCharts.add(JSON.stringify(player.chart));
     } else {
@@ -36,6 +36,12 @@ test("generated players use distribution-built charts instead of archetypes", ()
 
   assert.ok(hitterCharts.size > 4);
   assert.ok(pitcherCharts.size > 4);
+});
+
+test("generated hitter speed has no artificial upper cap", () => {
+  const pool = generatePlayerPool("uncapped-speed-check", 20, 13);
+  const speeds = pool.filter((player) => player.kind === "hitter").map((player) => player.speed);
+  assert.ok(Math.max(...speeds) > 20);
 });
 
 test("generated player pools do not repeat full names", () => {
