@@ -751,7 +751,6 @@ function renderTournament() {
   app.innerHTML = `<section class="toolbar">
     <button data-action="back-draft">Back to draft</button>
     <button data-action="rerun-same">Replay same seed</button>
-    <button data-action="rerun-new">New sim</button>
     <button data-action="batch">Sim ${DEFAULT_BATCH_RUNS} seasons</button>
     <button data-action="reset">New room</button>
   </section>
@@ -791,13 +790,6 @@ function bindTournamentActions() {
     if (action === "rerun-same") {
       const teams = state.draft.managers.map(buildTeam);
       state.tournament = simulateRoundRobin(teams, state.seed);
-      state.selectedGameIndex = state.tournament.final ? state.tournament.games.length : 0;
-      saveState();
-      renderTournament();
-    }
-    if (action === "rerun-new") {
-      const teams = state.draft.managers.map(buildTeam);
-      state.tournament = simulateRoundRobin(teams, `${state.seed}-${Date.now()}`);
       state.selectedGameIndex = state.tournament.final ? state.tournament.games.length : 0;
       saveState();
       renderTournament();
