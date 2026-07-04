@@ -578,7 +578,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .tournament-stat-table {
-  min-width: 720px;
+  min-width: 1120px;
 }
 
 .tournament-stat-table th {

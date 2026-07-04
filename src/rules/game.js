@@ -406,8 +406,15 @@ export function applyHomer(state, batter, battingSide, pitchingSide = null, pitc
 
 function scoreRunner(state, battingSide, pitchingSide, runner, fallbackPitcher = null) {
   state.score[battingSide] += 1;
+  recordRunnerStat(state, runner, "r");
   chargeRun(state, pitchingSide, runner?.responsiblePitcherId ?? fallbackPitcher?.id);
   return 1;
+}
+
+function recordRunnerStat(state, runner, stat) {
+  if (!runner?.id) return;
+  const line = ensureHitterLine(state, runner);
+  line[stat] = (line[stat] ?? 0) + 1;
 }
 
 function chargeRun(state, pitchingSide, pitcherId) {
@@ -500,8 +507,10 @@ function resolveStealAttempt(state, candidate, rng) {
 
   if (safe) {
     state.bases[candidate.toIndex] = candidate.runner;
+    recordRunnerStat(state, candidate.runner, "sb");
   } else {
     state.outs += 1;
+    recordRunnerStat(state, candidate.runner, "cs");
   }
 
   return describeAdvanceAttempt(candidate, {
@@ -765,9 +774,12 @@ function ensureHitterLine(state, hitter) {
       h: 0,
       d: 0,
       t: 0,
+      r: 0,
       bb: 0,
       so: 0,
       hr: 0,
+      sb: 0,
+      cs: 0,
       rbi: 0
     });
   }

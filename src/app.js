@@ -24,8 +24,8 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js";
-import { simulateRoundRobin } from "./rules/tournament.js?v=20260703-batch-sims";
+} from "./rules/batch.js?v=20260704-player-rate-stats";
+import { simulateRoundRobin } from "./rules/tournament.js?v=20260704-player-rate-stats";
 import {
   basesText,
   escapeHtml,
@@ -37,7 +37,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260704-race-chart";
+} from "./ui/render.js?v=20260704-player-rate-stats";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const app = document.querySelector("#app");
@@ -836,7 +836,9 @@ function renderGameDetail(game) {
 function renderTournamentStats(games) {
   const playersById = draftedPlayersById();
   const stats = aggregateTournamentStats(games, playersById);
-  const hitters = stats.hitters.sort(compareTournamentHitters);
+  const leagueWoba = tournamentWoba(stats.hitters);
+  const fipConstant = tournamentFipConstant(stats.pitchers);
+  const hitters = stats.hitters.sort((a, b) => compareTournamentHitters(a, b, leagueWoba));
   const pitchers = stats.pitchers.sort(compareTournamentPitchers);
   const baserunning = stats.teams.sort(compareTournamentBaserunning);
   const defense = [...stats.teams].sort(compareTournamentDefense);
@@ -852,7 +854,8 @@ function renderTournamentStats(games) {
     <div class="leader-grid">
       ${renderLeaderCard("HR leaders", hitters, (row) => row.hr, (row) => `${row.rbi} RBI`)}
       ${renderLeaderCard("RBI leaders", hitters, (row) => row.rbi, (row) => `${row.h} H`)}
-      ${renderLeaderCard("Hit leaders", hitters, (row) => row.h, (row) => `${formatAverage(row.h, row.ab)} AVG`)}
+      ${renderLeaderCard("Run leaders", hitters, (row) => row.r, (row) => `${row.hr} HR`)}
+      ${renderLeaderCard("wRC+ leaders", hitters, (row) => wrcPlus(row, leagueWoba), (row) => `${formatAverage(totalBases(row), row.ab)} SLG`)}
       ${renderLeaderCard("Strikeout leaders", pitchers, (row) => row.so, (row) => `${formatInnings(row.outs)} IP`)}
     </div>
     <div class="stat-table-grid">
@@ -860,8 +863,8 @@ function renderTournamentStats(games) {
         <h3>Hitters</h3>
         <div class="table-scroll">
           <table class="tournament-stat-table">
-            <thead><tr><th>Player</th><th>Team</th><th class="num">PA</th><th class="num">AB</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">RBI</th><th class="num">AVG</th><th class="num">OBP</th></tr></thead>
-            <tbody>${hitters.map(renderTournamentHitterRow).join("")}</tbody>
+            <thead><tr><th>Player</th><th>Team</th><th class="num">PA</th><th class="num">HR</th><th class="num">R</th><th class="num">RBI</th><th class="num">SB</th><th class="num">BB%</th><th class="num">K%</th><th class="num">ISO</th><th class="num">BABIP</th><th class="num">AVG</th><th class="num">OBP</th><th class="num">SLG</th><th class="num">wOBA</th><th class="num">wRC+</th></tr></thead>
+            <tbody>${hitters.map((row) => renderTournamentHitterRow(row, leagueWoba)).join("")}</tbody>
           </table>
         </div>
       </div>
@@ -869,8 +872,8 @@ function renderTournamentStats(games) {
         <h3>Pitchers</h3>
         <div class="table-scroll">
           <table class="tournament-stat-table">
-            <thead><tr><th>Player</th><th>Team</th><th class="num">IP</th><th class="num">BF</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">R</th><th class="num">RA/9</th></tr></thead>
-            <tbody>${pitchers.map(renderTournamentPitcherRow).join("")}</tbody>
+            <thead><tr><th>Player</th><th>Team</th><th class="num">IP</th><th class="num">K/9</th><th class="num">BB/9</th><th class="num">ERA</th><th class="num">FIP</th></tr></thead>
+            <tbody>${pitchers.map((row) => renderTournamentPitcherRow(row, fipConstant)).join("")}</tbody>
           </table>
         </div>
       </div>
@@ -929,34 +932,36 @@ function renderLeaderCard(title, rows, valueForRow, detailForRow) {
   </article>`;
 }
 
-function renderTournamentHitterRow(row) {
+function renderTournamentHitterRow(row, leagueWoba) {
   return `<tr>
     <td>${renderTournamentPlayerName(row)}</td>
     <td>${escapeHtml(row.team)}</td>
     <td class="num">${row.pa}</td>
-    <td class="num">${row.ab}</td>
-    <td class="num">${row.h}</td>
-    <td class="num">${row.bb}</td>
-    <td class="num">${row.so}</td>
     <td class="num">${row.hr}</td>
+    <td class="num">${row.r}</td>
     <td class="num">${row.rbi}</td>
+    <td class="num">${row.sb}</td>
+    <td class="num">${formatPercent(row.bb, row.pa, 1)}</td>
+    <td class="num">${formatPercent(row.so, row.pa, 1)}</td>
+    <td class="num">${formatAverage(totalBases(row) - row.h, row.ab)}</td>
+    <td class="num">${formatAverage(row.h - row.hr, babipDenominator(row))}</td>
     <td class="num">${formatAverage(row.h, row.ab)}</td>
     <td class="num">${formatAverage(row.h + row.bb, row.ab + row.bb)}</td>
+    <td class="num">${formatAverage(totalBases(row), row.ab)}</td>
+    <td class="num">${formatAverage(wobaNumerator(row), row.pa)}</td>
+    <td class="num">${wrcPlus(row, leagueWoba)}</td>
   </tr>`;
 }
 
-function renderTournamentPitcherRow(row) {
+function renderTournamentPitcherRow(row, fipConstant) {
   return `<tr>
     <td>${renderTournamentPlayerName(row)}</td>
     <td>${escapeHtml(row.team)}</td>
     <td class="num">${formatInnings(row.outs)}</td>
-    <td class="num">${row.bf}</td>
-    <td class="num">${row.h}</td>
-    <td class="num">${row.bb}</td>
-    <td class="num">${row.so}</td>
-    <td class="num">${row.hr}</td>
-    <td class="num">${row.r}</td>
-    <td class="num">${formatRunsPerNine(row.r, row.outs)}</td>
+    <td class="num">${formatPerNine(row.so, row.outs)}</td>
+    <td class="num">${formatPerNine(row.bb, row.outs)}</td>
+    <td class="num">${formatPerNine(row.r, row.outs)}</td>
+    <td class="num">${formatFip(row, fipConstant)}</td>
   </tr>`;
 }
 
@@ -1010,17 +1015,27 @@ function aggregateTournamentStats(games, playersById = new Map()) {
           pa: 0,
           ab: 0,
           h: 0,
+          d: 0,
+          t: 0,
+          r: 0,
           bb: 0,
           so: 0,
           hr: 0,
+          sb: 0,
+          cs: 0,
           rbi: 0
         }, playersById);
         row.pa += line.pa;
         row.ab += line.ab;
         row.h += line.h;
+        row.d += line.d ?? 0;
+        row.t += line.t ?? 0;
+        row.r += line.r ?? 0;
         row.bb += line.bb;
         row.so += line.so;
         row.hr += line.hr;
+        row.sb += line.sb ?? 0;
+        row.cs += line.cs ?? 0;
         row.rbi += line.rbi;
       }
       for (const line of teamBox.pitchers ?? []) {
@@ -1169,18 +1184,19 @@ function draftedPlayersById() {
   return players;
 }
 
-function compareTournamentHitters(a, b) {
-  return b.hr - a.hr
+function compareTournamentHitters(a, b, leagueWoba) {
+  return wrcPlus(b, leagueWoba) - wrcPlus(a, leagueWoba)
+    || b.hr - a.hr
     || b.rbi - a.rbi
-    || b.h - a.h
+    || b.r - a.r
     || b.pa - a.pa
     || a.name.localeCompare(b.name);
 }
 
 function compareTournamentPitchers(a, b) {
-  return b.so - a.so
-    || a.r - b.r
+  return runsPerNine(a.r, a.outs) - runsPerNine(b.r, b.outs)
     || b.outs - a.outs
+    || b.so - a.so
     || a.name.localeCompare(b.name);
 }
 
@@ -1203,14 +1219,80 @@ function formatAverage(numerator, denominator) {
   return (numerator / denominator).toFixed(3).replace(/^0/, "");
 }
 
-function formatPercent(numerator, denominator) {
+function formatPercent(numerator, denominator, digits = 0) {
   if (!denominator) return "---";
-  return `${Math.round((numerator / denominator) * 100)}%`;
+  return `${((numerator / denominator) * 100).toFixed(digits)}%`;
+}
+
+function formatPerNine(total, outs) {
+  if (!outs) return "---";
+  return ((total * 27) / outs).toFixed(2);
 }
 
 function formatRunsPerNine(runs, outs) {
-  if (!outs) return "---";
-  return ((runs * 27) / outs).toFixed(2);
+  return formatPerNine(runs, outs);
+}
+
+function formatFip(row, constant) {
+  if (!row.outs) return "---";
+  return (rawFip(row) + constant).toFixed(2);
+}
+
+function totalBases(row) {
+  return singles(row) + row.d * 2 + row.t * 3 + row.hr * 4;
+}
+
+function singles(row) {
+  return Math.max(0, row.h - row.d - row.t - row.hr);
+}
+
+function babipDenominator(row) {
+  return row.ab - row.so - row.hr;
+}
+
+function wobaNumerator(row) {
+  return row.bb * 0.69
+    + singles(row) * 0.89
+    + row.d * 1.27
+    + row.t * 1.62
+    + row.hr * 2.1;
+}
+
+function woba(row) {
+  return row.pa ? wobaNumerator(row) / row.pa : 0;
+}
+
+function tournamentWoba(rows) {
+  const numerator = rows.reduce((sum, row) => sum + wobaNumerator(row), 0);
+  const denominator = rows.reduce((sum, row) => sum + row.pa, 0);
+  return denominator ? numerator / denominator : 0;
+}
+
+function wrcPlus(row, leagueWoba) {
+  if (!leagueWoba || !row.pa) return 0;
+  return Math.round((woba(row) / leagueWoba) * 100);
+}
+
+function inningsPitched(row) {
+  return row.outs / 3;
+}
+
+function runsPerNine(runs, outs) {
+  return outs ? (runs * 27) / outs : Number.POSITIVE_INFINITY;
+}
+
+function rawFip(row) {
+  const innings = inningsPitched(row);
+  if (!innings) return 0;
+  return (13 * row.hr + 3 * row.bb - 2 * row.so) / innings;
+}
+
+function tournamentFipConstant(rows) {
+  const outs = rows.reduce((sum, row) => sum + row.outs, 0);
+  if (!outs) return 0;
+  const runs = rows.reduce((sum, row) => sum + row.r, 0);
+  const raw = rows.reduce((sum, row) => sum + rawFip(row) * inningsPitched(row), 0) / (outs / 3);
+  return runsPerNine(runs, outs) - raw;
 }
 
 function formatInnings(outs) {

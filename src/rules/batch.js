@@ -1,5 +1,5 @@
 import { distribution, rate } from "./stats.js";
-import { simulateRoundRobin } from "./tournament.js?v=20260703-batch-sims";
+import { simulateRoundRobin } from "./tournament.js?v=20260704-player-rate-stats";
 
 export const DEFAULT_BATCH_RUNS = 1000;
 export const MAX_BATCH_RUNS = 20000;

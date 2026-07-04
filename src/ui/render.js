@@ -284,10 +284,12 @@ function renderHitterBox(teamBox) {
       (line) => `<tr>
         <td>${escapeHtml(line.name)}</td>
         <td class="num">${line.ab}</td>
+        <td class="num">${line.r ?? 0}</td>
         <td class="num">${line.h}</td>
         <td class="num">${line.bb}</td>
         <td class="num">${line.so}</td>
         <td class="num">${line.hr}</td>
+        <td class="num">${line.sb ?? 0}</td>
         <td class="num">${line.rbi}</td>
       </tr>`
     )
@@ -295,7 +297,7 @@ function renderHitterBox(teamBox) {
   return `<section>
     <h4>${escapeHtml(teamBox.team)} hitters</h4>
     <table>
-      <thead><tr><th>Name</th><th>AB</th><th>H</th><th>BB</th><th>SO</th><th>HR</th><th>RBI</th></tr></thead>
+      <thead><tr><th>Name</th><th>AB</th><th>R</th><th>H</th><th>BB</th><th>SO</th><th>HR</th><th>SB</th><th>RBI</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </section>`;

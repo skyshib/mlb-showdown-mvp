@@ -226,7 +226,7 @@ test("failed extra-base attempt after a hit records an out for the pitcher", () 
 
 test("runner can steal second before the plate appearance", () => {
   const state = createInitialState(teamA, weakDefense);
-  state.bases = [{ name: "Runner 1", speed: 20 }, null, null];
+  state.bases = [{ id: "a-h-0", name: "A Hitter 0", speed: 20 }, null, null];
 
   const event = playStealAttempt(state, { d20: () => 20 });
 
@@ -235,10 +235,11 @@ test("runner can steal second before the plate appearance", () => {
   assert.equal(event.outsAfter, 0);
   assert.deepEqual(
     state.bases.map((runner) => runner?.name ?? null),
-    [null, "Runner 1", null]
+    [null, "A Hitter 0", null]
   );
   assert.equal(state.lineupIndex.away, 0);
   assert.equal(event.playDetails.stealAttempt.to, "2B");
+  assert.equal(state.stats.hitters.get("a-h-0").sb, 1);
 });
 
 test("stealing third uses catcher fielding and the steal-third bonus", () => {
@@ -295,6 +296,7 @@ test("home run clears the bases and scores batter", () => {
   assert.equal(runs, 3);
   assert.equal(state.score.away, 3);
   assert.deepEqual(state.bases, [null, null, null]);
+  assert.equal(state.stats.hitters.get("h-test").r, 1);
 });
 
 test("groundout with runner on first can become a double play", () => {
