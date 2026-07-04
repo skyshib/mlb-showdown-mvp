@@ -94,7 +94,6 @@ Known rough edges:
 
 - Saved drafts are only in local browser storage.
 - If you change ports, you are effectively using a different save slot.
-- The draft repair path is still prototype-level.
 - Generated cards are balanced for playability, not official card distribution accuracy.
 
 ## Project Layout

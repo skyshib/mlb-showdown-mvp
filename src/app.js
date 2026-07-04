@@ -11,7 +11,6 @@ import {
   getRosterNeeds,
   lineupStatus,
   pickPlayer,
-  repairDraftRosters,
   staffStatus,
   undoLastPick,
   validateRoster
@@ -148,7 +147,6 @@ function renderDraft() {
     <button data-action="autopick" ${draft.complete ? "disabled" : ""}>Auto-pick next</button>
     <button data-action="undo-pick" ${draft.pickNumber > 0 ? "" : "disabled"}>Undo last pick</button>
     <button data-action="finish" ${draft.complete ? "disabled" : ""}>Auto-finish draft</button>
-    <button data-action="repair" ${canRepairDraft(draft, current) ? "" : "disabled"}>Fix roster gaps</button>
     <button data-action="tournament" ${canSimulate(draft) ? "" : "disabled"}>Sim tournament</button>
   </section>
   ${renderDraftFocus(draft, focusManager)}
@@ -239,12 +237,6 @@ function bindDraftActions() {
     }
     if (action === "finish") {
       while (!state.draft.complete) autopick(state.draft);
-      selectedLineupMove = null;
-      saveState();
-      renderDraft();
-    }
-    if (action === "repair") {
-      repairDraftRosters(state.draft);
       selectedLineupMove = null;
       saveState();
       renderDraft();
@@ -926,13 +918,6 @@ function assignPlayersToSlots(players, labels, labelForPlayer) {
 
 function canSimulate(draft) {
   return draft.complete && draft.managers.every((manager) => validateRoster(manager).length === 0);
-}
-
-function canRepairDraft(draft, current) {
-  if (canSimulate(draft)) return false;
-  if (draft.complete) return true;
-  if (!current) return false;
-  return !availablePlayers(draft).some((player) => canPickPlayer(draft, current, player).ok);
 }
 
 function draftVisiblePlayers(draft, manager) {
