@@ -438,7 +438,7 @@ function renderSetup(setupError = "") {
         <div class="pool-suboptions">
           <label class="pool-option">
             <input type="radio" name="realPool" value="stars" ${state.realPool === "mariners" ? "" : "checked"} />
-            <span><strong>${REAL_POOL_SEASON} stars</strong><small>The seed above deals ${REAL_POOL_INFO.dealt} of ${REAL_POOL_INFO.size} cards from around today's league — stars, regulars, and role players from approximate ${REAL_POOL_SEASON} stats. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
+            <span><strong>All of baseball history</strong><small>The seed above deals ${REAL_POOL_INFO.dealt} of ${REAL_POOL_INFO.size} cards from ${REAL_POOL_SEASON} — legends, today's stars, role players, and cult heroes. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
           </label>
           <label class="pool-option">
             <input type="radio" name="realPool" value="mariners" ${state.realPool === "mariners" ? "checked" : ""} />
