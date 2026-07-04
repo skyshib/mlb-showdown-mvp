@@ -30,7 +30,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260705-online-rooms-2";
+} from "./onlineClient.js?v=20260705-online-rooms-4";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,

@@ -50,15 +50,11 @@ Draft rooms are saved in browser `localStorage`, which means saves are local to 
 
 ## Online Play (multiple machines)
 
-Local solo play works exactly as before. To draft with friends on other machines, one person runs the room server instead of `npm run serve`:
-
-```bash
-npm run online
-```
+Local solo play works exactly as before. To draft with friends on other machines, one person hosts the app — `npm run serve` (port 5177) and `npm run online` (port 8790) are the same server and both include online rooms.
 
 Then:
 
-1. Open `http://127.0.0.1:8790/index.html` (the server also serves the app) and click `Create online room` on the setup screen.
+1. Open the app (e.g. `http://127.0.0.1:5177/index.html`) and click `Create online room` on the setup screen.
 2. Share the invite link shown in the room banner (use your LAN IP or a tunnel, e.g. `http://192.168.1.20:8790/index.html?room=ab12cd`).
 3. Each player opens the link and claims a manager seat; extra visitors can spectate.
 4. Picks are turn-gated: you can only draft (or auto-pick) when your manager is on the clock, and you can only edit your own lineup. The room creator's seat is the host, and can auto-finish the draft, undo any pick, or act for a stalled seat.

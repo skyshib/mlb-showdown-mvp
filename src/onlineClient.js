@@ -56,6 +56,11 @@ async function request(method, path, body) {
     throw new Error("Could not reach the room server. Is it running? (npm run online)");
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`);
+  if (!response.ok) {
+    if (!data.error && response.status === 404) {
+      throw new Error("This web server doesn't have the online rooms API. Restart the app with `npm run serve` or `npm run online` from the latest code.");
+    }
+    throw new Error(data.error ?? `Request failed (${response.status})`);
+  }
   return data;
 }
