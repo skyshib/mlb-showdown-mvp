@@ -102,6 +102,7 @@ function defaultState() {
       hitters: { sort: "ops", direction: "desc" },
       pitchers: { sort: "era", direction: "asc" }
     },
+    batchStatsTab: "overview",
     view: null,
     selectedGameIndex: 0,
     selectedTeamName: null,
@@ -934,6 +935,7 @@ function startBatchRun(runs) {
       race: { teamNames, totalRuns: count, series: downsampleSeries(series) }
     };
     state.view = "batch";
+    state.batchStatsTab = "overview";
     saveState();
     renderBatch();
   };
@@ -1086,25 +1088,90 @@ function renderBatch() {
     )
     .join("");
 
-  app.innerHTML = `<section class="toolbar">
-    <button data-action="batch-back">${backLabel}</button>
-    <label class="batch-runs-label">Seasons
-      <select data-batch-runs>
-        ${[100, 500, 1000, 2500, 5000].map((option) => `<option value="${option}" ${option === runs ? "selected" : ""}>${option}</option>`).join("")}
-      </select>
-    </label>
-    <button data-action="batch-run">Run again</button>
-    <button data-action="reset">New room</button>
-  </section>
-  ${state.batch.race ? `<section class="panel race-results-panel">
+  const activeBatchTab = normalizeBatchStatsTab(state.batchStatsTab);
+  const raceSection = state.batch.race ? `<section class="panel race-results-panel">
     <h2>How the race unfolded</h2>
     ${renderRaceChart(state.batch.race)}
-  </section>` : ""}
-  ${awards.length ? `<section class="panel awards-panel">
+  </section>` : "";
+  const awardsSection = awards.length ? `<div class="panel awards-panel">
     <h2>The awards show</h2>
     <div class="award-grid">${awards.map((item) => renderAwardCard(item, playersById)).join("")}</div>
-  </section>` : `<section class="panel awards-panel"><h2>The awards show</h2><p class="batch-note">This sim predates the awards stats. Hit Run again to hold the ceremony.</p></section>`}
-  <section class="panel tournament-stats-panel">
+  </div>` : `<div class="panel awards-panel"><h2>The awards show</h2><p class="batch-note">This sim predates the awards stats. Hit Run again to hold the ceremony.</p></div>`;
+  const teamTableSection = `<div class="panel">
+    <p class="eyebrow">${runs} simulated seasons</p>
+    <h1>${escapeHtml(top.team)} had the best draft</h1>
+    <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons.</p>
+    <table>
+      <thead><tr>
+        <th>#</th>
+        ${renderBatchSortHeader("teams", "team", "Team")}
+        ${renderBatchSortHeader("teams", "titleShare", "Title", "num")}
+        ${renderBatchSortHeader("teams", "finalsShare", "Final", "num")}
+        ${renderBatchSortHeader("teams", "w162", "W/162", "num")}
+        ${renderBatchSortHeader("teams", "l162", "L/162", "num")}
+        ${renderBatchSortHeader("teams", "rf162", "RF/162", "num")}
+        ${renderBatchSortHeader("teams", "ra162", "RA/162", "num")}
+      </tr></thead>
+      <tbody>${teamRows}</tbody>
+    </table>
+  </div>`;
+  const overviewSection = `<section class="grid batch-overview-grid">
+    ${teamTableSection}
+    ${awardsSection}
+  </section>
+  ${raceSection}`;
+  const hittersSection = `<section class="panel wide">
+    <h2>Hitters, 162-game pace</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>#</th>
+          ${renderBatchSortHeader("hitters", "name", "Player")}
+          ${renderBatchSortHeader("hitters", "team", "Team")}
+          ${renderBatchSortHeader("hitters", "position", "Pos")}
+          ${renderBatchSortHeader("hitters", "pa162", "PA/162", "num")}
+          ${renderBatchSortHeader("hitters", "hr162", "HR/162", "num")}
+          ${renderBatchSortHeader("hitters", "r162", "R/162", "num")}
+          ${renderBatchSortHeader("hitters", "rbi162", "RBI/162", "num")}
+          ${renderBatchSortHeader("hitters", "sb162", "SB/162", "num")}
+          ${renderBatchSortHeader("hitters", "cs162", "CS/162", "num")}
+          ${renderBatchSortHeader("hitters", "bbRate", "BB%", "num")}
+          ${renderBatchSortHeader("hitters", "kRate", "K%", "num")}
+          ${renderBatchSortHeader("hitters", "iso", "ISO", "num")}
+          ${renderBatchSortHeader("hitters", "babip", "BABIP", "num")}
+          ${renderBatchSortHeader("hitters", "avg", "AVG", "num")}
+          ${renderBatchSortHeader("hitters", "obp", "OBP", "num")}
+          ${renderBatchSortHeader("hitters", "slg", "SLG", "num")}
+          ${renderBatchSortHeader("hitters", "ops", "OPS", "num")}
+          ${renderBatchSortHeader("hitters", "woba", "wOBA", "num")}
+          ${renderBatchSortHeader("hitters", "wrcPlus", "wRC+", "num")}
+          ${renderBatchSortHeader("hitters", "wpa162", "WPA/162", "num")}
+        </tr></thead>
+        <tbody>${hitterRows}</tbody>
+      </table>
+    </div>
+  </section>`;
+  const pitchersSection = `<section class="panel wide">
+    <h2>Pitchers, 162-game pace</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr>
+          <th>#</th>
+          ${renderBatchSortHeader("pitchers", "name", "Player")}
+          ${renderBatchSortHeader("pitchers", "team", "Team")}
+          ${renderBatchSortHeader("pitchers", "role", "Role")}
+          ${renderBatchSortHeader("pitchers", "ip162", "IP/162", "num")}
+          ${renderBatchSortHeader("pitchers", "k9", "K/9", "num")}
+          ${renderBatchSortHeader("pitchers", "bb9", "BB/9", "num")}
+          ${renderBatchSortHeader("pitchers", "era", "ERA", "num")}
+          ${renderBatchSortHeader("pitchers", "fip", "FIP", "num")}
+          ${renderBatchSortHeader("pitchers", "wpa162", "WPA/162", "num")}
+        </tr></thead>
+        <tbody>${pitcherRows}</tbody>
+      </table>
+    </div>
+  </section>`;
+  const teamSkillsSection = `<section class="panel tournament-stats-panel">
     <div class="section-title-row">
       <div>
         <p class="eyebrow">Team skills</p>
@@ -1132,78 +1199,53 @@ function renderBatch() {
         </div>
       </div>
     </div>
-  </section>
-  <section class="grid tournament-grid">
-    <div class="panel">
-      <p class="eyebrow">${runs} simulated seasons</p>
-      <h1>${escapeHtml(top.team)} had the best draft</h1>
-      <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons. Team and player counting stats below are normalized to a 162-game season; the title is decided by the final. Same room seed replays the same seasons, so tweak lineups and run again to compare.</p>
-      <table>
-        <thead><tr>
-          <th>#</th>
-          ${renderBatchSortHeader("teams", "team", "Team")}
-          ${renderBatchSortHeader("teams", "titleShare", "Title", "num")}
-          ${renderBatchSortHeader("teams", "finalsShare", "Final", "num")}
-          ${renderBatchSortHeader("teams", "w162", "W/162", "num")}
-          ${renderBatchSortHeader("teams", "l162", "L/162", "num")}
-          ${renderBatchSortHeader("teams", "rf162", "RF/162", "num")}
-          ${renderBatchSortHeader("teams", "ra162", "RA/162", "num")}
-        </tr></thead>
-        <tbody>${teamRows}</tbody>
-      </table>
-    </div>
-    <div class="panel wide">
-      <h2>Hitters, 162-game pace</h2>
-      <div class="table-scroll">
-        <table>
-          <thead><tr>
-            <th>#</th>
-            ${renderBatchSortHeader("hitters", "name", "Player")}
-            ${renderBatchSortHeader("hitters", "team", "Team")}
-            ${renderBatchSortHeader("hitters", "position", "Pos")}
-            ${renderBatchSortHeader("hitters", "pa162", "PA/162", "num")}
-            ${renderBatchSortHeader("hitters", "hr162", "HR/162", "num")}
-            ${renderBatchSortHeader("hitters", "r162", "R/162", "num")}
-            ${renderBatchSortHeader("hitters", "rbi162", "RBI/162", "num")}
-            ${renderBatchSortHeader("hitters", "sb162", "SB/162", "num")}
-            ${renderBatchSortHeader("hitters", "cs162", "CS/162", "num")}
-            ${renderBatchSortHeader("hitters", "bbRate", "BB%", "num")}
-            ${renderBatchSortHeader("hitters", "kRate", "K%", "num")}
-            ${renderBatchSortHeader("hitters", "iso", "ISO", "num")}
-            ${renderBatchSortHeader("hitters", "babip", "BABIP", "num")}
-            ${renderBatchSortHeader("hitters", "avg", "AVG", "num")}
-            ${renderBatchSortHeader("hitters", "obp", "OBP", "num")}
-            ${renderBatchSortHeader("hitters", "slg", "SLG", "num")}
-            ${renderBatchSortHeader("hitters", "ops", "OPS", "num")}
-            ${renderBatchSortHeader("hitters", "woba", "wOBA", "num")}
-            ${renderBatchSortHeader("hitters", "wrcPlus", "wRC+", "num")}
-            ${renderBatchSortHeader("hitters", "wpa162", "WPA/162", "num")}
-          </tr></thead>
-          <tbody>${hitterRows}</tbody>
-        </table>
-      </div>
-      <h2 class="batch-section-title">Pitchers, 162-game pace</h2>
-      <div class="table-scroll">
-        <table>
-          <thead><tr>
-            <th>#</th>
-            ${renderBatchSortHeader("pitchers", "name", "Player")}
-            ${renderBatchSortHeader("pitchers", "team", "Team")}
-            ${renderBatchSortHeader("pitchers", "role", "Role")}
-            ${renderBatchSortHeader("pitchers", "ip162", "IP/162", "num")}
-            ${renderBatchSortHeader("pitchers", "k9", "K/9", "num")}
-            ${renderBatchSortHeader("pitchers", "bb9", "BB/9", "num")}
-            ${renderBatchSortHeader("pitchers", "era", "ERA", "num")}
-            ${renderBatchSortHeader("pitchers", "fip", "FIP", "num")}
-            ${renderBatchSortHeader("pitchers", "wpa162", "WPA/162", "num")}
-          </tr></thead>
-          <tbody>${pitcherRows}</tbody>
-        </table>
-      </div>
-    </div>
   </section>`;
+  const batchSections = {
+    overview: overviewSection,
+    hitters: hittersSection,
+    pitchers: pitchersSection,
+    skills: teamSkillsSection
+  };
+
+  app.innerHTML = `<section class="toolbar">
+    <button data-action="batch-back">${backLabel}</button>
+    <label class="batch-runs-label">Seasons
+      <select data-batch-runs>
+        ${[100, 500, 1000, 2500, 5000].map((option) => `<option value="${option}" ${option === runs ? "selected" : ""}>${option}</option>`).join("")}
+      </select>
+    </label>
+    <button data-action="batch-run">Run again</button>
+    <button data-action="reset">New room</button>
+  </section>
+  ${renderBatchStatsTabs(activeBatchTab)}
+  ${batchSections[activeBatchTab]}`;
 
   bindBatchActions();
+}
+
+function renderBatchStatsTabs(activeTab) {
+  return `<div class="game-tabs batch-stat-tabs" role="tablist" aria-label="Season simulator stats">
+    ${batchStatsTabs().map((tab) => `<button
+      type="button"
+      class="game-tab ${tab.id === activeTab ? "active" : ""}"
+      data-batch-tab="${escapeHtml(tab.id)}"
+      role="tab"
+      aria-selected="${tab.id === activeTab ? "true" : "false"}"
+    >${escapeHtml(tab.label)}</button>`).join("")}
+  </div>`;
+}
+
+function batchStatsTabs() {
+  return [
+    { id: "overview", label: "Overview" },
+    { id: "hitters", label: "Hitters" },
+    { id: "pitchers", label: "Pitchers" },
+    { id: "skills", label: "Team skills" }
+  ];
+}
+
+function normalizeBatchStatsTab(value) {
+  return batchStatsTabs().some((tab) => tab.id === value) ? value : "overview";
 }
 
 function renderAwardCard(item, playersById = new Map()) {
@@ -1351,6 +1393,14 @@ function bindBatchActions() {
   resetAppHandlers();
   hideHoverCard();
   app.onclick = (event) => {
+    const tabButton = event.target.closest("button[data-batch-tab]");
+    if (tabButton) {
+      state.batchStatsTab = normalizeBatchStatsTab(tabButton.dataset.batchTab);
+      saveState();
+      renderBatch();
+      return;
+    }
+
     const sortButton = event.target.closest("button[data-batch-sort]");
     if (sortButton) {
       updateBatchSort(sortButton.dataset.batchTable, sortButton.dataset.batchSort);
@@ -2468,6 +2518,7 @@ function reviveState(value) {
     realPool: value.realPool === "mariners" ? "mariners" : "stars",
     filters,
     batchSorts,
+    batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
     draft,
     view: value.view === "batch" && value.batch ? "batch" : null
   };

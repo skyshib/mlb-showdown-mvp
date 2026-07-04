@@ -789,6 +789,14 @@ button.roster-slot[draggable="true"]:active {
   color: white;
 }
 
+.batch-stat-tabs {
+  margin-top: 16px;
+}
+
+.batch-overview-grid {
+  align-items: start;
+}
+
 .game-log {
   overflow-x: auto;
 }
