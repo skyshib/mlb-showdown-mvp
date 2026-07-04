@@ -1,5 +1,5 @@
 import { distribution, rate } from "./stats.js";
-import { simulateRoundRobin } from "./tournament.js?v=20260704-player-rate-stats";
+import { simulateRoundRobin } from "./tournament.js?v=20260705-awards-show";
 
 export const DEFAULT_BATCH_RUNS = 1000;
 export const MAX_BATCH_RUNS = 20000;
@@ -23,7 +23,8 @@ export function createBatchState(teams) {
     runs: 0,
     teams: new Map(),
     hitters: new Map(),
-    pitchers: new Map()
+    pitchers: new Map(),
+    topSwing: null
   };
 
   for (const team of teams) {
@@ -99,8 +100,14 @@ export function summarizeBatch(state) {
         rbiPer162: per162(line.rbi, line.teamGames),
         sbPer162: per162(line.sb, line.teamGames),
         csPer162: per162(line.cs, line.teamGames),
+        gidpPer162: per162(line.gidp, line.teamGames),
+        wpaPer162: per162(line.wpa, line.teamGames),
         hrPerSeason: rate(line.hr, state.runs),
-        rbiPerSeason: rate(line.rbi, state.runs)
+        rbiPerSeason: rate(line.rbi, state.runs),
+        runsPerSeason: rate(line.r, state.runs),
+        sbPerSeason: rate(line.sb, state.runs),
+        gidpPerSeason: rate(line.gidp, state.runs),
+        wpaPerSeason: rate(line.wpa, state.runs)
       };
     })
     .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
@@ -112,7 +119,9 @@ export function summarizeBatch(state) {
       inningsPerSeason: rate(line.outs, state.runs * 3),
       runsPerNine: rate(line.r * 27, line.outs),
       strikeoutsPerNine: rate(line.so * 27, line.outs),
-      walksPerNine: rate(line.bb * 27, line.outs)
+      walksPerNine: rate(line.bb * 27, line.outs),
+      wpaPer162: per162(line.wpa, line.teamGames),
+      wpaPerSeason: rate(line.wpa, state.runs)
     }))
     .sort((a, b) => (a.outs === 0) - (b.outs === 0) || a.runsPerNine - b.runsPerNine || b.outs - a.outs);
 
@@ -120,7 +129,8 @@ export function summarizeBatch(state) {
     runs: state.runs,
     teams,
     hitters,
-    pitchers
+    pitchers,
+    topSwing: state.topSwing
   };
 }
 
@@ -151,6 +161,14 @@ function foldTournament(state, result) {
   for (const game of games) {
     foldBoxScore(state, game.boxScore?.away);
     foldBoxScore(state, game.boxScore?.home);
+    if (game.topSwing && (!state.topSwing || game.topSwing.wpa > state.topSwing.wpa)) {
+      state.topSwing = {
+        ...game.topSwing,
+        season: state.runs,
+        matchup: `${game.away.name} at ${game.home.name}`,
+        isFinal: game === result.final
+      };
+    }
   }
 }
 
@@ -179,6 +197,11 @@ function foldBoxScore(state, teamBox) {
     row.sb += line.sb ?? 0;
     row.cs += line.cs ?? 0;
     row.rbi += line.rbi;
+    row.r += line.r ?? 0;
+    row.sb += line.sb ?? 0;
+    row.cs += line.cs ?? 0;
+    row.gidp += line.gidp ?? 0;
+    row.wpa += line.wpa ?? 0;
   }
   for (const line of teamBox.pitchers) {
     const row = state.pitchers.get(line.id);
@@ -190,6 +213,7 @@ function foldBoxScore(state, teamBox) {
     row.so += line.so;
     row.hr += line.hr;
     row.r += line.r;
+    row.wpa += line.wpa ?? 0;
   }
 }
 
@@ -212,7 +236,9 @@ function registerHitter(state, teamName, player) {
     hr: 0,
     sb: 0,
     cs: 0,
-    rbi: 0
+    rbi: 0,
+    gidp: 0,
+    wpa: 0
   });
 }
 
@@ -230,7 +256,8 @@ function registerPitcher(state, teamName, player) {
     bb: 0,
     so: 0,
     hr: 0,
-    r: 0
+    r: 0,
+    wpa: 0
   });
 }
 

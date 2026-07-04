@@ -44,6 +44,7 @@ npm run balance
 6. Review standings, team rosters, box scores, and play-by-play.
 7. Click `Sim 1000 seasons` to replay the whole tournament many times and see who really drafted best: title equity per team, aggregate hitting/pitching lines per player, and sim awards. One tournament is a tiny sample; the batch view is the fair verdict. The seasons dropdown on the results screen re-runs with 100-5000 replays.
 8. Watch the title race unfold live: the sim is intentionally paced (about 15 seconds) with a line chart of each team's cumulative title share, a leader callout, and running tallies. It slows down near the finish for drama; `Skip to results` jumps straight to the verdict. The final chart is saved with the results.
+9. Stick around for the awards show: Sim MVP by win probability added, Cy Young and shutdown reliever by ERA, on-base machine, home run king, speed demon, run scorer, rally killer (most GIDP), steal and bust of the draft (pick number versus WPA finish), and the single biggest swing across every simulated season.
 
 Draft rooms are saved in browser `localStorage`, which means saves are local to the browser and exact origin. For example, `127.0.0.1:5177` and `127.0.0.1:5178` do not share saved drafts.
 

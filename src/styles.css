@@ -1428,4 +1428,16 @@ button.roster-slot[draggable="true"]:active {
   text-decoration: underline;
   padding: 0;
   font-size: 13px;
+.awards-panel {
+  margin-top: 16px;
+}
+
+.awards-panel .award-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.award-card .award-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }

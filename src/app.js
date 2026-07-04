@@ -38,8 +38,9 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260705-caught-stealing-stats";
-import { simulateRoundRobin } from "./rules/tournament.js?v=20260704-player-rate-stats";
+} from "./rules/batch.js?v=20260705-awards-show";
+import { computeAwards } from "./rules/awards.js?v=20260705-awards-show";
+import { simulateRoundRobin } from "./rules/tournament.js?v=20260705-awards-show";
 import {
   basesText,
   escapeHtml,
@@ -1012,9 +1013,7 @@ function renderBatch() {
   }
   const { summary, runs } = state.batch;
   const top = summary.teams[0];
-  const mvp = summary.hitters[0];
-  const hrKing = [...summary.hitters].sort((a, b) => b.hr - a.hr || b.ops - a.ops)[0];
-  const ace = summary.pitchers.find((line) => line.outs > 0) ?? summary.pitchers[0];
+  const awards = computeAwards(summary, buildPickNumberMap(state.draft));
   const backLabel = state.tournament ? "Back to tournament" : "Back to draft";
   const playersById = draftedPlayersById();
   const leagueWoba = tournamentWoba(summary.hitters);
@@ -1062,6 +1061,7 @@ function renderBatch() {
         <td class="num">${formatBattingStat(line.ops)}</td>
         <td class="num">${formatAverage(wobaNumerator(line), line.pa)}</td>
         <td class="num">${wrcPlus(line, leagueWoba)}</td>
+        <td class="num">${formatWpaStat(batchPace(line, "wpaPer162", "wpa", teamGamesByName))}</td>
       </tr>`
     )
     .join("");
@@ -1078,6 +1078,7 @@ function renderBatch() {
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
         <td class="num">${formatFip(line, fipConstant)}</td>
+        <td class="num">${formatWpaStat(batchPace(line, "wpaPer162", "wpa", teamGamesByName))}</td>
       </tr>`
     )
     .join("");
@@ -1096,6 +1097,10 @@ function renderBatch() {
     <h2>How the race unfolded</h2>
     ${renderRaceChart(state.batch.race)}
   </section>` : ""}
+  ${awards.length ? `<section class="panel awards-panel">
+    <h2>The awards show</h2>
+    <div class="award-grid">${awards.map((item) => renderAwardCard(item, playersById)).join("")}</div>
+  </section>` : `<section class="panel awards-panel"><h2>The awards show</h2><p class="batch-note">This sim predates the awards stats. Hit Run again to hold the ceremony.</p></section>`}
   <section class="grid tournament-grid">
     <div class="panel">
       <p class="eyebrow">${runs} simulated seasons</p>
@@ -1114,11 +1119,6 @@ function renderBatch() {
         </tr></thead>
         <tbody>${teamRows}</tbody>
       </table>
-      <div class="award-grid">
-        ${renderAwardCard("Sim MVP", mvp, `${formatBattingStat(mvp?.ops)} OPS`, playersById)}
-        ${renderAwardCard("Sim ace", ace, `${(ace?.runsPerNine ?? 0).toFixed(2)} RA/9`, playersById)}
-        ${renderAwardCard("HR king", hrKing, `${formatSeasonCount(batchPace(hrKing, "hrPer162", "hr", teamGamesByName))} HR/162`, playersById)}
-      </div>
     </div>
     <div class="panel wide">
       <h2>Hitters, 162-game pace</h2>
@@ -1145,6 +1145,7 @@ function renderBatch() {
             ${renderBatchSortHeader("hitters", "ops", "OPS", "num")}
             ${renderBatchSortHeader("hitters", "woba", "wOBA", "num")}
             ${renderBatchSortHeader("hitters", "wrcPlus", "wRC+", "num")}
+            ${renderBatchSortHeader("hitters", "wpa162", "WPA/162", "num")}
           </tr></thead>
           <tbody>${hitterRows}</tbody>
         </table>
@@ -1162,6 +1163,7 @@ function renderBatch() {
             ${renderBatchSortHeader("pitchers", "bb9", "BB/9", "num")}
             ${renderBatchSortHeader("pitchers", "era", "ERA", "num")}
             ${renderBatchSortHeader("pitchers", "fip", "FIP", "num")}
+            ${renderBatchSortHeader("pitchers", "wpa162", "WPA/162", "num")}
           </tr></thead>
           <tbody>${pitcherRows}</tbody>
         </table>
@@ -1172,13 +1174,14 @@ function renderBatch() {
   bindBatchActions();
 }
 
-function renderAwardCard(label, player, statLine, playersById = new Map()) {
-  if (!player) return "";
+function renderAwardCard(item, playersById = new Map()) {
+  if (!item) return "";
   return `<div class="award-card">
-    <span class="award-label">${escapeHtml(label)}</span>
-    ${renderBatchPlayerName(player, playersById, "strong", "award-player-name")}
-    <span class="award-stat">${escapeHtml(statLine)}</span>
-    <em>${escapeHtml(player.team)}</em>
+    <span class="award-label">${escapeHtml(item.label)}</span>
+    ${renderBatchPlayerName({ id: item.id, name: item.name, team: item.team }, playersById, "strong", "award-player-name")}
+    <span class="award-stat">${escapeHtml(item.stat)}</span>
+    <em>${escapeHtml(item.team ?? "")}</em>
+    ${item.note ? `<span class="award-note">${escapeHtml(item.note)}</span>` : ""}
   </div>`;
 }
 
@@ -1245,6 +1248,7 @@ function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
   if (sort === "ops") return line.ops;
   if (sort === "woba") return woba(line);
   if (sort === "wrcPlus") return wrcPlus(line, leagueWoba);
+  if (sort === "wpa162") return batchPace(line, "wpaPer162", "wpa", teamGamesByName);
   return line.ops;
 }
 
@@ -1257,6 +1261,7 @@ function batchPitcherSortValue(line, sort, fipConstant, teamGamesByName) {
   if (sort === "bb9") return rateValue(line.bb * 27, line.outs);
   if (sort === "era") return rateValue(line.r * 27, line.outs);
   if (sort === "fip") return line.outs ? rawFip(line) + fipConstant : Number.POSITIVE_INFINITY;
+  if (sort === "wpa162") return batchPace(line, "wpaPer162", "wpa", teamGamesByName);
   return rateValue(line.r * 27, line.outs);
 }
 
@@ -1289,6 +1294,25 @@ function defaultBatchSortDirection(table, sort) {
   if (["name", "team", "position", "role"].includes(sort)) return "asc";
   if (table === "pitchers" && ["era", "fip", "bb9"].includes(sort)) return "asc";
   return "desc";
+}
+
+function buildPickNumberMap(draft) {
+  if (!draft?.managers?.length || !draft.rosterSize) return {};
+  const map = {};
+  const rosterIndexes = new Map();
+  const teamCount = draft.managers.length;
+  const totalPicks = teamCount * draft.rosterSize;
+  for (let pick = 0; pick < totalPicks; pick += 1) {
+    const round = Math.floor(pick / teamCount);
+    const indexInRound = pick % teamCount;
+    const managerIndex = round % 2 === 0 ? indexInRound : teamCount - 1 - indexInRound;
+    const manager = draft.managers[managerIndex];
+    const rosterIndex = rosterIndexes.get(manager.id) ?? 0;
+    rosterIndexes.set(manager.id, rosterIndex + 1);
+    const player = manager.roster[rosterIndex];
+    if (player) map[player.id] = pick + 1;
+  }
+  return map;
 }
 
 function bindBatchActions() {
@@ -1362,6 +1386,11 @@ function formatBattingStat(value) {
   const number = Number(value) || 0;
   const fixed = number.toFixed(3);
   return number < 1 ? fixed.replace(/^0/, "") : fixed;
+}
+
+function formatWpaStat(value) {
+  const number = Number(value) || 0;
+  return `${number >= 0 ? "+" : ""}${number.toFixed(3)}`;
 }
 
 function showHoverCard(row, clientX, clientY) {

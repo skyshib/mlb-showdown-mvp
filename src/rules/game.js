@@ -7,6 +7,78 @@ const ADVANCE_DECISION_MATRIX = {
   2: { second: 0.7, third: 0.65, home: 0.55 }
 };
 
+// Win-probability model constants, measured from this engine across the random
+// and real pools (scripts in repo history): runs per half-inning mean/variance.
+const WP_RUNS_PER_HALF = 0.5;
+const WP_VAR_PER_HALF = 1.2;
+// MLB 1993-2010 run-expectancy-by-base/out table, scaled to this engine's run
+// environment. Keys are first/second/third occupancy bits.
+const WP_RE_TABLE = {
+  "000": [0.544, 0.291, 0.112],
+  "100": [0.941, 0.562, 0.245],
+  "010": [1.17, 0.721, 0.348],
+  "001": [1.433, 0.989, 0.385],
+  "110": [1.556, 0.963, 0.471],
+  "101": [1.853, 1.211, 0.53],
+  "011": [2.05, 1.447, 0.626],
+  "111": [2.39, 1.631, 0.814]
+};
+const WP_RE_SCALE = WP_RUNS_PER_HALF / 0.544;
+
+// Approximate probability that the home team wins from the given state,
+// using a normal projection of the final run differential: current lead,
+// plus run expectancy for the half in progress, plus mean runs for each
+// remaining half-inning. Ties resolve to 0.5 via the +/-0.5 continuity band.
+export function winProbabilityHome(state) {
+  const diff = state.score.home - state.score.away;
+  if (state.walkoff) return 1;
+
+  const view = { inning: state.inning, half: state.half, outs: state.outs, bases: state.bases };
+  if (view.outs >= 3) {
+    view.outs = 0;
+    view.bases = [null, null, null];
+    if (view.half === "top") {
+      view.half = "bottom";
+    } else {
+      view.half = "top";
+      view.inning += 1;
+    }
+  }
+
+  if (view.half === "top" && view.inning > 9 && diff !== 0) return diff > 0 ? 1 : 0;
+  if (view.half === "bottom" && view.inning >= 9 && diff > 0) return 1;
+
+  const battingHome = view.half === "bottom";
+  const baseKey = view.bases.map((runner) => (runner ? "1" : "0")).join("");
+  const currentRe = (WP_RE_TABLE[baseKey]?.[Math.min(2, view.outs)] ?? 0) * WP_RE_SCALE;
+  const awayFuture = Math.max(0, 9 - view.inning);
+  const homeFuture = view.half === "top" ? Math.max(0, 10 - view.inning) : Math.max(0, 9 - view.inning);
+  const expected = diff + (battingHome ? currentRe : -currentRe) + WP_RUNS_PER_HALF * (homeFuture - awayFuture);
+  const sigma = Math.sqrt(WP_VAR_PER_HALF * (homeFuture + awayFuture + 1));
+  return 1 - 0.5 * normalCdf((0.5 - expected) / sigma) - 0.5 * normalCdf((-0.5 - expected) / sigma);
+}
+
+function normalCdf(z) {
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * x);
+  const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return 0.5 * (1 + sign * erf);
+}
+
+function trackTopSwing(state, player, wpa, result) {
+  if (!state.topSwing || wpa > state.topSwing.wpa) {
+    state.topSwing = {
+      playerId: player.id,
+      name: player.name,
+      wpa,
+      result,
+      inning: state.inning,
+      half: state.half
+    };
+  }
+}
+
 export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
   const rng = createRng(seed);
   const state = createInitialState(awayTeam, homeTeam);
@@ -24,7 +96,8 @@ export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
     winner: state.score.away > state.score.home ? state.away.name : state.home.name,
     boxScore: buildBoxScore(state),
     events,
-    innings: state.inning
+    innings: state.inning,
+    topSwing: state.topSwing
   };
 }
 
@@ -44,6 +117,7 @@ export function playPlateAppearance(state, rng) {
   const before = snapshotBases(state);
   const outsBefore = state.outs;
   const scoreBefore = { ...state.score };
+  const wpBefore = winProbabilityHome(state);
   const controlRoll = rng.d20();
   const effectiveControl = pitcher.control - fatiguePenalty;
   const controlTotal = controlRoll + effectiveControl;
@@ -58,6 +132,12 @@ export function playPlateAppearance(state, rng) {
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
   state.pitching[pitchingSide].outsRecorded += outsOnPlay;
+
+  const wpAfter = winProbabilityHome(state);
+  const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
+  ensureHitterLine(state, batter).wpa += battingWpa;
+  ensurePitcherLine(state, pitcher).wpa -= battingWpa;
+  trackTopSwing(state, batter, battingWpa, result);
 
   const event = {
     inning: state.inning,
@@ -82,6 +162,9 @@ export function playPlateAppearance(state, rng) {
     scoreBefore,
     scoreAfter: { ...state.score },
     runs,
+    wpBefore,
+    wpAfter,
+    wpa: battingWpa,
     playDetails: state.lastPlayDetails
   };
 
@@ -111,11 +194,18 @@ export function playStealAttempt(state, rng) {
 
   if (!stealAttempt) return null;
 
+  const wpBefore = winProbabilityHome(state);
+  const runner = { id: stealAttempt.runner.id, name: stealAttempt.runner.name };
   const attemptResult = resolveStealAttempt(state, stealAttempt, rng);
   if (!attemptResult.safe) {
     state.pitching[pitchingSide].outsRecorded += 1;
     ensurePitcherLine(state, pitcher).outs += 1;
   }
+  const wpAfter = winProbabilityHome(state);
+  const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
+  ensureHitterLine(state, runner).wpa += battingWpa;
+  ensurePitcherLine(state, pitcher).wpa -= battingWpa;
+  trackTopSwing(state, runner, battingWpa, attemptResult.safe ? "SB" : "CS");
   const event = {
     type: "steal",
     inning: state.inning,
@@ -140,6 +230,9 @@ export function playStealAttempt(state, rng) {
     scoreBefore,
     scoreAfter: { ...state.score },
     runs: 0,
+    wpBefore,
+    wpAfter,
+    wpa: battingWpa,
     playDetails: {
       kind: "steal",
       stealAttempt: attemptResult
@@ -172,6 +265,7 @@ export function createInitialState(awayTeam, homeTeam) {
       pitchers: new Map()
     },
     lastPlayDetails: null,
+    topSwing: null,
     walkoff: false
   };
 }
@@ -757,6 +851,9 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   } else if (result !== RESULTS.BB) {
     hitterLine.ab += 1;
   }
+  if (state.lastPlayDetails?.kind === "groundout" && state.lastPlayDetails.doublePlayAttempt?.batterOut) {
+    hitterLine.gidp += 1;
+  }
   pitcherLine.outs += outsOnPlay;
 
   state[battingSide].runs = state.score[battingSide];
@@ -780,7 +877,9 @@ function ensureHitterLine(state, hitter) {
       hr: 0,
       sb: 0,
       cs: 0,
-      rbi: 0
+      rbi: 0,
+      gidp: 0,
+      wpa: 0
     });
   }
   return state.stats.hitters.get(hitter.id);
@@ -798,7 +897,8 @@ function ensurePitcherLine(state, pitcher) {
       bb: 0,
       so: 0,
       hr: 0,
-      r: 0
+      r: 0,
+      wpa: 0
     });
   }
   return state.stats.pitchers.get(pitcher.id);
