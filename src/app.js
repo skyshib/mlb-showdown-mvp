@@ -30,7 +30,6 @@ import {
   playerPower,
   playerPrimary,
   renderBoxScore,
-  renderCardGrid,
   renderPlayerCard,
   renderPlayerTable
 } from "./ui/render.js?v=20260704-roster-depth";
@@ -46,6 +45,7 @@ let state = loadState() ?? defaultState();
 let selectedLineupMove = null;
 let draggedLineupMove = null;
 let batchRunToken = 0;
+let hoverPreviewController = null;
 
 renderCurrentScreen();
 
@@ -83,6 +83,7 @@ function renderCurrentScreen() {
 }
 
 function resetAppHandlers() {
+  clearHoverCardPreviewBindings();
   app.onclick = null;
   app.oninput = null;
   app.onchange = null;
@@ -103,7 +104,6 @@ function resetAppHandlers() {
 
 function renderSetup() {
   resetAppHandlers();
-  hideHoverCard();
   app.innerHTML = `<section class="panel setup">
     <div>
       <p class="eyebrow">MLB Showdown-ish MVP</p>
@@ -200,8 +200,6 @@ function renderDraft() {
 }
 
 function bindDraftActions() {
-  let hoveredPreviewRow = null;
-
   app.onclick = (event) => {
     const lineupSlot = event.target.closest("[data-lineup-slot]");
     if (lineupSlot) {
@@ -298,47 +296,10 @@ function bindDraftActions() {
 
   app.onchange = app.oninput;
 
-  app.onpointerover = (event) => {
-    const previewTarget = event.target.closest(".player-name-preview");
-    if (!previewTarget) return;
-    hoveredPreviewRow = previewTarget;
-    showHoverCard(previewTarget, event.clientX, event.clientY);
-  };
-
-  app.onpointermove = (event) => {
-    if (!hoveredPreviewRow) return;
-    showHoverCard(hoveredPreviewRow, event.clientX, event.clientY);
-  };
-
-  app.onpointerout = (event) => {
-    const previewTarget = event.target.closest(".player-name-preview");
-    if (!previewTarget || (event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) return;
-    hoveredPreviewRow = null;
-    hideHoverCard();
-  };
-  app.onmouseover = app.onpointerover;
-  app.onmousemove = app.onpointermove;
-  app.onmouseout = app.onpointerout;
-
-  app.onfocusin = (event) => {
-    const previewTarget = event.target.closest(".player-name-preview");
-    if (!previewTarget) return;
-    const rect = previewTarget.getBoundingClientRect();
-    showHoverCard(previewTarget, rect.right, rect.top + rect.height / 2);
-  };
-
-  app.onfocusout = (event) => {
-    if (event.relatedTarget?.closest?.(".player-name-preview")) return;
-    hideHoverCard();
-  };
-
-  app.onkeydown = (event) => {
-    if (event.key === "Escape") {
-      selectedLineupMove = null;
-      hideHoverCard();
-      renderDraft();
-    }
-  };
+  bindHoverCardPreviews(() => {
+    selectedLineupMove = null;
+    renderDraft();
+  });
 
   app.ondragstart = (event) => {
     const slot = event.target.closest("[data-lineup-slot][data-player-id]");
@@ -387,13 +348,11 @@ function renderTournament() {
   const tournament = state.tournament;
   const games = allTournamentGames(tournament);
   const selectedGame = games[state.selectedGameIndex] ?? games[0];
-  const selectedTeamName = state.selectedTeamName ?? tournament.standings[0]?.team;
-  const selectedManager = state.draft.managers.find((manager) => manager.name === selectedTeamName) ?? state.draft.managers[0];
   const standings = tournament.standings
     .map(
-      (row, index) => `<tr class="${row.team === selectedManager.name ? "selected-row" : ""}">
+      (row, index) => `<tr>
         <td>${index + 1}</td>
-        <td><button class="link-button" data-action="select-team" data-team="${escapeHtml(row.team)}">${escapeHtml(row.team)}</button></td>
+        <td>${escapeHtml(row.team)}</td>
         <td class="num">${row.wins}</td>
         <td class="num">${row.losses}</td>
         <td class="num">${row.runsFor}</td>
@@ -424,11 +383,6 @@ function renderTournament() {
         <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>RF</th><th>RA</th></tr></thead>
         <tbody>${standings}</tbody>
       </table>
-      <div class="team-detail">
-        <h2>${escapeHtml(selectedManager.name)} roster</h2>
-        ${renderRosterSummary(selectedManager)}
-        ${renderCardGrid(selectedManager.roster, { compact: true })}
-      </div>
     </div>
     <div class="panel wide">
       <h2>Games</h2>
@@ -478,15 +432,83 @@ function bindTournamentActions() {
       saveState();
       renderTournament();
     }
-    if (action === "select-team") {
-      state.selectedTeamName = button.dataset.team;
-      saveState();
-      renderTournament();
-    }
     if (action === "batch") {
       startBatchRun(DEFAULT_BATCH_RUNS);
     }
   };
+  bindHoverCardPreviews();
+}
+
+function bindHoverCardPreviews(onEscape = null) {
+  let hoveredPreviewRow = null;
+  clearHoverCardPreviewBindings();
+  hoverPreviewController = new AbortController();
+  const listenerOptions = { signal: hoverPreviewController.signal };
+
+  hideHoverCard();
+
+  app.onpointerover = null;
+  app.onpointermove = null;
+  app.onpointerout = null;
+  app.onmouseover = null;
+  app.onmousemove = null;
+  app.onmouseout = null;
+  app.onfocusin = null;
+  app.onfocusout = null;
+  app.onkeydown = null;
+
+  const handlePointerOver = (event) => {
+    const previewTarget = event.target.closest(".player-name-preview");
+    if (!previewTarget) return;
+    hoveredPreviewRow = previewTarget;
+    showHoverCard(previewTarget, event.clientX, event.clientY);
+  };
+
+  const handlePointerMove = (event) => {
+    if (!hoveredPreviewRow) return;
+    showHoverCard(hoveredPreviewRow, event.clientX, event.clientY);
+  };
+
+  const handlePointerOut = (event) => {
+    const previewTarget = event.target.closest(".player-name-preview");
+    if (!previewTarget || (event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) return;
+    hoveredPreviewRow = null;
+    hideHoverCard();
+  };
+
+  const handleFocusIn = (event) => {
+    const previewTarget = event.target.closest(".player-name-preview");
+    if (!previewTarget) return;
+    const rect = previewTarget.getBoundingClientRect();
+    showHoverCard(previewTarget, rect.right, rect.top + rect.height / 2);
+  };
+
+  const handleFocusOut = (event) => {
+    if (event.relatedTarget?.closest?.(".player-name-preview")) return;
+    hideHoverCard();
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key !== "Escape") return;
+    hideHoverCard();
+    onEscape?.(event);
+  };
+
+  app.addEventListener("pointerover", handlePointerOver, listenerOptions);
+  app.addEventListener("pointermove", handlePointerMove, listenerOptions);
+  app.addEventListener("pointerout", handlePointerOut, listenerOptions);
+  app.addEventListener("mouseover", handlePointerOver, listenerOptions);
+  app.addEventListener("mousemove", handlePointerMove, listenerOptions);
+  app.addEventListener("mouseout", handlePointerOut, listenerOptions);
+  app.addEventListener("focusin", handleFocusIn, listenerOptions);
+  app.addEventListener("focusout", handleFocusOut, listenerOptions);
+  app.addEventListener("keydown", handleKeyDown, listenerOptions);
+}
+
+function clearHoverCardPreviewBindings() {
+  hoverPreviewController?.abort();
+  hoverPreviewController = null;
+  hideHoverCard();
 }
 
 function invalidateBatch() {
@@ -736,7 +758,8 @@ function renderGameDetail(game) {
 }
 
 function renderTournamentStats(games) {
-  const stats = aggregateTournamentStats(games);
+  const playersById = draftedPlayersById();
+  const stats = aggregateTournamentStats(games, playersById);
   const hitters = stats.hitters.sort(compareTournamentHitters);
   const pitchers = stats.pitchers.sort(compareTournamentPitchers);
 
@@ -796,7 +819,7 @@ function renderLeaderCard(title, rows, valueForRow, detailForRow) {
         const width = Math.round((value / max) * 100);
         return `<li>
           <div class="leader-line">
-            <strong>${escapeHtml(row.name)}</strong>
+            ${renderTournamentPlayerName(row, "strong")}
             <span>${escapeHtml(row.team)}</span>
             <b>${value}</b>
           </div>
@@ -810,7 +833,7 @@ function renderLeaderCard(title, rows, valueForRow, detailForRow) {
 
 function renderTournamentHitterRow(row) {
   return `<tr>
-    <td>${escapeHtml(row.name)}</td>
+    <td>${renderTournamentPlayerName(row)}</td>
     <td>${escapeHtml(row.team)}</td>
     <td class="num">${row.pa}</td>
     <td class="num">${row.ab}</td>
@@ -826,7 +849,7 @@ function renderTournamentHitterRow(row) {
 
 function renderTournamentPitcherRow(row) {
   return `<tr>
-    <td>${escapeHtml(row.name)}</td>
+    <td>${renderTournamentPlayerName(row)}</td>
     <td>${escapeHtml(row.team)}</td>
     <td class="num">${formatInnings(row.outs)}</td>
     <td class="num">${row.bf}</td>
@@ -839,7 +862,17 @@ function renderTournamentPitcherRow(row) {
   </tr>`;
 }
 
-function aggregateTournamentStats(games) {
+function renderTournamentPlayerName(row, tagName = "span") {
+  if (!row.player) return `<${tagName}>${escapeHtml(row.name)}</${tagName}>`;
+  return `<${tagName}
+    class="player-name-preview stat-player-name"
+    tabindex="0"
+    data-preview-id="${escapeHtml(row.player.id)}"
+    data-preview-card="${escapeHtml(renderPlayerCard(row.player))}"
+  >${escapeHtml(row.name)}</${tagName}>`;
+}
+
+function aggregateTournamentStats(games, playersById = new Map()) {
   const hitters = new Map();
   const pitchers = new Map();
 
@@ -856,7 +889,7 @@ function aggregateTournamentStats(games) {
           so: 0,
           hr: 0,
           rbi: 0
-        });
+        }, playersById);
         row.pa += line.pa;
         row.ab += line.ab;
         row.h += line.h;
@@ -874,7 +907,7 @@ function aggregateTournamentStats(games) {
           so: 0,
           hr: 0,
           r: 0
-        });
+        }, playersById);
         row.bf += line.bf;
         row.outs += line.outs;
         row.h += line.h;
@@ -892,16 +925,27 @@ function aggregateTournamentStats(games) {
   };
 }
 
-function getAggregateLine(map, line, team, stats) {
+function getAggregateLine(map, line, team, stats, playersById = new Map()) {
   if (!map.has(line.id)) {
     map.set(line.id, {
       id: line.id,
       name: line.name,
       team: line.team ?? team,
+      player: playersById.get(line.id) ?? null,
       ...stats
     });
   }
   return map.get(line.id);
+}
+
+function draftedPlayersById() {
+  const players = new Map();
+  for (const manager of state.draft?.managers ?? []) {
+    for (const player of manager.roster) {
+      players.set(player.id, player);
+    }
+  }
+  return players;
 }
 
 function compareTournamentHitters(a, b) {
@@ -1233,16 +1277,6 @@ function findDraftManager(managerId) {
 
 function findRosterPlayer(managerId, playerId) {
   return findDraftManager(managerId)?.roster.find((player) => player.id === playerId);
-}
-
-function renderRosterSummary(manager) {
-  const counts = rosterCounts(manager.roster);
-  return `<div class="target-row summary">
-    <span>${counts.hitters} hitters</span>
-    <span>${counts.starters} starters</span>
-    <span>${counts.bullpen} bullpen</span>
-    <span>${manager.roster.reduce((sum, player) => sum + player.points, 0)} points</span>
-  </div>`;
 }
 
 function renderFilters() {
