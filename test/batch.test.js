@@ -51,6 +51,15 @@ test("simulateBatch accounts for every season, title, and finals slot", () => {
   for (const row of summary.teams) {
     assert.equal(row.wins.count, 25);
     assert.ok(row.games >= row.wins.sum + row.losses.sum);
+    assert.ok(Number.isFinite(row.steals));
+    assert.ok(Number.isFinite(row.caughtStealing));
+    assert.ok(Number.isFinite(row.advances));
+    assert.ok(Number.isFinite(row.advanceAttempts));
+    assert.ok(Number.isFinite(row.outsOnBases));
+    assert.ok(Number.isFinite(row.cutDowns));
+    assert.ok(Number.isFinite(row.caughtStealingByDefense));
+    assert.ok(Number.isFinite(row.doublePlays));
+    assert.ok(Number.isFinite(row.doublePlayChances));
   }
 });
 

@@ -1,4 +1,5 @@
 import { distribution, rate } from "./stats.js";
+import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260705-batch-team-skills";
 import { simulateRoundRobin } from "./tournament.js?v=20260705-awards-show";
 
 export const DEFAULT_BATCH_RUNS = 1000;
@@ -29,7 +30,7 @@ export function createBatchState(teams) {
 
   for (const team of teams) {
     state.teams.set(team.name, {
-      team: team.name,
+      ...createTeamSkillLine(team.name),
       titles: 0,
       finalsAppearances: 0,
       games: 0,
@@ -78,7 +79,8 @@ export function summarizeBatch(state) {
       wins: distribution(row.wins),
       losses: distribution(row.losses),
       runsFor: distribution(row.runsFor),
-      runsAgainst: distribution(row.runsAgainst)
+      runsAgainst: distribution(row.runsAgainst),
+      ...teamSkillTotals(row)
     }))
     .sort((a, b) => b.titleShare - a.titleShare || b.wins.mean - a.wins.mean);
 
@@ -161,6 +163,9 @@ function foldTournament(state, result) {
   for (const game of games) {
     foldBoxScore(state, game.boxScore?.away);
     foldBoxScore(state, game.boxScore?.home);
+    for (const event of game.events ?? []) {
+      aggregateEventSkillStats(state.teams, event);
+    }
     if (game.topSwing && (!state.topSwing || game.topSwing.wpa > state.topSwing.wpa)) {
       state.topSwing = {
         ...game.topSwing,
@@ -259,6 +264,27 @@ function registerPitcher(state, teamName, player) {
     r: 0,
     wpa: 0
   });
+}
+
+function teamSkillTotals(row) {
+  return {
+    stealAttempts: row.stealAttempts,
+    steals: row.steals,
+    caughtStealing: row.caughtStealing,
+    advanceAttempts: row.advanceAttempts,
+    advances: row.advances,
+    tagAttempts: row.tagAttempts,
+    tagAdvances: row.tagAdvances,
+    outsOnBases: row.outsOnBases,
+    advanceChances: row.advanceChances,
+    advancesAllowed: row.advancesAllowed,
+    stealsAllowed: row.stealsAllowed,
+    cutDowns: row.cutDowns,
+    homeCutDowns: row.homeCutDowns,
+    caughtStealingByDefense: row.caughtStealingByDefense,
+    doublePlayChances: row.doublePlayChances,
+    doublePlays: row.doublePlays
+  };
 }
 
 function per162(total, games) {

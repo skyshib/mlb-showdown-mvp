@@ -38,8 +38,9 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260705-awards-show";
+} from "./rules/batch.js?v=20260705-awards-show-batch-team-skills";
 import { computeAwards } from "./rules/awards.js?v=20260705-awards-show";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import { simulateRoundRobin } from "./rules/tournament.js?v=20260705-awards-show";
 import {
   basesText,
@@ -1022,6 +1023,8 @@ function renderBatch() {
   const sortedTeams = sortBatchRows(summary.teams, "teams", (row, sort) => batchTeamSortValue(row, sort));
   const sortedHitters = sortBatchRows(summary.hitters, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
   const sortedPitchers = sortBatchRows(summary.pitchers, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
+  const sortedBaserunning = [...summary.teams].sort(compareTournamentBaserunning);
+  const sortedDefense = [...summary.teams].sort(compareTournamentDefense);
 
   const teamRows = sortedTeams
     .map(
@@ -1101,6 +1104,35 @@ function renderBatch() {
     <h2>The awards show</h2>
     <div class="award-grid">${awards.map((item) => renderAwardCard(item, playersById)).join("")}</div>
   </section>` : `<section class="panel awards-panel"><h2>The awards show</h2><p class="batch-note">This sim predates the awards stats. Hit Run again to hold the ceremony.</p></section>`}
+  <section class="panel tournament-stats-panel">
+    <div class="section-title-row">
+      <div>
+        <p class="eyebrow">Team skills</p>
+        <h2>Baserunning and defense, 162-game pace</h2>
+      </div>
+      <span>${runs} seasons</span>
+    </div>
+    <div class="team-skill-grid">
+      <div class="stat-table-block">
+        <h3>Baserunning</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table team-stat-table">
+            <thead><tr><th>Team</th><th class="num">SB/162</th><th class="num">CS/162</th><th class="num">Adv/162</th><th class="num">Att/162</th><th class="num">Adv%</th><th class="num">Tag%</th><th class="num">OOB/162</th></tr></thead>
+            <tbody>${sortedBaserunning.map(renderBatchBaserunningRow).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="stat-table-block">
+        <h3>Defense</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table team-stat-table">
+            <thead><tr><th>Team</th><th class="num">Cut/162</th><th class="num">Home/162</th><th class="num">CS/162</th><th class="num">DP%</th><th class="num">Ch/162</th><th class="num">Stop%</th></tr></thead>
+            <tbody>${sortedDefense.map(renderBatchDefenseRow).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
   <section class="grid tournament-grid">
     <div class="panel">
       <p class="eyebrow">${runs} simulated seasons</p>
@@ -1566,6 +1598,37 @@ function renderTournamentPitcherRow(row, fipConstant) {
   </tr>`;
 }
 
+function renderBatchBaserunningRow(row) {
+  const games = teamSkillGames(row);
+  return `<tr>
+    <td>${escapeHtml(row.team)}</td>
+    <td class="num">${formatSeasonCount(per162(row.steals, games))}</td>
+    <td class="num">${formatSeasonCount(per162(row.caughtStealing, games))}</td>
+    <td class="num">${formatSeasonCount(per162(row.advances, games))}</td>
+    <td class="num">${formatSeasonCount(per162(row.advanceAttempts, games))}</td>
+    <td class="num">${formatPercent(row.advances, row.advanceAttempts)}</td>
+    <td class="num">${formatPercent(row.tagAdvances, row.tagAttempts)}</td>
+    <td class="num">${formatSeasonCount(per162(row.outsOnBases, games))}</td>
+  </tr>`;
+}
+
+function renderBatchDefenseRow(row) {
+  const games = teamSkillGames(row);
+  return `<tr>
+    <td>${escapeHtml(row.team)}</td>
+    <td class="num">${formatSeasonCount(per162(row.cutDowns, games))}</td>
+    <td class="num">${formatSeasonCount(per162(row.homeCutDowns, games))}</td>
+    <td class="num">${formatSeasonCount(per162(row.caughtStealingByDefense, games))}</td>
+    <td class="num">${formatPercent(row.doublePlays, row.doublePlayChances)}</td>
+    <td class="num">${formatSeasonCount(per162(row.advanceChances, games))}</td>
+    <td class="num">${formatPercent(row.cutDowns, row.advanceChances)}</td>
+  </tr>`;
+}
+
+function teamSkillGames(row) {
+  return row.games ?? teamScheduleGames(row);
+}
+
 function renderTournamentBaserunningRow(row) {
   return `<tr>
     <td>${escapeHtml(row.team)}</td>
@@ -1674,97 +1737,6 @@ function aggregateTournamentStats(games, playersById = new Map()) {
     pitchers: [...pitchers.values()],
     teams: [...teams.values()]
   };
-}
-
-function aggregateEventSkillStats(teams, event) {
-  const battingTeam = event.battingTeam;
-  const pitchingTeam = event.pitchingTeam;
-  const details = event.playDetails;
-  if (!details || !battingTeam || !pitchingTeam) return;
-
-  if (details.kind === "steal" && details.stealAttempt) {
-    trackAdvanceAttempt(teams, battingTeam, pitchingTeam, details.stealAttempt, "steal");
-    return;
-  }
-
-  if (details.kind === "hit") {
-    for (const attempt of details.extraBaseAttempts ?? []) {
-      trackAdvanceAttempt(teams, battingTeam, pitchingTeam, attempt, "hit");
-    }
-    return;
-  }
-
-  if (details.kind === "flyout") {
-    for (const attempt of details.tagUpAttempts ?? []) {
-      trackAdvanceAttempt(teams, battingTeam, pitchingTeam, attempt, "tag");
-    }
-    return;
-  }
-
-  if (details.kind === "groundout" && details.doublePlayAttempt) {
-    const defense = getTeamSkillLine(teams, pitchingTeam);
-    defense.doublePlayChances += 1;
-    if (details.doublePlayAttempt.batterOut) defense.doublePlays += 1;
-  }
-}
-
-function trackAdvanceAttempt(teams, battingTeam, pitchingTeam, attempt, kind) {
-  const offense = getTeamSkillLine(teams, battingTeam);
-  const defense = getTeamSkillLine(teams, pitchingTeam);
-
-  if (kind === "steal") {
-    offense.stealAttempts += 1;
-    if (attempt.safe) {
-      offense.steals += 1;
-      defense.stealsAllowed += 1;
-    } else {
-      offense.caughtStealing += 1;
-      offense.outsOnBases += 1;
-      defense.caughtStealingByDefense += 1;
-    }
-  } else {
-    offense.advanceAttempts += 1;
-    defense.advanceChances += 1;
-    if (kind === "tag") offense.tagAttempts += 1;
-    if (attempt.safe) {
-      offense.advances += 1;
-      defense.advancesAllowed += 1;
-      if (kind === "tag") offense.tagAdvances += 1;
-    } else {
-      offense.outsOnBases += 1;
-      defense.cutDowns += 1;
-      if (attempt.to === "home") defense.homeCutDowns += 1;
-    }
-    return;
-  }
-
-  defense.advanceChances += 1;
-  if (!attempt.safe) defense.cutDowns += 1;
-}
-
-function getTeamSkillLine(map, team) {
-  if (!map.has(team)) {
-    map.set(team, {
-      team,
-      stealAttempts: 0,
-      steals: 0,
-      caughtStealing: 0,
-      advanceAttempts: 0,
-      advances: 0,
-      tagAttempts: 0,
-      tagAdvances: 0,
-      outsOnBases: 0,
-      advanceChances: 0,
-      advancesAllowed: 0,
-      stealsAllowed: 0,
-      cutDowns: 0,
-      homeCutDowns: 0,
-      caughtStealingByDefense: 0,
-      doublePlayChances: 0,
-      doublePlays: 0
-    });
-  }
-  return map.get(team);
 }
 
 function getAggregateLine(map, line, team, stats, playersById = new Map()) {
