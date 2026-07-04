@@ -2,6 +2,7 @@ import { formatRange, normalizeResult } from "../rules/cards.js";
 
 const HITTER_OUTCOMES = ["BB", "1B", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
+const HISTORY_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "3B", "HR"];
 
 export function playerPosition(player) {
   return player.kind === "hitter" ? player.position : player.role;
@@ -73,6 +74,40 @@ export function renderPlayerTable(players, options = {}) {
     <thead>
       <tr>
         ${headers.map((header, index) => renderHeaderCell(header, mode, index, options)).join("")}
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+export function renderDraftHistoryTable(picks) {
+  if (!picks.length) {
+    return `<p class="empty">No picks made yet.</p>`;
+  }
+  const rows = picks
+    .map(({ pickNumber, round, manager, player }) => `<tr class="draft-player-row">
+        <td class="num">${pickNumber}</td>
+        <td class="num">${round}</td>
+        <td>${escapeHtml(manager.name)}</td>
+        <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
+        <td>${escapeHtml(playerPosition(player))}</td>
+        <td class="num">${playerPrimary(player)}</td>
+        <td class="num">${player.points}</td>
+        ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
+      </tr>`)
+    .join("");
+
+  return `<div class="table-scroll"><table class="player-table history-table">
+    <thead>
+      <tr>
+        <th class="num">#</th>
+        <th class="num">Rnd</th>
+        <th>Manager</th>
+        <th>Player</th>
+        <th>Pos</th>
+        <th class="num">OB/CT</th>
+        <th class="num">Pts</th>
+        ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
       </tr>
     </thead>
     <tbody>${rows}</tbody>

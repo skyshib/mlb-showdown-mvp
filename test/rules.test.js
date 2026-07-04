@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, managerValuation, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel } from "../src/rules/valuation.js";
 import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
@@ -1013,4 +1013,27 @@ test("autopick weighs positional dropoff instead of only top overall value", () 
   autopick(draft);
 
   assert.equal(draft.managers[0].roster[0].id, "scarce-c-1");
+});
+
+test("draftHistory lists picks in snake order with the picking manager", () => {
+  const draft = createDraft(["One", "Two"], makeDraftPool("hist"), 13, "history-room");
+
+  pickPlayer(draft, "hist-h-0");
+  pickPlayer(draft, "hist-h-1");
+  pickPlayer(draft, "hist-h-2");
+  pickPlayer(draft, "hist-h-3");
+
+  const history = draftHistory(draft);
+  assert.deepEqual(
+    history.map((pick) => [pick.pickNumber, pick.round, pick.manager.name, pick.player.id]),
+    [
+      [1, 1, "One", "hist-h-0"],
+      [2, 1, "Two", "hist-h-1"],
+      [3, 2, "Two", "hist-h-2"],
+      [4, 2, "One", "hist-h-3"]
+    ]
+  );
+
+  undoLastPick(draft);
+  assert.equal(draftHistory(draft).length, 3);
 });

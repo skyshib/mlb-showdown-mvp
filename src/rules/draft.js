@@ -132,6 +132,25 @@ export function undoLastPick(draft) {
   return { manager, player };
 }
 
+export function draftHistory(draft) {
+  const counters = new Map();
+  const picks = [];
+  for (let pickNumber = 0; pickNumber < draft.pickNumber; pickNumber += 1) {
+    const manager = managerForPickNumber(draft, pickNumber);
+    const rosterIndex = counters.get(manager.id) ?? 0;
+    counters.set(manager.id, rosterIndex + 1);
+    const player = manager.roster[rosterIndex];
+    if (!player) continue;
+    picks.push({
+      pickNumber: pickNumber + 1,
+      round: Math.floor(pickNumber / draft.managers.length) + 1,
+      manager,
+      player
+    });
+  }
+  return picks;
+}
+
 export function autopick(draft) {
   const manager = currentManager(draft);
   const rosterNeeds = getRosterNeeds(manager.roster);

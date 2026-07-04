@@ -9,6 +9,7 @@ import {
   CORNER_OUTFIELD_POSITION,
   createDraft,
   currentManager,
+  draftHistory,
   getRosterNeeds,
   isCornerOutfielder,
   lineupStatus,
@@ -16,7 +17,7 @@ import {
   staffStatus,
   undoLastPick,
   validateRoster
-} from "./rules/draft.js?v=20260704-ai-valuation";
+} from "./rules/draft.js?v=20260705-draft-history";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -34,10 +35,11 @@ import {
   playerPrimary,
   raceColor,
   renderBoxScore,
+  renderDraftHistoryTable,
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260704-player-rate-stats";
+} from "./ui/render.js?v=20260705-draft-history";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const app = document.querySelector("#app");
@@ -60,6 +62,7 @@ function defaultState() {
     managers: ["Kasey", "Milo", "Nico", "Rafa"],
     rosterSize: 13,
     draft: null,
+    draftTab: "available",
     tournament: null,
     batch: null,
     view: null,
@@ -163,9 +166,12 @@ function renderSetup() {
 function renderDraft() {
   const draft = state.draft;
   const current = draft.complete ? null : currentManager(draft);
-  const playerRows = draft.complete
-    ? filteredPlayers(availablePlayers(draft)).sort(comparePlayers).slice(0, 40)
-    : draftVisiblePlayers(draft, current);
+  const historyTab = state.draftTab === "history";
+  const playerRows = historyTab
+    ? []
+    : draft.complete
+      ? filteredPlayers(availablePlayers(draft)).sort(comparePlayers).slice(0, 40)
+      : draftVisiblePlayers(draft, current);
   const rosters = draft.managers.map((manager) => renderRoster(manager, draft)).join("");
   const focusManager = current ?? (state.selectedTeamName
     ? draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0]
@@ -182,7 +188,13 @@ function renderDraft() {
   ${renderDraftFocus(draft, focusManager)}
   <section class="grid">
     <div class="panel">
-      <div class="section-head">
+      <div class="game-tabs">
+        <button class="game-tab ${historyTab ? "" : "active"}" data-action="draft-tab" data-tab="available">Available cards</button>
+        <button class="game-tab ${historyTab ? "active" : ""}" data-action="draft-tab" data-tab="history">Draft history</button>
+      </div>
+      ${historyTab
+        ? renderDraftHistoryTable(draftHistory(draft))
+        : `<div class="section-head">
         <h2>Available cards</h2>
         ${renderFilters()}
       </div>
@@ -193,7 +205,7 @@ function renderDraft() {
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
         canPick: (player) => (current ? canPickPlayer(draft, current, player) : { ok: false, reason: "draft complete" })
-      })}
+      })}`}
     </div>
     <div class="panel">
       <h2>Rosters</h2>
@@ -240,6 +252,12 @@ function bindDraftActions() {
       clearSavedState();
       state = defaultState();
       renderSetup();
+      return;
+    }
+    if (action === "draft-tab") {
+      state.draftTab = button.dataset.tab === "history" ? "history" : "available";
+      saveState();
+      renderDraft();
       return;
     }
     if (action === "pick") {
