@@ -186,6 +186,23 @@ Before a plate appearance, the auto-manager may attempt one steal using the adva
 - Official/manual pitching changes.
 - 2003+ icons.
 
+## Draft Types
+
+Setup offers two draft types. Both build the same 13-card roster (9 hitters, 2 starters, 2 bullpen) from the same pools; only how cards are claimed differs.
+
+Snake (default): managers pick in turn and the order reverses every round.
+
+Auction: managers take turns nominating a card, then anyone can bid on it.
+
+- Every manager starts with the same budget, default `5000` (a strong 13-card roster sums to roughly 5000 card points, so bids read on the classic Showdown cap scale). The budget is configurable at setup, floored at `65` (13 slots times the minimum bid) and rounded to the bid step.
+- Nomination order rotates through the managers top to bottom, skipping anyone whose roster is full. Nominating puts the card on the block with an opening bid of `5` held by the nominator, so a manager can only nominate a card they could legally roster.
+- Any other manager may raise by at least `5` (quick raises `+5/+25/+100` or a custom amount). A bid is blocked if the card would not fit the bidder's roster minimums, or if it would leave them unable to pay the `5` minimum for each remaining open slot (`max bid = budget - 5 * open slots after this card`).
+- `Sold` awards the card to the standing high bidder at the standing bid and deducts it from their budget. There is no timer; the room decides when bidding is done, like calling going-going-gone at the table.
+- An untouched nomination can be canceled. `Undo` steps backward one action: an open lot returns to nomination, a completed sale refunds the price and hands the nomination back.
+- `Auto-run next lot` resolves one full lot with proxy bidding: each manager's willingness is their per-slot budget share scaled by how the card's personal valuation compares to the remaining pool of that kind, plus a 15% premium when it fills an open need. The highest-willing manager keeps outbidding until nobody else will pay more, so prices land near the second-highest willingness. `Auto-finish auction` repeats this until every roster is full.
+- Draft history shows the price paid next to each card.
+- Online rooms currently always create snake drafts; auction is hot-seat local for now. The auction actions (`nominate`, `bid`, `sell`, `cancel-lot`) are already wired through `applyDraftAction`, so the online room flow only needs a `draftType` field at room creation to support it later.
+
 ## UI Notes
 
 The app now treats this file as the v1 rule contract. The draft and tournament screens show this as an assumption rather than as a claim about the full original rules.

@@ -31,25 +31,55 @@ const BULLPEN_TARGET = 2;
 const PITCHER_TARGET = STARTER_TARGET + BULLPEN_TARGET;
 const DEFAULT_ROSTER_SIZE = HITTER_TARGET + PITCHER_TARGET;
 
-export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, seed = "showdown") {
+export const AUCTION_MIN_BID = 5;
+export const AUCTION_MIN_RAISE = 5;
+export const AUCTION_DEFAULT_BUDGET = 5000;
+
+export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE) {
+  const value = Math.round((Number(budget) || AUCTION_DEFAULT_BUDGET) / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
+  return Math.max(rosterSize * AUCTION_MIN_BID, value);
+}
+
+export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, seed = "showdown", options = {}) {
   const cleanManagers = managers.map((name, index) => ({
     id: `team-${index + 1}`,
     name: name.trim() || `Manager ${index + 1}`,
     roster: []
   }));
 
-  return {
+  const draft = {
     managers: cleanManagers,
     pool: pool.map((player) => normalizeCardPosition({ ...player })),
     pickedIds: new Set(),
     rosterSize,
     seed,
     pickNumber: 0,
-    complete: false
+    complete: false,
+    draftType: options.draftType === "auction" ? "auction" : "snake"
   };
+
+  if (draft.draftType === "auction") {
+    const budget = normalizeAuctionBudget(options.budget, rosterSize);
+    draft.auction = {
+      budget,
+      budgets: Object.fromEntries(cleanManagers.map((manager) => [manager.id, budget])),
+      nominatorIndex: 0,
+      lot: null,
+      history: []
+    };
+  }
+
+  return draft;
+}
+
+export function isAuctionDraft(draft) {
+  return draft?.draftType === "auction";
 }
 
 export function currentManager(draft) {
+  if (isAuctionDraft(draft)) {
+    return draft.managers[draft.auction.nominatorIndex];
+  }
   return managerForPickNumber(draft, draft.pickNumber);
 }
 
@@ -103,6 +133,9 @@ export function canPickPlayer(draft, manager, player) {
 
 export function pickPlayer(draft, playerId) {
   if (draft.complete) return draft;
+  if (isAuctionDraft(draft)) {
+    throw new Error("Auction drafts add players by selling lots");
+  }
   const manager = currentManager(draft);
   const player = draft.pool.find((item) => item.id === playerId);
   if (!player || draft.pickedIds.has(playerId)) {
@@ -123,12 +156,182 @@ export function pickPlayer(draft, playerId) {
   return draft;
 }
 
+export function auctionBudget(draft, manager) {
+  return draft.auction?.budgets?.[manager.id] ?? 0;
+}
+
+// A bid can never leave a manager unable to pay the minimum bid for each of
+// their remaining open roster slots.
+export function auctionMaxBid(draft, manager) {
+  const slotsAfterThisPlayer = draft.rosterSize - manager.roster.length - 1;
+  return auctionBudget(draft, manager) - Math.max(0, slotsAfterThisPlayer) * AUCTION_MIN_BID;
+}
+
+export function auctionLotPlayer(draft) {
+  const lot = draft.auction?.lot;
+  if (!lot) return null;
+  return draft.pool.find((player) => player.id === lot.playerId) ?? null;
+}
+
+export function canNominatePlayer(draft, manager, player) {
+  if (!isAuctionDraft(draft)) return { ok: false, reason: "not an auction draft" };
+  if (draft.complete) return { ok: false, reason: "draft complete" };
+  if (draft.auction.lot) return { ok: false, reason: "finish the current lot first" };
+  const nominator = currentManager(draft);
+  if (manager.id !== nominator.id) {
+    return { ok: false, reason: `${nominator.name} nominates next` };
+  }
+  if (auctionMaxBid(draft, manager) < AUCTION_MIN_BID) {
+    return { ok: false, reason: "cannot afford the opening bid" };
+  }
+  return canPickPlayer(draft, manager, player);
+}
+
+export function nominatePlayer(draft, playerId) {
+  const nominator = currentManager(draft);
+  const player = draft.pool.find((item) => item.id === playerId);
+  if (!player || draft.pickedIds.has(playerId)) {
+    throw new Error("Player is not available");
+  }
+  const legality = canNominatePlayer(draft, nominator, player);
+  if (!legality.ok) {
+    throw new Error(legality.reason);
+  }
+  draft.auction.lot = {
+    playerId,
+    bid: AUCTION_MIN_BID,
+    bidderId: nominator.id,
+    nominatorId: nominator.id,
+    raises: 0
+  };
+  return draft.auction.lot;
+}
+
+export function canBid(draft, manager, amount) {
+  const lot = draft.auction?.lot;
+  if (!lot) return { ok: false, reason: "no card is on the block" };
+  if (manager.id === lot.bidderId) return { ok: false, reason: "already the high bidder" };
+  const rosterLegality = canPickPlayer(draft, manager, auctionLotPlayer(draft));
+  if (!rosterLegality.ok) return rosterLegality;
+  const maxBid = auctionMaxBid(draft, manager);
+  if (!Number.isFinite(amount) || amount < lot.bid + AUCTION_MIN_RAISE) {
+    return { ok: false, reason: `must raise to at least ${lot.bid + AUCTION_MIN_RAISE}` };
+  }
+  if (amount > maxBid) {
+    return { ok: false, reason: `max bid is ${Math.max(0, maxBid)} (must keep ${AUCTION_MIN_BID} per open slot)` };
+  }
+  return { ok: true, reason: "" };
+}
+
+export function placeBid(draft, managerId, amount) {
+  const manager = draft.managers.find((item) => item.id === managerId);
+  if (!manager) throw new Error("Unknown manager");
+  const legality = canBid(draft, manager, amount);
+  if (!legality.ok) {
+    throw new Error(legality.reason);
+  }
+  const lot = draft.auction.lot;
+  lot.bid = amount;
+  lot.bidderId = managerId;
+  lot.raises += 1;
+  return lot;
+}
+
+export function sellLot(draft) {
+  const lot = draft.auction?.lot;
+  if (!lot) throw new Error("No card is on the block");
+  const winner = draft.managers.find((item) => item.id === lot.bidderId);
+  const player = auctionLotPlayer(draft);
+  if (!winner || !player) throw new Error("Lot is invalid");
+  const legality = canPickPlayer(draft, winner, player);
+  if (!legality.ok) {
+    throw new Error(legality.reason);
+  }
+
+  winner.roster.push(player);
+  draft.pickedIds.add(player.id);
+  draft.auction.budgets[winner.id] -= lot.bid;
+  draft.auction.history.push({
+    playerId: player.id,
+    managerId: winner.id,
+    price: lot.bid,
+    nominatorId: lot.nominatorId,
+    nominatorIndex: draft.auction.nominatorIndex
+  });
+  draft.pickNumber += 1;
+  draft.auction.lot = null;
+  draft.auction.nominatorIndex = nextNominatorIndex(draft, draft.auction.nominatorIndex);
+  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  return { manager: winner, player, price: lot.bid };
+}
+
+// Only an untouched nomination can be canceled; once someone raises, resolve
+// the lot with Sold or Undo.
+export function cancelLot(draft) {
+  const lot = draft.auction?.lot;
+  if (!lot || lot.raises > 0) return null;
+  draft.auction.lot = null;
+  return lot;
+}
+
+export function upcomingNominators(draft, count) {
+  if (!isAuctionDraft(draft) || draft.complete) return [];
+  const nominators = [];
+  let index = draft.auction.nominatorIndex;
+  for (let step = 0; step < count; step += 1) {
+    const manager = draft.managers[index];
+    if (!manager || manager.roster.length >= draft.rosterSize) break;
+    nominators.push(manager);
+    index = nextNominatorIndex(draft, index);
+  }
+  return nominators;
+}
+
+function nextNominatorIndex(draft, fromIndex) {
+  const count = draft.managers.length;
+  for (let offset = 1; offset <= count; offset += 1) {
+    const index = (fromIndex + offset) % count;
+    if (draft.managers[index].roster.length < draft.rosterSize) return index;
+  }
+  return fromIndex;
+}
+
 export function undoLastPick(draft) {
-  if (!draft || draft.pickNumber <= 0) return null;
+  if (!draft) return null;
+  if (isAuctionDraft(draft)) return undoAuctionAction(draft);
+  if (draft.pickNumber <= 0) return null;
   const manager = managerForPickNumber(draft, draft.pickNumber - 1);
   const player = manager?.roster.pop();
   if (!manager || !player) return null;
 
+  draft.pickedIds.delete(player.id);
+  draft.pickNumber -= 1;
+  draft.complete = false;
+  if (manager.lineupAssignments) {
+    for (const [slot, playerId] of Object.entries(manager.lineupAssignments)) {
+      if (playerId === player.id) delete manager.lineupAssignments[slot];
+    }
+  }
+  return { manager, player };
+}
+
+// Undo in an auction unwinds one step at a time: an open lot goes back to
+// nomination, a finished lot refunds the sale and hands the nomination back.
+function undoAuctionAction(draft) {
+  if (draft.auction.lot) {
+    draft.auction.lot = null;
+    return { canceledLot: true };
+  }
+  const entry = draft.auction.history.at(-1);
+  if (!entry) return null;
+  const manager = draft.managers.find((item) => item.id === entry.managerId);
+  const rosterIndex = manager?.roster.findIndex((player) => player.id === entry.playerId) ?? -1;
+  if (!manager || rosterIndex < 0) return null;
+
+  draft.auction.history.pop();
+  const [player] = manager.roster.splice(rosterIndex, 1);
+  draft.auction.budgets[manager.id] += entry.price;
+  draft.auction.nominatorIndex = entry.nominatorIndex;
   draft.pickedIds.delete(player.id);
   draft.pickNumber -= 1;
   draft.complete = false;
@@ -148,6 +351,18 @@ export function applyDraftAction(draft, action) {
   switch (action?.type) {
     case "pick":
       pickPlayer(draft, action.playerId);
+      return;
+    case "nominate":
+      nominatePlayer(draft, action.playerId);
+      return;
+    case "bid":
+      placeBid(draft, action.managerId, action.amount);
+      return;
+    case "sell":
+      sellLot(draft);
+      return;
+    case "cancel-lot":
+      cancelLot(draft);
       return;
     case "autopick":
       autopick(draft);
@@ -170,6 +385,19 @@ export function applyDraftAction(draft, action) {
 }
 
 export function draftHistory(draft) {
+  if (isAuctionDraft(draft)) {
+    const playersById = new Map(draft.pool.map((player) => [player.id, player]));
+    const managersById = new Map(draft.managers.map((manager) => [manager.id, manager]));
+    return draft.auction.history
+      .map((entry, index) => ({
+        pickNumber: index + 1,
+        round: Math.floor(index / draft.managers.length) + 1,
+        manager: managersById.get(entry.managerId),
+        player: playersById.get(entry.playerId),
+        price: entry.price
+      }))
+      .filter((pick) => pick.manager && pick.player);
+  }
   const counters = new Map();
   const picks = [];
   for (let pickNumber = 0; pickNumber < draft.pickNumber; pickNumber += 1) {
@@ -189,7 +417,12 @@ export function draftHistory(draft) {
 }
 
 export function autopick(draft) {
-  const manager = currentManager(draft);
+  if (isAuctionDraft(draft)) return autoRunAuctionLot(draft);
+  const best = bestAutopickTarget(draft, currentManager(draft));
+  return pickPlayer(draft, best.id);
+}
+
+function bestAutopickTarget(draft, manager) {
   const rosterNeeds = getRosterNeeds(manager.roster);
   const candidates = availablePlayers(draft);
   const legal = candidates.filter((player) => canPickPlayer(draft, manager, player).ok);
@@ -199,13 +432,66 @@ export function autopick(draft) {
   const model = managerValuation(draft, manager);
   const values = new Map(legal.map((player) => [player.id, model.value(player)]));
   const dropoffs = positionDropoffs(legal, values);
-  const best = legal
+  return legal
     .map((player) => ({
       player,
       score: autopickScore(draft, manager, player, rosterNeeds, values.get(player.id), dropoffs.get(player.id))
     }))
     .sort((a, b) => b.score - a.score)[0].player;
-  return pickPlayer(draft, best.id);
+}
+
+// Auto for auctions resolves one full lot: nominate the nominator's best
+// target if nothing is on the block, let every manager proxy-bid up to their
+// willingness, then sell to the standing high bidder.
+function autoRunAuctionLot(draft) {
+  if (draft.complete) return draft;
+  if (!draft.auction.lot) {
+    const nominator = currentManager(draft);
+    nominatePlayer(draft, bestAutopickTarget(draft, nominator).id);
+  }
+  autoBidLot(draft);
+  sellLot(draft);
+  return draft;
+}
+
+function autoBidLot(draft) {
+  const lot = draft.auction.lot;
+  const player = auctionLotPlayer(draft);
+  const willingness = new Map();
+  for (const manager of draft.managers) {
+    if (manager.roster.length >= draft.rosterSize) continue;
+    if (!canPickPlayer(draft, manager, player).ok) continue;
+    willingness.set(manager.id, auctionWillingness(draft, manager, player));
+  }
+
+  let guard = Math.ceil(draft.auction.budget / AUCTION_MIN_RAISE) + draft.managers.length + 5;
+  while (guard > 0) {
+    guard -= 1;
+    const nextBid = lot.bid + AUCTION_MIN_RAISE;
+    const challenger = draft.managers
+      .filter((manager) => manager.id !== lot.bidderId && (willingness.get(manager.id) ?? 0) >= nextBid)
+      .sort((a, b) => willingness.get(b.id) - willingness.get(a.id))[0];
+    if (!challenger) break;
+    placeBid(draft, challenger.id, nextBid);
+  }
+}
+
+// Prices scale with the room budget: a manager's willingness for a card is
+// their per-slot budget share times how the card's personal valuation compares
+// to the rest of the pool at that kind, with a premium when it fills an open
+// roster need.
+function auctionWillingness(draft, manager, player) {
+  const maxBid = auctionMaxBid(draft, manager);
+  if (maxBid < AUCTION_MIN_BID) return 0;
+  const model = managerValuation(draft, manager);
+  const sameKind = availablePlayers(draft).filter((item) => item.kind === player.kind);
+  const meanValue = sameKind.reduce((sum, item) => sum + model.value(item), 0) / Math.max(1, sameKind.length);
+  const relativeValue = meanValue > 0 ? model.value(player) / meanValue : 1;
+  const fairShare = auctionBudget(draft, manager) / Math.max(1, draft.rosterSize - manager.roster.length);
+  const needPremium = managerNeedsPositionGroup(manager, player, getRosterNeeds(manager.roster)) ? 1.15 : 1;
+  const raw = fairShare * relativeValue * needPremium;
+  const rounded = Math.round(raw / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
+  return Math.max(AUCTION_MIN_BID, Math.min(maxBid, rounded));
 }
 
 export function managerValuation(draft, manager) {

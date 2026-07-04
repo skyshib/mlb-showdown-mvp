@@ -3,10 +3,19 @@ import { buildRealPlayerPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./da
 import { buildMarinersPool, buildMarinersDraftPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners-deal";
 import {
   applyDraftAction,
+  AUCTION_DEFAULT_BUDGET,
+  AUCTION_MIN_BID,
+  AUCTION_MIN_RAISE,
+  auctionBudget,
+  auctionLotPlayer,
+  auctionMaxBid,
   autopick,
   assignLineupSlots,
   availablePlayers,
   buildTeam,
+  canBid,
+  canNominatePlayer,
+  cancelLot,
   canPlayerFillLineupSlot,
   canPickPlayer,
   CORNER_OUTFIELD_POSITION,
@@ -14,14 +23,20 @@ import {
   currentManager,
   draftHistory,
   getRosterNeeds,
+  isAuctionDraft,
   isCornerOutfielder,
   lineupStatus,
+  nominatePlayer,
+  normalizeAuctionBudget,
   normalizeCardPosition,
   pickPlayer,
+  placeBid,
+  sellLot,
   staffStatus,
   undoLastPick,
+  upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260705-online-rooms";
+} from "./rules/draft.js?v=20260706-auction-draft";
 import {
   createRoom,
   fetchRoom,
@@ -54,7 +69,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260705-caught-stealing-stats";
+} from "./ui/render.js?v=20260706-auction-draft";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const REAL_POOL_INFO = (() => {
@@ -80,6 +95,7 @@ let draggedLineupMove = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
 let onlineStream = null;
+let auctionRaise = AUCTION_MIN_RAISE;
 
 const onlineRoomParam = new URLSearchParams(location.search).get("room");
 if (onlineRoomParam) {
@@ -94,6 +110,8 @@ function defaultState() {
     managers: ["Kasey", "Milo", "Nico", "Rafa"],
     poolMode: "random",
     realPool: "stars",
+    draftType: "snake",
+    auctionBudget: AUCTION_DEFAULT_BUDGET,
     rosterSize: 13,
     draft: null,
     draftTab: "available",
@@ -388,6 +406,22 @@ function renderSetup(setupError = "") {
         Roster size
         <input name="rosterSize" type="number" min="13" max="13" value="13" />
       </label>
+      <fieldset class="pool-mode draft-type-mode">
+        <legend>Draft type</legend>
+        <label class="pool-option">
+          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
+          <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
+        </label>
+        <label class="pool-option">
+          <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
+          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then anyone can bid on it. Highest bid wins the card and pays from that manager's budget. Local rooms only for now.</small></span>
+        </label>
+        <label class="auction-budget-field">
+          Budget per manager
+          <input name="auctionBudget" type="number" min="${13 * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
+          <small>A strong 13-card roster adds up to roughly 5000 card points, so 5000 bids like the classic Showdown cap.</small>
+        </label>
+      </fieldset>
       <fieldset class="pool-mode">
         <legend>Player pool</legend>
         <label class="pool-option">
@@ -443,6 +477,8 @@ function renderSetup(setupError = "") {
     state.rosterSize = 13;
     state.poolMode = form.get("poolMode") === "real" ? "real" : "random";
     state.realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
+    state.draftType = form.get("draftType") === "auction" ? "auction" : "snake";
+    state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
     const realPoolInfo = state.realPool === "mariners" ? MARINERS_POOL_INFO : REAL_POOL_INFO;
     if (state.poolMode === "real" && state.managers.length > realPoolInfo.managerLimit) {
       renderSetup(
@@ -455,7 +491,10 @@ function renderSetup(setupError = "") {
         ? buildMarinersDraftPool(state.seed)
         : buildRealPlayerPool()
       : generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
-    state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed);
+    state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed, {
+      draftType: state.draftType,
+      budget: state.auctionBudget
+    });
     state.tournament = null;
     state.batch = null;
     state.view = null;
@@ -493,6 +532,8 @@ function renderSetup(setupError = "") {
 
 function renderDraft() {
   const draft = state.draft;
+  const auction = isAuctionDraft(draft);
+  const lot = auction ? draft.auction.lot : null;
   const current = draft.complete ? null : currentManager(draft);
   const historyTab = state.draftTab === "history";
   const playerRows = historyTab
@@ -506,16 +547,19 @@ function renderDraft() {
     : draft.managers[0]);
 
   const online = state.online;
+  const canUndo = (auction ? draft.pickNumber > 0 || Boolean(lot) : draft.pickNumber > 0)
+    && (auction ? !online || online.host : onlineCanUndo(draft));
   app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
   <section class="toolbar">
     <button data-action="reset">${online ? "Leave room" : "New room"}</button>
-    <button data-action="autopick" ${draft.complete || !onlineCanPickNow(current) ? "disabled" : ""}>Auto-pick next</button>
-    <button data-action="undo-pick" ${draft.pickNumber > 0 && onlineCanUndo(draft) ? "" : "disabled"}>Undo last pick</button>
-    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>Auto-finish draft</button>`}
+    <button data-action="autopick" ${draft.complete || !onlineCanPickNow(current) ? "disabled" : ""}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
+    <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot ? "Undo nomination" : "Undo last pick"}</button>
+    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="tournament" ${canSimulate(draft) ? "" : "disabled"}>Sim tournament</button>
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} seasons</button>
   </section>
   ${renderDraftFocus(draft, focusManager)}
+  ${lot ? renderAuctionLotPanel(draft) : ""}
   <section class="grid">
     <div class="panel">
       <div class="game-tabs">
@@ -530,13 +574,14 @@ function renderDraft() {
       </div>
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
-        action: "pick",
-        label: "Pick",
+        action: auction ? "nominate" : "pick",
+        label: auction ? "Nominate" : "Pick",
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
         canPick: (player) => {
           if (!current) return { ok: false, reason: "draft complete" };
-          if (!onlineCanPickNow(current)) return { ok: false, reason: `${current.name} is on the clock` };
+          if (!onlineCanPickNow(current)) return { ok: false, reason: `${current.name} is ${auction ? "nominating" : "on the clock"}` };
+          if (auction) return canNominatePlayer(draft, current, player);
           return canPickPlayer(draft, current, player);
         }
       })}`}
@@ -548,6 +593,63 @@ function renderDraft() {
   </section>`;
 
   bindDraftActions();
+}
+
+function renderAuctionLotPanel(draft) {
+  const lot = draft.auction.lot;
+  const player = auctionLotPlayer(draft);
+  if (!player) return "";
+  const online = state.online;
+  const bidder = draft.managers.find((manager) => manager.id === lot.bidderId);
+  const nominator = draft.managers.find((manager) => manager.id === lot.nominatorId);
+  const raiseOptions = [5, 25, 100];
+  const nextBid = lot.bid + auctionRaise;
+  const customValue = raiseOptions.includes(auctionRaise) ? "" : auctionRaise;
+  const canActForManager = (manager) => !online || online.host || manager.id === online.managerId;
+  const hostOnly = online && !online.host;
+
+  const bidderChips = draft.managers
+    .map((manager) => {
+      const isHigh = manager.id === lot.bidderId;
+      const legality = canBid(draft, manager, nextBid);
+      const seatBlocked = !canActForManager(manager);
+      const disabled = !legality.ok || seatBlocked;
+      const reason = seatBlocked ? "not your seat" : legality.reason;
+      return `<div class="lot-bidder ${isHigh ? "high-bidder" : ""}">
+        <strong>${escapeHtml(manager.name)}</strong>
+        <span>${auctionBudget(draft, manager)} left &middot; max bid ${Math.max(0, auctionMaxBid(draft, manager))}</span>
+        ${isHigh
+          ? `<em>High bidder</em>`
+          : `<button class="small" data-action="bid" data-manager-id="${escapeHtml(manager.id)}" ${disabled ? "disabled" : ""} title="${escapeHtml(reason)}">Bid ${nextBid}</button>`}
+      </div>`;
+    })
+    .join("");
+
+  return `<section class="panel auction-lot">
+    <div class="lot-header">
+      <div>
+        <p class="eyebrow">On the block &middot; nominated by ${escapeHtml(nominator?.name ?? "?")}</p>
+        <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}
+          <span class="lot-player-meta">${escapeHtml(playerPosition(player))} &middot; ${player.points} pts</span></h2>
+      </div>
+      <div class="lot-bid-state">
+        <span class="lot-bid-amount">${lot.bid}</span>
+        <span class="lot-bid-holder">high bid &middot; ${escapeHtml(bidder?.name ?? "?")}</span>
+      </div>
+    </div>
+    <div class="lot-raise-row" role="group" aria-label="Raise amount">
+      <span>Raise by</span>
+      ${raiseOptions
+        .map((amount) => `<button type="button" class="type-pill ${auctionRaise === amount ? "active" : ""}" data-action="raise-amount" data-amount="${amount}">+${amount}</button>`)
+        .join("")}
+      <label class="custom-raise">custom <input type="number" data-raise-custom min="${AUCTION_MIN_RAISE}" step="${AUCTION_MIN_RAISE}" value="${customValue}" placeholder="${AUCTION_MIN_RAISE}" /></label>
+    </div>
+    <div class="lot-bidders">${bidderChips}</div>
+    <div class="lot-actions">
+      <button data-action="sell-lot" ${hostOnly ? "disabled" : ""}>Sell to ${escapeHtml(bidder?.name ?? "?")} for ${lot.bid}</button>
+      ${lot.raises === 0 ? `<button data-action="cancel-lot" ${hostOnly ? "disabled" : ""}>Cancel nomination</button>` : ""}
+    </div>
+  </section>`;
 }
 
 function bindDraftActions() {
@@ -610,6 +712,57 @@ function bindDraftActions() {
       saveState();
       renderDraft();
     }
+    if (action === "nominate") {
+      if (button.disabled) return;
+      auctionRaise = AUCTION_MIN_RAISE;
+      if (state.online) {
+        sendOnlineAction({ type: "nominate", playerId: button.dataset.playerId });
+        return;
+      }
+      nominatePlayer(state.draft, button.dataset.playerId);
+      saveState();
+      renderDraft();
+    }
+    if (action === "raise-amount") {
+      auctionRaise = Math.max(AUCTION_MIN_RAISE, Number(button.dataset.amount) || AUCTION_MIN_RAISE);
+      renderDraft();
+    }
+    if (action === "bid") {
+      if (button.disabled) return;
+      const lot = state.draft.auction?.lot;
+      if (!lot) return;
+      if (state.online) {
+        sendOnlineAction({ type: "bid", managerId: button.dataset.managerId, amount: lot.bid + auctionRaise });
+        return;
+      }
+      placeBid(state.draft, button.dataset.managerId, lot.bid + auctionRaise);
+      saveState();
+      renderDraft();
+    }
+    if (action === "sell-lot") {
+      if (button.disabled) return;
+      auctionRaise = AUCTION_MIN_RAISE;
+      if (state.online) {
+        sendOnlineAction({ type: "sell" });
+        return;
+      }
+      sellLot(state.draft);
+      selectedLineupMove = null;
+      invalidateBatch();
+      saveState();
+      renderDraft();
+    }
+    if (action === "cancel-lot") {
+      if (button.disabled) return;
+      auctionRaise = AUCTION_MIN_RAISE;
+      if (state.online) {
+        sendOnlineAction({ type: "cancel-lot" });
+        return;
+      }
+      cancelLot(state.draft);
+      saveState();
+      renderDraft();
+    }
     if (action === "autopick") {
       if (button.disabled) return;
       if (state.online) {
@@ -664,6 +817,14 @@ function bindDraftActions() {
   };
 
   app.oninput = (event) => {
+    const raiseInput = event.target.closest("[data-raise-custom]");
+    if (raiseInput) {
+      // Commit on change (blur/enter) only, so typing does not re-render away focus.
+      if (event.type !== "change") return;
+      auctionRaise = Math.max(AUCTION_MIN_RAISE, Math.round(Number(raiseInput.value) || AUCTION_MIN_RAISE));
+      renderDraft();
+      return;
+    }
     const input = event.target.closest("[data-filter]");
     if (!input) return;
     state.filters[input.dataset.filter] = input.value;
@@ -2016,9 +2177,12 @@ function renderAdvanceAttempts(attempts) {
 
 function renderRoster(manager, draft) {
   const counts = rosterCounts(manager.roster);
+  const budgetLine = isAuctionDraft(draft)
+    ? ` &middot; ${auctionBudget(draft, manager)} budget left`
+    : "";
   return `<article class="roster">
     <h3>${escapeHtml(manager.name)}</h3>
-    <p>${manager.roster.length}/${draft.rosterSize} drafted</p>
+    <p>${manager.roster.length}/${draft.rosterSize} drafted${budgetLine}</p>
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
       <span class="${counts.starters >= 2 ? "ok" : "warn"}">${counts.starters}/2 starters</span>
@@ -2063,22 +2227,38 @@ function renderMiniRosterSlot(player, slotLabel) {
 }
 
 function renderDraftFocus(draft, manager) {
+  const auction = isAuctionDraft(draft);
+  const lot = auction ? draft.auction.lot : null;
   const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
   const fieldingSums = lineupFieldingSums(manager);
-  const pick = draftPickInfo(draft);
-  const nextNames = upcomingManagers(draft, 4).map((item) => escapeHtml(item.name)).join(" · ");
   const totalPicks = draft.managers.length * draft.rosterSize;
+  const eyebrow = draft.complete
+    ? "Roster view"
+    : auction
+      ? `Lot ${draft.pickNumber + 1} of ${totalPicks}`
+      : `Round ${draftPickInfo(draft).round}, pick ${draftPickInfo(draft).pickInRound}`;
+  const heading = draft.complete
+    ? `${escapeHtml(manager.name)} roster`
+    : auction
+      ? lot
+        ? `${escapeHtml(manager.name)} has a card on the block`
+        : `${escapeHtml(manager.name)} nominates next`
+      : `${escapeHtml(manager.name)} is on the clock`;
+  const nextNames = (auction ? upcomingNominators(draft, 5).slice(1) : upcomingManagers(draft, 4))
+    .map((item) => escapeHtml(item.name))
+    .join(" · ");
   return `<section class="panel draft-focus">
     <div class="draft-focus-main">
-      <p class="eyebrow">${draft.complete ? "Roster view" : `Round ${pick.round}, pick ${pick.pickInRound}`}</p>
-      <h1>${draft.complete ? `${escapeHtml(manager.name)} roster` : `${escapeHtml(manager.name)} is on the clock`}</h1>
+      <p class="eyebrow">${eyebrow}</p>
+      <h1>${heading}</h1>
       <div class="draft-metrics">
-        <span>${draft.pickNumber}/${totalPicks} picks made</span>
+        <span>${draft.pickNumber}/${totalPicks} ${auction ? "cards sold" : "picks made"}</span>
+        ${auction ? `<span>${auctionBudget(draft, manager)} budget left</span>` : ""}
         <span>${totalPoints} pts</span>
         <span>IF ${formatSignedNumber(fieldingSums.infield)}</span>
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
       </div>
-      ${draft.complete ? "" : `<p class="next-up">Next: ${nextNames}</p>`}
+      ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
     </div>
     ${renderRosterSlots(manager, draft)}
   </section>`;
@@ -2502,11 +2682,15 @@ function reviveState(value) {
     : null;
   if (draft) {
     draft.seed = draft.seed ?? value.seed ?? "showdown";
+    draft.draftType = draft.draftType === "auction" ? "auction" : "snake";
     draft.complete = draft.managers.every((manager) => manager.roster.length >= draft.rosterSize);
     // Rooms saved before corners were lumped still carry bare LF/RF labels.
     draft.pool = draft.pool.map(normalizeCardPosition);
     for (const manager of draft.managers) {
       manager.roster = manager.roster.map(normalizeCardPosition);
+    }
+    if (draft.draftType === "auction") {
+      draft.auction = reviveAuction(draft, draft.auction);
     }
   }
   return {
@@ -2515,10 +2699,35 @@ function reviveState(value) {
     rosterSize: 13,
     poolMode: value.poolMode === "real" ? "real" : "random",
     realPool: value.realPool === "mariners" ? "mariners" : "stars",
+    draftType: value.draftType === "auction" ? "auction" : "snake",
+    auctionBudget: normalizeAuctionBudget(value.auctionBudget ?? AUCTION_DEFAULT_BUDGET, 13),
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
     draft,
     view: value.view === "batch" && value.batch ? "batch" : null
+  };
+}
+
+function reviveAuction(draft, auction) {
+  const budget = normalizeAuctionBudget(auction?.budget, draft.rosterSize);
+  const savedBudgets = auction?.budgets ?? {};
+  const budgets = Object.fromEntries(
+    draft.managers.map((manager) => {
+      const saved = Number(savedBudgets[manager.id]);
+      return [manager.id, Number.isFinite(saved) ? saved : budget];
+    })
+  );
+  const nominatorIndex = Math.min(
+    Math.max(0, Math.round(Number(auction?.nominatorIndex) || 0)),
+    draft.managers.length - 1
+  );
+  const lot = auction?.lot?.playerId && !draft.pickedIds.has(auction.lot.playerId) ? auction.lot : null;
+  return {
+    budget,
+    budgets,
+    nominatorIndex,
+    lot,
+    history: Array.isArray(auction?.history) ? auction.history : []
   };
 }

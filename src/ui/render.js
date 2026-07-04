@@ -84,8 +84,9 @@ export function renderDraftHistoryTable(picks) {
   if (!picks.length) {
     return `<p class="empty">No picks made yet.</p>`;
   }
+  const showPrice = picks.some((pick) => pick.price != null);
   const rows = picks
-    .map(({ pickNumber, round, manager, player }) => `<tr class="draft-player-row">
+    .map(({ pickNumber, round, manager, player, price }) => `<tr class="draft-player-row">
         <td class="num">${pickNumber}</td>
         <td class="num">${round}</td>
         <td>${escapeHtml(manager.name)}</td>
@@ -93,6 +94,7 @@ export function renderDraftHistoryTable(picks) {
         <td>${escapeHtml(playerPosition(player))}</td>
         <td class="num">${playerPrimary(player)}</td>
         <td class="num">${player.points}</td>
+        ${showPrice ? `<td class="num">${price ?? ""}</td>` : ""}
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
       </tr>`)
     .join("");
@@ -107,6 +109,7 @@ export function renderDraftHistoryTable(picks) {
         <th>Pos</th>
         <th class="num">OB/CT</th>
         <th class="num">Pts</th>
+        ${showPrice ? `<th class="num">Paid</th>` : ""}
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
       </tr>
     </thead>
