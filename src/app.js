@@ -762,6 +762,8 @@ function renderTournamentStats(games) {
   const stats = aggregateTournamentStats(games, playersById);
   const hitters = stats.hitters.sort(compareTournamentHitters);
   const pitchers = stats.pitchers.sort(compareTournamentPitchers);
+  const baserunning = stats.teams.sort(compareTournamentBaserunning);
+  const defense = [...stats.teams].sort(compareTournamentDefense);
 
   return `<section class="panel tournament-stats-panel">
     <div class="section-title-row">
@@ -793,6 +795,26 @@ function renderTournamentStats(games) {
           <table class="tournament-stat-table">
             <thead><tr><th>Player</th><th>Team</th><th class="num">IP</th><th class="num">BF</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">R</th><th class="num">RA/9</th></tr></thead>
             <tbody>${pitchers.map(renderTournamentPitcherRow).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="team-skill-grid">
+      <div class="stat-table-block">
+        <h3>Baserunning</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table team-stat-table">
+            <thead><tr><th>Team</th><th class="num">SB</th><th class="num">CS</th><th class="num">Adv</th><th class="num">Att</th><th class="num">Adv%</th><th class="num">Tag</th><th class="num">OOB</th></tr></thead>
+            <tbody>${baserunning.map(renderTournamentBaserunningRow).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="stat-table-block">
+        <h3>Defense</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table team-stat-table">
+            <thead><tr><th>Team</th><th class="num">Cut</th><th class="num">Home</th><th class="num">CS</th><th class="num">DP</th><th class="num">Ch</th><th class="num">Stop%</th></tr></thead>
+            <tbody>${defense.map(renderTournamentDefenseRow).join("")}</tbody>
           </table>
         </div>
       </div>
@@ -862,6 +884,31 @@ function renderTournamentPitcherRow(row) {
   </tr>`;
 }
 
+function renderTournamentBaserunningRow(row) {
+  return `<tr>
+    <td>${escapeHtml(row.team)}</td>
+    <td class="num">${row.steals}</td>
+    <td class="num">${row.caughtStealing}</td>
+    <td class="num">${row.advances}</td>
+    <td class="num">${row.advanceAttempts}</td>
+    <td class="num">${formatPercent(row.advances, row.advanceAttempts)}</td>
+    <td class="num">${row.tagAdvances}/${row.tagAttempts}</td>
+    <td class="num">${row.outsOnBases}</td>
+  </tr>`;
+}
+
+function renderTournamentDefenseRow(row) {
+  return `<tr>
+    <td>${escapeHtml(row.team)}</td>
+    <td class="num">${row.cutDowns}</td>
+    <td class="num">${row.homeCutDowns}</td>
+    <td class="num">${row.caughtStealingByDefense}</td>
+    <td class="num">${row.doublePlays}/${row.doublePlayChances}</td>
+    <td class="num">${row.advanceChances}</td>
+    <td class="num">${formatPercent(row.cutDowns, row.advanceChances)}</td>
+  </tr>`;
+}
+
 function renderTournamentPlayerName(row, tagName = "span") {
   if (!row.player) return `<${tagName}>${escapeHtml(row.name)}</${tagName}>`;
   return `<${tagName}
@@ -875,11 +922,13 @@ function renderTournamentPlayerName(row, tagName = "span") {
 function aggregateTournamentStats(games, playersById = new Map()) {
   const hitters = new Map();
   const pitchers = new Map();
+  const teams = new Map();
 
   for (const game of games) {
     for (const side of ["away", "home"]) {
       const teamBox = game.boxScore?.[side];
       if (!teamBox) continue;
+      getTeamSkillLine(teams, teamBox.team);
       for (const line of teamBox.hitters ?? []) {
         const row = getAggregateLine(hitters, line, teamBox.team, {
           pa: 0,
@@ -917,12 +966,108 @@ function aggregateTournamentStats(games, playersById = new Map()) {
         row.r += line.r;
       }
     }
+
+    for (const event of game.events ?? []) {
+      aggregateEventSkillStats(teams, event);
+    }
   }
 
   return {
     hitters: [...hitters.values()],
-    pitchers: [...pitchers.values()]
+    pitchers: [...pitchers.values()],
+    teams: [...teams.values()]
   };
+}
+
+function aggregateEventSkillStats(teams, event) {
+  const battingTeam = event.battingTeam;
+  const pitchingTeam = event.pitchingTeam;
+  const details = event.playDetails;
+  if (!details || !battingTeam || !pitchingTeam) return;
+
+  if (details.kind === "steal" && details.stealAttempt) {
+    trackAdvanceAttempt(teams, battingTeam, pitchingTeam, details.stealAttempt, "steal");
+    return;
+  }
+
+  if (details.kind === "hit") {
+    for (const attempt of details.extraBaseAttempts ?? []) {
+      trackAdvanceAttempt(teams, battingTeam, pitchingTeam, attempt, "hit");
+    }
+    return;
+  }
+
+  if (details.kind === "flyout") {
+    for (const attempt of details.tagUpAttempts ?? []) {
+      trackAdvanceAttempt(teams, battingTeam, pitchingTeam, attempt, "tag");
+    }
+    return;
+  }
+
+  if (details.kind === "groundout" && details.doublePlayAttempt) {
+    const defense = getTeamSkillLine(teams, pitchingTeam);
+    defense.doublePlayChances += 1;
+    if (details.doublePlayAttempt.batterOut) defense.doublePlays += 1;
+  }
+}
+
+function trackAdvanceAttempt(teams, battingTeam, pitchingTeam, attempt, kind) {
+  const offense = getTeamSkillLine(teams, battingTeam);
+  const defense = getTeamSkillLine(teams, pitchingTeam);
+
+  if (kind === "steal") {
+    offense.stealAttempts += 1;
+    if (attempt.safe) {
+      offense.steals += 1;
+      defense.stealsAllowed += 1;
+    } else {
+      offense.caughtStealing += 1;
+      offense.outsOnBases += 1;
+      defense.caughtStealingByDefense += 1;
+    }
+  } else {
+    offense.advanceAttempts += 1;
+    defense.advanceChances += 1;
+    if (kind === "tag") offense.tagAttempts += 1;
+    if (attempt.safe) {
+      offense.advances += 1;
+      defense.advancesAllowed += 1;
+      if (kind === "tag") offense.tagAdvances += 1;
+    } else {
+      offense.outsOnBases += 1;
+      defense.cutDowns += 1;
+      if (attempt.to === "home") defense.homeCutDowns += 1;
+    }
+    return;
+  }
+
+  defense.advanceChances += 1;
+  if (!attempt.safe) defense.cutDowns += 1;
+}
+
+function getTeamSkillLine(map, team) {
+  if (!map.has(team)) {
+    map.set(team, {
+      team,
+      stealAttempts: 0,
+      steals: 0,
+      caughtStealing: 0,
+      advanceAttempts: 0,
+      advances: 0,
+      tagAttempts: 0,
+      tagAdvances: 0,
+      outsOnBases: 0,
+      advanceChances: 0,
+      advancesAllowed: 0,
+      stealsAllowed: 0,
+      cutDowns: 0,
+      homeCutDowns: 0,
+      caughtStealingByDefense: 0,
+      doublePlayChances: 0,
+      doublePlays: 0
+    });
+  }
+  return map.get(team);
 }
 
 function getAggregateLine(map, line, team, stats, playersById = new Map()) {
@@ -963,9 +1108,28 @@ function compareTournamentPitchers(a, b) {
     || a.name.localeCompare(b.name);
 }
 
+function compareTournamentBaserunning(a, b) {
+  return b.advances - a.advances
+    || b.steals - a.steals
+    || a.outsOnBases - b.outsOnBases
+    || a.team.localeCompare(b.team);
+}
+
+function compareTournamentDefense(a, b) {
+  return b.cutDowns - a.cutDowns
+    || b.doublePlays - a.doublePlays
+    || b.caughtStealingByDefense - a.caughtStealingByDefense
+    || a.team.localeCompare(b.team);
+}
+
 function formatAverage(numerator, denominator) {
   if (!denominator) return "---";
   return (numerator / denominator).toFixed(3).replace(/^0/, "");
+}
+
+function formatPercent(numerator, denominator) {
+  if (!denominator) return "---";
+  return `${Math.round((numerator / denominator) * 100)}%`;
 }
 
 function formatRunsPerNine(runs, outs) {

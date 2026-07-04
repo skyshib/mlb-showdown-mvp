@@ -515,6 +515,13 @@ button.roster-slot[draggable="true"]:active {
   gap: 14px;
 }
 
+.team-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
 .stat-table-block {
   min-width: 0;
 }
@@ -532,6 +539,10 @@ button.roster-slot[draggable="true"]:active {
   top: 0;
   z-index: 1;
   background: var(--panel);
+}
+
+.team-stat-table {
+  min-width: 560px;
 }
 
 .wide {
@@ -1114,7 +1125,8 @@ button.roster-slot[draggable="true"]:active {
   }
 
   .leader-grid,
-  .stat-table-grid {
+  .stat-table-grid,
+  .team-skill-grid {
     grid-template-columns: 1fr;
   }
 }
