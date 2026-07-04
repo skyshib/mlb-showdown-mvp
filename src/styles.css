@@ -239,6 +239,18 @@ td span {
   line-height: 1.35;
 }
 
+.pool-suboptions {
+  display: grid;
+  gap: 8px;
+  margin-left: 27px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+
+.pool-mode:has(input[name="poolMode"][value="random"]:checked) .pool-suboptions {
+  opacity: 0.55;
+}
+
 .form-error {
   margin: 0;
   border: 1px solid rgba(143, 49, 71, 0.45);

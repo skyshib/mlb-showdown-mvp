@@ -17,7 +17,7 @@ export const REAL_POOL_SEASON = "2025";
 // describe this pool playing against itself, so the derivation stays
 // self-consistent: an average pool hitter facing an average pool pitcher
 // should reach base at roughly his real-life rate.
-const LEAGUE = {
+export const LEAGUE = {
   obp: 0.312, // approximate 2025 MLB on-base percentage
   poolControl: 4.6, // typical control among this pool's pitchers
   poolOnBase: 11, // typical on-base among this pool's hitters
@@ -128,8 +128,8 @@ const PITCHER_ROWS = [
 ];
 
 export function buildRealPlayerPool() {
-  const hitters = HITTER_ROWS.map(makeRealHitter);
-  const pitchers = PITCHER_ROWS.map(makeRealPitcher);
+  const hitters = HITTER_ROWS.map((row) => makeRealHitter(row));
+  const pitchers = PITCHER_ROWS.map((row) => makeRealPitcher(row));
   return [...hitters, ...pitchers].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
 }
 
@@ -148,8 +148,13 @@ export function maxRealPoolManagers(pool = buildRealPlayerPool()) {
   );
 }
 
-function makeRealHitter([name, team, position, bats, speed, fielding, pa, h, doubles, triples, hr, bb, so]) {
-  const obp = (h + bb) / pa;
+// Other pools reuse the card math via options: idPrefix/idSuffix keep ids
+// unique across pools (and across two cards of the same player), and obpShift
+// re-centers a stat line from another run environment onto the LEAGUE
+// baseline before rates become card numbers (see marinersPlayers.js).
+export function makeRealHitter(row, { idPrefix = "real-h", idSuffix = "", obpShift = 0 } = {}) {
+  const [name, team, position, bats, speed, fielding, pa, h, doubles, triples, hr, bb, so] = row;
+  const obp = (h + bb) / pa - obpShift;
   const onBase = clamp(Math.round(10.5 + (obp - LEAGUE.obp) * 25), 7, 16);
   const hitterChartProb = clamp((onBase - LEAGUE.poolControl) / 20, 0.05, 0.95);
   const onBaseShare = clamp(
@@ -181,7 +186,7 @@ function makeRealHitter([name, team, position, bats, speed, fielding, pa, h, dou
   ]);
 
   return {
-    id: `real-h-${slug(name)}`,
+    id: `${idPrefix}-${slug(name)}${idSuffix ? `-${idSuffix}` : ""}`,
     kind: "hitter",
     name,
     team,
@@ -195,9 +200,10 @@ function makeRealHitter([name, team, position, bats, speed, fielding, pa, h, dou
   };
 }
 
-function makeRealPitcher([name, team, role, throws, inningsPitched, gs, h, hr, bb, so]) {
+export function makeRealPitcher(row, { idPrefix = "real-p", idSuffix = "", obpShift = 0 } = {}) {
+  const [name, team, role, throws, inningsPitched, gs, h, hr, bb, so] = row;
   const battersFaced = Math.round(3 * inningsPitched + h + bb);
-  const obpAllowed = (h + bb) / battersFaced;
+  const obpAllowed = (h + bb) / battersFaced - obpShift;
   const control = clamp(Math.round(3.2 + (0.3 - obpAllowed) * 28), 0, 6);
   const hitterChartProb = clamp((LEAGUE.poolOnBase - control) / 20, 0.05, 0.95);
   const onBaseShare = clamp(
@@ -232,7 +238,7 @@ function makeRealPitcher([name, team, role, throws, inningsPitched, gs, h, hr, b
   const ip = role === "SP" ? clamp(Math.round(inningsPitched / Math.max(1, gs)), 5, 8) : 1;
 
   return {
-    id: `real-p-${slug(name)}`,
+    id: `${idPrefix}-${slug(name)}${idSuffix ? `-${idSuffix}` : ""}`,
     kind: "pitcher",
     name,
     team,

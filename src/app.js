@@ -1,5 +1,6 @@
 import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-real-players";
 import { buildRealPlayerPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
+import { buildMarinersPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners";
 import {
   autopick,
   assignLineupSlots,
@@ -48,6 +49,10 @@ const REAL_POOL_INFO = (() => {
   const pool = buildRealPlayerPool();
   return { size: pool.length, managerLimit: maxRealPoolManagers(pool) };
 })();
+const MARINERS_POOL_INFO = (() => {
+  const pool = buildMarinersPool();
+  return { size: pool.length, managerLimit: maxRealPoolManagers(pool) };
+})();
 const app = document.querySelector("#app");
 const cardPreview = document.createElement("div");
 cardPreview.className = "hover-card-preview";
@@ -67,6 +72,7 @@ function defaultState() {
     seed: "coefficient-classic",
     managers: ["Kasey", "Milo", "Nico", "Rafa"],
     poolMode: "random",
+    realPool: "stars",
     rosterSize: 13,
     draft: null,
     draftTab: "available",
@@ -151,8 +157,18 @@ function renderSetup(setupError = "") {
         </label>
         <label class="pool-option">
           <input type="radio" name="poolMode" value="real" ${state.poolMode === "real" ? "checked" : ""} />
-          <span><strong>Real MLB players</strong><small>${REAL_POOL_INFO.size} stars with cards built from approximate ${REAL_POOL_SEASON} stats. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
+          <span><strong>Real MLB players</strong><small>Cards built from real stat lines. Pick a pool below.</small></span>
         </label>
+        <div class="pool-suboptions">
+          <label class="pool-option">
+            <input type="radio" name="realPool" value="stars" ${state.realPool === "mariners" ? "" : "checked"} />
+            <span><strong>${REAL_POOL_SEASON} stars</strong><small>${REAL_POOL_INFO.size} standouts from around today's league, from approximate ${REAL_POOL_SEASON} stats. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
+          </label>
+          <label class="pool-option">
+            <input type="radio" name="realPool" value="mariners" ${state.realPool === "mariners" ? "checked" : ""} />
+            <span><strong>Mariners, every era</strong><small>${MARINERS_POOL_INFO.size} M's cards from ${MARINERS_POOL_ERAS} — Junior, Edgar, the Big Unit, Ichiro, Big Dumper. Up to ${MARINERS_POOL_INFO.managerLimit} managers.</small></span>
+          </label>
+        </div>
       </fieldset>
       ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
       <button type="submit">Start draft</button>
@@ -163,7 +179,14 @@ function renderSetup(setupError = "") {
     <p>Control roll is d20 plus pitcher control versus hitter on-base. Higher than on-base uses the pitcher chart; ties go to the hitter. Baserunning is simplified and documented in <code>docs/rules.md</code>.</p>
   </section>`;
 
-  document.querySelector("#setup-form").addEventListener("submit", (event) => {
+  const setupForm = document.querySelector("#setup-form");
+  // Picking a real-pool flavor implies the real mode; keep the parent radio in sync.
+  setupForm.addEventListener("change", (event) => {
+    if (event.target.name === "realPool") {
+      setupForm.querySelector('input[name="poolMode"][value="real"]').checked = true;
+    }
+  });
+  setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const managers = dedupeManagerNames(
@@ -176,14 +199,18 @@ function renderSetup(setupError = "") {
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
     state.rosterSize = 13;
     state.poolMode = form.get("poolMode") === "real" ? "real" : "random";
-    if (state.poolMode === "real" && state.managers.length > REAL_POOL_INFO.managerLimit) {
+    state.realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
+    const realPoolInfo = state.realPool === "mariners" ? MARINERS_POOL_INFO : REAL_POOL_INFO;
+    if (state.poolMode === "real" && state.managers.length > realPoolInfo.managerLimit) {
       renderSetup(
-        `The real player pool has position depth for up to ${REAL_POOL_INFO.managerLimit} managers. Trim the manager list or draft fictional randoms.`
+        `The ${state.realPool === "mariners" ? "all-era Mariners" : "real player"} pool has position depth for up to ${realPoolInfo.managerLimit} managers. Trim the manager list or pick a different pool.`
       );
       return;
     }
     const pool = state.poolMode === "real"
-      ? buildRealPlayerPool()
+      ? state.realPool === "mariners"
+        ? buildMarinersPool()
+        : buildRealPlayerPool()
       : generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
     state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed);
     state.tournament = null;
@@ -2139,6 +2166,7 @@ function reviveState(value) {
     ...value,
     rosterSize: 13,
     poolMode: value.poolMode === "real" ? "real" : "random",
+    realPool: value.realPool === "mariners" ? "mariners" : "stars",
     filters,
     batchSorts,
     draft,
