@@ -38,7 +38,7 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260705-sortable-season-stats";
+} from "./rules/batch.js?v=20260705-caught-stealing-stats";
 import { simulateRoundRobin } from "./rules/tournament.js?v=20260704-player-rate-stats";
 import {
   basesText,
@@ -52,7 +52,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260705-sortable-season-stats";
+} from "./ui/render.js?v=20260705-caught-stealing-stats";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const REAL_POOL_INFO = (() => {
@@ -1051,6 +1051,7 @@ function renderBatch() {
         <td class="num">${formatSeasonCount(batchPace(line, "rPer162", "r", teamGamesByName))}</td>
         <td class="num">${formatSeasonCount(batchPace(line, "rbiPer162", "rbi", teamGamesByName))}</td>
         <td class="num">${formatSeasonCount(batchPace(line, "sbPer162", "sb", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "csPer162", "cs", teamGamesByName))}</td>
         <td class="num">${formatPercent(line.bb, line.pa, 1)}</td>
         <td class="num">${formatPercent(line.so, line.pa, 1)}</td>
         <td class="num">${formatAverage(totalBases(line) - line.h, line.ab)}</td>
@@ -1133,6 +1134,7 @@ function renderBatch() {
             ${renderBatchSortHeader("hitters", "r162", "R/162", "num")}
             ${renderBatchSortHeader("hitters", "rbi162", "RBI/162", "num")}
             ${renderBatchSortHeader("hitters", "sb162", "SB/162", "num")}
+            ${renderBatchSortHeader("hitters", "cs162", "CS/162", "num")}
             ${renderBatchSortHeader("hitters", "bbRate", "BB%", "num")}
             ${renderBatchSortHeader("hitters", "kRate", "K%", "num")}
             ${renderBatchSortHeader("hitters", "iso", "ISO", "num")}
@@ -1232,6 +1234,7 @@ function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
   if (sort === "r162") return batchPace(line, "rPer162", "r", teamGamesByName);
   if (sort === "rbi162") return batchPace(line, "rbiPer162", "rbi", teamGamesByName);
   if (sort === "sb162") return batchPace(line, "sbPer162", "sb", teamGamesByName);
+  if (sort === "cs162") return batchPace(line, "csPer162", "cs", teamGamesByName);
   if (sort === "bbRate") return rateValue(line.bb, line.pa);
   if (sort === "kRate") return rateValue(line.so, line.pa);
   if (sort === "iso") return rateValue(totalBases(line) - line.h, line.ab);
@@ -1431,7 +1434,7 @@ function renderTournamentStats(games) {
         <h3>Hitters</h3>
         <div class="table-scroll">
           <table class="tournament-stat-table">
-            <thead><tr><th>Player</th><th>Team</th><th class="num">PA</th><th class="num">HR</th><th class="num">R</th><th class="num">RBI</th><th class="num">SB</th><th class="num">BB%</th><th class="num">K%</th><th class="num">ISO</th><th class="num">BABIP</th><th class="num">AVG</th><th class="num">OBP</th><th class="num">SLG</th><th class="num">wOBA</th><th class="num">wRC+</th></tr></thead>
+            <thead><tr><th>Player</th><th>Team</th><th class="num">PA</th><th class="num">HR</th><th class="num">R</th><th class="num">RBI</th><th class="num">SB</th><th class="num">CS</th><th class="num">BB%</th><th class="num">K%</th><th class="num">ISO</th><th class="num">BABIP</th><th class="num">AVG</th><th class="num">OBP</th><th class="num">SLG</th><th class="num">wOBA</th><th class="num">wRC+</th></tr></thead>
             <tbody>${hitters.map((row) => renderTournamentHitterRow(row, leagueWoba)).join("")}</tbody>
           </table>
         </div>
@@ -1509,6 +1512,7 @@ function renderTournamentHitterRow(row, leagueWoba) {
     <td class="num">${row.r}</td>
     <td class="num">${row.rbi}</td>
     <td class="num">${row.sb}</td>
+    <td class="num">${row.cs}</td>
     <td class="num">${formatPercent(row.bb, row.pa, 1)}</td>
     <td class="num">${formatPercent(row.so, row.pa, 1)}</td>
     <td class="num">${formatAverage(totalBases(row) - row.h, row.ab)}</td>

@@ -98,6 +98,7 @@ export function summarizeBatch(state) {
         rPer162: per162(line.r, line.teamGames),
         rbiPer162: per162(line.rbi, line.teamGames),
         sbPer162: per162(line.sb, line.teamGames),
+        csPer162: per162(line.cs, line.teamGames),
         hrPerSeason: rate(line.hr, state.runs),
         rbiPerSeason: rate(line.rbi, state.runs)
       };
