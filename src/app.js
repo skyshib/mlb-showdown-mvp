@@ -6,9 +6,11 @@ import {
   buildTeam,
   canPlayerFillLineupSlot,
   canPickPlayer,
+  CORNER_OUTFIELD_POSITION,
   createDraft,
   currentManager,
   getRosterNeeds,
+  isCornerOutfielder,
   lineupStatus,
   pickPlayer,
   staffStatus,
@@ -1366,7 +1368,6 @@ function renderLineupSlot(player, slotLabel, manager) {
 function rosterSlotDescription(player, slotLabel) {
   if (player.kind === "pitcher") return playerPosition(player);
   if (slotLabel === "1B" && player.position !== "1B") return `${player.position} at 1B | Field -1`;
-  if ((slotLabel === "LF" || slotLabel === "RF") && player.position !== slotLabel) return `${player.position} at ${slotLabel}`;
   return playerPosition(player);
 }
 
@@ -1446,7 +1447,7 @@ function findRosterPlayer(managerId, playerId) {
 function renderFilters() {
   const positions = state.filters.type === "pitcher"
     ? ["all", "SP", "RP"]
-    : ["all", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+    : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF"];
   const sortOptions = [
     ["points", "Best points"],
     ["primary", "Best OB/CTRL"],
@@ -1520,10 +1521,15 @@ function filteredPlayers(players) {
   const search = state.filters.search.trim().toLowerCase();
   return players.filter((player) => {
     if (player.kind !== state.filters.type) return false;
-    if (state.filters.position !== "all" && playerPosition(player) !== state.filters.position) return false;
+    if (state.filters.position !== "all" && !matchesPositionFilter(player, state.filters.position)) return false;
     if (search && !`${player.name} ${playerPosition(player)} ${player.kind}`.toLowerCase().includes(search)) return false;
     return true;
   });
+}
+
+function matchesPositionFilter(player, filterPosition) {
+  if (filterPosition === CORNER_OUTFIELD_POSITION) return isCornerOutfielder(playerPosition(player));
+  return playerPosition(player) === filterPosition;
 }
 
 function assignPlayersToSlots(players, labels, labelForPlayer) {

@@ -3,7 +3,20 @@ import { createValuationModel } from "./valuation.js";
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
 const EXACT_REQUIRED_POSITIONS = ["C", "2B", "3B", "SS", "CF"];
-const CORNER_OUTFIELD_POSITIONS = ["LF", "RF"];
+const CORNER_OUTFIELD_SLOTS = ["LF", "RF"];
+export const CORNER_OUTFIELD_POSITION = "LF/RF";
+
+// Corner outfielders are one group: an LF/RF card plays either corner at the
+// same fielding score. Bare "LF"/"RF" card positions are accepted for
+// hand-built pools that still label the corners separately.
+export function isCornerOutfielder(position) {
+  return position === CORNER_OUTFIELD_POSITION || CORNER_OUTFIELD_SLOTS.includes(position);
+}
+
+function positionMatchesSlot(position, label) {
+  if (CORNER_OUTFIELD_SLOTS.includes(label)) return isCornerOutfielder(position);
+  return position === label;
+}
 const HITTER_TARGET = 9;
 const STARTER_TARGET = 2;
 const BULLPEN_TARGET = 2;
@@ -220,7 +233,7 @@ export function lineupStatus(roster) {
   }
   const missingPositions = assigned.slots.filter((slot) => slot.label !== "DH" && !slot.player).map((slot) => slot.label);
   const duplicatePositions = assigned.slots
-    .filter((slot) => slot.player && slot.player.position !== slot.label && slot.label !== "DH")
+    .filter((slot) => slot.player && !positionMatchesSlot(slot.player.position, slot.label) && slot.label !== "DH")
     .map((slot) => `${slot.player.position}->${slot.label}`);
   const extraDuplicates = assigned.extras.map((player) => player.position);
 
@@ -249,10 +262,8 @@ export function assignLineupSlots(roster, assignments = {}) {
     assignFirst(slots, used, label, hitters.find((player) => player.position === label && !used.has(player.id)));
   }
 
-  for (const label of CORNER_OUTFIELD_POSITIONS) {
-    const exactCorner = hitters.find((player) => player.position === label && !used.has(player.id));
-    const otherCorner = hitters.find((player) => CORNER_OUTFIELD_POSITIONS.includes(player.position) && !used.has(player.id));
-    assignFirst(slots, used, label, exactCorner ?? otherCorner);
+  for (const label of CORNER_OUTFIELD_SLOTS) {
+    assignFirst(slots, used, label, hitters.find((player) => isCornerOutfielder(player.position) && !used.has(player.id)));
   }
 
   const exactFirstBase = hitters.find((player) => player.position === "1B" && !used.has(player.id));
@@ -272,8 +283,7 @@ export function canPlayerFillLineupSlot(player, label) {
   if (player?.kind !== "hitter") return false;
   if (label === "DH") return true;
   if (label === "1B") return true;
-  if (CORNER_OUTFIELD_POSITIONS.includes(label)) return CORNER_OUTFIELD_POSITIONS.includes(player.position);
-  return player.position === label;
+  return positionMatchesSlot(player.position, label);
 }
 
 function repairManagerRoster(draft, manager) {
@@ -288,7 +298,7 @@ function repairManagerRoster(draft, manager) {
     const replacement = availablePlayers(draft)
       .filter((player) => player.kind === neededKind)
       .filter((player) => !neededRole || pitcherRole(player) === neededRole)
-      .filter((player) => !neededPosition || player.position === neededPosition)
+      .filter((player) => !neededPosition || positionMatchesSlot(player.position, neededPosition))
       .filter((player) => neededKind !== "hitter" || canAddHitterToLineup(manager.roster, player).ok)
       .sort((a, b) => b.points - a.points)[0] ?? makeEmergencyReplacement(draft, manager, neededKind, neededRole, neededPosition);
 
@@ -347,7 +357,7 @@ function addRosterDemand(demand, roster) {
   const needs = getRosterNeeds(roster);
   for (const position of lineup.missingPositions) {
     if (EXACT_REQUIRED_POSITIONS.includes(position)) demand.positions[position] += 1;
-    if (CORNER_OUTFIELD_POSITIONS.includes(position)) demand.cornerOutfield += 1;
+    if (CORNER_OUTFIELD_SLOTS.includes(position)) demand.cornerOutfield += 1;
   }
   demand.hitters += needs.hitter;
   demand.starter += needs.starter;
@@ -365,7 +375,7 @@ function leagueSupply(players) {
     if (player.kind === "hitter") {
       hitters += 1;
       if (EXACT_REQUIRED_POSITIONS.includes(player.position)) positions[player.position] += 1;
-      if (CORNER_OUTFIELD_POSITIONS.includes(player.position)) cornerOutfield += 1;
+      if (isCornerOutfielder(player.position)) cornerOutfield += 1;
     } else if (pitcherRole(player) === "SP") {
       starter += 1;
     } else {
@@ -387,15 +397,16 @@ function makeEmergencyReplacement(draft, manager, neededKind, neededRole, needed
 }
 
 function makeEmergencyHitter(index, teamName, position) {
+  const cardPosition = CORNER_OUTFIELD_SLOTS.includes(position) ? CORNER_OUTFIELD_POSITION : position;
   return {
     id: `emergency-h-${index}`,
     kind: "hitter",
-    name: `${teamName} Replacement ${position}`,
-    position,
+    name: `${teamName} Replacement ${cardPosition}`,
+    position: cardPosition,
     bats: "R",
     onBase: 8,
     speed: 8,
-    fielding: emergencyFielding(position),
+    fielding: emergencyFielding(cardPosition),
     points: 180,
     chart: [
       { from: 1, to: 3, result: "SO" },
@@ -474,7 +485,7 @@ function positionDropoffs(players, values) {
 
 function positionGroup(player) {
   if (player.kind === "pitcher") return `pitcher-${pitcherRole(player)}`;
-  if (CORNER_OUTFIELD_POSITIONS.includes(player.position)) return "hitter-LF/RF";
+  if (isCornerOutfielder(player.position)) return `hitter-${CORNER_OUTFIELD_POSITION}`;
   return `hitter-${player.position}`;
 }
 
@@ -488,7 +499,7 @@ function managerNeedsPositionGroup(manager, player, needs) {
   if (player.kind === "pitcher") return pitcherNeed(player, needs) > 0;
   if (needs.hitter <= 0) return false;
   const lineup = lineupStatus(manager.roster);
-  if (CORNER_OUTFIELD_POSITIONS.includes(player.position)) {
+  if (isCornerOutfielder(player.position)) {
     return lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF");
   }
   return lineup.missingPositions.includes(player.position);
@@ -535,7 +546,7 @@ function hitterPositionBonus(roster, player) {
   if (player.kind !== "hitter") return 0;
   const lineup = lineupStatus(roster);
   if (lineup.missingPositions.includes(player.position)) return 60;
-  if (CORNER_OUTFIELD_POSITIONS.includes(player.position) && (lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF"))) return 60;
+  if (isCornerOutfielder(player.position) && (lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF"))) return 60;
   if (lineup.missingPositions.includes("1B")) return 20;
   if (!lineup.dhFilled) return 15;
   return 0;

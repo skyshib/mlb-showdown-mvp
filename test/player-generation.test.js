@@ -8,9 +8,8 @@ const FIELDING_RANGES = {
   "2B": [0, 6],
   "3B": [0, 3],
   SS: [0, 6],
-  LF: [0, 2],
-  CF: [1, 3],
-  RF: [0, 2]
+  "LF/RF": [0, 2],
+  CF: [1, 3]
 };
 
 test("generated players use distribution-built charts instead of archetypes", () => {
@@ -45,7 +44,7 @@ test("generated player pools do not repeat full names", () => {
   assert.equal(new Set(names).size, names.length);
 });
 
-test("generated player pools include two players per team at every hitter position", () => {
+test("generated player pools include two players per team per lineup slot at every hitter position", () => {
   const teamCount = 2;
   const pool = generatePlayerPool("position-depth-check", teamCount, 13);
   const hitters = pool.filter((player) => player.kind === "hitter");
@@ -55,15 +54,15 @@ test("generated player pools include two players per team at every hitter positi
     positionCounts[hitter.position] += 1;
   }
 
+  // LF/RF covers two lineup slots, so its bucket is twice as deep.
   assert.deepEqual(positionCounts, {
     C: 4,
     "1B": 4,
     "2B": 4,
     "3B": 4,
     SS: 4,
-    LF: 4,
-    CF: 4,
-    RF: 4
+    "LF/RF": 8,
+    CF: 4
   });
 });
 

@@ -464,16 +464,18 @@ const LAST_NAMES = [
   "Zapata"
 ];
 
-const POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+const POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF"];
+// Corner outfielders are one interchangeable group covering two lineup slots,
+// so their bucket generates twice as many copies as single-slot positions.
+const POSITION_POOL_MULTIPLIER = { "LF/RF": 2 };
 const FIELDING_DISTRIBUTIONS = {
   C: { min: 1, max: 10, mean: 6, sd: 1.5 },
   "1B": { min: 0, max: 1, mean: 0.5, sd: 0.5 },
   "2B": { min: 0, max: 6, mean: 2.5, sd: 1.5 },
   "3B": { min: 0, max: 3, mean: 1.5, sd: 1 },
   SS: { min: 0, max: 6, mean: 3, sd: 1.5 },
-  LF: { min: 0, max: 2, mean: 1, sd: 2 / 3 },
-  CF: { min: 1, max: 3, mean: 2, sd: 2 / 3 },
-  RF: { min: 0, max: 2, mean: 1, sd: 2 / 3 }
+  "LF/RF": { min: 0, max: 2, mean: 1, sd: 2 / 3 },
+  CF: { min: 1, max: 3, mean: 2, sd: 2 / 3 }
 };
 
 const SPEED_MEANS = {
@@ -482,9 +484,8 @@ const SPEED_MEANS = {
   "2B": 12,
   "3B": 11,
   SS: 12,
-  LF: 12,
-  CF: 14,
-  RF: 12
+  "LF/RF": 12,
+  CF: 14
 };
 
 export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
@@ -498,7 +499,8 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
   let pitcherCount = 0;
 
   for (const position of POSITIONS) {
-    for (let copy = 0; copy < hitterCopiesPerPosition; copy += 1) {
+    const copies = hitterCopiesPerPosition * (POSITION_POOL_MULTIPLIER[position] ?? 1);
+    for (let copy = 0; copy < copies; copy += 1) {
       hitterCount += 1;
       players.push(makeHitterCard(rng, hitterCount, usedNames, position));
     }

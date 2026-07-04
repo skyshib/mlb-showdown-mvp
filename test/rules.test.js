@@ -638,6 +638,44 @@ test("corner outfielders can fill left or right field", () => {
   assert.equal(slots.find((slot) => slot.label === "RF").player.name, "Left Two");
 });
 
+test("combined LF/RF cards cover both corners at the same fielding score", () => {
+  const manager = {
+    name: "Combined Corners",
+    roster: [
+      makeHitter({ id: "combo-c", position: "C" }),
+      makeHitter({ id: "combo-1b", position: "1B" }),
+      makeHitter({ id: "combo-2b", position: "2B" }),
+      makeHitter({ id: "combo-3b", position: "3B" }),
+      makeHitter({ id: "combo-ss", position: "SS" }),
+      makeHitter({ id: "combo-cf", position: "CF" }),
+      makeHitter({ id: "combo-corner-a", name: "Corner One", position: "LF/RF", fielding: 2 }),
+      makeHitter({ id: "combo-corner-b", name: "Corner Two", position: "LF/RF", fielding: 1 }),
+      makeHitter({ id: "combo-dh", position: "C" }),
+      makePitcher({ id: "combo-sp-1", role: "SP" }),
+      makePitcher({ id: "combo-sp-2", role: "SP" }),
+      makePitcher({ id: "combo-rp-1", role: "RP", ip: 1 }),
+      makePitcher({ id: "combo-rp-2", role: "RP", ip: 1 })
+    ]
+  };
+
+  assert.deepEqual(validateRoster(manager), []);
+
+  const team = buildTeam(manager);
+  const leftField = team.lineup.find((player) => player.defensivePosition === "LF");
+  const rightField = team.lineup.find((player) => player.defensivePosition === "RF");
+  assert.equal(leftField.id, "combo-corner-a");
+  assert.equal(leftField.fielding, 2);
+  assert.equal(rightField.id, "combo-corner-b");
+  assert.equal(rightField.fielding, 1);
+
+  const swapped = buildTeam({
+    ...manager,
+    lineupAssignments: { LF: "combo-corner-b", RF: "combo-corner-a" }
+  });
+  assert.equal(swapped.lineup.find((player) => player.defensivePosition === "LF").fielding, 1);
+  assert.equal(swapped.lineup.find((player) => player.defensivePosition === "RF").fielding, 2);
+});
+
 test("any hitter can cover first base with literal minus-one fielding", () => {
   const manager = {
     name: "First Base Fallback",
