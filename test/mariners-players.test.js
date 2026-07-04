@@ -45,8 +45,8 @@ test("mariners pool covers every era of the franchise", () => {
   }
 });
 
-test("mariners pool supports at least five managers with legal position supply", () => {
-  assert.ok(maxRealPoolManagers(buildMarinersPool()) >= 5, "pool should support five-manager rooms");
+test("mariners pool supports at least six managers with legal position supply", () => {
+  assert.ok(maxRealPoolManagers(buildMarinersPool()) >= 6, "pool should support six-manager rooms");
 });
 
 test("franchise legends grade out like legends across eras", () => {
@@ -96,9 +96,9 @@ test("mariners pool drafts to completion and simulates a tournament", () => {
   assert.ok(tournament.games.length > 0);
 });
 
-test("mariners pool drafts to completion at the five-manager maximum", () => {
+test("mariners pool drafts to completion at the six-manager maximum", () => {
   const pool = buildMarinersPool();
-  const managers = ["A", "B", "C", "D", "E"];
+  const managers = ["A", "B", "C", "D", "E", "F"];
   const draft = createDraft(managers, pool, 13);
   while (!draft.complete) autopick(draft);
   for (const manager of draft.managers) {
