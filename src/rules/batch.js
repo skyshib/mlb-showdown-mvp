@@ -31,6 +31,7 @@ export function createBatchState(teams) {
       team: team.name,
       titles: 0,
       finalsAppearances: 0,
+      games: 0,
       wins: [],
       losses: [],
       runsFor: [],
@@ -72,6 +73,7 @@ export function summarizeBatch(state) {
       team: row.team,
       titleShare: rate(row.titles, state.runs),
       finalsShare: rate(row.finalsAppearances, state.runs),
+      games: row.games,
       wins: distribution(row.wins),
       losses: distribution(row.losses),
       runsFor: distribution(row.runsFor),
@@ -91,6 +93,11 @@ export function summarizeBatch(state) {
         obp,
         slg,
         ops: obp + slg,
+        paPer162: per162(line.pa, line.teamGames),
+        hrPer162: per162(line.hr, line.teamGames),
+        rPer162: per162(line.r, line.teamGames),
+        rbiPer162: per162(line.rbi, line.teamGames),
+        sbPer162: per162(line.sb, line.teamGames),
         hrPerSeason: rate(line.hr, state.runs),
         rbiPerSeason: rate(line.rbi, state.runs)
       };
@@ -100,6 +107,7 @@ export function summarizeBatch(state) {
   const pitchers = [...state.pitchers.values()]
     .map((line) => ({
       ...line,
+      ipPer162: per162(line.outs / 3, line.teamGames),
       inningsPerSeason: rate(line.outs, state.runs * 3),
       runsPerNine: rate(line.r * 27, line.outs),
       strikeoutsPerNine: rate(line.so * 27, line.outs),
@@ -147,6 +155,14 @@ function foldTournament(state, result) {
 
 function foldBoxScore(state, teamBox) {
   if (!teamBox) return;
+  const team = state.teams.get(teamBox.team);
+  if (team) team.games += 1;
+  for (const row of state.hitters.values()) {
+    if (row.team === teamBox.team) row.teamGames += 1;
+  }
+  for (const row of state.pitchers.values()) {
+    if (row.team === teamBox.team) row.teamGames += 1;
+  }
   for (const line of teamBox.hitters) {
     const row = state.hitters.get(line.id);
     if (!row) continue;
@@ -183,6 +199,7 @@ function registerHitter(state, teamName, player) {
     name: player.name,
     team: teamName,
     position: player.cardPosition ?? player.position,
+    teamGames: 0,
     pa: 0,
     ab: 0,
     h: 0,
@@ -205,6 +222,7 @@ function registerPitcher(state, teamName, player) {
     name: player.name,
     team: teamName,
     role: player.role === "SP" ? "SP" : "RP",
+    teamGames: 0,
     bf: 0,
     outs: 0,
     h: 0,
@@ -213,4 +231,8 @@ function registerPitcher(state, teamName, player) {
     hr: 0,
     r: 0
   });
+}
+
+function per162(total, games) {
+  return rate(total * 162, games);
 }

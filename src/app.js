@@ -27,7 +27,7 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260705-season-stats-hover";
+} from "./rules/batch.js?v=20260705-season-162-stats";
 import { simulateRoundRobin } from "./rules/tournament.js?v=20260704-player-rate-stats";
 import {
   basesText,
@@ -41,7 +41,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260705-season-overall-stats";
+} from "./ui/render.js?v=20260705-season-162-stats";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const REAL_POOL_INFO = (() => {
@@ -700,6 +700,7 @@ function renderBatch() {
   const playersById = draftedPlayersById();
   const leagueWoba = tournamentWoba(summary.hitters);
   const fipConstant = tournamentFipConstant(summary.pitchers);
+  const teamGamesByName = new Map(summary.teams.map((row) => [row.team, row.games ?? teamScheduleGames(row)]));
 
   const teamRows = summary.teams
     .map(
@@ -708,10 +709,10 @@ function renderBatch() {
         <td><strong>${escapeHtml(row.team)}</strong></td>
         <td class="num">${formatShare(row.titleShare)}</td>
         <td class="num">${formatShare(row.finalsShare)}</td>
-        <td class="num">${formatDistributionTotal(row.wins)}</td>
-        <td class="num">${formatDistributionTotal(row.losses)}</td>
-        <td class="num">${formatDistributionTotal(row.runsFor)}</td>
-        <td class="num">${formatDistributionTotal(row.runsAgainst)}</td>
+        <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.wins), teamScheduleGames(row)))}</td>
+        <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.losses), teamScheduleGames(row)))}</td>
+        <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.runsFor), teamScheduleGames(row)))}</td>
+        <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.runsAgainst), teamScheduleGames(row)))}</td>
       </tr>`
     )
     .join("");
@@ -723,11 +724,11 @@ function renderBatch() {
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.position ?? "")}</td>
-        <td class="num">${line.pa}</td>
-        <td class="num">${line.hr}</td>
-        <td class="num">${line.r ?? 0}</td>
-        <td class="num">${line.rbi}</td>
-        <td class="num">${line.sb ?? 0}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "paPer162", "pa", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "hrPer162", "hr", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "rPer162", "r", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "rbiPer162", "rbi", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "sbPer162", "sb", teamGamesByName))}</td>
         <td class="num">${formatPercent(line.bb, line.pa, 1)}</td>
         <td class="num">${formatPercent(line.so, line.pa, 1)}</td>
         <td class="num">${formatAverage(totalBases(line) - line.h, line.ab)}</td>
@@ -749,7 +750,7 @@ function renderBatch() {
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.role)}</td>
-        <td class="num">${formatInnings(line.outs)}</td>
+        <td class="num">${formatDecimal(batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3), 1)}</td>
         <td class="num">${formatPerNine(line.so, line.outs)}</td>
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
@@ -776,29 +777,29 @@ function renderBatch() {
     <div class="panel">
       <p class="eyebrow">${runs} simulated seasons</p>
       <h1>${escapeHtml(top.team)} had the best draft</h1>
-      <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons. Team and player stats below are totals across every simulated game; the title is decided by the final. Same room seed replays the same seasons, so tweak lineups and run again to compare.</p>
+      <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons. Team and player counting stats below are normalized to a 162-game season; the title is decided by the final. Same room seed replays the same seasons, so tweak lineups and run again to compare.</p>
       <table>
-        <thead><tr><th>#</th><th>Team</th><th>Title</th><th>Final</th><th class="num">W</th><th class="num">L</th><th class="num">RF</th><th class="num">RA</th></tr></thead>
+        <thead><tr><th>#</th><th>Team</th><th>Title</th><th>Final</th><th class="num">W/162</th><th class="num">L/162</th><th class="num">RF/162</th><th class="num">RA/162</th></tr></thead>
         <tbody>${teamRows}</tbody>
       </table>
       <div class="award-grid">
         ${renderAwardCard("Sim MVP", mvp, `${formatBattingStat(mvp?.ops)} OPS`, playersById)}
         ${renderAwardCard("Sim ace", ace, `${(ace?.runsPerNine ?? 0).toFixed(2)} RA/9`, playersById)}
-        ${renderAwardCard("HR king", hrKing, `${hrKing?.hr ?? 0} HR`, playersById)}
+        ${renderAwardCard("HR king", hrKing, `${formatSeasonCount(batchPace(hrKing, "hrPer162", "hr", teamGamesByName))} HR/162`, playersById)}
       </div>
     </div>
     <div class="panel wide">
-      <h2>Hitters, all seasons combined</h2>
+      <h2>Hitters, 162-game pace</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th class="num">PA</th><th class="num">HR</th><th class="num">R</th><th class="num">RBI</th><th class="num">SB</th><th class="num">BB%</th><th class="num">K%</th><th class="num">ISO</th><th class="num">BABIP</th><th class="num">AVG</th><th class="num">OBP</th><th class="num">SLG</th><th class="num">OPS</th><th class="num">wOBA</th><th class="num">wRC+</th></tr></thead>
+          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th class="num">PA/162</th><th class="num">HR/162</th><th class="num">R/162</th><th class="num">RBI/162</th><th class="num">SB/162</th><th class="num">BB%</th><th class="num">K%</th><th class="num">ISO</th><th class="num">BABIP</th><th class="num">AVG</th><th class="num">OBP</th><th class="num">SLG</th><th class="num">OPS</th><th class="num">wOBA</th><th class="num">wRC+</th></tr></thead>
           <tbody>${hitterRows}</tbody>
         </table>
       </div>
-      <h2 class="batch-section-title">Pitchers, all seasons combined</h2>
+      <h2 class="batch-section-title">Pitchers, 162-game pace</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th class="num">IP</th><th class="num">K/9</th><th class="num">BB/9</th><th class="num">ERA</th><th class="num">FIP</th></tr></thead>
+          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th class="num">IP/162</th><th class="num">K/9</th><th class="num">BB/9</th><th class="num">ERA</th><th class="num">FIP</th></tr></thead>
           <tbody>${pitcherRows}</tbody>
         </table>
       </div>
@@ -855,6 +856,31 @@ function formatShare(value) {
 function formatDistributionTotal(value) {
   const total = value?.sum ?? (value?.mean ?? 0) * (value?.count ?? 0);
   return Math.round(total);
+}
+
+function teamScheduleGames(row) {
+  return formatDistributionTotal(row.wins) + formatDistributionTotal(row.losses);
+}
+
+function batchPace(line, paceKey, totalKey, teamGamesByName, totalOverride = null) {
+  if (!line) return 0;
+  const existing = Number(line[paceKey]);
+  if (Number.isFinite(existing)) return existing;
+  const total = totalOverride ?? Number(line[totalKey] ?? 0);
+  const games = Number(line.teamGames ?? teamGamesByName.get(line.team) ?? 0);
+  return per162(total, games);
+}
+
+function per162(total, games) {
+  return games ? (Number(total) * 162) / games : 0;
+}
+
+function formatSeasonCount(value) {
+  return String(Math.round(Number(value) || 0));
+}
+
+function formatDecimal(value, digits = 1) {
+  return (Number(value) || 0).toFixed(digits);
 }
 
 function formatBattingStat(value) {

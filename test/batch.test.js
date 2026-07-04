@@ -50,6 +50,7 @@ test("simulateBatch accounts for every season, title, and finals slot", () => {
 
   for (const row of summary.teams) {
     assert.equal(row.wins.count, 25);
+    assert.ok(row.games >= row.wins.sum + row.losses.sum);
   }
 });
 
@@ -65,10 +66,15 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
     assert.ok(Number.isFinite(line.r));
     assert.ok(Number.isFinite(line.sb));
     assert.ok(Number.isFinite(line.ops));
+    assert.ok(line.teamGames > 0);
+    assert.ok(Number.isFinite(line.paPer162));
+    assert.ok(Number.isFinite(line.hrPer162));
   }
   for (const line of summary.pitchers) {
     assert.ok(line.outs > 0);
     assert.ok(Number.isFinite(line.runsPerNine));
+    assert.ok(line.teamGames > 0);
+    assert.ok(Number.isFinite(line.ipPer162));
   }
   for (let index = 1; index < summary.hitters.length; index += 1) {
     assert.ok(summary.hitters[index - 1].ops >= summary.hitters[index].ops, "hitters sorted by OPS");
