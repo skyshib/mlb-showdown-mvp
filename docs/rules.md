@@ -185,4 +185,7 @@ Current implementation details:
 - If no printed 1B is available, any hitter can cover first base with Fielding set to exactly `-1`. This is not a subtraction from the card's printed Fielding.
 - Manual draft picks are blocked if they would make those minimums impossible.
 - Auto-pick scores available players by point value plus roster-need urgency, including the starter/bullpen split.
-- Box scores are generated from the simulator event log.
+- Box scores are generated from the simulator event log, and hitter lines track doubles and triples so aggregate SLG/OPS can be computed.
+- `Sim N seasons` replays the full round-robin (plus final) N times with seeds `{roomSeed}-batch-season-{n}`, so the same room seed always reproduces the same batch. The batch screen reports title/finals equity, round-robin win distributions, per-player aggregate lines, and sim awards.
+- Batch results are saved with the room and invalidated by any pick, undo, or lineup change, since those change the teams being simulated.
+- Duplicate manager names are suffixed (`Sam`, `Sam 2`) at room creation because standings and batch aggregation key on team name.

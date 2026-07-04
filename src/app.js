@@ -15,7 +15,14 @@ import {
   undoLastPick,
   validateRoster
 } from "./rules/draft.js?v=20260704-roster-depth";
-import { simulateRoundRobin } from "./rules/tournament.js";
+import {
+  DEFAULT_BATCH_RUNS,
+  createBatchState,
+  normalizeBatchRuns,
+  runBatchChunk,
+  summarizeBatch
+} from "./rules/batch.js";
+import { simulateRoundRobin } from "./rules/tournament.js?v=20260703-batch-sims";
 import {
   basesText,
   escapeHtml,
@@ -38,6 +45,7 @@ document.body.append(cardPreview);
 let state = loadState() ?? defaultState();
 let selectedLineupMove = null;
 let draggedLineupMove = null;
+let batchRunToken = 0;
 
 renderCurrentScreen();
 
@@ -48,6 +56,8 @@ function defaultState() {
     rosterSize: 13,
     draft: null,
     tournament: null,
+    batch: null,
+    view: null,
     selectedGameIndex: 0,
     selectedTeamName: null,
     filters: {
@@ -61,7 +71,9 @@ function defaultState() {
 }
 
 function renderCurrentScreen() {
-  if (state.tournament) {
+  if (state.view === "batch" && state.batch && state.draft) {
+    renderBatch();
+  } else if (state.tournament) {
     renderTournament();
   } else if (state.draft) {
     renderDraft();
@@ -70,7 +82,7 @@ function renderCurrentScreen() {
   }
 }
 
-function renderSetup() {
+function resetAppHandlers() {
   app.onclick = null;
   app.oninput = null;
   app.onchange = null;
@@ -83,6 +95,14 @@ function renderSetup() {
   app.onfocusin = null;
   app.onfocusout = null;
   app.onkeydown = null;
+  app.ondragstart = null;
+  app.ondragover = null;
+  app.ondrop = null;
+  app.ondragend = null;
+}
+
+function renderSetup() {
+  resetAppHandlers();
   hideHoverCard();
   app.innerHTML = `<section class="panel setup">
     <div>
@@ -114,16 +134,20 @@ function renderSetup() {
   document.querySelector("#setup-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const managers = String(form.get("managers"))
-      .split("\n")
-      .map((name) => name.trim())
-      .filter(Boolean);
+    const managers = dedupeManagerNames(
+      String(form.get("managers"))
+        .split("\n")
+        .map((name) => name.trim())
+        .filter(Boolean)
+    );
     state.seed = String(form.get("seed")).trim() || "showdown";
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
     state.rosterSize = 13;
     const pool = generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
     state.draft = createDraft(state.managers, pool, state.rosterSize);
     state.tournament = null;
+    state.batch = null;
+    state.view = null;
     state.selectedGameIndex = 0;
     state.selectedTeamName = state.managers[0];
     saveState();
@@ -148,6 +172,7 @@ function renderDraft() {
     <button data-action="undo-pick" ${draft.pickNumber > 0 ? "" : "disabled"}>Undo last pick</button>
     <button data-action="finish" ${draft.complete ? "disabled" : ""}>Auto-finish draft</button>
     <button data-action="tournament" ${canSimulate(draft) ? "" : "disabled"}>Sim tournament</button>
+    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} seasons</button>
   </section>
   ${renderDraftFocus(draft, focusManager)}
   <section class="grid">
@@ -218,12 +243,14 @@ function bindDraftActions() {
       if (button.disabled) return;
       pickPlayer(state.draft, button.dataset.playerId);
       selectedLineupMove = null;
+      invalidateBatch();
       saveState();
       renderDraft();
     }
     if (action === "autopick") {
       autopick(state.draft);
       selectedLineupMove = null;
+      invalidateBatch();
       saveState();
       renderDraft();
     }
@@ -232,22 +259,28 @@ function bindDraftActions() {
       state.tournament = null;
       selectedLineupMove = null;
       draggedLineupMove = null;
+      invalidateBatch();
       saveState();
       renderDraft();
     }
     if (action === "finish") {
       while (!state.draft.complete) autopick(state.draft);
       selectedLineupMove = null;
+      invalidateBatch();
       saveState();
       renderDraft();
     }
     if (action === "tournament") {
-      const teams = state.draft.managers.map(buildTeam);
+      const teams = state.draft.managers.map((manager) => buildTeam(manager));
       state.tournament = simulateRoundRobin(teams, state.seed);
+      state.view = null;
       state.selectedGameIndex = state.tournament.final ? state.tournament.games.length : 0;
       state.selectedTeamName = state.tournament.standings[0]?.team ?? teams[0]?.name;
       saveState();
       renderTournament();
+    }
+    if (action === "batch") {
+      startBatchRun(DEFAULT_BATCH_RUNS);
     }
 
   };
@@ -339,6 +372,7 @@ function bindDraftActions() {
     moveLineupPlayer(draggedLineupMove.managerId, draggedLineupMove.playerId, slot.dataset.slotLabel);
     draggedLineupMove = null;
     selectedLineupMove = null;
+    invalidateBatch();
     saveState();
     renderDraft();
   };
@@ -379,6 +413,7 @@ function renderTournament() {
     <button data-action="back-draft">Back to draft</button>
     <button data-action="rerun-same">Replay same seed</button>
     <button data-action="rerun-new">New sim</button>
+    <button data-action="batch">Sim ${DEFAULT_BATCH_RUNS} seasons</button>
     <button data-action="reset">New room</button>
   </section>
   <section class="grid tournament-grid">
@@ -407,6 +442,8 @@ function renderTournament() {
 }
 
 function bindTournamentActions() {
+  resetAppHandlers();
+  hideHoverCard();
   app.onclick = (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
@@ -446,19 +483,216 @@ function bindTournamentActions() {
       saveState();
       renderTournament();
     }
+    if (action === "batch") {
+      startBatchRun(DEFAULT_BATCH_RUNS);
+    }
   };
-  app.oninput = null;
-  app.onchange = null;
-  app.onpointerover = null;
-  app.onpointermove = null;
-  app.onpointerout = null;
-  app.onmouseover = null;
-  app.onmousemove = null;
-  app.onmouseout = null;
-  app.onfocusin = null;
-  app.onfocusout = null;
-  app.onkeydown = null;
+}
+
+function invalidateBatch() {
+  state.batch = null;
+  if (state.view === "batch") state.view = null;
+}
+
+function dedupeManagerNames(names) {
+  const seen = new Map();
+  return names.map((name) => {
+    const count = seen.get(name) ?? 0;
+    seen.set(name, count + 1);
+    return count === 0 ? name : `${name} ${count + 1}`;
+  });
+}
+
+function startBatchRun(runs) {
+  if (!state.draft || !canSimulate(state.draft)) return;
+  const count = normalizeBatchRuns(runs);
+  const teams = state.draft.managers.map((manager) => buildTeam(manager));
+  const batchState = createBatchState(teams);
+  const seed = `${state.seed}-batch`;
+  const token = ++batchRunToken;
+  const chunkSize = 250;
+  let completed = 0;
+
+  const step = () => {
+    if (token !== batchRunToken || state.draft === null) return;
+    const size = Math.min(chunkSize, count - completed);
+    runBatchChunk(batchState, teams, seed, completed, size);
+    completed += size;
+    if (completed < count) {
+      renderBatchProgress(completed, count);
+      setTimeout(step, 0);
+      return;
+    }
+    state.batch = { runs: count, seed, summary: summarizeBatch(batchState) };
+    state.view = "batch";
+    saveState();
+    renderBatch();
+  };
+
+  renderBatchProgress(0, count);
+  setTimeout(step, 30);
+}
+
+function renderBatchProgress(completed, total) {
+  resetAppHandlers();
   hideHoverCard();
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  app.innerHTML = `<section class="panel sim-progress">
+    <p class="eyebrow">Season simulator</p>
+    <h1>Simulating ${total} seasons</h1>
+    <p class="lede">${completed} of ${total} seasons complete.</p>
+    <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+  </section>`;
+}
+
+function renderBatch() {
+  if (!state.batch?.summary?.teams?.length) {
+    state.view = null;
+    renderCurrentScreen();
+    return;
+  }
+  const { summary, runs } = state.batch;
+  const top = summary.teams[0];
+  const mvp = summary.hitters[0];
+  const hrKing = [...summary.hitters].sort((a, b) => b.hr - a.hr || b.ops - a.ops)[0];
+  const ace = summary.pitchers.find((line) => line.outs > 0) ?? summary.pitchers[0];
+  const backLabel = state.tournament ? "Back to tournament" : "Back to draft";
+
+  const teamRows = summary.teams
+    .map(
+      (row, index) => `<tr>
+        <td>${index + 1}</td>
+        <td><strong>${escapeHtml(row.team)}</strong></td>
+        <td class="num">${formatShare(row.titleShare)}</td>
+        <td class="num">${formatShare(row.finalsShare)}</td>
+        <td class="num">${row.wins.mean.toFixed(2)}</td>
+        <td class="num">${Math.round(row.wins.p10)}&ndash;${Math.round(row.wins.p90)}</td>
+        <td class="num">${row.runsFor.mean.toFixed(1)}</td>
+        <td class="num">${row.runsAgainst.mean.toFixed(1)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const hitterRows = summary.hitters
+    .map(
+      (line, index) => `<tr>
+        <td>${index + 1}</td>
+        <td><strong>${escapeHtml(line.name)}</strong></td>
+        <td>${escapeHtml(line.team)}</td>
+        <td>${escapeHtml(line.position ?? "")}</td>
+        <td class="num">${formatBattingStat(line.avg)}</td>
+        <td class="num">${formatBattingStat(line.obp)}</td>
+        <td class="num">${formatBattingStat(line.slg)}</td>
+        <td class="num">${formatBattingStat(line.ops)}</td>
+        <td class="num">${line.hrPerSeason.toFixed(2)}</td>
+        <td class="num">${line.rbiPerSeason.toFixed(2)}</td>
+      </tr>`
+    )
+    .join("");
+
+  const pitcherRows = summary.pitchers
+    .map(
+      (line, index) => `<tr>
+        <td>${index + 1}</td>
+        <td><strong>${escapeHtml(line.name)}</strong></td>
+        <td>${escapeHtml(line.team)}</td>
+        <td>${escapeHtml(line.role)}</td>
+        <td class="num">${line.inningsPerSeason.toFixed(1)}</td>
+        <td class="num">${line.runsPerNine.toFixed(2)}</td>
+        <td class="num">${line.strikeoutsPerNine.toFixed(2)}</td>
+        <td class="num">${line.walksPerNine.toFixed(2)}</td>
+      </tr>`
+    )
+    .join("");
+
+  app.innerHTML = `<section class="toolbar">
+    <button data-action="batch-back">${backLabel}</button>
+    <label class="batch-runs-label">Seasons
+      <select data-batch-runs>
+        ${[100, 500, 1000, 2500, 5000].map((option) => `<option value="${option}" ${option === runs ? "selected" : ""}>${option}</option>`).join("")}
+      </select>
+    </label>
+    <button data-action="batch-run">Run again</button>
+    <button data-action="reset">New room</button>
+  </section>
+  <section class="grid tournament-grid">
+    <div class="panel">
+      <p class="eyebrow">${runs} simulated seasons</p>
+      <h1>${escapeHtml(top.team)} had the best draft</h1>
+      <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons. Wins below are the round-robin record; the title is decided by the final. Same room seed replays the same seasons, so tweak lineups and run again to compare.</p>
+      <table>
+        <thead><tr><th>#</th><th>Team</th><th>Title</th><th>Final</th><th>Avg W</th><th>W p10&ndash;p90</th><th>RF/ssn</th><th>RA/ssn</th></tr></thead>
+        <tbody>${teamRows}</tbody>
+      </table>
+      <div class="award-grid">
+        ${renderAwardCard("Sim MVP", mvp, `${formatBattingStat(mvp?.ops)} OPS`)}
+        ${renderAwardCard("Sim ace", ace, `${(ace?.runsPerNine ?? 0).toFixed(2)} RA/9`)}
+        ${renderAwardCard("HR king", hrKing, `${(hrKing?.hrPerSeason ?? 0).toFixed(2)} HR/ssn`)}
+      </div>
+    </div>
+    <div class="panel wide">
+      <h2>Hitters, all seasons combined</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th>AVG</th><th>OBP</th><th>SLG</th><th>OPS</th><th>HR/ssn</th><th>RBI/ssn</th></tr></thead>
+          <tbody>${hitterRows}</tbody>
+        </table>
+      </div>
+      <h2 class="batch-section-title">Pitchers, all seasons combined</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th>IP/ssn</th><th>RA/9</th><th>K/9</th><th>BB/9</th></tr></thead>
+          <tbody>${pitcherRows}</tbody>
+        </table>
+      </div>
+    </div>
+  </section>`;
+
+  bindBatchActions();
+}
+
+function renderAwardCard(label, player, statLine) {
+  if (!player) return "";
+  return `<div class="award-card">
+    <span class="award-label">${escapeHtml(label)}</span>
+    <strong>${escapeHtml(player.name)}</strong>
+    <span class="award-stat">${escapeHtml(statLine)}</span>
+    <em>${escapeHtml(player.team)}</em>
+  </div>`;
+}
+
+function bindBatchActions() {
+  resetAppHandlers();
+  hideHoverCard();
+  app.onclick = (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+    const action = button.dataset.action;
+    if (action === "batch-back") {
+      state.view = null;
+      saveState();
+      renderCurrentScreen();
+    }
+    if (action === "batch-run") {
+      const select = app.querySelector("[data-batch-runs]");
+      startBatchRun(select?.value ?? DEFAULT_BATCH_RUNS);
+    }
+    if (action === "reset") {
+      clearSavedState();
+      state = defaultState();
+      renderSetup();
+    }
+  };
+}
+
+function formatShare(value) {
+  return `${((Number(value) || 0) * 100).toFixed(1)}%`;
+}
+
+function formatBattingStat(value) {
+  const number = Number(value) || 0;
+  const fixed = number.toFixed(3);
+  return number < 1 ? fixed.replace(/^0/, "") : fixed;
 }
 
 function showHoverCard(row, clientX, clientY) {
@@ -936,6 +1170,7 @@ function handleLineupSlotClick(slot) {
   if (selectedLineupMove?.managerId === managerId && canMoveLineupPlayer(managerId, selectedLineupMove.playerId, slotLabel)) {
     moveLineupPlayer(managerId, selectedLineupMove.playerId, slotLabel);
     selectedLineupMove = null;
+    invalidateBatch();
     saveState();
     renderDraft();
     return;
@@ -1264,6 +1499,7 @@ function reviveState(value) {
     ...value,
     rosterSize: 13,
     filters,
-    draft
+    draft,
+    view: value.view === "batch" && value.batch ? "batch" : null
   };
 }

@@ -1,4 +1,4 @@
-import { simulateGame } from "./game.js";
+import { simulateGame } from "./game.js?v=20260703-batch-sims";
 
 export function simulateRoundRobin(teams, seed = "tournament") {
   const rotation = createRotationTracker(teams);

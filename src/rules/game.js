@@ -725,6 +725,12 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
     hitterLine.h += 1;
     pitcherLine.h += 1;
   }
+  if (result === RESULTS.DOUBLE) {
+    hitterLine.d += 1;
+  }
+  if (result === RESULTS.TRIPLE) {
+    hitterLine.t += 1;
+  }
   if (result === RESULTS.BB) {
     hitterLine.bb += 1;
     pitcherLine.bb += 1;
@@ -757,6 +763,8 @@ function ensureHitterLine(state, hitter) {
       pa: 0,
       ab: 0,
       h: 0,
+      d: 0,
+      t: 0,
       bb: 0,
       so: 0,
       hr: 0,
