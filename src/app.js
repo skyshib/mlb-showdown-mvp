@@ -27,7 +27,7 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260705-season-162-stats";
+} from "./rules/batch.js?v=20260705-sortable-season-stats";
 import { simulateRoundRobin } from "./rules/tournament.js?v=20260704-player-rate-stats";
 import {
   basesText,
@@ -41,7 +41,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260705-season-162-stats";
+} from "./ui/render.js?v=20260705-sortable-season-stats";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const REAL_POOL_INFO = (() => {
@@ -72,6 +72,11 @@ function defaultState() {
     draftTab: "available",
     tournament: null,
     batch: null,
+    batchSorts: {
+      teams: { sort: "titleShare", direction: "desc" },
+      hitters: { sort: "ops", direction: "desc" },
+      pitchers: { sort: "era", direction: "asc" }
+    },
     view: null,
     selectedGameIndex: 0,
     selectedTeamName: null,
@@ -701,8 +706,11 @@ function renderBatch() {
   const leagueWoba = tournamentWoba(summary.hitters);
   const fipConstant = tournamentFipConstant(summary.pitchers);
   const teamGamesByName = new Map(summary.teams.map((row) => [row.team, row.games ?? teamScheduleGames(row)]));
+  const sortedTeams = sortBatchRows(summary.teams, "teams", (row, sort) => batchTeamSortValue(row, sort));
+  const sortedHitters = sortBatchRows(summary.hitters, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
+  const sortedPitchers = sortBatchRows(summary.pitchers, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
 
-  const teamRows = summary.teams
+  const teamRows = sortedTeams
     .map(
       (row, index) => `<tr>
         <td>${index + 1}</td>
@@ -717,7 +725,7 @@ function renderBatch() {
     )
     .join("");
 
-  const hitterRows = summary.hitters
+  const hitterRows = sortedHitters
     .map(
       (line, index) => `<tr>
         <td>${index + 1}</td>
@@ -743,7 +751,7 @@ function renderBatch() {
     )
     .join("");
 
-  const pitcherRows = summary.pitchers
+  const pitcherRows = sortedPitchers
     .map(
       (line, index) => `<tr>
         <td>${index + 1}</td>
@@ -779,7 +787,16 @@ function renderBatch() {
       <h1>${escapeHtml(top.team)} had the best draft</h1>
       <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons. Team and player counting stats below are normalized to a 162-game season; the title is decided by the final. Same room seed replays the same seasons, so tweak lineups and run again to compare.</p>
       <table>
-        <thead><tr><th>#</th><th>Team</th><th>Title</th><th>Final</th><th class="num">W/162</th><th class="num">L/162</th><th class="num">RF/162</th><th class="num">RA/162</th></tr></thead>
+        <thead><tr>
+          <th>#</th>
+          ${renderBatchSortHeader("teams", "team", "Team")}
+          ${renderBatchSortHeader("teams", "titleShare", "Title", "num")}
+          ${renderBatchSortHeader("teams", "finalsShare", "Final", "num")}
+          ${renderBatchSortHeader("teams", "w162", "W/162", "num")}
+          ${renderBatchSortHeader("teams", "l162", "L/162", "num")}
+          ${renderBatchSortHeader("teams", "rf162", "RF/162", "num")}
+          ${renderBatchSortHeader("teams", "ra162", "RA/162", "num")}
+        </tr></thead>
         <tbody>${teamRows}</tbody>
       </table>
       <div class="award-grid">
@@ -792,14 +809,44 @@ function renderBatch() {
       <h2>Hitters, 162-game pace</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th class="num">PA/162</th><th class="num">HR/162</th><th class="num">R/162</th><th class="num">RBI/162</th><th class="num">SB/162</th><th class="num">BB%</th><th class="num">K%</th><th class="num">ISO</th><th class="num">BABIP</th><th class="num">AVG</th><th class="num">OBP</th><th class="num">SLG</th><th class="num">OPS</th><th class="num">wOBA</th><th class="num">wRC+</th></tr></thead>
+          <thead><tr>
+            <th>#</th>
+            ${renderBatchSortHeader("hitters", "name", "Player")}
+            ${renderBatchSortHeader("hitters", "team", "Team")}
+            ${renderBatchSortHeader("hitters", "position", "Pos")}
+            ${renderBatchSortHeader("hitters", "pa162", "PA/162", "num")}
+            ${renderBatchSortHeader("hitters", "hr162", "HR/162", "num")}
+            ${renderBatchSortHeader("hitters", "r162", "R/162", "num")}
+            ${renderBatchSortHeader("hitters", "rbi162", "RBI/162", "num")}
+            ${renderBatchSortHeader("hitters", "sb162", "SB/162", "num")}
+            ${renderBatchSortHeader("hitters", "bbRate", "BB%", "num")}
+            ${renderBatchSortHeader("hitters", "kRate", "K%", "num")}
+            ${renderBatchSortHeader("hitters", "iso", "ISO", "num")}
+            ${renderBatchSortHeader("hitters", "babip", "BABIP", "num")}
+            ${renderBatchSortHeader("hitters", "avg", "AVG", "num")}
+            ${renderBatchSortHeader("hitters", "obp", "OBP", "num")}
+            ${renderBatchSortHeader("hitters", "slg", "SLG", "num")}
+            ${renderBatchSortHeader("hitters", "ops", "OPS", "num")}
+            ${renderBatchSortHeader("hitters", "woba", "wOBA", "num")}
+            ${renderBatchSortHeader("hitters", "wrcPlus", "wRC+", "num")}
+          </tr></thead>
           <tbody>${hitterRows}</tbody>
         </table>
       </div>
       <h2 class="batch-section-title">Pitchers, 162-game pace</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th class="num">IP/162</th><th class="num">K/9</th><th class="num">BB/9</th><th class="num">ERA</th><th class="num">FIP</th></tr></thead>
+          <thead><tr>
+            <th>#</th>
+            ${renderBatchSortHeader("pitchers", "name", "Player")}
+            ${renderBatchSortHeader("pitchers", "team", "Team")}
+            ${renderBatchSortHeader("pitchers", "role", "Role")}
+            ${renderBatchSortHeader("pitchers", "ip162", "IP/162", "num")}
+            ${renderBatchSortHeader("pitchers", "k9", "K/9", "num")}
+            ${renderBatchSortHeader("pitchers", "bb9", "BB/9", "num")}
+            ${renderBatchSortHeader("pitchers", "era", "ERA", "num")}
+            ${renderBatchSortHeader("pitchers", "fip", "FIP", "num")}
+          </tr></thead>
           <tbody>${pitcherRows}</tbody>
         </table>
       </div>
@@ -824,10 +871,121 @@ function renderBatchPlayerName(line, playersById, tagName = "strong", className 
   return renderPlayerPreviewName(player, line.name, tagName, className);
 }
 
+function renderBatchSortHeader(table, sort, label, className = "") {
+  const config = batchSortConfig(table);
+  const active = config.sort === sort;
+  const direction = active ? config.direction : null;
+  const arrow = direction === "asc" ? "^" : direction === "desc" ? "v" : "";
+  return `<th class="${escapeHtml(className)}" aria-sort="${active ? (direction === "asc" ? "ascending" : "descending") : "none"}">
+    <button type="button" class="column-sort ${active ? "active" : ""}" data-batch-table="${escapeHtml(table)}" data-batch-sort="${escapeHtml(sort)}">
+      <span>${escapeHtml(label)}</span>${arrow ? `<span class="sort-arrow">${arrow}</span>` : ""}
+    </button>
+  </th>`;
+}
+
+function sortBatchRows(rows, table, valueForSort) {
+  const { sort, direction } = batchSortConfig(table);
+  const multiplier = direction === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const value = compareSortValues(valueForSort(a, sort), valueForSort(b, sort));
+    if (value) return value * multiplier;
+    return String(a.name ?? a.team ?? "").localeCompare(String(b.name ?? b.team ?? ""));
+  });
+}
+
+function compareSortValues(a, b) {
+  if (typeof a === "string" || typeof b === "string") return String(a ?? "").localeCompare(String(b ?? ""));
+  return (Number(a) || 0) - (Number(b) || 0);
+}
+
+function batchTeamSortValue(row, sort) {
+  if (sort === "team") return row.team;
+  if (sort === "titleShare") return row.titleShare;
+  if (sort === "finalsShare") return row.finalsShare;
+  if (sort === "w162") return per162(formatDistributionTotal(row.wins), teamScheduleGames(row));
+  if (sort === "l162") return per162(formatDistributionTotal(row.losses), teamScheduleGames(row));
+  if (sort === "rf162") return per162(formatDistributionTotal(row.runsFor), teamScheduleGames(row));
+  if (sort === "ra162") return per162(formatDistributionTotal(row.runsAgainst), teamScheduleGames(row));
+  return row.titleShare;
+}
+
+function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
+  if (sort === "name") return line.name;
+  if (sort === "team") return line.team;
+  if (sort === "position") return line.position ?? "";
+  if (sort === "pa162") return batchPace(line, "paPer162", "pa", teamGamesByName);
+  if (sort === "hr162") return batchPace(line, "hrPer162", "hr", teamGamesByName);
+  if (sort === "r162") return batchPace(line, "rPer162", "r", teamGamesByName);
+  if (sort === "rbi162") return batchPace(line, "rbiPer162", "rbi", teamGamesByName);
+  if (sort === "sb162") return batchPace(line, "sbPer162", "sb", teamGamesByName);
+  if (sort === "bbRate") return rateValue(line.bb, line.pa);
+  if (sort === "kRate") return rateValue(line.so, line.pa);
+  if (sort === "iso") return rateValue(totalBases(line) - line.h, line.ab);
+  if (sort === "babip") return rateValue(line.h - line.hr, babipDenominator(line));
+  if (sort === "avg") return line.avg;
+  if (sort === "obp") return line.obp;
+  if (sort === "slg") return line.slg;
+  if (sort === "ops") return line.ops;
+  if (sort === "woba") return woba(line);
+  if (sort === "wrcPlus") return wrcPlus(line, leagueWoba);
+  return line.ops;
+}
+
+function batchPitcherSortValue(line, sort, fipConstant, teamGamesByName) {
+  if (sort === "name") return line.name;
+  if (sort === "team") return line.team;
+  if (sort === "role") return line.role;
+  if (sort === "ip162") return batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3);
+  if (sort === "k9") return rateValue(line.so * 27, line.outs);
+  if (sort === "bb9") return rateValue(line.bb * 27, line.outs);
+  if (sort === "era") return rateValue(line.r * 27, line.outs);
+  if (sort === "fip") return line.outs ? rawFip(line) + fipConstant : Number.POSITIVE_INFINITY;
+  return rateValue(line.r * 27, line.outs);
+}
+
+function rateValue(numerator, denominator) {
+  return denominator ? numerator / denominator : 0;
+}
+
+function batchSortConfig(table) {
+  return state.batchSorts?.[table] ?? defaultBatchSorts()[table] ?? { sort: "name", direction: "asc" };
+}
+
+function updateBatchSort(table, sort) {
+  if (!table || !sort) return;
+  state.batchSorts = { ...defaultBatchSorts(), ...(state.batchSorts ?? {}) };
+  const current = state.batchSorts[table] ?? defaultBatchSorts()[table] ?? { sort: "name", direction: "asc" };
+  state.batchSorts[table] = current.sort === sort
+    ? { sort, direction: current.direction === "asc" ? "desc" : "asc" }
+    : { sort, direction: defaultBatchSortDirection(table, sort) };
+}
+
+function defaultBatchSorts() {
+  return {
+    teams: { sort: "titleShare", direction: "desc" },
+    hitters: { sort: "ops", direction: "desc" },
+    pitchers: { sort: "era", direction: "asc" }
+  };
+}
+
+function defaultBatchSortDirection(table, sort) {
+  if (["name", "team", "position", "role"].includes(sort)) return "asc";
+  if (table === "pitchers" && ["era", "fip", "bb9"].includes(sort)) return "asc";
+  return "desc";
+}
+
 function bindBatchActions() {
   resetAppHandlers();
   hideHoverCard();
   app.onclick = (event) => {
+    const sortButton = event.target.closest("button[data-batch-sort]");
+    if (sortButton) {
+      updateBatchSort(sortButton.dataset.batchTable, sortButton.dataset.batchSort);
+      saveState();
+      renderBatch();
+      return;
+    }
+
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const action = button.dataset.action;
@@ -1957,6 +2115,7 @@ function serializeState(value) {
 
 function reviveState(value) {
   const filters = { ...defaultState().filters, ...(value.filters ?? {}) };
+  const batchSorts = { ...defaultBatchSorts(), ...(value.batchSorts ?? {}) };
   if (filters.type === "all") filters.type = "hitter";
   filters.sortDirection = filters.sortDirection ?? defaultSortDirection(filters.sort);
   const draft = value.draft
@@ -1981,6 +2140,7 @@ function reviveState(value) {
     rosterSize: 13,
     poolMode: value.poolMode === "real" ? "real" : "random",
     filters,
+    batchSorts,
     draft,
     view: value.view === "batch" && value.batch ? "batch" : null
   };
