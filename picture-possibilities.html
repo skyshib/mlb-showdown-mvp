@@ -8,14 +8,12 @@
       :root {
         color-scheme: dark;
         --bg: #0b0f14;
-        --panel: #111820;
-        --panel-2: #16222d;
         --ink: #edf3f4;
-        --muted: #9aaab4;
+        --muted: #98a8b2;
         --line: rgba(255, 255, 255, 0.14);
-        --gold: #d7a93f;
+        --gold: #d9b34a;
         --green: #0f6b52;
-        --red: #ce3e4e;
+        --red: #ce3f4c;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
@@ -34,7 +32,7 @@
       }
 
       main {
-        width: min(1320px, calc(100vw - 32px));
+        width: min(1380px, calc(100vw - 32px));
         margin: 0 auto;
         padding: 30px 0 56px;
       }
@@ -53,7 +51,7 @@
       }
 
       h1 {
-        max-width: 760px;
+        max-width: 780px;
         font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
         font-size: clamp(34px, 5vw, 64px);
         font-stretch: condensed;
@@ -63,7 +61,7 @@
       }
 
       .lede {
-        max-width: 520px;
+        max-width: 560px;
         color: var(--muted);
         font-size: 14px;
         line-height: 1.5;
@@ -71,7 +69,7 @@
 
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         gap: 18px;
       }
 
@@ -112,7 +110,7 @@
         pointer-events: none;
         background:
           linear-gradient(115deg, transparent 34%, rgba(255, 255, 255, 0.12) 46%, transparent 58%),
-          linear-gradient(to bottom, transparent 58%, rgba(0, 0, 0, 0.5));
+          linear-gradient(to bottom, transparent 60%, rgba(0, 0, 0, 0.44));
       }
 
       .image-slot {
@@ -131,15 +129,32 @@
 
       .image-slot.contain img {
         object-fit: contain;
-        padding: 18px;
+        padding: 14px;
       }
 
-      .image-slot.archival img {
-        filter: sepia(0.25) contrast(1.04);
+      .image-slot.tight img {
+        object-position: 50% 18%;
       }
 
       .image-slot.local-photo img {
         object-position: 54% 20%;
+      }
+
+      .image-slot.modern-photo img {
+        object-position: 52% 36%;
+      }
+
+      .image-slot.vintage-photo img {
+        filter: sepia(0.3) contrast(1.08);
+        object-position: 50% 22%;
+      }
+
+      .image-slot.newsprint img {
+        filter: grayscale(1) contrast(1.18);
+      }
+
+      .image-slot.washed img {
+        filter: saturate(0.74) contrast(0.98) brightness(1.06);
       }
 
       .card-strip {
@@ -167,7 +182,7 @@
         background: linear-gradient(180deg, #f6f8f8, #aeb8bf);
         color: #10243b;
         font-family: "Arial Narrow", "Roboto Condensed", sans-serif;
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 950;
         font-style: italic;
         letter-spacing: 0;
@@ -264,118 +279,37 @@
         white-space: nowrap;
       }
 
-      .silhouette,
-      .abstract-art,
-      .ai-concept,
-      .crest-art {
+      .ai-photo,
+      .painted-action {
         position: absolute;
         inset: 0;
         overflow: hidden;
       }
 
-      .silhouette {
+      .ai-photo {
         background:
-          linear-gradient(to bottom, rgba(255, 255, 255, 0.05), transparent 34%),
-          linear-gradient(135deg, #16495f, #11202d 55%, #0c1319);
-      }
-
-      .silhouette::before {
-        content: "27";
-        position: absolute;
-        left: 50%;
-        top: 42%;
-        transform: translate(-50%, -50%);
-        color: rgba(255, 255, 255, 0.1);
-        font-family: Georgia, serif;
-        font-size: 120px;
-        font-weight: 900;
-      }
-
-      .silhouette::after {
-        content: "";
-        position: absolute;
-        left: 50%;
-        bottom: -14px;
-        width: 118px;
-        height: 232px;
-        transform: translateX(-50%);
-        background:
-          radial-gradient(circle at 50% 17%, #171717 0 33px, transparent 34px),
-          linear-gradient(82deg, transparent 0 24px, #141414 25px 78px, transparent 79px),
-          linear-gradient(98deg, transparent 0 44px, #141414 45px 96px, transparent 97px);
-        filter: drop-shadow(0 22px 18px rgba(0, 0, 0, 0.55));
-      }
-
-      .abstract-art {
-        display: grid;
-        place-items: center;
-        background:
-          radial-gradient(circle at 18% 20%, #d7a93f 0 12%, transparent 13%),
-          radial-gradient(circle at 74% 28%, #ce3e4e 0 13%, transparent 14%),
-          radial-gradient(circle at 34% 72%, #edf3f4 0 18%, transparent 19%),
-          linear-gradient(145deg, #0f6b52, #111820 70%);
-      }
-
-      .abstract-mark {
-        position: relative;
-        width: 146px;
-        height: 146px;
-        border-radius: 50%;
-        background:
-          conic-gradient(from 24deg, #edf3f4 0 18%, transparent 18% 30%, #d7a93f 30% 48%, transparent 48% 62%, #ce3e4e 62% 82%, transparent 82%),
-          #122633;
-        box-shadow:
-          inset 0 0 0 10px rgba(255, 255, 255, 0.1),
-          0 18px 32px rgba(0, 0, 0, 0.34);
-      }
-
-      .abstract-mark::before,
-      .abstract-mark::after {
-        content: "";
-        position: absolute;
-        border-radius: 50%;
-        background: #0b0f14;
-      }
-
-      .abstract-mark::before {
-        left: 36px;
-        top: 30px;
-        width: 26px;
-        height: 26px;
-      }
-
-      .abstract-mark::after {
-        right: 30px;
-        bottom: 31px;
-        width: 42px;
-        height: 42px;
-      }
-
-      .ai-concept {
-        background:
-          radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.26), transparent 0 24%, transparent 25%),
+          radial-gradient(circle at 50% 27%, rgba(255, 255, 255, 0.25), transparent 0 25%, transparent 26%),
           linear-gradient(145deg, #f0c15a, #ce4d58 45%, #183b62);
       }
 
-      .ai-concept::before {
+      .ai-photo::before {
         content: "";
         position: absolute;
-        left: 30px;
-        right: 30px;
-        bottom: 0;
-        height: 198px;
-        clip-path: polygon(44% 0, 60% 2%, 78% 42%, 72% 100%, 22% 100%, 16% 40%);
+        left: 29px;
+        right: 29px;
+        bottom: -5px;
+        height: 205px;
+        clip-path: polygon(44% 0, 60% 2%, 80% 44%, 73% 100%, 22% 100%, 15% 42%);
         background:
-          linear-gradient(90deg, rgba(255, 255, 255, 0.78) 0 42%, #1f5b8e 42% 58%, rgba(255, 255, 255, 0.78) 58%),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.82) 0 42%, #1f5b8e 42% 58%, rgba(255, 255, 255, 0.82) 58%),
           #f5f5f5;
-        box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.08);
       }
 
-      .ai-concept::after {
+      .ai-photo::after {
         content: "AI";
         position: absolute;
         left: 50%;
-        top: 44%;
+        top: 43%;
         transform: translate(-50%, -50%) rotate(-8deg);
         color: rgba(255, 255, 255, 0.86);
         font-family: "Arial Narrow", sans-serif;
@@ -385,31 +319,26 @@
         text-shadow: 0 5px 16px rgba(0, 0, 0, 0.34);
       }
 
-      .crest-art {
-        display: grid;
-        place-items: center;
+      .painted-action {
         background:
-          repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.035) 0 8px, transparent 8px 16px),
-          linear-gradient(145deg, #173322, #07211b 62%, #061017);
+          radial-gradient(circle at 62% 22%, #f9d57c 0 6%, transparent 7%),
+          linear-gradient(130deg, #101820 0 27%, #2c6c7c 28% 50%, #eb8a41 51% 70%, #611d32 71%);
       }
 
-      .crest {
-        display: grid;
-        place-items: center;
-        width: 148px;
-        height: 148px;
-        border: 5px solid rgba(255, 255, 255, 0.88);
-        border-radius: 50%;
+      .painted-action::before {
+        content: "";
+        position: absolute;
+        left: 29px;
+        top: 48px;
+        width: 166px;
+        height: 188px;
         background:
-          radial-gradient(circle at 50% 50%, #143f31 0 43%, transparent 44%),
-          conic-gradient(from 0deg, #e8bd55, #e8bd55 12%, #1e7d5f 12%, #1e7d5f 25%, #e8bd55 25%, #e8bd55 37%, #1e7d5f 37%, #1e7d5f 50%, #e8bd55 50%, #e8bd55 62%, #1e7d5f 62%, #1e7d5f 75%, #e8bd55 75%, #e8bd55 87%, #1e7d5f 87%);
-        box-shadow: 0 18px 32px rgba(0, 0, 0, 0.34);
-        color: #fff;
-        font-family: Georgia, serif;
-        font-size: 58px;
-        font-weight: 900;
-        letter-spacing: -0.08em;
-        text-shadow: 0 4px 0 rgba(0, 0, 0, 0.28);
+          linear-gradient(38deg, transparent 0 45%, #f4f0e7 46% 57%, transparent 58%),
+          radial-gradient(circle at 44% 18%, #1b1412 0 17px, transparent 18px),
+          linear-gradient(100deg, transparent 0 36px, #f4f0e7 37px 92px, transparent 93px),
+          linear-gradient(78deg, transparent 0 62px, #163f6b 63px 106px, transparent 107px);
+        filter: drop-shadow(0 18px 18px rgba(0, 0, 0, 0.35));
+        transform: rotate(-10deg);
       }
 
       footer {
@@ -439,14 +368,14 @@
   <body>
     <main>
       <header>
-        <h1>Player Picture Possibilities</h1>
+        <h1>Photo And Illustration Directions</h1>
         <p class="lede">
-          Same tiny card frame, different image strategies. None of these replace the app cards yet, and the AI slot is a
-          concept placeholder rather than a generated call.
+          Focused only on art that could plausibly fill the player photo window: real photos, archival looks,
+          illustration styles, pixel art, and AI-image placeholders without calling an image model yet.
         </p>
       </header>
 
-      <section class="grid" aria-label="Player image option examples">
+      <section class="grid" aria-label="Player image style examples">
         <article class="option">
           <div class="preview">
             <div class="mini-card">
@@ -455,41 +384,113 @@
               </div>
               <div class="card-strip">
                 <div class="badge">10</div>
-                <div class="name-bar">Real Photo</div>
+                <div class="name-bar">Real Card Photo</div>
                 <div class="meta"><span>180 PT</span><span>SPD 15</span><span>CF +1</span></div>
                 <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
               </div>
             </div>
           </div>
           <div class="notes">
-            <h2>Current / Local Photo</h2>
-            <p>Best if we want cards to feel like real baseball cards. Also the hardest path for invented players unless we generate or license images.</p>
-            <div class="tag-row"><span class="tag">Best card feel</span><span class="tag">Needs assets</span></div>
+            <h2>Real Card Photo</h2>
+            <p>The strongest sports-card feeling. For fictional players, this probably means AI generation or a licensed photo set.</p>
+            <div class="tag-row"><span class="tag">Most authentic</span><span class="tag">Asset-heavy</span></div>
           </div>
         </article>
 
         <article class="option">
           <div class="preview">
             <div class="mini-card">
-              <div class="image-slot archival">
+              <div class="image-slot modern-photo">
+                <img
+                  src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/ae/Baseball_Player_-_Tom%C3%A1%C5%A1_Kovala_%28At_Bat%29.jpg/500px-Baseball_Player_-_Tom%C3%A1%C5%A1_Kovala_%28At_Bat%29.jpg"
+                  alt="Open-license baseball player batting photo"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">9</div>
+                <div class="name-bar">Open Action</div>
+                <div class="meta"><span>160 PT</span><span>SPD 13</span><span>RF +1</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Open Action Photo</h2>
+            <p>A real baseball-photo path using Commons/Openverse-style sources. It would need attribution and license tracking per image.</p>
+            <div class="tag-row"><span class="tag">Real action</span><span class="tag">License metadata</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot vintage-photo">
+                <img
+                  src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/dc/%28Unidentified_baseball_player_in_dark_uniform_-_batting_form_-_%284050452035%29.jpg/500px-%28Unidentified_baseball_player_in_dark_uniform_-_batting_form_-_%284050452035%29.jpg"
+                  alt="Vintage baseball player batting photo"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">8</div>
+                <div class="name-bar">Vintage Action</div>
+                <div class="meta"><span>135 PT</span><span>SPD 11</span><span>3B +1</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>3B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Vintage Action Photo</h2>
+            <p>Old baseball photography has a great tabletop-card mood. It feels less tied to current MLB players and more like a custom universe.</p>
+            <div class="tag-row"><span class="tag">Period flavor</span><span class="tag">Less modern</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot newsprint tight">
+                <img
+                  src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/13/Babe_Ruth2.jpg/500px-Babe_Ruth2.jpg"
+                  alt="Black and white archival baseball portrait"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">12</div>
+                <div class="name-bar">Newsprint</div>
+                <div class="meta"><span>230 PT</span><span>SPD 6</span><span>LF +0</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Newsprint Photo</h2>
+            <p>High-contrast black-and-white could make fictional cards feel like found newspaper clippings.</p>
+            <div class="tag-row"><span class="tag">Gritty</span><span class="tag">Great with texture</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot washed tight">
                 <img
                   src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/81/Honus_Wagner_%28crop%29.JPG/330px-Honus_Wagner_%28crop%29.JPG"
-                  alt="Open-license archival baseball player photo"
+                  alt="Muted archival portrait photo"
                   referrerpolicy="no-referrer"
                 />
               </div>
               <div class="card-strip">
                 <div class="badge">11</div>
-                <div class="name-bar">Archive Photo</div>
+                <div class="name-bar">Faded Portrait</div>
                 <div class="meta"><span>190 PT</span><span>SPD 18</span><span>SS +3</span></div>
                 <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>3B</span><span>HR</span></div>
               </div>
             </div>
           </div>
           <div class="notes">
-            <h2>Open Archive</h2>
-            <p>Wikimedia/Openverse-style search could give a public-domain or Creative Commons vintage flavor, with attribution and license checks.</p>
-            <div class="tag-row"><span class="tag">Free-use route</span><span class="tag">License review</span></div>
+            <h2>Faded Portrait</h2>
+            <p>A softer archival portrait treatment. This might work well if cards lean more character-sheet than action-shot.</p>
+            <div class="tag-row"><span class="tag">Classic</span><span class="tag">Portrait-first</span></div>
           </div>
         </article>
 
@@ -499,21 +500,141 @@
               <div class="image-slot contain">
                 <img
                   src="https://api.dicebear.com/10.x/adventurer-neutral/svg?seed=Kasey%20Slider&backgroundColor=b6e3f4"
-                  alt="DiceBear illustrated avatar"
+                  alt="DiceBear Adventurer Neutral illustrated avatar"
                 />
               </div>
               <div class="card-strip">
                 <div class="badge">8</div>
-                <div class="name-bar">Illustrated</div>
+                <div class="name-bar">Adventure</div>
                 <div class="meta"><span>140 PT</span><span>SPD 11</span><span>2B +2</span></div>
                 <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
               </div>
             </div>
           </div>
           <div class="notes">
-            <h2>DiceBear Illustration</h2>
-            <p>Deterministic from a player name and easy to self-host later. More profile-avatar than baseball action, but very cheap to prototype.</p>
-            <div class="tag-row"><span class="tag">No auth</span><span class="tag">Deterministic</span></div>
+            <h2>Adventurer</h2>
+            <p>Clean character portrait. It is readable at small sizes and still has enough face detail to make players feel distinct.</p>
+            <div class="tag-row"><span class="tag">Illustrated</span><span class="tag">Name-seeded</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot contain">
+                <img
+                  src="https://api.dicebear.com/10.x/lorelei/svg?seed=Kasey%20Changeup&backgroundColor=ffd5dc"
+                  alt="DiceBear Lorelei portrait avatar"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">7</div>
+                <div class="name-bar">Lorelei</div>
+                <div class="meta"><span>115 PT</span><span>SPD 17</span><span>CF +0</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Lorelei</h2>
+            <p>More polished and expressive, with a nice trading-card sticker vibe. Less sporty, but charming.</p>
+            <div class="tag-row"><span class="tag">Expressive</span><span class="tag">CC0 style</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot contain">
+                <img
+                  src="https://api.dicebear.com/10.x/open-peeps/svg?seed=Kasey%20Curveball&backgroundColor=f0c14a"
+                  alt="DiceBear Open Peeps illustrated avatar"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">6</div>
+                <div class="name-bar">Open Peeps</div>
+                <div class="meta"><span>95 PT</span><span>SPD 10</span><span>C +1</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Open Peeps</h2>
+            <p>Chunky, editorial line art. Could be fun if the whole game leans more handmade and playful.</p>
+            <div class="tag-row"><span class="tag">Hand-drawn</span><span class="tag">CC0 style</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot contain">
+                <img
+                  src="https://api.dicebear.com/10.x/personas/svg?seed=Kasey%20Knuckleball&backgroundColor=143642"
+                  alt="DiceBear Personas illustrated avatar"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">9</div>
+                <div class="name-bar">Personas</div>
+                <div class="meta"><span>150 PT</span><span>SPD 8</span><span>1B +2</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Personas</h2>
+            <p>Simple, bold, and graphic. It reads more like app-avatar art than baseball art, but it is very scannable.</p>
+            <div class="tag-row"><span class="tag">Bold shapes</span><span class="tag">Scannable</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot contain">
+                <img
+                  src="https://api.dicebear.com/10.x/micah/svg?seed=Kasey%20Ace&backgroundColor=ffdfbf"
+                  alt="DiceBear Micah soft portrait avatar"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">10</div>
+                <div class="name-bar">Micah</div>
+                <div class="meta"><span>175 PT</span><span>SPD 12</span><span>SP</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Micah</h2>
+            <p>A softer portrait style. This feels more modern and friendly, maybe a little less competitive.</p>
+            <div class="tag-row"><span class="tag">Soft portrait</span><span class="tag">Modern</span></div>
+          </div>
+        </article>
+
+        <article class="option">
+          <div class="preview">
+            <div class="mini-card">
+              <div class="image-slot contain">
+                <img
+                  src="https://api.dicebear.com/10.x/dylan/svg?seed=Kasey%20Splitter&backgroundColor=c0aede"
+                  alt="DiceBear Dylan stylized portrait avatar"
+                />
+              </div>
+              <div class="card-strip">
+                <div class="badge">8</div>
+                <div class="name-bar">Dylan</div>
+                <div class="meta"><span>130 PT</span><span>SPD 14</span><span>RP</span></div>
+                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="notes">
+            <h2>Dylan</h2>
+            <p>More stylized and poster-like. This one could work if we want the player pool to feel a bit weirder and less literal.</p>
+            <div class="tag-row"><span class="tag">Poster-ish</span><span class="tag">Distinct faces</span></div>
           </div>
         </article>
 
@@ -535,34 +656,9 @@
             </div>
           </div>
           <div class="notes">
-            <h2>Pixel Avatar</h2>
-            <p>A playful alternate universe look. It gives every player identity without pretending to be a real person.</p>
-            <div class="tag-row"><span class="tag">Arcade feel</span><span class="tag">Low realism</span></div>
-          </div>
-        </article>
-
-        <article class="option">
-          <div class="preview">
-            <div class="mini-card">
-              <div class="image-slot contain">
-                <img
-                  src="https://robohash.org/kasey-showdown-ace.png?set=set3&size=480x480&bgset=bg1"
-                  alt="RoboHash robot avatar"
-                  referrerpolicy="no-referrer"
-                />
-              </div>
-              <div class="card-strip">
-                <div class="badge">6</div>
-                <div class="name-bar">Mascot Bot</div>
-                <div class="meta"><span>95 PT</span><span>SPD 13</span><span>RP</span></div>
-                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
-              </div>
-            </div>
-          </div>
-          <div class="notes">
-            <h2>RoboHash</h2>
-            <p>Silly, legible, and instantly unique from a player id. Maybe too goofy for the main set, but excellent for a chaos mode.</p>
-            <div class="tag-row"><span class="tag">No auth</span><span class="tag">Memorable</span></div>
+            <h2>Pixel Art</h2>
+            <p>A playful video-game direction. It loses realism, but the fantasy draft might actually benefit from that separation.</p>
+            <div class="tag-row"><span class="tag">Arcade</span><span class="tag">CC0 style</span></div>
           </div>
         </article>
 
@@ -570,44 +666,20 @@
           <div class="preview">
             <div class="mini-card">
               <div class="image-slot">
-                <div class="abstract-art" aria-hidden="true"><div class="abstract-mark"></div></div>
+                <div class="painted-action" aria-hidden="true"></div>
               </div>
               <div class="card-strip">
                 <div class="badge">9</div>
-                <div class="name-bar">Abstract</div>
-                <div class="meta"><span>155 PT</span><span>SPD 9</span><span>1B +1</span></div>
+                <div class="name-bar">Painted Action</div>
+                <div class="meta"><span>165 PT</span><span>SPD 16</span><span>RF +2</span></div>
                 <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
               </div>
             </div>
           </div>
           <div class="notes">
-            <h2>Abstract Avatar</h2>
-            <p>Graphic and clean. Boring Avatars has this kind of seeded SVG feel, but this tile is local CSS so it does not depend on their hosted endpoint.</p>
-            <div class="tag-row"><span class="tag">SVG-style</span><span class="tag">Local mock</span></div>
-          </div>
-        </article>
-
-        <article class="option">
-          <div class="preview">
-            <div class="mini-card">
-              <div class="image-slot contain">
-                <img
-                  src="https://ui-avatars.com/api/?name=Kasey+Shibayama&size=480&background=0f6b52&color=ffffff&bold=true&format=svg"
-                  alt="Initials avatar"
-                />
-              </div>
-              <div class="card-strip">
-                <div class="badge">5</div>
-                <div class="name-bar">Initials</div>
-                <div class="meta"><span>70 PT</span><span>SPD 7</span><span>C +0</span></div>
-                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
-              </div>
-            </div>
-          </div>
-          <div class="notes">
-            <h2>Initials Badge</h2>
-            <p>The safest fallback. It will never look broken, but it is probably too plain to carry the card design by itself.</p>
-            <div class="tag-row"><span class="tag">Reliable fallback</span><span class="tag">Plain</span></div>
+            <h2>Painted Action</h2>
+            <p>Local CSS placeholder for a possible generated sports-illustration treatment: less photo-real, more card art.</p>
+            <div class="tag-row"><span class="tag">Generated later</span><span class="tag">Painterly</span></div>
           </div>
         </article>
 
@@ -615,69 +687,27 @@
           <div class="preview">
             <div class="mini-card">
               <div class="image-slot">
-                <div class="silhouette" aria-hidden="true"></div>
-              </div>
-              <div class="card-strip">
-                <div class="badge">8</div>
-                <div class="name-bar">Silhouette</div>
-                <div class="meta"><span>135 PT</span><span>SPD 16</span><span>RF +2</span></div>
-                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
-              </div>
-            </div>
-          </div>
-          <div class="notes">
-            <h2>CSS Silhouette</h2>
-            <p>Fully local, fast, and themeable by team color. More iconic than personal, but it avoids licensing and generation entirely.</p>
-            <div class="tag-row"><span class="tag">No network</span><span class="tag">Themeable</span></div>
-          </div>
-        </article>
-
-        <article class="option">
-          <div class="preview">
-            <div class="mini-card">
-              <div class="image-slot">
-                <div class="crest-art" aria-hidden="true"><div class="crest">MS</div></div>
-              </div>
-              <div class="card-strip">
-                <div class="badge">10</div>
-                <div class="name-bar">Team Crest</div>
-                <div class="meta"><span>170 PT</span><span>SPD 12</span><span>SP</span></div>
-                <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
-              </div>
-            </div>
-          </div>
-          <div class="notes">
-            <h2>Crest / Monogram</h2>
-            <p>Could emphasize team identity instead of player likeness. Strong for custom fantasy teams and easy to generate from initials.</p>
-            <div class="tag-row"><span class="tag">Team-first</span><span class="tag">No external art</span></div>
-          </div>
-        </article>
-
-        <article class="option">
-          <div class="preview">
-            <div class="mini-card">
-              <div class="image-slot">
-                <div class="ai-concept" aria-hidden="true"></div>
+                <div class="ai-photo" aria-hidden="true"></div>
               </div>
               <div class="card-strip">
                 <div class="badge">12</div>
-                <div class="name-bar">AI Concept</div>
+                <div class="name-bar">AI Photo</div>
                 <div class="meta"><span>210 PT</span><span>SPD 14</span><span>CF +3</span></div>
                 <div class="chart"><span>SO</span><span>GB</span><span>BB</span><span>1B</span><span>2B</span><span>HR</span></div>
               </div>
             </div>
           </div>
           <div class="notes">
-            <h2>AI Generated</h2>
-            <p>Placeholder only for now. This is where Nano Banana/OpenAI-style images would go once you decide we should generate them.</p>
-            <div class="tag-row"><span class="tag">Highest upside</span><span class="tag">Not called yet</span></div>
+            <h2>AI Photo</h2>
+            <p>Placeholder only. This is the slot for Nano Banana/OpenAI-style fictional player photos once you explicitly want generated images.</p>
+            <div class="tag-row"><span class="tag">Highest realism</span><span class="tag">Not generated yet</span></div>
           </div>
         </article>
       </section>
 
       <footer>
-        External examples use DiceBear, RoboHash, Boring Avatars, UI Avatars, and a Wikimedia Commons thumbnail. For a real implementation, we should cache chosen
-        assets locally and store source/license metadata with each generated player.
+        Photo examples use local assets plus Wikimedia Commons thumbnails. Illustration examples use DiceBear HTTP API styles.
+        For app integration, the important next step is storing the source type, seed, license, and attribution alongside each player.
       </footer>
     </main>
   </body>
