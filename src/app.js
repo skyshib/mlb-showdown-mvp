@@ -1,4 +1,4 @@
-import { generatePlayerPool } from "./data/playerGeneration.js?v=20260627-middle-infield-fielding";
+import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-roster-depth";
 import {
   autopick,
   assignLineupSlots,
@@ -15,7 +15,7 @@ import {
   staffStatus,
   undoLastPick,
   validateRoster
-} from "./rules/draft.js?v=20260627-repair-current";
+} from "./rules/draft.js?v=20260704-roster-depth";
 import { simulateRoundRobin } from "./rules/tournament.js";
 import {
   basesText,
@@ -27,7 +27,7 @@ import {
   renderCardGrid,
   renderPlayerCard,
   renderPlayerTable
-} from "./ui/render.js?v=20260627-repair-current";
+} from "./ui/render.js?v=20260704-roster-depth";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const app = document.querySelector("#app");
@@ -592,8 +592,42 @@ function renderRoster(manager, draft) {
       <span class="${counts.starters >= 2 ? "ok" : "warn"}">${counts.starters}/2 starters</span>
       <span class="${counts.bullpen >= 2 ? "ok" : "warn"}">${counts.bullpen}/2 bullpen</span>
     </div>
-    <ol>${manager.roster.map((player) => `<li><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong> <span>${escapeHtml(player.kind)} | ${player.points} pts</span></li>`).join("")}</ol>
+    ${renderRosterDepthChart(manager)}
   </article>`;
+}
+
+function renderRosterDepthChart(manager) {
+  const lineupSlots = assignHittersToLineupSlots(manager).slots;
+  const staffSlots = assignPlayersToSlots(
+    manager.roster.filter((player) => player.kind === "pitcher"),
+    ["SP", "SP", "RP", "RP"],
+    (player) => player.role
+  ).slots;
+
+  return `<div class="mini-roster-board">
+    <div class="mini-roster-section">
+      <span class="mini-roster-heading">Lineup</span>
+      <div class="mini-slot-grid">${lineupSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label)).join("")}</div>
+    </div>
+    <div class="mini-roster-section">
+      <span class="mini-roster-heading">Staff</span>
+      <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label)).join("")}</div>
+    </div>
+  </div>`;
+}
+
+function renderMiniRosterSlot(player, slotLabel) {
+  if (!player) {
+    return `<div class="mini-roster-slot empty-mini-slot">
+      <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
+      <span class="mini-slot-name">open</span>
+    </div>`;
+  }
+  return `<div class="mini-roster-slot filled-mini-slot">
+    <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
+    <strong class="mini-slot-name player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
+    <span class="mini-slot-meta">${escapeHtml(rosterSlotDescription(player, slotLabel))} | ${player.points} pts</span>
+  </div>`;
 }
 
 function renderDraftFocus(draft, manager) {

@@ -430,18 +430,72 @@ button.roster-slot[draggable="true"]:active {
   font-size: 13px;
 }
 
-.roster ol {
-  margin: 10px 0 0;
-  padding-left: 22px;
+.mini-roster-board {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
 }
 
-.roster li {
-  margin: 3px 0;
-}
-
-.roster li span {
+.mini-roster-heading {
+  display: block;
+  margin-bottom: 6px;
   color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mini-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mini-roster-slot {
+  min-width: 0;
+  min-height: 58px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px;
+  background: #f8faf7;
+}
+
+.empty-mini-slot {
+  background: #fbfcfa;
+  color: var(--muted);
+}
+
+.mini-slot-label,
+.mini-slot-name,
+.mini-slot-meta {
+  display: block;
+  min-width: 0;
+}
+
+.mini-slot-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.mini-slot-name {
+  overflow: hidden;
+  margin-top: 2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
+  font-weight: 850;
+}
+
+.mini-slot-meta {
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .section-head {
