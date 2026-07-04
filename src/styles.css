@@ -1354,3 +1354,78 @@ button.roster-slot[draggable="true"]:active {
 .race-results-panel .race-chart {
   max-width: 920px;
 }
+
+.online-setup {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.online-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.online-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.online-banner .online-share code {
+  user-select: all;
+  font-size: 12px;
+}
+
+.seat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.seat-option {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--ink);
+  text-align: left;
+}
+
+.seat-option span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.seat-option:not(:disabled):hover {
+  border-color: var(--accent-dark);
+  background: var(--accent);
+  color: white;
+}
+
+.seat-option:not(:disabled):hover span {
+  color: inherit;
+}
+
+.seat-option:disabled {
+  opacity: 0.55;
+}
+
+.link-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent-dark);
+  text-decoration: underline;
+  padding: 0;
+  font-size: 13px;
+}

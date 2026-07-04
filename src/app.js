@@ -2,6 +2,7 @@ import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-real-p
 import { buildRealPlayerPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
 import { buildMarinersPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners";
 import {
+  applyDraftAction,
   autopick,
   assignLineupSlots,
   availablePlayers,
@@ -20,7 +21,16 @@ import {
   staffStatus,
   undoLastPick,
   validateRoster
-} from "./rules/draft.js?v=20260705-draft-history";
+} from "./rules/draft.js?v=20260705-online-rooms";
+import {
+  createRoom,
+  fetchRoom,
+  joinRoom,
+  sendRoomAction,
+  subscribeRoom,
+  loadOnlineSeat,
+  storeOnlineSeat
+} from "./onlineClient.js?v=20260705-online-rooms-2";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -64,8 +74,14 @@ let selectedLineupMove = null;
 let draggedLineupMove = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
+let onlineStream = null;
 
-renderCurrentScreen();
+const onlineRoomParam = new URLSearchParams(location.search).get("room");
+if (onlineRoomParam) {
+  bootOnlineRoom(onlineRoomParam);
+} else {
+  renderCurrentScreen();
+}
 
 function defaultState() {
   return {
@@ -76,6 +92,7 @@ function defaultState() {
     rosterSize: 13,
     draft: null,
     draftTab: "available",
+    online: null,
     tournament: null,
     batch: null,
     batchSorts: {
@@ -97,7 +114,9 @@ function defaultState() {
 }
 
 function renderCurrentScreen() {
-  if (state.view === "batch" && state.batch && state.draft) {
+  if (state.online && !state.online.managerId && !state.online.spectator) {
+    renderSeatSelect();
+  } else if (state.view === "batch" && state.batch && state.draft) {
     renderBatch();
   } else if (state.tournament) {
     renderTournament();
@@ -126,6 +145,217 @@ function resetAppHandlers() {
   app.ondragover = null;
   app.ondrop = null;
   app.ondragend = null;
+}
+
+async function bootOnlineRoom(roomId) {
+  renderOnlineMessage(`Connecting to room ${roomId}…`);
+  let room;
+  try {
+    room = await fetchRoom(roomId);
+  } catch (error) {
+    renderOnlineMessage(error.message, true);
+    return;
+  }
+  const seat = loadOnlineSeat(roomId);
+  state = defaultState();
+  state.seed = room.seed;
+  state.managers = room.managers.map((manager) => manager.name);
+  state.rosterSize = room.rosterSize;
+  state.poolMode = room.poolMode === "real" ? "real" : "random";
+  state.online = {
+    roomId,
+    managerId: seat?.managerId ?? null,
+    token: seat?.token ?? null,
+    host: Boolean(seat?.host),
+    hostToken: seat?.hostToken ?? null,
+    spectator: Boolean(seat?.spectator),
+    claimedSeats: room.managers.filter((manager) => manager.claimed).map((manager) => manager.id),
+    appliedSeq: 0,
+    status: ""
+  };
+  rebuildOnlineDraft(room);
+  subscribeOnline();
+  renderCurrentScreen();
+}
+
+function rebuildOnlineDraft(room) {
+  const pool = room.poolMode === "real"
+    ? buildRealPlayerPool()
+    : generatePlayerPool(room.seed, room.managers.length, room.rosterSize);
+  state.draft = createDraft(state.managers, pool, room.rosterSize, room.seed);
+  for (const entry of room.actions) applyDraftAction(state.draft, entry.action);
+  state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
+  state.selectedTeamName = state.managers[0];
+}
+
+function subscribeOnline() {
+  onlineStream?.close();
+  onlineStream = subscribeRoom(state.online.roomId, state.online.appliedSeq, {
+    onAction: (entry) => {
+      const online = state.online;
+      if (!online || entry.seq <= online.appliedSeq) return;
+      if (entry.seq > online.appliedSeq + 1) {
+        resyncOnlineRoom();
+        return;
+      }
+      try {
+        applyDraftAction(state.draft, entry.action);
+      } catch {
+        resyncOnlineRoom();
+        return;
+      }
+      online.appliedSeq = entry.seq;
+      online.status = "";
+      if (entry.action.type !== "lineup") {
+        state.tournament = null;
+        invalidateBatch();
+      }
+      selectedLineupMove = null;
+      draggedLineupMove = null;
+      renderCurrentScreen();
+    },
+    onSeats: (payload) => {
+      if (!state.online) return;
+      state.online.claimedSeats = payload.seats;
+      renderCurrentScreen();
+    },
+    onError: () => {
+      if (!state.online || state.online.status) return;
+      state.online.status = "Reconnecting to room server…";
+      renderCurrentScreen();
+    }
+  });
+}
+
+async function resyncOnlineRoom() {
+  const online = state.online;
+  if (!online) return;
+  try {
+    const room = await fetchRoom(online.roomId);
+    online.claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
+    rebuildOnlineDraft(room);
+    online.status = "";
+    subscribeOnline();
+  } catch (error) {
+    online.status = error.message;
+  }
+  renderCurrentScreen();
+}
+
+async function sendOnlineAction(action) {
+  const online = state.online;
+  if (!online?.token) return;
+  try {
+    await sendRoomAction(online.roomId, online.token, action);
+  } catch (error) {
+    online.status = error.message;
+    renderCurrentScreen();
+  }
+}
+
+function leaveOnlineRoom() {
+  onlineStream?.close();
+  onlineStream = null;
+  location.href = location.pathname;
+}
+
+function renderOnlineMessage(message, isError = false) {
+  resetAppHandlers();
+  app.innerHTML = `<section class="panel setup online-message">
+    <div>
+      <p class="eyebrow">Online room</p>
+      <h1>${isError ? "Cannot open room" : "One moment"}</h1>
+      <p class="lede">${escapeHtml(message)}</p>
+      ${isError ? `<p><a href="${location.pathname}">Back to local setup</a></p>` : ""}
+    </div>
+  </section>`;
+}
+
+function renderSeatSelect() {
+  resetAppHandlers();
+  const online = state.online;
+  const seats = state.draft.managers
+    .map((manager) => {
+      const claimed = online.claimedSeats.includes(manager.id);
+      return `<button class="seat-option" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}" ${claimed ? "disabled" : ""}>
+        <strong>${escapeHtml(manager.name)}</strong>
+        <span>${claimed ? "Taken" : "Open seat"}</span>
+      </button>`;
+    })
+    .join("");
+  app.innerHTML = `<section class="panel setup">
+    <div>
+      <p class="eyebrow">Online room ${escapeHtml(online.roomId)}</p>
+      <h1>Choose your seat</h1>
+      <p class="lede">Pick the manager you will draft for.${online.hostToken ? " You created this room, so your seat gets host controls." : ""}</p>
+      <div class="seat-grid">${seats}</div>
+      <p><button type="button" class="link-button" data-action="spectate">Watch without a seat</button></p>
+      ${online.status ? `<p class="warn">${escapeHtml(online.status)}</p>` : ""}
+    </div>
+  </section>`;
+
+  app.onclick = async (event) => {
+    const spectate = event.target.closest("[data-action='spectate']");
+    if (spectate) {
+      state.online.spectator = true;
+      storeOnlineSeat(state.online.roomId, { spectator: true });
+      renderCurrentScreen();
+      return;
+    }
+    const button = event.target.closest("[data-action='claim-seat']");
+    if (!button || button.disabled) return;
+    try {
+      const result = await joinRoom(state.online.roomId, button.dataset.managerId, state.online.hostToken ?? undefined);
+      state.online.managerId = result.managerId;
+      state.online.token = result.token;
+      state.online.host = Boolean(result.host);
+      storeOnlineSeat(state.online.roomId, {
+        managerId: result.managerId,
+        token: result.token,
+        host: state.online.host,
+        spectator: false
+      });
+      renderCurrentScreen();
+    } catch (error) {
+      state.online.status = error.message;
+      renderSeatSelect();
+    }
+  };
+}
+
+function renderOnlineBanner(draft, current) {
+  const online = state.online;
+  const mySeat = draft.managers.find((manager) => manager.id === online.managerId);
+  const shareUrl = `${location.origin}${location.pathname}?room=${encodeURIComponent(online.roomId)}`;
+  const turnNote = draft.complete
+    ? "Draft complete — anyone can sim the tournament locally"
+    : current
+      ? online.managerId === current.id
+        ? "You are on the clock"
+        : `Waiting for ${current.name}`
+      : "";
+  return `<section class="panel online-banner">
+    <span><strong>Online room ${escapeHtml(online.roomId)}</strong></span>
+    <span>${mySeat ? `You are ${escapeHtml(mySeat.name)}${online.host ? " (host)" : ""}` : "Spectating"}</span>
+    ${turnNote ? `<span>${escapeHtml(turnNote)}</span>` : ""}
+    <span class="online-share">Invite link: <code>${escapeHtml(shareUrl)}</code></span>
+    ${online.status ? `<span class="warn">${escapeHtml(online.status)}</span>` : ""}
+  </section>`;
+}
+
+function onlineCanPickNow(current) {
+  const online = state.online;
+  if (!online) return true;
+  if (!current) return false;
+  return online.host || current.id === online.managerId;
+}
+
+function onlineCanUndo(draft) {
+  const online = state.online;
+  if (!online) return true;
+  if (online.host) return true;
+  const lastPick = draftHistory(draft).at(-1);
+  return Boolean(lastPick && lastPick.manager.id === online.managerId);
 }
 
 function renderSetup(setupError = "") {
@@ -172,6 +402,10 @@ function renderSetup(setupError = "") {
       </fieldset>
       ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
       <button type="submit">Start draft</button>
+      <div class="online-setup">
+        <button type="button" data-action="create-online">Create online room</button>
+        <p class="online-note" data-online-note>Draft with friends on other machines. Needs the room server: <code>npm run online</code></p>
+      </div>
     </form>
   </section>
   <section class="panel notes">
@@ -221,6 +455,30 @@ function renderSetup(setupError = "") {
     saveState();
     renderDraft();
   });
+
+  document.querySelector("[data-action='create-online']").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const note = document.querySelector("[data-online-note]");
+    const form = new FormData(document.querySelector("#setup-form"));
+    const managers = dedupeManagerNames(
+      String(form.get("managers"))
+        .split("\n")
+        .map((name) => name.trim())
+        .filter(Boolean)
+    );
+    const seed = String(form.get("seed")).trim() || "showdown";
+    const poolMode = form.get("poolMode") === "real" ? "real" : "random";
+    button.disabled = true;
+    note.textContent = "Creating online room…";
+    try {
+      const room = await createRoom({ seed, managers: managers.length >= 2 ? managers : ["Home", "Away"], poolMode });
+      storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
+      location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
+    } catch (error) {
+      button.disabled = false;
+      note.textContent = error.message;
+    }
+  });
 }
 
 function renderDraft() {
@@ -237,11 +495,13 @@ function renderDraft() {
     ? draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0]
     : draft.managers[0]);
 
-  app.innerHTML = `<section class="toolbar">
-    <button data-action="reset">New room</button>
-    <button data-action="autopick" ${draft.complete ? "disabled" : ""}>Auto-pick next</button>
-    <button data-action="undo-pick" ${draft.pickNumber > 0 ? "" : "disabled"}>Undo last pick</button>
-    <button data-action="finish" ${draft.complete ? "disabled" : ""}>Auto-finish draft</button>
+  const online = state.online;
+  app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
+  <section class="toolbar">
+    <button data-action="reset">${online ? "Leave room" : "New room"}</button>
+    <button data-action="autopick" ${draft.complete || !onlineCanPickNow(current) ? "disabled" : ""}>Auto-pick next</button>
+    <button data-action="undo-pick" ${draft.pickNumber > 0 && onlineCanUndo(draft) ? "" : "disabled"}>Undo last pick</button>
+    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>Auto-finish draft</button>`}
     <button data-action="tournament" ${canSimulate(draft) ? "" : "disabled"}>Sim tournament</button>
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} seasons</button>
   </section>
@@ -264,7 +524,11 @@ function renderDraft() {
         label: "Pick",
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
-        canPick: (player) => (current ? canPickPlayer(draft, current, player) : { ok: false, reason: "draft complete" })
+        canPick: (player) => {
+          if (!current) return { ok: false, reason: "draft complete" };
+          if (!onlineCanPickNow(current)) return { ok: false, reason: `${current.name} is on the clock` };
+          return canPickPlayer(draft, current, player);
+        }
       })}`}
     </div>
     <div class="panel">
@@ -309,6 +573,10 @@ function bindDraftActions() {
     if (!button) return;
     const action = button.dataset.action;
     if (action === "reset") {
+      if (state.online) {
+        leaveOnlineRoom();
+        return;
+      }
       clearSavedState();
       state = defaultState();
       renderSetup();
@@ -322,6 +590,10 @@ function bindDraftActions() {
     }
     if (action === "pick") {
       if (button.disabled) return;
+      if (state.online) {
+        sendOnlineAction({ type: "pick", playerId: button.dataset.playerId });
+        return;
+      }
       pickPlayer(state.draft, button.dataset.playerId);
       selectedLineupMove = null;
       invalidateBatch();
@@ -329,6 +601,11 @@ function bindDraftActions() {
       renderDraft();
     }
     if (action === "autopick") {
+      if (button.disabled) return;
+      if (state.online) {
+        sendOnlineAction({ type: "autopick" });
+        return;
+      }
       autopick(state.draft);
       selectedLineupMove = null;
       invalidateBatch();
@@ -336,6 +613,11 @@ function bindDraftActions() {
       renderDraft();
     }
     if (action === "undo-pick") {
+      if (button.disabled) return;
+      if (state.online) {
+        sendOnlineAction({ type: "undo" });
+        return;
+      }
       undoLastPick(state.draft);
       state.tournament = null;
       selectedLineupMove = null;
@@ -345,6 +627,11 @@ function bindDraftActions() {
       renderDraft();
     }
     if (action === "finish") {
+      if (button.disabled) return;
+      if (state.online) {
+        sendOnlineAction({ type: "finish" });
+        return;
+      }
       while (!state.draft.complete) autopick(state.draft);
       selectedLineupMove = null;
       invalidateBatch();
@@ -1851,6 +2138,7 @@ function handleLineupSlotClick(slot) {
 }
 
 function canMoveLineupPlayer(managerId, playerId, toLabel) {
+  if (state.online && !state.online.host && managerId !== state.online.managerId) return false;
   const manager = findDraftManager(managerId);
   const player = findRosterPlayer(managerId, playerId);
   if (!manager || !player || player.kind !== "hitter") return false;
@@ -1878,7 +2166,12 @@ function moveLineupPlayer(managerId, playerId, toLabel) {
     delete assignments[fromSlot.label];
   }
 
-  manager.lineupAssignments = cleanLineupAssignments(manager, assignments);
+  const cleaned = cleanLineupAssignments(manager, assignments);
+  if (state.online) {
+    sendOnlineAction({ type: "lineup", managerId, assignments: cleaned });
+    return true;
+  }
+  manager.lineupAssignments = cleaned;
   return true;
 }
 
@@ -2111,6 +2404,7 @@ function allTournamentGames(tournament) {
 }
 
 function saveState() {
+  if (state.online) return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState(state)));
 }
 

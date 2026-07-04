@@ -47,6 +47,24 @@ npm run balance
 
 Draft rooms are saved in browser `localStorage`, which means saves are local to the browser and exact origin. For example, `127.0.0.1:5177` and `127.0.0.1:5178` do not share saved drafts.
 
+## Online Play (multiple machines)
+
+Local solo play works exactly as before. To draft with friends on other machines, one person runs the room server instead of `npm run serve`:
+
+```bash
+npm run online
+```
+
+Then:
+
+1. Open `http://127.0.0.1:8790/index.html` (the server also serves the app) and click `Create online room` on the setup screen.
+2. Share the invite link shown in the room banner (use your LAN IP or a tunnel, e.g. `http://192.168.1.20:8790/index.html?room=ab12cd`).
+3. Each player opens the link and claims a manager seat; extra visitors can spectate.
+4. Picks are turn-gated: you can only draft (or auto-pick) when your manager is on the clock, and you can only edit your own lineup. The room creator's seat is the host, and can auto-finish the draft, undo any pick, or act for a stalled seat.
+5. Once the draft completes, anyone can run `Sim tournament` or the batch sim locally — results are identical on every machine because all sims are seeded.
+
+How it works: the server keeps an ordered log of draft actions per room and streams it to every browser over server-sent events. Each client rebuilds the identical draft by replaying the log through the same deterministic rules used in local play, so the server stays a thin coordinator (in-memory rooms, no database). Rooms live until the server process stops.
+
 ## Current Status
 
 Implemented:

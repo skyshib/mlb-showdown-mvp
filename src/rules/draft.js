@@ -140,6 +140,35 @@ export function undoLastPick(draft) {
   return { manager, player };
 }
 
+// Single entry point for replaying shared draft actions. Online rooms sync an
+// ordered action log; the server and every client apply actions through this
+// function so replicas stay byte-identical (all underlying rules are
+// deterministic given the draft seed).
+export function applyDraftAction(draft, action) {
+  switch (action?.type) {
+    case "pick":
+      pickPlayer(draft, action.playerId);
+      return;
+    case "autopick":
+      autopick(draft);
+      return;
+    case "finish":
+      while (!draft.complete) autopick(draft);
+      return;
+    case "undo":
+      undoLastPick(draft);
+      return;
+    case "lineup": {
+      const manager = draft.managers.find((item) => item.id === action.managerId);
+      if (!manager) throw new Error("Unknown manager for lineup action");
+      manager.lineupAssignments = { ...(action.assignments ?? {}) };
+      return;
+    }
+    default:
+      throw new Error(`Unknown draft action: ${action?.type}`);
+  }
+}
+
 export function draftHistory(draft) {
   const counters = new Map();
   const picks = [];

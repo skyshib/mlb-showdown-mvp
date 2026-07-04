@@ -6,6 +6,7 @@
   "scripts": {
     "balance": "node scripts/balance-sim.js",
     "test": "node --test",
-    "serve": "node scripts/serve.js"
+    "serve": "node scripts/serve.js",
+    "online": "node scripts/online-server.js"
   }
 }
