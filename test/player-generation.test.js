@@ -24,7 +24,7 @@ test("generated players use distribution-built charts instead of archetypes", ()
 
     if (player.kind === "hitter") {
       const [min, max] = FIELDING_RANGES[player.position];
-      assert.ok(player.onBase >= 7 && player.onBase <= 14);
+      assert.ok(player.onBase >= 6 && player.onBase <= 15);
       assert.ok(player.speed >= 1 && player.speed <= 20);
       assert.ok(player.fielding >= min && player.fielding <= max);
       hitterCharts.add(JSON.stringify(player.chart));

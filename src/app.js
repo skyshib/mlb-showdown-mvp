@@ -1,4 +1,4 @@
-import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-roster-depth";
+import { generatePlayerPool } from "./data/playerGeneration.js?v=20260704-card-variance";
 import {
   autopick,
   assignLineupSlots,

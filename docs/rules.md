@@ -37,13 +37,13 @@ Hitter attributes:
 
 | Attribute | Distribution |
 | --- | --- |
-| Hitter chart out slots | Normal mean `6`, SD `1.5`, clipped `1-10` |
-| On-base | Normal mean `10.5 - (outSlots - 6) * 0.25`, SD `1.2`, clipped `7-14` |
-| Speed | Normal by position, SD `3.5`, clipped `1-20`; fewer chart outs add a small positive adjustment |
-| Walk/hit split | Hits are normal mean `80%` of non-out slots, SD `10%`, clipped `55%-95%`; the rest are walks |
-| Extra-base hit split | Extra-base hits are normal mean `32%` of hit slots, SD `12%`, clipped `5%-70%` |
-| Home runs | Normal share of extra-base slots; can be zero |
-| Outs mix | SO/GB/FB proportions are independently varied, then normalized to fill the out slots |
+| Hitter chart out slots | Normal mean `6`, SD `2.2`, clipped `1-11` |
+| On-base | Normal mean `10.5 - (outSlots - 6) * 0.25`, SD `1.6`, clipped `6-15` |
+| Speed | Normal by position, SD `4.5`, clipped `1-20`; fewer chart outs add a small positive adjustment |
+| Walk/hit split | Hits are normal mean `80%` of non-out slots, SD `16%`, clipped `50%-98%`; the rest are walks |
+| Extra-base hit split | Extra-base hits are normal mean `32%` of hit slots, SD `18%`, clipped `0%-80%` |
+| Home runs | Normal share of extra-base slots with wider variance; can be zero |
+| Outs mix | SO/GB/FB proportions are independently varied with wider variance, then normalized to fill the out slots |
 
 Speed means by position:
 
@@ -75,13 +75,13 @@ Pitcher attributes:
 
 | Attribute | Distribution |
 | --- | --- |
-| Pitcher chart out slots | Normal mean `16`, SD `1`, clipped `12-19` |
-| Control | Normal mean `3.5`, SD `1.1`, clipped `0-6` |
+| Pitcher chart out slots | Normal mean `16`, SD `1.6`, clipped `11-19` |
+| Control | Normal mean `3.5`, SD `1.5`, clipped `0-6` |
 | Starter IP | Normal mean `6`, SD `0.5`, clipped `5-7`; 2% chance of `8` |
 | Reliever IP | Fixed at `1` |
-| Walk/hit split | Walks are normal mean `35%` of non-out slots, SD `13%`, clipped `10%-65%`; the rest are hits |
-| Extra-base hit split | Extra-base hits are normal mean `28%` of hit slots, SD `10%`, clipped `0%-60%` |
-| Outs mix | PU/SO/GB/FB proportions are independently varied, then normalized to fill the out slots |
+| Walk/hit split | Walks are normal mean `35%` of non-out slots, SD `18%`, clipped `5%-75%`; the rest are hits |
+| Extra-base hit split | Extra-base hits are normal mean `28%` of hit slots, SD `16%`, clipped `0%-75%` |
+| Outs mix | PU/SO/GB/FB proportions are independently varied with wider variance, then normalized to fill the out slots |
 
 Point values:
 

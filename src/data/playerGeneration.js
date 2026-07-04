@@ -520,7 +520,7 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
 function makeHitterCard(rng, index, usedNames, position) {
   const chart = makeHitterChart(rng);
   const outSlots = countChartSlots(chart, [RESULTS.SO, RESULTS.GB, RESULTS.FB]);
-  const onBase = normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.2, 7, 14);
+  const onBase = normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.6, 6, 15);
   const speed = randomSpeed(rng, position, outSlots);
   const fielding = randomFielding(rng, position);
   const points = onBase * 20 + fielding * 7 + speedPoints(speed) + chartPower(chart);
@@ -540,7 +540,7 @@ function makeHitterCard(rng, index, usedNames, position) {
 
 function makePitcherCard(rng, index, usedNames, role) {
   const isReliever = role === "RP";
-  const control = normalInt(rng, 3.5, 1.1, 0, 6);
+  const control = normalInt(rng, 3.5, 1.5, 0, 6);
   const ip = isReliever ? 1 : starterIp(rng);
   const chart = makePitcherChart(rng);
   const points = control * 35 + ip * 8 + pitcherChartPower(chart);
@@ -576,20 +576,20 @@ function toChart(rows) {
 }
 
 function makeHitterChart(rng) {
-  const outs = normalInt(rng, 6, 1.5, 1, 10);
+  const outs = normalInt(rng, 6, 2.2, 1, 11);
   const remaining = 20 - outs;
-  const hitRate = normalFloat(rng, 0.8, 0.1, 0.55, 0.95);
+  const hitRate = normalFloat(rng, 0.8, 0.16, 0.5, 0.98);
   const hits = clamp(Math.round(remaining * hitRate), 1, remaining);
   const walks = remaining - hits;
-  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.32, 0.12, 0.05, 0.7)), 0, hits);
+  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.32, 0.18, 0, 0.8)), 0, hits);
   const singles = hits - extraBaseHits;
   const triples = extraBaseHits >= 2 && rng.next() < 0.22 ? 1 : 0;
-  const homeRuns = clamp(Math.round((extraBaseHits - triples) * normalFloat(rng, 0.42, 0.18, 0, 0.85)), 0, extraBaseHits - triples);
+  const homeRuns = clamp(Math.round((extraBaseHits - triples) * normalFloat(rng, 0.42, 0.25, 0, 0.95)), 0, extraBaseHits - triples);
   const doubles = extraBaseHits - triples - homeRuns;
   const outCounts = splitSlots(rng, outs, [
-    normalFloat(rng, 0.32, 0.12, 0.08, 0.65),
-    normalFloat(rng, 0.38, 0.14, 0.08, 0.7),
-    normalFloat(rng, 0.3, 0.12, 0.08, 0.65)
+    normalFloat(rng, 0.32, 0.18, 0.03, 0.75),
+    normalFloat(rng, 0.38, 0.2, 0.03, 0.8),
+    normalFloat(rng, 0.3, 0.18, 0.03, 0.75)
   ]);
 
   return chartFromCounts([
@@ -605,20 +605,20 @@ function makeHitterChart(rng) {
 }
 
 function makePitcherChart(rng) {
-  const outs = normalInt(rng, 16, 1, 12, 19);
+  const outs = normalInt(rng, 16, 1.6, 11, 19);
   const remaining = 20 - outs;
-  const walkRate = normalFloat(rng, 0.35, 0.13, 0.1, 0.65);
+  const walkRate = normalFloat(rng, 0.35, 0.18, 0.05, 0.75);
   const walks = clamp(Math.round(remaining * walkRate), 0, remaining);
   const hits = remaining - walks;
-  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.28, 0.1, 0, 0.6)), 0, hits);
+  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.28, 0.16, 0, 0.75)), 0, hits);
   const singles = hits - extraBaseHits;
-  const homeRuns = clamp(Math.round(extraBaseHits * normalFloat(rng, 0.35, 0.18, 0, 0.8)), 0, extraBaseHits);
+  const homeRuns = clamp(Math.round(extraBaseHits * normalFloat(rng, 0.35, 0.25, 0, 0.9)), 0, extraBaseHits);
   const doubles = extraBaseHits - homeRuns;
   const outCounts = splitSlots(rng, outs, [
-    normalFloat(rng, 0.12, 0.05, 0.03, 0.25),
-    normalFloat(rng, 0.34, 0.12, 0.12, 0.65),
-    normalFloat(rng, 0.34, 0.12, 0.12, 0.65),
-    normalFloat(rng, 0.2, 0.08, 0.06, 0.45)
+    normalFloat(rng, 0.12, 0.08, 0.01, 0.32),
+    normalFloat(rng, 0.34, 0.18, 0.06, 0.75),
+    normalFloat(rng, 0.34, 0.18, 0.06, 0.75),
+    normalFloat(rng, 0.2, 0.12, 0.03, 0.55)
   ]);
 
   return chartFromCounts([
@@ -663,7 +663,7 @@ function splitSlots(rng, total, weights) {
 
 function randomSpeed(rng, position, outSlots) {
   const outAdjustment = (6 - outSlots) * 0.6;
-  return normalInt(rng, (SPEED_MEANS[position] ?? 12) + outAdjustment, 3.5, 1, 20);
+  return normalInt(rng, (SPEED_MEANS[position] ?? 12) + outAdjustment, 4.5, 1, 20);
 }
 
 function randomFielding(rng, position) {
