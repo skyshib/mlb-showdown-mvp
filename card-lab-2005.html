@@ -238,7 +238,7 @@
           linear-gradient(180deg, #e03a24, #a91108);
         border: 3px solid #ffffff;
         box-shadow: 0 3px 7px rgba(0, 0, 0, 0.6);
-        transform: rotate(-3deg);
+        transform: skewX(-8deg);
         color: #ffffff;
         font-size: 34px;
         font-weight: 900;
@@ -254,7 +254,7 @@
         left: 0px;
         top: 32px;
         z-index: 3;
-        width: 92px;
+        width: 88px;
         height: 20px;
         display: flex;
         align-items: center;
@@ -262,7 +262,7 @@
         background: linear-gradient(180deg, #262626, #040404);
         border: 2px solid #ffffff;
         box-shadow: 0 3px 6px rgba(0, 0, 0, 0.55);
-        transform: rotate(-6deg);
+        transform: rotate(-5deg) skewX(-22deg);
         transform-origin: left center;
         color: #ffffff;
         font-size: 12.5px;
@@ -270,6 +270,11 @@
         font-style: italic;
         letter-spacing: 0.06em;
         padding-bottom: 1px;
+      }
+
+      .card05 .onbase-label span {
+        display: block;
+        transform: skewX(10deg);
       }
 
       /* stat line */
@@ -542,7 +547,7 @@
               <div class="strip-bg">${stripBackdrop(index)}</div>
               <div class="name-bar"><span class="name">${card.name}</span></div>
               <div class="onbase-num">${card.onBase}</div>
-              <div class="onbase-label">ON-BASE</div>
+              <div class="onbase-label"><span>ON-BASE</span></div>
               <div class="stat-line">
                 <span>${card.points} PT.</span>
                 <span>SPEED ${card.speed}</span>
