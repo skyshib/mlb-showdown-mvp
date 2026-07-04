@@ -41,7 +41,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260705-season-stats-hover";
+} from "./ui/render.js?v=20260705-season-overall-stats";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const REAL_POOL_INFO = (() => {
@@ -708,10 +708,10 @@ function renderBatch() {
         <td><strong>${escapeHtml(row.team)}</strong></td>
         <td class="num">${formatShare(row.titleShare)}</td>
         <td class="num">${formatShare(row.finalsShare)}</td>
-        <td class="num">${row.wins.mean.toFixed(2)}</td>
-        <td class="num">${Math.round(row.wins.p10)}&ndash;${Math.round(row.wins.p90)}</td>
-        <td class="num">${row.runsFor.mean.toFixed(1)}</td>
-        <td class="num">${row.runsAgainst.mean.toFixed(1)}</td>
+        <td class="num">${formatDistributionTotal(row.wins)}</td>
+        <td class="num">${formatDistributionTotal(row.losses)}</td>
+        <td class="num">${formatDistributionTotal(row.runsFor)}</td>
+        <td class="num">${formatDistributionTotal(row.runsAgainst)}</td>
       </tr>`
     )
     .join("");
@@ -776,15 +776,15 @@ function renderBatch() {
     <div class="panel">
       <p class="eyebrow">${runs} simulated seasons</p>
       <h1>${escapeHtml(top.team)} had the best draft</h1>
-      <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons. Wins below are the round-robin record; the title is decided by the final. Same room seed replays the same seasons, so tweak lineups and run again to compare.</p>
+      <p class="batch-note">${escapeHtml(top.team)} wins the title in ${formatShare(top.titleShare)} of seasons. Team and player stats below are totals across every simulated game; the title is decided by the final. Same room seed replays the same seasons, so tweak lineups and run again to compare.</p>
       <table>
-        <thead><tr><th>#</th><th>Team</th><th>Title</th><th>Final</th><th>Avg W</th><th>W p10&ndash;p90</th><th>RF/ssn</th><th>RA/ssn</th></tr></thead>
+        <thead><tr><th>#</th><th>Team</th><th>Title</th><th>Final</th><th class="num">W</th><th class="num">L</th><th class="num">RF</th><th class="num">RA</th></tr></thead>
         <tbody>${teamRows}</tbody>
       </table>
       <div class="award-grid">
         ${renderAwardCard("Sim MVP", mvp, `${formatBattingStat(mvp?.ops)} OPS`, playersById)}
         ${renderAwardCard("Sim ace", ace, `${(ace?.runsPerNine ?? 0).toFixed(2)} RA/9`, playersById)}
-        ${renderAwardCard("HR king", hrKing, `${(hrKing?.hrPerSeason ?? 0).toFixed(2)} HR/ssn`, playersById)}
+        ${renderAwardCard("HR king", hrKing, `${hrKing?.hr ?? 0} HR`, playersById)}
       </div>
     </div>
     <div class="panel wide">
@@ -850,6 +850,11 @@ function bindBatchActions() {
 
 function formatShare(value) {
   return `${((Number(value) || 0) * 100).toFixed(1)}%`;
+}
+
+function formatDistributionTotal(value) {
+  const total = value?.sum ?? (value?.mean ?? 0) * (value?.count ?? 0);
+  return Math.round(total);
 }
 
 function formatBattingStat(value) {

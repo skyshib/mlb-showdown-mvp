@@ -4,13 +4,14 @@ export function rate(numerator, denominator) {
 
 export function distribution(values) {
   if (!values.length) {
-    return { count: 0, min: 0, p10: 0, median: 0, mean: 0, p90: 0, max: 0 };
+    return { count: 0, sum: 0, min: 0, p10: 0, median: 0, mean: 0, p90: 0, max: 0 };
   }
 
   const sorted = [...values].sort((a, b) => a - b);
   const sum = sorted.reduce((total, value) => total + value, 0);
   return {
     count: sorted.length,
+    sum,
     min: sorted[0],
     p10: percentile(sorted, 0.1),
     median: percentile(sorted, 0.5),

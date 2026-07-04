@@ -45,6 +45,8 @@ test("simulateBatch accounts for every season, title, and finals slot", () => {
   const meanLosses = summary.teams.reduce((sum, row) => sum + row.losses.mean, 0);
   assert.ok(Math.abs(meanWins - 6) < 1e-9);
   assert.ok(Math.abs(meanLosses - 6) < 1e-9);
+  assert.equal(summary.teams.reduce((sum, row) => sum + row.wins.sum, 0), 25 * 6);
+  assert.equal(summary.teams.reduce((sum, row) => sum + row.losses.sum, 0), 25 * 6);
 
   for (const row of summary.teams) {
     assert.equal(row.wins.count, 25);
