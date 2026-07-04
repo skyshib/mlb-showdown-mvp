@@ -2,7 +2,7 @@ import { RESULTS } from "../rules/cards.js";
 import {
   chartFromCounts,
   chartPower,
-  pitcherChartPower,
+  pitcherPoints,
   speedPoints,
   toChart
 } from "./playerGeneration.js?v=20260704-real-players";
@@ -351,7 +351,7 @@ export function makeRealPitcher(row, { idPrefix = "real-p", idSuffix = "", obpSh
     throws,
     control,
     ip,
-    points: control * 35 + ip * 8 + pitcherChartPower(chart),
+    points: pitcherPoints(control, ip, chart),
     chart: toChart(chart)
   };
 }

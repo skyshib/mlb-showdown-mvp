@@ -545,7 +545,7 @@ function makePitcherCard(rng, index, usedNames, role) {
   const control = normalInt(rng, 3.5, 1.5, 0, 6);
   const ip = isReliever ? 1 : starterIp(rng);
   const chart = makePitcherChart(rng);
-  const points = control * 35 + ip * 8 + pitcherChartPower(chart);
+  const points = pitcherPoints(control, ip, chart);
   return {
     id: `p-${index}`,
     kind: "pitcher",
@@ -727,4 +727,15 @@ export function pitcherChartPower(chart) {
     [RESULTS.HR]: -16
   };
   return chart.reduce((sum, [from, to, result]) => sum + (to - from + 1) * values[result], 0);
+}
+
+// A pitcher's control and chart apply to every batter he faces, so quality
+// points scale with workload: full price at the 6-IP starter baseline, half
+// for a 1-IP reliever. The flat IP term stays as the fatigue-onset premium.
+export function ipWorkloadWeight(ip) {
+  return ((Number(ip) || 0) + 4) / 10;
+}
+
+export function pitcherPoints(control, ip, chart) {
+  return Math.round((control * 35 + pitcherChartPower(chart)) * ipWorkloadWeight(ip)) + ip * 8;
 }

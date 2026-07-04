@@ -43,6 +43,21 @@ test("real pool supports at least six managers with legal position supply", () =
   assert.ok(maxRealPoolManagers(pool) >= 6, "pool should support six-manager rooms");
 });
 
+test("starter workload outprices relievers", () => {
+  const pool = buildRealPlayerPool();
+  const starters = pool.filter((player) => player.role === "SP");
+  const relievers = pool.filter((player) => player.role === "RP");
+  const avg = (players) => players.reduce((sum, player) => sum + player.points, 0) / players.length;
+
+  // Relievers pitch one inning to a starter's six-plus, so the same control
+  // and chart quality should cost far less on a bullpen card.
+  assert.ok(avg(relievers) < avg(starters) * 0.65, "average reliever prices well below average starter");
+
+  const bestReliever = Math.max(...relievers.map((player) => player.points));
+  const bestStarter = Math.max(...starters.map((player) => player.points));
+  assert.ok(bestReliever < bestStarter * 0.6, "even elite closers stay below ace pricing");
+});
+
 test("real cards reflect real skills", () => {
   const pool = buildRealPlayerPool();
   const judge = findPlayer(pool, "Aaron Judge");

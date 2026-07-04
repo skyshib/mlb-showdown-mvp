@@ -69,12 +69,19 @@ function hitterValue(player, weights) {
   );
 }
 
+// Mirrors the workload curve in playerGeneration's pitcherPoints: control and
+// chart quality reach every batter faced, so they are worth full price at the
+// 6-IP starter baseline and half for a 1-IP reliever.
+function ipWorkloadWeight(ip) {
+  return ((Number(ip) || 0) + 4) / 10;
+}
+
 function pitcherValue(player, weights) {
-  return (
+  const ip = Number(player.ip) || 0;
+  const quality =
     (Number(player.control) || 0) * weights.control +
-    (Number(player.ip) || 0) * weights.ip +
-    chartValue(player.chart, PITCHER_CHART_VALUES) * weights.chart
-  );
+    chartValue(player.chart, PITCHER_CHART_VALUES) * weights.chart;
+  return quality * ipWorkloadWeight(ip) + ip * weights.ip;
 }
 
 function chartValue(chart, values) {

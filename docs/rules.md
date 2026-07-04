@@ -88,7 +88,7 @@ Point values:
 - Hitter points are `onBase * 20 + fielding * 7 + speedPoints + chartPower`.
 - `speedPoints` are `round((speed - 1) * 1.5)`, floored at 0.
 - Hitter chart weights are SO `-4`, GB `-2`, FB `-2`, BB `4`, 1B `5`, 2B `9`, 3B `11`, HR `14`, multiplied by the number of d20 slots for each result.
-- Pitcher points are `control * 35 + IP * 8 + pitcherChartPower`.
+- Pitcher points are `round((control * 35 + pitcherChartPower) * (IP + 4) / 10) + IP * 8`. Control and chart quality scale with workload — full price at the 6-IP starter baseline, half for a 1-IP reliever — so starters price above same-quality relievers. The draft AI's valuation model applies the same workload curve.
 - Pitcher chart weights are PU `8`, SO `10`, GB `8`, FB `6`, BB `-5`, 1B `-7`, 2B `-11`, HR `-16`, multiplied by the number of d20 slots for each result.
 
 ## Real Player Pool

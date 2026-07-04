@@ -994,6 +994,19 @@ test("valuation models are deterministic and differ between managers", () => {
   assert.notDeepEqual(modelA.weights, modelB.weights);
 });
 
+test("valuation model prices starter workload above an identical reliever", () => {
+  const starter = makePitcher({ id: "val-sp", role: "SP", ip: 6 });
+  const reliever = makePitcher({ id: "val-rp", role: "RP", ip: 1 });
+
+  for (const seed of ["room-a:valuation:team-1", "room-b:valuation:team-2", "room-c:valuation:team-3"]) {
+    const model = createValuationModel(seed);
+    assert.ok(
+      model.value(starter) > model.value(reliever) * 1.5,
+      `same-quality starter should be worth well over a reliever (seed ${seed})`
+    );
+  }
+});
+
 test("managerValuation derives distinct stable models from the draft seed", () => {
   const draft = createDraft(["One", "Two"], [], 13, "my-room");
   const modelOne = managerValuation(draft, draft.managers[0]);
