@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
 import { buildRealPlayerPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
+import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
 import { applyDraftAction, createDraft, currentManager, draftHistory } from "../src/rules/draft.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -81,14 +82,15 @@ async function createRoom(rooms, request, response) {
   const seed = String(body.seed ?? "").trim() || "showdown";
   const rosterSize = 13;
   const poolMode = body.poolMode === "real" ? "real" : "random";
+  const realPool = body.realPool === "mariners" ? "mariners" : "stars";
 
   let pool;
   if (poolMode === "real") {
-    pool = buildRealPlayerPool();
+    pool = realPool === "mariners" ? buildMarinersDraftPool(seed) : buildRealPlayerPool();
     const managerLimit = maxRealPoolManagers(pool);
     if (managers.length > managerLimit) {
       return sendJson(response, 400, {
-        error: `The real player pool supports up to ${managerLimit} managers`
+        error: `The ${realPool === "mariners" ? "all-era Mariners" : "real player"} pool supports up to ${managerLimit} managers`
       });
     }
   } else {
@@ -100,6 +102,7 @@ async function createRoom(rooms, request, response) {
     seed,
     rosterSize,
     poolMode,
+    realPool,
     draft,
     actions: [],
     seats: new Map(),
@@ -200,6 +203,7 @@ function roomSnapshot(room) {
     seed: room.seed,
     rosterSize: room.rosterSize,
     poolMode: room.poolMode,
+    realPool: room.realPool ?? "stars",
     managers: room.draft.managers.map((manager) => ({
       id: manager.id,
       name: manager.name,

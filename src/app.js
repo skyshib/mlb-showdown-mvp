@@ -1,6 +1,6 @@
 import { generatePlayerPool } from "./data/playerGeneration.js?v=20260705-uncapped-speed";
 import { buildRealPlayerPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
-import { buildMarinersPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners";
+import { buildMarinersPool, buildMarinersDraftPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners-deal";
 import {
   applyDraftAction,
   autopick,
@@ -62,8 +62,11 @@ const REAL_POOL_INFO = (() => {
   return { size: pool.length, managerLimit: maxRealPoolManagers(pool) };
 })();
 const MARINERS_POOL_INFO = (() => {
-  const pool = buildMarinersPool();
-  return { size: pool.length, managerLimit: maxRealPoolManagers(pool) };
+  const fullSet = buildMarinersPool();
+  // Every deal has the same per-position shape, so any probe seed reports
+  // the manager limit all Mariners drafts share.
+  const dealt = buildMarinersDraftPool("probe");
+  return { size: fullSet.length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
 })();
 const app = document.querySelector("#app");
 const cardPreview = document.createElement("div");
@@ -165,6 +168,7 @@ async function bootOnlineRoom(roomId) {
   state.managers = room.managers.map((manager) => manager.name);
   state.rosterSize = room.rosterSize;
   state.poolMode = room.poolMode === "real" ? "real" : "random";
+  state.realPool = room.realPool === "mariners" ? "mariners" : "stars";
   state.online = {
     roomId,
     managerId: seat?.managerId ?? null,
@@ -183,7 +187,9 @@ async function bootOnlineRoom(roomId) {
 
 function rebuildOnlineDraft(room) {
   const pool = room.poolMode === "real"
-    ? buildRealPlayerPool()
+    ? room.realPool === "mariners"
+      ? buildMarinersDraftPool(room.seed)
+      : buildRealPlayerPool()
     : generatePlayerPool(room.seed, room.managers.length, room.rosterSize);
   state.draft = createDraft(state.managers, pool, room.rosterSize, room.seed);
   for (const entry of room.actions) applyDraftAction(state.draft, entry.action);
@@ -399,7 +405,7 @@ function renderSetup(setupError = "") {
           </label>
           <label class="pool-option">
             <input type="radio" name="realPool" value="mariners" ${state.realPool === "mariners" ? "checked" : ""} />
-            <span><strong>Mariners, every era</strong><small>${MARINERS_POOL_INFO.size} M's cards from ${MARINERS_POOL_ERAS} — Junior, Edgar, the Big Unit, Ichiro, Big Dumper. Up to ${MARINERS_POOL_INFO.managerLimit} managers.</small></span>
+            <span><strong>Mariners, every era</strong><small>The seed above deals ${MARINERS_POOL_INFO.dealt} of ${MARINERS_POOL_INFO.size} M's cards from ${MARINERS_POOL_ERAS} — Junior and Edgar one night, Willie Bloomquist the next. Up to ${MARINERS_POOL_INFO.managerLimit} managers.</small></span>
           </label>
         </div>
       </fieldset>
@@ -446,7 +452,7 @@ function renderSetup(setupError = "") {
     }
     const pool = state.poolMode === "real"
       ? state.realPool === "mariners"
-        ? buildMarinersPool()
+        ? buildMarinersDraftPool(state.seed)
         : buildRealPlayerPool()
       : generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
     state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed);
@@ -471,10 +477,11 @@ function renderSetup(setupError = "") {
     );
     const seed = String(form.get("seed")).trim() || "showdown";
     const poolMode = form.get("poolMode") === "real" ? "real" : "random";
+    const realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
     button.disabled = true;
     note.textContent = "Creating online room…";
     try {
-      const room = await createRoom({ seed, managers: managers.length >= 2 ? managers : ["Home", "Away"], poolMode });
+      const room = await createRoom({ seed, managers: managers.length >= 2 ? managers : ["Home", "Away"], poolMode, realPool });
       storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
       location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
     } catch (error) {
