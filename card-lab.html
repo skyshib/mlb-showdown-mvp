@@ -1355,9 +1355,323 @@
         background: rgba(5, 8, 10, 0.86);
       }
 
+      .lab-grid.focus-lab {
+        grid-template-columns: minmax(280px, 380px);
+        justify-content: center;
+      }
+
+      .focus-lab .variant-shell {
+        max-width: 380px;
+        margin: 0 auto;
+      }
+
+      .variant-photo-strip.card {
+        --card-green: #194b3e;
+        --card-green-dark: #071d18;
+        --card-red: #d62d23;
+        display: block;
+        max-width: 360px;
+        aspect-ratio: 5 / 7;
+        border: 2px solid #0c100f;
+        border-radius: 18px;
+        padding: 0;
+        background: #0a0d0c;
+        color: #fff;
+        box-shadow:
+          0 26px 52px rgba(0, 0, 0, 0.42),
+          0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+      }
+
+      .variant-photo-strip.card::before {
+        background:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04), transparent 9%, rgba(255, 255, 255, 0.05) 10%, transparent 13%),
+          linear-gradient(115deg, transparent 34%, rgba(255, 255, 255, 0.12) 48%, transparent 59%);
+        mix-blend-mode: screen;
+      }
+
+      .variant-photo-strip .photo {
+        position: absolute;
+        inset: 0;
+        height: auto;
+        border-radius: 16px;
+        overflow: hidden;
+        background: #1d2721;
+      }
+
+      .variant-photo-strip .photo::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background:
+          radial-gradient(120% 90% at 50% 20%, transparent 42%, rgba(0, 0, 0, 0.23) 72%),
+          linear-gradient(to bottom, transparent 55%, rgba(6, 12, 10, 0.72) 77%, rgba(6, 12, 10, 0.95));
+        pointer-events: none;
+      }
+
+      .photo-placeholder {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 18% 16%, rgba(255, 229, 180, 0.8) 0 3%, transparent 4%),
+          radial-gradient(circle at 32% 12%, rgba(171, 48, 43, 0.78) 0 3%, transparent 4%),
+          radial-gradient(circle at 72% 13%, rgba(245, 231, 201, 0.76) 0 4%, transparent 5%),
+          linear-gradient(180deg, #d8ccb3 0 21%, #708879 22% 24%, #25352f 25% 47%, #5b4a60 48% 51%, #18211d 52% 100%);
+      }
+
+      .photo-placeholder::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 22%;
+        height: 5px;
+        background: rgba(236, 243, 222, 0.54);
+        box-shadow: 0 124px 0 rgba(236, 243, 222, 0.32);
+      }
+
+      .photo-placeholder::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(90deg, transparent 0 8%, rgba(0, 0, 0, 0.16) 8.6% 9%, transparent 9.4% 21%, rgba(255, 255, 255, 0.1) 21.4% 21.8%, transparent 22.2% 100%),
+          repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 28px);
+        opacity: 0.5;
+      }
+
+      .mock-batter {
+        position: absolute;
+        left: 20%;
+        top: 10%;
+        z-index: 1;
+        width: 60%;
+        height: 66%;
+        filter: drop-shadow(0 9px 10px rgba(0, 0, 0, 0.44));
+      }
+
+      .mock-batter span {
+        position: absolute;
+        display: block;
+      }
+
+      .mock-batter .bat {
+        left: 59%;
+        top: 0;
+        width: 5px;
+        height: 170px;
+        border-radius: 999px;
+        background: linear-gradient(#d9b079, #8a5631);
+        transform: rotate(-45deg);
+        transform-origin: 50% 100%;
+      }
+
+      .mock-batter .head {
+        left: 38%;
+        top: 8%;
+        width: 43px;
+        height: 33px;
+        border-radius: 45% 45% 38% 38%;
+        background: #172f65;
+        box-shadow: 10px 12px 0 -8px #4b3224;
+      }
+
+      .mock-batter .torso {
+        left: 27%;
+        top: 20%;
+        width: 86px;
+        height: 124px;
+        border-radius: 35px 18px 24px 30px;
+        background: linear-gradient(145deg, #d9d8ce, #9da098);
+        transform: rotate(-12deg);
+      }
+
+      .mock-batter .front-arm,
+      .mock-batter .back-arm {
+        top: 23%;
+        width: 30px;
+        height: 105px;
+        border-radius: 999px;
+        background: linear-gradient(#c8c8bd, #80847f);
+      }
+
+      .mock-batter .front-arm {
+        left: 62%;
+        transform: rotate(-42deg);
+      }
+
+      .mock-batter .back-arm {
+        left: 52%;
+        transform: rotate(-58deg);
+      }
+
+      .mock-batter .front-leg,
+      .mock-batter .back-leg {
+        top: 56%;
+        width: 33px;
+        height: 146px;
+        border-radius: 999px;
+        background: linear-gradient(#d7d4c9, #9c9b93);
+      }
+
+      .mock-batter .front-leg {
+        left: 47%;
+        transform: rotate(-10deg);
+      }
+
+      .mock-batter .back-leg {
+        left: 20%;
+        transform: rotate(38deg);
+      }
+
+      .variant-photo-strip .strip-overlay {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 3;
+        padding: 0 13px 13px;
+      }
+
+      .variant-photo-strip .identity-row {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr) 58px;
+        align-items: end;
+        gap: 9px;
+      }
+
+      .variant-photo-strip .ob-lockup {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 58px;
+        height: 49px;
+        border: 2px solid rgba(10, 16, 13, 0.9);
+        border-radius: 4px;
+        background: #fbf3df;
+        color: var(--card-red);
+        font-family: Impact, "Arial Black", sans-serif;
+        font-size: 34px;
+        line-height: 1;
+        text-shadow:
+          1px 0 #fff,
+          -1px 0 #fff,
+          0 1px #fff,
+          0 2px 0 rgba(0, 0, 0, 0.32);
+        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.38);
+      }
+
+      .variant-photo-strip .ob-lockup small {
+        position: absolute;
+        left: -5px;
+        right: -5px;
+        bottom: -16px;
+        border: 1px solid rgba(255, 255, 255, 0.68);
+        border-radius: 3px;
+        padding: 1px 2px;
+        background: #9e1720;
+        color: #fff;
+        font-family: "Arial Narrow", "Roboto Condensed", sans-serif;
+        font-size: 10px;
+        font-weight: 950;
+        letter-spacing: 0.03em;
+        text-align: center;
+        text-shadow: 0 1px 0 #000;
+        transform: rotate(-7deg);
+      }
+
+      .variant-photo-strip .name-panel {
+        min-width: 0;
+        padding-bottom: 2px;
+      }
+
+      .variant-photo-strip .name-panel h3 {
+        margin: 0;
+        color: #fff;
+        font-family: Impact, "Arial Black", "Arial Narrow", sans-serif;
+        font-size: 31px;
+        font-style: italic;
+        font-weight: 950;
+        line-height: 0.9;
+        text-transform: uppercase;
+        white-space: nowrap;
+        text-shadow:
+          2px 2px 0 #e12a22,
+          3px 3px 0 rgba(0, 0, 0, 0.78);
+      }
+
+      .variant-photo-strip .team-logo {
+        align-self: center;
+        color: #e4eaf2;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 34px;
+        font-weight: 950;
+        letter-spacing: -0.14em;
+        line-height: 0.85;
+        text-align: center;
+        text-shadow:
+          -2px -2px 0 #315079,
+          2px -2px 0 #315079,
+          -2px 2px 0 #315079,
+          2px 2px 0 #315079,
+          0 4px 8px rgba(0, 0, 0, 0.62);
+      }
+
+      .variant-photo-strip .meta-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 13px;
+        margin-top: 4px;
+        min-height: 26px;
+        border-top: 1px solid rgba(255, 255, 255, 0.22);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.58);
+        background:
+          linear-gradient(90deg, rgba(6, 26, 19, 0.9), rgba(40, 86, 67, 0.82), rgba(6, 26, 19, 0.9));
+        font-family: "Arial Narrow", "Roboto Condensed", sans-serif;
+        font-size: 13px;
+        font-weight: 950;
+        text-transform: uppercase;
+        text-shadow: 0 1px 2px #000;
+      }
+
+      .variant-photo-strip .classic-chart {
+        margin-top: 0;
+        border: 0;
+        border-radius: 0 0 6px 6px;
+        background: rgba(7, 28, 20, 0.9);
+        box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+      }
+
+      .variant-photo-strip .classic-cell {
+        grid-template-rows: 21px 24px;
+        border-right: 1px solid rgba(255, 255, 255, 0.16);
+      }
+
+      .variant-photo-strip .classic-range {
+        background:
+          linear-gradient(180deg, rgba(59, 112, 86, 0.88), rgba(23, 63, 48, 0.94));
+        color: #fff;
+        font-size: 13px;
+        text-shadow: 0 1px 2px #000;
+      }
+
+      .variant-photo-strip .classic-result {
+        background:
+          linear-gradient(180deg, rgba(52, 91, 70, 0.95), rgba(13, 41, 31, 0.98)) !important;
+        color: #fff !important;
+        font-size: 15px;
+        text-shadow: 0 1px 2px #000 !important;
+      }
+
       @media (max-width: 1120px) {
         .lab-grid {
           grid-template-columns: repeat(2, minmax(240px, 1fr));
+        }
+
+        .lab-grid.focus-lab {
+          grid-template-columns: minmax(280px, 380px);
         }
       }
 
@@ -1380,29 +1694,37 @@
     <main>
       <header>
         <h1>Card Lab</h1>
-        <p class="lede">2005 Strip rarity preview using a compact range/result chart strip. This page is just a mockup sandbox; the draft hover cards are untouched.</p>
+        <p class="lede">2005 photo-strip mockup sandbox. This does not touch draft or hover cards, and the image slot is still a placeholder.</p>
       </header>
       <section id="lab" class="lab-grid" aria-label="Card design variants"></section>
     </main>
     <script type="module">
-      import { generatePlayerPool } from "./src/data/playerGeneration.js?v=20260627-middle-infield-fielding";
       import { formatRange, normalizeResult } from "./src/rules/cards.js";
 
-      const labPool = generatePlayerPool("card-lab", 4, 12);
-      const player =
-        labPool.find((card) => card.kind === "hitter" && card.chart.some((entry) => normalizeResult(entry.result) === "SO")) ??
-        labPool.find((card) => card.kind === "hitter");
-      const teamColor = colorFor(player.name);
-      const teamDark = shade(teamColor, -42);
+      const player = {
+        kind: "hitter",
+        name: "Dante Rivera",
+        onBase: 10,
+        points: 180,
+        speed: 15,
+        bats: "S",
+        position: "CF",
+        fielding: 1,
+        chart: [
+          { from: 1, to: 2, result: "SO" },
+          { from: 3, to: 4, result: "GB" },
+          { from: 5, to: 6, result: "FB" },
+          { from: 7, to: 10, result: "BB" },
+          { from: 11, to: 16, result: "1B" },
+          { from: 17, to: 17, result: "1B+" },
+          { from: 18, to: 19, result: "2B" },
+          { from: 20, to: 20, result: "HR" }
+        ]
+      };
       const rootStyle = frameStyleFor(player);
-      const rarityPreviewCards = [
-        { badge: "A", title: "Rainbow", note: "390+ pt", player: { ...player, points: 410 } },
-        { badge: "B", title: "Gold", note: "340-389 pt", player: { ...player, points: 360 } },
-        { badge: "C", title: "Silver", note: "285-339 pt", player: { ...player, points: 310 } },
-        { badge: "D", title: "Bronze", note: "under 285 pt", player: { ...player, points: 250 } }
-      ];
       const lab = document.querySelector("#lab");
-      lab.innerHTML = rarityPreviewCards.map((item) => shell(item.badge, item.title, item.note, card2005Strip(item.player))).join("");
+      lab.classList.add("focus-lab");
+      lab.innerHTML = shell("A", "2005 Photo Strip", "layout mockup", photoStripCard(player));
 
       function shell(letter, title, note, card) {
         return `<div class="variant-shell">
@@ -1510,6 +1832,40 @@
         </article>`;
       }
 
+      function photoStripCard(cardPlayer = player) {
+        return `<article class="card variant-photo-strip" style="${frameStyleFor(cardPlayer)}">
+          <div class="photo">${photoPlaceholder()}</div>
+          <div class="strip-overlay">
+            <div class="identity-row">
+              <div class="ob-lockup">${cardPlayer.onBase}<small>ON-BASE</small></div>
+              <div class="name-panel"><h3>${escapeHtml(cardPlayer.name)}</h3></div>
+              <div class="team-logo">${teamMark(cardPlayer)}</div>
+            </div>
+            <div class="meta-bar">
+              <span>${cardPlayer.points} PT</span>
+              <span>SPEED ${cardPlayer.speed}</span>
+              <span>BATS ${cardPlayer.bats}</span>
+              <span>${cardPlayer.position} ${signed(cardPlayer.fielding)}</span>
+            </div>
+            ${horizontalScoreChart(cardPlayer, { preservePlus: true })}
+          </div>
+        </article>`;
+      }
+
+      function photoPlaceholder() {
+        return `<div class="photo-placeholder" aria-hidden="true">
+          <div class="mock-batter">
+            <span class="bat"></span>
+            <span class="head"></span>
+            <span class="torso"></span>
+            <span class="back-arm"></span>
+            <span class="front-arm"></span>
+            <span class="back-leg"></span>
+            <span class="front-leg"></span>
+          </div>
+        </div>`;
+      }
+
       function foilBottomCard() {
         return `<article class="card variant-f" style="${rootStyle}">
           <div class="photo">
@@ -1600,12 +1956,12 @@
         return `<div class="chart">${rows}</div>`;
       }
 
-      function horizontalScoreChart(cardPlayer = player) {
-        const entries = compactChartEntries(cardPlayer);
+      function horizontalScoreChart(cardPlayer = player, options = {}) {
+        const entries = options.preservePlus ? rawChartEntries(cardPlayer) : compactChartEntries(cardPlayer);
         const cells = entries
           .map((entry) => {
             return `<div class="classic-cell ${resultClass(entry.result)}" title="${formatRange(entry)} ${entry.result}">
-              <span class="classic-range">${formatRange(entry)}</span>
+              <span class="classic-range">${stripRange(entry)}</span>
               <span class="classic-result">${entry.result}</span>
             </div>`;
           })
@@ -1679,14 +2035,28 @@
         }, []);
       }
 
+      function rawChartEntries(cardPlayer = player) {
+        return [...cardPlayer.chart].sort((a, b) => a.from - b.from);
+      }
+
+      function stripRange(entry) {
+        return entry.from === 20 && entry.to === 20 ? "20+" : formatRange(entry);
+      }
+
       function resultClass(result) {
-        if (["SO", "GB", "FB", "PU"].includes(result)) return "out";
-        if (result === "BB") return "walk";
-        if (result === "1B") return "single";
-        if (result === "2B") return "double";
-        if (result === "3B") return "triple";
-        if (result === "HR") return "homer";
+        const normalized = normalizeResult(result);
+        if (["SO", "GB", "FB", "PU"].includes(normalized)) return "out";
+        if (normalized === "BB") return "walk";
+        if (normalized === "1B") return "single";
+        if (normalized === "2B") return "double";
+        if (normalized === "3B") return "triple";
+        if (normalized === "HR") return "homer";
         return "out";
+      }
+
+      function teamMark(cardPlayer) {
+        const words = cardPlayer.name.split(/\s+/).filter(Boolean);
+        return words.length > 1 ? `${words[0][0]}${words.at(-1)[0]}`.toUpperCase() : "SD";
       }
 
       function signed(value) {
