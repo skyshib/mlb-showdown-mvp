@@ -88,6 +88,22 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
   }
 });
 
+test("single-game batch hitter totals match the source box score", () => {
+  const teams = draftTeams("batch-box-source", 2);
+  const seed = "batch-box-source";
+  const summary = simulateBatch(teams, { seed, runs: 1 });
+  const game = simulateGame(teams[0], teams[1], `${seed}-game-1-${teams[0].name}-${teams[1].name}`);
+  const boxHitters = [...game.boxScore.away.hitters, ...game.boxScore.home.hitters];
+
+  for (const key of ["r", "sb", "cs", "rbi", "hr"]) {
+    assert.equal(
+      summary.hitters.reduce((sum, line) => sum + line[key], 0),
+      boxHitters.reduce((sum, line) => sum + line[key], 0),
+      `batch ${key} should match one source game`
+    );
+  }
+});
+
 test("batchProgressSnapshot reports running win rates mid-batch", () => {
   const teams = draftTeams("batch-snapshot");
   const state = createBatchState(teams);

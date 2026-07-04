@@ -173,6 +173,12 @@ td span {
   font-variant-numeric: tabular-nums;
 }
 
+.stat-audit {
+  cursor: help;
+  text-decoration: underline dotted rgba(46, 66, 55, 0.35);
+  text-underline-offset: 3px;
+}
+
 .chart {
   max-width: 420px;
   color: #37433d;

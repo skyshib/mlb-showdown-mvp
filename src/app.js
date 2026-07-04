@@ -1121,12 +1121,12 @@ function renderBatch() {
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.position ?? "")}</td>
-        <td class="num">${formatSeasonCount(batchPace(line, "paPer162", "pa", teamGamesByName))}</td>
-        <td class="num">${formatSeasonCount(batchPace(line, "hrPer162", "hr", teamGamesByName))}</td>
-        <td class="num">${formatSeasonCount(batchPace(line, "rPer162", "r", teamGamesByName))}</td>
-        <td class="num">${formatSeasonCount(batchPace(line, "rbiPer162", "rbi", teamGamesByName))}</td>
-        <td class="num">${formatSeasonCount(batchPace(line, "sbPer162", "sb", teamGamesByName))}</td>
-        <td class="num">${formatSeasonCount(batchPace(line, "csPer162", "cs", teamGamesByName))}</td>
+        ${renderPaceCell(line, "paPer162", "pa", teamGamesByName, "PA")}
+        ${renderPaceCell(line, "hrPer162", "hr", teamGamesByName, "HR")}
+        ${renderPaceCell(line, "rPer162", "r", teamGamesByName, "R")}
+        ${renderPaceCell(line, "rbiPer162", "rbi", teamGamesByName, "RBI")}
+        ${renderPaceCell(line, "sbPer162", "sb", teamGamesByName, "SB")}
+        ${renderPaceCell(line, "csPer162", "cs", teamGamesByName, "CS")}
         <td class="num">${formatPercent(line.bb, line.pa, 1)}</td>
         <td class="num">${formatPercent(line.so, line.pa, 1)}</td>
         <td class="num">${formatAverage(totalBases(line) - line.h, line.ab)}</td>
@@ -1137,7 +1137,7 @@ function renderBatch() {
         <td class="num">${formatBattingStat(line.ops)}</td>
         <td class="num">${formatAverage(wobaNumerator(line), line.pa)}</td>
         <td class="num">${wrcPlus(line, leagueWoba)}</td>
-        <td class="num">${formatWpaStat(batchPace(line, "wpaPer162", "wpa", teamGamesByName))}</td>
+        ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
       </tr>`
     )
     .join("");
@@ -1149,12 +1149,12 @@ function renderBatch() {
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.role)}</td>
-        <td class="num">${formatDecimal(batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3), 1)}</td>
+        ${renderPaceCell(line, "ipPer162", "ip", teamGamesByName, "IP", (value) => formatDecimal(value, 1), line.outs / 3)}
         <td class="num">${formatPerNine(line.so, line.outs)}</td>
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
         <td class="num">${formatFip(line, fipConstant)}</td>
-        <td class="num">${formatWpaStat(batchPace(line, "wpaPer162", "wpa", teamGamesByName))}</td>
+        ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
       </tr>`
     )
     .join("");
@@ -1527,6 +1527,19 @@ function batchPace(line, paceKey, totalKey, teamGamesByName, totalOverride = nul
   const total = totalOverride ?? Number(line[totalKey] ?? 0);
   const games = Number(line.teamGames ?? teamGamesByName.get(line.team) ?? 0);
   return per162(total, games);
+}
+
+function renderPaceCell(line, paceKey, totalKey, teamGamesByName, label, formatter = formatSeasonCount, totalOverride = null) {
+  const value = batchPace(line, paceKey, totalKey, teamGamesByName, totalOverride);
+  const total = totalOverride ?? Number(line?.[totalKey] ?? 0);
+  const games = Number(line?.teamGames ?? teamGamesByName.get(line?.team) ?? 0);
+  const title = `${label}: ${formatAuditNumber(total)} raw / ${formatAuditNumber(games)} team games * 162 = ${formatAuditNumber(value)}`;
+  return `<td class="num stat-audit" title="${escapeHtml(title)}">${formatter(value)}</td>`;
+}
+
+function formatAuditNumber(value) {
+  const number = Number(value) || 0;
+  return Number.isInteger(number) ? String(number) : number.toFixed(2);
 }
 
 function per162(total, games) {

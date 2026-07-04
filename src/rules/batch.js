@@ -196,9 +196,6 @@ function foldBoxScore(state, teamBox) {
     row.sb += line.sb ?? 0;
     row.cs += line.cs ?? 0;
     row.rbi += line.rbi;
-    row.r += line.r ?? 0;
-    row.sb += line.sb ?? 0;
-    row.cs += line.cs ?? 0;
     row.gidp += line.gidp ?? 0;
     row.wpa += line.wpa ?? 0;
   }
