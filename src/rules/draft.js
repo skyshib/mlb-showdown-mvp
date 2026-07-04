@@ -13,6 +13,14 @@ export function isCornerOutfielder(position) {
   return position === CORNER_OUTFIELD_POSITION || CORNER_OUTFIELD_SLOTS.includes(position);
 }
 
+// Rewrites bare "LF"/"RF" card labels to the lumped LF/RF position so every
+// pool source drafts and displays corners as one position.
+export function normalizeCardPosition(player) {
+  if (player?.kind !== "hitter" || !isCornerOutfielder(player.position)) return player;
+  if (player.position === CORNER_OUTFIELD_POSITION) return player;
+  return { ...player, position: CORNER_OUTFIELD_POSITION };
+}
+
 function positionMatchesSlot(position, label) {
   if (CORNER_OUTFIELD_SLOTS.includes(label)) return isCornerOutfielder(position);
   return position === label;
@@ -32,7 +40,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
 
   return {
     managers: cleanManagers,
-    pool: pool.map((player) => ({ ...player })),
+    pool: pool.map((player) => normalizeCardPosition({ ...player })),
     pickedIds: new Set(),
     rosterSize,
     seed,

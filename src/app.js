@@ -14,6 +14,7 @@ import {
   getRosterNeeds,
   isCornerOutfielder,
   lineupStatus,
+  normalizeCardPosition,
   pickPlayer,
   staffStatus,
   undoLastPick,
@@ -1913,6 +1914,11 @@ function reviveState(value) {
   if (draft) {
     draft.seed = draft.seed ?? value.seed ?? "showdown";
     draft.complete = draft.managers.every((manager) => manager.roster.length >= draft.rosterSize);
+    // Rooms saved before corners were lumped still carry bare LF/RF labels.
+    draft.pool = draft.pool.map(normalizeCardPosition);
+    for (const manager of draft.managers) {
+      manager.roster = manager.roster.map(normalizeCardPosition);
+    }
   }
   return {
     ...defaultState(),

@@ -197,7 +197,7 @@ Current implementation details:
 - Tournament rotation uses both drafted starters across games.
 - Bench and backup players are intentionally not implemented for now.
 - The top roster board supports manual lineup assignment: click a hitter slot to highlight valid destinations, then click a destination to move or swap. Drag/drop uses the same eligibility rules.
-- Corner outfielders are one lumped position: generated cards print `LF/RF` and play either corner at the same fielding score. Bare `LF`/`RF` card labels (hand-built pools) are treated the same way.
+- Corner outfielders are one lumped position: cards print `LF/RF` and play either corner at the same fielding score. Bare `LF`/`RF` card labels (hand-built pools, rooms saved before the lump) are rewritten to `LF/RF` when a draft is created or a saved room is loaded, so the draft screen always shows corners as one position and one pool.
 - If no printed 1B is available, any hitter can cover first base with Fielding set to exactly `-1`. This is not a subtraction from the card's printed Fielding.
 - Manual draft picks are blocked if they would make those minimums impossible.
 - Auto-pick scores available players by point value plus roster-need urgency, including the starter/bullpen split.

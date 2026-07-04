@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel } from "../src/rules/valuation.js";
 import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
@@ -638,6 +638,26 @@ test("corner outfielders can fill left or right field", () => {
 
   const slots = assignLineupSlots(manager.roster).slots;
   assert.equal(slots.find((slot) => slot.label === "RF").player.name, "Left Two");
+});
+
+test("createDraft lumps bare LF and RF card labels into the LF/RF pool", () => {
+  const draft = createDraft(["Solo"], [
+    makeHitter({ id: "lump-lf", position: "LF" }),
+    makeHitter({ id: "lump-rf", position: "RF" }),
+    makeHitter({ id: "lump-combined", position: "LF/RF" }),
+    makeHitter({ id: "lump-cf", position: "CF" }),
+    makePitcher({ id: "lump-sp", role: "SP" })
+  ], 13);
+
+  const positions = Object.fromEntries(draft.pool.map((player) => [player.id, player.position ?? player.role]));
+  assert.equal(positions["lump-lf"], "LF/RF");
+  assert.equal(positions["lump-rf"], "LF/RF");
+  assert.equal(positions["lump-combined"], "LF/RF");
+  assert.equal(positions["lump-cf"], "CF");
+  assert.equal(positions["lump-sp"], "SP");
+
+  const centerFielder = makeHitter({ id: "keep-cf", position: "CF" });
+  assert.equal(normalizeCardPosition(centerFielder), centerFielder);
 });
 
 test("combined LF/RF cards cover both corners at the same fielding score", () => {
