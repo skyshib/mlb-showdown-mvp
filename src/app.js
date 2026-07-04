@@ -27,7 +27,7 @@ import {
   normalizeBatchRuns,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260704-player-rate-stats";
+} from "./rules/batch.js?v=20260705-season-stats-hover";
 import { simulateRoundRobin } from "./rules/tournament.js?v=20260704-player-rate-stats";
 import {
   basesText,
@@ -41,7 +41,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart
-} from "./ui/render.js?v=20260705-tournament-hover-fix";
+} from "./ui/render.js?v=20260705-season-stats-hover";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const REAL_POOL_INFO = (() => {
@@ -697,6 +697,9 @@ function renderBatch() {
   const hrKing = [...summary.hitters].sort((a, b) => b.hr - a.hr || b.ops - a.ops)[0];
   const ace = summary.pitchers.find((line) => line.outs > 0) ?? summary.pitchers[0];
   const backLabel = state.tournament ? "Back to tournament" : "Back to draft";
+  const playersById = draftedPlayersById();
+  const leagueWoba = tournamentWoba(summary.hitters);
+  const fipConstant = tournamentFipConstant(summary.pitchers);
 
   const teamRows = summary.teams
     .map(
@@ -717,15 +720,24 @@ function renderBatch() {
     .map(
       (line, index) => `<tr>
         <td>${index + 1}</td>
-        <td><strong>${escapeHtml(line.name)}</strong></td>
+        <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.position ?? "")}</td>
+        <td class="num">${line.pa}</td>
+        <td class="num">${line.hr}</td>
+        <td class="num">${line.r ?? 0}</td>
+        <td class="num">${line.rbi}</td>
+        <td class="num">${line.sb ?? 0}</td>
+        <td class="num">${formatPercent(line.bb, line.pa, 1)}</td>
+        <td class="num">${formatPercent(line.so, line.pa, 1)}</td>
+        <td class="num">${formatAverage(totalBases(line) - line.h, line.ab)}</td>
+        <td class="num">${formatAverage(line.h - line.hr, babipDenominator(line))}</td>
         <td class="num">${formatBattingStat(line.avg)}</td>
         <td class="num">${formatBattingStat(line.obp)}</td>
         <td class="num">${formatBattingStat(line.slg)}</td>
         <td class="num">${formatBattingStat(line.ops)}</td>
-        <td class="num">${line.hrPerSeason.toFixed(2)}</td>
-        <td class="num">${line.rbiPerSeason.toFixed(2)}</td>
+        <td class="num">${formatAverage(wobaNumerator(line), line.pa)}</td>
+        <td class="num">${wrcPlus(line, leagueWoba)}</td>
       </tr>`
     )
     .join("");
@@ -734,13 +746,14 @@ function renderBatch() {
     .map(
       (line, index) => `<tr>
         <td>${index + 1}</td>
-        <td><strong>${escapeHtml(line.name)}</strong></td>
+        <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.role)}</td>
-        <td class="num">${line.inningsPerSeason.toFixed(1)}</td>
-        <td class="num">${line.runsPerNine.toFixed(2)}</td>
-        <td class="num">${line.strikeoutsPerNine.toFixed(2)}</td>
-        <td class="num">${line.walksPerNine.toFixed(2)}</td>
+        <td class="num">${formatInnings(line.outs)}</td>
+        <td class="num">${formatPerNine(line.so, line.outs)}</td>
+        <td class="num">${formatPerNine(line.bb, line.outs)}</td>
+        <td class="num">${formatPerNine(line.r, line.outs)}</td>
+        <td class="num">${formatFip(line, fipConstant)}</td>
       </tr>`
     )
     .join("");
@@ -769,23 +782,23 @@ function renderBatch() {
         <tbody>${teamRows}</tbody>
       </table>
       <div class="award-grid">
-        ${renderAwardCard("Sim MVP", mvp, `${formatBattingStat(mvp?.ops)} OPS`)}
-        ${renderAwardCard("Sim ace", ace, `${(ace?.runsPerNine ?? 0).toFixed(2)} RA/9`)}
-        ${renderAwardCard("HR king", hrKing, `${(hrKing?.hrPerSeason ?? 0).toFixed(2)} HR/ssn`)}
+        ${renderAwardCard("Sim MVP", mvp, `${formatBattingStat(mvp?.ops)} OPS`, playersById)}
+        ${renderAwardCard("Sim ace", ace, `${(ace?.runsPerNine ?? 0).toFixed(2)} RA/9`, playersById)}
+        ${renderAwardCard("HR king", hrKing, `${(hrKing?.hrPerSeason ?? 0).toFixed(2)} HR/ssn`, playersById)}
       </div>
     </div>
     <div class="panel wide">
       <h2>Hitters, all seasons combined</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th>AVG</th><th>OBP</th><th>SLG</th><th>OPS</th><th>HR/ssn</th><th>RBI/ssn</th></tr></thead>
+          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th class="num">PA</th><th class="num">HR</th><th class="num">R</th><th class="num">RBI</th><th class="num">SB</th><th class="num">BB%</th><th class="num">K%</th><th class="num">ISO</th><th class="num">BABIP</th><th class="num">AVG</th><th class="num">OBP</th><th class="num">SLG</th><th class="num">OPS</th><th class="num">wOBA</th><th class="num">wRC+</th></tr></thead>
           <tbody>${hitterRows}</tbody>
         </table>
       </div>
       <h2 class="batch-section-title">Pitchers, all seasons combined</h2>
       <div class="table-scroll">
         <table>
-          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th>IP/ssn</th><th>RA/9</th><th>K/9</th><th>BB/9</th></tr></thead>
+          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th class="num">IP</th><th class="num">K/9</th><th class="num">BB/9</th><th class="num">ERA</th><th class="num">FIP</th></tr></thead>
           <tbody>${pitcherRows}</tbody>
         </table>
       </div>
@@ -795,14 +808,19 @@ function renderBatch() {
   bindBatchActions();
 }
 
-function renderAwardCard(label, player, statLine) {
+function renderAwardCard(label, player, statLine, playersById = new Map()) {
   if (!player) return "";
   return `<div class="award-card">
     <span class="award-label">${escapeHtml(label)}</span>
-    <strong>${escapeHtml(player.name)}</strong>
+    ${renderBatchPlayerName(player, playersById, "strong", "award-player-name")}
     <span class="award-stat">${escapeHtml(statLine)}</span>
     <em>${escapeHtml(player.team)}</em>
   </div>`;
+}
+
+function renderBatchPlayerName(line, playersById, tagName = "strong", className = "batch-player-name") {
+  const player = playerForBoxLine(playersById, line, line.team);
+  return renderPlayerPreviewName(player, line.name, tagName, className);
 }
 
 function bindBatchActions() {
@@ -827,6 +845,7 @@ function bindBatchActions() {
       renderSetup();
     }
   };
+  bindHoverCardPreviews();
 }
 
 function formatShare(value) {
@@ -1037,13 +1056,18 @@ function renderTournamentDefenseRow(row) {
 }
 
 function renderTournamentPlayerName(row, tagName = "span") {
-  if (!row.player) return `<${tagName}>${escapeHtml(row.name)}</${tagName}>`;
+  return renderPlayerPreviewName(row.player, row.name, tagName, "stat-player-name");
+}
+
+function renderPlayerPreviewName(player, name, tagName = "span", className = "") {
+  if (!player) return `<${tagName}>${escapeHtml(name)}</${tagName}>`;
+  const classes = ["player-name-preview", className].filter(Boolean).join(" ");
   return `<${tagName}
-    class="player-name-preview stat-player-name"
+    class="${escapeHtml(classes)}"
     tabindex="0"
-    data-preview-id="${escapeHtml(row.player.id)}"
-    data-preview-card="${escapeHtml(renderPlayerCard(row.player))}"
-  >${escapeHtml(row.name)}</${tagName}>`;
+    data-preview-id="${escapeHtml(player.id)}"
+    data-preview-card="${escapeHtml(renderPlayerCard(player))}"
+  >${escapeHtml(name)}</${tagName}>`;
 }
 
 function aggregateTournamentStats(games, playersById = new Map()) {
@@ -1299,11 +1323,11 @@ function formatFip(row, constant) {
 }
 
 function totalBases(row) {
-  return singles(row) + row.d * 2 + row.t * 3 + row.hr * 4;
+  return singles(row) + (row.d ?? 0) * 2 + (row.t ?? 0) * 3 + (row.hr ?? 0) * 4;
 }
 
 function singles(row) {
-  return Math.max(0, row.h - row.d - row.t - row.hr);
+  return Math.max(0, (row.h ?? 0) - (row.d ?? 0) - (row.t ?? 0) - (row.hr ?? 0));
 }
 
 function babipDenominator(row) {
@@ -1311,11 +1335,11 @@ function babipDenominator(row) {
 }
 
 function wobaNumerator(row) {
-  return row.bb * 0.69
+  return (row.bb ?? 0) * 0.69
     + singles(row) * 0.89
-    + row.d * 1.27
-    + row.t * 1.62
-    + row.hr * 2.1;
+    + (row.d ?? 0) * 1.27
+    + (row.t ?? 0) * 1.62
+    + (row.hr ?? 0) * 2.1;
 }
 
 function woba(row) {

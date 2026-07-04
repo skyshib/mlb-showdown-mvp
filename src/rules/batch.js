@@ -155,9 +155,12 @@ function foldBoxScore(state, teamBox) {
     row.h += line.h;
     row.d += line.d ?? 0;
     row.t += line.t ?? 0;
+    row.r += line.r ?? 0;
     row.bb += line.bb;
     row.so += line.so;
     row.hr += line.hr;
+    row.sb += line.sb ?? 0;
+    row.cs += line.cs ?? 0;
     row.rbi += line.rbi;
   }
   for (const line of teamBox.pitchers) {
@@ -185,9 +188,12 @@ function registerHitter(state, teamName, player) {
     h: 0,
     d: 0,
     t: 0,
+    r: 0,
     bb: 0,
     so: 0,
     hr: 0,
+    sb: 0,
+    cs: 0,
     rbi: 0
   });
 }

@@ -60,6 +60,8 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
   for (const line of summary.hitters) {
     assert.ok(line.pa > 0);
     assert.ok(line.team);
+    assert.ok(Number.isFinite(line.r));
+    assert.ok(Number.isFinite(line.sb));
     assert.ok(Number.isFinite(line.ops));
   }
   for (const line of summary.pitchers) {
