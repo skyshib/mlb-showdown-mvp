@@ -14,7 +14,7 @@ import {
   staffStatus,
   undoLastPick,
   validateRoster
-} from "./rules/draft.js?v=20260704-roster-depth";
+} from "./rules/draft.js?v=20260704-ai-valuation";
 import {
   DEFAULT_BATCH_RUNS,
   createBatchState,
@@ -144,7 +144,7 @@ function renderSetup() {
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
     state.rosterSize = 13;
     const pool = generatePlayerPool(state.seed, state.managers.length, state.rosterSize);
-    state.draft = createDraft(state.managers, pool, state.rosterSize);
+    state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed);
     state.tournament = null;
     state.batch = null;
     state.view = null;
@@ -1492,6 +1492,7 @@ function reviveState(value) {
       }
     : null;
   if (draft) {
+    draft.seed = draft.seed ?? value.seed ?? "showdown";
     draft.complete = draft.managers.every((manager) => manager.roster.length >= draft.rosterSize);
   }
   return {

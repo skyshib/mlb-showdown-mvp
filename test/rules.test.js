@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, managerValuation, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { createValuationModel } from "../src/rules/valuation.js";
 import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
@@ -921,4 +922,55 @@ test("round robin cycles through each starter per team", () => {
   assert.deepEqual(startersByTeam.get("One"), ["One Starter One", "One Starter Two"]);
   assert.deepEqual(startersByTeam.get("Two"), ["Two Starter One", "Two Starter Two"]);
   assert.deepEqual(startersByTeam.get("Three"), ["Three Starter One", "Three Starter Two"]);
+});
+
+test("valuation models are deterministic and differ between managers", () => {
+  const player = makeHitter({ id: "val-h", position: "SS", onBase: 11, speed: 14, fielding: 3 });
+  const modelA = createValuationModel("room-seed:valuation:team-1");
+  const modelARepeat = createValuationModel("room-seed:valuation:team-1");
+  const modelB = createValuationModel("room-seed:valuation:team-2");
+
+  assert.equal(modelA.value(player), modelARepeat.value(player));
+  assert.notDeepEqual(modelA.weights, modelB.weights);
+});
+
+test("managerValuation derives distinct stable models from the draft seed", () => {
+  const draft = createDraft(["One", "Two"], [], 13, "my-room");
+  const modelOne = managerValuation(draft, draft.managers[0]);
+  const modelTwo = managerValuation(draft, draft.managers[1]);
+  const revived = createDraft(["One", "Two"], [], 13, "my-room");
+
+  assert.notDeepEqual(modelOne.weights, modelTwo.weights);
+  assert.deepEqual(managerValuation(revived, revived.managers[0]).weights, modelOne.weights);
+});
+
+test("autopick weighs positional dropoff instead of only top overall value", () => {
+  const eliteStats = {
+    onBase: 12,
+    speed: 12,
+    fielding: 3,
+    chart: [
+      { from: 1, to: 10, result: RESULTS.SINGLE },
+      { from: 11, to: 20, result: RESULTS.HR }
+    ]
+  };
+  const weakChart = [
+    { from: 1, to: 12, result: RESULTS.SO },
+    { from: 13, to: 20, result: RESULTS.SINGLE }
+  ];
+  const pool = [
+    makeHitter({ id: "scarce-ss-1", name: "Deep SS One", position: "SS", ...eliteStats }),
+    makeHitter({ id: "scarce-ss-2", name: "Deep SS Two", position: "SS", ...eliteStats }),
+    makeHitter({ id: "scarce-c-1", name: "Last Good C", position: "C", ...eliteStats }),
+    makeHitter({ id: "scarce-c-2", name: "Weak C", position: "C", onBase: 7, speed: 8, fielding: 0, chart: weakChart }),
+    makePitcher({ id: "scarce-sp-1", role: "SP" }),
+    makePitcher({ id: "scarce-sp-2", role: "SP" }),
+    makePitcher({ id: "scarce-rp-1", role: "RP", ip: 1 }),
+    makePitcher({ id: "scarce-rp-2", role: "RP", ip: 1 })
+  ];
+  const draft = createDraft(["Solo"], pool, 13, "scarcity-room");
+
+  autopick(draft);
+
+  assert.equal(draft.managers[0].roster[0].id, "scarce-c-1");
 });

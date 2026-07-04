@@ -1,3 +1,5 @@
+import { createValuationModel } from "./valuation.js";
+
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
 const EXACT_REQUIRED_POSITIONS = ["C", "2B", "3B", "SS", "CF"];
@@ -8,7 +10,7 @@ const BULLPEN_TARGET = 2;
 const PITCHER_TARGET = STARTER_TARGET + BULLPEN_TARGET;
 const DEFAULT_ROSTER_SIZE = HITTER_TARGET + PITCHER_TARGET;
 
-export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE) {
+export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, seed = "showdown") {
   const cleanManagers = managers.map((name, index) => ({
     id: `team-${index + 1}`,
     name: name.trim() || `Manager ${index + 1}`,
@@ -20,6 +22,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE) {
     pool: pool.map((player) => ({ ...player })),
     pickedIds: new Set(),
     rosterSize,
+    seed,
     pickNumber: 0,
     complete: false
   };
@@ -124,11 +127,29 @@ export function autopick(draft) {
   if (!legal.length) {
     throw new Error("No legal players are available");
   }
+  const model = managerValuation(draft, manager);
+  const values = new Map(legal.map((player) => [player.id, model.value(player)]));
+  const dropoffs = positionDropoffs(legal, values);
   const best = legal
-    .map((player) => ({ player, score: autopickScore(draft, manager, player, rosterNeeds) }))
+    .map((player) => ({
+      player,
+      score: autopickScore(draft, manager, player, rosterNeeds, values.get(player.id), dropoffs.get(player.id))
+    }))
     .sort((a, b) => b.score - a.score)[0].player;
   return pickPlayer(draft, best.id);
 }
+
+export function managerValuation(draft, manager) {
+  const key = `${draft.seed ?? "showdown"}:valuation:${manager.id}`;
+  let model = valuationModels.get(key);
+  if (!model) {
+    model = createValuationModel(key);
+    valuationModels.set(key, model);
+  }
+  return model;
+}
+
+const valuationModels = new Map();
 
 export function buildTeam(manager, options = {}) {
   const lineup = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
@@ -415,14 +436,62 @@ function emergencyFielding(position) {
   return 0;
 }
 
-function autopickScore(draft, manager, player, needs) {
+function autopickScore(draft, manager, player, needs, personalValue, dropoff) {
   const remainingSlots = draft.rosterSize - manager.roster.length;
   const matchingNeed = player.kind === "pitcher" ? pitcherNeed(player, needs) : needs.hitter;
   const forcedNeed = matchingNeed > 0 && matchingNeed >= remainingSlots;
   const needBonus = matchingNeed > 0 ? 80 + (matchingNeed / Math.max(1, remainingSlots)) * 120 : 0;
   const balanceBonus = player.kind === "pitcher" && pitcherNeed(player, needs) > 0 ? 35 : 0;
   const positionBonus = hitterPositionBonus(manager.roster, player);
-  return player.points + needBonus + balanceBonus + positionBonus + (forcedNeed ? 1000 : 0);
+  const scarcityBonus = positionScarcityBonus(manager, player, needs, dropoff);
+  return personalValue + needBonus + balanceBonus + positionBonus + scarcityBonus + (forcedNeed ? 1000 : 0);
+}
+
+function positionDropoffs(players, values) {
+  const groupTops = new Map();
+  for (const player of players) {
+    const group = positionGroup(player);
+    const value = values.get(player.id);
+    const top = groupTops.get(group) ?? { first: -Infinity, second: -Infinity };
+    if (value > top.first) {
+      top.second = top.first;
+      top.first = value;
+    } else if (value > top.second) {
+      top.second = value;
+    }
+    groupTops.set(group, top);
+  }
+
+  const dropoffs = new Map();
+  for (const player of players) {
+    const top = groupTops.get(positionGroup(player));
+    const value = values.get(player.id);
+    const bestOther = value >= top.first ? Math.max(0, top.second === -Infinity ? 0 : top.second) : top.first;
+    dropoffs.set(player.id, Math.max(0, value - bestOther));
+  }
+  return dropoffs;
+}
+
+function positionGroup(player) {
+  if (player.kind === "pitcher") return `pitcher-${pitcherRole(player)}`;
+  if (CORNER_OUTFIELD_POSITIONS.includes(player.position)) return "hitter-LF/RF";
+  return `hitter-${player.position}`;
+}
+
+function positionScarcityBonus(manager, player, needs, dropoff) {
+  if (!dropoff || dropoff <= 0) return 0;
+  if (!managerNeedsPositionGroup(manager, player, needs)) return 0;
+  return Math.min(120, dropoff * 0.8);
+}
+
+function managerNeedsPositionGroup(manager, player, needs) {
+  if (player.kind === "pitcher") return pitcherNeed(player, needs) > 0;
+  if (needs.hitter <= 0) return false;
+  const lineup = lineupStatus(manager.roster);
+  if (CORNER_OUTFIELD_POSITIONS.includes(player.position)) {
+    return lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF");
+  }
+  return lineup.missingPositions.includes(player.position);
 }
 
 function canAddPitcherToStaff(roster, player) {
