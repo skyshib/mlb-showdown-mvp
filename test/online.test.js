@@ -305,3 +305,43 @@ test("rooms survive a server restart with seats and turn state intact", async (t
   const done = await api(second, "GET", `/api/rooms/${roomId}`);
   assert.equal(done.data.complete, true);
 });
+
+test("shared sim actions are logged after the draft completes and survive restarts", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", { seed: "sim-room", managers: ["Gil", "Hana"] });
+  const roomId = created.data.roomId;
+  const gil = await api(base, "POST", `/api/rooms/${roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+
+  // Sims are rejected until the draft is complete.
+  const early = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: gil.data.token,
+    action: { type: "batch", runs: 250, salt: "abc123" }
+  });
+  assert.equal(early.status, 409);
+  assert.match(early.data.error, /must be complete/i);
+
+  await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: gil.data.token, action: { type: "finish" } });
+
+  const batch = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: gil.data.token,
+    action: { type: "batch", runs: 250, salt: "abc123" }
+  });
+  assert.equal(batch.status, 200);
+
+  const room = await api(base, "GET", `/api/rooms/${roomId}`);
+  const logged = room.data.actions.at(-1).action;
+  assert.equal(logged.type, "batch");
+  assert.equal(logged.salt, "abc123");
+
+  // Restart: sim actions in the log must not break the draft replay.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const second = await startServer(t, dataDir);
+  const revived = await api(second, "GET", `/api/rooms/${roomId}`);
+  assert.equal(revived.status, 200);
+  assert.equal(revived.data.complete, true);
+  assert.equal(revived.data.actions.length, room.data.actions.length);
+});

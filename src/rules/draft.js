@@ -343,6 +343,11 @@ function undoAuctionAction(draft) {
   return { manager, player };
 }
 
+// Sim actions live in the shared room log so every player sees the same
+// results, but they never mutate the draft — clients run the seeded sims
+// locally when they see one, and log replays skip them.
+export const SIM_ACTION_TYPES = new Set(["batch"]);
+
 // Single entry point for replaying shared draft actions. Online rooms sync an
 // ordered action log; the server and every client apply actions through this
 // function so replicas stay byte-identical (all underlying rules are

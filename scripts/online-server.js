@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
-import { applyDraftAction, createDraft, currentManager, draftHistory } from "../src/rules/draft.js";
+import { applyDraftAction, createDraft, currentManager, draftHistory, SIM_ACTION_TYPES } from "../src/rules/draft.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -87,7 +87,9 @@ function reviveRoom(saved) {
     : buildFictionalDraftPool(saved.seed);
   const draft = createDraft(managerNames, pool, saved.rosterSize, saved.seed);
   const actions = saved.actions ?? [];
-  for (const entry of actions) applyDraftAction(draft, entry.action);
+  for (const entry of actions) {
+    if (!SIM_ACTION_TYPES.has(entry.action?.type)) applyDraftAction(draft, entry.action);
+  }
   return {
     id: saved.id,
     seed: saved.seed,
@@ -217,7 +219,7 @@ async function postAction(store, room, request, response) {
   if (denial) return sendJson(response, 409, { error: denial });
 
   try {
-    applyDraftAction(room.draft, action);
+    if (!SIM_ACTION_TYPES.has(action?.type)) applyDraftAction(room.draft, action);
   } catch (error) {
     return sendJson(response, 409, { error: error.message });
   }
@@ -252,6 +254,10 @@ function denyAction(draft, seat, isHost, action) {
   }
   if (type === "lineup") {
     if (!isHost && action?.managerId !== seat?.managerId) return "You can only edit your own lineup";
+    return null;
+  }
+  if (SIM_ACTION_TYPES.has(type)) {
+    if (!draft.complete) return "The draft must be complete before simulating";
     return null;
   }
   return `Unknown draft action: ${type}`;

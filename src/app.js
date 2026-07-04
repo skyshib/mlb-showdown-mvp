@@ -22,6 +22,7 @@ import {
   createDraft,
   currentManager,
   draftHistory,
+  SIM_ACTION_TYPES,
   getRosterNeeds,
   isAuctionDraft,
   isCornerOutfielder,
@@ -36,7 +37,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260706-auction-draft";
+} from "./rules/draft.js?v=20260706-shared-sims";
 import {
   createRoom,
   fetchRoom,
@@ -213,9 +214,26 @@ function rebuildOnlineDraft(room) {
       : buildRealDraftPool(room.seed)
     : buildFictionalDraftPool(room.seed);
   state.draft = createDraft(state.managers, pool, room.rosterSize, room.seed);
-  for (const entry of room.actions) applyDraftAction(state.draft, entry.action);
+  let lastSim = null;
+  for (const entry of room.actions) {
+    if (SIM_ACTION_TYPES.has(entry.action?.type)) {
+      lastSim = entry.action;
+    } else {
+      applyDraftAction(state.draft, entry.action);
+    }
+  }
   state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
   state.selectedTeamName = state.managers[0];
+  if (lastSim) applySharedSim(lastSim, { instant: true });
+}
+
+// A sim action in the shared log means someone hit "Sim": every client runs
+// the same seeded simulation locally, so results match on all machines.
+function applySharedSim(action, options = {}) {
+  if (!state.draft || !canSimulate(state.draft)) return;
+  if (action.type === "batch") {
+    startBatchRun(action.runs ?? DEFAULT_BATCH_RUNS, { ...options, salt: action.salt });
+  }
 }
 
 function subscribeOnline() {
@@ -226,6 +244,13 @@ function subscribeOnline() {
       if (!online || entry.seq <= online.appliedSeq) return;
       if (entry.seq > online.appliedSeq + 1) {
         resyncOnlineRoom();
+        return;
+      }
+      if (SIM_ACTION_TYPES.has(entry.action?.type)) {
+        online.appliedSeq = entry.seq;
+        online.status = "";
+        // The batch renders its own race animation; no render call here.
+        applySharedSim(entry.action);
         return;
       }
       try {
@@ -274,7 +299,12 @@ async function resyncOnlineRoom() {
 
 async function sendOnlineAction(action) {
   const online = state.online;
-  if (!online?.token) return;
+  if (!online) return;
+  if (!online.token) {
+    online.status = "Spectators can't run room actions — claim a seat first.";
+    renderCurrentScreen();
+    return;
+  }
   try {
     await sendRoomAction(online.roomId, online.token, action);
   } catch (error) {
@@ -809,7 +839,7 @@ function bindDraftActions() {
       renderDraft();
     }
     if (action === "batch") {
-      startBatchRun(DEFAULT_BATCH_RUNS);
+      requestBatchRun(DEFAULT_BATCH_RUNS);
     }
 
   };
@@ -969,19 +999,34 @@ function dedupeManagerNames(names) {
   });
 }
 
-function startBatchRun(runs) {
+// Every batch run gets a fresh salt so its seeded games differ from the
+// last run's; online rooms carry the salt inside the shared action so every
+// client still simulates the identical games.
+function requestBatchRun(runs) {
+  if (state.online) {
+    sendOnlineAction({ type: "batch", runs: normalizeBatchRuns(runs), salt: newBatchSalt() });
+    return;
+  }
+  startBatchRun(runs, { salt: newBatchSalt() });
+}
+
+function newBatchSalt() {
+  return Date.now().toString(36);
+}
+
+function startBatchRun(runs, options = {}) {
   if (!state.draft || !canSimulate(state.draft)) return;
   const count = normalizeBatchRuns(runs);
   const teams = state.draft.managers.map((manager) => buildTeam(manager));
   const teamNames = teams.map((team) => team.name);
   const batchState = createBatchState(teams);
-  const seed = `${state.seed}-batch`;
+  const seed = options.salt ? `${state.seed}-batch-${options.salt}` : `${state.seed}-batch`;
   const token = ++batchRunToken;
   const gamesPerFrame = Math.max(2, Math.round(count / 90));
   const plotStart = Math.max(4, Math.round(count * 0.02));
   const series = [];
   let completed = 0;
-  let skipRequested = false;
+  let skipRequested = Boolean(options.instant);
 
   resetAppHandlers();
   hideHoverCard();
@@ -1496,9 +1541,13 @@ function bindBatchActions() {
     }
     if (action === "batch-run") {
       const select = app.querySelector("[data-batch-runs]");
-      startBatchRun(select?.value ?? DEFAULT_BATCH_RUNS);
+      requestBatchRun(select?.value ?? DEFAULT_BATCH_RUNS);
     }
     if (action === "reset") {
+      if (state.online) {
+        leaveOnlineRoom();
+        return;
+      }
       clearSavedState();
       state = defaultState();
       renderSetup();
