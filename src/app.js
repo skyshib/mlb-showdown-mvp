@@ -19,6 +19,7 @@ import {
 } from "./rules/draft.js?v=20260704-ai-valuation";
 import {
   DEFAULT_BATCH_RUNS,
+  batchProgressSnapshot,
   createBatchState,
   normalizeBatchRuns,
   runBatchChunk,
@@ -31,10 +32,12 @@ import {
   playerPosition,
   playerPower,
   playerPrimary,
+  raceColor,
   renderBoxScore,
   renderPlayerCard,
-  renderPlayerTable
-} from "./ui/render.js?v=20260704-roster-depth";
+  renderPlayerTable,
+  renderRaceChart
+} from "./ui/render.js?v=20260704-race-chart";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
 const app = document.querySelector("#app");
@@ -531,41 +534,108 @@ function startBatchRun(runs) {
   if (!state.draft || !canSimulate(state.draft)) return;
   const count = normalizeBatchRuns(runs);
   const teams = state.draft.managers.map((manager) => buildTeam(manager));
+  const teamNames = teams.map((team) => team.name);
   const batchState = createBatchState(teams);
   const seed = `${state.seed}-batch`;
   const token = ++batchRunToken;
-  const chunkSize = 250;
+  const seasonsPerFrame = Math.max(2, Math.round(count / 90));
+  const plotStart = Math.max(4, Math.round(count * 0.02));
+  const series = [];
   let completed = 0;
+  let skipRequested = false;
 
-  const step = () => {
-    if (token !== batchRunToken || state.draft === null) return;
-    const size = Math.min(chunkSize, count - completed);
-    runBatchChunk(batchState, teams, seed, completed, size);
-    completed += size;
-    if (completed < count) {
-      renderBatchProgress(completed, count);
-      setTimeout(step, 0);
-      return;
-    }
-    state.batch = { runs: count, seed, summary: summarizeBatch(batchState) };
+  resetAppHandlers();
+  hideHoverCard();
+  app.onclick = (event) => {
+    if (event.target.closest("button[data-action=batch-skip]")) skipRequested = true;
+  };
+
+  const pushFrame = () => {
+    if (completed < plotStart) return null;
+    const snapshot = batchProgressSnapshot(batchState);
+    const shareByTeam = new Map(snapshot.rows.map((row) => [row.team, row.share]));
+    series.push({ n: completed, shares: teamNames.map((name) => shareByTeam.get(name) ?? 0) });
+    return snapshot;
+  };
+
+  const finalize = () => {
+    if (token !== batchRunToken || !state.draft) return;
+    state.batch = {
+      runs: count,
+      seed,
+      summary: summarizeBatch(batchState),
+      race: { teamNames, totalRuns: count, series: downsampleSeries(series) }
+    };
     state.view = "batch";
     saveState();
     renderBatch();
   };
 
-  renderBatchProgress(0, count);
-  setTimeout(step, 30);
+  const step = () => {
+    if (token !== batchRunToken || !state.draft) return;
+    if (skipRequested) {
+      runBatchChunk(batchState, teams, seed, completed, count - completed);
+      completed = count;
+      pushFrame();
+      finalize();
+      return;
+    }
+    const size = Math.min(seasonsPerFrame, count - completed);
+    runBatchChunk(batchState, teams, seed, completed, size);
+    completed += size;
+    const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
+    renderBatchRace({ snapshot, series, completed, total: count, teamNames });
+    if (completed >= count) {
+      setTimeout(finalize, 700);
+      return;
+    }
+    setTimeout(step, raceFrameDelay(completed / count));
+  };
+
+  renderBatchRace({ snapshot: null, series, completed: 0, total: count, teamNames });
+  setTimeout(step, 250);
 }
 
-function renderBatchProgress(completed, total) {
-  resetAppHandlers();
-  hideHoverCard();
+function raceFrameDelay(progress) {
+  if (progress >= 0.85) return 230;
+  if (progress <= 0.12) return 170;
+  return 90;
+}
+
+function downsampleSeries(series, maxPoints = 160) {
+  if (series.length <= maxPoints) return series;
+  const step = series.length / (maxPoints - 1);
+  const sampled = [];
+  for (let index = 0; index < maxPoints - 1; index += 1) {
+    sampled.push(series[Math.floor(index * step)]);
+  }
+  sampled.push(series[series.length - 1]);
+  return sampled;
+}
+
+function renderBatchRace({ snapshot, series, completed, total, teamNames }) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
-  app.innerHTML = `<section class="panel sim-progress">
+  const tallies = (snapshot?.rows ?? teamNames.map((name) => ({ team: name, titles: 0, share: 0 })))
+    .slice()
+    .sort((a, b) => b.titles - a.titles);
+  const leader = completed > 0 ? tallies[0] : null;
+  const heading = completed >= total
+    ? "Photo finish"
+    : leader
+      ? `${escapeHtml(leader.team)} leads the title race`
+      : `Simulating ${total} seasons`;
+  const chips = tallies
+    .map((row) => `<span class="race-chip"><i style="background:${raceColor(teamNames.indexOf(row.team))}"></i>${escapeHtml(row.team)} <strong>${row.titles}</strong></span>`)
+    .join("");
+
+  app.innerHTML = `<section class="panel sim-progress race-screen">
     <p class="eyebrow">Season simulator</p>
-    <h1>Simulating ${total} seasons</h1>
-    <p class="lede">${completed} of ${total} seasons complete.</p>
+    <h1>${heading}</h1>
+    <p class="lede">${completed} of ${total} seasons complete. Title share so far, season by season:</p>
     <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+    ${renderRaceChart({ teamNames, totalRuns: total, series })}
+    <div class="race-chips">${chips}</div>
+    <button data-action="batch-skip" class="small race-skip">Skip to results</button>
   </section>`;
 }
 
@@ -639,6 +709,10 @@ function renderBatch() {
     <button data-action="batch-run">Run again</button>
     <button data-action="reset">New room</button>
   </section>
+  ${state.batch.race ? `<section class="panel race-results-panel">
+    <h2>How the race unfolded</h2>
+    ${renderRaceChart(state.batch.race)}
+  </section>` : ""}
   <section class="grid tournament-grid">
     <div class="panel">
       <p class="eyebrow">${runs} simulated seasons</p>

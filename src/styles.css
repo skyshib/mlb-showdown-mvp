@@ -202,6 +202,53 @@ td span {
   gap: 14px;
 }
 
+.pool-mode {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px 14px;
+}
+
+.pool-mode legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.pool-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.pool-option input {
+  margin-top: 3px;
+}
+
+.pool-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.pool-option small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.form-error {
+  margin: 0;
+  border: 1px solid rgba(143, 49, 71, 0.45);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(143, 49, 71, 0.08);
+  color: #8f3147;
+  font-size: 14px;
+}
+
 .lede {
   margin-top: 12px;
   max-width: 680px;
@@ -1212,4 +1259,86 @@ button.roster-slot[draggable="true"]:active {
   height: 100%;
   background: var(--accent);
   transition: width 120ms ease;
+}
+
+.race-screen {
+  max-width: 980px;
+}
+
+.race-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 4px;
+}
+
+.race-chart-placeholder {
+  display: grid;
+  place-items: center;
+  height: 180px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.race-grid {
+  stroke: #dfe5de;
+  stroke-width: 1;
+}
+
+.race-parity {
+  stroke: #9aa79e;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+}
+
+.race-axis-text {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.race-parity-text {
+  font-size: 10px;
+}
+
+.race-label {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.race-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.race-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  background: white;
+}
+
+.race-chip i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.race-skip {
+  justify-self: start;
+}
+
+.race-results-panel {
+  margin-top: 16px;
+}
+
+.race-results-panel .race-chart {
+  max-width: 920px;
 }

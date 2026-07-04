@@ -55,6 +55,17 @@ export function runBatchChunk(state, teams, seed, startIndex, count) {
   return state;
 }
 
+export function batchProgressSnapshot(state) {
+  return {
+    runs: state.runs,
+    rows: [...state.teams.values()].map((row) => ({
+      team: row.team,
+      titles: row.titles,
+      share: rate(row.titles, state.runs)
+    }))
+  };
+}
+
 export function summarizeBatch(state) {
   const teams = [...state.teams.values()]
     .map((row) => ({

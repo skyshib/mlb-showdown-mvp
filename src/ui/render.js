@@ -172,6 +172,95 @@ export function renderBoxScore(game) {
   </div>`;
 }
 
+export const RACE_COLORS = ["#0b6b53", "#8f3147", "#365f91", "#b06c1f", "#5a4f91", "#4f6f2b", "#9c3b21", "#2b6f6f"];
+
+export function raceColor(index) {
+  return RACE_COLORS[index % RACE_COLORS.length];
+}
+
+export function renderRaceChart(race) {
+  const teamNames = race?.teamNames ?? [];
+  const series = race?.series ?? [];
+  if (!teamNames.length || series.length < 2) {
+    return `<div class="race-chart-placeholder">Waiting for the first seasons to finish...</div>`;
+  }
+
+  const width = 760;
+  const height = 280;
+  const margin = { top: 16, right: 138, bottom: 32, left: 48 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const lastPoint = series[series.length - 1];
+  const totalRuns = Math.max(race.totalRuns ?? lastPoint.n, lastPoint.n, 1);
+  const xMin = series[0].n;
+  const xSpan = Math.max(1, totalRuns - xMin);
+  const parity = 1 / teamNames.length;
+
+  let maxShare = parity;
+  for (const point of series) {
+    for (const value of point.shares) {
+      if (value > maxShare) maxShare = value;
+    }
+  }
+  const yMax = Math.min(1, Math.max(0.3, Math.ceil((maxShare + 0.02) * 10) / 10));
+
+  const xFor = (n) => margin.left + ((n - xMin) / xSpan) * plotWidth;
+  const yFor = (value) => margin.top + (1 - value / yMax) * plotHeight;
+
+  const gridStep = yMax > 0.6 ? 0.2 : 0.1;
+  const gridLines = [];
+  for (let value = 0; value <= yMax + 1e-9; value += gridStep) {
+    const yPos = yFor(value);
+    gridLines.push(`<line x1="${margin.left}" y1="${yPos.toFixed(1)}" x2="${margin.left + plotWidth}" y2="${yPos.toFixed(1)}" class="race-grid" />
+      <text x="${margin.left - 8}" y="${(yPos + 4).toFixed(1)}" text-anchor="end" class="race-axis-text">${Math.round(value * 100)}%</text>`);
+  }
+
+  const parityY = yFor(parity);
+  const parityLine = parity <= yMax
+    ? `<line x1="${margin.left}" y1="${parityY.toFixed(1)}" x2="${margin.left + plotWidth}" y2="${parityY.toFixed(1)}" class="race-parity" />
+      <text x="${margin.left + 6}" y="${(parityY - 5).toFixed(1)}" class="race-axis-text race-parity-text">even draft (${Math.round(parity * 100)}%)</text>`
+    : "";
+
+  const xTicks = [xMin, Math.round((xMin + totalRuns) / 2), totalRuns].map((n) => {
+    const xPos = xFor(n);
+    return `<text x="${xPos.toFixed(1)}" y="${height - 10}" text-anchor="middle" class="race-axis-text">${n}</text>`;
+  });
+
+  const lines = teamNames.map((name, index) => {
+    const points = series
+      .map((point) => `${xFor(point.n).toFixed(1)},${yFor(point.shares[index] ?? 0).toFixed(1)}`)
+      .join(" ");
+    return `<polyline points="${points}" fill="none" stroke="${raceColor(index)}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />`;
+  });
+
+  const labels = teamNames
+    .map((name, index) => ({
+      name,
+      color: raceColor(index),
+      value: lastPoint.shares[index] ?? 0,
+      yPos: yFor(lastPoint.shares[index] ?? 0)
+    }))
+    .sort((a, b) => a.yPos - b.yPos);
+  for (let index = 1; index < labels.length; index += 1) {
+    labels[index].yPos = Math.max(labels[index].yPos, labels[index - 1].yPos + 14);
+  }
+  const labelMaxY = margin.top + plotHeight;
+  for (let index = labels.length - 1; index >= 0; index -= 1) {
+    const limit = labelMaxY - (labels.length - 1 - index) * 14;
+    if (labels[index].yPos > limit) labels[index].yPos = limit;
+  }
+  const endX = Math.min(xFor(lastPoint.n), margin.left + plotWidth);
+  const labelTexts = labels.map((label) => `<text x="${(endX + 8).toFixed(1)}" y="${(label.yPos + 4).toFixed(1)}" fill="${label.color}" class="race-label">${escapeHtml(label.name)} ${(label.value * 100).toFixed(1)}%</text>`);
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="race-chart" role="img" aria-label="Cumulative title share by team as seasons are simulated">
+    ${gridLines.join("")}
+    ${parityLine}
+    ${xTicks.join("")}
+    ${lines.join("")}
+    ${labelTexts.join("")}
+  </svg>`;
+}
+
 export function basesText(bases) {
   const labels = ["1B", "2B", "3B"];
   const occupied = bases

@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
-import { simulateBatch, normalizeBatchRuns, DEFAULT_BATCH_RUNS } from "../src/rules/batch.js";
+import {
+  DEFAULT_BATCH_RUNS,
+  batchProgressSnapshot,
+  createBatchState,
+  normalizeBatchRuns,
+  runBatchChunk,
+  simulateBatch
+} from "../src/rules/batch.js";
 import { RESULTS } from "../src/rules/cards.js";
 import { autopick, buildTeam, createDraft } from "../src/rules/draft.js";
 import { simulateGame } from "../src/rules/game.js";
@@ -62,6 +69,19 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
   for (let index = 1; index < summary.hitters.length; index += 1) {
     assert.ok(summary.hitters[index - 1].ops >= summary.hitters[index].ops, "hitters sorted by OPS");
   }
+});
+
+test("batchProgressSnapshot reports running title tallies mid-batch", () => {
+  const teams = draftTeams("batch-snapshot");
+  const state = createBatchState(teams);
+  runBatchChunk(state, teams, "batch-snapshot", 0, 8);
+  const snapshot = batchProgressSnapshot(state);
+
+  assert.equal(snapshot.runs, 8);
+  assert.equal(snapshot.rows.length, 4);
+  assert.equal(snapshot.rows.reduce((sum, row) => sum + row.titles, 0), 8);
+  const shareSum = snapshot.rows.reduce((sum, row) => sum + row.share, 0);
+  assert.ok(Math.abs(shareSum - 1) < 1e-9);
 });
 
 test("normalizeBatchRuns clamps bad input to sane run counts", () => {

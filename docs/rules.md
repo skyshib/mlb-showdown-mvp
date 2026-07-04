@@ -187,5 +187,6 @@ Current implementation details:
 - Auto-pick scores available players by point value plus roster-need urgency, including the starter/bullpen split.
 - Box scores are generated from the simulator event log, and hitter lines track doubles and triples so aggregate SLG/OPS can be computed.
 - `Sim N seasons` replays the full round-robin (plus final) N times with seeds `{roomSeed}-batch-season-{n}`, so the same room seed always reproduces the same batch. The batch screen reports title/finals equity, round-robin win distributions, per-player aggregate lines, and sim awards.
+- The batch run animates as a title race: ~90 paced frames (slower opening and finish for drama, roughly 15 seconds total), each frame charting cumulative title share per team against a dashed "even draft" parity line. The first ~2% of seasons are computed but not plotted so the chart is not dominated by tiny-sample spikes. `Skip to results` finishes the remaining seasons instantly; the downsampled series (max 160 points) is saved with the results and re-rendered on the results screen.
 - Batch results are saved with the room and invalidated by any pick, undo, or lineup change, since those change the teams being simulated.
 - Duplicate manager names are suffixed (`Sam`, `Sam 2`) at room creation because standings and batch aggregation key on team name.
