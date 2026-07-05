@@ -229,16 +229,23 @@ reuses the batch simulation path (`src/rules/batch.js`) with a small series wrap
 
 ### 5.3 Player decisions (v1)
 
-Only decisions the engine already supports:
+Shipped decision set:
 
 | Decision | Engine seam | When offered |
 |----------|-------------|--------------|
-| Steal attempt (per runner) | `playStealAttempt` | runner on, before PA resolves |
-| Pitching change | existing bullpen/fatigue model, made manual | between batters when your side pitches |
-| Send / hold runner on hits | currently auto — add an optional prompt hook | leverage moments only |
-| Tag-up attempt | currently auto — same hook pattern | leverage moments only |
+| Steal attempt (per runner) | `stealCandidates` / `attemptSteal` | runner on, before PA resolves |
+| Sacrifice bunt | `canBunt` / `attemptBunt` | runner on, fewer than two outs |
+| Intentional walk | `intentionalWalk` | any time your side pitches |
+| Pitching change | `changePitcher`, manual via `state.manualPitchingFor` (no auto-substitution for the player) | between batters when your side pitches |
+| Send / hold runners on hits | `state.deferAdvancesFor` pauses the play; `resolveAdvanceDecision` finishes it | every hit that creates an extra-base chance |
+| Tag-up attempt | same deferred-advance seam | every fly ball with a runner in position |
+| Batting order | `battingOrder` on the manager, editable in the club and before games | outside battles (persists as the default) |
 
-Deferred (engine gaps, listed in README): bunts, hit-and-run, pinch-hitting (no bench
+Runners send lead-first: a trailing runner can only go if everyone ahead of him
+goes. Fast-forward switches all of these back to the decision-matrix autopilot
+(and manages your pen at fatigue 2) until the next leverage moment.
+
+Deferred (engine gaps, listed in README): hit-and-run, pinch-hitting (no bench
 concept yet), strategy cards. The decision-hook interface should be designed so these
 slot in later without reworking the battle UI.
 

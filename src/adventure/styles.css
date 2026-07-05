@@ -230,7 +230,7 @@ h1.gq-logo {
 .gq-tooltip {
   position: fixed;
   z-index: 50;
-  width: min(38vw, 40vh);
+  width: min(46vw, 60vh);
   container-type: inline-size;
   pointer-events: none;
   filter: drop-shadow(0 0.5em 1.5em rgba(0, 0, 0, 0.55));
