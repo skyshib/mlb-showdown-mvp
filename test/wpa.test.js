@@ -42,14 +42,19 @@ test("the final event lands on the actual winner", () => {
   }
 });
 
-test("every game settles the full half-win of WPA on the winner", () => {
+test("every game settles the winner's full pregame win probability gap", () => {
   const teams = draftTeams("wpa-settlement", 2);
   for (let index = 0; index < 40; index += 1) {
     const result = simulateGame(teams[0], teams[1], `wpa-settlement-${index}`);
     const homeWon = result.winner === result.home.name;
     const box = homeWon ? result.boxScore.home : result.boxScore.away;
     const net = [...box.hitters, ...box.pitchers].reduce((sum, line) => sum + (line.wpa ?? 0), 0);
-    assert.ok(Math.abs(net - 0.5) < 1e-9, `game ${index}: winner net WPA ${net} should be +0.5`);
+    // The MLB win-expectancy table opens with real home-field advantage, so
+    // the winner's net WPA is the distance from that prior to a sure win —
+    // not a symmetric 0.5.
+    const pregame = result.events[0].wpBefore;
+    const expected = homeWon ? 1 - pregame : pregame;
+    assert.ok(Math.abs(net - expected) < 1e-9, `game ${index}: winner net WPA ${net} should be ${expected}`);
 
     // Per docs/rules.md the away team can only win after a completed inning,
     // never by ending the game mid-half in extras.

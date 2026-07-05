@@ -303,6 +303,30 @@ td span {
   backdrop-filter: blur(10px);
 }
 
+.pick-clock {
+  margin-left: auto;
+  align-self: center;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-dark);
+}
+
+.pick-clock.low {
+  border-color: var(--warn);
+  color: var(--warn);
+  animation: pick-clock-pulse 1s ease-in-out infinite;
+}
+
+@keyframes pick-clock-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.8fr);
@@ -1289,6 +1313,92 @@ button.roster-slot[draggable="true"]:active {
   font-style: normal;
 }
 
+.formula-reveal-panel {
+  margin-top: 16px;
+}
+
+.formula-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.formula-card {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: white;
+}
+
+.formula-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.formula-outcome {
+  color: var(--accent-dark);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.formula-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.formula-line strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.formula-kind {
+  display: inline-block;
+  min-width: 58px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.formula-leans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.weight-lean {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.weight-lean strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.weight-lean.lean-up strong {
+  color: #1c7a3d;
+}
+
+.weight-lean.lean-down strong {
+  color: #b3402a;
+}
+
+.draft-recap-panel {
+  margin-top: 16px;
+}
+
 .sim-progress {
   max-width: 560px;
   margin-top: 24px;
@@ -1354,6 +1464,61 @@ button.roster-slot[draggable="true"]:active {
 .race-label {
   font-size: 12px;
   font-weight: 700;
+}
+
+.wp-chart {
+  max-height: 240px;
+}
+
+.wp-line {
+  stroke: var(--accent);
+}
+
+.wp-inning-grid {
+  stroke-dasharray: 2 4;
+}
+
+.wp-swing-dot {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+
+.wpa-pos {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+.wpa-neg {
+  color: #8f3147;
+  font-weight: 600;
+}
+
+.wpa-swing td {
+  background: rgba(11, 107, 83, 0.07);
+}
+
+.wp-cell {
+  white-space: nowrap;
+}
+
+.game-log-row {
+  cursor: pointer;
+}
+
+.game-log-row:hover td {
+  background: rgba(11, 107, 83, 0.08);
+}
+
+.game-log-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.game-log-panel h3 {
+  margin-top: 20px;
 }
 
 .race-chips {
@@ -1465,6 +1630,8 @@ button.roster-slot[draggable="true"]:active {
   text-decoration: underline;
   padding: 0;
   font-size: 13px;
+}
+
 .awards-panel {
   margin-top: 16px;
 }
@@ -1547,23 +1714,93 @@ button.roster-slot[draggable="true"]:active {
   color: var(--muted);
 }
 
-.lot-raise-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.lot-tie-note {
+  margin-bottom: 12px;
   font-size: 13px;
+  font-weight: 700;
+  color: var(--warn);
+}
+
+.lot-tie-note.muted {
+  font-weight: 500;
   color: var(--muted);
 }
 
-.custom-raise {
-  display: inline-flex;
+.lot-entry {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(11, 107, 83, 0.05);
 }
 
-.custom-raise input {
-  width: 84px;
+.lot-entry-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-dark);
+}
+
+.lot-entry input {
+  width: 110px;
+}
+
+.mask-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.mask-toggle input {
+  width: auto;
+}
+
+.cpu-tag {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--muted);
+  vertical-align: 2px;
+}
+
+.cpu-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.cpu-option {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.cpu-option input {
+  width: auto;
+}
+
+.cpu-note {
+  color: var(--muted);
+}
+
+.last-sale {
+  margin-top: 16px;
+}
+
+.last-sale p {
+  font-size: 14px;
 }
 
 .lot-bidders {

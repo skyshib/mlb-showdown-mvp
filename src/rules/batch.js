@@ -1,6 +1,6 @@
 import { distribution, rate } from "./stats.js";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260705-batch-team-skills";
-import { simulateGame, WP_DEFAULT_ENV } from "./game.js?v=20260704-wpa-calibration";
+import { simulateGame } from "./game.js?v=20260708-mlb-win-prob";
 
 export const DEFAULT_BATCH_RUNS = 1000;
 export const MAX_BATCH_RUNS = 20000;
@@ -22,9 +22,6 @@ export function simulateBatch(teams, options = {}) {
 export function createBatchState(teams) {
   const state = {
     runs: 0,
-    // Calibrated once per batch so every game's WPA is scored against the
-    // run environment these specific teams actually produce.
-    wpEnv: measureRunEnvironment(teams),
     teams: new Map(),
     hitters: new Map(),
     pitchers: new Map(),
@@ -56,23 +53,45 @@ export function runBatchChunk(state, teams, seed, startIndex, count) {
   const schedule = createSchedule(teams);
   if (!schedule.length) return state;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    const result = simulateScheduledGame(schedule, state.rotation, seed, index, state.wpEnv);
-    foldGame(state, result);
+    foldGame(state, playScheduledGame(schedule[index % schedule.length], state.rotation, seed, index));
   }
   return state;
 }
 
-export function simulateBatchGame(teams, seed, gameNumber) {
+function playScheduledGame(matchup, rotation, seed, index) {
+  return simulateGame(
+    teamForGame(matchup.away, rotation),
+    teamForGame(matchup.home, rotation),
+    `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`
+  );
+}
+
+// Re-simulates games [startIndex, startIndex + count) of a batch run. Batch
+// games are fully determined by (teams, seed, index), so the review log can
+// page through every game of a finished run without storing any of them —
+// the rotation walk below replays the starter sequence runBatchChunk saw.
+export function replayBatchGames(teams, seed, startIndex, count) {
   const schedule = createSchedule(teams);
-  if (!schedule.length) return null;
-  const targetIndex = Math.max(0, Math.round(Number(gameNumber) || 1) - 1);
-  const wpEnv = measureRunEnvironment(teams);
+  if (!schedule.length) return [];
   const rotation = createRotationTracker(teams);
-  let result = null;
-  for (let index = 0; index <= targetIndex; index += 1) {
-    result = simulateScheduledGame(schedule, rotation, seed, index, wpEnv);
+  const games = [];
+  for (let index = 0; index < startIndex + count; index += 1) {
+    const matchup = schedule[index % schedule.length];
+    if (index < startIndex) {
+      teamForGame(matchup.away, rotation);
+      teamForGame(matchup.home, rotation);
+      continue;
+    }
+    games.push({ index, game: playScheduledGame(matchup, rotation, seed, index) });
   }
-  return result;
+  return games;
+}
+
+// One-game convenience over replayBatchGames, numbered from 1 the way the
+// game-log UI counts.
+export function simulateBatchGame(teams, seed, gameNumber) {
+  const targetIndex = Math.max(0, Math.round(Number(gameNumber) || 1) - 1);
+  return replayBatchGames(teams, seed, targetIndex, 1)[0]?.game ?? null;
 }
 
 export function batchProgressSnapshot(state) {
@@ -303,50 +322,6 @@ function createSchedule(teams) {
   return schedule;
 }
 
-// Plays a short seeded slate between the drafted teams and measures runs per
-// half-inning, so the win-probability model reflects this matchup set's
-// actual run environment instead of a league average that goes stale every
-// time the card pools get rebalanced. A miss on runs per half turns into a
-// hitter-vs-pitcher WPA tilt about 1.4x as large, so ~100 games keep the
-// measured mean tight; they cost well under a second and are never folded
-// into batch stats.
-export function measureRunEnvironment(teams, seed = "wp-env") {
-  const schedule = createSchedule(teams);
-  if (!schedule.length) return { ...WP_DEFAULT_ENV };
-
-  const games = schedule.length * Math.max(2, Math.ceil(100 / schedule.length));
-  const rotation = createRotationTracker(teams);
-  const halves = [];
-  for (let index = 0; index < games; index += 1) {
-    const matchup = schedule[index % schedule.length];
-    const result = simulateGame(
-      teamForGame(matchup.away, rotation),
-      teamForGame(matchup.home, rotation),
-      `${seed}-${index}`
-    );
-    let runs = 0;
-    for (const event of result.events) {
-      runs += event.scoreAfter.away + event.scoreAfter.home - event.scoreBefore.away - event.scoreBefore.home;
-      if (event.outsAfter >= 3) {
-        halves.push(runs);
-        runs = 0;
-      }
-    }
-  }
-  if (halves.length < 30) return { ...WP_DEFAULT_ENV };
-
-  const mean = halves.reduce((sum, value) => sum + value, 0) / halves.length;
-  const variance = halves.reduce((sum, value) => sum + (value - mean) ** 2, 0) / halves.length;
-  return {
-    runsPerHalf: clampEnv(mean, 0.02, 3),
-    varPerHalf: clampEnv(variance, 0.02, 6)
-  };
-}
-
-function clampEnv(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
 function createRotationTracker(teams) {
   return new Map(teams.map((team) => [team.name, 0]));
 }
@@ -362,16 +337,6 @@ function teamForGame(team, rotation) {
     starterIndex: starters.length ? startCount % starters.length : 0,
     pitchers: [starter, ...bullpen].filter(Boolean)
   };
-}
-
-function simulateScheduledGame(schedule, rotation, seed, index, wpEnv = null) {
-  const matchup = schedule[index % schedule.length];
-  return simulateGame(
-    teamForGame(matchup.away, rotation),
-    teamForGame(matchup.home, rotation),
-    `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`,
-    wpEnv ? { wpEnv } : undefined
-  );
 }
 
 function formatDistributionTotal(value) {

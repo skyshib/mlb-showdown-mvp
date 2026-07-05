@@ -297,6 +297,73 @@ export function renderRaceChart(race) {
   </svg>`;
 }
 
+// Home team's win probability across one game's plays. Big swings
+// (|WPA| >= 10%) get a marker; every play carries a native tooltip.
+export function renderWinProbabilityChart(game) {
+  const events = game?.events ?? [];
+  if (events.length < 2 || events[0].wpBefore == null) return "";
+
+  const width = 760;
+  const height = 220;
+  const margin = { top: 14, right: 16, bottom: 30, left: 48 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const xFor = (index) => margin.left + (index / events.length) * plotWidth;
+  const yFor = (wp) => margin.top + (1 - wp) * plotHeight;
+
+  const gridLines = [0, 0.5, 1].map((value) => {
+    const yPos = yFor(value);
+    return `<line x1="${margin.left}" y1="${yPos.toFixed(1)}" x2="${margin.left + plotWidth}" y2="${yPos.toFixed(1)}" class="${value === 0.5 ? "race-parity" : "race-grid"}" />
+      <text x="${margin.left - 8}" y="${(yPos + 4).toFixed(1)}" text-anchor="end" class="race-axis-text">${Math.round(value * 100)}%</text>`;
+  });
+
+  const inningMarks = [];
+  let lastInning = 0;
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (event.inning !== lastInning) {
+      lastInning = event.inning;
+      const xPos = xFor(index);
+      if (index > 0) {
+        inningMarks.push(`<line x1="${xPos.toFixed(1)}" y1="${margin.top}" x2="${xPos.toFixed(1)}" y2="${margin.top + plotHeight}" class="race-grid wp-inning-grid" />`);
+      }
+      if (lastInning <= 12 || lastInning % 2 === 1) {
+        inningMarks.push(`<text x="${xPos.toFixed(1)}" y="${height - 10}" text-anchor="start" class="race-axis-text">${lastInning}</text>`);
+      }
+    }
+  }
+
+  const points = [`${xFor(0).toFixed(1)},${yFor(events[0].wpBefore).toFixed(1)}`];
+  for (let index = 0; index < events.length; index += 1) {
+    points.push(`${xFor(index + 1).toFixed(1)},${yFor(events[index].wpAfter).toFixed(1)}`);
+  }
+
+  const describe = (event) => {
+    const label = event.type === "steal"
+      ? `${event.playDetails?.stealAttempt?.runner ?? event.batter} ${event.result}`
+      : `${event.batter} ${event.result} vs ${event.pitcher}`;
+    const swing = (event.wpa * 100).toFixed(1);
+    return `${event.inning}${event.half === "top" ? "T" : "B"} · ${label} · home ${Math.round(event.wpBefore * 100)}% → ${Math.round(event.wpAfter * 100)}% (${event.wpa >= 0 ? "+" : ""}${swing}% batting side)`;
+  };
+
+  const hoverZones = events.map((event, index) =>
+    `<rect x="${xFor(index).toFixed(1)}" y="${margin.top}" width="${(plotWidth / events.length).toFixed(2)}" height="${plotHeight}" fill="transparent"><title>${escapeHtml(describe(event))}</title></rect>`);
+
+  const swingMarkers = events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => Math.abs(event.wpa ?? 0) >= 0.1)
+    .map(({ event, index }) =>
+      `<circle cx="${xFor(index + 1).toFixed(1)}" cy="${yFor(event.wpAfter).toFixed(1)}" r="4.5" class="wp-swing-dot"><title>${escapeHtml(describe(event))}</title></circle>`);
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="race-chart wp-chart" role="img" aria-label="Home team win probability after each play; the table below lists every play">
+    ${gridLines.join("")}
+    ${inningMarks.join("")}
+    <polyline points="${points.join(" ")}" fill="none" class="wp-line" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+    ${swingMarkers.join("")}
+    ${hoverZones.join("")}
+  </svg>`;
+}
+
 export function basesText(bases) {
   const labels = ["1B", "2B", "3B"];
   const occupied = bases

@@ -6,7 +6,7 @@ import {
   pitcherPoints,
   speedPoints,
   toChart
-} from "./playerGeneration.js?v=20260704-real-players";
+} from "./playerGeneration.js?v=20260706-version-sync";
 
 // Real-player pool. Cards are derived from approximate, hand-entered MLB stat
 // lines so each card reflects the player's actual skills: the 2025 season for

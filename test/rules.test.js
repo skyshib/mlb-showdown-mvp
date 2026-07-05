@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
 import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
-import { createValuationModel } from "../src/rules/valuation.js";
+import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
@@ -1004,6 +1004,21 @@ test("valuation model prices starter workload above an identical reliever", () =
       model.value(starter) > model.value(reliever) * 1.5,
       `same-quality starter should be worth well over a reliever (seed ${seed})`
     );
+  }
+});
+
+test("valuation weights stay within the advertised spread of the revealed baseline", () => {
+  for (const seed of ["room-a:valuation:team-1", "room-b:valuation:team-2", "room-c:valuation:team-3"]) {
+    const model = createValuationModel(seed);
+    for (const kind of ["hitter", "pitcher"]) {
+      for (const [key, base] of Object.entries(VALUATION_BASE_WEIGHTS[kind])) {
+        const ratio = model.weights[kind][key] / base;
+        assert.ok(
+          ratio >= 1 - VALUATION_PERTURBATION && ratio <= 1 + VALUATION_PERTURBATION,
+          `${kind}.${key} lean ${ratio} should stay within ±${VALUATION_PERTURBATION} (seed ${seed})`
+        );
+      }
+    }
   }
 });
 

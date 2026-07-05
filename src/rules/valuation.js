@@ -38,6 +38,14 @@ const PITCHER_CHART_VALUES = {
 
 const PERTURBATION = 0.25;
 
+// The UI reveals each manager's perturbed weights after a sim; exposing the
+// baseline and spread lets it show how far every preference leans.
+export const VALUATION_BASE_WEIGHTS = {
+  hitter: HITTER_BASE_WEIGHTS,
+  pitcher: PITCHER_BASE_WEIGHTS
+};
+export const VALUATION_PERTURBATION = PERTURBATION;
+
 export function createValuationModel(seed) {
   const rng = createRng(String(seed));
   const weights = {

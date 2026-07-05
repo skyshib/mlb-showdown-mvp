@@ -1,0 +1,125 @@
+import { loadSave } from "./state.js";
+import { cardPanelHtml } from "./ui/helpers.js";
+import { titleScreen, introScreen, nameEntryScreen, starterPickScreen } from "./ui/titleScreens.js";
+import { mapScreen, trainerIntroScreen } from "./ui/mapScreen.js";
+import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen } from "./ui/battleScreen.js";
+import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen } from "./ui/collectionScreens.js";
+
+const SCREENS = {
+  title: titleScreen,
+  intro: introScreen,
+  nameEntry: nameEntryScreen,
+  starterPick: starterPickScreen,
+  map: mapScreen,
+  trainerIntro: trainerIntroScreen,
+  battle: battleScreen,
+  seriesBreak: seriesBreakScreen,
+  battleResult: battleResultScreen,
+  simSeries: simSeriesScreen,
+  shop: shopScreen,
+  sell: sellScreen,
+  binder: binderScreen,
+  team: teamScreen,
+  lineup: lineupScreen,
+  packOpen: packOpenScreen
+};
+
+const KEY_MAP = {
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  Enter: "a",
+  z: "a",
+  Z: "a",
+  Escape: "b",
+  x: "b",
+  X: "b",
+  Backspace: "b"
+};
+
+const app = {
+  save: loadSave(),
+  screen: { name: "title", menuIndex: 0 },
+  go(name, data = {}) {
+    this.screen = { name, ...data };
+    this.rerender();
+  },
+  rerender() {
+    const root = document.getElementById("app");
+    const screen = SCREENS[this.screen.name] ?? titleScreen;
+    root.innerHTML = screen.render(this);
+    screen.mounted?.(this);
+  }
+};
+
+document.addEventListener("keydown", (event) => {
+  const inInput = event.target instanceof HTMLInputElement;
+  if (inInput && event.key !== "Enter" && event.key !== "Escape") return;
+  const key = KEY_MAP[event.key];
+  if (!key) return;
+  event.preventDefault();
+  SCREENS[app.screen.name]?.key?.(app, key);
+});
+
+// Mouse/touch parity: clicking a menu row moves the cursor there; clicking
+// the row that is already selected confirms it.
+document.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-menu-index]");
+  if (!row) return;
+  const index = Number(row.dataset.menuIndex);
+  const screen = SCREENS[app.screen.name];
+  if (!screen?.key) return;
+  const field = clickCursorField(app.screen);
+  if (app.screen[field] === index) {
+    screen.key(app, "a");
+  } else {
+    app.screen[field] = index;
+    app.rerender();
+  }
+});
+
+function clickCursorField(screen) {
+  if (screen.mode === "steal") return "stealIndex";
+  if (screen.mode === "pick") return "pickIndex";
+  if (screen.mode === "rosters") return "rosterIndex";
+  if (screen.confirming) return "confirmIndex";
+  if (screen.menuIndex !== undefined) return "menuIndex";
+  return "index";
+}
+
+// Hovering a row that maps to a card (screens expose hoverCard) floats the
+// full card panel next to the cursor — the quickest way to read a chart.
+const tooltip = document.createElement("div");
+tooltip.className = "gq-tooltip";
+tooltip.hidden = true;
+document.body.appendChild(tooltip);
+
+document.addEventListener("mouseover", (event) => {
+  const row = event.target.closest?.("[data-menu-index]");
+  const card = row && SCREENS[app.screen.name]?.hoverCard?.(app, Number(row.dataset.menuIndex));
+  if (!card) {
+    tooltip.hidden = true;
+    return;
+  }
+  tooltip.innerHTML = cardPanelHtml(card);
+  tooltip.hidden = false;
+});
+
+document.addEventListener("mousemove", (event) => {
+  if (tooltip.hidden) return;
+  const pad = 14;
+  const rect = tooltip.getBoundingClientRect();
+  const x = Math.min(event.clientX + pad, window.innerWidth - rect.width - pad);
+  const y = Math.min(event.clientY + pad, window.innerHeight - rect.height - pad);
+  tooltip.style.left = `${Math.max(pad, x)}px`;
+  tooltip.style.top = `${Math.max(pad, y)}px`;
+});
+
+document.addEventListener("mouseout", (event) => {
+  if (!event.relatedTarget || !event.relatedTarget.closest?.("[data-menu-index]")) {
+    tooltip.hidden = true;
+  }
+});
+
+app.rerender();

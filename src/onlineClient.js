@@ -1,7 +1,7 @@
 const SEAT_STORAGE_PREFIX = "mlb-showdown-online-seat-";
 
-export async function createRoom({ seed, managers, poolMode, realPool }) {
-  return request("POST", "/api/rooms", { seed, managers, poolMode, realPool });
+export async function createRoom({ seed, managers, poolMode, realPool, pickTimer }) {
+  return request("POST", "/api/rooms", { seed, managers, poolMode, realPool, pickTimer });
 }
 
 export async function fetchRoom(roomId) {

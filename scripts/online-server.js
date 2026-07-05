@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
-import { applyDraftAction, createDraft, currentManager, draftHistory, SIM_ACTION_TYPES } from "../src/rules/draft.js";
+import { applyDraftAction, createDraft, currentManager, draftHistory, normalizePickTimerSeconds, SIM_ACTION_TYPES } from "../src/rules/draft.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -77,6 +77,7 @@ function loadRooms(dataDir) {
 
 function reviveRoom(saved) {
   const managerNames = saved.managerNames ?? [];
+  const cpuNames = Array.isArray(saved.cpuNames) ? saved.cpuNames : [];
   const realPool = saved.realPool === "mariners" ? "mariners" : "stars";
   // Must deal exactly as createRoom did, or the replayed action log references
   // cards that are not in the revived pool.
@@ -85,7 +86,12 @@ function reviveRoom(saved) {
       ? buildMarinersDraftPool(saved.seed)
       : buildRealDraftPool(saved.seed)
     : buildFictionalDraftPool(saved.seed);
-  const draft = createDraft(managerNames, pool, saved.rosterSize, saved.seed);
+  const draft = createDraft(
+    managerNames.map((name) => ({ name, cpu: cpuNames.includes(name) })),
+    pool,
+    saved.rosterSize,
+    saved.seed
+  );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
     if (!SIM_ACTION_TYPES.has(entry.action?.type)) applyDraftAction(draft, entry.action);
@@ -96,6 +102,8 @@ function reviveRoom(saved) {
     rosterSize: saved.rosterSize,
     poolMode: saved.poolMode === "real" ? "real" : "random",
     realPool,
+    pickTimer: normalizePickTimerSeconds(saved.pickTimer),
+    cpuNames,
     managerNames,
     draft,
     actions,
@@ -115,6 +123,8 @@ function persistRoom(store, room) {
     rosterSize: room.rosterSize,
     poolMode: room.poolMode,
     realPool: room.realPool,
+    pickTimer: room.pickTimer,
+    cpuNames: room.cpuNames ?? [],
     managerNames: room.managerNames,
     hostToken: room.hostToken,
     seats: Object.fromEntries(room.seats),
@@ -159,6 +169,10 @@ async function createRoom(store, request, response) {
   const rosterSize = 13;
   const poolMode = body.poolMode === "real" ? "real" : "random";
   const realPool = body.realPool === "mariners" ? "mariners" : "stars";
+  const pickTimer = normalizePickTimerSeconds(body.pickTimer);
+  const cpuNames = Array.isArray(body.cpu)
+    ? body.cpu.map((name) => String(name)).filter((name) => managers.includes(name))
+    : [];
 
   // Every pool flavor deals a seeded slice of a deep set; the deal is
   // deterministic in the seed so clients rebuild the identical deck.
@@ -174,13 +188,15 @@ async function createRoom(store, request, response) {
       error: `The ${poolLabel} pool deals position depth for up to ${managerLimit} managers`
     });
   }
-  const draft = createDraft(managers, pool, rosterSize, seed);
+  const draft = createDraft(managers.map((name) => ({ name, cpu: cpuNames.includes(name) })), pool, rosterSize, seed);
   const room = {
     id: newRoomId(store.rooms),
     seed,
     rosterSize,
     poolMode,
     realPool,
+    pickTimer,
+    cpuNames,
     managerNames: managers,
     draft,
     actions: [],
@@ -198,6 +214,7 @@ async function joinRoom(store, room, request, response) {
   const body = await readJsonBody(request);
   const manager = room.draft.managers.find((item) => item.id === body.managerId);
   if (!manager) return sendJson(response, 404, { error: "Unknown manager seat" });
+  if (manager.cpu) return sendJson(response, 409, { error: `${manager.name} is a computer manager` });
   const existing = room.seats.get(manager.id);
   if (existing) return sendJson(response, 409, { error: `${manager.name} is already claimed` });
   const isHost = Boolean(body.hostToken) && body.hostToken === room.hostToken;
@@ -290,9 +307,11 @@ function roomSnapshot(room) {
     rosterSize: room.rosterSize,
     poolMode: room.poolMode,
     realPool: room.realPool ?? "stars",
+    pickTimer: room.pickTimer ?? 0,
     managers: room.draft.managers.map((manager) => ({
       id: manager.id,
       name: manager.name,
+      cpu: Boolean(manager.cpu),
       claimed: room.seats.has(manager.id)
     })),
     actions: room.actions,

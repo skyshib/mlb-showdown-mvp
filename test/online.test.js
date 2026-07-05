@@ -306,6 +306,68 @@ test("rooms survive a server restart with seats and turn state intact", async (t
   assert.equal(done.data.complete, true);
 });
 
+test("cpu managers are flagged in snapshots, unclaimable, and survive restarts", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "cpu-room",
+    managers: ["Gil", "Robo"],
+    cpu: ["Robo"]
+  });
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.data.managers.map((manager) => manager.cpu), [false, true]);
+
+  const claim = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, {
+    managerId: "team-2",
+    hostToken: created.data.hostToken
+  });
+  assert.equal(claim.status, 409);
+  assert.match(claim.data.error, /computer/i);
+
+  // The host client drives the computer seat with autopick actions.
+  const gil = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  const first = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
+    token: gil.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(first.status, 200);
+  const cpuTurn = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
+    token: gil.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(cpuTurn.status, 200);
+
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const second = await startServer(t, dataDir);
+  const revived = await api(second, "GET", `/api/rooms/${created.data.roomId}`);
+  assert.deepEqual(revived.data.managers.map((manager) => manager.cpu), [false, true]);
+});
+
+test("pick timer is normalized, returned in snapshots, and survives restarts", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "timed-room",
+    managers: ["Gil", "Hana"],
+    pickTimer: 60
+  });
+  assert.equal(created.data.pickTimer, 60);
+
+  // Out-of-range values clamp instead of erroring.
+  const tiny = await api(base, "POST", "/api/rooms", { seed: "t2", managers: ["A", "B"], pickTimer: 3 });
+  assert.equal(tiny.data.pickTimer, 15);
+  const off = await api(base, "POST", "/api/rooms", { seed: "t3", managers: ["A", "B"] });
+  assert.equal(off.data.pickTimer, 0);
+
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const second = await startServer(t, dataDir);
+  const revived = await api(second, "GET", `/api/rooms/${created.data.roomId}`);
+  assert.equal(revived.data.pickTimer, 60);
+});
+
 test("shared sim actions are logged after the draft completes and survive restarts", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
   const base = await startServer(t, dataDir);
