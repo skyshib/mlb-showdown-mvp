@@ -7,8 +7,11 @@ import {
   diamondHtml,
   outsHtml,
   shortName,
-  cardPanelHtml
+  cardPanelHtml,
+  cardLine
 } from "./helpers.js";
+import { gameStars, gameLogLine } from "./statsScreens.js";
+import { buildBoxScore } from "../../rules/game.js";
 import { trainerById, rewardCoins } from "../region.js";
 import { buildNpcTeam } from "../npcTeams.js";
 import {
@@ -18,11 +21,14 @@ import {
   grantCoins,
   recordTrainerWin,
   recordTrainerLoss,
+  timesBeaten,
   grantBadge,
+  addCardToCollection,
   addLog,
   startSeries,
   attemptNumber,
   recordSeriesGame,
+  recordGameStats,
   clearSeries,
   LOSS_FEE
 } from "../state.js";
@@ -51,6 +57,9 @@ export function startTrainerBattle(app, trainer) {
       bestOf: trainer.battleFormat.bestOf,
       seed: deriveSeed(save, "sim", trainer.id, `a${attempt}`)
     });
+    for (const game of series.games) {
+      recordGameStats(save, game.playerIsAway ? game.boxScore.away : game.boxScore.home);
+    }
     const outcome = applyOutcome(app, trainer, series.playerWonSeries);
     persistSave(save);
     app.go("simSeries", { trainerId: trainer.id, series, revealed: 0, outcome });
@@ -90,17 +99,20 @@ function launchSeriesGame(app, trainer) {
 
 // Coins, badge, pack, and log bookkeeping for any battle outcome. Reward
 // coins are read before the win is recorded so first-win pay is full price.
-function applyOutcome(app, trainer, won) {
+// Exported for tests. The first win over any trainer also earns a card claim:
+// the player takes one card off the beaten roster (repeat wins pay coins only).
+export function applyOutcome(app, trainer, won) {
   const save = app.save;
   if (!won) {
     recordTrainerLoss(save);
     addLog(save, `Lost to ${trainer.name}.`);
     return { won: false, coins: -LOSS_FEE };
   }
+  const firstWin = timesBeaten(save, trainer.id) === 0;
   const coins = rewardCoins(save, trainer);
   grantCoins(save, coins);
   recordTrainerWin(save, trainer.id);
-  const outcome = { won: true, coins, badge: null, pack: null };
+  const outcome = { won: true, coins, badge: null, pack: null, cardClaim: firstWin };
   if (trainer.rewards.badge && !save.player.badges.includes(trainer.rewards.badge)) {
     grantBadge(save, trainer.rewards.badge);
     outcome.badge = trainer.rewards.badge;
@@ -126,18 +138,18 @@ function battleMenuItems(app, phase) {
   if (phase.type === "player-batting") {
     const items = [{ label: "SWING AWAY", run: (a) => afterAction(a, actSwing(a.screen.battle)) }];
     if (phase.canBunt) {
-      items.push({ label: "SAC BUNT", run: (a) => afterAction(a, actBunt(a.screen.battle)) });
-    }
-    if (phase.stealOptions.length) {
       items.push({
-        label: "STEAL",
-        run: (a) => {
-          a.screen.mode = "steal";
-          a.screen.stealIndex = 0;
-        }
+        html: `SAC BUNT <span class="gq-dim">${Math.round(phase.buntChance * 100)}% CLEAN</span>`,
+        run: (a) => afterAction(a, actBunt(a.screen.battle))
       });
     }
-    items.push(rostersItem(), fastForwardItem());
+    for (const option of phase.stealOptions) {
+      items.push({
+        html: `STEAL ${option.toIndex === 2 ? "3B" : "2B"} — ${escapeHtml(shortName(option.runner.name))} <span class="gq-dim">${Math.round(option.safeChance * 100)}% SAFE</span>`,
+        run: (a) => afterAction(a, actSteal(a.screen.battle, option.fromIndex))
+      });
+    }
+    items.push(rostersItem(), gameLogItem(), fastForwardItem());
     return items;
   }
   const items = [{ label: "PITCH TO HIM", run: (a) => afterAction(a, actPitch(a.screen.battle)) }];
@@ -146,11 +158,14 @@ function battleMenuItems(app, phase) {
     run: (a) => afterAction(a, actIntentionalWalk(a.screen.battle))
   });
   items.push({
-    label: `BULLPEN${phase.mound.hasReliefAvailable ? "" : " (EMPTY)"}`,
-    disabled: !phase.mound.hasReliefAvailable,
-    run: (a) => afterAction(a, actChangePitcher(a.screen.battle))
+    label: `BULLPEN${phase.bullpen.length ? "" : " (EMPTY)"}`,
+    disabled: !phase.bullpen.length,
+    run: (a) => {
+      a.screen.mode = "pen";
+      a.screen.penIndex = 0;
+    }
   });
-  items.push(rostersItem(), fastForwardItem());
+  items.push(rostersItem(), gameLogItem(), fastForwardItem());
   return items;
 }
 
@@ -193,6 +208,30 @@ function rostersItem() {
   };
 }
 
+function gameLogItem() {
+  return {
+    label: "GAME LOG",
+    run: (a) => {
+      a.screen.mode = "log";
+      a.screen.logIndex = Math.max(0, a.screen.battle.events.length - 1);
+    }
+  };
+}
+
+// Every play so far with its WPA, newest at the bottom (the cursor starts
+// there — you usually want to reread what just happened).
+function renderGameLog(app, battle, trainer) {
+  const rows = battle.events.map((event) => ({ html: gameLogLine(event, battle.playerSide) }));
+  const index = clampIndex(app.screen.logIndex ?? rows.length - 1, rows.length);
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>GAME LOG &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
+    <div class="gq-body"><div class="gq-frame gq-scroll">${
+      rows.length ? menuHtml(rows, index) : `<p class="gq-dim">NO PLAYS YET. GO MAKE SOME HISTORY.</p>`
+    }</div></div>
+    <div class="gq-textbox"><p class="gq-dim">% IS WPA FOR YOUR SIDE &middot; 10%+ SWINGS BOLD. X to go back.</p></div>
+  </div>`;
+}
+
 function fastForwardItem() {
   return {
     label: "FAST FORWARD",
@@ -213,19 +252,36 @@ function afterAction(app, events, presetLines = null) {
   if (phase.type === "over") resolveGameEnd(app, phase);
 }
 
+// Every finished game routes through the box-score screen first, then on to
+// the series break or the final result.
 function resolveGameEnd(app, phase) {
   const save = app.save;
   const trainer = trainerById(app.screen.trainerId);
+  const battle = app.screen.battle;
+  const boxScore = buildBoxScore(battle.state);
+  recordGameStats(save, boxScore[battle.playerSide]);
   const status = recordSeriesGame(save, phase.playerWon);
   persistSave(save);
+
+  let next;
   if (status === "live") {
-    app.go("seriesBreak", { trainerId: trainer.id, lastWon: phase.playerWon, score: phase.score, menuIndex: 0 });
-    return;
+    next = { name: "seriesBreak", data: { trainerId: trainer.id, lastWon: phase.playerWon, score: phase.score, menuIndex: 0 } };
+  } else {
+    const outcome = applyOutcome(app, trainer, status === "won");
+    clearSeries(save);
+    persistSave(save);
+    next = { name: "battleResult", data: { trainerId: trainer.id, outcome, score: phase.score, page: 0 } };
   }
-  const outcome = applyOutcome(app, trainer, status === "won");
-  clearSeries(save);
-  persistSave(save);
-  app.go("battleResult", { trainerId: trainer.id, outcome, score: phase.score, page: 0 });
+  app.go("gameStats", {
+    trainerId: trainer.id,
+    boxScore,
+    stars: gameStars(boxScore, battle.playerSide),
+    events: battle.events,
+    score: phase.score,
+    playerSide: battle.playerSide,
+    index: 0,
+    next
+  });
 }
 
 // Every card in the game, sectioned: your lineup in batting order, your
@@ -286,6 +342,7 @@ export const battleScreen = {
     const state = battle.state;
     const trainer = trainerById(app.screen.trainerId);
     if (app.screen.mode === "rosters") return renderRosters(app, battle, trainer);
+    if (app.screen.mode === "log") return renderGameLog(app, battle, trainer);
     const phase = battlePhase(battle);
     const series = app.save.activeSeries;
     return `<div class="gq-screen">
@@ -322,15 +379,26 @@ export const battleScreen = {
       app.rerender();
       return;
     }
+    if (app.screen.mode === "log") {
+      const total = app.screen.battle.events.length;
+      if (key === "up" || key === "down") {
+        app.screen.logIndex = clampIndex((app.screen.logIndex ?? total - 1) + (key === "down" ? 1 : -1), total);
+      } else if (key === "b" || key === "a") {
+        app.screen.mode = "menu";
+        app.screen.menuIndex = 0;
+      }
+      app.rerender();
+      return;
+    }
     if (phase.type === "over") return;
-    if (app.screen.mode === "steal") {
-      const options = phase.stealOptions ?? [];
+    if (app.screen.mode === "pen") {
+      const options = phase.bullpen ?? [];
       const items = options.length + 1;
       if (key === "up" || key === "down") {
-        app.screen.stealIndex = clampIndex((app.screen.stealIndex ?? 0) + (key === "down" ? 1 : -1), items);
+        app.screen.penIndex = clampIndex((app.screen.penIndex ?? 0) + (key === "down" ? 1 : -1), items);
       } else if (key === "a") {
-        const index = app.screen.stealIndex ?? 0;
-        if (index < options.length) afterAction(app, actSteal(app.screen.battle, options[index].fromIndex));
+        const index = app.screen.penIndex ?? 0;
+        if (index < options.length) afterAction(app, actChangePitcher(app.screen.battle, options[index].index));
         else app.screen.mode = "menu";
       } else if (key === "b") {
         app.screen.mode = "menu";
@@ -355,28 +423,28 @@ function renderMatchup(phase) {
   }
   if (phase.type === "player-batting") {
     return `<div class="gq-matchup">
-      <div>AT BAT<br><b>${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span></div>
-      <div class="gq-right">ON MOUND<br><b>${escapeHtml(shortName(phase.opposingPitcher.name))}</b><br><span class="gq-dim">CTRL ${phase.opposingPitcher.control}</span></div>
+      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span></div>
+      <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(shortName(phase.opposingPitcher.name))}</b><br><span class="gq-dim">CTRL ${phase.opposingPitcher.control}</span></div>
     </div>`;
   }
   const fatigue = phase.mound.fatiguePenalty;
   return `<div class="gq-matchup">
-    <div>THEY SEND UP<br><b>${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span></div>
-    <div class="gq-right">YOUR ARM<br><b>${escapeHtml(shortName(phase.mound.pitcher.name))}</b><br>
+    <div>THEY SEND UP<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span></div>
+    <div class="gq-right">YOUR ARM<br><b data-card-id="${escapeHtml(phase.mound.pitcher.id)}">${escapeHtml(shortName(phase.mound.pitcher.name))}</b><br>
       <span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${phase.mound.pitcher.control}${fatigue > 0 ? ` &minus;${fatigue} TIRED` : ""} &middot; ${phase.mound.outsRecorded} OUTS IN</span></div>
   </div>`;
 }
 
 function renderBattleMenu(app, phase) {
   if (phase.type === "over") return "";
-  if (app.screen.mode === "steal") {
-    const options = (phase.stealOptions ?? []).map((option) => ({
-      html: `${escapeHtml(shortName(option.runner.name))} &#8594; ${option.toIndex === 2 ? "3B" : "2B"} <span class="gq-dim">${Math.round(option.safeChance * 100)}% SAFE</span>`
+  if (app.screen.mode === "pen") {
+    const options = (phase.bullpen ?? []).map(({ pitcher }) => ({
+      html: `${escapeHtml(pitcher.role)} ${escapeHtml(shortName(pitcher.name))} <span class="gq-dim">CTRL${pitcher.control} IP${pitcher.ip}</span>`
     }));
-    return menuHtml([...options, { label: "NEVER MIND" }], app.screen.stealIndex ?? 0);
+    return menuHtml([...options, { label: "NEVER MIND" }], app.screen.penIndex ?? 0);
   }
   return menuHtml(
-    battleMenuItems(app, phase).map((item) => ({ label: item.label, disabled: item.disabled })),
+    battleMenuItems(app, phase).map((item) => ({ label: item.label, html: item.html, disabled: item.disabled })),
     app.screen.menuIndex ?? 0
   );
 }
@@ -443,8 +511,9 @@ export const battleResultScreen = {
         <div class="gq-frame gq-title-frame">
           <b style="font-size:6cqw">${outcome.won ? "&#9733; W &#9733;" : "L"}</b>
           <p class="gq-mt">${outcome.won ? `+&#9679; ${outcome.coins} COINS` : `LOST &#9679; ${LOSS_FEE} SCRAMBLING HOME`}</p>
-          ${outcome.badge ? `<p><b>THE ${escapeHtml(outcome.badge.toUpperCase())} BADGE IS YOURS!</b><br><span class="gq-dim">ROSTER POINT CAP RAISED.</span></p>` : ""}
+          ${outcome.badge ? `<p><b>THE ${escapeHtml(outcome.badge.toUpperCase())} BADGE IS YOURS!</b><br><span class="gq-dim">NEW CHALLENGERS AWAIT.</span></p>` : ""}
           ${outcome.pack ? `<p>BONUS: A BOOSTER PACK!</p>` : ""}
+          ${outcome.cardClaim ? `<p>WINNER'S RULE: TAKE A CARD FROM THEIR ROSTER!</p>` : ""}
         </div>
       </div>
       <div class="gq-textbox">
@@ -460,6 +529,8 @@ export const battleResultScreen = {
     const dialog = outcome.won ? trainer.dialog.win : trainer.dialog.lose;
     if (app.screen.page + 1 < dialog.length) {
       app.screen.page += 1;
+    } else if (outcome.cardClaim) {
+      app.go("claimCard", { trainerId: trainer.id, index: 0 });
     } else if (app.save.pendingPacks.length) {
       app.go("packOpen", { revealed: 0, returnTo: "map" });
     } else {
@@ -468,6 +539,51 @@ export const battleResultScreen = {
     app.rerender();
   }
 };
+
+// ---- Winner's card claim -----------------------------------------------------
+
+// First win over a trainer: take any one card off the beaten roster. The NPC
+// team rebuilds deterministically, so the roster here is the one just faced.
+export const claimCardScreen = {
+  render(app) {
+    const trainer = trainerById(app.screen.trainerId);
+    const roster = buildNpcTeam(trainer).roster;
+    const index = clampIndex(app.screen.index ?? 0, roster.length);
+    const selected = roster[index];
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>WINNER'S PICK</span><span>${escapeHtml(trainer.name)}</span></div>
+      <div class="gq-body"><div class="gq-columns">
+        <div class="gq-frame gq-scroll">${menuHtml(roster.map((card) => ({ html: cardLine(card) })), index)}</div>
+        <div>${selected ? cardPanelHtml(selected) : ""}</div>
+      </div></div>
+      <div class="gq-textbox"><p>Take ONE card from their roster. Z claims it. X walks away empty-handed.</p></div>
+    </div>`;
+  },
+  hoverCard(app, index) {
+    return buildNpcTeam(trainerById(app.screen.trainerId)).roster[index] ?? null;
+  },
+  key(app, key) {
+    const trainer = trainerById(app.screen.trainerId);
+    const roster = buildNpcTeam(trainer).roster;
+    if (key === "up" || key === "down") {
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), roster.length);
+    } else if (key === "a") {
+      const card = roster[clampIndex(app.screen.index ?? 0, roster.length)];
+      addCardToCollection(app.save, card.id);
+      addLog(app.save, `Claimed ${card.name} from ${trainer.name}.`);
+      persistSave(app.save);
+      leaveClaim(app);
+    } else if (key === "b") {
+      leaveClaim(app);
+    }
+    app.rerender();
+  }
+};
+
+function leaveClaim(app) {
+  if (app.save.pendingPacks.length) app.go("packOpen", { revealed: 0, returnTo: "map" });
+  else app.go("map");
+}
 
 // ---- Simulated series ------------------------------------------------------
 
@@ -480,7 +596,9 @@ export const simSeriesScreen = {
       .slice(0, revealed)
       .map(
         (game) =>
-          `<p>G${game.gameNumber} ${game.playerIsAway ? "@" : "VS"} &middot; ${game.playerWon ? "<b>W</b>" : "L"} ${game.playerRuns}-${game.npcRuns}${game.innings > 9 ? ` (${game.innings})` : ""}</p>`
+          `<p>G${game.gameNumber} ${game.playerIsAway ? "@" : "VS"} &middot; ${game.playerWon ? "<b>W</b>" : "L"} ${game.playerRuns}-${game.npcRuns}${game.innings > 9 ? ` (${game.innings})` : ""}${
+            game.topSwing ? ` <span class="gq-dim">&#9733; ${escapeHtml(shortName(game.topSwing.name))}</span>` : ""
+          }</p>`
       )
       .join("");
     return `<div class="gq-screen">
@@ -489,7 +607,8 @@ export const simSeriesScreen = {
         <div class="gq-frame">${rows || `<p class="gq-dim">THE CAGE LIGHTS FLICKER ON...</p>`}</div>
         ${done
           ? `<div class="gq-frame gq-center"><b style="font-size:5cqw">${series.playerWins} - ${series.npcWins}</b><br>
-              ${outcome.won ? `SERIES WON! +&#9679; ${outcome.coins}` : `SERIES LOST. -&#9679; ${LOSS_FEE}`}</div>`
+              ${outcome.won ? `SERIES WON! +&#9679; ${outcome.coins}` : `SERIES LOST. -&#9679; ${LOSS_FEE}`}
+              ${outcome.cardClaim ? `<br>WINNER'S RULE: TAKE A CARD FROM THEIR ROSTER!` : ""}</div>`
           : ""}
       </div>
       <div class="gq-textbox"><p>${done ? "Z to head back." : "Z to reveal the next game."}</p></div>
@@ -498,6 +617,7 @@ export const simSeriesScreen = {
   key(app, key) {
     if (key !== "a" && key !== "b") return;
     if (app.screen.revealed < app.screen.series.games.length) app.screen.revealed += 1;
+    else if (app.screen.outcome.cardClaim) app.go("claimCard", { trainerId: app.screen.trainerId, index: 0 });
     else app.go("map");
     app.rerender();
   }

@@ -338,22 +338,28 @@ export function renderWinProbabilityChart(game) {
     points.push(`${xFor(index + 1).toFixed(1)},${yFor(events[index].wpAfter).toFixed(1)}`);
   }
 
-  const describe = (event) => {
+  // Native SVG <title> tooltips are unreliable (Safari never shows them, and
+  // they need a long stationary hover), so each zone carries the tooltip text
+  // in data attributes for the custom hover tooltip wired up in app.js.
+  const describeValue = (event) => {
+    const swing = (event.wpa * 100).toFixed(1);
+    return `home ${Math.round(event.wpBefore * 100)}% → ${Math.round(event.wpAfter * 100)}% (${event.wpa >= 0 ? "+" : ""}${swing}% batting side)`;
+  };
+  const describePlay = (event) => {
     const label = event.type === "steal"
       ? `${event.playDetails?.stealAttempt?.runner ?? event.batter} ${event.result}`
       : `${event.batter} ${event.result} vs ${event.pitcher}`;
-    const swing = (event.wpa * 100).toFixed(1);
-    return `${event.inning}${event.half === "top" ? "T" : "B"} · ${label} · home ${Math.round(event.wpBefore * 100)}% → ${Math.round(event.wpAfter * 100)}% (${event.wpa >= 0 ? "+" : ""}${swing}% batting side)`;
+    return `${event.inning}${event.half === "top" ? "T" : "B"} · ${label}`;
   };
 
   const hoverZones = events.map((event, index) =>
-    `<rect x="${xFor(index).toFixed(1)}" y="${margin.top}" width="${(plotWidth / events.length).toFixed(2)}" height="${plotHeight}" fill="transparent"><title>${escapeHtml(describe(event))}</title></rect>`);
+    `<rect x="${xFor(index).toFixed(1)}" y="${margin.top}" width="${(plotWidth / events.length).toFixed(2)}" height="${plotHeight}" fill="transparent" class="wp-hover-zone" data-wp-value="${escapeHtml(describeValue(event))}" data-wp-play="${escapeHtml(describePlay(event))}" />`);
 
   const swingMarkers = events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => Math.abs(event.wpa ?? 0) >= 0.1)
     .map(({ event, index }) =>
-      `<circle cx="${xFor(index + 1).toFixed(1)}" cy="${yFor(event.wpAfter).toFixed(1)}" r="4.5" class="wp-swing-dot"><title>${escapeHtml(describe(event))}</title></circle>`);
+      `<circle cx="${xFor(index + 1).toFixed(1)}" cy="${yFor(event.wpAfter).toFixed(1)}" r="4.5" class="wp-swing-dot" />`);
 
   return `<svg viewBox="0 0 ${width} ${height}" class="race-chart wp-chart" role="img" aria-label="Home team win probability after each play; the table below lists every play">
     ${gridLines.join("")}

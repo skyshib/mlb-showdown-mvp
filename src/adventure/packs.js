@@ -1,14 +1,24 @@
 import { generatePlayerPool } from "../data/playerGeneration.js";
 import { createRng } from "../rules/rng.js";
 
-// The adventure keeps one persistent card universe (like the fictional
-// league): every save meets the same cards, so collection knowledge carries
-// across playthroughs. Bump the seed version for a new card series.
-const ADVENTURE_UNIVERSE_SEED = "adventure-universe-v1";
-const ADVENTURE_UNIVERSE_TEAMS = 16;
+// Every save generates its own card universe from the save seed, so a new
+// playthrough always meets a fresh league. Screens set the seed once (on boot
+// or new game) and the pool caches until a different seed swaps in.
+const DEFAULT_UNIVERSE_SEED = "adventure-universe-v2";
+// generatePlayerPool yields 24 cards per "team": 125 teams ≈ a 3000-card set.
+const UNIVERSE_TEAMS = 125;
 
-// Relievers score far below hitters on raw points, so rarity is a rank within
-// each group (hitters / starters / relievers), not a global points threshold.
+// ---- Pricing ----------------------------------------------------------------
+//
+// A card's TRUE value comes from its strength rank within its group (hitters /
+// starters / relievers), mapped onto a convex price curve: stars cost far more
+// than role players. The PRINTED point cost — what rosters and NPC budgets
+// actually pay — is the true value plus heavy noise, so some cards are
+// bargains and others are rip-offs. Rarity follows true strength, not price.
+const PRICE_CURVE = { base: 90, span: 810, gamma: 6 };
+const PRICE_NOISE = 0.35;
+
+// Rarity is a rank within each group, so relievers get legends too.
 const RARITY_SHARES = [
   ["legend", 0.07],
   ["rare", 0.18],
@@ -23,25 +33,48 @@ export const RARITIES = {
   legend: { key: "legend", label: "Legend", order: 3, singlePrice: 2000, sellValue: 600 }
 };
 
+// Boosters are a gamble, not a guaranteed upgrade: four wild slots that can
+// land anywhere (mostly commons) plus one slot that always hits uncommon or
+// better. Odds are cumulative thresholds.
 export const PACKS = {
   booster: {
     id: "booster",
     name: "Booster Pack",
     price: 500,
-    slots: ["common", "common", "common", "uncommon", "premium"]
+    slots: ["wild", "wild", "wild", "wild", "hit"]
   }
 };
 
-// The premium slot: mostly rare, occasional legend.
-const PREMIUM_LEGEND_CHANCE = 0.12;
+const WILD_ODDS = [
+  ["common", 0.58],
+  ["uncommon", 0.85],
+  ["rare", 0.97],
+  ["legend", 1]
+];
+const HIT_ODDS = [
+  ["uncommon", 0.62],
+  ["rare", 0.92],
+  ["legend", 1]
+];
 
+let universeSeed = DEFAULT_UNIVERSE_SEED;
 let poolCache = null;
 let poolIndexCache = null;
 
+// Point the adventure at a save's universe. Same seed is a no-op; a new seed
+// drops the cache so the next adventurePool() call regenerates.
+export function setUniverseSeed(seed) {
+  const next = seed || DEFAULT_UNIVERSE_SEED;
+  if (next === universeSeed) return;
+  universeSeed = next;
+  poolCache = null;
+  poolIndexCache = null;
+}
+
 export function adventurePool() {
   if (!poolCache) {
-    const raw = generatePlayerPool(ADVENTURE_UNIVERSE_SEED, ADVENTURE_UNIVERSE_TEAMS, 13);
-    poolCache = assignRarities(raw);
+    const raw = generatePlayerPool(`universe:${universeSeed}`, UNIVERSE_TEAMS, 13);
+    poolCache = calibrateUniverse(raw, universeSeed);
     poolIndexCache = new Map(poolCache.map((card) => [card.id, card]));
   }
   return poolCache;
@@ -52,26 +85,38 @@ export function cardById(id) {
   return poolIndexCache.get(id) ?? null;
 }
 
-function assignRarities(pool) {
+// Rank each group by the generator's raw quality score, then price the rank:
+// truePoints from the curve, printed points with seeded noise on top.
+function calibrateUniverse(pool, seed) {
+  const rng = createRng(`universe-prices:${seed}`);
   const groups = [
     pool.filter((card) => card.kind === "hitter"),
     pool.filter((card) => card.role === "SP"),
     pool.filter((card) => card.role === "RP")
   ];
-  const rarityById = new Map();
+  const priced = new Map();
   for (const group of groups) {
     const ranked = [...group].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
     ranked.forEach((card, index) => {
-      const fraction = (index + 1) / ranked.length;
-      const tier = RARITY_SHARES.find(([, share]) => fraction <= share)[0];
-      rarityById.set(card.id, tier);
+      const fromTop = (index + 1) / ranked.length;
+      const rarity = RARITY_SHARES.find(([, share]) => fromTop <= share)[0];
+      const strength = (ranked.length - index) / ranked.length;
+      const truePoints = Math.round(PRICE_CURVE.base + PRICE_CURVE.span * strength ** PRICE_CURVE.gamma);
+      const noise = 1 + (rng.next() * 2 - 1) * PRICE_NOISE;
+      const points = Math.max(10, Math.round(truePoints * noise));
+      priced.set(card.id, { rarity, truePoints, points });
     });
   }
-  return pool.map((card) => ({ ...card, rarity: rarityById.get(card.id) }));
+  return pool.map((card) => ({ ...card, ...priced.get(card.id) }));
 }
 
 function cardsOfRarity(rarity) {
   return adventurePool().filter((card) => card.rarity === rarity);
+}
+
+function rollRarity(rng, odds) {
+  const roll = rng.next();
+  return odds.find(([, cumulative]) => roll < cumulative)[0];
 }
 
 export function openPack(packId, seed) {
@@ -79,8 +124,8 @@ export function openPack(packId, seed) {
   if (!pack) throw new Error(`Unknown pack ${packId}`);
   const rng = createRng(seed);
   return pack.slots.map((slot) => {
-    const rarity = slot === "premium"
-      ? (rng.next() < PREMIUM_LEGEND_CHANCE ? "legend" : "rare")
+    const rarity = slot === "wild" ? rollRarity(rng, WILD_ODDS)
+      : slot === "hit" ? rollRarity(rng, HIT_ODDS)
       : slot;
     return rng.pick(cardsOfRarity(rarity));
   });
@@ -106,84 +151,39 @@ export function shopStock(saveSeed, townId, cycle, count = 4) {
   return stock;
 }
 
-// ---- Starter flow ----------------------------------------------------------
+// ---- Starter pack ------------------------------------------------------------
 
-const STARTER_SLOTS = [
-  ["C", 1],
-  ["1B", 1],
-  ["2B", 1],
-  ["3B", 1],
-  ["SS", 1],
-  ["LF/RF", 2],
-  ["CF", 1]
+// One slot per required lineup spot plus the DH and the four-man staff, so the
+// sealed pack is always a legal 13-card roster.
+const STARTER_PACK_SLOTS = [
+  "C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER",
+  "SP", "SP", "RP", "RP"
 ];
+const STARTER_RARE_COUNT = 2;
 
-// The farm team: the cheapest legal roster the universe can field. One extra
-// cheap hitter covers DH. Deterministic, no seed involved.
-export function starterCommons() {
+function slotMatches(slot, card) {
+  if (slot === "HITTER") return card.kind === "hitter";
+  if (slot === "SP" || slot === "RP") return card.role === slot;
+  return card.kind === "hitter" && card.position === slot;
+}
+
+// The sealed starter deck: like the real product, two rares and the rest
+// commons, randomized per save. Which two slots get the rares is part of the
+// luck of the draw.
+export function starterPack(seed) {
+  const rng = createRng(`starter-pack:${seed}`);
+  const rareSlots = new Set();
+  while (rareSlots.size < STARTER_RARE_COUNT) {
+    rareSlots.add(rng.int(0, STARTER_PACK_SLOTS.length - 1));
+  }
   const pool = adventurePool();
   const used = new Set();
-  const cheapestBy = (filter) =>
-    pool
-      .filter((card) => !used.has(card.id) && filter(card))
-      .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name))[0];
-  const roster = [];
-  const take = (card) => {
-    if (!card) throw new Error("Adventure pool cannot field a starter roster");
+  return STARTER_PACK_SLOTS.map((slot, index) => {
+    const rarity = rareSlots.has(index) ? "rare" : "common";
+    const fits = pool.filter((card) => !used.has(card.id) && card.rarity === rarity && slotMatches(slot, card));
+    if (!fits.length) throw new Error(`Starter pack cannot fill ${slot} with a ${rarity}`);
+    const card = rng.pick(fits);
     used.add(card.id);
-    roster.push(card);
-  };
-
-  for (const [position, copies] of STARTER_SLOTS) {
-    for (let i = 0; i < copies; i += 1) {
-      take(cheapestBy((card) => card.kind === "hitter" && card.position === position));
-    }
-  }
-  take(cheapestBy((card) => card.kind === "hitter"));
-  take(cheapestBy((card) => card.role === "SP"));
-  take(cheapestBy((card) => card.role === "SP"));
-  take(cheapestBy((card) => card.role === "RP"));
-  take(cheapestBy((card) => card.role === "RP"));
-  return roster;
-}
-
-// The 1-of-3 franchise star moment. Stars come from the rare tier (legends
-// stay in packs): the best rare ace, slugger, and speedster in the universe.
-export function starterChoices() {
-  const rares = adventurePool().filter((card) => card.rarity === "rare");
-  const best = (candidates, score) =>
-    [...candidates].sort((a, b) => score(b) - score(a) || b.points - a.points || a.name.localeCompare(b.name))[0];
-  return [
-    {
-      key: "ace",
-      title: "The Ace",
-      blurb: "A starter who owns the mound.",
-      card: best(rares.filter((card) => card.role === "SP"), (card) => card.points)
-    },
-    {
-      key: "slugger",
-      title: "The Slugger",
-      blurb: "A center fielder with light-tower power.",
-      card: best(rares.filter((card) => card.position === "CF"), (card) => card.points)
-    },
-    {
-      key: "speedster",
-      title: "The Speedster",
-      blurb: "A shortstop who turns walks into doubles.",
-      card: best(rares.filter((card) => card.position === "SS"), (card) => card.speed)
-    }
-  ];
-}
-
-// Fold the chosen star into the farm team: it replaces the weakest card of
-// its own kind (same position for hitters, same role for pitchers) so the
-// roster stays exactly legal.
-export function starterRosterWith(starCard) {
-  const commons = starterCommons();
-  const matches = (card) =>
-    starCard.kind === "pitcher" ? card.role === starCard.role : card.position === starCard.position;
-  const weakest = commons
-    .filter(matches)
-    .sort((a, b) => a.points - b.points)[0];
-  return commons.map((card) => (card.id === weakest.id ? starCard : card));
+    return card;
+  });
 }

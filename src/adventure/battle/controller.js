@@ -9,6 +9,7 @@ import {
   isGameOver,
   simulateGame,
   canBunt,
+  buntSuccessChance,
   attemptBunt,
   intentionalWalk,
   pendingAdvanceDecision,
@@ -69,8 +70,10 @@ export function battlePhase(battle) {
     return {
       type: "player-batting",
       batter: team.lineup[state.lineupIndex[battle.playerSide] % team.lineup.length],
+      battingSpot: (state.lineupIndex[battle.playerSide] % team.lineup.length) + 1,
       stealOptions: stealCandidates(state),
       canBunt: canBunt(state),
+      buntChance: buntSuccessChance(state),
       opposingPitcher: pitcherStatus(state, battle.npcSide).pitcher
     };
   }
@@ -78,8 +81,20 @@ export function battlePhase(battle) {
   return {
     type: "player-pitching",
     batter: npcTeam.lineup[state.lineupIndex[battle.npcSide] % npcTeam.lineup.length],
-    mound: pitcherStatus(state, battle.playerSide)
+    battingSpot: (state.lineupIndex[battle.npcSide] % npcTeam.lineup.length) + 1,
+    mound: pitcherStatus(state, battle.playerSide),
+    bullpen: availableRelievers(battle)
   };
+}
+
+// The arms the player can still bring in, with their staff indexes for
+// changePitcher. Everyone behind the current pitcher is available.
+export function availableRelievers(battle) {
+  const state = battle.state;
+  const runtime = state.pitching[battle.playerSide];
+  return state[battle.playerSide].pitchers
+    .map((pitcher, index) => ({ pitcher, index }))
+    .slice(runtime.pitcherIndex + 1);
 }
 
 function pushEvent(battle, event) {
@@ -138,9 +153,10 @@ export function actPitch(battle) {
   return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng))];
 }
 
-// Player action while pitching: go to the pen.
-export function actChangePitcher(battle) {
-  const pitcher = changePitcher(battle.state, battle.playerSide);
+// Player action while pitching: go to the pen. Pass a staff index to bring
+// in a specific arm; omit it for the next man up.
+export function actChangePitcher(battle, targetIndex = null) {
+  const pitcher = changePitcher(battle.state, battle.playerSide, targetIndex);
   if (!pitcher) return [];
   return [pushEvent(battle, pitchingChangeEvent(battle, battle.playerSide, pitcher))];
 }
@@ -234,7 +250,8 @@ export function runSimSeries({ playerManager, npcManager, bestOf, seed }) {
       npcRuns,
       innings: result.innings,
       playerWon,
-      topSwing: result.topSwing
+      topSwing: result.topSwing,
+      boxScore: result.boxScore
     });
   }
 

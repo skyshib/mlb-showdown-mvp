@@ -1,11 +1,12 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml } from "./helpers.js";
-import { starterChoices, starterRosterWith } from "../packs.js";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js";
+import { starterPack, setUniverseSeed } from "../packs.js";
 import {
   createSave,
   persistSave,
   clearSave,
   addCardToCollection,
   setRoster,
+  rosterCards,
   grantCoins,
   addLog
 } from "../state.js";
@@ -13,9 +14,9 @@ import {
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],
   ["Out here, managers settle everything the right way:", "nine innings of SHOWDOWN cards."],
-  ["Every kid gets a farm team to start.", "Cheap cards. Big hearts. Terrible charts."],
-  ["But you also get to choose ONE franchise star.", "Choose well. Your rival gets the one that beats it."],
-  ["Win games, earn coins, rip open booster packs,", "and take the IRONWOOD GYM's badge.", "Now — what's your name, rookie?"]
+  ["Every rookie gets a sealed STARTER PACK.", "Thirteen cards. Two rares. The rest... character."],
+  ["Mind the sticker prices — the printers had a rough year.", "Some cards cost twice what they're worth.", "Some are steals. A sharp eye builds a cheap pennant."],
+  ["Win games, claim cards off the managers you beat,", "and climb the routes to the summit.", "Now — what's your name, rookie?"]
 ];
 
 const STARTING_COINS = 250;
@@ -26,7 +27,7 @@ export const titleScreen = {
     return `<div class="gq-screen">
       <div class="gq-body gq-center">
         <h1 class="gq-logo">SHOWDOWN<br>QUEST</h1>
-        <p class="gq-sub">CASCADE LEAGUE &middot; SERIES 1</p>
+        <p class="gq-sub">CASCADE LEAGUE &middot; SERIES 2</p>
         <div class="gq-mt" style="max-width:60%;margin:4cqw auto 0;text-align:left">
           ${menuHtml(items.map((item) => ({ label: item.label })), app.screen.menuIndex ?? 0)}
         </div>
@@ -114,7 +115,7 @@ export const nameEntryScreen = {
   key(app, key) {
     if (key === "a") {
       const value = document.getElementById("gq-name")?.value.trim().toUpperCase() || "ROOKIE";
-      app.go("starterPick", { playerName: value, index: 0, confirming: false });
+      finishNewGame(app, value);
     } else if (key === "b") {
       app.go("intro", { page: INTRO_PAGES.length - 1 });
     }
@@ -122,59 +123,42 @@ export const nameEntryScreen = {
   }
 };
 
-export const starterPickScreen = {
-  render(app) {
-    const choices = starterChoices();
-    const choice = choices[app.screen.index];
-    return `<div class="gq-screen">
-      <div class="gq-topbar"><span>CHOOSE YOUR FRANCHISE STAR</span><span>${app.screen.index + 1}/3</span></div>
-      <div class="gq-body">
-        <p class="gq-center">&#9664; <b>${escapeHtml(choice.title.toUpperCase())}</b> &#9654;</p>
-        <p class="gq-center gq-dim">${escapeHtml(choice.blurb)}</p>
-        <div class="gq-mt">${cardPanelHtml(choice.card)}</div>
-      </div>
-      <div class="gq-textbox">
-        ${app.screen.confirming
-          ? `<p>Take ${escapeHtml(choice.card.name.toUpperCase())}?</p>${menuHtml(
-              [{ label: "YES — SIGN THEM" }, { label: "KEEP LOOKING" }],
-              app.screen.confirmIndex ?? 0
-            )}`
-          : `<p>&#9664;/&#9654; browse &middot; Z choose</p>`}
-      </div>
-    </div>`;
-  },
-  key(app, key) {
-    const choices = starterChoices();
-    if (app.screen.confirming) {
-      if (key === "up" || key === "down") {
-        app.screen.confirmIndex = clampIndex((app.screen.confirmIndex ?? 0) + 1, 2);
-      } else if (key === "a") {
-        if ((app.screen.confirmIndex ?? 0) === 0) return finishNewGame(app, choices[app.screen.index]);
-        app.screen.confirming = false;
-      } else if (key === "b") {
-        app.screen.confirming = false;
-      }
-    } else if (key === "left" || key === "right") {
-      app.screen.index = clampIndex(app.screen.index + (key === "right" ? 1 : -1), choices.length);
-    } else if (key === "a") {
-      app.screen.confirming = true;
-      app.screen.confirmIndex = 0;
-    } else if (key === "b") {
-      app.go("nameEntry");
-    }
-    app.rerender();
-  }
-};
-
-function finishNewGame(app, choice) {
+// A new save is a whole new universe: fresh seed, fresh 3000-card league,
+// fresh sealed starter pack. Nothing carries over but the player's wits.
+function finishNewGame(app, playerName) {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
-  const save = createSave({ name: app.screen.playerName, saveSeed });
-  const roster = starterRosterWith(choice.card);
+  const save = createSave({ name: playerName, saveSeed });
+  setUniverseSeed(saveSeed);
+  const roster = starterPack(saveSeed);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));
   grantCoins(save, STARTING_COINS);
-  addLog(save, `Signed ${choice.card.name} as the franchise star.`);
+  addLog(save, "Opened the starter pack.");
   app.save = persistSave(save);
-  app.go("map");
+  app.go("starterReveal", { revealed: 0 });
   app.rerender();
 }
+
+// Rip the starter pack open card by card, packOpen-style, then hit the map.
+export const starterRevealScreen = {
+  render(app) {
+    const cards = rosterCards(app.save);
+    const revealed = app.screen.revealed ?? 0;
+    const current = revealed > 0 ? cards[revealed - 1] : null;
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>STARTER PACK</span><span>${revealed}/${cards.length}</span></div>
+      <div class="gq-pack-stage">
+        <p class="gq-pack-count">${revealed === 0 ? "&#9993; YOUR SEALED STARTER PACK. RIP IT OPEN!" : rarityTag(current)}</p>
+        ${current ? `<div class="gq-pack-reveal">${cardPanelHtml(current)}</div>` : ""}
+      </div>
+      <div class="gq-textbox"><p class="gq-blink">${(app.screen.revealed ?? 0) < cards.length ? "Z — NEXT CARD" : "Z — PLAY BALL"}</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key !== "a" && key !== "b") return;
+    const cards = rosterCards(app.save);
+    if ((app.screen.revealed ?? 0) < cards.length) app.screen.revealed = (app.screen.revealed ?? 0) + 1;
+    else app.go("map");
+    app.rerender();
+  }
+};

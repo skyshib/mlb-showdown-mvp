@@ -33,7 +33,8 @@ option for each. Any of them can be swapped without invalidating the rest.
 
 The emotional beats to hit, in priority order:
 
-1. **The starter moment** — opening your first pack and choosing 1 of 3 star cards.
+1. **The starter moment** — ripping open a sealed starter pack: two rares, eleven
+   commons, a whole roster of strangers that's suddenly *your team*.
 2. **Pack-opening dopamine** — earned, not purchased with real money; rarity reveal animation.
 3. **Roster identity** — your team feels like *yours*; you know your cards' charts.
 4. **Gym-badge progression** — each stadium boss has a personality and a signature
@@ -63,7 +64,7 @@ overworld, animation-heavy battle scenes.
           ▼
   TEAM SCREEN   (roster + lineup management, existing legality rules)
           ▼
-  back to map — badges unlock new nodes and raise the roster point cap
+  back to map — badges unlock new nodes; first wins claim a card off the loser
 ```
 
 Session shape: one interactive game ≈ 8–15 minutes (with fast-forward for
@@ -89,29 +90,29 @@ Each node contains:
 - **Shop** (in towns): packs + rotating singles (see §6).
 - **Rival encounters** at scripted nodes (after badges 1, 3, 5, and pre-champion).
 
-### 3.2 Badges = point-cap raises
+### 3.2 A flat cap and a rising boss ladder *(shipped)*
 
-The player's active roster has a **team point cap** (cards already carry `points`).
-This is the level-cap analog and the difficulty spine:
+The player's roster budget is a **flat 5,000 printed points** for the whole
+campaign — badges are trophies and unlock gates, not cap raises. The difficulty
+spine is the **boss budget ladder** instead: trainer budgets climb from 4,000 to the
+10,000-point champion, so late bosses out-spend the player two-to-one.
 
-| Badge | Gym archetype (leader teaches…) | Player cap after win |
-|-------|--------------------------------|---------------------|
-| start | — | 2,600 pts |
-| 1 | Contact hitting (death by singles) | 3,000 |
-| 2 | Speed / steals (tests your catcher) | 3,400 |
-| 3 | Power sluggers (HR chart bombs) | 3,800 |
-| 4 | Ace pitching (low-run games, bunt for edges) | 4,200 |
-| 5 | Bullpen chess (fatigue exploitation) | 4,600 |
-| 6 | Defense / rally killing (GIDP machine) | 5,000 |
-| 7 | Balanced juggernaut | 5,400 |
-| 8 | Champion's gauntlet gatekeeper | 6,000 |
-| — | **Pennant Series** (Elite-Four analog): best-of-3 vs 3 named managers, then the Champion (your rival) | — |
+| Trainer | Format | Budget |
+|---------|--------|--------|
+| Sandlot Kid Jojo (Route 1) | game | 4,000 |
+| Bleacher Prophet Mabel (Route 1) | game | 4,400 |
+| Batting Cage Crew (repeatable sim) | sim Bo5 | 4,300 |
+| Bench Boss Garrick (Ironwood Gym) | Bo3 | 5,200 |
+| Ump-in-Exile Hollis (Route 2) | game | 6,000 |
+| Salvage Queen Petra (Route 2) | game | 7,000 |
+| Harbormaster Quince (Galehook Gym) | Bo3 | 8,000 |
+| Night-Train Sawyer (Route 3) | game | 9,000 |
+| Commissioner Vale (Summit Gym) | Bo3 | 10,000 |
 
-NPC team strengths are authored as point budgets slightly above the player's current
-cap, so the player is always punching up a little.
-
-Exact cap numbers are placeholders to be tuned with `scripts/balance-sim.js`-style
-simulation once NPC teams exist.
+Beating the checkbook is possible because **printed prices are noisy** (§4.2): a
+5,000-point roster of scouted bargains can carry far more true value than it costs.
+Two other ratchets help the climb: the first win over any trainer **claims one card
+of the player's choice off the beaten roster**, and gym wins still pay packs.
 
 ### 3.3 Trainer definitions
 
@@ -143,29 +144,34 @@ a boss needs a signature card.
 
 ## 4. Collection
 
-### 4.1 Starter pack
+### 4.1 Starter pack *(shipped)*
 
 New save flow:
 
 1. Professor-style intro NPC ("Professor Oakmont, the region's scorekeeper").
-2. Player receives a **starter roster**: 12 common cards forming a *legal but weak*
-   team (baseball can't start with one Charmander — you need nine fielders and a
-   staff, so the starter pack is a full farm-team roster).
-3. **The starter choice**: pick 1 of 3 face-of-franchise star cards —
-   an **ace SP** (Charmander), a **slugging CF** (Squirtle), or a **speedster SS**
-   (Bulbasaur). The rival picks the type-advantaged counterpart.
-4. First rival battle immediately follows, tutorializing the battle UI.
+2. Player rips open a **sealed starter pack** — like the real MLB Showdown starter
+   product: a full legal 13-card roster (nine bats covering every position plus a
+   DH slot, two starters, two relievers) containing **exactly 2 rares and 11
+   commons**, randomized per save (which slots get the rares is part of the luck).
+   Cards reveal one at a time, then it's straight to the map.
 
-### 4.2 Rarity and packs
+### 4.2 The card universe, pricing, and packs *(shipped)*
 
-Reuse the existing rarity bands from card generation/visuals (rarity borders already
-exist). Pack contents:
+Each save generates its **own ~3,000-card universe** from the save seed
+(`setUniverseSeed` in `packs.js`) — a new game is always a fresh league, so runs
+don't get repetitive. Within a universe:
 
-- **Booster pack** (the workhorse): 5 cards — 3 common, 1 uncommon, 1 rare-or-better
-  slot (rare 80% / epic 17% / legend 3%). Numbers to be tuned.
-- **Premium pack** (late-game shops): 5 cards, floor uncommon, guaranteed epic slot.
-- **Themed packs** (per-town flavor): position- or archetype-weighted (e.g. the
-  pitching town sells arm-heavy packs).
+- **True value** comes from a card's strength rank within its group (hitters /
+  SP / RP), mapped onto a convex curve from ~90 up to 900 points. **Rarity follows
+  true strength** (top 7% legend, next 11% rare, next 12% uncommon, rest common).
+- **Printed points** — what roster caps and NPC budgets actually pay — are true
+  value ±35% seeded noise. Some cards are steals, some are rip-offs; scouting the
+  actual chart beats reading the sticker. Calibration: an even-rarity 13-card
+  roster costs ≈ the 5,000-point cap.
+- **Booster pack** (5 cards, 500 coins): four *wild* slots that can land anywhere
+  (common 58% / uncommon 27% / rare 12% / legend 3%) plus one *hit* slot that's
+  always uncommon-or-better (uncommon 62% / rare 30% / legend 8%). Duds and
+  jackpots both happen — packs are a gamble, not a guaranteed upgrade.
 
 Pack pulls are seeded per-open (`saveSeed + packCounter`) — deterministic per save,
 different across saves, savescumming-resistant.
@@ -268,6 +274,22 @@ salted) but any single game is reproducible for debugging. A series loss restart
 whole series on the next attempt. Losses cost a small coin fee ("you scurried back to the
 clubhouse…") and never cost cards.
 
+### 5.6 Stats and stars
+
+Every interactive game ends on a box-score screen: three stars of the game (both
+teams, ranked by WPA), then batting and pitching lines for each side. Every row
+leads with its signed WPA percent (10%+ swings in bold), and the textbox legend
+explains the number. A full **game log** is one keypress away: GAME LOG in the
+battle menu during play, and &#8592;/&#8594; on the box-score screen after — every
+play with inning, actor, result, score, and its WPA signed from the player's side
+(the opponent's big rally reads negative). Box-score lines are keyed by side as well as card id, so a
+card appearing in both lineups keeps separate home and away stat lines. Sim-series
+reveal rows carry each game's top-swing star. Every game — interactive or simmed —
+also folds the player's team lines into `save.seasonStats`, viewable at YOUR CLUB →
+SEASON STATS with the batch sim's rate stats (AVG/OBP/SLG/OPS; IP, RA9, K) plus each
+card's cumulative season WPA, shown with the same signed-percent treatment as the
+box-score screen. The field grows in place on older saves; no version bump.
+
 ---
 
 ## 6. Economy (initial tuning targets)
@@ -342,9 +364,9 @@ guarded by existing tests.
 
 ```js
 {
-  version: 1,
-  saveSeed: "…",                    // master seed; all RNG derives from it
-  player: { name, avatar, coins, badges: [], pointCap },
+  version: 2,                       // v2: per-save universes, flat cap, starter packs
+  saveSeed: "…",                    // master seed; the card universe and all RNG derive from it
+  player: { name, avatar, coins, badges: [] },   // point cap is a flat 5000
   collection: { [cardId]: count },  // cards are pool-generated; pool seed stored
   roster: { cardIds: [], lineup: {} },   // validated by existing draft.js rules
   progress: { nodesUnlocked, scoutsBeaten, rivalStage, counters: { packsOpened, … } },

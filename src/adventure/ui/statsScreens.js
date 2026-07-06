@@ -1,0 +1,222 @@
+import { escapeHtml, menuHtml, clampIndex, shortName } from "./helpers.js";
+import { trainerById } from "../region.js";
+import { cardById } from "../packs.js";
+import { seasonHitters, seasonPitchers, ensureSeasonStats } from "../state.js";
+
+// ---- Formatting --------------------------------------------------------------
+
+export function ipText(outs) {
+  return `${Math.floor(outs / 3)}.${outs % 3}`;
+}
+
+// Batting-average style: .273, 1.043 for OPS-like values over 1.
+export function rateText(value) {
+  return value >= 1 ? value.toFixed(3) : value.toFixed(3).replace(/^0/, "");
+}
+
+// A compact game line: "2-4, HR, 3 RBI, SB". Only the parts that happened.
+export function hitterGameLine(line) {
+  const parts = [`${line.h}-${line.ab}`];
+  if (line.hr) parts.push(line.hr > 1 ? `${line.hr} HR` : "HR");
+  else if (line.t) parts.push(line.t > 1 ? `${line.t} 3B` : "3B");
+  else if (line.d) parts.push(line.d > 1 ? `${line.d} 2B` : "2B");
+  if (line.rbi) parts.push(`${line.rbi} RBI`);
+  if (line.r) parts.push(`${line.r} R`);
+  if (line.bb) parts.push(`${line.bb} BB`);
+  if (line.sb) parts.push(line.sb > 1 ? `${line.sb} SB` : "SB");
+  return parts.join(", ");
+}
+
+export function pitcherGameLine(line) {
+  return `${ipText(line.outs)} IP, ${line.h} H, ${line.bb} BB, ${line.so} K, ${line.r} R`;
+}
+
+// Signed whole-percent WPA: the number the recap ranks everything by.
+export function wpaText(wpa) {
+  const percent = Math.round((wpa ?? 0) * 100);
+  return `${percent >= 0 ? "+" : ""}${percent}%`;
+}
+
+// Big swings (|WPA| >= 10%) read bold; the rest stay quiet.
+export function wpaHtml(wpa) {
+  const text = wpaText(wpa);
+  return Math.abs(wpa ?? 0) >= 0.1 ? `<b>${text}</b>` : `<span class="gq-dim">${text}</span>`;
+}
+
+// ---- Game log ------------------------------------------------------------------
+
+// One play-by-play row: inning, actor, result, score when it changed, and the
+// play's WPA from the PLAYER'S side (a big opponent rally reads negative).
+export function gameLogLine(event, playerSide) {
+  const inning = `${event.half === "top" ? "T" : "B"}${event.inning}`;
+  if (event.type === "pitching-change") {
+    return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.team))} GO TO THE PEN: ${escapeHtml(shortName(event.pitcher))}</span>`;
+  }
+  const actor = event.type === "steal"
+    ? event.playDetails?.stealAttempt?.runner ?? event.batter
+    : event.batter;
+  const battingSide = event.half === "top" ? "away" : "home";
+  const wpa = battingSide === playerSide ? event.wpa : -(event.wpa ?? 0);
+  const score = event.runs > 0 ? ` <span class="gq-dim">${event.scoreAfter.away}-${event.scoreAfter.home}</span>` : "";
+  return `${inning} ${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
+}
+
+// ---- Stars of the game -------------------------------------------------------
+
+// Hockey-style three stars: everyone from both box scores, ranked by WPA.
+export function gameStars(boxScore, playerSide) {
+  const pool = [];
+  for (const side of ["away", "home"]) {
+    const yours = side === playerSide;
+    for (const line of boxScore[side].hitters) {
+      pool.push({ id: line.id, name: line.name, yours, wpa: line.wpa ?? 0, summary: hitterGameLine(line) });
+    }
+    for (const line of boxScore[side].pitchers) {
+      pool.push({ id: line.id, name: line.name, yours, wpa: line.wpa ?? 0, summary: pitcherGameLine(line) });
+    }
+  }
+  return pool.sort((a, b) => b.wpa - a.wpa).slice(0, 3);
+}
+
+// ---- Post-game stats screen ----------------------------------------------------
+
+// Every row the screen shows, sections included, so the cursor can walk (and
+// hover can read) the whole box score.
+function gameStatRows(app) {
+  const { boxScore, stars, playerSide } = app.screen;
+  const npcSide = playerSide === "away" ? "home" : "away";
+  const rows = [];
+  stars.forEach((star, index) => rows.push({
+    section: "STARS OF THE GAME",
+    id: star.id,
+    html: `${"&#9733;".repeat(3 - index)} ${escapeHtml(shortName(star.name))}${star.yours ? "" : " (THEM)"} ${wpaHtml(star.wpa)} <span class="gq-dim">${escapeHtml(star.summary)}</span>`
+  }));
+  const sides = [
+    { box: boxScore[playerSide], tag: "YOUR" },
+    { box: boxScore[npcSide], tag: "THEIR" }
+  ];
+  for (const { box, tag } of sides) {
+    for (const line of box.hitters) {
+      rows.push({
+        section: `${tag} BATS`,
+        id: line.id,
+        html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${escapeHtml(hitterGameLine(line))}</span>`
+      });
+    }
+    for (const line of box.pitchers) {
+      rows.push({
+        section: `${tag} ARMS`,
+        id: line.id,
+        html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${escapeHtml(pitcherGameLine(line))}</span>`
+      });
+    }
+  }
+  return rows;
+}
+
+function sectionedMenu(rows, index) {
+  const sections = [];
+  rows.forEach((row, rowIndex) => {
+    if (row.section !== rows[rowIndex - 1]?.section) sections.push({ header: row.section, start: rowIndex });
+  });
+  let html = "";
+  for (const [sectionIndex, section] of sections.entries()) {
+    const end = sections[sectionIndex + 1]?.start ?? rows.length;
+    html += `<h3>${section.header}</h3>${menuHtml(
+      rows.slice(section.start, end).map((row) => ({ html: row.html })),
+      index - section.start,
+      { offset: section.start }
+    )}`;
+  }
+  return html;
+}
+
+function gameLogMenuRows(app) {
+  return (app.screen.events ?? []).map((event) => ({ html: gameLogLine(event, app.screen.playerSide) }));
+}
+
+export const gameStatsScreen = {
+  render(app) {
+    const trainer = trainerById(app.screen.trainerId);
+    const logView = app.screen.view === "log";
+    const hasLog = (app.screen.events ?? []).length > 0;
+    let body;
+    if (logView) {
+      const rows = gameLogMenuRows(app);
+      body = menuHtml(rows, clampIndex(app.screen.index ?? 0, rows.length));
+    } else {
+      const rows = gameStatRows(app);
+      body = sectionedMenu(rows, clampIndex(app.screen.index ?? 0, rows.length));
+    }
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>FINAL ${app.screen.score.away}-${app.screen.score.home} VS ${escapeHtml(trainer.name)}</span><span>${logView ? "GAME LOG" : "BOX SCORE"}</span></div>
+      <div class="gq-body"><div class="gq-frame gq-scroll gq-map-node">${body}</div></div>
+      <div class="gq-textbox"><p class="gq-dim">% IS WPA${logView ? " FOR YOUR SIDE" : " — WIN PROBABILITY ADDED"}. 10%+ SWINGS READ BOLD.${hasLog ? ` &#8592;/&#8594; ${logView ? "BOX SCORE" : "GAME LOG"}.` : ""}</p><p class="gq-blink">Z — CONTINUE</p></div>
+    </div>`;
+  },
+  hoverCard(app, index) {
+    if (app.screen.view === "log") return null;
+    return cardById(gameStatRows(app)[index]?.id) ?? null;
+  },
+  key(app, key) {
+    const logView = app.screen.view === "log";
+    if ((key === "left" || key === "right") && (app.screen.events ?? []).length) {
+      app.screen.view = logView ? "box" : "log";
+      app.screen.index = 0;
+    } else if (key === "up" || key === "down") {
+      const rows = logView ? gameLogMenuRows(app) : gameStatRows(app);
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
+    } else if (key === "a" || key === "b") {
+      const next = app.screen.next;
+      return app.go(next.name, next.data);
+    }
+    app.rerender();
+  }
+};
+
+// ---- Season stats screen -------------------------------------------------------
+
+function seasonRows(save, view) {
+  if (view === "pitchers") {
+    return seasonPitchers(save).map((line) => ({
+      id: line.id,
+      html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`
+    }));
+  }
+  return seasonHitters(save).map((line) => ({
+    id: line.id,
+    html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G</span>`
+  }));
+}
+
+export const seasonStatsScreen = {
+  render(app) {
+    const save = app.save;
+    const view = app.screen.view ?? "hitters";
+    const rows = seasonRows(save, view);
+    const index = clampIndex(app.screen.index ?? 0, rows.length);
+    const games = ensureSeasonStats(save).games;
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>SEASON STATS &middot; ${view === "pitchers" ? "ARMS" : "BATS"}</span><span>${games} GAME${games === 1 ? "" : "S"}</span></div>
+      <div class="gq-body"><div class="gq-frame gq-scroll">${
+        rows.length ? menuHtml(rows, index) : `<p class="gq-dim">NO GAMES ON RECORD YET. GO PLAY SOMEBODY.</p>`
+      }</div></div>
+      <div class="gq-textbox"><p class="gq-dim">&#8592;/&#8594; BATS &middot; ARMS. % IS SEASON WPA. Hover a row to read the card. X to leave.</p></div>
+    </div>`;
+  },
+  hoverCard(app, index) {
+    return cardById(seasonRows(app.save, app.screen.view ?? "hitters")[index]?.id) ?? null;
+  },
+  key(app, key) {
+    if (key === "left" || key === "right") {
+      app.screen.view = (app.screen.view ?? "hitters") === "hitters" ? "pitchers" : "hitters";
+      app.screen.index = 0;
+    } else if (key === "up" || key === "down") {
+      const rows = seasonRows(app.save, app.screen.view ?? "hitters");
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
+    } else if (key === "b" || key === "a") {
+      return app.go("map");
+    }
+    app.rerender();
+  }
+};

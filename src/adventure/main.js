@@ -1,27 +1,32 @@
 import { loadSave } from "./state.js";
+import { setUniverseSeed, cardById } from "./packs.js";
 import { cardPanelHtml } from "./ui/helpers.js";
-import { titleScreen, introScreen, nameEntryScreen, starterPickScreen } from "./ui/titleScreens.js";
+import { titleScreen, introScreen, nameEntryScreen, starterRevealScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen } from "./ui/mapScreen.js";
-import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen } from "./ui/battleScreen.js";
+import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen } from "./ui/collectionScreens.js";
+import { gameStatsScreen, seasonStatsScreen } from "./ui/statsScreens.js";
 
 const SCREENS = {
   title: titleScreen,
   intro: introScreen,
   nameEntry: nameEntryScreen,
-  starterPick: starterPickScreen,
+  starterReveal: starterRevealScreen,
   map: mapScreen,
   trainerIntro: trainerIntroScreen,
   battle: battleScreen,
   seriesBreak: seriesBreakScreen,
   battleResult: battleResultScreen,
   simSeries: simSeriesScreen,
+  claimCard: claimCardScreen,
   shop: shopScreen,
   sell: sellScreen,
   binder: binderScreen,
   team: teamScreen,
   lineup: lineupScreen,
-  packOpen: packOpenScreen
+  packOpen: packOpenScreen,
+  gameStats: gameStatsScreen,
+  seasonStats: seasonStatsScreen
 };
 
 const KEY_MAP = {
@@ -50,8 +55,15 @@ const app = {
     const screen = SCREENS[this.screen.name] ?? titleScreen;
     root.innerHTML = screen.render(this);
     screen.mounted?.(this);
+    // Rerendering resets scroll positions; keep the cursor row in view so
+    // long lists (rosters, binder) can actually be walked.
+    root.querySelector(".gq-cursor")?.scrollIntoView({ block: "nearest" });
   }
 };
+
+// Every save lives in its own card universe, keyed by its seed. Point the
+// pool at the loaded save before anything renders a card.
+if (app.save) setUniverseSeed(app.save.saveSeed);
 
 document.addEventListener("keydown", (event) => {
   const inInput = event.target instanceof HTMLInputElement;
@@ -80,9 +92,11 @@ document.addEventListener("click", (event) => {
 });
 
 function clickCursorField(screen) {
-  if (screen.mode === "steal") return "stealIndex";
+  if (screen.mode === "pen") return "penIndex";
   if (screen.mode === "pick") return "pickIndex";
   if (screen.mode === "rosters") return "rosterIndex";
+  if (screen.mode === "scout") return "scoutIndex";
+  if (screen.mode === "log") return "logIndex";
   if (screen.confirming) return "confirmIndex";
   if (screen.menuIndex !== undefined) return "menuIndex";
   return "index";
@@ -90,14 +104,22 @@ function clickCursorField(screen) {
 
 // Hovering a row that maps to a card (screens expose hoverCard) floats the
 // full card panel next to the cursor — the quickest way to read a chart.
+// Any element can also opt in directly with data-card-id (batter and pitcher
+// names in the matchup, runners on the base icons).
 const tooltip = document.createElement("div");
 tooltip.className = "gq-tooltip";
 tooltip.hidden = true;
 document.body.appendChild(tooltip);
 
+function hoveredCard(target) {
+  const tagged = target.closest?.("[data-card-id]");
+  if (tagged) return cardById(tagged.dataset.cardId);
+  const row = target.closest?.("[data-menu-index]");
+  return row ? SCREENS[app.screen.name]?.hoverCard?.(app, Number(row.dataset.menuIndex)) : null;
+}
+
 document.addEventListener("mouseover", (event) => {
-  const row = event.target.closest?.("[data-menu-index]");
-  const card = row && SCREENS[app.screen.name]?.hoverCard?.(app, Number(row.dataset.menuIndex));
+  const card = hoveredCard(event.target);
   if (!card) {
     tooltip.hidden = true;
     return;
@@ -117,7 +139,7 @@ document.addEventListener("mousemove", (event) => {
 });
 
 document.addEventListener("mouseout", (event) => {
-  if (!event.relatedTarget || !event.relatedTarget.closest?.("[data-menu-index]")) {
+  if (!event.relatedTarget || !event.relatedTarget.closest?.("[data-menu-index], [data-card-id]")) {
     tooltip.hidden = true;
   }
 });

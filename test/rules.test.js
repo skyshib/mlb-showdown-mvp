@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
 import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
-import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
+import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, attemptSteal, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
 const hitter = {
@@ -221,7 +221,7 @@ test("failed extra-base attempt after a hit records an out for the pitcher", () 
   assert.equal(event.result, RESULTS.SINGLE);
   assert.equal(event.outsAfter, 3);
   assert.equal(event.playDetails.thrownAttempt.safe, false);
-  assert.equal(state.stats.pitchers.get("wd-p").outs, 1);
+  assert.equal(state.stats.pitchers.get("home:wd-p").outs, 1);
 });
 
 test("runner can steal second before the plate appearance", () => {
@@ -239,23 +239,28 @@ test("runner can steal second before the plate appearance", () => {
   );
   assert.equal(state.lineupIndex.away, 0);
   assert.equal(event.playDetails.stealAttempt.to, "2B");
-  assert.equal(state.stats.hitters.get("a-h-0").sb, 1);
+  assert.equal(state.stats.hitters.get("away:a-h-0").sb, 1);
 });
 
-test("stealing third uses catcher fielding and the steal-third bonus", () => {
+test("stealing third fights the shorter throw: +5 to the catcher, not the runner", () => {
   const state = createInitialState(teamA, strongCatcherDefense);
   state.outs = 1;
   state.bases = [null, { name: "Runner 2", speed: 15 }, null];
 
-  const event = playStealAttempt(state, { d20: () => 16 });
+  // The penalized odds fall below the decision matrix, so the auto-runner
+  // now declines this jump...
+  assert.equal(playStealAttempt(state, { d20: () => 16 }), null);
+
+  // ...but a forced attempt shows the penalized target and pays for it.
+  const event = attemptSteal(state, 1, { d20: () => 16 });
 
   assert.equal(event.result, "CS");
   assert.equal(event.outsAfter, 2);
   assert.deepEqual(state.bases, [null, null, null]);
   assert.equal(event.playDetails.stealAttempt.fielding, 5);
-  assert.equal(event.playDetails.stealAttempt.target, 20);
+  assert.equal(event.playDetails.stealAttempt.target, 10);
   assert.equal(event.playDetails.stealAttempt.total, 21);
-  assert.equal(state.stats.pitchers.get("sc-p").outs, 1);
+  assert.equal(state.stats.pitchers.get("home:sc-p").outs, 1);
 });
 
 test("low-probability steal attempts are skipped by the decision matrix", () => {
@@ -286,7 +291,7 @@ test("caught stealing for the third out advances the half inning without a plate
   assert.deepEqual(state.bases, [null, null, null]);
   assert.equal(state.lineupIndex.away, 0);
   assert.equal(state.away.plateAppearances, 0);
-  assert.equal(state.stats.pitchers.get("wd-p").outs, 1);
+  assert.equal(state.stats.pitchers.get("home:wd-p").outs, 1);
 });
 
 test("home run clears the bases and scores batter", () => {
@@ -296,7 +301,7 @@ test("home run clears the bases and scores batter", () => {
   assert.equal(runs, 3);
   assert.equal(state.score.away, 3);
   assert.deepEqual(state.bases, [null, null, null]);
-  assert.equal(state.stats.hitters.get("h-test").r, 1);
+  assert.equal(state.stats.hitters.get("away:h-test").r, 1);
 });
 
 test("groundout with runner on first can become a double play", () => {
@@ -491,9 +496,9 @@ test("runs are charged to the pitcher responsible for inherited runners", () => 
   const runs = applyDouble(state, hitter, "away", "home", null, state.home.pitchers[1]);
 
   assert.equal(runs, 1);
-  assert.equal(state.stats.pitchers.get("starter").r, 1);
+  assert.equal(state.stats.pitchers.get("home:starter").r, 1);
   assert.equal(state.home.pitchers[0].chargedRuns, 1);
-  assert.equal(state.stats.pitchers.get("reliever")?.r ?? 0, 0);
+  assert.equal(state.stats.pitchers.get("home:reliever")?.r ?? 0, 0);
 });
 
 test("charged runs reduce fatigue IP but do not change planned bullpen timing", () => {
@@ -532,6 +537,28 @@ test("simulation returns box score lines", () => {
   assert.equal(result.boxScore.away.hitters.length, 9);
   assert.equal(result.boxScore.home.pitchers.length, 1);
   assert.ok(result.boxScore.away.hitters.some((line) => line.pa > 0));
+});
+
+test("a card on both teams keeps separate home and away box score lines", () => {
+  const mirrorHome = {
+    name: "Mirror",
+    lineup: teamA.lineup.map((player) => ({ ...player })),
+    pitchers: [{ ...pitcher, id: "mirror-p", name: "Mirror Pitcher" }]
+  };
+  const result = simulateGame(teamA, mirrorHome, "mirror-seed");
+
+  assert.equal(result.boxScore.away.hitters.length, 9);
+  assert.equal(result.boxScore.home.hitters.length, 9);
+  for (const awayLine of result.boxScore.away.hitters) {
+    const homeLine = result.boxScore.home.hitters.find((line) => line.id === awayLine.id);
+    assert.ok(homeLine, `${awayLine.id} has a home line too`);
+    assert.notEqual(awayLine, homeLine, "the sides do not share a stat line");
+    assert.equal(awayLine.side, "away");
+    assert.equal(homeLine.side, "home");
+  }
+  const awayPa = result.boxScore.away.hitters.reduce((sum, line) => sum + line.pa, 0);
+  const homePa = result.boxScore.home.hitters.reduce((sum, line) => sum + line.pa, 0);
+  assert.ok(awayPa >= 27 && homePa >= 24, "each side records only its own plate appearances");
 });
 
 test("draft blocks picks that would make pitcher minimum impossible", () => {

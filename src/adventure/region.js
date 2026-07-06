@@ -1,7 +1,9 @@
 import { timesBeaten } from "./state.js";
 
-// M1 slice of the Cascade League: one town, one route, one gym. Trainers are
-// pure data — teams build deterministically from teamSeed + pointBudget.
+// The Cascade League: one town so far, with routes climbing past it. Trainers
+// are pure data — teams build deterministically from teamSeed + pointBudget.
+// Budgets ladder from 4000 up to the 10000-point champion: late bosses
+// out-spend the player's flat 5000, so winning means fielding bargains.
 export const REGION = {
   name: "CASCADE LEAGUE",
   towns: [
@@ -22,14 +24,14 @@ export const TRAINERS = [
     archetype: "contact",
     aiProfile: "conservative",
     teamSeed: "scout-jojo-v1",
-    pointBudget: 2350,
+    pointBudget: 4000,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: [],
     rewards: { coins: 150 },
     dialog: {
       intro: ["Hey! My sandlot crew never strikes out.", "Let's play ball!"],
-      win: ["Aw, dropped it...", "You play like a big-leaguer."],
+      win: ["Aw, dropped it...", "You play like a big-leaguer. Take a card, that's the rule."],
       lose: ["The sandlot stays undefeated!"]
     }
   },
@@ -41,7 +43,7 @@ export const TRAINERS = [
     archetype: "speed",
     aiProfile: "aggressive",
     teamSeed: "scout-mabel-v1",
-    pointBudget: 2550,
+    pointBudget: 4400,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["scout-jojo"],
@@ -60,7 +62,7 @@ export const TRAINERS = [
     archetype: "balanced",
     aiProfile: "balanced",
     teamSeed: "farm-cage-crew-v1",
-    pointBudget: 2500,
+    pointBudget: 4300,
     battleFormat: { type: "simSeries", bestOf: 5 },
     repeatable: true,
     requires: [],
@@ -79,7 +81,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "balanced",
     teamSeed: "gym-garrick-v1",
-    pointBudget: 2950,
+    pointBudget: 5200,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["scout-jojo", "scout-mabel"],
@@ -92,15 +94,126 @@ export const TRAINERS = [
       ],
       win: [
         "That... was a pennant swing.",
-        "Take the IRONWOOD BADGE. Your roster cap just got heavier."
+        "Take the IRONWOOD BADGE. The road past town just opened up."
       ],
       lose: ["Come back when your lineup grows teeth."]
+    }
+  },
+  {
+    id: "route-hollis",
+    name: "UMP-IN-EXILE HOLLIS",
+    title: "Route 2",
+    sprite: "HO",
+    archetype: "ace",
+    aiProfile: "conservative",
+    teamSeed: "route-hollis-v1",
+    pointBudget: 6000,
+    battleFormat: { type: "game" },
+    repeatable: false,
+    requires: ["gym-garrick"],
+    rewards: { coins: 400 },
+    dialog: {
+      intro: ["They ran me out of the league for calling it straight.", "My aces call it straighter. Strike three, kid."],
+      win: ["Ball four. You earned that walk-off.", "Fair is fair — pick a card off my bench."],
+      lose: ["STEE-RIKE. You're out. Come back with a real bat."]
+    }
+  },
+  {
+    id: "route-petra",
+    name: "SALVAGE QUEEN PETRA",
+    title: "Route 2",
+    sprite: "PE",
+    archetype: "power",
+    aiProfile: "aggressive",
+    teamSeed: "route-petra-v1",
+    pointBudget: 7000,
+    battleFormat: { type: "game" },
+    repeatable: false,
+    requires: ["route-hollis"],
+    rewards: { coins: 500 },
+    dialog: {
+      intro: ["Everything at my yard is overpriced except the swings.", "My sluggers were other teams' junk. Watch them fly."],
+      win: ["Scrapped! Fine — one man's roster is another man's salvage."],
+      lose: ["Straight to the crusher with you."]
+    }
+  },
+  {
+    id: "gym-quince",
+    name: "HARBORMASTER QUINCE",
+    title: "Galehook Gym",
+    sprite: "QU",
+    archetype: "contact",
+    aiProfile: "balanced",
+    teamSeed: "gym-quince-v1",
+    pointBudget: 8000,
+    battleFormat: { type: "series", bestOf: 3 },
+    repeatable: false,
+    requires: ["route-hollis", "route-petra"],
+    rewards: { coins: 1500, pack: "booster", badge: "galehook" },
+    dialog: {
+      intro: [
+        "Every ship that docks here pays a toll.",
+        "Yours is nine innings, three times over.",
+        "My crew slaps singles like the tide. Endless."
+      ],
+      win: [
+        "You sailed through the gale...",
+        "The GALEHOOK BADGE is yours. The summit road is open."
+      ],
+      lose: ["Back to port with you. The tide always wins."]
+    }
+  },
+  {
+    id: "route-sawyer",
+    name: "NIGHT-TRAIN SAWYER",
+    title: "Route 3",
+    sprite: "SA",
+    archetype: "speed",
+    aiProfile: "aggressive",
+    teamSeed: "route-sawyer-v1",
+    pointBudget: 9000,
+    battleFormat: { type: "game" },
+    repeatable: false,
+    requires: ["gym-quince"],
+    rewards: { coins: 800 },
+    dialog: {
+      intro: ["Last stop before the summit, rookie.", "My roster cost more than your town. Try to keep up."],
+      win: ["...The night train got derailed.", "Take a souvenir. You'll need it up there."],
+      lose: ["All aboard! Next stop: back where you started."]
+    }
+  },
+  {
+    id: "boss-vale",
+    name: "COMMISSIONER VALE",
+    title: "Summit Gym",
+    sprite: "VA",
+    archetype: "balanced",
+    aiProfile: "balanced",
+    teamSeed: "boss-vale-v1",
+    pointBudget: 10000,
+    battleFormat: { type: "series", bestOf: 3 },
+    repeatable: false,
+    requires: ["route-sawyer"],
+    rewards: { coins: 3000, pack: "booster", badge: "cascade" },
+    dialog: {
+      intro: [
+        "So you're the bargain hunter the routes keep whispering about.",
+        "I own the deepest checkbook in the league. Ten thousand points of it.",
+        "Show me a lineup that money can't buy."
+      ],
+      win: [
+        "Extraordinary. The checkbook lost.",
+        "The CASCADE BADGE — and the league — are yours, champ."
+      ],
+      lose: ["Depth wins pennants. Come back when you've found yours."]
     }
   }
 ];
 
 export const BADGES = {
-  ironwood: { key: "ironwood", name: "IRONWOOD BADGE", town: "cedar-yards" }
+  ironwood: { key: "ironwood", name: "IRONWOOD BADGE", town: "cedar-yards" },
+  galehook: { key: "galehook", name: "GALEHOOK BADGE", town: "cedar-yards" },
+  cascade: { key: "cascade", name: "CASCADE BADGE", town: "cedar-yards" }
 };
 
 export function trainerById(id) {

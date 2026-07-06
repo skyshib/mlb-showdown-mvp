@@ -164,12 +164,18 @@ export function halfLabel(state) {
   return `${state.half === "top" ? "TOP" : "BOT"} ${state.inning}`;
 }
 
+// Occupied bases carry the runner's card id so hovering the icon floats the
+// full card (main.js resolves data-card-id into the tooltip).
 export function diamondHtml(state) {
   const [first, second, third] = state.bases;
+  const base = (cls, runner) =>
+    `<span class="gq-base ${cls} ${runner ? "gq-base-on" : ""}"${
+      runner?.id ? ` data-card-id="${escapeHtml(runner.id)}" title="${escapeHtml(runner.name)}"` : ""
+    }></span>`;
   return `<div class="gq-diamond">
-    <span class="gq-base gq-base-2 ${second ? "gq-base-on" : ""}"></span>
-    <span class="gq-base gq-base-3 ${third ? "gq-base-on" : ""}"></span>
-    <span class="gq-base gq-base-1 ${first ? "gq-base-on" : ""}"></span>
+    ${base("gq-base-2", second)}
+    ${base("gq-base-3", third)}
+    ${base("gq-base-1", first)}
     <span class="gq-base gq-base-h"></span>
   </div>`;
 }

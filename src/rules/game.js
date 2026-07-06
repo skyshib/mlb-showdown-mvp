@@ -186,7 +186,8 @@ export function stealCandidates(state) {
       toIndex: 2,
       outsForDecision: state.outs,
       fielding,
-      targetBonus: 5
+      // The throw to third is shorter: +5 to the catcher, not the runner.
+      targetBonus: -5
     }));
   }
   if (runnerOnFirst && !runnerOnSecond) {
@@ -278,6 +279,19 @@ function performStealAttempt(state, stealAttempt, rng) {
 // move, fewer than two outs, and no play already waiting on a decision.
 export function canBunt(state) {
   return state.outs < 2 && state.bases.some(Boolean) && !state.pendingAdvance;
+}
+
+// The chance the current batter gets a bunt down cleanly, for display before
+// the player commits. Mirrors the roll in attemptBunt.
+export function buntSuccessChance(state) {
+  if (!canBunt(state)) return 0;
+  const battingSide = state.half === "top" ? "away" : "home";
+  const pitchingSide = battingSide === "away" ? "home" : "away";
+  const battingTeam = state[battingSide];
+  const batter = battingTeam.lineup[state.lineupIndex[battingSide] % battingTeam.lineup.length];
+  const target = 16 + Math.floor(speedTarget(batter) / 4);
+  const penalty = Math.floor(totalInfieldFielding(state[pitchingSide]) / 4);
+  return Math.max(0, Math.min(20, target - penalty)) / 20;
 }
 
 // A sacrifice bunt as a full plate appearance. Clean bunt: batter out, every
@@ -609,10 +623,17 @@ export function isGameOver(state) {
 
 // Manually bring in the next pitcher, ahead of the automatic plan. Returns the
 // new pitcher, or null when the staff is spent. Auto play never calls this.
-export function changePitcher(state, side) {
+export function changePitcher(state, side, targetIndex = null) {
   const runtime = state.pitching[side];
   const team = state[side];
   if (runtime.pitcherIndex >= team.pitchers.length - 1) return null;
+  // Picking a specific arm pulls him to the front of the remaining staff, so
+  // skipped relievers stay available for later.
+  if (targetIndex !== null) {
+    if (targetIndex <= runtime.pitcherIndex || targetIndex >= team.pitchers.length) return null;
+    const [picked] = team.pitchers.splice(targetIndex, 1);
+    team.pitchers.splice(runtime.pitcherIndex + 1, 0, picked);
+  }
   runtime.pitcherIndex += 1;
   runtime.outsRecorded = 0;
   return team.pitchers[runtime.pitcherIndex];
@@ -955,7 +976,8 @@ function chooseStealAttempt(state, pitchingSide) {
       toIndex: 2,
       outsForDecision: state.outs,
       fielding,
-      targetBonus: 5
+      // The throw to third is shorter: +5 to the catcher, not the runner.
+      targetBonus: -5
     }));
   } else if (runnerOnFirst && !runnerOnSecond) {
     candidates.push(createAdvanceCandidate({
@@ -1260,12 +1282,19 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   state[pitchingSide].runsAllowed = state.score[battingSide];
 }
 
+// Stat lines are keyed by side as well as card id so the same card appearing
+// in both lineups keeps separate home and away lines. Deriving the side from
+// state.half is safe because every stat records before the half flips (a
+// pending advance decision blocks the flip until it resolves).
 function ensureHitterLine(state, hitter) {
-  if (!state.stats.hitters.has(hitter.id)) {
-    state.stats.hitters.set(hitter.id, {
+  const side = state.half === "top" ? "away" : "home";
+  const key = `${side}:${hitter.id}`;
+  if (!state.stats.hitters.has(key)) {
+    state.stats.hitters.set(key, {
       id: hitter.id,
       name: hitter.name,
-      team: null,
+      side,
+      team: state[side].name,
       pa: 0,
       ab: 0,
       h: 0,
@@ -1282,15 +1311,18 @@ function ensureHitterLine(state, hitter) {
       wpa: 0
     });
   }
-  return state.stats.hitters.get(hitter.id);
+  return state.stats.hitters.get(key);
 }
 
 function ensurePitcherLine(state, pitcher) {
-  if (!state.stats.pitchers.has(pitcher.id)) {
-    state.stats.pitchers.set(pitcher.id, {
+  const side = state.half === "top" ? "home" : "away";
+  const key = `${side}:${pitcher.id}`;
+  if (!state.stats.pitchers.has(key)) {
+    state.stats.pitchers.set(key, {
       id: pitcher.id,
       name: pitcher.name,
-      team: null,
+      side,
+      team: state[side].name,
       bf: 0,
       outs: 0,
       h: 0,
@@ -1301,7 +1333,7 @@ function ensurePitcherLine(state, pitcher) {
       wpa: 0
     });
   }
-  return state.stats.pitchers.get(pitcher.id);
+  return state.stats.pitchers.get(key);
 }
 
 function summarizeTeam(state, side) {
@@ -1313,7 +1345,8 @@ function summarizeTeam(state, side) {
   };
 }
 
-function buildBoxScore(state) {
+// Exported for interactive layers that need a box score from a live state.
+export function buildBoxScore(state) {
   return {
     away: buildTeamBoxScore(state, "away"),
     home: buildTeamBoxScore(state, "home")
@@ -1321,11 +1354,9 @@ function buildBoxScore(state) {
 }
 
 function buildTeamBoxScore(state, side) {
-  const hitterIds = new Set(state[side].lineup.map((player) => player.id));
-  const pitcherIds = new Set(state[side].pitchers.map((player) => player.id));
   return {
     team: state[side].name,
-    hitters: [...state.stats.hitters.values()].filter((line) => hitterIds.has(line.id)),
-    pitchers: [...state.stats.pitchers.values()].filter((line) => pitcherIds.has(line.id))
+    hitters: [...state.stats.hitters.values()].filter((line) => line.side === side),
+    pitchers: [...state.stats.pitchers.values()].filter((line) => line.side === side)
   };
 }

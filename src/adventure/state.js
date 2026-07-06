@@ -1,10 +1,13 @@
 import { cardById } from "./packs.js";
 
 const SAVE_KEY = "showdown-quest-save";
-export const SAVE_VERSION = 1;
+// v2: per-save card universes, flat point cap, starter packs. v1 saves point
+// at the old shared universe, so they don't migrate.
+export const SAVE_VERSION = 2;
 
-// Roster point cap by badge count: the level-cap analog. Spec §3.2.
-const POINT_CAPS = [2600, 3000, 3400, 3800, 4200, 4600, 5000, 5400, 6000];
+// The roster budget is flat: every manager fields 5000 points. Getting ahead
+// means finding bargains, not raising the cap; badges are trophies and gates.
+const POINT_CAP = 5000;
 
 export const LOSS_FEE = 50;
 
@@ -25,12 +28,13 @@ export function createSave({ name, saveSeed }) {
     },
     activeSeries: null,
     pendingPacks: [],
-    log: []
+    log: [],
+    seasonStats: { games: 0, hitters: {}, pitchers: {} }
   };
 }
 
-export function pointCap(save) {
-  return POINT_CAPS[Math.min(save.player.badges.length, POINT_CAPS.length - 1)];
+export function pointCap() {
+  return POINT_CAP;
 }
 
 export function deriveSeed(save, ...parts) {
@@ -144,6 +148,62 @@ export function setRoster(save, cardIds, lineupAssignments = {}) {
 // first). Ids that leave the roster are dropped on the next setRoster.
 export function setBattingOrder(save, cardIds) {
   save.roster.battingOrder = [...cardIds];
+}
+
+// ---- Season stats ------------------------------------------------------------
+
+const HITTER_STAT_KEYS = ["pa", "ab", "h", "d", "t", "hr", "bb", "so", "r", "rbi", "sb", "cs", "gidp", "wpa"];
+const PITCHER_STAT_KEYS = ["bf", "outs", "h", "bb", "so", "hr", "r", "wpa"];
+
+// Older saves predate season stats; grow the field in place instead of
+// invalidating them with a version bump.
+export function ensureSeasonStats(save) {
+  if (!save.seasonStats) save.seasonStats = { games: 0, hitters: {}, pitchers: {} };
+  return save.seasonStats;
+}
+
+// Fold one game's box score for the player's team into the rolling season
+// totals. Every game counts: interactive battles and simulated series alike.
+export function recordGameStats(save, teamBox) {
+  const season = ensureSeasonStats(save);
+  season.games += 1;
+  for (const line of teamBox.hitters) {
+    const row = season.hitters[line.id] ??
+      (season.hitters[line.id] = { id: line.id, name: line.name, games: 0, ...Object.fromEntries(HITTER_STAT_KEYS.map((key) => [key, 0])) });
+    row.games += 1;
+    for (const key of HITTER_STAT_KEYS) row[key] += line[key] ?? 0;
+  }
+  for (const line of teamBox.pitchers) {
+    const row = season.pitchers[line.id] ??
+      (season.pitchers[line.id] = { id: line.id, name: line.name, games: 0, ...Object.fromEntries(PITCHER_STAT_KEYS.map((key) => [key, 0])) });
+    row.games += 1;
+    for (const key of PITCHER_STAT_KEYS) row[key] += line[key] ?? 0;
+  }
+  return season;
+}
+
+// Season lines with the rate stats the batch sim reports: AVG/OBP/SLG/OPS for
+// bats, RA9 and K/9 for arms. Sorted the same way, too.
+export function seasonHitters(save) {
+  return Object.values(ensureSeasonStats(save).hitters)
+    .map((line) => {
+      const singles = line.h - line.d - line.t - line.hr;
+      const totalBases = singles + line.d * 2 + line.t * 3 + line.hr * 4;
+      const obp = line.pa ? (line.h + line.bb) / line.pa : 0;
+      const slg = line.ab ? totalBases / line.ab : 0;
+      return { ...line, avg: line.ab ? line.h / line.ab : 0, obp, slg, ops: obp + slg };
+    })
+    .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
+}
+
+export function seasonPitchers(save) {
+  return Object.values(ensureSeasonStats(save).pitchers)
+    .map((line) => ({
+      ...line,
+      runsPerNine: line.outs ? (line.r * 27) / line.outs : 0,
+      strikeoutsPerNine: line.outs ? (line.so * 27) / line.outs : 0
+    }))
+    .sort((a, b) => (a.outs === 0) - (b.outs === 0) || a.runsPerNine - b.runsPerNine || b.outs - a.outs);
 }
 
 // ---- Coins -----------------------------------------------------------------

@@ -183,10 +183,22 @@ export const binderScreen = {
 
 // ---- Team (roster editing) -------------------------------------------------
 
-function benchCards(save, kind) {
-  return collectionCards(save)
+// Replacement candidates for a roster card. The default view sticks to the
+// outgoing card's own position (role for pitchers); "all" widens to every
+// unrostered card of the same kind. Exported for tests.
+export function benchCards(save, anchor, filter = "position") {
+  const spares = collectionCards(save)
     .map(({ card }) => card)
-    .filter((card) => card.kind === kind && !save.roster.cardIds.includes(card.id));
+    .filter((card) => card.kind === anchor.kind && !save.roster.cardIds.includes(card.id));
+  if (filter === "all") return spares;
+  return spares.filter((card) =>
+    anchor.kind === "pitcher" ? card.role === anchor.role : card.position === anchor.position
+  );
+}
+
+function benchLabel(anchor, filter) {
+  const slot = anchor.kind === "pitcher" ? anchor.role : anchor.position;
+  return filter === "all" ? `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}` : `SPARE ${slot} ONLY`;
 }
 
 export const teamScreen = {
@@ -199,7 +211,8 @@ export const teamScreen = {
     if (points > cap) issues.push(`over cap by ${points - cap}`);
     const picking = app.screen.mode === "pick";
     const rosterIndex = clampIndex(app.screen.index ?? 0, roster.length);
-    const bench = picking ? benchCards(save, roster[rosterIndex].kind) : [];
+    const filter = app.screen.pickFilter ?? "position";
+    const bench = picking ? benchCards(save, roster[rosterIndex], filter) : [];
     const pickIndex = clampIndex(app.screen.pickIndex ?? 0, bench.length + 1);
     const preview = picking
       ? bench[pickIndex] ?? null
@@ -209,20 +222,20 @@ export const teamScreen = {
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${
           picking
-            ? menuHtml(
+            ? `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
                 [
                   ...bench.map((card) => ({ html: cardLine(card) })),
                   { label: "CANCEL" }
                 ],
                 pickIndex
-              )
+              )}`
             : menuHtml(roster.map((card) => ({ html: cardLine(card) })), rosterIndex)
         }</div>
         <div>${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
       </div></div>
       <div class="gq-textbox">
         ${issues.length ? `<p>! ${escapeHtml(issues.join(", "))}</p>` : `<p>ROSTER IS GAME-READY.</p>`}
-        <p class="gq-dim">${picking ? "Pick a replacement. X cancels." : "Z swaps a card. Lineup slots fill automatically. X to leave."}</p>
+        <p class="gq-dim">${picking ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels." : "Z swaps a card. Lineup slots fill automatically. X to leave."}</p>
       </div>
     </div>`;
   },
@@ -230,7 +243,7 @@ export const teamScreen = {
     const roster = rosterCards(app.save);
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
-      return benchCards(app.save, anchor?.kind)[index] ?? null;
+      return anchor ? benchCards(app.save, anchor, app.screen.pickFilter ?? "position")[index] ?? null : null;
     }
     return roster[index] ?? null;
   },
@@ -238,15 +251,18 @@ export const teamScreen = {
     const save = app.save;
     const roster = rosterCards(save);
     if (app.screen.mode === "pick") {
-      const bench = benchCards(save, roster[clampIndex(app.screen.index ?? 0, roster.length)].kind);
+      const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
+      const bench = benchCards(save, anchor, app.screen.pickFilter ?? "position");
       const total = bench.length + 1;
-      if (key === "up" || key === "down") {
+      if (key === "left" || key === "right") {
+        app.screen.pickFilter = (app.screen.pickFilter ?? "position") === "position" ? "all" : "position";
+        app.screen.pickIndex = 0;
+      } else if (key === "up" || key === "down") {
         app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), total);
       } else if (key === "a") {
         const pickIndex = app.screen.pickIndex ?? 0;
         if (pickIndex < bench.length) {
-          const outgoing = roster[clampIndex(app.screen.index ?? 0, roster.length)];
-          const cardIds = save.roster.cardIds.map((id) => (id === outgoing.id ? bench[pickIndex].id : id));
+          const cardIds = save.roster.cardIds.map((id) => (id === anchor.id ? bench[pickIndex].id : id));
           setRoster(save, cardIds);
           persistSave(save);
         }
@@ -259,6 +275,7 @@ export const teamScreen = {
     } else if (key === "a") {
       app.screen.mode = "pick";
       app.screen.pickIndex = 0;
+      app.screen.pickFilter = "position";
     } else if (key === "b") {
       app.go("map");
     }

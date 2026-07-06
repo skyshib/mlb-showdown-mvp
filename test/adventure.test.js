@@ -5,12 +5,12 @@ import {
   cardById,
   openPack,
   shopStock,
-  starterCommons,
-  starterChoices,
-  starterRosterWith,
+  starterPack,
+  setUniverseSeed,
   RARITIES,
   PACKS
 } from "../src/adventure/packs.js";
+import { applyOutcome } from "../src/adventure/ui/battleScreen.js";
 import {
   createSave,
   persistSave,
@@ -24,6 +24,10 @@ import {
   setBattingOrder,
   rosterPoints,
   managerFor,
+  ensureSeasonStats,
+  recordGameStats,
+  seasonHitters,
+  seasonPitchers,
   pointCap,
   startSeries,
   recordSeriesGame,
@@ -62,9 +66,13 @@ import {
 } from "../src/rules/game.js";
 import { createRng } from "../src/rules/rng.js";
 
+// Every test runs in the same fixed universe unless it explicitly swaps seeds
+// (and swaps back before returning).
+setUniverseSeed("test-seed");
+
 function testSave() {
   const save = createSave({ name: "TEST", saveSeed: "test-seed" });
-  const roster = starterRosterWith(starterChoices()[0].card);
+  const roster = starterPack(save.saveSeed);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));
   return save;
@@ -81,12 +89,60 @@ function fakeStorage() {
 
 // ---- Pool and rarity -------------------------------------------------------
 
-test("every adventure card carries a rarity and ids resolve", () => {
+test("the universe holds 3000 cards, each with a rarity and a resolvable id", () => {
   const pool = adventurePool();
-  assert.ok(pool.length > 300);
+  assert.equal(pool.length, 3000);
   for (const card of pool) {
     assert.ok(RARITIES[card.rarity], `${card.id} has rarity ${card.rarity}`);
     assert.equal(cardById(card.id)?.id, card.id);
+  }
+});
+
+test("printed points carry heavy noise around true value; rarity tracks true strength", () => {
+  const pool = adventurePool();
+  for (const card of pool) {
+    assert.ok(card.truePoints >= 90 && card.truePoints <= 900, `${card.id} true value in range (${card.truePoints})`);
+    const drift = Math.abs(card.points / card.truePoints - 1);
+    assert.ok(drift <= 0.36, `${card.id} noise within ±35% (${drift.toFixed(2)})`);
+  }
+  assert.ok(pool.some((card) => card.points < card.truePoints * 0.8), "real bargains exist");
+  assert.ok(pool.some((card) => card.points > card.truePoints * 1.2), "real rip-offs exist");
+  // Within each group, every higher tier is truly stronger than the tier below.
+  const order = ["common", "uncommon", "rare", "legend"];
+  for (const group of [
+    pool.filter((card) => card.kind === "hitter"),
+    pool.filter((card) => card.role === "SP"),
+    pool.filter((card) => card.role === "RP")
+  ]) {
+    for (let tier = 1; tier < order.length; tier += 1) {
+      const lowerMax = Math.max(...group.filter((c) => c.rarity === order[tier - 1]).map((c) => c.truePoints));
+      const upperMin = Math.min(...group.filter((c) => c.rarity === order[tier]).map((c) => c.truePoints));
+      assert.ok(upperMin >= lowerMax, `${order[tier]} outranks ${order[tier - 1]}`);
+    }
+  }
+});
+
+test("an even-rarity 13-card roster costs about the 5000-point budget", () => {
+  const pool = adventurePool();
+  const tierMean = (tier) => {
+    const cards = pool.filter((card) => card.rarity === tier);
+    return cards.reduce((sum, card) => sum + card.points, 0) / cards.length;
+  };
+  const evenMix = 13 * (["common", "uncommon", "rare", "legend"].reduce((sum, tier) => sum + tierMean(tier), 0) / 4);
+  assert.ok(evenMix > 4400 && evenMix < 5700, `even mix ≈ ${Math.round(evenMix)}`);
+});
+
+test("each save seed generates its own universe, deterministically", () => {
+  const names = () => adventurePool().slice(0, 25).map((card) => `${card.name}:${card.points}`);
+  const original = names();
+  try {
+    setUniverseSeed("another-save");
+    const other = names();
+    assert.notDeepEqual(other, original, "different seed, different league");
+    setUniverseSeed("test-seed");
+    assert.deepEqual(names(), original, "same seed regenerates the same league");
+  } finally {
+    setUniverseSeed("test-seed");
   }
 });
 
@@ -104,16 +160,21 @@ test("rarity is ranked within groups, so relievers get legends too", () => {
 
 // ---- Packs -----------------------------------------------------------------
 
-test("pack pulls are deterministic per seed and honor slot tiers", () => {
+test("pack pulls are deterministic per seed, varied, with one guaranteed hit", () => {
   const first = openPack("booster", "seed-1");
   const second = openPack("booster", "seed-1");
   const other = openPack("booster", "seed-2");
   assert.deepEqual(first.map((card) => card.id), second.map((card) => card.id));
   assert.notDeepEqual(first.map((card) => card.id), other.map((card) => card.id));
   assert.equal(first.length, PACKS.booster.slots.length);
-  assert.equal(first.filter((card) => card.rarity === "common").length, 3);
-  assert.equal(first[3].rarity, "uncommon");
-  assert.ok(["rare", "legend"].includes(first[4].rarity));
+  // Wild slots can land anywhere; the last slot always hits uncommon+.
+  const rarities = new Set();
+  for (let i = 0; i < 40; i += 1) {
+    const cards = openPack("booster", `spread-${i}`);
+    for (const card of cards) rarities.add(card.rarity);
+    assert.ok(["uncommon", "rare", "legend"].includes(cards[4].rarity), "hit slot never pulls a common");
+  }
+  assert.deepEqual([...rarities].sort(), ["common", "legend", "rare", "uncommon"], "packs span every tier");
 });
 
 test("shop stock is deterministic and restocks by cycle", () => {
@@ -127,18 +188,50 @@ test("shop stock is deterministic and restocks by cycle", () => {
 
 // ---- Starter flow ----------------------------------------------------------
 
-test("starter commons are a legal roster and every star swap stays legal and under the cap", () => {
-  const commons = starterCommons();
-  assert.equal(commons.length, 13);
-  assert.equal(validateRoster({ roster: commons }).length, 0);
-  for (const choice of starterChoices()) {
-    const roster = starterRosterWith(choice.card);
+test("the starter pack is a legal 13-card roster: two rares, eleven commons, under budget", () => {
+  for (const seed of ["seed-a", "seed-b", "seed-c"]) {
+    const roster = starterPack(seed);
     assert.equal(roster.length, 13);
-    assert.equal(validateRoster({ roster }).length, 0, `${choice.key} roster legal`);
-    assert.ok(roster.some((card) => card.id === choice.card.id), "star made the team");
+    assert.equal(validateRoster({ roster }).length, 0, `${seed} roster legal`);
+    assert.equal(roster.filter((card) => card.rarity === "rare").length, 2, `${seed} has two rares`);
+    assert.equal(roster.filter((card) => card.rarity === "common").length, 11, `${seed} rest are commons`);
     const points = roster.reduce((sum, card) => sum + card.points, 0);
-    assert.ok(points <= 2600, `${choice.key} under starter cap (${points})`);
+    assert.ok(points <= pointCap(), `${seed} under the ${pointCap()} cap (${points})`);
   }
+  assert.deepEqual(
+    starterPack("seed-a").map((card) => card.id),
+    starterPack("seed-a").map((card) => card.id),
+    "same seed, same pack"
+  );
+  assert.notDeepEqual(
+    starterPack("seed-a").map((card) => card.id),
+    starterPack("seed-b").map((card) => card.id),
+    "new seed, new pack"
+  );
+});
+
+test("the point cap is always 5000", () => {
+  const save = testSave();
+  assert.equal(pointCap(save), 5000);
+  save.player.badges = ["ironwood", "galehook", "cascade"];
+  assert.equal(pointCap(save), 5000, "badges do not move the cap");
+});
+
+test("beating a trainer for the first time earns a card claim; repeats do not", () => {
+  const save = testSave();
+  const app = { save };
+  const trainer = trainerById("farm-cage-crew");
+  const first = applyOutcome(app, trainer, true);
+  assert.equal(first.cardClaim, true, "first win claims a card");
+  const rematch = applyOutcome(app, trainer, true);
+  assert.equal(rematch.cardClaim, false, "rematch pays coins only");
+  const loss = applyOutcome(app, trainerById("scout-jojo"), false);
+  assert.equal(loss.cardClaim ?? false, false, "losses claim nothing");
+  // The claimable roster is deterministic, so the pick is honored later.
+  const boss = buildNpcTeam(trainer);
+  const stolen = boss.roster[0];
+  addCardToCollection(save, stolen.id);
+  assert.equal(ownedCount(save, stolen.id) >= 1, true);
 });
 
 // ---- NPC teams -------------------------------------------------------------
@@ -151,6 +244,21 @@ test("every trainer builds a legal team within budget, deterministically", () =>
     const again = buildNpcTeam(trainer);
     assert.deepEqual(npc.roster.map((card) => card.id), again.roster.map((card) => card.id));
   }
+});
+
+test("trainer lineups bat best-first and the star position varies by trainer", () => {
+  const starPositions = new Set();
+  for (const trainer of TRAINERS) {
+    const npc = buildNpcTeam(trainer);
+    const lineup = buildTeam(npc).lineup;
+    for (let spot = 1; spot < lineup.length; spot += 1) {
+      assert.ok(lineup[spot - 1].points >= lineup[spot].points, `${trainer.id} bats by points (spot ${spot})`);
+    }
+    const hitters = npc.roster.filter((card) => card.kind === "hitter");
+    const star = hitters.reduce((best, card) => (card.truePoints > best.truePoints ? card : best));
+    starPositions.add(star.position);
+  }
+  assert.ok(starPositions.size >= 2, `the best hitter is not always the same slot (${[...starPositions].join(", ")})`);
 });
 
 // ---- Save layer ------------------------------------------------------------
@@ -264,6 +372,37 @@ test("auto sim is untouched by the hooks: seeded games still reproduce", () => {
   assert.deepEqual(a.boxScore.away.hitters, b.boxScore.away.hitters);
 });
 
+test("the skipper can call for a specific reliever; skipped arms stay available", () => {
+  const { player, npc } = hookTeams();
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "pick-pen" });
+  const state = battle.state;
+  const staff = state.away.pitchers;
+  assert.equal(staff.length, 3);
+  const secondReliever = staff[2];
+  const firstReliever = staff[1];
+  const brought = changePitcher(state, "away", 2);
+  assert.equal(brought.id, secondReliever.id, "the chosen arm takes the hill");
+  assert.equal(pitcherStatus(state, "away").pitcher.id, secondReliever.id);
+  assert.equal(pitcherStatus(state, "away").hasReliefAvailable, true, "the skipped arm is still in the pen");
+  const next = changePitcher(state, "away");
+  assert.equal(next.id, firstReliever.id, "and comes in next");
+  assert.equal(changePitcher(state, "away", 99), null, "bogus targets are refused");
+});
+
+test("stealing third is tougher than stealing second for the same runner", () => {
+  const { player, npc } = hookTeams();
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "steal-third" });
+  const state = battle.state;
+  const runner = { id: "r1", name: "Runner One", speed: 15 };
+  state.bases = [runner, null, null];
+  const second = stealCandidates(state)[0];
+  state.bases = [null, runner, null];
+  const third = stealCandidates(state)[0];
+  assert.equal(second.target, runner.speed, "second base is a straight speed check");
+  assert.equal(third.target, runner.speed - 5, "the catcher gets +5 on the throw to third");
+  assert.ok(third.safeChance < second.safeChance);
+});
+
 test("manual pitching keeps the player's arm in past the plan; the NPC still rolls over", () => {
   const { player, npc } = hookTeams();
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "manual-pen" });
@@ -367,6 +506,114 @@ test("a saved batting order reorders the lineup for future games", () => {
   assert.deepEqual(battle.state.away.lineup.map((player) => player.id), reversed, "battles honor it too");
 });
 
+// ---- Season stats ------------------------------------------------------------
+
+test("game box scores fold into rolling season stats with batch-style rates", async () => {
+  const { gameStars } = await import("../src/adventure/ui/statsScreens.js");
+  const save = testSave();
+  delete save.seasonStats;
+  assert.equal(ensureSeasonStats(save).games, 0, "older saves grow the field in place");
+
+  const { player, npc } = hookTeams();
+  const first = simulateGame(buildTeam(player), buildTeam(npc), "season-g1");
+  const second = simulateGame(buildTeam(player), buildTeam(npc), "season-g2");
+  recordGameStats(save, first.boxScore.away);
+  recordGameStats(save, second.boxScore.away);
+
+  assert.equal(save.seasonStats.games, 2);
+  const hitters = seasonHitters(save);
+  assert.ok(hitters.length >= 9, "every hitter has a season line");
+  const paTotal = first.boxScore.away.hitters.reduce((sum, line) => sum + line.pa, 0)
+    + second.boxScore.away.hitters.reduce((sum, line) => sum + line.pa, 0);
+  assert.equal(hitters.reduce((sum, line) => sum + line.pa, 0), paTotal, "PAs accumulate across games");
+  for (const line of hitters) {
+    assert.ok(line.avg >= 0 && line.avg <= 1);
+    assert.ok(line.ops >= 0, `${line.name} has an OPS`);
+    assert.equal(line.games, 2);
+  }
+  const wpaTotal = first.boxScore.away.hitters.reduce((sum, line) => sum + line.wpa, 0)
+    + second.boxScore.away.hitters.reduce((sum, line) => sum + line.wpa, 0);
+  const seasonWpa = hitters.reduce((sum, line) => sum + line.wpa, 0);
+  assert.ok(Math.abs(seasonWpa - wpaTotal) < 1e-9, "WPA accumulates across games");
+  const pitchers = seasonPitchers(save);
+  assert.ok(pitchers.length >= 1);
+  const outsTotal = first.boxScore.away.pitchers.reduce((sum, line) => sum + line.outs, 0)
+    + second.boxScore.away.pitchers.reduce((sum, line) => sum + line.outs, 0);
+  assert.equal(pitchers.reduce((sum, line) => sum + line.outs, 0), outsTotal, "outs accumulate");
+
+  const stars = gameStars(first.boxScore, "away");
+  assert.equal(stars.length, 3);
+  assert.ok(stars[0].wpa >= stars[1].wpa && stars[1].wpa >= stars[2].wpa, "stars rank by WPA");
+  assert.ok(stars.every((star) => star.summary.length > 0));
+});
+
+test("sim series carry per-game box scores so season stats include them", () => {
+  const save = testSave();
+  const { player, npc } = hookTeams();
+  const series = runSimSeries({ playerManager: player, npcManager: npc, bestOf: 3, seed: "sim-stats" });
+  for (const game of series.games) {
+    assert.ok(game.boxScore, `game ${game.gameNumber} has a box score`);
+    recordGameStats(save, game.playerIsAway ? game.boxScore.away : game.boxScore.home);
+  }
+  assert.equal(save.seasonStats.games, series.games.length);
+  assert.ok(seasonHitters(save).every((line) => line.games === series.games.length));
+});
+
+test("replacement picks default to the outgoing card's position; 'all' widens to the kind", async () => {
+  const { benchCards } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const roster = save.roster.cardIds.map((id) => cardById(id));
+  const pool = adventurePool();
+  const spare = (filter) => pool.find((card) => filter(card) && !save.roster.cardIds.includes(card.id));
+  const spares = [
+    spare((card) => card.position === "C"),
+    spare((card) => card.position === "1B"),
+    spare((card) => card.role === "SP"),
+    spare((card) => card.role === "RP")
+  ];
+  for (const card of spares) addCardToCollection(save, card.id);
+
+  const catcher = roster.find((card) => card.position === "C");
+  const positionOnly = benchCards(save, catcher, "position");
+  assert.ok(positionOnly.length >= 1);
+  assert.ok(positionOnly.every((card) => card.position === "C"), "default view is same-position only");
+  const allBats = benchCards(save, catcher, "all");
+  assert.ok(allBats.some((card) => card.position === "1B"), "'all' shows other positions");
+  assert.ok(allBats.every((card) => card.kind === "hitter"), "'all' stays within the kind");
+
+  const starter = roster.find((card) => card.role === "SP");
+  assert.ok(benchCards(save, starter, "position").every((card) => card.role === "SP"), "pitchers filter by role");
+  assert.ok(benchCards(save, starter, "all").some((card) => card.role === "RP"), "'all' shows the whole pen");
+});
+
+test("the battle screen tags batter, pitcher, and runners with hoverable card ids", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "hover-tags" });
+  battle.state.bases[0] = { id: "runner-card-id", name: "Runner One", speed: 15 };
+  const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
+  const html = battleScreen.render(app);
+  const phase = battlePhase(battle);
+  assert.ok(html.includes(`data-card-id="${phase.batter.id}"`), "batter is hoverable");
+  assert.ok(html.includes(`data-card-id="${phase.opposingPitcher.id}"`), "pitcher is hoverable");
+  assert.ok(html.includes('data-card-id="runner-card-id"'), "occupied base is hoverable");
+});
+
+test("the game log lines carry player-perspective WPA", async () => {
+  const { gameLogLine } = await import("../src/adventure/ui/statsScreens.js");
+  const swing = { inning: 3, half: "top", batter: "Al Smith", pitcher: "Bo Diaz", result: "HR", runs: 2, scoreAfter: { away: 3, home: 1 }, wpa: 0.18 };
+  const yours = gameLogLine(swing, "away");
+  assert.ok(yours.includes("T3"), "inning tag");
+  assert.ok(yours.includes("A.SMITH"), "batter");
+  assert.ok(yours.includes("+18%"), "your swing reads positive");
+  assert.ok(yours.includes("3-1"), "score shows when runs score");
+  const theirs = gameLogLine({ ...swing, half: "bottom" }, "away");
+  assert.ok(theirs.includes("-18%"), "their swing reads negative");
+  const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
+  assert.ok(pen.includes("PEN"), "pitching changes log without WPA");
+});
+
 // ---- Battle controller -----------------------------------------------------
 
 function playToCompletion(seed) {
@@ -441,13 +688,6 @@ test("runSimSeries clinches at the majority and alternates home games", () => {
     series.games.map((game) => `${game.playerRuns}-${game.npcRuns}`),
     again.games.map((game) => `${game.playerRuns}-${game.npcRuns}`)
   );
-});
-
-test("point cap rises with badges", () => {
-  const save = testSave();
-  assert.equal(pointCap(save), 2600);
-  save.player.badges.push("ironwood");
-  assert.equal(pointCap(save), 3000);
 });
 
 test("attempt numbers derive distinct battle seeds", () => {

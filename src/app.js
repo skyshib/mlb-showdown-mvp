@@ -101,6 +101,14 @@ const cardPreview = document.createElement("div");
 cardPreview.className = "hover-card-preview";
 cardPreview.setAttribute("aria-hidden", "true");
 document.body.append(cardPreview);
+const chartTip = document.createElement("div");
+chartTip.className = "chart-tip";
+chartTip.setAttribute("aria-hidden", "true");
+chartTip.hidden = true;
+const chartTipValue = document.createElement("strong");
+const chartTipPlay = document.createElement("span");
+chartTip.append(chartTipValue, chartTipPlay);
+document.body.append(chartTip);
 
 let state = loadState() ?? defaultState();
 let selectedLineupMove = null;
@@ -1210,11 +1218,17 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handlePointerMove = (event) => {
+    const chartZone = event.target.closest?.("[data-wp-value]");
+    if (chartZone) showChartTip(chartZone, event.clientX, event.clientY);
+    else hideChartTip();
     if (!hoveredPreviewRow) return;
     showHoverCard(hoveredPreviewRow, event.clientX, event.clientY);
   };
 
   const handlePointerOut = (event) => {
+    if (event.target.closest?.("[data-wp-value]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-wp-value]"))) {
+      hideChartTip();
+    }
     const previewTarget = event.target.closest(".player-name-preview");
     if (!previewTarget || (event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) return;
     hoveredPreviewRow = null;
@@ -1254,6 +1268,7 @@ function clearHoverCardPreviewBindings() {
   hoverPreviewController?.abort();
   hoverPreviewController = null;
   hideHoverCard();
+  hideChartTip();
 }
 
 function invalidateBatch() {
@@ -2132,6 +2147,26 @@ function showHoverCard(row, clientX, clientY) {
 function hideHoverCard() {
   cardPreview.classList.remove("active");
   cardPreview.setAttribute("aria-hidden", "true");
+}
+
+function showChartTip(zone, clientX, clientY) {
+  chartTipValue.textContent = zone.dataset.wpValue ?? "";
+  chartTipPlay.textContent = zone.dataset.wpPlay ?? "";
+  chartTip.hidden = false;
+
+  const gap = 14;
+  const rect = chartTip.getBoundingClientRect();
+  let x = clientX - rect.width / 2;
+  let y = clientY - rect.height - gap;
+  if (y < gap) y = clientY + gap;
+  x = Math.max(gap, Math.min(x, window.innerWidth - rect.width - gap));
+
+  chartTip.style.left = `${Math.round(x)}px`;
+  chartTip.style.top = `${Math.round(y)}px`;
+}
+
+function hideChartTip() {
+  chartTip.hidden = true;
 }
 
 function renderGameDetail(game) {

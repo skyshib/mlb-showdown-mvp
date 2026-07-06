@@ -181,6 +181,9 @@ h1.gq-logo {
 .gq-base-1 { top: 0; right: 0; }
 .gq-base-h { bottom: 0; right: 0; border-radius: 50%; }
 
+/* Anything tagged with a card id floats the full card on hover. */
+[data-card-id] { cursor: help; }
+
 .gq-outs i {
   display: inline-block;
   width: 2.2cqw;

@@ -7,14 +7,19 @@ const HITTER_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITT
 const PITCHER_SLOTS = ["SP", "SP", "RP", "RP"];
 
 // Archetype scoring biases which card wins a slot; the greedy budget keeps
-// the roster legal and affordable either way.
+// the roster legal and affordable either way. Scoring reads TRUE value, not
+// the noisy printed price — trainers scout talent, then pay the sticker.
 const ARCHETYPES = {
-  balanced: (card) => card.points,
-  contact: (card) => (card.kind === "hitter" ? card.onBase * 30 + card.points * 0.2 : card.points),
-  speed: (card) => (card.kind === "hitter" ? card.speed * 25 + card.points * 0.3 : card.points),
-  power: (card) => (card.kind === "hitter" ? chartSlots(card, "HR") * 90 + card.points * 0.4 : card.points),
-  ace: (card) => (card.kind === "pitcher" ? card.points * 2 : card.points)
+  balanced: (card) => worth(card),
+  contact: (card) => (card.kind === "hitter" ? card.onBase * 30 + worth(card) * 0.2 : worth(card)),
+  speed: (card) => (card.kind === "hitter" ? card.speed * 25 + worth(card) * 0.3 : worth(card)),
+  power: (card) => (card.kind === "hitter" ? chartSlots(card, "HR") * 90 + worth(card) * 0.4 : worth(card)),
+  ace: (card) => (card.kind === "pitcher" ? worth(card) * 2 : worth(card))
 };
+
+function worth(card) {
+  return card.truePoints ?? card.points;
+}
 
 function chartSlots(card, result) {
   return card.chart.reduce((sum, row) => sum + (row.result === result ? row.to - row.from + 1 : 0), 0);
@@ -27,16 +32,18 @@ function slotMatches(slot, card) {
 }
 
 // Greedy under budget: fill slots one at a time, always leaving enough budget
-// to cover the remaining slots with the cheapest unused fits, and spend the
-// rest of the room on the best archetype fit. Ace staffs shop for pitching
-// first so the budget lands on the mound.
+// to cover the remaining slots with the cheapest unused fits, and spend most of
+// the room on the best archetype fit. Early slots see the most room, so the
+// fill ORDER is shuffled per trainer — which position lands the star is part of
+// the trainer's identity, not always the catcher. Ace staffs still shop for
+// pitching first so the budget lands on the mound.
 export function buildNpcTeam(trainer) {
   const pool = adventurePool();
   const score = ARCHETYPES[trainer.archetype] ?? ARCHETYPES.balanced;
   const rng = createRng(`npc-team:${trainer.teamSeed}`);
   const slots = trainer.archetype === "ace"
-    ? [...PITCHER_SLOTS, ...HITTER_SLOTS]
-    : [...HITTER_SLOTS, ...PITCHER_SLOTS];
+    ? [...shuffled(PITCHER_SLOTS, rng), ...shuffled(HITTER_SLOTS, rng)]
+    : shuffled([...HITTER_SLOTS, ...PITCHER_SLOTS], rng);
 
   const used = new Set();
   const roster = [];
@@ -61,7 +68,9 @@ export function buildNpcTeam(trainer) {
   for (let index = 0; index < slots.length; index += 1) {
     const slot = slots[index];
     const reserve = reserveFor(slots.slice(index + 1));
-    const room = trainer.pointBudget - spent - reserve;
+    // Spend only a jittered share of the room, so the surplus spreads across
+    // several slots instead of one mega star followed by scraps.
+    const room = (trainer.pointBudget - spent - reserve) * (0.6 + 0.4 * rng.next());
     const fits = unusedFits(slot);
     const affordable = fits.filter((card) => card.points <= room);
     const candidates = (affordable.length ? affordable : fits.sort((a, b) => a.points - b.points).slice(0, 1))
@@ -75,11 +84,27 @@ export function buildNpcTeam(trainer) {
     spent += pick.points;
   }
 
+  // Present (and bat) the squad best-first: hitters by printed points, then
+  // pitchers by printed points, so the top starter also opens game 1.
+  const byPoints = (a, b) => b.points - a.points || a.name.localeCompare(b.name);
+  const hitters = roster.filter((card) => card.kind === "hitter").sort(byPoints);
+  const pitchers = roster.filter((card) => card.kind === "pitcher").sort(byPoints);
+
   return {
     id: trainer.id,
     name: trainer.name,
-    roster,
+    roster: [...hitters, ...pitchers],
     lineupAssignments: {},
+    battingOrder: hitters.map((card) => card.id),
     points: spent
   };
+}
+
+function shuffled(slots, rng) {
+  const copy = [...slots];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = rng.int(0, i);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }

@@ -1484,6 +1484,34 @@ button.roster-slot[draggable="true"]:active {
   stroke-width: 2;
 }
 
+.wp-hover-zone:hover {
+  fill: rgba(11, 107, 83, 0.08);
+}
+
+.chart-tip {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  max-width: 320px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 6px 16px rgba(28, 37, 33, 0.18);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.chart-tip strong {
+  font-size: 13px;
+}
+
+.chart-tip span {
+  color: var(--muted);
+}
+
 .wpa-pos {
   color: var(--accent-dark);
   font-weight: 600;

@@ -1,7 +1,8 @@
-import { escapeHtml, menuHtml, clampIndex } from "./helpers.js";
+import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js";
 import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins } from "../region.js";
 import { timesBeaten, managerFor, rosterPoints, pointCap } from "../state.js";
 import { validateRoster } from "../../rules/draft.js";
+import { buildNpcTeam } from "../npcTeams.js";
 import { startTrainerBattle } from "./battleScreen.js";
 
 export function rosterProblems(save) {
@@ -41,6 +42,7 @@ function mapItems(app) {
   items.push({ section: "CEDAR YARDS", label: "CARD SHOP", run: (a) => a.go("shop", { menuIndex: 0 }) });
   items.push({ section: "YOUR CLUB", label: "TEAM", run: (a) => a.go("team", { index: 0, mode: "roster" }) });
   items.push({ section: "YOUR CLUB", label: "BATTING ORDER", run: (a) => a.go("lineup", { index: 0 }) });
+  items.push({ section: "YOUR CLUB", label: "SEASON STATS", run: (a) => a.go("seasonStats", { index: 0, view: "hitters" }) });
   items.push({ section: "YOUR CLUB", label: "BINDER", run: (a) => a.go("binder", { index: 0 }) });
   return items;
 }
@@ -111,9 +113,31 @@ function badgeLine(save) {
     .join("");
 }
 
+// The scouting report: the trainer's full squad, hitters then arms.
+function scoutRows(trainer) {
+  const npc = buildNpcTeam(trainer);
+  return [
+    ...npc.roster.filter((card) => card.kind === "hitter"),
+    ...npc.roster.filter((card) => card.kind === "pitcher")
+  ];
+}
+
 export const trainerIntroScreen = {
   render(app) {
     const trainer = trainerById(app.screen.trainerId);
+    if (app.screen.mode === "scout") {
+      const rows = scoutRows(trainer);
+      const index = clampIndex(app.screen.scoutIndex ?? 0, rows.length);
+      const selected = rows[index];
+      return `<div class="gq-screen">
+        <div class="gq-topbar"><span>SCOUTING ${escapeHtml(trainer.name)}</span><span>${buildNpcTeam(trainer).points} PT</span></div>
+        <div class="gq-body"><div class="gq-columns">
+          <div class="gq-frame gq-scroll">${menuHtml(rows.map((card) => ({ html: cardLine(card) })), index)}</div>
+          <div>${selected ? cardPanelHtml(selected) : ""}</div>
+        </div></div>
+        <div class="gq-textbox"><p class="gq-dim">Hover or move the cursor to read a card. X to go back.</p></div>
+      </div>`;
+    }
     const beaten = timesBeaten(app.save, trainer.id) > 0;
     const dialog = trainer.dialog.intro;
     const onLastPage = app.screen.page >= dialog.length - 1;
@@ -129,30 +153,51 @@ export const trainerIntroScreen = {
       <div class="gq-textbox">
         <p>${escapeHtml(dialog[Math.min(app.screen.page, dialog.length - 1)])}</p>
         ${onLastPage
-          ? menuHtml([{ label: "PLAY BALL" }, { label: "SET LINEUP" }, { label: "WALK AWAY" }], app.screen.menuIndex ?? 0)
+          ? menuHtml(
+              [{ label: "PLAY BALL" }, { label: "SCOUT ROSTER" }, { label: "SET LINEUP" }, { label: "WALK AWAY" }],
+              app.screen.menuIndex ?? 0
+            )
           : `<p class="gq-blink gq-right">&#9660;</p>`}
       </div>
     </div>`;
   },
+  hoverCard(app, index) {
+    if (app.screen.mode !== "scout") return null;
+    return scoutRows(trainerById(app.screen.trainerId))[index] ?? null;
+  },
   key(app, key) {
     const trainer = trainerById(app.screen.trainerId);
+    if (app.screen.mode === "scout") {
+      const rows = scoutRows(trainer);
+      if (key === "up" || key === "down") {
+        app.screen.scoutIndex = clampIndex((app.screen.scoutIndex ?? 0) + (key === "down" ? 1 : -1), rows.length);
+      } else if (key === "b" || key === "a") {
+        app.screen.mode = null;
+      }
+      app.rerender();
+      return;
+    }
     const onLastPage = app.screen.page >= trainer.dialog.intro.length - 1;
     if (!onLastPage) {
       if (key === "a") app.screen.page += 1;
       else if (key === "b") app.go("map");
     } else if (key === "up" || key === "down") {
-      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), 3);
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), 4);
     } else if (key === "a") {
       const choice = app.screen.menuIndex ?? 0;
       if (choice === 0) return startTrainerBattle(app, trainer);
       if (choice === 1) {
+        app.screen.mode = "scout";
+        app.screen.scoutIndex = 0;
+      } else if (choice === 2) {
         return app.go("lineup", {
           index: 0,
           returnTo: "trainerIntro",
           returnData: { trainerId: trainer.id, page: app.screen.page, menuIndex: 0 }
         });
+      } else {
+        app.go("map");
       }
-      app.go("map");
     } else if (key === "b") {
       app.go("map");
     }
