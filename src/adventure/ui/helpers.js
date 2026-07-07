@@ -134,7 +134,7 @@ export function describeEvent(event) {
       lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} It's ${event.scoreAfter.away}-${event.scoreAfter.home}.`);
     }
     if (event.outsAfter >= 3) {
-      lines.push(`Side retired. ${event.half === "top" ? "Bottom" : "Top"} ${event.half === "top" ? event.inning : event.inning + 1} coming up.`);
+      lines.push(sideRetiredLine(event));
     }
     return lines;
   }
@@ -164,9 +164,21 @@ export function describeEvent(event) {
     lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} It's ${event.scoreAfter.away}-${event.scoreAfter.home}.`);
   }
   if (event.outsAfter >= 3) {
-    lines.push(`Side retired. ${event.half === "top" ? "Bottom" : "Top"} ${event.half === "top" ? event.inning : event.inning + 1} coming up.`);
+    lines.push(sideRetiredLine(event));
   }
   return lines;
+}
+
+// The third out either turns the inning over or ends the game — never
+// announce a next half-inning that won't be played.
+function sideRetiredLine(event) {
+  const decided = event.inning >= 9 && (
+    event.half === "bottom"
+      ? event.scoreAfter.home !== event.scoreAfter.away
+      : event.scoreAfter.home > event.scoreAfter.away
+  );
+  if (decided) return "That's the ballgame!";
+  return `Side retired. ${event.half === "top" ? "Bottom" : "Top"} ${event.half === "top" ? event.inning : event.inning + 1} coming up.`;
 }
 
 export function halfLabel(state) {

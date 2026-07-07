@@ -804,6 +804,26 @@ test("the NPC's mound arm shows its fatigue subtraction like the player's", asyn
   assert.ok(html.includes(`&minus;${phase.opposingMound.fatiguePenalty} TIRED`), "the subtraction shows on their arm too");
 });
 
+test("the third out narrates the next half-inning only if one is coming", async () => {
+  const { describeEvent } = await import("../src/adventure/ui/helpers.js");
+  const out = (over = {}) => ({
+    batter: "Al Smith", pitcher: "Bo Diaz", result: "GB", runs: 0,
+    outsAfter: 3, half: "bottom", inning: 9,
+    scoreAfter: { away: 5, home: 3 }, ...over
+  });
+  const finalOut = describeEvent(out()).join(" ");
+  assert.ok(finalOut.includes("That's the ballgame!"), "a decided bottom 9 ends the game");
+  assert.ok(!finalOut.includes("coming up"), "no phantom top 10");
+  const midGame = describeEvent(out({ inning: 5 })).join(" ");
+  assert.ok(midGame.includes("Top 6 coming up."), "mid-game turnovers still announce the next half");
+  const tiedNinth = describeEvent(out({ scoreAfter: { away: 3, home: 3 } })).join(" ");
+  assert.ok(tiedNinth.includes("Top 10 coming up."), "a tie means free baseball");
+  const topNine = describeEvent(out({ half: "top", scoreAfter: { away: 2, home: 4 } })).join(" ");
+  assert.ok(topNine.includes("That's the ballgame!"), "home leading after the top of the 9th ends it");
+  const topNineTrailing = describeEvent(out({ half: "top", scoreAfter: { away: 4, home: 2 } })).join(" ");
+  assert.ok(topNineTrailing.includes("Bottom 9 coming up."), "the home team still gets its licks");
+});
+
 test("the game log lines carry player-perspective WPA", async () => {
   const { gameLogLine } = await import("../src/adventure/ui/statsScreens.js");
   const swing = { inning: 3, half: "top", batter: "Al Smith", pitcher: "Bo Diaz", result: "HR", runs: 2, scoreAfter: { away: 3, home: 1 }, wpa: 0.18 };
