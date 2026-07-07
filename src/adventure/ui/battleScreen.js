@@ -256,8 +256,51 @@ function afterAction(app, events, presetLines = null) {
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
   const phase = battlePhase(app.screen.battle);
-  if (phase.type === "over") resolveGameEnd(app, phase);
+  if (phase.type === "over") {
+    // Land on the FINAL screen first: the last play and the outcome, stated
+    // plainly, before the box score.
+    app.go("gameOver", {
+      trainerId: app.screen.trainerId,
+      battle: app.screen.battle,
+      lines: app.screen.lines,
+      phase
+    });
+  }
 }
+
+// ---- Game over ---------------------------------------------------------------
+
+export const gameOverScreen = {
+  render(app) {
+    const trainer = trainerById(app.screen.trainerId);
+    const battle = app.screen.battle;
+    const phase = app.screen.phase;
+    const you = phase.score[battle.playerSide];
+    const them = phase.score[battle.npcSide];
+    const innings = battle.state.inning;
+    const lines = (app.screen.lines ?? []).filter(Boolean);
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>FINAL</span><span>VS ${escapeHtml(trainer.name)}</span></div>
+      <div class="gq-body gq-center">
+        <div class="gq-frame gq-title-frame">
+          <b style="font-size:7cqw">${phase.playerWon ? "&#9733; YOU WIN! &#9733;" : "YOU LOSE..."}</b>
+          <p class="gq-mt" style="font-size:4.6cqw"><b>YOU ${you} &middot; THEM ${them}</b></p>
+          <p class="gq-dim">${battle.state.walkoff ? "WALK-OFF! " : ""}${innings !== 9 ? `${innings} INNINGS` : "9 INNINGS"} &middot; ${battle.playerSide === "home" ? "YOUR PARK" : "ON THE ROAD"}</p>
+        </div>
+        <div class="gq-frame" style="text-align:left">
+          <p class="gq-dim">THE FINAL PLAY:</p>
+          ${lines.length ? lines.map((line) => `<p>${line}</p>`).join("") : "<p>The last out is in the book.</p>"}
+        </div>
+      </div>
+      <div class="gq-textbox"><p class="gq-blink">Z — BOX SCORE</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key !== "a" && key !== "b") return;
+    resolveGameEnd(app, app.screen.phase);
+    app.rerender();
+  }
+};
 
 // Every finished game routes through the box-score screen first, then on to
 // the series break or the final result.

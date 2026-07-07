@@ -4,7 +4,7 @@ import { hydratePhotos } from "./photos.js";
 import { cardPanelHtml, escapeHtml } from "./ui/helpers.js";
 import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, starterRevealScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
-import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
+import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen } from "./ui/collectionScreens.js";
 import { gameStatsScreen, seasonStatsScreen, championshipScreen } from "./ui/statsScreens.js";
 
@@ -18,6 +18,7 @@ const SCREENS = {
   trainerIntro: trainerIntroScreen,
   ambush: ambushScreen,
   battle: battleScreen,
+  gameOver: gameOverScreen,
   seriesBreak: seriesBreakScreen,
   battleResult: battleResultScreen,
   simSeries: simSeriesScreen,

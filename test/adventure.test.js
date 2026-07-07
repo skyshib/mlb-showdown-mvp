@@ -760,6 +760,34 @@ test("series games can put the player at home, batting second", () => {
   assert.equal(roadGame.playerSide, "away", "single games keep the player on the road");
 });
 
+test("games land on a FINAL screen naming the winner and the last play", async () => {
+  const { battleScreen, gameOverScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  startSeries(save, trainer.id, 1);
+  const { player, npc } = hookTeams();
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "final-screen" });
+  const app = {
+    save,
+    screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] },
+    go(name, data) { this.screen = { name, ...data }; },
+    rerender() {}
+  };
+  // Ride FAST FORWARD (always the last menu item) until the game ends.
+  let guard = 300;
+  while (app.screen.name === "battle" && guard-- > 0) {
+    battleScreen.key(app, "up"); // wrap to the last item
+    battleScreen.key(app, "a");
+  }
+  assert.equal(app.screen.name, "gameOver", "the game ends on the FINAL screen");
+  const html = gameOverScreen.render(app);
+  assert.ok(html.includes("YOU WIN!") || html.includes("YOU LOSE"), "the outcome is stated plainly");
+  assert.ok(html.includes("THE FINAL PLAY:"), "the last play is shown");
+  assert.match(html.replace(/<[^>]+>/g, " "), /YOU \d+ .* THEM \d+/, "the final score reads from your side");
+  gameOverScreen.key(app, "a");
+  assert.equal(app.screen.name, "gameStats", "Z continues to the box score");
+});
+
 test("the NPC's mound arm shows its fatigue subtraction like the player's", async () => {
   const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
   const { player, npc } = hookTeams();
