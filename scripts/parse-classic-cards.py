@@ -23,7 +23,7 @@ def parse_range(token):
     if not token or token == "-":
         return None
     if token.endswith("+"):  # "20+" means that number and everything above
-        return [int(token[:-1]), 30]
+        return [int(token[:-1]), None]
     parts = token.split("-")
     if not parts[0].isdigit():
         return None
@@ -48,7 +48,7 @@ def parse_chart(table_html):
 
 def main():
     cards = []
-    seen = set()
+    seen = {}
     for fname in sorted(os.listdir(PAGES)):
         html = open(os.path.join(PAGES, fname), encoding="utf-8", errors="replace").read()
         for row in ROW_RE.findall(html):
@@ -78,18 +78,21 @@ def main():
             name = re.sub(r"^\*+\s*", "", raw_name).strip()
             is_foil = slug.startswith("foil-")
             key = (year, edition, number, name)
-            if key in seen and is_foil:
-                continue  # foil duplicates of the base card
             if key in seen:
+                # A foil printing of a card we already kept: mark the base
+                # card as having a foil version instead of duplicating it.
+                if is_foil:
+                    seen[key]["foil"] = True
                 continue
-            seen.add(key)
             is_pitcher = "PU" in chart or positions.split("|")[0].strip().split("+")[0].strip() in ("Starter", "Reliever", "Closer")
-            cards.append({
+            record = {
                 "slug": slug, "name": name, "team": team, "year": year,
                 "edition": edition, "number": number, "points": points,
                 "obc": obc, "spd": spd, "positions": positions, "hand": hand,
                 "pitcher": is_pitcher, "chart": chart, "foil": is_foil,
-            })
+            }
+            seen[key] = record
+            cards.append(record)
     print(f"parsed {len(cards)} unique cards", file=sys.stderr)
     json.dump(cards, open(os.path.join(os.path.dirname(__file__), "classic-raw.json"), "w"))
 

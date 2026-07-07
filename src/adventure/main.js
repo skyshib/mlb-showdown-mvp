@@ -1,6 +1,5 @@
 import { loadSave } from "./state.js";
 import { setUniverseSeed, cardById } from "./packs.js";
-import { hydratePhotos } from "./photos.js";
 import { cardPanelHtml } from "./ui/helpers.js";
 import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, starterRevealScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
@@ -59,8 +58,6 @@ const app = {
     const screen = SCREENS[this.screen.name] ?? titleScreen;
     root.innerHTML = screen.render(this);
     screen.mounted?.(this);
-    // Real-player cards get their Wikipedia portraits filled in.
-    hydratePhotos(root);
     // Rerendering resets scroll positions; keep the cursor row in view so
     // long lists (rosters, binder) can actually be walked.
     root.querySelector(".gq-cursor")?.scrollIntoView({ block: "nearest" });
@@ -175,7 +172,6 @@ document.addEventListener("mouseover", (event) => {
     return;
   }
   tooltip.innerHTML = cardPanelHtml(card);
-  hydratePhotos(tooltip);
   tooltip.hidden = false;
 });
 
@@ -210,7 +206,6 @@ document.addEventListener("click", (event) => {
     return;
   }
   tooltip.innerHTML = cardPanelHtml(card);
-  hydratePhotos(tooltip);
   tooltip.hidden = false;
   const anchor = tagged.getBoundingClientRect();
   const pad = 10;

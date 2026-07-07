@@ -192,36 +192,38 @@ h1.gq-logo {
   margin: 2cqw 0;
 }
 
-/* ---- Real-player portraits (Wikipedia thumbnails) ---- */
+/* ---- Foil cards ---- */
 
-/* Photos render through a DMG green wash so real faces sit inside the
-   Game Boy palette instead of fighting it. */
-.gq-card-portrait {
+/* Foil printings (and legends everywhere) get a slow shine sweep and a
+   twinkling star — as much sparkle as four shades of green allow. */
+.gq-foil {
   position: relative;
-  height: 22cqw;
-  margin-bottom: 1cqw;
   overflow: hidden;
-  border: 0.5cqw solid var(--gb-darkest);
-  background: var(--gb-light);
 }
-.gq-card-portrait:empty { display: none; }
-.gq-card-portrait img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: top center;
-  filter: grayscale(1) sepia(1) hue-rotate(55deg) saturate(1.6) brightness(0.95) contrast(1.05);
-  image-rendering: pixelated;
-}
-.gq-photo-credit {
+.gq-foil::after {
+  content: "";
   position: absolute;
-  right: 0.5cqw;
-  bottom: 0.3cqw;
-  font-size: 1.8cqw;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.4) 50%, transparent 58%);
+  transform: translateX(-110%);
+  animation: gq-foil-sweep 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.gq-foil::before {
+  content: "\2726";
+  position: absolute;
+  top: 0.6cqw;
+  right: 1cqw;
+  z-index: 1;
   color: var(--gb-lightest);
-  background: var(--gb-darkest);
-  padding: 0 0.6cqw;
-  letter-spacing: 0.05em;
+  text-shadow: 0 0 1cqw var(--gb-light);
+  animation: gq-blink 1.3s steps(2) infinite;
+  pointer-events: none;
+}
+@keyframes gq-foil-sweep {
+  0% { transform: translateX(-110%); }
+  55% { transform: translateX(110%); }
+  100% { transform: translateX(110%); }
 }
 
 .gq-outs i {

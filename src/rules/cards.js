@@ -23,6 +23,8 @@ export function compactChart(chart) {
 }
 
 export function formatRange(entry) {
+  // Open-ended ranges print as the card does ("21+"), even past the d20.
+  if (!Number.isFinite(entry.to)) return `${entry.from}+`;
   return entry.from === entry.to ? String(entry.from) : `${entry.from}-${entry.to}`;
 }
 

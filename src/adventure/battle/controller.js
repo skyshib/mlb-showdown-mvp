@@ -32,9 +32,11 @@ export function createBattle({ playerManager, npcManager, trainer, seed, starter
     playerIsAway ? playerTeam : npcTeam,
     playerIsAway ? npcTeam : playerTeam
   );
-  // The player manages the mound and the basepaths; the NPC stays on
-  // autopilot (pitching plan plus AI profile).
-  state.manualPitchingFor = playerSide;
+  // Both mounds run manual: the player pulls their own arms, and the NPC
+  // skipper decides by AI profile — which means NPC pitchers visibly tire
+  // (and ride their fatigue) under exactly the same rules as yours, instead
+  // of being silently rotated out by a pitching plan.
+  state.manualPitchingFor = "both";
   state.deferAdvancesFor = playerSide;
   return {
     seed,

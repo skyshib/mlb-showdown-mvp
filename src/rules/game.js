@@ -653,7 +653,9 @@ function currentPitcher(state, side) {
   const runtime = state.pitching[side];
   const team = state[side];
   // Manual mode: the arm stays in (and tires) until changePitcher is called.
-  if (state.manualPitchingFor !== side) {
+  // "both" puts every mound under manual control (the adventure's NPC skipper
+  // makes its own calls); a single side string covers just that side.
+  if (state.manualPitchingFor !== side && state.manualPitchingFor !== "both") {
     while (runtime.pitcherIndex < team.pitchers.length - 1) {
       const pitcher = team.pitchers[runtime.pitcherIndex];
       if (runtime.outsRecorded < pitcher.plannedOuts) break;

@@ -497,7 +497,7 @@ test("stealing third is tougher than stealing second for the same runner", () =>
   assert.ok(third.safeChance < second.safeChance);
 });
 
-test("manual pitching keeps the player's arm in past the plan; the NPC still rolls over", () => {
+test("manual pitching keeps every arm in until pulled — yours by hand, theirs by the AI", async () => {
   const { player, npc } = hookTeams();
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "manual-pen" });
   const state = battle.state;
@@ -505,9 +505,16 @@ test("manual pitching keeps the player's arm in past the plan; the NPC still rol
   state.pitching.away.outsRecorded = starter.plannedOuts + 6;
   assert.equal(pitcherStatus(state, "away").pitcher.id, starter.id, "player's starter stays until pulled");
   assert.ok(pitcherStatus(state, "away").fatiguePenalty >= 1, "and pays for it in fatigue");
+  // The NPC mound runs manual too: their starter stays in (and tires) until
+  // the AI skipper pulls him — no silent plan-based swaps.
   const npcStarter = pitcherStatus(state, "home").pitcher;
   state.pitching.home.outsRecorded = npcStarter.plannedOuts;
-  assert.notEqual(pitcherStatus(state, "home").pitcher.id, npcStarter.id, "NPC pen still follows the plan");
+  assert.equal(pitcherStatus(state, "home").pitcher.id, npcStarter.id, "NPC arm stays until the AI pulls it");
+  assert.ok(pitcherStatus(state, "home").fatiguePenalty >= 1, "and shows real fatigue while he waits");
+  const { npcMaybePullPitcher, AI_PROFILES } = await import("../src/adventure/battle/ai.js");
+  const pulled = npcMaybePullPitcher(state, "home", AI_PROFILES.conservative);
+  assert.ok(pulled, "a tired NPC arm gets pulled by the profile");
+  assert.notEqual(pitcherStatus(state, "home").pitcher.id, npcStarter.id);
 });
 
 test("a sacrifice bunt trades an out to move the runners", () => {
@@ -703,7 +710,7 @@ test("series games can put the player at home, batting second", () => {
   const homeGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "home-game", playerIsAway: false });
   assert.equal(homeGame.playerSide, "home");
   assert.equal(homeGame.npcSide, "away");
-  assert.equal(homeGame.state.manualPitchingFor, "home", "the player manages their own mound at home");
+  assert.equal(homeGame.state.manualPitchingFor, "both", "both mounds run manual in battles");
   const phase = battlePhase(homeGame);
   assert.equal(phase.type, "player-pitching", "top 1 at home: the NPC bats first");
   const roadGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "road-game" });
@@ -772,6 +779,13 @@ test("every league builds a working universe with a legal starter pack", async (
     const classic = adventurePool();
     assert.ok(classic.every((card) => card.points === card.truePoints), "classic points are authentic — no noise");
     assert.ok(classic.every((card) => card.real && card.setTag), "classic cards carry their set tag");
+    assert.ok(classic.every((card) => /'\d\d/.test(card.name)), "the card year rides with the name");
+    assert.ok(classic.some((card) => card.foil), "foil printings are flagged");
+    const openEnded = classic.find((card) => card.chart.some((row) => !Number.isFinite(row.to)));
+    assert.ok(openEnded, "open-ended chart rows survive as printed");
+    const { formatRange } = await import("../src/rules/cards.js");
+    const openRow = openEnded.chart.find((row) => !Number.isFinite(row.to));
+    assert.equal(formatRange(openRow), `${openRow.from}+`, "and format like the card, e.g. 21+");
     setUniverseSeed("league-test", "mlb-history");
     const history = adventurePool();
     assert.ok(history.some((card) => card.points !== card.truePoints), "MLB league keeps the bargain noise");

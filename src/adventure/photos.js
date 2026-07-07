@@ -1,3 +1,7 @@
+// CURRENTLY UNWIRED: card images are paused. To re-enable, call
+// hydratePhotos(root) after renders in main.js and give cardPanelHtml a
+// portrait slot again (see git history).
+//
 // Real-player portraits, fetched at runtime from Wikipedia's public REST API
 // (freely licensed / public-domain imagery served by Wikimedia, credited on
 // the card). Nothing is scraped or re-hosted: the browser asks Wikipedia for

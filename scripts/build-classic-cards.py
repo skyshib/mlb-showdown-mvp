@@ -24,12 +24,13 @@ def primary_position(positions):
     return pos, fielding
 
 def chart_rows(chart):
+    """Rows as printed on the card; hi None means an open range ("21+")."""
     rows = []
-    for key, (lo, hi) in chart.items():
+    for key, rng in chart.items():
         if key not in RESULT_CODE:
             return None
-        rows.append((lo, min(hi, 30), RESULT_CODE[key]))
-    rows.sort()
+        rows.append((rng[0], rng[1], RESULT_CODE[key]))
+    rows.sort(key=lambda r: r[0])
     # verify contiguous coverage of 1..20; extend earlier rows over small gaps
     fixed = []
     cursor = 1
@@ -40,8 +41,8 @@ def chart_rows(chart):
         elif lo > cursor:
             lo = 1
         fixed.append((lo, hi, code))
-        cursor = max(cursor, hi + 1)
-    if fixed and fixed[-1][1] < 20:
+        cursor = max(cursor, (hi if hi is not None else 30) + 1)
+    if fixed and fixed[-1][1] is not None and fixed[-1][1] < 20:
         last = fixed[-1]
         fixed[-1] = (last[0], 20, last[2])
     return fixed
@@ -70,13 +71,17 @@ for card in cards:
         card_id = f"{base_id}-{n}"
         n += 1
     seen_ids.add(card_id)
-    chart_str = "|".join(f"{code}{lo}-{hi}" for lo, hi, code in rows)
+    chart_str = "|".join(f"{code}{lo}+" if hi is None else f"{code}{lo}-{hi}" for lo, hi, code in rows)
+    # The card year rides with the name ("Mike Caruso '02") unless the printed
+    # name already carries one (Super Season cards like "Jeff Kent '98").
+    display = card["name"] if re.search(r"'\d\d$", card["name"]) else f"{card['name']} '{card['year'][2:]}"
+    foil = 1 if card.get("foil") else 0
     if card["pitcher"]:
         role = "SP" if card["positions"].split("|")[0].strip().startswith("Starter") else "RP"
-        out.append([card_id, card["name"], card["team"], card["year"], card["edition"], 1, card["points"], obc, min(max(spd, 1), 9), role, 0, card["hand"], chart_str])
+        out.append([card_id, display, card["team"], card["year"], card["edition"], 1, card["points"], obc, min(max(spd, 1), 9), role, 0, card["hand"], chart_str, foil])
     else:
         pos, fielding = primary_position(card["positions"])
-        out.append([card_id, card["name"], card["team"], card["year"], card["edition"], 0, card["points"], obc, min(max(spd, 6), 25), pos, fielding, card["hand"], chart_str])
+        out.append([card_id, display, card["team"], card["year"], card["edition"], 0, card["points"], obc, min(max(spd, 6), 25), pos, fielding, card["hand"], chart_str, foil])
 
 print(f"emitting {len(out)} cards ({skipped} skipped)", file=sys.stderr)
 

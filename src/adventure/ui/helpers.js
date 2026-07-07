@@ -55,8 +55,8 @@ export function cardPanelHtml(card, { count = null } = {}) {
   const header = card.kind === "pitcher"
     ? `${card.role} &middot; CTRL ${card.control} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
     : `${escapeHtml(card.position)} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${card.fielding >= 0 ? "+" : ""}${card.fielding}`;
-  return `<div class="gq-card gq-rarity-border-${card.rarity}">
-    ${card.real ? `<div class="gq-card-portrait" data-photo-name="${escapeHtml(card.name)}"></div>` : ""}
+  const foil = card.foil || card.rarity === "legend";
+  return `<div class="gq-card gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
     <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
