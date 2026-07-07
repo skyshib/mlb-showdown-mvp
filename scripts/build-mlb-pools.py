@@ -168,7 +168,10 @@ def build_pitcher(pid, t):
     gb = round(rest * 0.55)
     fb = rest - gb
     if t["GS"] / max(1, t["G"]) >= 0.4:
-        role, ip_card = "SP", clamp(round(t["IPouts"] / max(1, t["GS"]) / 3), 4, 8)
+        # Swingmen log relief innings too; estimate those out (~1.5 IP per
+        # relief outing) so IP reflects innings per START, not per GS-divisor.
+        start_outs = max(0.0, t["IPouts"] - (t["G"] - t["GS"]) * 4.5)
+        role, ip_card = "SP", clamp(round(start_outs / max(1, t["GS"]) / 3), 4, 8)
     else:
         role, ip_card = "RP", 1 if t["SV"] > 30 or t["IPouts"] / max(1, t["G"]) < 5 else 2
     parts = [("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("H", hr)]

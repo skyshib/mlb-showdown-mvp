@@ -970,6 +970,11 @@ test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () =>
     assert.ok(cruz, "Julio Cruz plays for the all-time Mariners");
     assert.equal(slots(cruz, "HR"), 0, "a 0.5% HR/PA hitter gets no homer slots");
     assert.ok(slots(cruz, "1B") >= 6, "his hits are singles");
+    // Swingmen: relief innings don't inflate a starter's IP.
+    const swingman = adventurePool().find((card) => card.name === "Ryan Rowland-Smith");
+    assert.ok(swingman.ip <= 6, `swingman IP reflects innings per start (${swingman.ip})`);
+    const workhorse = adventurePool().find((card) => card.name === "Randy Johnson");
+    assert.ok(workhorse.ip >= 7, "true workhorses keep their deep tanks");
     setUniverseSeed("mix-test", "mlb-history");
     const pool = adventurePool();
     const ruth = pool.find((card) => card.name === "Babe Ruth");
