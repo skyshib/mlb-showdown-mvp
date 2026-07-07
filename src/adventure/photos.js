@@ -91,7 +91,9 @@ export function hydratePhotos(root) {
   }
 }
 
+// No per-card credit: the intro text carries the Wikipedia/Wikimedia
+// attribution once, so the cards stay clean.
 function fill(slot, url) {
   if (slot.querySelector("img")) return;
-  slot.innerHTML = `<img src="${url}" alt="" loading="lazy"><span class="gq-photo-credit">PHOTO: WIKIPEDIA</span>`;
+  slot.innerHTML = `<img src="${url}" alt="" loading="lazy">`;
 }

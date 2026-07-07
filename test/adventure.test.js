@@ -839,6 +839,10 @@ test("every league builds a working universe with a legal starter pack", async (
     assert.ok(history.some((card) => card.points !== card.truePoints), "MLB league keeps the bargain noise");
     assert.ok(history.some((card) => card.name === "Babe Ruth"), "the Babe is in the all-time pool");
     assert.ok(history.length > 9000, "the wide swath: thousands of players, not just stars");
+    setUniverseSeed("league-test", "decade-1990");
+    const stints = adventurePool();
+    assert.ok(stints.every((card) => /^[A-Z]{2,3} \d{4}-\d{4}$/.test(card.setTag)), "decade cards are team stints: club + only the years with it");
+    assert.ok(stints.some((card) => card.setTag.startsWith("SEA 199")), "the 90s Mariners are represented");
   } finally {
     setUniverseSeed("test-seed", "fictional");
   }

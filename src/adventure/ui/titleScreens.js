@@ -16,7 +16,8 @@ const INTRO_PAGES = [
   ["Out here, managers settle everything the right way:", "nine innings of SHOWDOWN cards."],
   ["Every rookie gets a sealed STARTER PACK.", "Thirteen cards. Two rares. The rest... character."],
   ["Mind the sticker prices — the printers had a rough year.", "Some cards cost twice what they're worth.", "Some are steals. A sharp eye builds a cheap pennant."],
-  ["Win games, claim cards off the managers you beat,", "and climb the routes to the summit.", "Now — what's your name, rookie?"]
+  ["Win games, claim cards off the managers you beat,", "and climb the routes to the summit."],
+  ["One bit of league paperwork:", "player photos come courtesy of Wikipedia,", "and the record books from the Baseball Databank (CC BY-SA).", "Now — what's your name, rookie?"]
 ];
 
 const STARTING_COINS = 250;

@@ -215,18 +215,6 @@ h1.gq-logo {
   filter: grayscale(1) sepia(1) hue-rotate(55deg) saturate(1.6) brightness(0.95) contrast(1.05);
   image-rendering: pixelated;
 }
-.gq-photo-credit {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  font-size: 1.3cqw;
-  text-align: center;
-  color: var(--gb-lightest);
-  background: var(--gb-darkest);
-  letter-spacing: 0.04em;
-}
-
 /* ---- Foil cards ---- */
 
 /* Foil printings (and legends everywhere) get a slow shine sweep and a
