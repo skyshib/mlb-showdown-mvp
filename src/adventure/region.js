@@ -335,7 +335,7 @@ export const TRAINERS = [
         "...Go win the whole thing. You earned it.",
         "And hey. Thanks for pushing me all season."
       ],
-      lose: ["The World Series will eat you alive. Come back stronger."]
+      lose: ["The World Series will eat you alive. Shoulda been me out there."]
     }
   },
   {
@@ -384,6 +384,7 @@ export function isTrainerUnlocked(save, trainer) {
 
 export function isTrainerAvailable(save, trainer) {
   if (!isTrainerUnlocked(save, trainer)) return false;
+  if (trainer.ambush && ambushDone(save, trainer.id)) return false;
   return trainer.repeatable || timesBeaten(save, trainer.id) === 0;
 }
 
@@ -415,5 +416,17 @@ export function ambushSprung(save, trainerId) {
 // Older saves grow the ambush ledger in place; no version bump.
 export function springAmbush(save, trainerId) {
   save.progress.ambushes ??= {};
-  save.progress.ambushes[trainerId] = true;
+  save.progress.ambushes[trainerId] ??= true;
+}
+
+// Rival bouts are one-and-done: once played to a result — win OR lose — the
+// bout is over and the rival moves on. Walking away from the intro does not
+// count; only a finished battle does.
+export function markAmbushDone(save, trainerId) {
+  save.progress.ambushes ??= {};
+  save.progress.ambushes[trainerId] = "done";
+}
+
+export function ambushDone(save, trainerId) {
+  return save.progress.ambushes?.[trainerId] === "done";
 }

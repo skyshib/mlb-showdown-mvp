@@ -1,5 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js";
-import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, pendingAmbush, ambushSprung, springAmbush } from "../region.js";
+import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js";
 import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js";
 import { validateRoster } from "../../rules/draft.js";
 import { buildNpcTeam } from "../npcTeams.js";
@@ -29,8 +29,9 @@ function mapItems(app) {
 
   for (const trainer of TRAINERS) {
     const beaten = timesBeaten(save, trainer.id) > 0;
-    // Ambush trainers don't exist on the map until they've jumped the player.
-    if (trainer.ambush && !ambushSprung(save, trainer.id) && !beaten) continue;
+    // Ambush trainers don't exist on the map until they've jumped the player,
+    // and a lost bout is gone for good — the rival moved on.
+    if (trainer.ambush && !beaten && (!ambushSprung(save, trainer.id) || ambushDone(save, trainer.id))) continue;
     const unlocked = isTrainerUnlocked(save, trainer);
     const available = isTrainerAvailable(save, trainer) && !save.activeSeries;
     const marker = beaten ? (trainer.repeatable ? "&#8635;" : "&#10003;") : formatTag(trainer);

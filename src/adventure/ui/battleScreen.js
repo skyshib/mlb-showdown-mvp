@@ -12,7 +12,7 @@ import {
 } from "./helpers.js";
 import { gameStars, gameLogLine } from "./statsScreens.js";
 import { buildBoxScore } from "../../rules/game.js";
-import { trainerById, rewardCoins } from "../region.js";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js";
 import { buildNpcTeam } from "../npcTeams.js";
 import {
   persistSave,
@@ -104,6 +104,8 @@ function launchSeriesGame(app, trainer) {
 // the player takes one card off the beaten roster (repeat wins pay coins only).
 export function applyOutcome(app, trainer, won) {
   const save = app.save;
+  // A rival bout only happens once: played to any result, it's over.
+  if (trainer.ambush) markAmbushDone(save, trainer.id);
   if (!won) {
     recordTrainerLoss(save);
     addLog(save, `Lost to ${trainer.name}.`);

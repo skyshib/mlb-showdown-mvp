@@ -121,8 +121,10 @@ reappears at milestones with a richer roster each time, Pokemon-style. Rival
 bouts are **hidden ambushes**: they never show on the map in advance. After the
 qualifying win the map stays open (shop, team, binder — time to work claimed
 cards into the roster), and the moment the player sets off for their *next
-game*, Cam jumps out with a "!" splash and a mean face. Walk away and he stays
-on the map like any trainer. Beating
+game*, Cam jumps out with a "!" splash and a mean face. Walk away from the
+intro and he waits on the map — but the bout itself is **one-and-done**: played
+to any result, win or lose, it's gone (a lost bout disappears from the map; no
+rematches, no retry-grinding the rival). Beating
 the checkbook is possible because **printed prices are noisy** (§4.2): a
 3,500-point roster of scouted bargains can carry far more true value than it
 costs. Two other ratchets help the climb: the first win over any trainer

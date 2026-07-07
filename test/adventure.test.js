@@ -266,6 +266,30 @@ test("the rival reappears at milestones with a growing budget", () => {
   assert.equal(TRAINERS.some((trainer) => trainer.battleFormat.type === "simSeries"), false, "the sim-series farm boss is gone");
 });
 
+test("rival bouts are one-and-done: a loss removes the bout for good", async () => {
+  const { isTrainerAvailable, markAmbushDone, ambushDone } = await import("../src/adventure/region.js");
+  const save = testSave();
+  const app = { save };
+  save.progress.trainersBeaten["scout-jojo"] = 1;
+  const rival = trainerById("rival-1");
+  springAmbush(save, rival.id);
+  assert.equal(isTrainerAvailable(save, rival), true, "sprung rival is challengeable");
+  const loss = applyOutcome(app, rival, false);
+  assert.equal(loss.won, false);
+  assert.equal(ambushDone(save, rival.id), true, "the bout is spent");
+  assert.equal(isTrainerAvailable(save, rival), false, "no rematch after a loss");
+  assert.equal(pendingAmbush(save), null, "he does not ambush again either");
+  springAmbush(save, rival.id);
+  assert.equal(ambushDone(save, rival.id), true, "re-springing cannot revive a finished bout");
+  // Regular trainers keep retries after losses.
+  const mabel = trainerById("scout-mabel");
+  applyOutcome(app, mabel, false);
+  assert.equal(isTrainerAvailable(save, mabel), true, "non-rival losses stay retryable");
+  // A won bout is also done, and marks normally.
+  markAmbushDone(save, "rival-2");
+  assert.equal(isTrainerAvailable(save, trainerById("rival-2")), false);
+});
+
 test("rival ambushes hide until sprung, spring once, then never again", () => {
   const save = testSave();
   assert.equal(pendingAmbush(save), null, "nobody jumps a fresh rookie");
