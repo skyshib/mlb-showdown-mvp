@@ -805,11 +805,16 @@ test("the NPC's mound arm shows its fatigue subtraction like the player's", asyn
   const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
   const html = battleScreen.render(app);
   assert.ok(html.includes(`&minus;${phase.opposingMound.fatiguePenalty} TIRED`), "the subtraction shows on their arm too");
-  // Charged runs deepen the penalty but never rewrite the printed tank.
+  // Charged runs deepen the penalty but never rewrite the printed tank —
+  // and their share of the fatigue is reported (and shown) explicitly.
+  assert.equal(phase.opposingMound.fatigueFromRuns, 0, "no runs charged yet, no run fatigue");
   npcArm.chargedRuns = 3;
   const shelled = battlePhase(battle).opposingMound;
   assert.equal(shelled.tiredAt, npcArm.ip * 4, "IP 1 always reads /4, however rough the outing");
   assert.ok(shelled.fatiguePenalty > phase.opposingMound.fatiguePenalty, "while the penalty itself grows");
+  assert.equal(shelled.fatigueFromRuns, shelled.fatiguePenalty - phase.opposingMound.fatiguePenalty, "the growth is attributed to the runs");
+  const shelledHtml = battleScreen.render(app);
+  assert.ok(shelledHtml.includes(`(&minus;${shelled.fatigueFromRuns} FROM RUNS)`), "the run share shows on the mound line");
 });
 
 test("reported innings match the innings actually played", () => {

@@ -651,6 +651,10 @@ export function changePitcher(state, side, targetIndex = null) {
 export function pitcherStatus(state, side) {
   const pitcher = currentPitcher(state, side);
   const runtime = state.pitching[side];
+  const fatiguePenalty = pitcherFatigue(runtime, pitcher);
+  // How much of the penalty is the beating he's taken (charged runs shrink
+  // the effective tank) versus plain workload — the UI shows the split.
+  const workloadOnly = pitcherFatigue(runtime, { ...pitcher, chargedRuns: 0 });
   return {
     pitcher,
     outsRecorded: runtime.outsRecorded,
@@ -659,7 +663,8 @@ export function pitcherStatus(state, side) {
     // The card's printed tank (IP x 4). Charged runs deepen the fatigue
     // penalty but never rewrite the tank on display — IP 1 always reads /4.
     tiredAt: pitcherIpBatters(pitcher),
-    fatiguePenalty: pitcherFatigue(runtime, pitcher),
+    fatiguePenalty,
+    fatigueFromRuns: fatiguePenalty - workloadOnly,
     hasReliefAvailable: runtime.pitcherIndex < state[side].pitchers.length - 1
   };
 }
