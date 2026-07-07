@@ -49,10 +49,10 @@ def decade_of(year):
     return (year // 10) * 10
 
 def accumulate(source, keys):
-    """One pass: career / franchise / decade-stint totals and year spans.
-    Decade cards are player-TEAM stints — a decade key is (pid, fid, decade),
-    so a mid-decade trade produces separate cards with separate years."""
-    career, by_franch, by_stint = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
+    """One pass: career / franchise / decade totals and year spans.
+    Decade cards pool a player's ENTIRE decade regardless of team; franchise
+    cards pool a player's entire career with that club regardless of decade."""
+    career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
     spans = defaultdict(lambda: [9999, 0])
     for r in rows(source):
         year = num(r, "yearID")
@@ -61,19 +61,19 @@ def accumulate(source, keys):
         for k in keys:
             v = num(r, k)
             career[pid][k] += v
+            by_decade[(pid, decade_of(year))][k] += v
             if fid:
                 by_franch[(pid, fid)][k] += v
-                by_stint[(pid, fid, decade_of(year))][k] += v
-        for key in (pid, (pid, fid) if fid else None, (pid, fid, decade_of(year)) if fid else None):
+        for key in (pid, (pid, decade_of(year)), (pid, fid) if fid else None):
             if key is None:
                 continue
             span = spans[key]
             span[0] = min(span[0], year)
             span[1] = max(span[1], year)
-    return career, by_franch, by_stint, spans
+    return career, by_franch, by_decade, spans
 
 def accumulate_positions():
-    career, by_franch, by_stint = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
+    career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
     for r in rows("Appearances.csv"):
         year = num(r, "yearID")
         pid = r["playerID"]
@@ -83,11 +83,11 @@ def accumulate_positions():
             if not g:
                 continue
             career[pid][pos] += g
+            by_decade[(pid, decade_of(year))][pos] += g
             if fid:
                 by_franch[(pid, fid)][pos] += g
-                by_stint[(pid, fid, decade_of(year))][pos] += g
     pick = lambda table: {k: max(g, key=g.get) for k, g in table.items() if sum(g.values()) > 0}
-    return pick(career), pick(by_franch), pick(by_stint)
+    return pick(career), pick(by_franch), pick(by_decade)
 
 def h(pid, salt, lo, hi):
     digest = hashlib.sha1(f"{pid}:{salt}".encode()).digest()
@@ -234,11 +234,11 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
     return pool
 
 print("accumulating batting...", file=sys.stderr)
-bat_career, bat_franch, bat_stint, bat_spans = accumulate("Batting.csv", BAT_KEYS)
+bat_career, bat_franch, bat_decade, bat_spans = accumulate("Batting.csv", BAT_KEYS)
 print("accumulating pitching...", file=sys.stderr)
-pit_career, pit_franch, pit_stint, pit_spans = accumulate("Pitching.csv", PIT_KEYS)
+pit_career, pit_franch, pit_decade, pit_spans = accumulate("Pitching.csv", PIT_KEYS)
 print("accumulating positions...", file=sys.stderr)
-pos_career, pos_franch, pos_stint = accumulate_positions()
+pos_career, pos_franch, pos_decade = accumulate_positions()
 spans_all = {**bat_spans, **pit_spans}
 for key, span in bat_spans.items():
     if key in pit_spans:
@@ -247,14 +247,13 @@ for key, span in bat_spans.items():
 history = build_slice("all", bat_career, pit_career, pos_career, spans_all, 400, 450)
 print(f"history: {len(history)}", file=sys.stderr)
 
-# Decade cards are per-team stints: the card names its club, and its years
-# and stats cover only that player's run with that club inside the decade.
+# Decade cards pool the player's whole decade, every team combined.
 decades = {}
 for start in range(1870, 2030, 10):
     tag = "00s" if start == 2000 else f"d{start}"
-    bat = {k: v for k, v in bat_stint.items() if k[2] == start}
-    pit = {k: v for k, v in pit_stint.items() if k[2] == start}
-    pool = build_slice(tag, bat, pit, pos_stint, spans_all, 200, 180, team_of=lambda key: key[1])
+    bat = {k: v for k, v in bat_decade.items() if k[1] == start}
+    pit = {k: v for k, v in pit_decade.items() if k[1] == start}
+    pool = build_slice(tag, bat, pit, pos_decade, spans_all, 250, 225)
     if pool_ok(pool):
         decades[start] = pool
     else:
