@@ -1,7 +1,8 @@
 import { loadSave } from "./state.js";
 import { setUniverseSeed, cardById } from "./packs.js";
+import { hydratePhotos } from "./photos.js";
 import { cardPanelHtml } from "./ui/helpers.js";
-import { titleScreen, introScreen, nameEntryScreen, starterRevealScreen } from "./ui/titleScreens.js";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, starterRevealScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
 import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen } from "./ui/collectionScreens.js";
@@ -11,6 +12,7 @@ const SCREENS = {
   title: titleScreen,
   intro: introScreen,
   nameEntry: nameEntryScreen,
+  leagueSelect: leagueSelectScreen,
   starterReveal: starterRevealScreen,
   map: mapScreen,
   trainerIntro: trainerIntroScreen,
@@ -57,15 +59,17 @@ const app = {
     const screen = SCREENS[this.screen.name] ?? titleScreen;
     root.innerHTML = screen.render(this);
     screen.mounted?.(this);
+    // Real-player cards get their Wikipedia portraits filled in.
+    hydratePhotos(root);
     // Rerendering resets scroll positions; keep the cursor row in view so
     // long lists (rosters, binder) can actually be walked.
     root.querySelector(".gq-cursor")?.scrollIntoView({ block: "nearest" });
   }
 };
 
-// Every save lives in its own card universe, keyed by its seed. Point the
-// pool at the loaded save before anything renders a card.
-if (app.save) setUniverseSeed(app.save.saveSeed);
+// Every save lives in its own card universe, keyed by its seed and league.
+// Point the pool at the loaded save before anything renders a card.
+if (app.save) setUniverseSeed(app.save.saveSeed, app.save.universe ?? "fictional");
 
 document.addEventListener("keydown", (event) => {
   const inInput = event.target instanceof HTMLInputElement;
@@ -171,6 +175,7 @@ document.addEventListener("mouseover", (event) => {
     return;
   }
   tooltip.innerHTML = cardPanelHtml(card);
+  hydratePhotos(tooltip);
   tooltip.hidden = false;
 });
 
@@ -205,6 +210,7 @@ document.addEventListener("click", (event) => {
     return;
   }
   tooltip.innerHTML = cardPanelHtml(card);
+  hydratePhotos(tooltip);
   tooltip.hidden = false;
   const anchor = tagged.getBoundingClientRect();
   const pad = 10;

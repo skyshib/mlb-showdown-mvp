@@ -11,10 +11,11 @@ const POINT_CAP = 3500;
 
 export const LOSS_FEE = 50;
 
-export function createSave({ name, saveSeed }) {
+export function createSave({ name, saveSeed, universe = "fictional" }) {
   return {
     version: SAVE_VERSION,
     saveSeed,
+    universe,
     player: {
       name,
       coins: 0,

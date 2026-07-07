@@ -21,7 +21,7 @@ option for each. Any of them can be swapped without invalidating the rest.
 | 2 | Battle format | **✓ Decided**: a **mix per trainer** — interactive 9-inning games (some standalone, some best-of series) *and* simulated series, depending on level/trainer. See §5.1 | — |
 | 3 | Opponents | **✓ Decided**: **computer NPCs** for now | Async/live PvP deferred to post-v1 |
 | 4 | Code separation | *Assumed*: **same repo, own entry point** (`adventure.html` → `src/adventure/`), deployed at its own URL | Alternatives: new repo with extracted engine package; fully standalone repo |
-| 5 | Card pool | *Assumed*: **fictional generated players** (`playerGeneration.js`) so the campaign controls rarity/power bands; real-player packs as a later unlockable set | Alternative: real players from day one |
+| 5 | Card pool | **✓ Shipped**: four leagues — fictional generated players, the real 2000-2005 Showdown card set, and two real-MLB pools (2000s decade, all-time) built from the Baseball Databank. See §4.2 | — |
 | 6 | Persistence | *Assumed*: **browser localStorage** with export/import save codes; no server required (static hosting works) | Alternative: server accounts |
 
 ---
@@ -187,9 +187,29 @@ New save flow:
 
 ### 4.2 The card universe, pricing, and packs *(shipped)*
 
-Each save generates its **own ~3,000-card universe** from the save seed
-(`setUniverseSeed` in `packs.js`) — a new game is always a fresh league, so runs
-don't get repetitive. Within a universe:
+Every new save **picks a league** (`UNIVERSES` in `packs.js`):
+
+- **CASCADE LEAGUE** — the fictional universe below, regenerated per save.
+- **CLASSIC SHOWDOWN** — all 3,544 real MLB Showdown cards (2000-2005, every
+  expansion), compiled from public scouting-report data (game-mechanical facts
+  only: points, on-base/control, speed/IP, positions, chart ranges). Printed
+  points are **authentic** — no price noise; rarity ranks real points.
+- **MLB: THE 2000s** (~1,900 players) and **MLB: ALL TIME** (~9,900 players,
+  bench guys and journeymen included, not just stars) — cards derived from
+  each player's real rates in the Baseball Databank (Chadwick Baseball
+  Bureau / Sean Lahman, **CC BY-SA 3.0**), mapped into the generator's
+  parameter space, then priced through the usual curve + seeded noise so the
+  bargain economy holds.
+
+Real-player cards show a **portrait fetched at runtime from Wikipedia's public
+API** (freely licensed Wikimedia imagery, credited on the card, cached in
+localStorage, DMG-green-washed to fit the palette); fictional cards keep their
+text portraits. Build scripts live in `scripts/` (`scrape-showdowncards.mjs`,
+`build-classic-cards.py`, `build-mlb-pools.py`).
+
+The fictional league generates its **own ~3,000-card universe** from the save
+seed — a new game is always a fresh league, so runs don't get repetitive.
+Within a universe:
 
 - **True value** comes from a card's strength rank within its group (hitters /
   SP / RP), mapped onto a convex curve from ~90 up to 900 points. **Rarity follows

@@ -1,5 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js";
-import { starterPack, setUniverseSeed } from "../packs.js";
+import { starterPack, setUniverseSeed, UNIVERSES } from "../packs.js";
 import {
   createSave,
   persistSave,
@@ -115,7 +115,7 @@ export const nameEntryScreen = {
   key(app, key) {
     if (key === "a") {
       const value = document.getElementById("gq-name")?.value.trim().toUpperCase() || "ROOKIE";
-      finishNewGame(app, value);
+      app.go("leagueSelect", { playerName: value, menuIndex: 0 });
     } else if (key === "b") {
       app.go("intro", { page: INTRO_PAGES.length - 1 });
     }
@@ -123,12 +123,40 @@ export const nameEntryScreen = {
   }
 };
 
-// A new save is a whole new universe: fresh seed, fresh 3000-card league,
-// fresh sealed starter pack. Nothing carries over but the player's wits.
-function finishNewGame(app, playerName) {
+// Which baseball do you want? A fresh fictional league, the real 2000-2005
+// Showdown card set, or real MLB players (one decade or all of history).
+export const leagueSelectScreen = {
+  render(app) {
+    const leagues = Object.values(UNIVERSES);
+    const index = clampIndex(app.screen.menuIndex ?? 0, leagues.length);
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CHOOSE YOUR LEAGUE</span><span>${index + 1}/${leagues.length}</span></div>
+      <div class="gq-body">
+        <div class="gq-frame">${menuHtml(leagues.map((league) => ({ label: league.name })), index)}</div>
+        <div class="gq-frame"><p class="gq-dim">${escapeHtml(leagues[index].blurb)}</p></div>
+      </div>
+      <div class="gq-textbox"><p>Z picks a league. Your starter pack comes from it.</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    const leagues = Object.values(UNIVERSES);
+    if (key === "up" || key === "down") {
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), leagues.length);
+    } else if (key === "a") {
+      finishNewGame(app, app.screen.playerName, leagues[clampIndex(app.screen.menuIndex ?? 0, leagues.length)].key);
+    } else if (key === "b") {
+      app.go("nameEntry");
+    }
+    app.rerender();
+  }
+};
+
+// A new save is a whole new universe: fresh seed, the chosen league's card
+// pool, fresh sealed starter pack. Nothing carries over but the player's wits.
+function finishNewGame(app, playerName, universe) {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
-  const save = createSave({ name: playerName, saveSeed });
-  setUniverseSeed(saveSeed);
+  const save = createSave({ name: playerName, saveSeed, universe });
+  setUniverseSeed(saveSeed, universe);
   const roster = starterPack(saveSeed);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));

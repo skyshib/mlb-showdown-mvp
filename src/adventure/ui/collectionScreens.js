@@ -147,33 +147,54 @@ export const sellScreen = {
 
 // ---- Binder ----------------------------------------------------------------
 
+// The binder pages by slot: left/right walks ALL -> each position -> the two
+// pitching roles. Exported for tests.
+export const BINDER_FILTERS = ["ALL", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
+
+export function binderRows(save, filter = "ALL") {
+  const rows = collectionCards(save);
+  if (!filter || filter === "ALL") return rows;
+  if (filter === "SP" || filter === "RP") return rows.filter(({ card }) => card.role === filter);
+  return rows.filter(({ card }) => card.kind === "hitter" && card.position === filter);
+}
+
 export const binderScreen = {
   render(app) {
-    const rows = collectionCards(app.save);
+    const filter = app.screen.filter ?? "ALL";
+    const rows = binderRows(app.save, filter);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const selected = rows[index];
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>BINDER</span><span>${rows.length} CARDS &middot; ${rows.reduce((sum, row) => sum + row.count, 0)} TOTAL</span></div>
+      <div class="gq-topbar"><span>BINDER &middot; ${escapeHtml(filter)}</span><span>${rows.length} CARDS &middot; ${rows.reduce((sum, row) => sum + row.count, 0)} TOTAL</span></div>
       <div class="gq-body"><div class="gq-columns">
-        <div class="gq-frame gq-scroll">${menuHtml(
-          rows.map(({ card, count }) => ({
-            html: `${cardLine(card)}${count > 1 ? ` <span class="gq-dim">x${count}</span>` : ""}${
-              app.save.roster.cardIds.includes(card.id) ? " &#9670;" : ""
-            }`
-          })),
-          index
-        )}</div>
+        <div class="gq-frame gq-scroll">${
+          rows.length
+            ? menuHtml(
+                rows.map(({ card, count }) => ({
+                  html: `${cardLine(card)}${count > 1 ? ` <span class="gq-dim">x${count}</span>` : ""}${
+                    app.save.roster.cardIds.includes(card.id) ? " &#9670;" : ""
+                  }`
+                })),
+                index
+              )
+            : `<p class="gq-dim">NO ${escapeHtml(filter)} CARDS YET.</p>`
+        }</div>
         <div>${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
       </div></div>
-      <div class="gq-textbox"><p>&#9670; = in roster. X to leave.</p></div>
+      <div class="gq-textbox"><p>&#9664;/&#9654; page by position. &#9670; = in roster. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
-    return collectionCards(app.save)[index]?.card ?? null;
+    return binderRows(app.save, app.screen.filter ?? "ALL")[index]?.card ?? null;
   },
   key(app, key) {
-    const rows = collectionCards(app.save);
-    if (key === "up" || key === "down") {
+    if (key === "left" || key === "right") {
+      const at = BINDER_FILTERS.indexOf(app.screen.filter ?? "ALL");
+      const next = (at + (key === "right" ? 1 : -1) + BINDER_FILTERS.length) % BINDER_FILTERS.length;
+      app.screen.filter = BINDER_FILTERS[next];
+      app.screen.index = 0;
+    } else if (key === "up" || key === "down") {
+      const rows = binderRows(app.save, app.screen.filter ?? "ALL");
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
     } else if (key === "b" || key === "a") {
       app.go("map");

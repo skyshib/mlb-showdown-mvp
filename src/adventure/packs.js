@@ -1,9 +1,36 @@
 import { generatePlayerPool } from "../data/playerGeneration.js";
 import { createRng } from "../rules/rng.js";
+import { decodeCardRows } from "../data/realCards.js";
+import { CLASSIC_CARD_ROWS } from "../data/classicCards.js";
+import { MLB_HISTORY_ROWS, MLB_2000S_ROWS } from "../data/mlbPools.js";
 
-// Every save generates its own card universe from the save seed, so a new
-// playthrough always meets a fresh league. Screens set the seed once (on boot
-// or new game) and the pool caches until a different seed swaps in.
+// Every save picks a league at new game. The fictional league regenerates
+// from the save seed; the real leagues share fixed card sets, but the MLB
+// leagues still reprice per save (the noise is seeded). Screens set the
+// universe once (on boot or new game) and the pool caches until it changes.
+export const UNIVERSES = {
+  fictional: {
+    key: "fictional",
+    name: "CASCADE LEAGUE",
+    blurb: "A brand-new fictional league, invented fresh for this save."
+  },
+  classic: {
+    key: "classic",
+    name: "CLASSIC SHOWDOWN",
+    blurb: "Every real MLB Showdown card, 2000-2005. Authentic printed points."
+  },
+  "mlb-2000s": {
+    key: "mlb-2000s",
+    name: "MLB: THE 2000s",
+    blurb: "Real big leaguers rated on their 2000-2009 numbers."
+  },
+  "mlb-history": {
+    key: "mlb-history",
+    name: "MLB: ALL TIME",
+    blurb: "A century of real players — stars, scrubs, and everyone between."
+  }
+};
+
 const DEFAULT_UNIVERSE_SEED = "adventure-universe-v2";
 // generatePlayerPool yields 24 cards per "team": 125 teams ≈ a 3000-card set.
 const UNIVERSE_TEAMS = 125;
@@ -58,26 +85,63 @@ const HIT_ODDS = [
 ];
 
 let universeSeed = DEFAULT_UNIVERSE_SEED;
+let universeMode = "fictional";
 let poolCache = null;
 let poolIndexCache = null;
 
-// Point the adventure at a save's universe. Same seed is a no-op; a new seed
-// drops the cache so the next adventurePool() call regenerates.
-export function setUniverseSeed(seed) {
-  const next = seed || DEFAULT_UNIVERSE_SEED;
-  if (next === universeSeed) return;
-  universeSeed = next;
+// Point the adventure at a save's universe. Same seed+mode is a no-op; any
+// change drops the cache so the next adventurePool() call rebuilds.
+export function setUniverseSeed(seed, mode = "fictional") {
+  const nextSeed = seed || DEFAULT_UNIVERSE_SEED;
+  const nextMode = UNIVERSES[mode] ? mode : "fictional";
+  if (nextSeed === universeSeed && nextMode === universeMode) return;
+  universeSeed = nextSeed;
+  universeMode = nextMode;
   poolCache = null;
   poolIndexCache = null;
 }
 
+export function universeKey() {
+  return universeMode;
+}
+
 export function adventurePool() {
   if (!poolCache) {
-    const raw = generatePlayerPool(`universe:${universeSeed}`, UNIVERSE_TEAMS, 13);
-    poolCache = calibrateUniverse(raw, universeSeed);
+    if (universeMode === "classic") {
+      // Real Showdown cards keep their authentic printed points — no noise.
+      poolCache = assignAuthenticRarity(decodeCardRows(CLASSIC_CARD_ROWS));
+    } else if (universeMode === "mlb-2000s" || universeMode === "mlb-history") {
+      // Real players, but the bargain economy stays: rate-derived quality
+      // runs through the same curve + seeded price noise as the fictional set.
+      const rows = universeMode === "mlb-2000s" ? MLB_2000S_ROWS : MLB_HISTORY_ROWS;
+      poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:${universeSeed}`);
+    } else {
+      const raw = generatePlayerPool(`universe:${universeSeed}`, UNIVERSE_TEAMS, 13);
+      poolCache = calibrateUniverse(raw, universeSeed);
+    }
     poolIndexCache = new Map(poolCache.map((card) => [card.id, card]));
   }
   return poolCache;
+}
+
+// Classic cards are the real thing: rarity ranks true strength via the raw
+// formula-free signal we have (the printed points ARE the truth), so both
+// truePoints and points stay authentic.
+function assignAuthenticRarity(pool) {
+  const groups = [
+    pool.filter((card) => card.kind === "hitter"),
+    pool.filter((card) => card.role === "SP"),
+    pool.filter((card) => card.role === "RP")
+  ];
+  const tiers = new Map();
+  for (const group of groups) {
+    const ranked = [...group].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+    ranked.forEach((card, index) => {
+      const fromTop = (index + 1) / ranked.length;
+      tiers.set(card.id, RARITY_SHARES.find(([, share]) => fromTop <= share)[0]);
+    });
+  }
+  return pool.map((card) => ({ ...card, rarity: tiers.get(card.id), truePoints: card.points }));
 }
 
 export function cardById(id) {

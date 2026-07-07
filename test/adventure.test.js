@@ -727,6 +727,64 @@ test("the game log lines carry player-perspective WPA", async () => {
   assert.ok(pen.includes("PEN"), "pitching changes log without WPA");
 });
 
+// ---- Real-card leagues -------------------------------------------------------
+
+test("every league builds a working universe with a legal starter pack", async () => {
+  const { UNIVERSES } = await import("../src/adventure/packs.js");
+  const { resolveChart } = await import("../src/rules/cards.js");
+  const expectedSizes = { classic: 3544, "mlb-2000s": 1906, "mlb-history": 9872 };
+  try {
+    for (const key of Object.keys(UNIVERSES)) {
+      setUniverseSeed("league-test", key);
+      const pool = adventurePool();
+      assert.ok(pool.length >= 1900, `${key} pool is deep (${pool.length})`);
+      if (expectedSizes[key]) assert.equal(pool.length, expectedSizes[key], `${key} pool size`);
+      for (const tier of ["common", "uncommon", "rare", "legend"]) {
+        assert.ok(pool.some((card) => card.rarity === tier), `${key} has ${tier}s`);
+      }
+      const roster = starterPack("league-test");
+      assert.equal(roster.length, 13, `${key} starter pack fills`);
+      assert.equal(validateRoster({ roster }).length, 0, `${key} starter pack is legal`);
+      assert.equal(roster.filter((card) => card.rarity === "rare").length, 2, `${key} starter has two rares`);
+      // Every real chart must resolve every d20 roll.
+      for (const card of pool.slice(0, 250)) {
+        for (let roll = 1; roll <= 20; roll += 1) {
+          assert.ok(resolveChart(card.chart, roll), `${key} ${card.id} resolves a ${roll}`);
+        }
+      }
+    }
+    setUniverseSeed("league-test", "classic");
+    const classic = adventurePool();
+    assert.ok(classic.every((card) => card.points === card.truePoints), "classic points are authentic — no noise");
+    assert.ok(classic.every((card) => card.real && card.setTag), "classic cards carry their set tag");
+    setUniverseSeed("league-test", "mlb-history");
+    const history = adventurePool();
+    assert.ok(history.some((card) => card.points !== card.truePoints), "MLB league keeps the bargain noise");
+    assert.ok(history.some((card) => card.name === "Babe Ruth"), "the Babe is in the all-time pool");
+    assert.ok(history.length > 9000, "the wide swath: thousands of players, not just stars");
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
+test("the binder pages by position with the arrow filters", async () => {
+  const { binderRows, BINDER_FILTERS } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const all = binderRows(save, "ALL");
+  assert.equal(all.length, collectionCardCount(save), "ALL shows the whole binder");
+  const catchers = binderRows(save, "C");
+  assert.ok(catchers.length >= 1, "the starter catcher shows under C");
+  assert.ok(catchers.every(({ card }) => card.position === "C"));
+  const starters = binderRows(save, "SP");
+  assert.ok(starters.length >= 2, "both starter arms show under SP");
+  assert.ok(starters.every(({ card }) => card.role === "SP"));
+  assert.ok(BINDER_FILTERS.includes("LF/RF") && BINDER_FILTERS[0] === "ALL");
+});
+
+function collectionCardCount(save) {
+  return Object.keys(save.collection).length;
+}
+
 // ---- Easter eggs -------------------------------------------------------------
 
 test("rare feats fire for the games worth framing", async () => {

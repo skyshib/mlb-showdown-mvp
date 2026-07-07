@@ -47,16 +47,19 @@ export function shortName(name) {
 }
 
 // Full card panel: the binder/pack view. Chart rows collapse to the compact
-// range map used by the main app.
+// range map used by the main app. Real-player cards (classic and MLB
+// leagues) get a photo slot that main.js hydrates from Wikipedia, plus their
+// set tag / years-active line.
 export function cardPanelHtml(card, { count = null } = {}) {
   const ranges = chartRangeRows(card);
   const header = card.kind === "pitcher"
     ? `${card.role} &middot; CTRL ${card.control} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
     : `${escapeHtml(card.position)} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${card.fielding >= 0 ? "+" : ""}${card.fielding}`;
   return `<div class="gq-card gq-rarity-border-${card.rarity}">
+    ${card.real ? `<div class="gq-card-portrait" data-photo-name="${escapeHtml(card.name)}"></div>` : ""}
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
-    <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT</span></div>
+    <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
     <div class="gq-card-chart">${ranges
       .map(([result, range]) => `<span class="gq-chart-cell"><b>${escapeHtml(result)}</b> ${escapeHtml(range)}</span>`)
       .join("")}</div>
