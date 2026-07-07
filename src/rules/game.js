@@ -76,9 +76,16 @@ export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
     winner: state.score.away > state.score.home ? state.away.name : state.home.name,
     boxScore: buildBoxScore(state),
     events,
-    innings: state.inning,
+    innings: inningsPlayed(state),
     topSwing: state.topSwing
   };
+}
+
+// Innings actually played in a finished game. The final out of a bottom half
+// rolls the state to the top of the NEXT inning before the game-over check,
+// so a terminal "top of the 10th" state was a nine-inning game.
+export function inningsPlayed(state) {
+  return state.half === "top" ? state.inning - 1 : state.inning;
 }
 
 export function playGameEvent(state, rng) {

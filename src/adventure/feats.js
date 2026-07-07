@@ -67,6 +67,21 @@ export function gameFeats({ boxScore, playerSide, events, score, innings }) {
     feats.push({ title: "STATEMENT GAME.", blurb: `Won by ${score[playerSide] - score[npcSide]}. Someone check on their manager.` });
   }
 
+  // Grand slams: a bases-loaded homer by the player's side.
+  if (Array.isArray(events)) {
+    for (const event of events) {
+      if (event.result !== "HR" || event.runs !== 4 || !event.half) continue;
+      const battingSide = event.half === "top" ? "away" : "home";
+      if (battingSide !== playerSide) continue;
+      const line = mine.hitters.find((hitter) => hitter.name === event.batter);
+      feats.push({
+        title: `${event.batter.toUpperCase()} — GRAND SLAM!`,
+        blurb: `Bases loaded, ${event.half === "top" ? "top" : "bottom"} ${event.inning}. Emptied.`,
+        cardId: line?.id
+      });
+    }
+  }
+
   // The comeback: down big at any point, still won.
   if (playerWon && Array.isArray(events)) {
     let maxDeficit = 0;

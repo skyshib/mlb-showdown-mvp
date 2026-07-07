@@ -806,6 +806,46 @@ test("the NPC's mound arm shows its fatigue subtraction like the player's", asyn
   assert.ok(html.includes(`&minus;${phase.opposingMound.fatiguePenalty} TIRED`), "the subtraction shows on their arm too");
 });
 
+test("reported innings match the innings actually played", () => {
+  const { player, npc } = hookTeams();
+  for (const seed of ["inn-a", "inn-b", "inn-c", "inn-d", "inn-e", "inn-f"]) {
+    const result = simulateGame(buildTeam(player), buildTeam(npc), seed);
+    const lastInning = Math.max(...result.events.map((event) => event.inning));
+    assert.equal(result.innings, lastInning, `${seed}: no phantom extra inning for away-side wins`);
+  }
+});
+
+test("grand slams get called and celebrated", async () => {
+  const { describeEvent } = await import("../src/adventure/ui/helpers.js");
+  const { gameFeats } = await import("../src/adventure/feats.js");
+  const slam = {
+    batter: "Al Smith", pitcher: "Bo Diaz", result: "HR", runs: 4,
+    outsAfter: 1, half: "top", inning: 6, scoreAfter: { away: 6, home: 2 }, wpa: 0.3
+  };
+  const call = describeEvent(slam, "away").join(" ");
+  assert.ok(call.includes("GRAND SLAM!"), "the narration calls it");
+  assert.ok(!call.includes("CRUSHES IT"), "and replaces the stock homer line");
+  const bat = { id: "h1", name: "Al Smith", pa: 4, ab: 4, h: 2, d: 0, t: 0, hr: 1, r: 1, bb: 0, so: 0, sb: 0, cs: 0, rbi: 4 };
+  const feats = gameFeats({
+    boxScore: { away: { hitters: [bat], pitchers: [{ id: "p", name: "Arm", bf: 30, outs: 27, h: 5, bb: 2, so: 6, hr: 0, r: 2 }] }, home: { hitters: [], pitchers: [] } },
+    playerSide: "away",
+    events: [slam],
+    score: { away: 6, home: 2 },
+    innings: 9
+  });
+  const slamFeat = feats.find((feat) => feat.title.includes("GRAND SLAM"));
+  assert.ok(slamFeat, "a slam headlines the box score");
+  assert.equal(slamFeat.cardId, "h1", "and links the hero's card");
+  const theirSlam = gameFeats({
+    boxScore: { away: { hitters: [bat], pitchers: [] }, home: { hitters: [], pitchers: [] } },
+    playerSide: "away",
+    events: [{ ...slam, half: "bottom" }],
+    score: { away: 6, home: 2 },
+    innings: 9
+  });
+  assert.equal(theirSlam.some((feat) => feat.title.includes("GRAND SLAM")), false, "their slams are their business");
+});
+
 test("the third out narrates the next half-inning only if one is coming", async () => {
   const { describeEvent } = await import("../src/adventure/ui/helpers.js");
   const out = (over = {}) => ({

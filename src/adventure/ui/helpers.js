@@ -158,7 +158,11 @@ export function describeEvent(event, playerSide = "away") {
     }
     return lines;
   }
-  lines.push(`${shortName(event.batter)} ${RESULT_LINES[event.result] ?? event.result}`);
+  if (event.result === "HR" && event.runs === 4) {
+    lines.push(`${shortName(event.batter)} unloads the bases... GRAND SLAM!`);
+  } else {
+    lines.push(`${shortName(event.batter)} ${RESULT_LINES[event.result] ?? event.result}`);
+  }
   if (event.playDetails?.doublePlayAttempt?.batterOut) lines.push("Double play! Two gone.");
   const thrown = event.playDetails?.thrownAttempt;
   if (thrown) {

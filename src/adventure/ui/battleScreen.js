@@ -11,7 +11,7 @@ import {
   cardLine
 } from "./helpers.js";
 import { gameStars, gameLogLine } from "./statsScreens.js";
-import { buildBoxScore } from "../../rules/game.js";
+import { buildBoxScore, inningsPlayed } from "../../rules/game.js";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js";
 import { gameFeats } from "../feats.js";
 import { buildNpcTeam } from "../npcTeams.js";
@@ -278,7 +278,7 @@ export const gameOverScreen = {
     const phase = app.screen.phase;
     const you = phase.score[battle.playerSide];
     const them = phase.score[battle.npcSide];
-    const innings = battle.state.inning;
+    const innings = inningsPlayed(battle.state);
     const lines = (app.screen.lines ?? []).filter(Boolean);
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>FINAL</span><span>VS ${escapeHtml(trainer.name)}</span></div>
@@ -332,7 +332,7 @@ function resolveGameEnd(app, phase) {
       playerSide: battle.playerSide,
       events: battle.events,
       score: phase.score,
-      innings: battle.state.inning
+      innings: inningsPlayed(battle.state)
     }),
     events: battle.events,
     score: phase.score,
