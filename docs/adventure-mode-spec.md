@@ -194,12 +194,14 @@ Every new save **picks a league** (`UNIVERSES` in `packs.js`):
   expansion), compiled from public scouting-report data (game-mechanical facts
   only: points, on-base/control, speed/IP, positions, chart ranges). Printed
   points are **authentic** — no price noise; rarity ranks real points.
-- **MLB: THE 2000s** (~1,900 players) and **MLB: ALL TIME** (~9,900 players,
-  bench guys and journeymen included, not just stars) — cards derived from
-  each player's real rates in the Baseball Databank (Chadwick Baseball
+- **MLB: ALL TIME** (~10,400 players, bench guys and journeymen included),
+  **MLB: DECADE** (pick any decade, 1910s-2020s, players rated on that
+  window), and **MLB: FRANCHISE** (pick any of the 30 active clubs and play
+  its all-time roster, players rated on their years with the club) — cards
+  derived from real rates in the Baseball Databank (Chadwick Baseball
   Bureau / Sean Lahman, **CC BY-SA 3.0**), mapped into the generator's
   parameter space, then priced through the usual curve + seeded noise so the
-  bargain economy holds.
+  bargain economy holds. Pre-1910 decades are omitted (no bullpens yet).
 
 Real-player cards show a **portrait fetched at runtime from Wikipedia's public
 API** (freely licensed Wikimedia imagery, credited on the card, cached in

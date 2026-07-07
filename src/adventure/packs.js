@@ -2,7 +2,7 @@ import { generatePlayerPool } from "../data/playerGeneration.js";
 import { createRng } from "../rules/rng.js";
 import { decodeCardRows } from "../data/realCards.js";
 import { CLASSIC_CARD_ROWS } from "../data/classicCards.js";
-import { MLB_HISTORY_ROWS, MLB_2000S_ROWS } from "../data/mlbPools.js";
+import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES } from "../data/mlbPools.js";
 
 // Every save picks a league at new game. The fictional league regenerates
 // from the save seed; the real leagues share fixed card sets, but the MLB
@@ -19,17 +19,35 @@ export const UNIVERSES = {
     name: "CLASSIC SHOWDOWN",
     blurb: "Every real MLB Showdown card, 2000-2005. Authentic printed points."
   },
-  "mlb-2000s": {
-    key: "mlb-2000s",
-    name: "MLB: THE 2000s",
-    blurb: "Real big leaguers rated on their 2000-2009 numbers."
-  },
   "mlb-history": {
     key: "mlb-history",
     name: "MLB: ALL TIME",
     blurb: "A century of real players — stars, scrubs, and everyone between."
   }
 };
+
+// The parameterized leagues: any decade since relief pitching existed, and
+// any active franchise (players rated on their years with that club).
+export const DECADES = Object.keys(MLB_DECADE_ROWS).map(Number).sort((a, b) => a - b);
+export const FRANCHISES = Object.keys(MLB_FRANCHISE_ROWS)
+  .map((id) => ({ id, name: MLB_FRANCHISE_NAMES[id] }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+// Resolve any universe key — fixed, decade-YYYY, franchise-XXX, or the
+// legacy mlb-2000s alias — to a descriptor, or null if unknown.
+export function universeConfig(mode) {
+  if (UNIVERSES[mode]) return UNIVERSES[mode];
+  if (mode === "mlb-2000s") return universeConfig("decade-2000");
+  const decade = /^decade-(\d{4})$/.exec(mode ?? "");
+  if (decade && MLB_DECADE_ROWS[decade[1]]) {
+    return { key: mode, name: `MLB: THE ${decade[1].slice(2)}0s`, blurb: `Real big leaguers rated on their ${decade[1]}-${Number(decade[1]) + 9} numbers.` };
+  }
+  const franchise = /^franchise-([A-Z]{2,3})$/.exec(mode ?? "");
+  if (franchise && MLB_FRANCHISE_ROWS[franchise[1]]) {
+    return { key: mode, name: MLB_FRANCHISE_NAMES[franchise[1]].toUpperCase(), blurb: `Every ${MLB_FRANCHISE_NAMES[franchise[1]]} of all time, rated on their years with the club.` };
+  }
+  return null;
+}
 
 const DEFAULT_UNIVERSE_SEED = "adventure-universe-v2";
 // generatePlayerPool yields 24 cards per "team": 125 teams ≈ a 3000-card set.
@@ -53,11 +71,12 @@ const RARITY_SHARES = [
   ["common", 1]
 ];
 
+// Sell values run ~15% of shop price: the shop is a pawnbroker, not a buyer.
 export const RARITIES = {
-  common: { key: "common", label: "Common", order: 0, singlePrice: 150, sellValue: 50 },
-  uncommon: { key: "uncommon", label: "Uncommon", order: 1, singlePrice: 400, sellValue: 125 },
-  rare: { key: "rare", label: "Rare", order: 2, singlePrice: 900, sellValue: 275 },
-  legend: { key: "legend", label: "Legend", order: 3, singlePrice: 2000, sellValue: 600 }
+  common: { key: "common", label: "Common", order: 0, singlePrice: 150, sellValue: 25 },
+  uncommon: { key: "uncommon", label: "Uncommon", order: 1, singlePrice: 400, sellValue: 60 },
+  rare: { key: "rare", label: "Rare", order: 2, singlePrice: 900, sellValue: 140 },
+  legend: { key: "legend", label: "Legend", order: 3, singlePrice: 2000, sellValue: 300 }
 };
 
 // Boosters are a gamble, not a guaranteed upgrade: four wild slots that can
@@ -93,7 +112,8 @@ let poolIndexCache = null;
 // change drops the cache so the next adventurePool() call rebuilds.
 export function setUniverseSeed(seed, mode = "fictional") {
   const nextSeed = seed || DEFAULT_UNIVERSE_SEED;
-  const nextMode = UNIVERSES[mode] ? mode : "fictional";
+  const config = universeConfig(mode);
+  const nextMode = config ? config.key : "fictional";
   if (nextSeed === universeSeed && nextMode === universeMode) return;
   universeSeed = nextSeed;
   universeMode = nextMode;
@@ -107,13 +127,17 @@ export function universeKey() {
 
 export function adventurePool() {
   if (!poolCache) {
+    const decade = /^decade-(\d{4})$/.exec(universeMode);
+    const franchise = /^franchise-([A-Z]{2,3})$/.exec(universeMode);
     if (universeMode === "classic") {
       // Real Showdown cards keep their authentic printed points — no noise.
       poolCache = assignAuthenticRarity(decodeCardRows(CLASSIC_CARD_ROWS));
-    } else if (universeMode === "mlb-2000s" || universeMode === "mlb-history") {
+    } else if (universeMode === "mlb-history" || decade || franchise) {
       // Real players, but the bargain economy stays: rate-derived quality
       // runs through the same curve + seeded price noise as the fictional set.
-      const rows = universeMode === "mlb-2000s" ? MLB_2000S_ROWS : MLB_HISTORY_ROWS;
+      const rows = decade ? MLB_DECADE_ROWS[decade[1]]
+        : franchise ? MLB_FRANCHISE_ROWS[franchise[1]]
+        : MLB_HISTORY_ROWS;
       poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:${universeSeed}`);
     } else {
       const raw = generatePlayerPool(`universe:${universeSeed}`, UNIVERSE_TEAMS, 13);
@@ -233,19 +257,31 @@ function slotMatches(slot, card) {
 
 // The sealed starter deck: like the real product, two rares and the rest
 // commons, randomized per save. Which two slots get the rares is part of the
-// luck of the draw.
+// luck of the draw — but only slots that actually stock a rare are in the
+// running, so thin pools (small franchises, old decades) still deal a pack.
 export function starterPack(seed) {
   const rng = createRng(`starter-pack:${seed}`);
-  const rareSlots = new Set();
-  while (rareSlots.size < STARTER_RARE_COUNT) {
-    rareSlots.add(rng.int(0, STARTER_PACK_SLOTS.length - 1));
-  }
   const pool = adventurePool();
+  const rareable = STARTER_PACK_SLOTS
+    .map((slot, index) => (pool.some((card) => card.rarity === "rare" && slotMatches(slot, card)) ? index : null))
+    .filter((index) => index !== null);
+  const rareSlots = new Set();
+  let guard = 60;
+  while (rareSlots.size < Math.min(STARTER_RARE_COUNT, rareable.length) && guard-- > 0) {
+    rareSlots.add(rareable[rng.int(0, rareable.length - 1)]);
+  }
   const used = new Set();
   return STARTER_PACK_SLOTS.map((slot, index) => {
     const rarity = rareSlots.has(index) ? "rare" : "common";
-    const fits = pool.filter((card) => !used.has(card.id) && card.rarity === rarity && slotMatches(slot, card));
-    if (!fits.length) throw new Error(`Starter pack cannot fill ${slot} with a ${rarity}`);
+    let fits = pool.filter((card) => !used.has(card.id) && card.rarity === rarity && slotMatches(slot, card));
+    if (!fits.length) {
+      // Thin pool at this slot: take the cheapest few of whatever exists.
+      fits = pool
+        .filter((card) => !used.has(card.id) && slotMatches(slot, card))
+        .sort((a, b) => a.points - b.points)
+        .slice(0, 5);
+    }
+    if (!fits.length) throw new Error(`Starter pack cannot fill ${slot}`);
     const card = rng.pick(fits);
     used.add(card.id);
     return card;

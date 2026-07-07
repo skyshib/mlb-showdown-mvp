@@ -365,9 +365,9 @@ export const battleScreen = {
         <span>${series && series.bestOf > 1 ? `G${series.nextGame} (${series.wins}-${series.losses}) &middot; ` : ""}${halfLabel(state)}</span>
       </div>
       <div class="gq-battle-hud">
-        <div class="gq-hud-team">YOU${battle.playerSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.playerSide]}</b></div>
+        <div class="gq-hud-team" data-hover-note="${escapeHtml(fieldingNote("YOUR DEFENSE", state[battle.playerSide]))}">YOU${battle.playerSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.playerSide]}</b></div>
         <div>${diamondHtml(state)}<div class="gq-center gq-mt">${outsHtml(state.outs)}</div></div>
-        <div class="gq-hud-team gq-hud-right">THEM${battle.npcSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.npcSide]}</b></div>
+        <div class="gq-hud-team gq-hud-right" data-hover-note="${escapeHtml(fieldingNote("THEIR DEFENSE", state[battle.npcSide]))}">THEM${battle.npcSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.npcSide]}</b></div>
       </div>
       ${renderMatchup(phase)}
       <div class="gq-textbox">
@@ -429,6 +429,16 @@ export const battleScreen = {
     app.rerender();
   }
 };
+
+// Team defense at a glance, mirroring the engine's steal/bunt/tag-up math:
+// the catcher's arm, the four infielders, the three outfielders.
+function fieldingNote(title, team) {
+  const total = (positions) => team.lineup
+    .filter((player) => positions.includes(player.assignedPosition ?? player.position))
+    .reduce((sum, player) => sum + (Number(player.fielding) || 0), 0);
+  const signed = (value) => `${value >= 0 ? "+" : ""}${value}`;
+  return `${title}\nCATCHER ${signed(total(["C", "CA"]))}\nINFIELD ${signed(total(["1B", "2B", "3B", "SS"]))}\nOUTFIELD ${signed(total(["LF", "CF", "RF"]))}`;
+}
 
 function renderMatchup(phase) {
   if (phase.type === "over") return "";

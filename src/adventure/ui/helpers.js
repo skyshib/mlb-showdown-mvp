@@ -57,6 +57,7 @@ export function cardPanelHtml(card, { count = null } = {}) {
     : `${escapeHtml(card.position)} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${card.fielding >= 0 ? "+" : ""}${card.fielding}`;
   const foil = card.foil || card.rarity === "legend";
   return `<div class="gq-card gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">
+    ${card.real ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}"></div>` : ""}
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
     <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
@@ -64,6 +65,12 @@ export function cardPanelHtml(card, { count = null } = {}) {
       .map(([result, range]) => `<span class="gq-chart-cell"><b>${escapeHtml(result)}</b> ${escapeHtml(range)}</span>`)
       .join("")}</div>
   </div>`;
+}
+
+// Classic card names carry their card year ("Mike Caruso '02") — strip it for
+// the Wikipedia lookup.
+function photoName(name) {
+  return name.replace(/\s*'\d\d$/, "");
 }
 
 function chartRangeRows(card) {

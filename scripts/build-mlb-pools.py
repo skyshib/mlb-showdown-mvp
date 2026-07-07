@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Build real-MLB card pools from the Baseball Databank (CC BY-SA).
 
-Two pools: full history (career stats) and the 2000s decade (2000-2009 stats
-only). Thresholds are deliberately low — the point is a wide swath of players,
-not an all-star gala. Charts and ratings derive from each player's real rates,
-mapped into the same parameter space as the fictional card generator so the
-engine's balance carries over. Raw quality points use the generator's formula;
-the game recalibrates them into printed prices per save.
+Pools: full history (career stats), every decade (window stats), and every
+franchise (stats accumulated with that club). Thresholds are deliberately low
+— the point is a wide swath of players, not an all-star gala. Charts and
+ratings derive from each player's real rates, mapped into the fictional card
+generator's parameter space; the game recalibrates raw points into printed
+prices per save. Slices that can't support a legal starter pack (a common and
+a rare at every slot) are dropped.
 """
-import csv, hashlib, json, os, re, sys
+import csv, hashlib, json, os, sys
 from collections import defaultdict
 
 SP = os.path.dirname(os.path.abspath(__file__))
@@ -33,37 +34,60 @@ for r in rows("People.csv"):
         "throws": (r.get("throws") or "R")[:1] or "R",
     }
 
+franch_of = {}
+for r in rows("Teams.csv"):
+    franch_of[(num(r, "yearID"), r["teamID"])] = r["franchID"]
+franch_names = {}
+for r in rows("TeamsFranchises.csv"):
+    franch_names[r["franchID"]] = r["franchName"]
+
 BAT_KEYS = ["AB", "H", "2B", "3B", "HR", "BB", "SO", "SB", "CS", "G"]
 PIT_KEYS = ["G", "GS", "IPouts", "H", "BB", "SO", "HR", "SV"]
 POS_COLS = {"G_c": "C", "G_1b": "1B", "G_2b": "2B", "G_3b": "3B", "G_ss": "SS", "G_lf": "LF/RF", "G_rf": "LF/RF", "G_cf": "CF", "G_dh": "DH"}
 
-def aggregate(source, keys, year_min=None, year_max=None):
-    totals = defaultdict(lambda: defaultdict(int))
-    years = defaultdict(lambda: [9999, 0])
+def decade_of(year):
+    return (year // 10) * 10
+
+def accumulate(source, keys):
+    """One pass: career / per-decade / per-franchise totals and year spans."""
+    career, by_decade, by_franch = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
+    spans = defaultdict(lambda: [9999, 0])
     for r in rows(source):
         year = num(r, "yearID")
-        if year_min and (year < year_min or year > year_max):
-            continue
         pid = r["playerID"]
+        fid = franch_of.get((year, r.get("teamID", "")), None)
         for k in keys:
-            totals[pid][k] += num(r, k)
-        span = years[pid]
-        span[0] = min(span[0], year)
-        span[1] = max(span[1], year)
-    return totals, years
+            v = num(r, k)
+            career[pid][k] += v
+            by_decade[(pid, decade_of(year))][k] += v
+            if fid:
+                by_franch[(pid, fid)][k] += v
+        for key in (pid, (pid, decade_of(year)), (pid, fid) if fid else None):
+            if key is None:
+                continue
+            span = spans[key]
+            span[0] = min(span[0], year)
+            span[1] = max(span[1], year)
+    return career, by_decade, by_franch, spans
 
-def positions_for(year_min=None, year_max=None):
-    games = defaultdict(lambda: defaultdict(int))
+def accumulate_positions():
+    career, by_decade, by_franch = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
     for r in rows("Appearances.csv"):
         year = num(r, "yearID")
-        if year_min and (year < year_min or year > year_max):
-            continue
+        pid = r["playerID"]
+        fid = franch_of.get((year, r.get("teamID", "")), None)
         for col, pos in POS_COLS.items():
-            games[r["playerID"]][pos] += num(r, col)
-    return {pid: max(g, key=g.get) for pid, g in games.items() if sum(g.values()) > 0}
+            g = num(r, col)
+            if not g:
+                continue
+            career[pid][pos] += g
+            by_decade[(pid, decade_of(year))][pos] += g
+            if fid:
+                by_franch[(pid, fid)][pos] += g
+    pick = lambda table: {k: max(g, key=g.get) for k, g in table.items() if sum(g.values()) > 0}
+    return pick(career), pick(by_decade), pick(by_franch)
 
 def h(pid, salt, lo, hi):
-    """Deterministic pseudo-random int in [lo, hi] from the player id."""
     digest = hashlib.sha1(f"{pid}:{salt}".encode()).digest()
     return lo + digest[0] % (hi - lo + 1)
 
@@ -71,11 +95,9 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 def spread(total, weights):
-    """Round `weights` (already summing to ~total) to ints summing to total."""
-    raw = [(w, i) for i, w in enumerate(weights)]
-    ints = [int(w) for w, _ in raw]
+    ints = [int(w) for w in weights]
     rem = total - sum(ints)
-    order = sorted(range(len(raw)), key=lambda i: raw[i][0] - ints[i], reverse=True)
+    order = sorted(range(len(weights)), key=lambda i: weights[i] - ints[i], reverse=True)
     for i in range(abs(rem)):
         ints[order[i % len(order)]] += 1 if rem > 0 else -1
     return [max(0, v) for v in ints]
@@ -92,43 +114,38 @@ def chart_string(parts):
             continue
         out.append(f"{code}{cursor}-{cursor + slots - 1}")
         cursor += slots
-    # extend the last entry to 20 if rounding left a gap
     if cursor <= 20 and out:
         last = out[-1]
-        code = last[0]
         lo = int(last[1:].split("-")[0])
-        out[-1] = f"{code}{lo}-20"
+        out[-1] = f"{last[0]}{lo}-20"
     return "|".join(out)
 
-def build_hitter(pid, t, era):
+def build_hitter(pid, t, pos):
     pa = t["AB"] + t["BB"]
     if pa <= 0 or t["AB"] == 0:
         return None
     obp = (t["H"] + t["BB"]) / pa
     outs = clamp(round(8.5 - (obp - 0.320) * 50), 2, 11)
     remaining = 20 - outs
-    walk_share = t["BB"] / max(1, t["BB"] + t["H"])
-    walks = clamp(round(remaining * walk_share), 0, remaining - 1)
+    walks = clamp(round(remaining * (t["BB"] / max(1, t["BB"] + t["H"]))), 0, remaining - 1)
     hits = remaining - walks
-    hshare = lambda k: t[k] / max(1, t["H"])
-    hr, tr, db = spread(hits, [hits * hshare("HR"), hits * hshare("3B"), hits * hshare("2B")])
+    share = lambda k: t[k] / max(1, t["H"])
+    hr, tr, db = spread(hits, [hits * share("HR"), hits * share("3B"), hits * share("2B")])
     singles = hits - hr - tr - db
     if singles < 0:
         db += singles
         singles = 0
-    outs_so = clamp(round(outs * (t["SO"] / max(1, t["AB"] - t["H"]))), 0, outs)
-    gb = round((outs - outs_so) * 0.55)
-    fb = outs - outs_so - gb
+    so = clamp(round(outs * (t["SO"] / max(1, t["AB"] - t["H"]))), 0, outs)
+    gb = round((outs - so) * 0.55)
+    fb = outs - so - gb
     on_base = clamp(round(6 + (obp - 0.270) * 60), 6, 15)
-    sb650 = t["SB"] / pa * 650
-    speed = clamp(round(8 + sb650 * 0.3 + hshare("3B") * 30), 6, 22)
-    pos = era["pos"].get(pid, "DH")
+    speed = clamp(round(8 + (t["SB"] / pa * 650) * 0.3 + share("3B") * 30), 6, 22)
     frange = FIELD_RANGE[pos]
     fielding = h(pid, "fld", frange[0], frange[1])
-    chart = chart_string([("K", outs_so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("T", tr), ("H", hr)])
-    power = sum(CHART_POWER[c] * n for c, n in [("K", outs_so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("T", tr), ("H", hr)])
+    parts = [("K", so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("T", tr), ("H", hr)]
+    power = sum(CHART_POWER[c] * n for c, n in parts)
     points = on_base * 20 + fielding * 7 + max(0, round((speed - 1) * 1.5)) + power
-    return [None, None, None, None, None, 0, points, on_base, speed, pos, fielding, None, chart]
+    return [None, None, None, None, None, 0, points, on_base, speed, pos, fielding, None, chart_string(parts)]
 
 def build_pitcher(pid, t):
     ip = t["IPouts"] / 3
@@ -139,56 +156,24 @@ def build_pitcher(pid, t):
     control = clamp(round(3.5 + (1.32 - whip) * 5), 0, 6)
     outs = clamp(round(15.5 + (1.32 - whip) * 5), 11, 19)
     remaining = 20 - outs
-    walk_share = t["BB"] / max(1, t["BB"] + t["H"])
-    walks = clamp(round(remaining * walk_share), 0, remaining)
+    walks = clamp(round(remaining * (t["BB"] / max(1, t["BB"] + t["H"]))), 0, remaining)
     hits = remaining - walks
     hr = clamp(round(hits * (t["HR"] / max(1, t["H"]))), 0, hits)
     db = clamp(round((hits - hr) * 0.3), 0, hits - hr)
     singles = hits - hr - db
-    so_share = clamp(k9 / 24, 0.10, 0.55)
-    so = round(outs * so_share)
+    so = round(outs * clamp(k9 / 24, 0.10, 0.55))
     pu = clamp(round(outs * 0.12), 0, outs - so)
     rest = outs - so - pu
     gb = round(rest * 0.55)
     fb = rest - gb
-    starter = t["GS"] / max(1, t["G"]) >= 0.4
-    if starter:
-        ip_card = clamp(round(t["IPouts"] / max(1, t["GS"]) / 3), 4, 8)
-        role = "SP"
+    if t["GS"] / max(1, t["G"]) >= 0.4:
+        role, ip_card = "SP", clamp(round(t["IPouts"] / max(1, t["GS"]) / 3), 4, 8)
     else:
-        ip_card = 1 if t["SV"] > 30 or t["IPouts"] / max(1, t["G"]) < 5 else 2
-        role = "RP"
-    chart = chart_string([("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("H", hr)])
-    power = sum(PIT_POWER[c] * n for c, n in [("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("H", hr)])
+        role, ip_card = "RP", 1 if t["SV"] > 30 or t["IPouts"] / max(1, t["G"]) < 5 else 2
+    parts = [("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("H", hr)]
+    power = sum(PIT_POWER[c] * n for c, n in parts)
     points = round((control * 35 + power) * ((ip_card + 4) / 10)) + ip_card * 8
-    return [None, None, None, None, None, 1, points, control, ip_card, role, 0, None, chart]
-
-def build_pool(tag, year_min=None, year_max=None, min_pa=400, min_ipouts=450):
-    bat, bat_years = aggregate("Batting.csv", BAT_KEYS, year_min, year_max)
-    pit, pit_years = aggregate("Pitching.csv", PIT_KEYS, year_min, year_max)
-    era = {"pos": positions_for(year_min, year_max)}
-    used_names = defaultdict(int)
-    pool = []
-    for pid, t in bat.items():
-        if t["AB"] + t["BB"] < min_pa or pid not in people:
-            continue
-        # two-way edge: skip hitters who were mainly pitchers
-        if era["pos"].get(pid) is None and pid in pit and pit[pid]["IPouts"] > (t["AB"] + t["BB"]):
-            continue
-        card = build_hitter(pid, t, era)
-        if not card:
-            continue
-        finish(card, pid, bat_years[pid], used_names, tag, "bats")
-        pool.append(card)
-    for pid, t in pit.items():
-        if t["IPouts"] < min_ipouts or pid not in people:
-            continue
-        card = build_pitcher(pid, t)
-        if not card:
-            continue
-        finish(card, pid, pit_years[pid], used_names, tag, "throws")
-        pool.append(card)
-    return pool
+    return [None, None, None, None, None, 1, points, control, ip_card, role, 0, None, chart_string(parts)]
 
 def finish(card, pid, span, used_names, tag, hand_key):
     info = people[pid]
@@ -201,31 +186,116 @@ def finish(card, pid, span, used_names, tag, hand_key):
     card[2] = f"{span[0]}-{span[1]}"
     card[3] = str(span[1])
     card[4] = "MLB"
-    card[11] = info["bats" if hand_key == "bats" else "throws"] or "R"
+    card[11] = info[hand_key]
+    return card
 
-history = build_pool("all", None, None, min_pa=400, min_ipouts=450)
-decade = build_pool("00s", 2000, 2009, min_pa=250, min_ipouts=225)
-print(f"history: {len(history)} cards | 2000s: {len(decade)}", file=sys.stderr)
-for tag, pool in (("history", history), ("2000s", decade)):
+# The runtime assigns rarity by rank within hitters / SP / RP, and the
+# starter pack falls back gracefully in thin spots — so a slice only needs
+# basic depth: enough of each group, and every position represented in the
+# common band (the pack's bread and butter).
+def pool_ok(pool):
     hitters = [c for c in pool if c[5] == 0]
-    pitchers = [c for c in pool if c[5] == 1]
-    pos = defaultdict(int)
-    for c in hitters:
-        pos[c[9]] += 1
-    print(f"  {tag}: hitters {len(hitters)} {dict(pos)} | SP {sum(1 for c in pitchers if c[9]=='SP')} RP {sum(1 for c in pitchers if c[9]=='RP')}", file=sys.stderr)
+    sps = [c for c in pool if c[5] == 1 and c[9] == "SP"]
+    rps = [c for c in pool if c[5] == 1 and c[9] == "RP"]
+    if len(hitters) < 40 or len(sps) < 10 or len(rps) < 10:
+        return False
+    ranked = sorted(hitters, key=lambda c: -c[6])
+    n = len(ranked)
+    common = [c for i, c in enumerate(ranked) if (i + 1) / n > 0.30]
+    for pos in ("C", "1B", "2B", "3B", "SS", "LF/RF", "CF"):
+        if sum(1 for c in hitters if c[9] == pos) < 3 or not any(c[9] == pos for c in common):
+            return False
+    return True
+
+def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, key_of, min_pa, min_ipouts):
+    used_names = defaultdict(int)
+    pool = []
+    for key, t in bat_slice.items():
+        pid = key if isinstance(key, str) else key[0]
+        if t["AB"] + t["BB"] < min_pa or pid not in people:
+            continue
+        pos = pos_slice.get(key, "DH")
+        card = build_hitter(pid, t, pos)
+        if card:
+            pool.append(finish(card, pid, spans[key], used_names, tag, "bats"))
+    for key, t in pit_slice.items():
+        pid = key if isinstance(key, str) else key[0]
+        if t["IPouts"] < min_ipouts or pid not in people:
+            continue
+        card = build_pitcher(pid, t)
+        if card:
+            pool.append(finish(card, pid, spans[key], used_names, tag, "throws"))
+    return pool
+
+print("accumulating batting...", file=sys.stderr)
+bat_career, bat_decade, bat_franch, bat_spans = accumulate("Batting.csv", BAT_KEYS)
+print("accumulating pitching...", file=sys.stderr)
+pit_career, pit_decade, pit_franch, pit_spans = accumulate("Pitching.csv", PIT_KEYS)
+print("accumulating positions...", file=sys.stderr)
+pos_career, pos_decade, pos_franch = accumulate_positions()
+spans_all = {**bat_spans, **pit_spans}
+for key, span in bat_spans.items():
+    if key in pit_spans:
+        spans_all[key] = [min(span[0], pit_spans[key][0]), max(span[1], pit_spans[key][1])]
+
+history = build_slice("all", bat_career, pit_career, pos_career, spans_all, None, 400, 450)
+print(f"history: {len(history)}", file=sys.stderr)
+
+decades = {}
+for start in range(1870, 2030, 10):
+    tag = "00s" if start == 2000 else f"d{start}"
+    bat = {k: v for k, v in bat_decade.items() if k[1] == start}
+    pit = {k: v for k, v in pit_decade.items() if k[1] == start}
+    pool = build_slice(tag, bat, pit, pos_decade, spans_all, None, 250, 225)
+    if pool_ok(pool):
+        decades[start] = pool
+    else:
+        print(f"  decade {start}s skipped ({len(pool)} cards, too thin)", file=sys.stderr)
+print(f"decades kept: {sorted(decades)} sizes {[len(v) for k, v in sorted(decades.items())]}", file=sys.stderr)
+
+franchises = {}
+for fid, fname in sorted(franch_names.items()):
+    bat = {k: v for k, v in bat_franch.items() if k[1] == fid}
+    pit = {k: v for k, v in pit_franch.items() if k[1] == fid}
+    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, None, 400, 350)
+    if pool_ok(pool):
+        franchises[fid] = pool
+    else:
+        print(f"  franchise {fid} ({fname}) skipped ({len(pool)})", file=sys.stderr)
+print(f"franchises kept: {len(franchises)}", file=sys.stderr)
 
 header = """// Real-MLB card pools built from the Baseball Databank (Chadwick Baseball
 // Bureau / Sean Lahman, CC BY-SA 3.0 — https://github.com/chadwickbureau/baseballdatabank).
-// Cards are derived from each player's real career (or 2000-2009) rates,
-// mapped into the fictional generator's parameter space. Generated file.
+// Cards derive from each player's real rates (career, decade window, or
+// franchise stint), mapped into the fictional generator's parameter space.
+// Generated by scripts/build-mlb-pools.py; do not hand-edit.
 // Tuple: [id, name, yearsActive, lastYear, set, isPitcher, rawPoints,
 //         obcOrControl, speedOrIp, positionOrRole, fielding, hand, chart]
 """
+def dump(f, name, pool):
+    f.write(f"export const {name} = [\n")
+    for card in pool:
+        f.write(json.dumps(card, separators=(",", ":")) + ",\n")
+    f.write("];\n")
+
 with open(os.path.join(SP, "mlbPools.js"), "w") as f:
     f.write(header)
-    for name, pool in (("MLB_HISTORY_ROWS", history), ("MLB_2000S_ROWS", decade)):
-        f.write(f"export const {name} = [\n")
+    dump(f, "MLB_HISTORY_ROWS", history)
+    f.write("export const MLB_DECADE_ROWS = {\n")
+    for start, pool in sorted(decades.items()):
+        f.write(f'"{start}": [\n')
         for card in pool:
             f.write(json.dumps(card, separators=(",", ":")) + ",\n")
-        f.write("];\n")
+        f.write("],\n")
+    f.write("};\n")
+    f.write("export const MLB_FRANCHISE_ROWS = {\n")
+    for fid, pool in sorted(franchises.items()):
+        f.write(f'"{fid}": [\n')
+        for card in pool:
+            f.write(json.dumps(card, separators=(",", ":")) + ",\n")
+        f.write("],\n")
+    f.write("};\n")
+    f.write("export const MLB_FRANCHISE_NAMES = ")
+    f.write(json.dumps({fid: franch_names[fid] for fid in sorted(franchises)}, indent=None))
+    f.write(";\n")
 print("wrote mlbPools.js", file=sys.stderr)

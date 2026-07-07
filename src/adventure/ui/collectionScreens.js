@@ -105,13 +105,39 @@ function sellableCards(save) {
   });
 }
 
+// Everything past the first copy of each card (roster copies always kept).
+// Returns coins earned. Exported for tests.
+export function sellAllDuplicates(save) {
+  let coins = 0;
+  for (const { card, count } of collectionCards(save)) {
+    const keep = 1;
+    for (let extra = count; extra > keep; extra -= 1) {
+      if (!removeCardFromCollection(save, card.id)) break;
+      coins += RARITIES[card.rarity].sellValue;
+    }
+  }
+  grantCoins(save, coins);
+  return coins;
+}
+
+// The haul from selling every spare copy at once, for the menu label. Every
+// card keeps its first copy.
+function duplicateHaul(save) {
+  return sellableCards(save).reduce(
+    (coins, { card, count }) => coins + RARITIES[card.rarity].sellValue * (count - 1),
+    0
+  );
+}
+
 export const sellScreen = {
   render(app) {
     const rows = sellableCards(app.save);
+    const haul = duplicateHaul(app.save);
     const items = [
       ...rows.map(({ card, count }) => ({
         html: `${cardLine(card)} <span class="gq-dim">x${count} &#8594; &#9679; ${RARITIES[card.rarity].sellValue}</span>`
       })),
+      ...(rows.length ? [{ html: `SELL ALL DUPLICATES <span class="gq-dim">&#8594; &#9679; ${haul}</span>` }] : []),
       { label: "DONE SELLING" }
     ];
     return `<div class="gq-screen">
@@ -119,24 +145,30 @@ export const sellScreen = {
       <div class="gq-body"><div class="gq-frame">${
         rows.length ? "" : `<p class="gq-dim">NOTHING SPARE TO SELL.</p>`
       }${menuHtml(items, app.screen.index ?? 0)}</div></div>
-      <div class="gq-textbox"><p>Z sells one copy. Cards in your roster keep their last copy.</p></div>
+      <div class="gq-textbox"><p>Z sells one copy. Every card keeps its first copy; SELL ALL clears the rest.</p></div>
     </div>`;
   },
   key(app, key) {
     const rows = sellableCards(app.save);
-    const total = rows.length + 1;
+    const hasSellAll = rows.length > 0;
+    const total = rows.length + (hasSellAll ? 1 : 0) + 1;
     if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), total);
     } else if (key === "a") {
       const index = app.screen.index ?? 0;
-      if (index >= rows.length) {
-        app.go("shop", { menuIndex: 0 });
-      } else {
+      if (index < rows.length) {
         const { card } = rows[index];
         if (removeCardFromCollection(app.save, card.id)) {
           grantCoins(app.save, RARITIES[card.rarity].sellValue);
           persistSave(app.save);
         }
+      } else if (hasSellAll && index === rows.length) {
+        const coins = sellAllDuplicates(app.save);
+        addLog(app.save, `Sold the duplicate pile (+${coins} coins).`);
+        persistSave(app.save);
+        app.screen.index = 0;
+      } else {
+        app.go("shop", { menuIndex: 0 });
       }
     } else if (key === "b") {
       app.go("shop", { menuIndex: 0 });

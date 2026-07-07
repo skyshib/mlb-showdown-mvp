@@ -192,6 +192,41 @@ h1.gq-logo {
   margin: 2cqw 0;
 }
 
+/* ---- Real-player headshots (Wikipedia thumbnails) ---- */
+
+/* A narrow portrait box matching the source photos' aspect ratio, so faces
+   stay in frame; the DMG green wash keeps them on-palette. */
+.gq-card-headshot {
+  float: right;
+  position: relative;
+  width: 13cqw;
+  aspect-ratio: 3 / 4;
+  margin: 0 0 1cqw 1.2cqw;
+  overflow: hidden;
+  border: 0.5cqw solid var(--gb-darkest);
+  background: var(--gb-light);
+}
+.gq-card-headshot:empty { display: none; }
+.gq-card-headshot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  filter: grayscale(1) sepia(1) hue-rotate(55deg) saturate(1.6) brightness(0.95) contrast(1.05);
+  image-rendering: pixelated;
+}
+.gq-photo-credit {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  font-size: 1.3cqw;
+  text-align: center;
+  color: var(--gb-lightest);
+  background: var(--gb-darkest);
+  letter-spacing: 0.04em;
+}
+
 /* ---- Foil cards ---- */
 
 /* Foil printings (and legends everywhere) get a slow shine sweep and a

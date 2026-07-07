@@ -1,6 +1,7 @@
 import { loadSave } from "./state.js";
 import { setUniverseSeed, cardById } from "./packs.js";
-import { cardPanelHtml } from "./ui/helpers.js";
+import { hydratePhotos } from "./photos.js";
+import { cardPanelHtml, escapeHtml } from "./ui/helpers.js";
 import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, starterRevealScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
 import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
@@ -58,6 +59,8 @@ const app = {
     const screen = SCREENS[this.screen.name] ?? titleScreen;
     root.innerHTML = screen.render(this);
     screen.mounted?.(this);
+    // Real-player cards get their Wikipedia headshots filled in.
+    hydratePhotos(root);
     // Rerendering resets scroll positions; keep the cursor row in view so
     // long lists (rosters, binder) can actually be walked.
     root.querySelector(".gq-cursor")?.scrollIntoView({ block: "nearest" });
@@ -165,13 +168,27 @@ function hoveredCard(target) {
   return row ? SCREENS[app.screen.name]?.hoverCard?.(app, Number(row.dataset.menuIndex)) : null;
 }
 
+// Plain-text hover notes (e.g. the HUD's team defense summary) render as a
+// small card-styled panel: first line is the title, the rest are rows.
+function notePanelHtml(note) {
+  const [title, ...lines] = note.split("\n");
+  return `<div class="gq-card"><div class="gq-card-name">${escapeHtml(title)}</div>${lines
+    .map((line) => `<div class="gq-card-meta">${escapeHtml(line)}</div>`)
+    .join("")}</div>`;
+}
+
 document.addEventListener("mouseover", (event) => {
   const card = hoveredCard(event.target);
-  if (!card) {
+  const note = event.target.closest?.("[data-hover-note]");
+  if (card) {
+    tooltip.innerHTML = cardPanelHtml(card);
+    hydratePhotos(tooltip);
+  } else if (note) {
+    tooltip.innerHTML = notePanelHtml(note.dataset.hoverNote);
+  } else {
     tooltip.hidden = true;
     return;
   }
-  tooltip.innerHTML = cardPanelHtml(card);
   tooltip.hidden = false;
 });
 
@@ -186,26 +203,31 @@ document.addEventListener("mousemove", (event) => {
 });
 
 document.addEventListener("mouseout", (event) => {
-  if (!event.relatedTarget || !event.relatedTarget.closest?.("[data-menu-index], [data-card-id]")) {
+  if (!event.relatedTarget || !event.relatedTarget.closest?.("[data-menu-index], [data-card-id], [data-hover-note]")) {
     tooltip.hidden = true;
   }
 });
 
-// Touch has no hover: tapping a card-tagged element (batter, pitcher, a
-// runner on a base) toggles the card panel near it instead.
+// Touch has no hover: tapping a tagged element (batter, pitcher, a runner on
+// a base, the HUD's team defense) toggles its panel near it instead.
 document.addEventListener("click", (event) => {
-  const tagged = event.target.closest?.("[data-card-id]");
+  const tagged = event.target.closest?.("[data-card-id], [data-hover-note]");
   if (!tagged) {
     if (!tooltip.hidden && !event.target.closest?.("[data-menu-index]")) tooltip.hidden = true;
     return;
   }
-  const card = cardById(tagged.dataset.cardId);
-  if (!card) return;
+  const card = tagged.dataset.cardId ? cardById(tagged.dataset.cardId) : null;
+  if (tagged.dataset.cardId && !card) return;
   if (!tooltip.hidden) {
     tooltip.hidden = true;
     return;
   }
-  tooltip.innerHTML = cardPanelHtml(card);
+  if (card) {
+    tooltip.innerHTML = cardPanelHtml(card);
+    hydratePhotos(tooltip);
+  } else {
+    tooltip.innerHTML = notePanelHtml(tagged.dataset.hoverNote);
+  }
   tooltip.hidden = false;
   const anchor = tagged.getBoundingClientRect();
   const pad = 10;

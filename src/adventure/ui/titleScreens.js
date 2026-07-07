@@ -1,5 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js";
-import { starterPack, setUniverseSeed, UNIVERSES } from "../packs.js";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, FRANCHISES, universeConfig } from "../packs.js";
 import {
   createSave,
   persistSave,
@@ -124,28 +124,63 @@ export const nameEntryScreen = {
 };
 
 // Which baseball do you want? A fresh fictional league, the real 2000-2005
-// Showdown card set, or real MLB players (one decade or all of history).
+// Showdown card set, real players (all time, any decade, or any franchise).
+// DECADE and FRANCHISE open sub-lists.
+function leagueOptions(app) {
+  if (app.screen.picker === "decade") {
+    return DECADES.map((start) => ({
+      label: `THE ${start}s`,
+      universe: `decade-${start}`
+    }));
+  }
+  if (app.screen.picker === "franchise") {
+    return FRANCHISES.map((franchise) => ({
+      label: franchise.name.toUpperCase(),
+      universe: `franchise-${franchise.id}`
+    }));
+  }
+  return [
+    ...Object.values(UNIVERSES).map((league) => ({ label: league.name, universe: league.key })),
+    { label: "MLB: DECADE", picker: "decade", blurb: "Pick any decade from the 1910s on — players rated on those ten years." },
+    { label: "MLB: FRANCHISE", picker: "franchise", blurb: "Pick a club and play its all-time roster — every player rated on their years there." }
+  ];
+}
+
 export const leagueSelectScreen = {
   render(app) {
-    const leagues = Object.values(UNIVERSES);
-    const index = clampIndex(app.screen.menuIndex ?? 0, leagues.length);
+    const options = leagueOptions(app);
+    const index = clampIndex(app.screen.menuIndex ?? 0, options.length);
+    const selected = options[index];
+    const blurb = selected.blurb ?? universeConfig(selected.universe)?.blurb ?? "";
+    const title = app.screen.picker === "decade" ? "PICK A DECADE" : app.screen.picker === "franchise" ? "PICK A FRANCHISE" : "CHOOSE YOUR LEAGUE";
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>CHOOSE YOUR LEAGUE</span><span>${index + 1}/${leagues.length}</span></div>
+      <div class="gq-topbar"><span>${title}</span><span>${index + 1}/${options.length}</span></div>
       <div class="gq-body">
-        <div class="gq-frame">${menuHtml(leagues.map((league) => ({ label: league.name })), index)}</div>
-        <div class="gq-frame"><p class="gq-dim">${escapeHtml(leagues[index].blurb)}</p></div>
+        <div class="gq-frame gq-scroll" style="max-height:62%">${menuHtml(options.map((option) => ({ label: option.label })), index)}</div>
+        ${blurb ? `<div class="gq-frame"><p class="gq-dim">${escapeHtml(blurb)}</p></div>` : ""}
       </div>
-      <div class="gq-textbox"><p>Z picks a league. Your starter pack comes from it.</p></div>
+      <div class="gq-textbox"><p>Z picks. ${app.screen.picker ? "X backs out." : "Your starter pack comes from the league you choose."}</p></div>
     </div>`;
   },
   key(app, key) {
-    const leagues = Object.values(UNIVERSES);
+    const options = leagueOptions(app);
     if (key === "up" || key === "down") {
-      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), leagues.length);
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), options.length);
     } else if (key === "a") {
-      finishNewGame(app, app.screen.playerName, leagues[clampIndex(app.screen.menuIndex ?? 0, leagues.length)].key);
+      const choice = options[clampIndex(app.screen.menuIndex ?? 0, options.length)];
+      if (choice.picker) {
+        app.screen.picker = choice.picker;
+        app.screen.menuIndex = 0;
+      } else {
+        finishNewGame(app, app.screen.playerName, choice.universe);
+      }
     } else if (key === "b") {
-      app.go("nameEntry");
+      if (app.screen.picker) {
+        app.screen.picker = null;
+        app.screen.menuIndex = 0;
+      } else {
+        app.go("nameEntry");
+      }
     }
     app.rerender();
   }

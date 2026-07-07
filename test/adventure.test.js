@@ -369,6 +369,36 @@ test("saves round-trip through storage and export codes", () => {
   assert.equal(importSaveCode("not a save"), null);
 });
 
+test("sell-all clears every duplicate at the pawn rate, keeping first copies", async () => {
+  const { sellAllDuplicates } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const rosterCard = save.roster.cardIds[0];
+  const spare = adventurePool().find((card) => !save.roster.cardIds.includes(card.id));
+  addCardToCollection(save, rosterCard, 2); // two extra copies of a roster card
+  addCardToCollection(save, spare.id, 3); // three copies of a bench card
+  const before = save.player.coins;
+  const rosterValue = RARITIES[cardById(rosterCard).rarity].sellValue;
+  const spareValue = RARITIES[spare.rarity].sellValue;
+  const coins = sellAllDuplicates(save);
+  assert.equal(coins, rosterValue * 2 + spareValue * 2, "every copy past the first sells");
+  assert.equal(save.player.coins, before + coins);
+  assert.equal(ownedCount(save, rosterCard), 1, "roster card keeps a copy");
+  assert.equal(ownedCount(save, spare.id), 1, "bench card keeps a copy");
+  assert.equal(sellAllDuplicates(save), 0, "second pass finds nothing");
+  assert.ok(RARITIES.common.sellValue <= 30, "the shop pays pawn rates now");
+});
+
+test("boss rosters spread the budget instead of stars-and-scrubs", () => {
+  for (const trainer of TRAINERS) {
+    const npc = buildNpcTeam(trainer);
+    const mean = npc.points / npc.roster.length;
+    const scrubs = npc.roster.filter((card) => card.points < mean * 0.25).length;
+    assert.ok(scrubs <= 2, `${trainer.id}: at most a couple of bargain-bin fillers (${scrubs})`);
+    const priciest = Math.max(...npc.roster.map((card) => card.points));
+    assert.ok(priciest <= mean * 4, `${trainer.id}: no card hogs the whole checkbook`);
+  }
+});
+
 test("selling never strips the roster copy of a card", () => {
   const save = testSave();
   const rosterCard = save.roster.cardIds[0];
@@ -702,6 +732,19 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
   assert.ok(html.includes(`data-card-id="${phase.batter.id}"`), "batter is hoverable");
   assert.ok(html.includes(`data-card-id="${phase.opposingPitcher.id}"`), "pitcher is hoverable");
   assert.ok(html.includes('data-card-id="runner-card-id"'), "occupied base is hoverable");
+  // YOU/THEM carry defense summaries: catcher arm, infield, outfield sums.
+  const notes = [...html.matchAll(/data-hover-note="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(notes.length, 2, "both HUD sides carry a defense note");
+  assert.ok(notes[0].startsWith("YOUR DEFENSE") && notes[1].startsWith("THEIR DEFENSE"));
+  for (const note of notes) {
+    assert.match(note, /CATCHER [+-]\d+/);
+    assert.match(note, /INFIELD [+-]\d+/);
+    assert.match(note, /OUTFIELD [+-]\d+/);
+  }
+  const infield = battle.state[battle.playerSide].lineup
+    .filter((p) => ["1B", "2B", "3B", "SS"].includes(p.assignedPosition ?? p.position))
+    .reduce((sum, p) => sum + (Number(p.fielding) || 0), 0);
+  assert.ok(notes[0].includes(`INFIELD ${infield >= 0 ? "+" : ""}${infield}`), "infield total matches the lineup");
 });
 
 test("series games can put the player at home, batting second", () => {
@@ -752,14 +795,19 @@ test("the game log lines carry player-perspective WPA", async () => {
 // ---- Real-card leagues -------------------------------------------------------
 
 test("every league builds a working universe with a legal starter pack", async () => {
-  const { UNIVERSES } = await import("../src/adventure/packs.js");
+  const { UNIVERSES, DECADES, FRANCHISES, universeConfig } = await import("../src/adventure/packs.js");
   const { resolveChart } = await import("../src/rules/cards.js");
-  const expectedSizes = { classic: 3544, "mlb-2000s": 1906, "mlb-history": 9872 };
+  const expectedSizes = { classic: 3544 };
   try {
-    for (const key of Object.keys(UNIVERSES)) {
+    assert.ok(DECADES.length >= 12 && DECADES.includes(1910) && DECADES.includes(2020), "decades run 1910s-2020s");
+    assert.equal(FRANCHISES.length, 30, "all thirty active franchises");
+    assert.equal(universeConfig("mlb-2000s")?.key, "decade-2000", "legacy 2000s saves alias to the decade");
+    assert.equal(universeConfig("decade-1870"), null, "pre-bullpen decades are not offered");
+    const sampled = [...Object.keys(UNIVERSES), "decade-1930", "decade-1970", "franchise-SEA", "franchise-NYY"];
+    for (const key of sampled) {
       setUniverseSeed("league-test", key);
       const pool = adventurePool();
-      assert.ok(pool.length >= 1900, `${key} pool is deep (${pool.length})`);
+      assert.ok(pool.length >= 200, `${key} pool is deep enough (${pool.length})`);
       if (expectedSizes[key]) assert.equal(pool.length, expectedSizes[key], `${key} pool size`);
       for (const tier of ["common", "uncommon", "rare", "legend"]) {
         assert.ok(pool.some((card) => card.rarity === tier), `${key} has ${tier}s`);

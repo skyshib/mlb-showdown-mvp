@@ -65,16 +65,27 @@ export function buildNpcTeam(trainer) {
     return total;
   };
 
+  // Every slot gets its own share of the budget up front, drawn from a
+  // bounded band (~0.7-1.6x an even split) so rosters read like real teams —
+  // a couple of headliners, a solid middle, role players — instead of one
+  // mega star and twelve minimum bids. Unspent allocation rolls forward.
+  const weights = slots.map(() => 0.7 + rng.next() * 0.9);
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  let carry = 0;
+
   for (let index = 0; index < slots.length; index += 1) {
     const slot = slots[index];
     const reserve = reserveFor(slots.slice(index + 1));
-    // Spend only a jittered share of the room, so the surplus spreads across
-    // several slots instead of one mega star followed by scraps.
-    const room = (trainer.pointBudget - spent - reserve) * (0.6 + 0.4 * rng.next());
+    const room = trainer.pointBudget - spent - reserve;
+    const allocation = (trainer.pointBudget * weights[index]) / weightTotal + carry;
+    const target = Math.max(0, Math.min(allocation, room));
     const fits = unusedFits(slot);
-    const affordable = fits.filter((card) => card.points <= room);
-    const candidates = (affordable.length ? affordable : fits.sort((a, b) => a.points - b.points).slice(0, 1))
-      .sort((a, b) => score(b) - score(a) || a.points - b.points || a.name.localeCompare(b.name));
+    // Shop near the slot's allocation first; widen to anything affordable,
+    // then to the cheapest legal fill, only if the band comes up empty.
+    let candidates = fits.filter((card) => card.points <= Math.min(room, target * 1.25) && card.points >= target * 0.5);
+    if (!candidates.length) candidates = fits.filter((card) => card.points <= room);
+    if (!candidates.length) candidates = [...fits].sort((a, b) => a.points - b.points).slice(0, 1);
+    candidates = [...candidates].sort((a, b) => score(b) - score(a) || a.points - b.points || a.name.localeCompare(b.name));
     // A pinch of seeded variety among near-equal picks so trainers sharing an
     // archetype don't field carbon-copy teams.
     const pick = candidates[Math.min(candidates.length - 1, rng.int(0, Math.min(2, candidates.length - 1)))];
@@ -82,6 +93,7 @@ export function buildNpcTeam(trainer) {
     used.add(pick.id);
     roster.push(pick);
     spent += pick.points;
+    carry = allocation - pick.points;
   }
 
   // Present (and bat) the squad best-first: hitters by printed points, then
