@@ -86,6 +86,14 @@ function gameStatRows(app) {
   const { boxScore, stars, playerSide } = app.screen;
   const npcSide = playerSide === "away" ? "home" : "away";
   const rows = [];
+  // Rare feats lead the recap — they're the reason you tell the story later.
+  for (const feat of app.screen.feats ?? []) {
+    rows.push({
+      section: "&#9733;&#9733; RARE FEAT &#9733;&#9733;",
+      id: feat.cardId ?? null,
+      html: `<b>${escapeHtml(feat.title)}</b> <span class="gq-dim">${escapeHtml(feat.blurb)}</span>`
+    });
+  }
   stars.forEach((star, index) => rows.push({
     section: "STARS OF THE GAME",
     id: star.id,

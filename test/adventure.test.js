@@ -710,6 +710,77 @@ test("the game log lines carry player-perspective WPA", async () => {
   assert.ok(pen.includes("PEN"), "pitching changes log without WPA");
 });
 
+// ---- Easter eggs -------------------------------------------------------------
+
+test("rare feats fire for the games worth framing", async () => {
+  const { gameFeats } = await import("../src/adventure/feats.js");
+  const bat = (over = {}) => ({ id: "h1", name: "Ace Batter", pa: 4, ab: 4, h: 0, d: 0, t: 0, hr: 0, r: 0, bb: 0, so: 0, sb: 0, cs: 0, rbi: 0, ...over });
+  const arm = (over = {}) => ({ id: "p1", name: "Big Arm", bf: 27, outs: 27, h: 5, bb: 2, so: 6, hr: 0, r: 0, ...over });
+  const nine = (over = {}) => Array.from({ length: 9 }, (_, i) => bat({ id: `h${i}`, name: `Batter ${i}`, ...over }));
+  const game = (over = {}) => gameFeats({
+    boxScore: { away: { hitters: nine({ h: 1, ab: 4 }), pitchers: [arm()] }, home: { hitters: nine(), pitchers: [arm()] } },
+    playerSide: "away",
+    events: [],
+    score: { away: 3, home: 1 },
+    innings: 9,
+    ...over
+  });
+  const titles = (feats) => feats.map((feat) => feat.title).join(" | ");
+
+  const perfect = game({ boxScore: { away: { hitters: nine({ h: 1 }), pitchers: [arm({ h: 0, bb: 0 })] }, home: { hitters: nine(), pitchers: [arm()] } }, score: { away: 1, home: 0 } });
+  assert.ok(titles(perfect).includes("PERFECT GAME!"), "perfecto detected");
+  assert.ok(!titles(perfect).includes("NO-HITTER"), "a perfect game outranks its lesser cousins");
+
+  const nono = game({ boxScore: { away: { hitters: nine({ h: 1 }), pitchers: [arm({ h: 0, bb: 3 })] }, home: { hitters: nine(), pitchers: [arm()] } }, score: { away: 2, home: 0 } });
+  assert.ok(titles(nono).includes("NO-HITTER!"));
+  assert.ok(!titles(nono).includes("SHUTOUT"), "no-hitter suppresses the shutout line");
+
+  const slugger = bat({ h: 4, hr: 4, rbi: 10, ab: 5 });
+  const bigDay = game({ boxScore: { away: { hitters: [slugger, ...nine().slice(1)], pitchers: [arm()] }, home: { hitters: nine(), pitchers: [arm()] } } });
+  assert.ok(titles(bigDay).includes("WENT DEEP 4 TIMES"), "4-homer game");
+  assert.ok(titles(bigDay).includes("DROVE IN 10"), "10 RBI");
+  assert.equal(bigDay.find((feat) => feat.title.includes("WENT DEEP")).cardId, "h1", "feat links the hero's card");
+
+  const cycleGuy = bat({ h: 4, d: 1, t: 1, hr: 1 });
+  assert.ok(titles(game({ boxScore: { away: { hitters: [cycleGuy, ...nine().slice(1)], pitchers: [arm()] }, home: { hitters: nine(), pitchers: [arm()] } } })).includes("CYCLE"), "the cycle");
+
+  const sombrero = bat({ ab: 5, h: 0, so: 5 });
+  assert.ok(titles(game({ boxScore: { away: { hitters: [sombrero, ...nine().slice(1)], pitchers: [arm()] }, home: { hitters: nine(), pitchers: [arm()] } } })).includes("PLATINUM SOMBRERO"), "the sombrero is celebrated, sadly");
+
+  assert.ok(titles(game()).includes("SOCIALIST BASEBALL"), "nine hitters, one hit apiece");
+  assert.ok(titles(game({ innings: 14 })).includes("FREE BASEBALL: 14 INNINGS"), "marathon");
+  assert.ok(titles(game({ score: { away: 18, home: 2 } })).includes("STATEMENT GAME"), "blowout");
+
+  const comebackEvents = [
+    { half: "bottom", inning: 3, runs: 6, scoreAfter: { away: 0, home: 6 } },
+    { half: "top", inning: 8, runs: 7, scoreAfter: { away: 7, home: 6 } }
+  ];
+  assert.ok(titles(game({ events: comebackEvents, score: { away: 7, home: 6 } })).includes("DOWN 6, NOT OUT"), "comeback tracked from the deepest hole");
+
+  const snowmanEvents = Array.from({ length: 4 }, () => ({ half: "top", inning: 5, runs: 2, scoreAfter: { away: 8, home: 0 } }));
+  assert.ok(titles(game({ events: snowmanEvents, score: { away: 8, home: 0 } })).includes("8-SPOT"), "snowman inning");
+
+  assert.equal(game({ score: { away: 2, home: 4 } }).some((feat) => feat.title.includes("SHUTOUT")), false, "losses do not celebrate the wrong side");
+});
+
+test("pack eggs and day whimsy stay rare", async () => {
+  const { packEggs, dayWhimsy } = await import("../src/adventure/feats.js");
+  const card = (rarity, position, id) => ({ id, rarity, kind: "hitter", position });
+  const doubleLegend = [card("legend", "C", "a"), card("legend", "SS", "b"), card("common", "1B", "c"), card("common", "2B", "d"), card("uncommon", "CF", "e")];
+  assert.ok(packEggs(doubleLegend, () => 1).some((egg) => egg.includes("HEAVENS")), "two legends celebrated");
+  const mono = ["a", "b", "c", "d", "e"].map((id) => card("uncommon", id, id));
+  assert.ok(packEggs(mono, () => 1).some((egg) => egg.includes("MONOCHROME")), "single-rarity pack");
+  const samePos = ["a", "b", "c", "d", "e"].map((id) => card("common", "C", id));
+  assert.ok(packEggs(samePos, () => 1).some((egg) => egg.includes("SCOUT NEEDS GLASSES")), "five of one slot");
+  assert.ok(packEggs(doubleLegend, () => 3).some((egg) => egg.includes("VU")), "all-duplicates pack");
+  const ordinary = [card("common", "C", "a"), card("common", "1B", "b"), card("common", "2B", "c"), card("uncommon", "SS", "d"), card("rare", "CF", "e")];
+  assert.equal(packEggs(ordinary, (id) => (id === "a" ? 2 : 1)).length, 0, "ordinary packs stay quiet");
+
+  assert.ok(dayWhimsy(42).includes("ANSWER"), "day 42");
+  assert.ok(dayWhimsy(162).includes("162"), "day 162");
+  assert.equal(dayWhimsy(41), null, "ordinary days stay quiet");
+});
+
 // ---- Battle controller -----------------------------------------------------
 
 function playToCompletion(seed) {

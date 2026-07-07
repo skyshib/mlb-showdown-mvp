@@ -1,5 +1,6 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag } from "./helpers.js";
 import { PACKS, RARITIES, openPack, shopStock, cardById } from "../packs.js";
+import { packEggs } from "../feats.js";
 import {
   persistSave,
   deriveSeed,
@@ -376,6 +377,9 @@ export const packOpenScreen = {
         ${current ? `<div class="gq-pack-reveal">${cardPanelHtml(current, { count: ownedCount(save, current.id) })}</div>` : ""}
       </div>
       <div class="gq-textbox">
+        ${revealed === cards.length && !rewound
+          ? packEggs(cards, (id) => ownedCount(save, id)).map((egg) => `<p><b>${egg}</b></p>`).join("")
+          : ""}
         ${revealed > 1 ? `<p class="gq-dim">&#9664;/&#9654; LOOK BACK THROUGH THE PULLS</p>` : ""}
         <p class="gq-blink">${rewound ? "Z — FORWARD" : revealed < cards.length ? "Z — NEXT CARD" : "Z — DONE"}</p>
       </div>

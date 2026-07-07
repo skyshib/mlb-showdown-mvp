@@ -135,6 +135,15 @@ Time is tracked in **days: every game played is one day**. The map header shows
 the current day, and winning the World Series ends on a championship review —
 season length in days, battle record, packs ripped, and the season's WPA MVPs.
 
+**Easter eggs** (`feats.js`) fire for rare moments, in three flavors: on-field
+feats headline the post-game box score (perfect game, no-hitter, shutout, the
+cycle, 4-HR games, 10-RBI games, 15-K starts, 5-steal games, snowman innings,
+big comebacks, marathons, blowouts, plus sillier ones — the platinum sombrero,
+socialist baseball, winning without a hit); pack oddities annotate a fully
+revealed pack (double-legend, monochrome, five-of-one-slot, all-duplicates);
+and exact day numbers swap the map's hint line for one-off flavor (13, 27, 42,
+56, 100, 108, 162, 314, 500, 715, 755). All are rare by construction.
+
 ### 3.3 Trainer definitions
 
 NPC trainers are **data, not code** — one authored JSON-ish module per region area:

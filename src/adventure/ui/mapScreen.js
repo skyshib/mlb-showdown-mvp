@@ -1,6 +1,7 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js";
 import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js";
 import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js";
+import { dayWhimsy } from "../feats.js";
 import { validateRoster } from "../../rules/draft.js";
 import { buildNpcTeam } from "../npcTeams.js";
 import { startTrainerBattle } from "./battleScreen.js";
@@ -118,7 +119,7 @@ export const mapScreen = {
       <div class="gq-textbox">${
         problems.length
           ? `<p>! ROSTER NOT GAME-READY: ${escapeHtml(problems.join(", "))}. Fix it in TEAM.</p>`
-          : `<p>Pick a place to go. Trainers pay coins; the gym pays a badge.</p>`
+          : `<p>${escapeHtml(dayWhimsy(ensureSeasonStats(save).games + 1) ?? "Pick a place to go. Trainers pay coins; the gym pays a badge.")}</p>`
       }</div>
     </div>`;
   },

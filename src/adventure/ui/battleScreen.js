@@ -13,6 +13,7 @@ import {
 import { gameStars, gameLogLine } from "./statsScreens.js";
 import { buildBoxScore } from "../../rules/game.js";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js";
+import { gameFeats } from "../feats.js";
 import { buildNpcTeam } from "../npcTeams.js";
 import {
   persistSave,
@@ -279,6 +280,13 @@ function resolveGameEnd(app, phase) {
     trainerId: trainer.id,
     boxScore,
     stars: gameStars(boxScore, battle.playerSide),
+    feats: gameFeats({
+      boxScore,
+      playerSide: battle.playerSide,
+      events: battle.events,
+      score: phase.score,
+      innings: battle.state.inning
+    }),
     events: battle.events,
     score: phase.score,
     playerSide: battle.playerSide,
