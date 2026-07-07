@@ -98,14 +98,22 @@ const RESULT_LINES = {
   HR: "CRUSHES IT! HOME RUN!"
 };
 
-export function describeEvent(event) {
+// Scores always read from the player's side: up 3-0 is "3-0" whether the
+// player is home or away.
+function scoreCall(event, playerSide) {
+  const yours = event.scoreAfter[playerSide];
+  const theirs = event.scoreAfter[playerSide === "home" ? "away" : "home"];
+  return `It's ${yours}-${theirs}.`;
+}
+
+export function describeEvent(event, playerSide = "away") {
   if (!event) return [];
   if (event.type === "pitching-change") {
     return [`${shortName(event.team)} goes to the pen: ${shortName(event.pitcher)} takes the hill.`];
   }
   if (event.type === "intentional-walk") {
     const lines = [`${shortName(event.batter)} is waved down to first. Intentional walk.`];
-    if (event.runs > 0) lines.push(`That forces in a run! It's ${event.scoreAfter.away}-${event.scoreAfter.home}.`);
+    if (event.runs > 0) lines.push(`That forces in a run! ${scoreCall(event, playerSide)}`);
     return lines;
   }
   if (event.type === "bunt") {
@@ -131,7 +139,7 @@ export function describeEvent(event) {
       }
     }
     if (event.runs > 0) {
-      lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} It's ${event.scoreAfter.away}-${event.scoreAfter.home}.`);
+      lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} ${scoreCall(event, playerSide)}`);
     }
     if (event.outsAfter >= 3) {
       lines.push(sideRetiredLine(event));
@@ -161,7 +169,7 @@ export function describeEvent(event) {
     );
   }
   if (event.runs > 0) {
-    lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} It's ${event.scoreAfter.away}-${event.scoreAfter.home}.`);
+    lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} `, scoreCall(event, playerSide));
   }
   if (event.outsAfter >= 3) {
     lines.push(sideRetiredLine(event));

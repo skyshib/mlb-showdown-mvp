@@ -57,8 +57,10 @@ export function gameLogLine(event, playerSide) {
     : event.batter;
   const battingSide = event.half === "top" ? "away" : "home";
   const wpa = battingSide === playerSide ? event.wpa : -(event.wpa ?? 0);
-  // Every row carries the score; scoring plays show it bold.
-  const scoreText = event.scoreAfter ? `${event.scoreAfter.away}-${event.scoreAfter.home}` : "";
+  // Every row carries the score, read from the player's side; scoring plays
+  // show it bold.
+  const npcSide = playerSide === "home" ? "away" : "home";
+  const scoreText = event.scoreAfter ? `${event.scoreAfter[playerSide]}-${event.scoreAfter[npcSide]}` : "";
   const score = scoreText ? (event.runs > 0 ? ` <b>${scoreText}</b>` : ` <span class="gq-dim">${scoreText}</span>`) : "";
   return `${inning} ${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
 }
@@ -159,7 +161,7 @@ export const gameStatsScreen = {
       body = sectionedMenu(rows, clampIndex(app.screen.index ?? 0, rows.length));
     }
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>FINAL ${app.screen.score.away}-${app.screen.score.home} VS ${escapeHtml(trainer.name)}</span><span>${logView ? "GAME LOG" : "BOX SCORE"}</span></div>
+      <div class="gq-topbar"><span>FINAL ${app.screen.score[app.screen.playerSide]}-${app.screen.score[app.screen.playerSide === "home" ? "away" : "home"]} VS ${escapeHtml(trainer.name)}</span><span>${logView ? "GAME LOG" : "BOX SCORE"}</span></div>
       <div class="gq-body"><div class="gq-frame gq-scroll gq-map-node">${body}</div></div>
       <div class="gq-textbox"><p class="gq-dim">% IS WPA${logView ? " FOR YOUR SIDE" : " — WIN PROBABILITY ADDED"}. 10%+ SWINGS READ BOLD.${hasLog ? ` &#8592;/&#8594; ${logView ? "BOX SCORE" : "GAME LOG"}.` : ""}</p><p class="gq-blink">Z — CONTINUE</p></div>
     </div>`;

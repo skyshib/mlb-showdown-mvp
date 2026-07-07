@@ -822,6 +822,11 @@ test("the third out narrates the next half-inning only if one is coming", async 
   assert.ok(topNine.includes("That's the ballgame!"), "home leading after the top of the 9th ends it");
   const topNineTrailing = describeEvent(out({ half: "top", scoreAfter: { away: 4, home: 2 } })).join(" ");
   assert.ok(topNineTrailing.includes("Bottom 9 coming up."), "the home team still gets its licks");
+
+  // Score calls read from the player's side, whichever dugout that is.
+  const rbi = out({ outsAfter: 1, runs: 1, result: "1B", scoreAfter: { away: 0, home: 3 } });
+  assert.ok(describeEvent(rbi, "home").join(" ").includes("It's 3-0."), "up 3-0 at home reads 3-0");
+  assert.ok(describeEvent(rbi, "away").join(" ").includes("It's 0-3."), "and 0-3 from the road dugout");
 });
 
 test("the game log lines carry player-perspective WPA", async () => {
@@ -836,6 +841,8 @@ test("the game log lines carry player-perspective WPA", async () => {
   assert.ok(quiet.includes("1-1"), "every row carries the score");
   const theirs = gameLogLine({ ...swing, half: "bottom" }, "away");
   assert.ok(theirs.includes("-18%"), "their swing reads negative");
+  const atHome = gameLogLine(swing, "home");
+  assert.ok(atHome.includes("1-3"), "the score flips to read from the home player's side");
   const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
   assert.ok(pen.includes("PEN"), "pitching changes log without WPA");
 });

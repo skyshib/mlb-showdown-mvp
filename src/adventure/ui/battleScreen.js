@@ -244,14 +244,15 @@ function fastForwardItem() {
     label: "FAST FORWARD",
     run: (a) => {
       const events = fastForward(a.screen.battle);
-      const tail = events.filter(Boolean).slice(-2).flatMap(describeEvent);
+      const tail = events.filter(Boolean).slice(-2).flatMap((event) => describeEvent(event, a.screen.battle.playerSide));
       afterAction(a, [], [`&#9193; ${events.length} plays on autopilot...`, ...tail]);
     }
   };
 }
 
 function afterAction(app, events, presetLines = null) {
-  const lines = presetLines ?? events.filter(Boolean).flatMap(describeEvent);
+  const playerSide = app.screen.battle.playerSide;
+  const lines = presetLines ?? events.filter(Boolean).flatMap((event) => describeEvent(event, playerSide));
   app.screen.lines = lines.length ? lines : app.screen.lines;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
@@ -315,12 +316,12 @@ function resolveGameEnd(app, phase) {
 
   let next;
   if (status === "live") {
-    next = { name: "seriesBreak", data: { trainerId: trainer.id, lastWon: phase.playerWon, score: phase.score, menuIndex: 0 } };
+    next = { name: "seriesBreak", data: { trainerId: trainer.id, lastWon: phase.playerWon, score: phase.score, playerSide: battle.playerSide, menuIndex: 0 } };
   } else {
     const outcome = applyOutcome(app, trainer, status === "won");
     clearSeries(save);
     persistSave(save);
-    next = { name: "battleResult", data: { trainerId: trainer.id, outcome, score: phase.score, page: 0 } };
+    next = { name: "battleResult", data: { trainerId: trainer.id, outcome, score: phase.score, playerSide: battle.playerSide, page: 0 } };
   }
   app.go("gameStats", {
     trainerId: trainer.id,
@@ -518,6 +519,12 @@ function renderBattleMenu(app, phase) {
   );
 }
 
+// Scores always read from the player's side, whichever dugout that was.
+function yourScore(screen) {
+  const side = screen.playerSide ?? "away";
+  return `${screen.score[side]}-${screen.score[side === "home" ? "away" : "home"]}`;
+}
+
 // ---- Between series games --------------------------------------------------
 
 export const seriesBreakScreen = {
@@ -529,7 +536,7 @@ export const seriesBreakScreen = {
       <div class="gq-body gq-center">
         <div class="gq-frame gq-title-frame">
           <p>${app.screen.lastWon ? "YOU TAKE GAME " : "THEY TAKE GAME "}${series.nextGame - 1}</p>
-          <p class="gq-dim">FINAL ${app.screen.score.away}-${app.screen.score.home}</p>
+          <p class="gq-dim">FINAL ${yourScore(app.screen)}</p>
           <p class="gq-mt" style="font-size:5cqw"><b>${series.wins} - ${series.losses}</b></p>
           <p class="gq-dim">SERIES STANDING (SAVED)</p>
         </div>
@@ -575,7 +582,7 @@ export const battleResultScreen = {
     const dialog = outcome.won ? trainer.dialog.win : trainer.dialog.lose;
     const page = Math.min(app.screen.page, dialog.length - 1);
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>${outcome.won ? "VICTORY!" : "DEFEAT..."}</span><span>FINAL ${app.screen.score ? `${app.screen.score.away}-${app.screen.score.home}` : ""}</span></div>
+      <div class="gq-topbar"><span>${outcome.won ? "VICTORY!" : "DEFEAT..."}</span><span>FINAL ${app.screen.score ? yourScore(app.screen) : ""}</span></div>
       <div class="gq-body gq-center">
         <div class="gq-frame gq-title-frame">
           <b style="font-size:6cqw">${outcome.won ? "&#9733; W &#9733;" : "L"}</b>
