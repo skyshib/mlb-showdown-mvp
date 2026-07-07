@@ -57,7 +57,9 @@ export function gameLogLine(event, playerSide) {
     : event.batter;
   const battingSide = event.half === "top" ? "away" : "home";
   const wpa = battingSide === playerSide ? event.wpa : -(event.wpa ?? 0);
-  const score = event.runs > 0 ? ` <span class="gq-dim">${event.scoreAfter.away}-${event.scoreAfter.home}</span>` : "";
+  // Every row carries the score; scoring plays show it bold.
+  const scoreText = event.scoreAfter ? `${event.scoreAfter.away}-${event.scoreAfter.home}` : "";
+  const score = scoreText ? (event.runs > 0 ? ` <b>${scoreText}</b>` : ` <span class="gq-dim">${scoreText}</span>`) : "";
   return `${inning} ${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
 }
 

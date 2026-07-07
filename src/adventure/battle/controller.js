@@ -21,20 +21,26 @@ import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js";
 
 // The interactive battle: one seeded game where the engine pauses before
 // every plate appearance so the humans (well, one human) can manage.
-// The player is always the visitor — you are the one traveling.
-export function createBattle({ playerManager, npcManager, trainer, seed, starterIndex = 0 }) {
+// Single games put the player on the road (you are the one traveling);
+// series alternate home and away game to game, like a real series.
+export function createBattle({ playerManager, npcManager, trainer, seed, starterIndex = 0, playerIsAway = true }) {
   const playerTeam = buildTeam(playerManager, { starterIndex });
   const npcTeam = buildTeam(npcManager, { starterIndex });
-  const state = createInitialState(playerTeam, npcTeam);
+  const playerSide = playerIsAway ? "away" : "home";
+  const npcSide = playerIsAway ? "home" : "away";
+  const state = createInitialState(
+    playerIsAway ? playerTeam : npcTeam,
+    playerIsAway ? npcTeam : playerTeam
+  );
   // The player manages the mound and the basepaths; the NPC stays on
   // autopilot (pitching plan plus AI profile).
-  state.manualPitchingFor = "away";
-  state.deferAdvancesFor = "away";
+  state.manualPitchingFor = playerSide;
+  state.deferAdvancesFor = playerSide;
   return {
     seed,
     trainer,
-    playerSide: "away",
-    npcSide: "home",
+    playerSide,
+    npcSide,
     profile: profileFor(trainer?.aiProfile),
     state,
     rng: createRng(seed),

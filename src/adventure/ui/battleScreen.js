@@ -78,12 +78,15 @@ export function startTrainerBattle(app, trainer) {
 function launchSeriesGame(app, trainer) {
   const save = app.save;
   const series = save.activeSeries;
+  // Series alternate ballparks: the player visits in odd games, hosts evens.
+  const playerIsAway = series.bestOf <= 1 || series.nextGame % 2 === 1;
   const battle = createBattle({
     playerManager: managerFor(save),
     npcManager: buildNpcTeam(trainer),
     trainer,
     seed: deriveSeed(save, "battle", trainer.id, `a${series.attempt}`, `g${series.nextGame}`),
-    starterIndex: series.nextGame - 1
+    starterIndex: series.nextGame - 1,
+    playerIsAway
   });
   persistSave(save);
   app.go("battle", {
@@ -91,7 +94,7 @@ function launchSeriesGame(app, trainer) {
     battle,
     lines: [
       series.bestOf > 1 ? `GAME ${series.nextGame} of the best-of-${series.bestOf}.` : "One game. Winner takes the coins.",
-      "You're the visitors. Top 1 — grab a bat."
+      playerIsAway ? "You're the visitors. Top 1 — grab a bat." : "Your ballpark tonight. Take the mound."
     ],
     menuIndex: 0,
     mode: "menu"
@@ -362,9 +365,9 @@ export const battleScreen = {
         <span>${series && series.bestOf > 1 ? `G${series.nextGame} (${series.wins}-${series.losses}) &middot; ` : ""}${halfLabel(state)}</span>
       </div>
       <div class="gq-battle-hud">
-        <div class="gq-hud-team">YOU<b>${state.score.away}</b></div>
+        <div class="gq-hud-team">YOU${battle.playerSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.playerSide]}</b></div>
         <div>${diamondHtml(state)}<div class="gq-center gq-mt">${outsHtml(state.outs)}</div></div>
-        <div class="gq-hud-team gq-hud-right">THEM<b>${state.score.home}</b></div>
+        <div class="gq-hud-team gq-hud-right">THEM${battle.npcSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.npcSide]}</b></div>
       </div>
       ${renderMatchup(phase)}
       <div class="gq-textbox">

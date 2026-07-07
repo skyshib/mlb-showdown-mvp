@@ -697,6 +697,19 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
   assert.ok(html.includes('data-card-id="runner-card-id"'), "occupied base is hoverable");
 });
 
+test("series games can put the player at home, batting second", () => {
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("gym-garrick");
+  const homeGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "home-game", playerIsAway: false });
+  assert.equal(homeGame.playerSide, "home");
+  assert.equal(homeGame.npcSide, "away");
+  assert.equal(homeGame.state.manualPitchingFor, "home", "the player manages their own mound at home");
+  const phase = battlePhase(homeGame);
+  assert.equal(phase.type, "player-pitching", "top 1 at home: the NPC bats first");
+  const roadGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "road-game" });
+  assert.equal(roadGame.playerSide, "away", "single games keep the player on the road");
+});
+
 test("the NPC's mound arm shows its fatigue subtraction like the player's", async () => {
   const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
   const { player, npc } = hookTeams();
@@ -720,7 +733,9 @@ test("the game log lines carry player-perspective WPA", async () => {
   assert.ok(yours.includes("T3"), "inning tag");
   assert.ok(yours.includes("A.SMITH"), "batter");
   assert.ok(yours.includes("+18%"), "your swing reads positive");
-  assert.ok(yours.includes("3-1"), "score shows when runs score");
+  assert.ok(yours.includes("<b>3-1</b>"), "scoring plays show the score bold");
+  const quiet = gameLogLine({ ...swing, runs: 0, result: "GB", scoreAfter: { away: 1, home: 1 } }, "away");
+  assert.ok(quiet.includes("1-1"), "every row carries the score");
   const theirs = gameLogLine({ ...swing, half: "bottom" }, "away");
   assert.ok(theirs.includes("-18%"), "their swing reads negative");
   const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
