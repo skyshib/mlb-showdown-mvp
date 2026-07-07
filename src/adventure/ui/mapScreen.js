@@ -58,31 +58,41 @@ function formatTag(trainer) {
   return "1 GAME";
 }
 
-// The Pokemon "!" moment: an ambush trainer springs out before the map draws.
-function renderAmbush(rival) {
-  return `<div class="gq-screen">
-    <div class="gq-topbar"><span>CEDAR YARDS</span><span>!!</span></div>
-    <div class="gq-body gq-center">
-      <p class="gq-ambush-bang gq-blink">!</p>
-      <div class="gq-frame gq-title-frame">
-        <b style="font-size:8cqw">&gt;:(</b><br>
-        <b style="font-size:5cqw">[${escapeHtml(rival.sprite)}]</b><br>
-        <b>${escapeHtml(rival.name)}</b><br>
-        <span class="gq-dim">HE LOOKS MEAN. ${rival.pointBudget} PT OF MEAN.</span>
+// The Pokemon "!" moment: heading off to the next game, the rival jumps out
+// instead. Its own screen so the map (shop, team, binder) stays reachable —
+// claimed cards can join the roster before the bout.
+export const ambushScreen = {
+  render(app) {
+    const rival = trainerById(app.screen.trainerId);
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CEDAR YARDS</span><span>!!</span></div>
+      <div class="gq-body gq-center">
+        <p class="gq-ambush-bang gq-blink">!</p>
+        <div class="gq-frame gq-title-frame">
+          <b style="font-size:8cqw">&gt;:(</b><br>
+          <b style="font-size:5cqw">[${escapeHtml(rival.sprite)}]</b><br>
+          <b>${escapeHtml(rival.name)}</b><br>
+          <span class="gq-dim">HE LOOKS MEAN. ${rival.pointBudget} PT OF MEAN.</span>
+        </div>
       </div>
-    </div>
-    <div class="gq-textbox">
-      <p>${escapeHtml(rival.name)} jumps out of the dugout shadows!</p>
-      <p class="gq-blink">Z — FACE HIM</p>
-    </div>
-  </div>`;
-}
+      <div class="gq-textbox">
+        <p>You head for the ballpark... ${escapeHtml(rival.name)} jumps out of the dugout shadows!</p>
+        <p class="gq-blink">Z — FACE HIM</p>
+      </div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key !== "a" && key !== "b") return;
+    springAmbush(app.save, app.screen.trainerId);
+    persistSave(app.save);
+    app.go("trainerIntro", { trainerId: app.screen.trainerId, page: 0 });
+    app.rerender();
+  }
+};
 
 export const mapScreen = {
   render(app) {
     const save = app.save;
-    const ambush = !save.activeSeries && pendingAmbush(save);
-    if (ambush) return renderAmbush(ambush);
     const items = mapItems(app);
     const problems = rosterProblems(save);
     const sections = [];
@@ -112,16 +122,6 @@ export const mapScreen = {
     </div>`;
   },
   key(app, key) {
-    const ambush = !app.save.activeSeries && pendingAmbush(app.save);
-    if (ambush) {
-      if (key === "a" || key === "b") {
-        springAmbush(app.save, ambush.id);
-        persistSave(app.save);
-        app.go("trainerIntro", { trainerId: ambush.id, page: 0 });
-      }
-      app.rerender();
-      return;
-    }
     const items = mapItems(app);
     if (key === "up" || key === "down") {
       let index = app.screen.menuIndex ?? 0;
@@ -134,6 +134,11 @@ export const mapScreen = {
       const item = items[app.screen.menuIndex ?? 0];
       if (!item || item.disabled) return;
       if (item.battle && rosterProblems(app.save).length) return;
+      // Setting off for any game springs a waiting rival first.
+      if (item.battle && !app.save.activeSeries) {
+        const ambush = pendingAmbush(app.save);
+        if (ambush) return app.go("ambush", { trainerId: ambush.id });
+      }
       item.run(app);
     } else if (key === "b") {
       app.go("title", { menuIndex: 0 });

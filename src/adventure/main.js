@@ -2,7 +2,7 @@ import { loadSave } from "./state.js";
 import { setUniverseSeed, cardById } from "./packs.js";
 import { cardPanelHtml } from "./ui/helpers.js";
 import { titleScreen, introScreen, nameEntryScreen, starterRevealScreen } from "./ui/titleScreens.js";
-import { mapScreen, trainerIntroScreen } from "./ui/mapScreen.js";
+import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
 import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen } from "./ui/collectionScreens.js";
 import { gameStatsScreen, seasonStatsScreen, championshipScreen } from "./ui/statsScreens.js";
@@ -14,6 +14,7 @@ const SCREENS = {
   starterReveal: starterRevealScreen,
   map: mapScreen,
   trainerIntro: trainerIntroScreen,
+  ambush: ambushScreen,
   battle: battleScreen,
   seriesBreak: seriesBreakScreen,
   battleResult: battleResultScreen,

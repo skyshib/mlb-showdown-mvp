@@ -118,9 +118,11 @@ late bosses out-spend the player better than two-to-one.
 
 The **rival** (Cam, a fellow rookie who opened a starter pack the same day)
 reappears at milestones with a richer roster each time, Pokemon-style. Rival
-bouts are **hidden ambushes**: they never show on the map in advance — the
-first map visit after the qualifying win, Cam jumps out with a "!" splash and
-a mean face, then stays on the map (like any trainer) if you walk away. Beating
+bouts are **hidden ambushes**: they never show on the map in advance. After the
+qualifying win the map stays open (shop, team, binder — time to work claimed
+cards into the roster), and the moment the player sets off for their *next
+game*, Cam jumps out with a "!" splash and a mean face. Walk away and he stays
+on the map like any trainer. Beating
 the checkbook is possible because **printed prices are noisy** (§4.2): a
 3,500-point roster of scouted bargains can carry far more true value than it
 costs. Two other ratchets help the climb: the first win over any trainer
