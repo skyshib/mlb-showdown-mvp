@@ -53,6 +53,8 @@ def accumulate(source, keys):
     Decade cards pool a player's ENTIRE decade regardless of team; franchise
     cards pool a player's entire career with that club regardless of decade."""
     career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
+    stint_volume = defaultdict(lambda: defaultdict(int))  # (pid, fid) -> decade -> volume
+    volume_key = "IPouts" if "IPouts" in keys else "AB"
     spans = defaultdict(lambda: [9999, 0])
     for r in rows(source):
         year = num(r, "yearID")
@@ -64,13 +66,15 @@ def accumulate(source, keys):
             by_decade[(pid, decade_of(year))][k] += v
             if fid:
                 by_franch[(pid, fid)][k] += v
+        if fid:
+            stint_volume[(pid, fid)][decade_of(year)] += num(r, volume_key) + (num(r, "BB") if volume_key == "AB" else 0)
         for key in (pid, (pid, decade_of(year)), (pid, fid) if fid else None):
             if key is None:
                 continue
             span = spans[key]
             span[0] = min(span[0], year)
             span[1] = max(span[1], year)
-    return career, by_franch, by_decade, spans
+    return career, by_franch, by_decade, spans, stint_volume
 
 def accumulate_positions():
     career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
@@ -139,14 +143,17 @@ ANCHOR_A = (ANCHOR_OB - ANCHOR_CTRL) / 20
 # keeps league totals intact while letting punchless hitters actually be
 # punchless (their floor is what pitcher charts concede, not the full league).
 HR_PITCHER_SHARE = 0.5
+K_PITCHER_SHARE = 0.7
 EVENTS = ["BB", "S", "D", "T", "HR"]
 
 def league_split(L):
     """The league-average pitcher chart and batter chart implied by L."""
     pitcher = dict(L)
     pitcher["HR"] = L["HR"] * HR_PITCHER_SHARE
+    pitcher["K"] = L["K"] * K_PITCHER_SHARE
     batter = dict(L)
     batter["HR"] = (L["HR"] - (1 - ANCHOR_A) * pitcher["HR"]) / ANCHOR_A
+    batter["K"] = (L["K"] - (1 - ANCHOR_A) * pitcher["K"]) / ANCHOR_A
     return pitcher, batter
 
 def league_tables(bat_decade):
@@ -196,9 +203,9 @@ def build_hitter(pid, t, pos, L):
     onbase_slots = clamp(round(sum(raw.values())), 2, 18)
     bb, s, d, tr, hr = spread(onbase_slots, [raw["BB"], raw["S"], raw["D"], raw["T"], raw["HR"]])
     outs = 20 - onbase_slots
-    # His chart's out mix follows his real K share of outs.
-    out_rate = max(0.02, 1 - obp)
-    so = clamp(round(outs * clamp((t["SO"] / pa) / out_rate, 0.05, 0.95)), 0, outs)
+    # Strikeouts back out like everything else: a contact hitter's chart
+    # carries fewer K slots than his raw K share would suggest.
+    so = clamp(round(max(0.0, ((t["SO"] / pa) - (1 - A) * pitcher_league["K"]) / A) * 20), 0, outs)
     gb = round((outs - so) * 0.55)
     fb = outs - so - gb
     sb650 = t["SB"] / pa * 650
@@ -233,8 +240,7 @@ def build_pitcher(pid, t, L):
     onbase_slots = clamp(round(sum(raw)), 1, 9)
     bb, s, d, hr = spread(onbase_slots, raw)
     outs = 20 - onbase_slots
-    out_rate = max(0.02, 1 - oba)
-    so = clamp(round(outs * clamp((t["SO"] / bf) / out_rate, 0.05, 0.95)), 0, outs)
+    so = clamp(round(max(0.0, ((t["SO"] / bf) - Ap * batter_league["K"]) / (1 - Ap)) * 20), 0, outs)
     pu = clamp(round(outs * 0.12), 0, outs - so)
     rest = outs - so - pu
     gb = round(rest * 0.55)
@@ -306,9 +312,9 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
     return pool
 
 print("accumulating batting...", file=sys.stderr)
-bat_career, bat_franch, bat_decade, bat_spans = accumulate("Batting.csv", BAT_KEYS)
+bat_career, bat_franch, bat_decade, bat_spans, bat_stint_vol = accumulate("Batting.csv", BAT_KEYS)
 print("accumulating pitching...", file=sys.stderr)
-pit_career, pit_franch, pit_decade, pit_spans = accumulate("Pitching.csv", PIT_KEYS)
+pit_career, pit_franch, pit_decade, pit_spans, pit_stint_vol = accumulate("Pitching.csv", PIT_KEYS)
 print("accumulating positions...", file=sys.stderr)
 pos_career, pos_franch, pos_decade = accumulate_positions()
 spans_all = {**bat_spans, **pit_spans}
@@ -362,7 +368,9 @@ franchises = {}
 for fid, fname in sorted(franch_names.items()):
     bat = {k: v for k, v in bat_franch.items() if k[1] == fid}
     pit = {k: v for k, v in pit_franch.items() if k[1] == fid}
-    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 400, 350, bat_league_career, pit_league_career)
+    bat_lg = lambda key: blend_league(LEAGUE, bat_stint_vol.get(key, {}))
+    pit_lg = lambda key: blend_league(LEAGUE, pit_stint_vol.get(key, {}))
+    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 400, 350, bat_lg, pit_lg)
     if pool_ok(pool):
         franchises[fid] = pool
     else:
