@@ -1,6 +1,6 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js";
-import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins } from "../region.js";
-import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats } from "../state.js";
+import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, pendingAmbush, ambushSprung, springAmbush } from "../region.js";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js";
 import { validateRoster } from "../../rules/draft.js";
 import { buildNpcTeam } from "../npcTeams.js";
 import { startTrainerBattle } from "./battleScreen.js";
@@ -29,6 +29,8 @@ function mapItems(app) {
 
   for (const trainer of TRAINERS) {
     const beaten = timesBeaten(save, trainer.id) > 0;
+    // Ambush trainers don't exist on the map until they've jumped the player.
+    if (trainer.ambush && !ambushSprung(save, trainer.id) && !beaten) continue;
     const unlocked = isTrainerUnlocked(save, trainer);
     const available = isTrainerAvailable(save, trainer) && !save.activeSeries;
     const marker = beaten ? (trainer.repeatable ? "&#8635;" : "&#10003;") : formatTag(trainer);
@@ -56,9 +58,31 @@ function formatTag(trainer) {
   return "1 GAME";
 }
 
+// The Pokemon "!" moment: an ambush trainer springs out before the map draws.
+function renderAmbush(rival) {
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>CEDAR YARDS</span><span>!!</span></div>
+    <div class="gq-body gq-center">
+      <p class="gq-ambush-bang gq-blink">!</p>
+      <div class="gq-frame gq-title-frame">
+        <b style="font-size:8cqw">&gt;:(</b><br>
+        <b style="font-size:5cqw">[${escapeHtml(rival.sprite)}]</b><br>
+        <b>${escapeHtml(rival.name)}</b><br>
+        <span class="gq-dim">HE LOOKS MEAN. ${rival.pointBudget} PT OF MEAN.</span>
+      </div>
+    </div>
+    <div class="gq-textbox">
+      <p>${escapeHtml(rival.name)} jumps out of the dugout shadows!</p>
+      <p class="gq-blink">Z — FACE HIM</p>
+    </div>
+  </div>`;
+}
+
 export const mapScreen = {
   render(app) {
     const save = app.save;
+    const ambush = !save.activeSeries && pendingAmbush(save);
+    if (ambush) return renderAmbush(ambush);
     const items = mapItems(app);
     const problems = rosterProblems(save);
     const sections = [];
@@ -88,6 +112,16 @@ export const mapScreen = {
     </div>`;
   },
   key(app, key) {
+    const ambush = !app.save.activeSeries && pendingAmbush(app.save);
+    if (ambush) {
+      if (key === "a" || key === "b") {
+        springAmbush(app.save, ambush.id);
+        persistSave(app.save);
+        app.go("trainerIntro", { trainerId: ambush.id, page: 0 });
+      }
+      app.rerender();
+      return;
+    }
     const items = mapItems(app);
     if (key === "up" || key === "down") {
       let index = app.screen.menuIndex ?? 0;
@@ -155,7 +189,12 @@ export const trainerIntroScreen = {
         <p>${escapeHtml(dialog[Math.min(app.screen.page, dialog.length - 1)])}</p>
         ${onLastPage
           ? menuHtml(
-              [{ label: "PLAY BALL" }, { label: "SCOUT ROSTER" }, { label: "SET LINEUP" }, { label: "WALK AWAY" }],
+              [
+                { label: "PLAY BALL", disabled: rosterProblems(app.save).length > 0 },
+                { label: "SCOUT ROSTER" },
+                { label: "SET LINEUP" },
+                { label: "WALK AWAY" }
+              ],
               app.screen.menuIndex ?? 0
             )
           : `<p class="gq-blink gq-right">&#9660;</p>`}
@@ -186,7 +225,10 @@ export const trainerIntroScreen = {
       app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), 4);
     } else if (key === "a") {
       const choice = app.screen.menuIndex ?? 0;
-      if (choice === 0) return startTrainerBattle(app, trainer);
+      if (choice === 0) {
+        if (rosterProblems(app.save).length) return;
+        return startTrainerBattle(app, trainer);
+      }
       if (choice === 1) {
         app.screen.mode = "scout";
         app.screen.scoutIndex = 0;

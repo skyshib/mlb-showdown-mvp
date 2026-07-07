@@ -357,6 +357,8 @@ export const lineupScreen = {
 
 // ---- Pack opening ----------------------------------------------------------
 
+// Reveals walk forward with Z; the left arrow rewinds to reread earlier pulls
+// (right walks back up). A new card only rips once the view is at the front.
 export const packOpenScreen = {
   render(app) {
     const save = app.save;
@@ -364,36 +366,56 @@ export const packOpenScreen = {
     if (!pending) return `<div class="gq-screen"><div class="gq-body gq-center"><p>NO PACKS TO OPEN.</p></div></div>`;
     const cards = openPack(pending.packId, pending.seed);
     const revealed = app.screen.revealed ?? 0;
-    const current = revealed > 0 ? cards[revealed - 1] : null;
+    const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+    const current = viewing > 0 ? cards[viewing - 1] : null;
+    const rewound = viewing < revealed;
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>${escapeHtml(PACKS[pending.packId].name.toUpperCase())}</span><span>${revealed}/${cards.length}</span></div>
       <div class="gq-pack-stage">
-        <p class="gq-pack-count">${revealed === 0 ? "&#9993; RIP IT OPEN!" : rarityTag(current)}</p>
+        <p class="gq-pack-count">${revealed === 0 ? "&#9993; RIP IT OPEN!" : `${rarityTag(current)}${rewound ? ` <span class="gq-dim">CARD ${viewing} OF ${revealed}</span>` : ""}`}</p>
         ${current ? `<div class="gq-pack-reveal">${cardPanelHtml(current, { count: ownedCount(save, current.id) })}</div>` : ""}
       </div>
-      <div class="gq-textbox"><p class="gq-blink">${revealed < cards.length ? "Z — NEXT CARD" : "Z — DONE"}</p></div>
+      <div class="gq-textbox">
+        ${revealed > 1 ? `<p class="gq-dim">&#9664;/&#9654; LOOK BACK THROUGH THE PULLS</p>` : ""}
+        <p class="gq-blink">${rewound ? "Z — FORWARD" : revealed < cards.length ? "Z — NEXT CARD" : "Z — DONE"}</p>
+      </div>
     </div>`;
   },
   key(app, key) {
-    if (key !== "a" && key !== "b") return;
     const save = app.save;
     const pending = save.pendingPacks[0];
     if (!pending) {
-      app.go(app.screen.returnTo ?? "map");
+      if (key === "a" || key === "b") app.go(app.screen.returnTo ?? "map");
       app.rerender();
       return;
     }
     const cards = openPack(pending.packId, pending.seed);
     const revealed = app.screen.revealed ?? 0;
-    if (revealed < cards.length) {
-      addCardToCollection(save, cards[revealed].id);
-      app.screen.revealed = revealed + 1;
-      persistSave(save);
+    const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+    if (key === "left") {
+      if (viewing > 1) app.screen.viewing = viewing - 1;
+    } else if (key === "right") {
+      if (viewing < revealed) app.screen.viewing = viewing + 1;
+    } else if (key === "a" || key === "b") {
+      if (viewing < revealed) {
+        app.screen.viewing = viewing + 1;
+      } else if (revealed < cards.length) {
+        addCardToCollection(save, cards[revealed].id);
+        app.screen.revealed = revealed + 1;
+        app.screen.viewing = revealed + 1;
+        persistSave(save);
+      } else {
+        save.pendingPacks.shift();
+        persistSave(save);
+        if (save.pendingPacks.length) {
+          app.screen.revealed = 0;
+          app.screen.viewing = 0;
+        } else {
+          app.go(app.screen.returnTo ?? "map");
+        }
+      }
     } else {
-      save.pendingPacks.shift();
-      persistSave(save);
-      if (save.pendingPacks.length) app.screen.revealed = 0;
-      else app.go(app.screen.returnTo ?? "map");
+      return;
     }
     app.rerender();
   }

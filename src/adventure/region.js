@@ -59,6 +59,7 @@ export const TRAINERS = [
     id: "rival-1",
     name: "RIVAL CAM",
     title: "Rival",
+    ambush: true,
     sprite: "CA",
     archetype: "power",
     aiProfile: "aggressive",
@@ -108,6 +109,7 @@ export const TRAINERS = [
     id: "rival-2",
     name: "RIVAL CAM",
     title: "Rival",
+    ambush: true,
     sprite: "CA",
     archetype: "power",
     aiProfile: "aggressive",
@@ -195,6 +197,7 @@ export const TRAINERS = [
     id: "rival-3",
     name: "RIVAL CAM",
     title: "Rival",
+    ambush: true,
     sprite: "CA",
     archetype: "power",
     aiProfile: "aggressive",
@@ -312,6 +315,7 @@ export const TRAINERS = [
     id: "rival-4",
     name: "RIVAL CAM",
     title: "Rival",
+    ambush: true,
     sprite: "CA",
     archetype: "power",
     aiProfile: "aggressive",
@@ -389,4 +393,27 @@ export function rewardCoins(save, trainer) {
   const beaten = timesBeaten(save, trainer.id);
   if (!trainer.repeatable || beaten === 0) return trainer.rewards.coins;
   return Math.max(50, Math.round(trainer.rewards.coins * Math.pow(0.75, beaten)));
+}
+
+// ---- Rival ambushes ----------------------------------------------------------
+
+// Ambush trainers stay off the map until they jump the player: the first map
+// visit after their requirements clear. Once sprung they show like anyone else.
+export function pendingAmbush(save) {
+  return TRAINERS.find((trainer) =>
+    trainer.ambush &&
+    !ambushSprung(save, trainer.id) &&
+    timesBeaten(save, trainer.id) === 0 &&
+    isTrainerUnlocked(save, trainer)
+  ) ?? null;
+}
+
+export function ambushSprung(save, trainerId) {
+  return Boolean(save.progress.ambushes?.[trainerId]);
+}
+
+// Older saves grow the ambush ledger in place; no version bump.
+export function springAmbush(save, trainerId) {
+  save.progress.ambushes ??= {};
+  save.progress.ambushes[trainerId] = true;
 }

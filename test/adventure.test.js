@@ -36,7 +36,7 @@ import {
   grantCoins,
   spendCoins
 } from "../src/adventure/state.js";
-import { TRAINERS, trainerById, isTrainerUnlocked, rewardCoins } from "../src/adventure/region.js";
+import { TRAINERS, trainerById, isTrainerUnlocked, rewardCoins, pendingAmbush, ambushSprung, springAmbush } from "../src/adventure/region.js";
 import { buildNpcTeam } from "../src/adventure/npcTeams.js";
 import {
   createBattle,
@@ -86,6 +86,10 @@ function fakeStorage() {
     removeItem: (key) => data.delete(key)
   };
 }
+
+// Node's experimental localStorage global throws without a backing file; give
+// screens that persist mid-flow (pack opening) a working in-memory one.
+Object.defineProperty(globalThis, "localStorage", { value: fakeStorage(), configurable: true });
 
 // ---- Pool and rarity -------------------------------------------------------
 
@@ -258,7 +262,45 @@ test("the rival reappears at milestones with a growing budget", () => {
     assert.ok(rivals[i].pointBudget > rivals[i - 1].pointBudget, "each rival encounter is richer");
   }
   assert.ok(rivals.every((trainer) => trainer.name === "RIVAL CAM"), "same rival every time");
+  assert.ok(rivals.every((trainer) => trainer.ambush), "every rival bout is an ambush");
   assert.equal(TRAINERS.some((trainer) => trainer.battleFormat.type === "simSeries"), false, "the sim-series farm boss is gone");
+});
+
+test("rival ambushes hide until sprung, spring once, then never again", () => {
+  const save = testSave();
+  assert.equal(pendingAmbush(save), null, "nobody jumps a fresh rookie");
+  save.progress.trainersBeaten["scout-jojo"] = 1;
+  const ambush = pendingAmbush(save);
+  assert.equal(ambush?.id, "rival-1", "beating Jojo springs the first rival");
+  assert.equal(ambushSprung(save, "rival-1"), false);
+  springAmbush(save, "rival-1");
+  assert.equal(ambushSprung(save, "rival-1"), true);
+  assert.equal(pendingAmbush(save), null, "a sprung ambush never re-fires");
+  save.progress.trainersBeaten["scout-mabel"] = 1;
+  save.progress.trainersBeaten["gym-garrick"] = 1;
+  assert.equal(pendingAmbush(save)?.id, "rival-2", "the next milestone springs the next bout");
+});
+
+test("pack reveals can rewind with the left arrow without re-adding cards", async () => {
+  const { packOpenScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  save.pendingPacks.push({ packId: "booster", seed: "rewind-pack" });
+  const cards = openPack("booster", "rewind-pack");
+  const app = { save, screen: { name: "packOpen", revealed: 0, returnTo: "map" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  const before = { ...save.collection };
+  packOpenScreen.key(app, "a");
+  packOpenScreen.key(app, "a");
+  assert.equal(app.screen.revealed, 2, "two cards ripped");
+  packOpenScreen.key(app, "left");
+  assert.equal(app.screen.viewing, 1, "left rewinds to the first pull");
+  assert.ok(packOpenScreen.render(app).includes("CARD 1 OF 2"), "the rewind position shows");
+  packOpenScreen.key(app, "a");
+  assert.equal(app.screen.viewing, 2, "Z walks forward through seen cards");
+  assert.equal(app.screen.revealed, 2, "walking forward does not rip a new card");
+  packOpenScreen.key(app, "a");
+  assert.equal(app.screen.revealed, 3, "at the front, Z rips the next card");
+  const added = Object.keys(save.collection).filter((id) => (save.collection[id] ?? 0) > (before[id] ?? 0));
+  assert.equal(added.length, new Set(cards.slice(0, 3).map((card) => card.id)).size, "each pull was added exactly once");
 });
 
 // ---- NPC teams -------------------------------------------------------------

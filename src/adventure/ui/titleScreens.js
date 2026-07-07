@@ -140,25 +140,46 @@ function finishNewGame(app, playerName) {
 }
 
 // Rip the starter pack open card by card, packOpen-style, then hit the map.
+// The left arrow rewinds through cards already revealed; Z walks forward and
+// only flips a new card once the view is back at the front.
 export const starterRevealScreen = {
   render(app) {
     const cards = rosterCards(app.save);
     const revealed = app.screen.revealed ?? 0;
-    const current = revealed > 0 ? cards[revealed - 1] : null;
+    const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+    const current = viewing > 0 ? cards[viewing - 1] : null;
+    const rewound = viewing < revealed;
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>STARTER PACK</span><span>${revealed}/${cards.length}</span></div>
       <div class="gq-pack-stage">
-        <p class="gq-pack-count">${revealed === 0 ? "&#9993; YOUR SEALED STARTER PACK. RIP IT OPEN!" : rarityTag(current)}</p>
+        <p class="gq-pack-count">${revealed === 0 ? "&#9993; YOUR SEALED STARTER PACK. RIP IT OPEN!" : `${rarityTag(current)}${rewound ? ` <span class="gq-dim">CARD ${viewing} OF ${revealed}</span>` : ""}`}</p>
         ${current ? `<div class="gq-pack-reveal">${cardPanelHtml(current)}</div>` : ""}
       </div>
-      <div class="gq-textbox"><p class="gq-blink">${(app.screen.revealed ?? 0) < cards.length ? "Z — NEXT CARD" : "Z — PLAY BALL"}</p></div>
+      <div class="gq-textbox">
+        ${revealed > 1 ? `<p class="gq-dim">&#9664;/&#9654; LOOK BACK THROUGH THE PACK</p>` : ""}
+        <p class="gq-blink">${rewound ? "Z — FORWARD" : revealed < cards.length ? "Z — NEXT CARD" : "Z — PLAY BALL"}</p>
+      </div>
     </div>`;
   },
   key(app, key) {
-    if (key !== "a" && key !== "b") return;
     const cards = rosterCards(app.save);
-    if ((app.screen.revealed ?? 0) < cards.length) app.screen.revealed = (app.screen.revealed ?? 0) + 1;
-    else app.go("map");
+    const revealed = app.screen.revealed ?? 0;
+    const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+    if (key === "left") {
+      if (viewing > 1) app.screen.viewing = viewing - 1;
+    } else if (key === "right") {
+      if (viewing < revealed) app.screen.viewing = viewing + 1;
+    } else if (key === "a" || key === "b") {
+      if (viewing < revealed) app.screen.viewing = viewing + 1;
+      else if (revealed < cards.length) {
+        app.screen.revealed = revealed + 1;
+        app.screen.viewing = revealed + 1;
+      } else {
+        return app.go("map");
+      }
+    } else {
+      return;
+    }
     app.rerender();
   }
 };

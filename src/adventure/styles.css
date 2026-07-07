@@ -184,6 +184,14 @@ h1.gq-logo {
 /* Anything tagged with a card id floats the full card on hover. */
 [data-card-id] { cursor: help; }
 
+/* The rival-ambush exclamation, straight out of a trainer's line of sight. */
+.gq-ambush-bang {
+  font-size: 14cqw;
+  font-weight: 700;
+  line-height: 1;
+  margin: 2cqw 0;
+}
+
 .gq-outs i {
   display: inline-block;
   width: 2.2cqw;
