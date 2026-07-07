@@ -430,6 +430,8 @@ test("starter covers innings not covered by bullpen and gets tired past his IP",
   };
   const state = createInitialState(teamA, tiredStaff);
   state.pitching.home.outsRecorded = 15;
+  // IP 5 covers 20 batters at full strength; the 21st sees the penalty.
+  state.pitching.home.battersFaced = 20;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
 
@@ -472,6 +474,8 @@ test("last bullpen pitcher keeps pitching in extras and becomes tired", () => {
   const state = createInitialState(teamA, orderedStaff);
   state.pitching.home.pitcherIndex = 2;
   state.pitching.home.outsRecorded = 3;
+  // IP 1 covers four batters; the fifth finds him gassed.
+  state.pitching.home.battersFaced = 4;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
 
@@ -515,6 +519,8 @@ test("charged runs reduce fatigue IP but do not change planned bullpen timing", 
   const state = createInitialState(teamA, staff);
   state.home.pitchers[0].chargedRuns = 3;
   state.pitching.home.outsRecorded = 12;
+  // Three charged runs shave a workload inning: the IP 5 tank drops to 16 BF.
+  state.pitching.home.battersFaced = 16;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
 

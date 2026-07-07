@@ -494,14 +494,14 @@ function renderMatchup(phase) {
     return `<div class="gq-matchup">
       <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span></div>
       <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(shortName(phase.opposingPitcher.name))}</b><br>
-        <span class="gq-dim ${theirFatigue > 0 ? "gq-fatigued" : ""}">CTRL ${phase.opposingPitcher.control}${theirFatigue > 0 ? ` &minus;${theirFatigue} TIRED` : ""} &middot; ${phase.opposingMound?.outsRecorded ?? 0} OUTS IN</span></div>
+        <span class="gq-dim ${theirFatigue > 0 ? "gq-fatigued" : ""}">CTRL ${phase.opposingPitcher.control}${theirFatigue > 0 ? ` &minus;${theirFatigue} TIRED` : ""} &middot; ${phase.opposingMound?.battersFaced ?? 0}/${phase.opposingMound?.tiredAt ?? 0} BF</span></div>
     </div>`;
   }
   const fatigue = phase.mound.fatiguePenalty;
   return `<div class="gq-matchup">
     <div>THEY SEND UP<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span></div>
     <div class="gq-right">YOUR ARM<br><b data-card-id="${escapeHtml(phase.mound.pitcher.id)}">${escapeHtml(shortName(phase.mound.pitcher.name))}</b><br>
-      <span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${phase.mound.pitcher.control}${fatigue > 0 ? ` &minus;${fatigue} TIRED` : ""} &middot; ${phase.mound.outsRecorded} OUTS IN</span></div>
+      <span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${phase.mound.pitcher.control}${fatigue > 0 ? ` &minus;${fatigue} TIRED` : ""} &middot; ${phase.mound.battersFaced}/${phase.mound.tiredAt} BF</span></div>
   </div>`;
 }
 

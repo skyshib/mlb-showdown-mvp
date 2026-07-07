@@ -113,6 +113,7 @@ export function playPlateAppearance(state, rng) {
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
   state.pitching[pitchingSide].outsRecorded += outsOnPlay;
+  state.pitching[pitchingSide].battersFaced += 1;
 
   const wpAfter = winProbabilityHome(state);
   const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
@@ -358,6 +359,7 @@ export function attemptBunt(state, rng) {
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
   state.pitching[pitchingSide].outsRecorded += outsOnPlay;
+  state.pitching[pitchingSide].battersFaced += 1;
   state[battingSide].runs = state.score[battingSide];
   state[pitchingSide].runsAllowed = state.score[battingSide];
 
@@ -433,6 +435,7 @@ export function intentionalWalk(state) {
   pitcherLine.bb += 1;
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
+  state.pitching[pitchingSide].battersFaced += 1;
   state[battingSide].runs = state.score[battingSide];
   state[pitchingSide].runsAllowed = state.score[battingSide];
 
@@ -579,8 +582,8 @@ export function createInitialState(awayTeam, homeTeam) {
     score: { away: 0, home: 0 },
     lineupIndex: { away: 0, home: 0 },
     pitching: {
-      away: { pitcherIndex: 0, outsRecorded: 0 },
-      home: { pitcherIndex: 0, outsRecorded: 0 }
+      away: { pitcherIndex: 0, outsRecorded: 0, battersFaced: 0 },
+      home: { pitcherIndex: 0, outsRecorded: 0, battersFaced: 0 }
     },
     stats: {
       hitters: new Map(),
@@ -632,6 +635,7 @@ export function changePitcher(state, side, targetIndex = null) {
   }
   runtime.pitcherIndex += 1;
   runtime.outsRecorded = 0;
+  runtime.battersFaced = 0;
   return team.pitchers[runtime.pitcherIndex];
 }
 
@@ -644,6 +648,8 @@ export function pitcherStatus(state, side) {
     pitcher,
     outsRecorded: runtime.outsRecorded,
     plannedOuts: pitcher.plannedOuts,
+    battersFaced: runtime.battersFaced ?? 0,
+    tiredAt: fatigueBatterLimit(pitcher),
     fatiguePenalty: pitcherFatigue(runtime, pitcher),
     hasReliefAvailable: runtime.pitcherIndex < state[side].pitchers.length - 1
   };
@@ -661,6 +667,7 @@ function currentPitcher(state, side) {
       if (runtime.outsRecorded < pitcher.plannedOuts) break;
       runtime.pitcherIndex += 1;
       runtime.outsRecorded = 0;
+      runtime.battersFaced = 0;
     }
   }
   return team.pitchers[runtime.pitcherIndex] ?? team.pitchers[team.pitchers.length - 1];
@@ -678,21 +685,34 @@ function buildPitchingPlan(pitchers) {
   ];
 }
 
+// Fatigue runs on batters faced: every IP of stamina covers four batters, so
+// an IP 6 starter handles 24 batters at full strength and tires on the 25th,
+// sinking another point every four batters after that. Charged runs shave a
+// "workload inning" (four batters) off the tank per three runs.
+const BATTERS_PER_IP = 4;
+
 function pitcherFatigue(runtime, pitcher) {
-  const ipOuts = fatigueIpOuts(pitcher);
-  if (runtime.outsRecorded < ipOuts) return 0;
-  return Math.floor((runtime.outsRecorded - ipOuts) / 3) + 1;
+  const limit = fatigueBatterLimit(pitcher);
+  const faced = runtime.battersFaced ?? 0;
+  if (faced < limit) return 0;
+  return Math.floor((faced - limit) / BATTERS_PER_IP) + 1;
+}
+
+function fatigueBatterLimit(pitcher) {
+  const runPenalty = Math.floor(Number(pitcher?.chargedRuns ?? 0) / 3) * BATTERS_PER_IP;
+  return Math.max(0, pitcherIpBatters(pitcher) - runPenalty);
+}
+
+function pitcherIpBatters(pitcher) {
+  const ip = Number(pitcher?.ip ?? 0);
+  if (!Number.isFinite(ip)) return 0;
+  return Math.max(0, Math.round(ip * BATTERS_PER_IP));
 }
 
 function pitcherIpOuts(pitcher) {
   const ip = Number(pitcher?.ip ?? 0);
   if (!Number.isFinite(ip)) return 0;
   return Math.max(0, Math.round(ip * 3));
-}
-
-function fatigueIpOuts(pitcher) {
-  const ipPenaltyOuts = Math.floor(Number(pitcher?.chargedRuns ?? 0) / 3) * 3;
-  return Math.max(0, pitcherIpOuts(pitcher) - ipPenaltyOuts);
 }
 
 function applyResult(state, result, batter, battingSide, pitchingSide, rng, pitcher) {

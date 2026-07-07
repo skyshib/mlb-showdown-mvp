@@ -533,12 +533,14 @@ test("manual pitching keeps every arm in until pulled — yours by hand, theirs 
   const state = battle.state;
   const starter = pitcherStatus(state, "away").pitcher;
   state.pitching.away.outsRecorded = starter.plannedOuts + 6;
+  state.pitching.away.battersFaced = starter.ip * 4 + 2;
   assert.equal(pitcherStatus(state, "away").pitcher.id, starter.id, "player's starter stays until pulled");
   assert.ok(pitcherStatus(state, "away").fatiguePenalty >= 1, "and pays for it in fatigue");
   // The NPC mound runs manual too: their starter stays in (and tires) until
   // the AI skipper pulls him — no silent plan-based swaps.
   const npcStarter = pitcherStatus(state, "home").pitcher;
   state.pitching.home.outsRecorded = npcStarter.plannedOuts;
+  state.pitching.home.battersFaced = npcStarter.ip * 4 + 1;
   assert.equal(pitcherStatus(state, "home").pitcher.id, npcStarter.id, "NPC arm stays until the AI pulls it");
   assert.ok(pitcherStatus(state, "home").fatiguePenalty >= 1, "and shows real fatigue while he waits");
   const { npcMaybePullPitcher, AI_PROFILES } = await import("../src/adventure/battle/ai.js");
@@ -795,7 +797,7 @@ test("the NPC's mound arm shows its fatigue subtraction like the player's", asyn
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "npc-tired" });
   const npcArm = battle.state.home.pitchers[0];
   // Push the NPC starter past fatigue onset but short of his planned exit.
-  battle.state.pitching.home.outsRecorded = npcArm.ip * 3 + 2;
+  battle.state.pitching.home.battersFaced = npcArm.ip * 4 + 2;
   const phase = battlePhase(battle);
   assert.equal(phase.type, "player-batting");
   assert.ok(phase.opposingMound.fatiguePenalty >= 1, "NPC arms tire under the same rules");
