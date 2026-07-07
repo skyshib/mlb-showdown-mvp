@@ -2,8 +2,8 @@ import { timesBeaten } from "./state.js";
 
 // The Cascade League: one town so far, with routes climbing past it. Trainers
 // are pure data — teams build deterministically from teamSeed + pointBudget.
-// Budgets ladder from 2500 up through the 8500-point summit and into the
-// postseason (division series, championship series, world series at 10000):
+// Budgets ladder from 2500 up through the 6500-point summit and into the
+// postseason (division series, championship series, world series at 7500):
 // late bosses out-spend the player's flat 3500, so winning means bargains.
 export const REGION = {
   name: "CASCADE LEAGUE",
@@ -44,7 +44,7 @@ export const TRAINERS = [
     archetype: "speed",
     aiProfile: "aggressive",
     teamSeed: "scout-mabel-v1",
-    pointBudget: 2900,
+    pointBudget: 2800,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["scout-jojo"],
@@ -63,7 +63,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "aggressive",
     teamSeed: "rival-cam-1",
-    pointBudget: 2700,
+    pointBudget: 2650,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["scout-jojo"],
@@ -86,7 +86,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "balanced",
     teamSeed: "gym-garrick-v1",
-    pointBudget: 3700,
+    pointBudget: 3300,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["scout-jojo", "scout-mabel"],
@@ -112,7 +112,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "aggressive",
     teamSeed: "rival-cam-2",
-    pointBudget: 4200,
+    pointBudget: 3650,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["gym-garrick"],
@@ -135,7 +135,7 @@ export const TRAINERS = [
     archetype: "ace",
     aiProfile: "conservative",
     teamSeed: "route-hollis-v1",
-    pointBudget: 4500,
+    pointBudget: 3850,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["gym-garrick"],
@@ -154,7 +154,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "aggressive",
     teamSeed: "route-petra-v1",
-    pointBudget: 5500,
+    pointBudget: 4500,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["route-hollis"],
@@ -173,7 +173,7 @@ export const TRAINERS = [
     archetype: "contact",
     aiProfile: "balanced",
     teamSeed: "gym-quince-v1",
-    pointBudget: 6500,
+    pointBudget: 5200,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["route-hollis", "route-petra"],
@@ -199,7 +199,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "aggressive",
     teamSeed: "rival-cam-3",
-    pointBudget: 6800,
+    pointBudget: 5400,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["gym-quince"],
@@ -222,7 +222,7 @@ export const TRAINERS = [
     archetype: "speed",
     aiProfile: "aggressive",
     teamSeed: "route-sawyer-v1",
-    pointBudget: 7500,
+    pointBudget: 5800,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["gym-quince"],
@@ -241,7 +241,7 @@ export const TRAINERS = [
     archetype: "balanced",
     aiProfile: "balanced",
     teamSeed: "boss-vale-v1",
-    pointBudget: 8500,
+    pointBudget: 6500,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["route-sawyer"],
@@ -249,7 +249,7 @@ export const TRAINERS = [
     dialog: {
       intro: [
         "So you're the bargain hunter the routes keep whispering about.",
-        "I own the deepest checkbook in the league. Eighty-five hundred points of it.",
+        "I own the deepest checkbook in the league. Sixty-five hundred points of it.",
         "Show me a lineup that money can't buy."
       ],
       win: [
@@ -267,7 +267,7 @@ export const TRAINERS = [
     archetype: "speed",
     aiProfile: "aggressive",
     teamSeed: "post-division-v1",
-    pointBudget: 9000,
+    pointBudget: 6800,
     battleFormat: { type: "series", bestOf: 5 },
     repeatable: false,
     requires: ["boss-vale"],
@@ -290,7 +290,7 @@ export const TRAINERS = [
     archetype: "ace",
     aiProfile: "balanced",
     teamSeed: "post-championship-v1",
-    pointBudget: 9500,
+    pointBudget: 7200,
     battleFormat: { type: "series", bestOf: 7 },
     repeatable: false,
     requires: ["post-division"],
@@ -316,7 +316,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "aggressive",
     teamSeed: "rival-cam-4",
-    pointBudget: 9800,
+    pointBudget: 7350,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["post-championship"],
@@ -342,7 +342,7 @@ export const TRAINERS = [
     archetype: "balanced",
     aiProfile: "aggressive",
     teamSeed: "post-worldseries-v1",
-    pointBudget: 10000,
+    pointBudget: 7500,
     battleFormat: { type: "series", bestOf: 7 },
     repeatable: false,
     requires: ["post-championship"],
@@ -350,7 +350,7 @@ export const TRAINERS = [
     dialog: {
       intro: [
         "Every October ends the same way: with me holding the trophy.",
-        "Ten thousand points. The best money can assemble.",
+        "Seventy-five hundred points. The best money can assemble.",
         "Seven games for everything. Play ball."
       ],
       win: [

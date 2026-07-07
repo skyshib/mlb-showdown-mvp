@@ -103,6 +103,50 @@ function clickCursorField(screen) {
   return "index";
 }
 
+// The rest of the Game Boy: an on-screen D-pad and A/B buttons for touch
+// devices (CSS shows them on coarse pointers / small windows). They feed the
+// exact same per-screen key handler as the keyboard, with hold-to-repeat so
+// long lists stay walkable.
+const controls = document.createElement("div");
+controls.className = "gq-controls";
+controls.innerHTML = `
+  <div class="gq-dpad">
+    <button type="button" class="gq-btn gq-dpad-up" data-gq-key="up" aria-label="Up">&#9650;</button>
+    <button type="button" class="gq-btn gq-dpad-left" data-gq-key="left" aria-label="Left">&#9664;</button>
+    <span class="gq-btn gq-dpad-center" aria-hidden="true"></span>
+    <button type="button" class="gq-btn gq-dpad-right" data-gq-key="right" aria-label="Right">&#9654;</button>
+    <button type="button" class="gq-btn gq-dpad-down" data-gq-key="down" aria-label="Down">&#9660;</button>
+  </div>
+  <div class="gq-ab">
+    <button type="button" class="gq-btn" data-gq-key="b" aria-label="B — back">B</button>
+    <button type="button" class="gq-btn" data-gq-key="a" aria-label="A — confirm">A</button>
+  </div>`;
+document.body.appendChild(controls);
+
+let repeatTimer = null;
+function stopRepeat() {
+  clearTimeout(repeatTimer);
+  clearInterval(repeatTimer);
+  repeatTimer = null;
+}
+
+controls.addEventListener("pointerdown", (event) => {
+  const key = event.target.closest("[data-gq-key]")?.dataset.gqKey;
+  if (!key) return;
+  event.preventDefault();
+  const press = () => SCREENS[app.screen.name]?.key?.(app, key);
+  press();
+  stopRepeat();
+  if (key === "up" || key === "down") {
+    repeatTimer = setTimeout(() => {
+      repeatTimer = setInterval(press, 130);
+    }, 400);
+  }
+});
+for (const done of ["pointerup", "pointercancel", "pointerleave"]) {
+  controls.addEventListener(done, stopRepeat);
+}
+
 // Hovering a row that maps to a card (screens expose hoverCard) floats the
 // full card panel next to the cursor — the quickest way to read a chart.
 // Any element can also opt in directly with data-card-id (batter and pitcher
@@ -143,6 +187,29 @@ document.addEventListener("mouseout", (event) => {
   if (!event.relatedTarget || !event.relatedTarget.closest?.("[data-menu-index], [data-card-id]")) {
     tooltip.hidden = true;
   }
+});
+
+// Touch has no hover: tapping a card-tagged element (batter, pitcher, a
+// runner on a base) toggles the card panel near it instead.
+document.addEventListener("click", (event) => {
+  const tagged = event.target.closest?.("[data-card-id]");
+  if (!tagged) {
+    if (!tooltip.hidden && !event.target.closest?.("[data-menu-index]")) tooltip.hidden = true;
+    return;
+  }
+  const card = cardById(tagged.dataset.cardId);
+  if (!card) return;
+  if (!tooltip.hidden) {
+    tooltip.hidden = true;
+    return;
+  }
+  tooltip.innerHTML = cardPanelHtml(card);
+  tooltip.hidden = false;
+  const anchor = tagged.getBoundingClientRect();
+  const pad = 10;
+  const rect = tooltip.getBoundingClientRect();
+  tooltip.style.left = `${Math.max(pad, Math.min(anchor.left, window.innerWidth - rect.width - pad))}px`;
+  tooltip.style.top = `${Math.max(pad, Math.min(anchor.bottom + pad, window.innerHeight - rect.height - pad))}px`;
 });
 
 app.rerender();

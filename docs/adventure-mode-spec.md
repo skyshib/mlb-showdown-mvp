@@ -95,26 +95,26 @@ Each node contains:
 The player's roster budget is a **flat 3,500 printed points** for the whole
 campaign — badges are trophies and unlock gates, not cap raises. The difficulty
 spine is the **boss budget ladder** instead: trainer budgets climb from 2,500
-through the 8,500-point summit and into a postseason that peaks at 10,000, so
-late bosses out-spend the player nearly three-to-one.
+through the 6,500-point summit and into a postseason that peaks at 7,500, so
+late bosses out-spend the player better than two-to-one.
 
 | Trainer | Format | Budget |
 |---------|--------|--------|
 | Sandlot Kid Jojo (Route 1) | game | 2,500 |
-| Rival Cam #1 (after Jojo) | game | 2,700 |
-| Bleacher Prophet Mabel (Route 1) | game | 2,900 |
-| Bench Boss Garrick (Ironwood Gym) | Bo3 | 3,700 |
-| Rival Cam #2 (after Ironwood) | game | 4,200 |
-| Ump-in-Exile Hollis (Route 2) | game | 4,500 |
-| Salvage Queen Petra (Route 2) | game | 5,500 |
-| Harbormaster Quince (Galehook Gym) | Bo3 | 6,500 |
-| Rival Cam #3 (after Galehook) | Bo3 | 6,800 |
-| Night-Train Sawyer (Route 3) | game | 7,500 |
-| Commissioner Vale (Summit Gym) | Bo3 | 8,500 |
-| October Gatekeeper Ivy (**Division Series**) | Bo5 | 9,000 |
-| Pennant Shark Okabe (**Championship Series**) | Bo7 | 9,500 |
-| Rival Cam #4 (before the World Series) | Bo3 | 9,800 |
-| Mr. November Graves (**World Series**) | Bo7 | 10,000 |
+| Rival Cam #1 (after Jojo) | game | 2,650 |
+| Bleacher Prophet Mabel (Route 1) | game | 2,800 |
+| Bench Boss Garrick (Ironwood Gym) | Bo3 | 3,300 |
+| Rival Cam #2 (after Ironwood) | game | 3,650 |
+| Ump-in-Exile Hollis (Route 2) | game | 3,850 |
+| Salvage Queen Petra (Route 2) | game | 4,500 |
+| Harbormaster Quince (Galehook Gym) | Bo3 | 5,200 |
+| Rival Cam #3 (after Galehook) | Bo3 | 5,400 |
+| Night-Train Sawyer (Route 3) | game | 5,800 |
+| Commissioner Vale (Summit Gym) | Bo3 | 6,500 |
+| October Gatekeeper Ivy (**Division Series**) | Bo5 | 6,800 |
+| Pennant Shark Okabe (**Championship Series**) | Bo7 | 7,200 |
+| Rival Cam #4 (before the World Series) | Bo3 | 7,350 |
+| Mr. November Graves (**World Series**) | Bo7 | 7,500 |
 
 The **rival** (Cam, a fellow rookie who opened a starter pack the same day)
 reappears at milestones with a richer roster each time, Pokemon-style. Beating
