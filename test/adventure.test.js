@@ -974,7 +974,7 @@ test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () =>
     const cruz = adventurePool().find((card) => card.name === "Julio Cruz");
     assert.ok(cruz, "Julio Cruz plays for the all-time Mariners");
     assert.equal(slots(cruz, "HR"), 0, "a 0.5% HR/PA hitter gets no homer slots");
-    assert.ok(slots(cruz, "1B") >= 6, "his hits are singles");
+    assert.ok(slots(cruz, "1B") >= 4 && slots(cruz, "2B") <= 1, "what hits he has are singles");
     // Swingmen: relief innings don't inflate a starter's IP.
     const swingman = adventurePool().find((card) => card.name === "Ryan Rowland-Smith");
     assert.ok(swingman.ip <= 6, `swingman IP reflects innings per start (${swingman.ip})`);
@@ -984,8 +984,51 @@ test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () =>
     const pool = adventurePool();
     const ruth = pool.find((card) => card.name === "Babe Ruth");
     assert.ok(slots(ruth, "HR") >= 3, "the Babe still slugs");
-    const singleless = pool.filter((card) => card.kind === "hitter" && slots(card, "1B") === 0);
-    assert.equal(singleless.length, 0, "every hitter keeps his singles");
+    // Under league-backout math a chart only carries a player's surplus over
+    // what pitcher charts already concede, so the worst hitters legitimately
+    // show empty hit columns — but the pool at large must stay singles-rich.
+    const poolHitters = pool.filter((card) => card.kind === "hitter");
+    const withSingles = poolHitters.filter((card) => slots(card, "1B") > 0);
+    assert.ok(withSingles.length / poolHitters.length > 0.9, "the vast majority of hitters keep singles slots");
+    const meanSingles = poolHitters.reduce((sum, card) => sum + slots(card, "1B"), 0) / poolHitters.length;
+    assert.ok(meanSingles >= 2.5, `charts stay singles-rich on average (${meanSingles.toFixed(1)})`);
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
+test("simulated matchups reproduce real season rates within tolerance", () => {
+  // Analytic expectation of each batter vs the whole decade pitcher pool,
+  // checked against the players' real 2000-2009 lines from the databank.
+  const share = (chart, result) => chart
+    .filter((row) => row.result === result)
+    .reduce((sum, row) => sum + Math.min(row.to, 20) - row.from + 1, 0) / 20;
+  const onBaseShare = (chart) => ["BB", "1B", "2B", "3B", "HR"].reduce((sum, e) => sum + share(chart, e), 0);
+  try {
+    setUniverseSeed("replay-test", "decade-2000");
+    const pool = adventurePool();
+    const arms = pool.filter((card) => card.kind === "pitcher");
+    const expectVs = (bat) => {
+      let obp = 0, hr = 0;
+      for (const arm of arms) {
+        const A = Math.min(Math.max((bat.onBase - arm.control) / 20, 0), 1);
+        obp += A * onBaseShare(bat.chart) + (1 - A) * onBaseShare(arm.chart);
+        hr += A * share(bat.chart, "HR") + (1 - A) * share(arm.chart, "HR");
+      }
+      return { obp: obp / arms.length, hr: hr / arms.length };
+    };
+    const realLines = [
+      ["Travis Hafner", 0.378, 0.049],
+      ["Jose Vizcaino", 0.315, 0.008],
+      ["Mark Grace", 0.372, 0.022]
+    ];
+    for (const [name, realObp, realHr] of realLines) {
+      const bat = pool.find((card) => card.name === name);
+      assert.ok(bat, `${name} is in the 2000s pool`);
+      const sim = expectVs(bat);
+      assert.ok(Math.abs(sim.obp - realObp) < 0.025, `${name} OBP ${sim.obp.toFixed(3)} ≈ real ${realObp}`);
+      assert.ok(Math.abs(sim.hr - realHr) < 0.01, `${name} HR/PA ${(sim.hr * 100).toFixed(1)}% ≈ real ${(realHr * 100).toFixed(1)}%`);
+    }
   } finally {
     setUniverseSeed("test-seed", "fictional");
   }

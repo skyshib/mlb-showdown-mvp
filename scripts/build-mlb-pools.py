@@ -122,47 +122,119 @@ def chart_string(parts):
         out[-1] = f"{last[0]}{lo}-20"
     return "|".join(out)
 
-def build_hitter(pid, t, pos):
+# ---- League-anchored card math ------------------------------------------------
+#
+# The engine resolves each PA as: batter advantage A = (OB - ctrl)/20, then
+# result = A x batterChart + (1-A) x pitcherChart. Anchoring the league at
+# ctrl 4 / OB 11, a player's chart is his real rates with the league backed
+# out: chart_e = (real_e - (1-A) x league_e) / A. A league-average player gets
+# a league-average chart, and any matchup reproduces real rates to first
+# order. League context is era-specific (per decade), PA-weighted for slices
+# spanning decades — a .350 OBP means more in 1968 than in 1930.
+ANCHOR_CTRL = 4
+ANCHOR_OB = 11
+ANCHOR_A = (ANCHOR_OB - ANCHOR_CTRL) / 20
+# Homers live mostly on batter charts: the league's pitcher charts carry only
+# this share of the era HR rate, and batter charts carry the surplus. This
+# keeps league totals intact while letting punchless hitters actually be
+# punchless (their floor is what pitcher charts concede, not the full league).
+HR_PITCHER_SHARE = 0.5
+EVENTS = ["BB", "S", "D", "T", "HR"]
+
+def league_split(L):
+    """The league-average pitcher chart and batter chart implied by L."""
+    pitcher = dict(L)
+    pitcher["HR"] = L["HR"] * HR_PITCHER_SHARE
+    batter = dict(L)
+    batter["HR"] = (L["HR"] - (1 - ANCHOR_A) * pitcher["HR"]) / ANCHOR_A
+    return pitcher, batter
+
+def league_tables(bat_decade):
+    lg = defaultdict(lambda: defaultdict(int))
+    for (pid, dec), t in bat_decade.items():
+        for k, v in t.items():
+            lg[dec][k] += v
+    tables = {}
+    for dec, t in lg.items():
+        pa = t["AB"] + t["BB"]
+        if pa < 50000:
+            continue
+        singles = t["H"] - t["2B"] - t["3B"] - t["HR"]
+        tables[dec] = {
+            "BB": t["BB"] / pa, "S": singles / pa, "D": t["2B"] / pa,
+            "T": t["3B"] / pa, "HR": t["HR"] / pa, "K": t["SO"] / pa,
+            "OBP": (t["H"] + t["BB"]) / pa,
+        }
+    return tables
+
+def blend_league(tables, weights):
+    total = sum(w for dec, w in weights.items() if dec in tables)
+    if total <= 0:
+        return tables[max(tables)]
+    blend = defaultdict(float)
+    for dec, w in weights.items():
+        if dec not in tables:
+            continue
+        for k, v in tables[dec].items():
+            blend[k] += v * (w / total)
+    return blend
+
+def build_hitter(pid, t, pos, L):
     pa = t["AB"] + t["BB"]
     if pa <= 0 or t["AB"] == 0:
         return None
+    singles = t["H"] - t["2B"] - t["3B"] - t["HR"]
+    b = {"BB": t["BB"] / pa, "S": singles / pa, "D": t["2B"] / pa,
+         "T": t["3B"] / pa, "HR": t["HR"] / pa}
     obp = (t["H"] + t["BB"]) / pa
-    outs = clamp(round(8.5 - (obp - 0.320) * 50), 2, 11)
-    remaining = 20 - outs
-    walks = clamp(round(remaining * (t["BB"] / max(1, t["BB"] + t["H"]))), 0, remaining - 1)
-    hits = remaining - walks
-    share = lambda k: t[k] / max(1, t["H"])
-    # All four hit types round together so the chart mirrors the player's real
-    # hit mix — singles very much included (a slap hitter's chart is singles).
-    single_share = max(0.0, 1.0 - share("HR") - share("3B") - share("2B"))
-    hr, tr, db, singles = spread(hits, [hits * share("HR"), hits * share("3B"), hits * share("2B"), hits * single_share])
-    so = clamp(round(outs * (t["SO"] / max(1, t["AB"] - t["H"]))), 0, outs)
+    # OB scales off the ERA-relative on-base gap; the chart backs the league
+    # out at that advantage, so OB and chart stay consistent by construction.
+    ob = clamp(round(ANCHOR_OB + (obp - L["OBP"]) * 50), 6, 15)
+    A = (ob - ANCHOR_CTRL) / 20
+    pitcher_league, _ = league_split(L)
+    raw = {e: max(0.0, (b[e] - (1 - A) * pitcher_league[e]) / A) * 20 for e in EVENTS}
+    onbase_slots = clamp(round(sum(raw.values())), 2, 18)
+    bb, s, d, tr, hr = spread(onbase_slots, [raw["BB"], raw["S"], raw["D"], raw["T"], raw["HR"]])
+    outs = 20 - onbase_slots
+    # His chart's out mix follows his real K share of outs.
+    out_rate = max(0.02, 1 - obp)
+    so = clamp(round(outs * clamp((t["SO"] / pa) / out_rate, 0.05, 0.95)), 0, outs)
     gb = round((outs - so) * 0.55)
     fb = outs - so - gb
-    on_base = clamp(round(6 + (obp - 0.270) * 60), 6, 15)
-    speed = clamp(round(8 + (t["SB"] / pa * 650) * 0.3 + share("3B") * 30), 6, 22)
+    sb650 = t["SB"] / pa * 650
+    speed = clamp(round(8 + sb650 * 0.3 + (t["3B"] / max(1, t["H"])) * 30), 6, 22)
     frange = FIELD_RANGE[pos]
     fielding = h(pid, "fld", frange[0], frange[1])
-    parts = [("K", so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("T", tr), ("H", hr)]
+    parts = [("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("T", tr), ("H", hr)]
     power = sum(CHART_POWER[c] * n for c, n in parts)
-    points = on_base * 20 + fielding * 7 + max(0, round((speed - 1) * 1.5)) + power
-    return [None, None, None, None, None, 0, points, on_base, speed, pos, fielding, None, chart_string(parts)]
+    points = ob * 20 + fielding * 7 + max(0, round((speed - 1) * 1.5)) + power
+    return [None, None, None, None, None, 0, points, ob, speed, pos, fielding, None, chart_string(parts)]
 
-def build_pitcher(pid, t):
+def build_pitcher(pid, t, L):
     ip = t["IPouts"] / 3
     if ip <= 0:
         return None
-    whip = (t["H"] + t["BB"]) / ip
-    k9 = t["SO"] * 9 / ip
-    control = clamp(round(3.5 + (1.32 - whip) * 5), 0, 6)
-    outs = clamp(round(15.5 + (1.32 - whip) * 5), 11, 19)
-    remaining = 20 - outs
-    walks = clamp(round(remaining * (t["BB"] / max(1, t["BB"] + t["H"]))), 0, remaining)
-    hits = remaining - walks
-    hr = clamp(round(hits * (t["HR"] / max(1, t["H"]))), 0, hits)
-    db = clamp(round((hits - hr) * 0.3), 0, hits - hr)
-    singles = hits - hr - db
-    so = round(outs * clamp(k9 / 24, 0.10, 0.55))
+    bf = max(t["IPouts"] + t["H"] + t["BB"], 1)
+    allowed_bb = t["BB"] / bf
+    allowed_hr = t["HR"] / bf
+    non_hr = max(0.0, (t["H"] - t["HR"]) / bf)
+    # The databank has no doubles-allowed: split non-HR hits by the era's mix
+    # (triples fold into doubles — engine pitcher charts carry no 3B).
+    xb_share = (L["D"] + L["T"]) / max(1e-9, L["S"] + L["D"] + L["T"])
+    allowed_d = non_hr * xb_share
+    allowed_s = non_hr - allowed_d
+    oba = (t["H"] + t["BB"]) / bf
+    ctrl = clamp(round(ANCHOR_CTRL + (L["OBP"] - oba) * 50), 0, 6)
+    Ap = (ANCHOR_OB - ctrl) / 20
+    _, batter_league = league_split(L)
+    back = lambda rate, l: max(0.0, (rate - Ap * l) / (1 - Ap)) * 20
+    raw = [back(allowed_bb, L["BB"]), back(allowed_s, L["S"]),
+           back(allowed_d, L["D"] + L["T"]), back(allowed_hr, batter_league["HR"])]
+    onbase_slots = clamp(round(sum(raw)), 1, 9)
+    bb, s, d, hr = spread(onbase_slots, raw)
+    outs = 20 - onbase_slots
+    out_rate = max(0.02, 1 - oba)
+    so = clamp(round(outs * clamp((t["SO"] / bf) / out_rate, 0.05, 0.95)), 0, outs)
     pu = clamp(round(outs * 0.12), 0, outs - so)
     rest = outs - so - pu
     gb = round(rest * 0.55)
@@ -174,12 +246,14 @@ def build_pitcher(pid, t):
         role, ip_card = "SP", clamp(round(start_outs / max(1, t["GS"]) / 3), 4, 8)
     else:
         role, ip_card = "RP", 1 if t["SV"] > 30 or t["IPouts"] / max(1, t["G"]) < 5 else 2
-    parts = [("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", walks), ("S", singles), ("D", db), ("H", hr)]
+    parts = [("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("H", hr)]
     power = sum(PIT_POWER[c] * n for c, n in parts)
-    points = round((control * 35 + power) * ((ip_card + 4) / 10)) + ip_card * 8
-    return [None, None, None, None, None, 1, points, control, ip_card, role, 0, None, chart_string(parts)]
+    points = round((ctrl * 35 + power) * ((ip_card + 4) / 10)) + ip_card * 8
+    return [None, None, None, None, None, 1, points, ctrl, ip_card, role, 0, None, chart_string(parts)]
 
-def finish(card, pid, span, used_names, tag, hand_key, team=None, id_suffix=""):
+def finish(card, pid, span, used_names, tag, hand_key):
+    team = None
+    id_suffix = ""
     info = people[pid]
     name = info["name"] or pid
     used_names[name] += 1
@@ -211,7 +285,7 @@ def pool_ok(pool):
             return False
     return True
 
-def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts, team_of=None):
+def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts, bat_league_of, pit_league_of):
     used_names = defaultdict(int)
     pool = []
     for key, t in bat_slice.items():
@@ -219,20 +293,16 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
         if t["AB"] + t["BB"] < min_pa or pid not in people:
             continue
         pos = pos_slice.get(key, "DH")
-        card = build_hitter(pid, t, pos)
+        card = build_hitter(pid, t, pos, bat_league_of(key))
         if card:
-            team = team_of(key) if team_of else None
-            suffix = f"-{key[1]}" if team_of else ""
-            pool.append(finish(card, pid, spans[key], used_names, tag, "bats", team, suffix))
+            pool.append(finish(card, pid, spans[key], used_names, tag, "bats"))
     for key, t in pit_slice.items():
         pid = key if isinstance(key, str) else key[0]
         if t["IPouts"] < min_ipouts or pid not in people:
             continue
-        card = build_pitcher(pid, t)
+        card = build_pitcher(pid, t, pit_league_of(key))
         if card:
-            team = team_of(key) if team_of else None
-            suffix = f"-{key[1]}" if team_of else ""
-            pool.append(finish(card, pid, spans[key], used_names, tag, "throws", team, suffix))
+            pool.append(finish(card, pid, spans[key], used_names, tag, "throws"))
     return pool
 
 print("accumulating batting...", file=sys.stderr)
@@ -246,7 +316,32 @@ for key, span in bat_spans.items():
     if key in pit_spans:
         spans_all[key] = [min(span[0], pit_spans[key][0]), max(span[1], pit_spans[key][1])]
 
-history = build_slice("all", bat_career, pit_career, pos_career, spans_all, 400, 450)
+LEAGUE = league_tables(bat_decade)
+
+# Era weights: a player's league context blends the decades he actually
+# played in, weighted by his PA (hitters) or IP (pitchers) in each.
+def era_weights(by_decade, pid, volume_keys):
+    weights = defaultdict(float)
+    for (p, dec), t in by_decade.items():
+        if p == pid:
+            weights[dec] += sum(t[k] for k in volume_keys)
+    return weights
+
+bat_weight_cache = {}
+def bat_league_career(key):
+    pid = key if isinstance(key, str) else key[0]
+    if pid not in bat_weight_cache:
+        bat_weight_cache[pid] = blend_league(LEAGUE, era_weights(bat_decade, pid, ["AB", "BB"]))
+    return bat_weight_cache[pid]
+
+pit_weight_cache = {}
+def pit_league_career(key):
+    pid = key if isinstance(key, str) else key[0]
+    if pid not in pit_weight_cache:
+        pit_weight_cache[pid] = blend_league(LEAGUE, era_weights(pit_decade, pid, ["IPouts"]))
+    return pit_weight_cache[pid]
+
+history = build_slice("all", bat_career, pit_career, pos_career, spans_all, 400, 450, bat_league_career, pit_league_career)
 print(f"history: {len(history)}", file=sys.stderr)
 
 # Decade cards pool the player's whole decade, every team combined.
@@ -255,7 +350,8 @@ for start in range(1870, 2030, 10):
     tag = "00s" if start == 2000 else f"d{start}"
     bat = {k: v for k, v in bat_decade.items() if k[1] == start}
     pit = {k: v for k, v in pit_decade.items() if k[1] == start}
-    pool = build_slice(tag, bat, pit, pos_decade, spans_all, 250, 225)
+    league = LEAGUE.get(start) or LEAGUE[max(LEAGUE)]
+    pool = build_slice(tag, bat, pit, pos_decade, spans_all, 250, 225, lambda key: league, lambda key: league)
     if pool_ok(pool):
         decades[start] = pool
     else:
@@ -266,7 +362,7 @@ franchises = {}
 for fid, fname in sorted(franch_names.items()):
     bat = {k: v for k, v in bat_franch.items() if k[1] == fid}
     pit = {k: v for k, v in pit_franch.items() if k[1] == fid}
-    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 400, 350)
+    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 400, 350, bat_league_career, pit_league_career)
     if pool_ok(pool):
         franchises[fid] = pool
     else:
