@@ -203,7 +203,7 @@ export const TRAINERS = [
     aiProfile: "aggressive",
     teamSeed: "rival-cam-3",
     pointBudget: 5400,
-    battleFormat: { type: "series", bestOf: 3 },
+    battleFormat: { type: "game" },
     repeatable: false,
     requires: ["gym-quince"],
     rewards: { coins: 1200 },
@@ -211,7 +211,7 @@ export const TRAINERS = [
       intro: [
         "The gale didn't slow you down, huh.",
         "I traded half my binder for this roster. Every card a hammer.",
-        "Best of three. For real this time."
+        "One game. For real this time."
       ],
       win: ["...You're actually good. Go take the summit. I'll be watching."],
       lose: ["The summit's got no room for you. Smell ya later!"]
@@ -321,14 +321,14 @@ export const TRAINERS = [
     aiProfile: "aggressive",
     teamSeed: "rival-cam-4",
     pointBudget: 7350,
-    battleFormat: { type: "series", bestOf: 3 },
+    battleFormat: { type: "game" },
     repeatable: false,
     requires: ["post-championship"],
     rewards: { coins: 2500, pack: "booster" },
     dialog: {
       intro: [
         "Of course it's you. It was always going to be you and me.",
-        "I spent everything I had for this one series.",
+        "I spent everything I had for this one game.",
         "Before you play the World Series... you play ME."
       ],
       win: [

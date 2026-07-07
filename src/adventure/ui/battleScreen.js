@@ -433,9 +433,11 @@ function renderMatchup(phase) {
     return `<div class="gq-matchup"><div>BALL IN PLAY<br><b>RUNNERS DECIDING...</b></div></div>`;
   }
   if (phase.type === "player-batting") {
+    const theirFatigue = phase.opposingMound?.fatiguePenalty ?? 0;
     return `<div class="gq-matchup">
       <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span></div>
-      <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(shortName(phase.opposingPitcher.name))}</b><br><span class="gq-dim">CTRL ${phase.opposingPitcher.control}</span></div>
+      <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(shortName(phase.opposingPitcher.name))}</b><br>
+        <span class="gq-dim ${theirFatigue > 0 ? "gq-fatigued" : ""}">CTRL ${phase.opposingPitcher.control}${theirFatigue > 0 ? ` &minus;${theirFatigue} TIRED` : ""} &middot; ${phase.opposingMound?.outsRecorded ?? 0} OUTS IN</span></div>
     </div>`;
   }
   const fatigue = phase.mound.fatiguePenalty;

@@ -108,12 +108,12 @@ late bosses out-spend the player better than two-to-one.
 | Ump-in-Exile Hollis (Route 2) | game | 3,850 |
 | Salvage Queen Petra (Route 2) | game | 4,500 |
 | Harbormaster Quince (Galehook Gym) | Bo3 | 5,200 |
-| Rival Cam #3 (after Galehook) | Bo3 | 5,400 |
+| Rival Cam #3 (after Galehook) | game | 5,400 |
 | Night-Train Sawyer (Route 3) | game | 5,800 |
 | Commissioner Vale (Summit Gym) | Bo3 | 6,500 |
 | October Gatekeeper Ivy (**Division Series**) | Bo5 | 6,800 |
 | Pennant Shark Okabe (**Championship Series**) | Bo7 | 7,200 |
-| Rival Cam #4 (before the World Series) | Bo3 | 7,350 |
+| Rival Cam #4 (before the World Series) | game | 7,350 |
 | Mr. November Graves (**World Series**) | Bo7 | 7,500 |
 
 The **rival** (Cam, a fellow rookie who opened a starter pack the same day)

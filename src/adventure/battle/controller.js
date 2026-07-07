@@ -74,6 +74,9 @@ export function battlePhase(battle) {
       stealOptions: stealCandidates(state),
       canBunt: canBunt(state),
       buntChance: buntSuccessChance(state),
+      // Full mound status, so the UI can show the NPC arm's fatigue — the
+      // tiredness rules are the same for both sides.
+      opposingMound: pitcherStatus(state, battle.npcSide),
       opposingPitcher: pitcherStatus(state, battle.npcSide).pitcher
     };
   }

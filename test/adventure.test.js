@@ -263,6 +263,7 @@ test("the rival reappears at milestones with a growing budget", () => {
   }
   assert.ok(rivals.every((trainer) => trainer.name === "RIVAL CAM"), "same rival every time");
   assert.ok(rivals.every((trainer) => trainer.ambush), "every rival bout is an ambush");
+  assert.ok(rivals.every((trainer) => trainer.battleFormat.type === "game"), "rival bouts are always a single game");
   assert.equal(TRAINERS.some((trainer) => trainer.battleFormat.type === "simSeries"), false, "the sim-series farm boss is gone");
 });
 
@@ -694,6 +695,22 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
   assert.ok(html.includes(`data-card-id="${phase.batter.id}"`), "batter is hoverable");
   assert.ok(html.includes(`data-card-id="${phase.opposingPitcher.id}"`), "pitcher is hoverable");
   assert.ok(html.includes('data-card-id="runner-card-id"'), "occupied base is hoverable");
+});
+
+test("the NPC's mound arm shows its fatigue subtraction like the player's", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "npc-tired" });
+  const npcArm = battle.state.home.pitchers[0];
+  // Push the NPC starter past fatigue onset but short of his planned exit.
+  battle.state.pitching.home.outsRecorded = npcArm.ip * 3 + 2;
+  const phase = battlePhase(battle);
+  assert.equal(phase.type, "player-batting");
+  assert.ok(phase.opposingMound.fatiguePenalty >= 1, "NPC arms tire under the same rules");
+  const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
+  const html = battleScreen.render(app);
+  assert.ok(html.includes(`&minus;${phase.opposingMound.fatiguePenalty} TIRED`), "the subtraction shows on their arm too");
 });
 
 test("the game log lines carry player-perspective WPA", async () => {
