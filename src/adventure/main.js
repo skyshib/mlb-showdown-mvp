@@ -5,7 +5,7 @@ import { titleScreen, introScreen, nameEntryScreen, starterRevealScreen } from "
 import { mapScreen, trainerIntroScreen } from "./ui/mapScreen.js";
 import { battleScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen } from "./ui/collectionScreens.js";
-import { gameStatsScreen, seasonStatsScreen } from "./ui/statsScreens.js";
+import { gameStatsScreen, seasonStatsScreen, championshipScreen } from "./ui/statsScreens.js";
 
 const SCREENS = {
   title: titleScreen,
@@ -26,7 +26,8 @@ const SCREENS = {
   lineup: lineupScreen,
   packOpen: packOpenScreen,
   gameStats: gameStatsScreen,
-  seasonStats: seasonStatsScreen
+  seasonStats: seasonStatsScreen,
+  championship: championshipScreen
 };
 
 const KEY_MAP = {

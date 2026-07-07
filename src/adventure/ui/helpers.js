@@ -103,7 +103,6 @@ export function describeEvent(event) {
     const lines = [];
     if (details?.clean) {
       lines.push(`${shortName(event.batter)} lays it down. Textbook sacrifice.`);
-      if (event.runs > 0) lines.push(`The squeeze scores! It's ${event.scoreAfter.away}-${event.scoreAfter.home}.`);
     } else {
       lines.push(`${shortName(event.batter)} bunts it right to the defense...`);
       if (details?.leadOut) lines.push(`${shortName(details.leadOut.runner)} is FORCED at ${details.leadOut.at}!`);

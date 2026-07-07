@@ -1,6 +1,6 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js";
 import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins } from "../region.js";
-import { timesBeaten, managerFor, rosterPoints, pointCap } from "../state.js";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats } from "../state.js";
 import { validateRoster } from "../../rules/draft.js";
 import { buildNpcTeam } from "../npcTeams.js";
 import { startTrainerBattle } from "./battleScreen.js";
@@ -22,6 +22,7 @@ function mapItems(app) {
     items.push({
       label: `RESUME SERIES: ${trainer.name} (${save.activeSeries.wins}-${save.activeSeries.losses})`,
       section: "! GYM SERIES IN PROGRESS",
+      battle: true,
       run: (a) => startTrainerBattle(a, trainer)
     });
   }
@@ -35,6 +36,7 @@ function mapItems(app) {
       section: trainer.title.toUpperCase(),
       html: `${escapeHtml(trainer.name)} <span class="gq-dim">${unlocked ? marker : "LOCKED"}</span>`,
       disabled: !available,
+      battle: true,
       run: (a) => a.go("trainerIntro", { trainerId: trainer.id, page: 0 })
     });
   }
@@ -74,7 +76,7 @@ export const mapScreen = {
     }
     return `<div class="gq-screen">
       <div class="gq-topbar">
-        <span>${escapeHtml(save.player.name)}</span>
+        <span>${escapeHtml(save.player.name)} &middot; DAY ${ensureSeasonStats(save).games + 1}</span>
         <span>&#9679; ${save.player.coins} &middot; ${rosterPoints(save)}/${pointCap(save)} PT &middot; BADGES <span class="gq-badgeline">${badgeLine(save)}</span></span>
       </div>
       <div class="gq-body">${html}</div>
@@ -97,8 +99,7 @@ export const mapScreen = {
     } else if (key === "a") {
       const item = items[app.screen.menuIndex ?? 0];
       if (!item || item.disabled) return;
-      const isBattle = item.run && (item.section?.includes("ROUTE") || item.section?.includes("GYM") || item.label?.includes("SERIES"));
-      if (isBattle && rosterProblems(app.save).length) return;
+      if (item.battle && rosterProblems(app.save).length) return;
       item.run(app);
     } else if (key === "b") {
       app.go("title", { menuIndex: 0 });

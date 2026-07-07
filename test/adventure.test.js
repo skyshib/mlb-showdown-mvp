@@ -210,28 +210,55 @@ test("the starter pack is a legal 13-card roster: two rares, eleven commons, und
   );
 });
 
-test("the point cap is always 5000", () => {
+test("the point cap is always 3500", () => {
   const save = testSave();
-  assert.equal(pointCap(save), 5000);
-  save.player.badges = ["ironwood", "galehook", "cascade"];
-  assert.equal(pointCap(save), 5000, "badges do not move the cap");
+  assert.equal(pointCap(save), 3500);
+  save.player.badges = ["ironwood", "galehook", "cascade", "pennant", "trophy"];
+  assert.equal(pointCap(save), 3500, "badges do not move the cap");
 });
 
 test("beating a trainer for the first time earns a card claim; repeats do not", () => {
   const save = testSave();
   const app = { save };
-  const trainer = trainerById("farm-cage-crew");
+  const trainer = trainerById("scout-jojo");
   const first = applyOutcome(app, trainer, true);
   assert.equal(first.cardClaim, true, "first win claims a card");
   const rematch = applyOutcome(app, trainer, true);
   assert.equal(rematch.cardClaim, false, "rematch pays coins only");
-  const loss = applyOutcome(app, trainerById("scout-jojo"), false);
+  const loss = applyOutcome(app, trainerById("scout-mabel"), false);
   assert.equal(loss.cardClaim ?? false, false, "losses claim nothing");
   // The claimable roster is deterministic, so the pick is honored later.
   const boss = buildNpcTeam(trainer);
   const stolen = boss.roster[0];
   addCardToCollection(save, stolen.id);
   assert.equal(ownedCount(save, stolen.id) >= 1, true);
+});
+
+test("the postseason chain runs division series, championship, then world series", () => {
+  const save = testSave();
+  const division = trainerById("post-division");
+  const championship = trainerById("post-championship");
+  const worldSeries = trainerById("post-worldseries");
+  assert.equal(division.battleFormat.bestOf, 5);
+  assert.equal(championship.battleFormat.bestOf, 7);
+  assert.equal(worldSeries.battleFormat.bestOf, 7);
+  assert.equal(isTrainerUnlocked(save, division), false, "October waits for the summit");
+  save.progress.trainersBeaten["boss-vale"] = 1;
+  assert.equal(isTrainerUnlocked(save, division), true);
+  assert.equal(isTrainerUnlocked(save, worldSeries), false);
+  save.progress.trainersBeaten["post-division"] = 1;
+  save.progress.trainersBeaten["post-championship"] = 1;
+  assert.equal(isTrainerUnlocked(save, worldSeries), true);
+});
+
+test("the rival reappears at milestones with a growing budget", () => {
+  const rivals = TRAINERS.filter((trainer) => trainer.title === "Rival");
+  assert.equal(rivals.length, 4);
+  for (let i = 1; i < rivals.length; i += 1) {
+    assert.ok(rivals[i].pointBudget > rivals[i - 1].pointBudget, "each rival encounter is richer");
+  }
+  assert.ok(rivals.every((trainer) => trainer.name === "RIVAL CAM"), "same rival every time");
+  assert.equal(TRAINERS.some((trainer) => trainer.battleFormat.type === "simSeries"), false, "the sim-series farm boss is gone");
 });
 
 // ---- NPC teams -------------------------------------------------------------
@@ -307,7 +334,7 @@ test("series bookkeeping clinches at the majority and salts attempts", () => {
 
 test("repeatable rewards diminish but never fall below the floor", () => {
   const save = testSave();
-  const farm = trainerById("farm-cage-crew");
+  const farm = { id: "test-farm", repeatable: true, rewards: { coins: 200 } };
   assert.equal(rewardCoins(save, farm), 200);
   save.progress.trainersBeaten[farm.id] = 1;
   assert.equal(rewardCoins(save, farm), 150);
@@ -423,6 +450,9 @@ test("a sacrifice bunt trades an out to move the runners", () => {
   assert.equal(canBunt(state), false, "nobody on, nothing to bunt for");
   state.bases[0] = { id: "r1", name: "Runner One", speed: 12 };
   assert.equal(canBunt(state), true);
+  state.bases[2] = { id: "r3", name: "Runner Three", speed: 12 };
+  assert.equal(canBunt(state), false, "no squeeze plays: a runner on third kills the bunt");
+  state.bases[2] = null;
   const batterId = state.away.lineup[0].id;
   const event = attemptBunt(state, createRng("bunt-roll"));
   assert.equal(event.type, "bunt");

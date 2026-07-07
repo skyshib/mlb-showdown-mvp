@@ -24,6 +24,7 @@ import {
   timesBeaten,
   grantBadge,
   addCardToCollection,
+  rosterCards,
   addLog,
   startSeries,
   attemptNumber,
@@ -544,6 +545,19 @@ export const battleResultScreen = {
 
 // First win over a trainer: take any one card off the beaten roster. The NPC
 // team rebuilds deterministically, so the roster here is the one just faced.
+// The right column stacks the boss card over YOUR cards at the same slot, so
+// the upgrade (or trap) is a straight side-read.
+function claimComparisonHtml(app, selected) {
+  if (!selected) return "";
+  const mine = rosterCards(app.save).filter((card) =>
+    selected.kind === "pitcher" ? card.role === selected.role : card.position === selected.position
+  );
+  const slot = selected.kind === "pitcher" ? selected.role : selected.position;
+  return `${cardPanelHtml(selected)}
+    <p class="gq-dim">YOURS AT ${escapeHtml(slot)}:</p>
+    ${mine.length ? mine.map((card) => cardPanelHtml(card)).join("") : `<p class="gq-dim">NOBODY. OPEN SLOT.</p>`}`;
+}
+
 export const claimCardScreen = {
   render(app) {
     const trainer = trainerById(app.screen.trainerId);
@@ -554,9 +568,9 @@ export const claimCardScreen = {
       <div class="gq-topbar"><span>WINNER'S PICK</span><span>${escapeHtml(trainer.name)}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${menuHtml(roster.map((card) => ({ html: cardLine(card) })), index)}</div>
-        <div>${selected ? cardPanelHtml(selected) : ""}</div>
+        <div>${claimComparisonHtml(app, selected)}</div>
       </div></div>
-      <div class="gq-textbox"><p>Take ONE card from their roster. Z claims it. X walks away empty-handed.</p></div>
+      <div class="gq-textbox"><p>Take ONE card from their roster — your own ${selected ? escapeHtml(selected.kind === "pitcher" ? selected.role : selected.position) : ""} cards show below theirs. Z claims it. X walks away empty-handed.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
@@ -581,8 +595,11 @@ export const claimCardScreen = {
 };
 
 function leaveClaim(app) {
-  if (app.save.pendingPacks.length) app.go("packOpen", { revealed: 0, returnTo: "map" });
-  else app.go("map");
+  // Winning the World Series ends the season: the review screen follows the
+  // spoils instead of the map.
+  const destination = app.screen.trainerId === "post-worldseries" ? "championship" : "map";
+  if (app.save.pendingPacks.length) app.go("packOpen", { revealed: 0, returnTo: destination });
+  else app.go(destination);
 }
 
 // ---- Simulated series ------------------------------------------------------

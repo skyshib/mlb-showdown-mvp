@@ -2,8 +2,9 @@ import { timesBeaten } from "./state.js";
 
 // The Cascade League: one town so far, with routes climbing past it. Trainers
 // are pure data — teams build deterministically from teamSeed + pointBudget.
-// Budgets ladder from 4000 up to the 10000-point champion: late bosses
-// out-spend the player's flat 5000, so winning means fielding bargains.
+// Budgets ladder from 2500 up through the 8500-point summit and into the
+// postseason (division series, championship series, world series at 10000):
+// late bosses out-spend the player's flat 3500, so winning means bargains.
 export const REGION = {
   name: "CASCADE LEAGUE",
   towns: [
@@ -24,7 +25,7 @@ export const TRAINERS = [
     archetype: "contact",
     aiProfile: "conservative",
     teamSeed: "scout-jojo-v1",
-    pointBudget: 4000,
+    pointBudget: 2500,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: [],
@@ -43,7 +44,7 @@ export const TRAINERS = [
     archetype: "speed",
     aiProfile: "aggressive",
     teamSeed: "scout-mabel-v1",
-    pointBudget: 4400,
+    pointBudget: 2900,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["scout-jojo"],
@@ -55,22 +56,26 @@ export const TRAINERS = [
     }
   },
   {
-    id: "farm-cage-crew",
-    name: "BATTING CAGE CREW",
-    title: "Cedar Yards",
-    sprite: "CC",
-    archetype: "balanced",
-    aiProfile: "balanced",
-    teamSeed: "farm-cage-crew-v1",
-    pointBudget: 4300,
-    battleFormat: { type: "simSeries", bestOf: 5 },
-    repeatable: true,
-    requires: [],
-    rewards: { coins: 200 },
+    id: "rival-1",
+    name: "RIVAL CAM",
+    title: "Rival",
+    sprite: "CA",
+    archetype: "power",
+    aiProfile: "aggressive",
+    teamSeed: "rival-cam-1",
+    pointBudget: 2700,
+    battleFormat: { type: "game" },
+    repeatable: false,
+    requires: ["scout-jojo"],
+    rewards: { coins: 300 },
     dialog: {
-      intro: ["Weekend money series, best of five.", "Set your lineup — we sim it out."],
-      win: ["Cage rats pay their debts. Nice series."],
-      lose: ["House wins. Run it back anytime."]
+      intro: [
+        "There you are! I ripped my starter pack the same day you did.",
+        "Mine came out better. Obviously.",
+        "One game. Loser walks home."
+      ],
+      win: ["WHAT. Rematch me after the gym. I'll be stronger."],
+      lose: ["Told you my pack was better. Smell ya later!"]
     }
   },
   {
@@ -81,7 +86,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "balanced",
     teamSeed: "gym-garrick-v1",
-    pointBudget: 5200,
+    pointBudget: 3700,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["scout-jojo", "scout-mabel"],
@@ -100,6 +105,29 @@ export const TRAINERS = [
     }
   },
   {
+    id: "rival-2",
+    name: "RIVAL CAM",
+    title: "Rival",
+    sprite: "CA",
+    archetype: "power",
+    aiProfile: "aggressive",
+    teamSeed: "rival-cam-2",
+    pointBudget: 4200,
+    battleFormat: { type: "game" },
+    repeatable: false,
+    requires: ["gym-garrick"],
+    rewards: { coins: 600 },
+    dialog: {
+      intro: [
+        "Heard you took the IRONWOOD BADGE. Took mine a week ago.",
+        "I've been pulling packs while you were napping.",
+        "Let's see whose binder grew teeth."
+      ],
+      win: ["Ugh. Fine. FINE. This isn't over."],
+      lose: ["Still a step behind me. Smell ya later!"]
+    }
+  },
+  {
     id: "route-hollis",
     name: "UMP-IN-EXILE HOLLIS",
     title: "Route 2",
@@ -107,7 +135,7 @@ export const TRAINERS = [
     archetype: "ace",
     aiProfile: "conservative",
     teamSeed: "route-hollis-v1",
-    pointBudget: 6000,
+    pointBudget: 4500,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["gym-garrick"],
@@ -126,7 +154,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "aggressive",
     teamSeed: "route-petra-v1",
-    pointBudget: 7000,
+    pointBudget: 5500,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["route-hollis"],
@@ -145,7 +173,7 @@ export const TRAINERS = [
     archetype: "contact",
     aiProfile: "balanced",
     teamSeed: "gym-quince-v1",
-    pointBudget: 8000,
+    pointBudget: 6500,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["route-hollis", "route-petra"],
@@ -164,6 +192,29 @@ export const TRAINERS = [
     }
   },
   {
+    id: "rival-3",
+    name: "RIVAL CAM",
+    title: "Rival",
+    sprite: "CA",
+    archetype: "power",
+    aiProfile: "aggressive",
+    teamSeed: "rival-cam-3",
+    pointBudget: 6800,
+    battleFormat: { type: "series", bestOf: 3 },
+    repeatable: false,
+    requires: ["gym-quince"],
+    rewards: { coins: 1200 },
+    dialog: {
+      intro: [
+        "The gale didn't slow you down, huh.",
+        "I traded half my binder for this roster. Every card a hammer.",
+        "Best of three. For real this time."
+      ],
+      win: ["...You're actually good. Go take the summit. I'll be watching."],
+      lose: ["The summit's got no room for you. Smell ya later!"]
+    }
+  },
+  {
     id: "route-sawyer",
     name: "NIGHT-TRAIN SAWYER",
     title: "Route 3",
@@ -171,7 +222,7 @@ export const TRAINERS = [
     archetype: "speed",
     aiProfile: "aggressive",
     teamSeed: "route-sawyer-v1",
-    pointBudget: 9000,
+    pointBudget: 7500,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["gym-quince"],
@@ -190,7 +241,7 @@ export const TRAINERS = [
     archetype: "balanced",
     aiProfile: "balanced",
     teamSeed: "boss-vale-v1",
-    pointBudget: 10000,
+    pointBudget: 8500,
     battleFormat: { type: "series", bestOf: 3 },
     repeatable: false,
     requires: ["route-sawyer"],
@@ -198,14 +249,115 @@ export const TRAINERS = [
     dialog: {
       intro: [
         "So you're the bargain hunter the routes keep whispering about.",
-        "I own the deepest checkbook in the league. Ten thousand points of it.",
+        "I own the deepest checkbook in the league. Eighty-five hundred points of it.",
         "Show me a lineup that money can't buy."
       ],
       win: [
         "Extraordinary. The checkbook lost.",
-        "The CASCADE BADGE — and the league — are yours, champ."
+        "The CASCADE BADGE is yours. Now October begins — the postseason awaits."
       ],
       lose: ["Depth wins pennants. Come back when you've found yours."]
+    }
+  },
+  {
+    id: "post-division",
+    name: "OCTOBER GATEKEEPER IVY",
+    title: "Division Series",
+    sprite: "IV",
+    archetype: "speed",
+    aiProfile: "aggressive",
+    teamSeed: "post-division-v1",
+    pointBudget: 9000,
+    battleFormat: { type: "series", bestOf: 5 },
+    repeatable: false,
+    requires: ["boss-vale"],
+    rewards: { coins: 2000, pack: "booster" },
+    dialog: {
+      intro: [
+        "Welcome to October, rookie. The air is colder up here.",
+        "Five games. My runners never stop moving.",
+        "One bad hop and your season's over."
+      ],
+      win: ["Swept out of my own series...", "Go on then. The championship is waiting."],
+      lose: ["And that's the season. See you next spring."]
+    }
+  },
+  {
+    id: "post-championship",
+    name: "PENNANT SHARK OKABE",
+    title: "Championship Series",
+    sprite: "OK",
+    archetype: "ace",
+    aiProfile: "balanced",
+    teamSeed: "post-championship-v1",
+    pointBudget: 9500,
+    battleFormat: { type: "series", bestOf: 7 },
+    repeatable: false,
+    requires: ["post-division"],
+    rewards: { coins: 3500, pack: "booster", badge: "pennant" },
+    dialog: {
+      intro: [
+        "Seven games. Four aces. Zero mercy.",
+        "I've hung six pennants. Yours would look better in my office.",
+        "Throw the first pitch whenever you're ready."
+      ],
+      win: [
+        "My rotation... out-pitched by a binder full of bargains.",
+        "The PENNANT is yours. One series left."
+      ],
+      lose: ["The shark eats again. Swim home."]
+    }
+  },
+  {
+    id: "rival-4",
+    name: "RIVAL CAM",
+    title: "Rival",
+    sprite: "CA",
+    archetype: "power",
+    aiProfile: "aggressive",
+    teamSeed: "rival-cam-4",
+    pointBudget: 9800,
+    battleFormat: { type: "series", bestOf: 3 },
+    repeatable: false,
+    requires: ["post-championship"],
+    rewards: { coins: 2500, pack: "booster" },
+    dialog: {
+      intro: [
+        "Of course it's you. It was always going to be you and me.",
+        "I spent everything I had for this one series.",
+        "Before you play the World Series... you play ME."
+      ],
+      win: [
+        "...Go win the whole thing. You earned it.",
+        "And hey. Thanks for pushing me all season."
+      ],
+      lose: ["The World Series will eat you alive. Come back stronger."]
+    }
+  },
+  {
+    id: "post-worldseries",
+    name: "MR. NOVEMBER GRAVES",
+    title: "World Series",
+    sprite: "GR",
+    archetype: "balanced",
+    aiProfile: "aggressive",
+    teamSeed: "post-worldseries-v1",
+    pointBudget: 10000,
+    battleFormat: { type: "series", bestOf: 7 },
+    repeatable: false,
+    requires: ["post-championship"],
+    rewards: { coins: 5000, pack: "booster", badge: "trophy" },
+    dialog: {
+      intro: [
+        "Every October ends the same way: with me holding the trophy.",
+        "Ten thousand points. The best money can assemble.",
+        "Seven games for everything. Play ball."
+      ],
+      win: [
+        "...The confetti falls for someone else this year.",
+        "THE COMMISSIONER'S TROPHY IS YOURS. You are the champion of the CASCADE LEAGUE."
+      ],
+      lose: ["November belongs to me. It always has."]
     }
   }
 ];
@@ -213,7 +365,9 @@ export const TRAINERS = [
 export const BADGES = {
   ironwood: { key: "ironwood", name: "IRONWOOD BADGE", town: "cedar-yards" },
   galehook: { key: "galehook", name: "GALEHOOK BADGE", town: "cedar-yards" },
-  cascade: { key: "cascade", name: "CASCADE BADGE", town: "cedar-yards" }
+  cascade: { key: "cascade", name: "CASCADE BADGE", town: "cedar-yards" },
+  pennant: { key: "pennant", name: "LEAGUE PENNANT", town: "cedar-yards" },
+  trophy: { key: "trophy", name: "COMMISSIONER'S TROPHY", town: "cedar-yards" }
 };
 
 export function trainerById(id) {

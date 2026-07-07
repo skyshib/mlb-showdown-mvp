@@ -92,27 +92,41 @@ Each node contains:
 
 ### 3.2 A flat cap and a rising boss ladder *(shipped)*
 
-The player's roster budget is a **flat 5,000 printed points** for the whole
+The player's roster budget is a **flat 3,500 printed points** for the whole
 campaign — badges are trophies and unlock gates, not cap raises. The difficulty
-spine is the **boss budget ladder** instead: trainer budgets climb from 4,000 to the
-10,000-point champion, so late bosses out-spend the player two-to-one.
+spine is the **boss budget ladder** instead: trainer budgets climb from 2,500
+through the 8,500-point summit and into a postseason that peaks at 10,000, so
+late bosses out-spend the player nearly three-to-one.
 
 | Trainer | Format | Budget |
 |---------|--------|--------|
-| Sandlot Kid Jojo (Route 1) | game | 4,000 |
-| Bleacher Prophet Mabel (Route 1) | game | 4,400 |
-| Batting Cage Crew (repeatable sim) | sim Bo5 | 4,300 |
-| Bench Boss Garrick (Ironwood Gym) | Bo3 | 5,200 |
-| Ump-in-Exile Hollis (Route 2) | game | 6,000 |
-| Salvage Queen Petra (Route 2) | game | 7,000 |
-| Harbormaster Quince (Galehook Gym) | Bo3 | 8,000 |
-| Night-Train Sawyer (Route 3) | game | 9,000 |
-| Commissioner Vale (Summit Gym) | Bo3 | 10,000 |
+| Sandlot Kid Jojo (Route 1) | game | 2,500 |
+| Rival Cam #1 (after Jojo) | game | 2,700 |
+| Bleacher Prophet Mabel (Route 1) | game | 2,900 |
+| Bench Boss Garrick (Ironwood Gym) | Bo3 | 3,700 |
+| Rival Cam #2 (after Ironwood) | game | 4,200 |
+| Ump-in-Exile Hollis (Route 2) | game | 4,500 |
+| Salvage Queen Petra (Route 2) | game | 5,500 |
+| Harbormaster Quince (Galehook Gym) | Bo3 | 6,500 |
+| Rival Cam #3 (after Galehook) | Bo3 | 6,800 |
+| Night-Train Sawyer (Route 3) | game | 7,500 |
+| Commissioner Vale (Summit Gym) | Bo3 | 8,500 |
+| October Gatekeeper Ivy (**Division Series**) | Bo5 | 9,000 |
+| Pennant Shark Okabe (**Championship Series**) | Bo7 | 9,500 |
+| Rival Cam #4 (before the World Series) | Bo3 | 9,800 |
+| Mr. November Graves (**World Series**) | Bo7 | 10,000 |
 
-Beating the checkbook is possible because **printed prices are noisy** (§4.2): a
-5,000-point roster of scouted bargains can carry far more true value than it costs.
-Two other ratchets help the climb: the first win over any trainer **claims one card
-of the player's choice off the beaten roster**, and gym wins still pay packs.
+The **rival** (Cam, a fellow rookie who opened a starter pack the same day)
+reappears at milestones with a richer roster each time, Pokemon-style. Beating
+the checkbook is possible because **printed prices are noisy** (§4.2): a
+3,500-point roster of scouted bargains can carry far more true value than it
+costs. Two other ratchets help the climb: the first win over any trainer
+**claims one card of the player's choice off the beaten roster** (the claim
+screen shows your own cards at that slot for comparison), and gym wins pay packs.
+
+Time is tracked in **days: every game played is one day**. The map header shows
+the current day, and winning the World Series ends on a championship review —
+season length in days, battle record, packs ripped, and the season's WPA MVPs.
 
 ### 3.3 Trainer definitions
 
@@ -167,7 +181,8 @@ don't get repetitive. Within a universe:
 - **Printed points** — what roster caps and NPC budgets actually pay — are true
   value ±35% seeded noise. Some cards are steals, some are rip-offs; scouting the
   actual chart beats reading the sticker. Calibration: an even-rarity 13-card
-  roster costs ≈ the 5,000-point cap.
+  roster costs ≈ 5,000 printed points — well above the 3,500-point cap, so you
+  cannot buy even average depth at sticker price.
 - **Booster pack** (5 cards, 500 coins): four *wild* slots that can land anywhere
   (common 58% / uncommon 27% / rare 12% / legend 3%) plus one *hit* slot that's
   always uncommon-or-better (uncommon 62% / rare 30% / legend 8%). Duds and
@@ -240,7 +255,7 @@ Shipped decision set:
 | Decision | Engine seam | When offered |
 |----------|-------------|--------------|
 | Steal attempt (per runner) | `stealCandidates` / `attemptSteal` | runner on, before PA resolves |
-| Sacrifice bunt | `canBunt` / `attemptBunt` | runner on, fewer than two outs |
+| Sacrifice bunt | `canBunt` / `attemptBunt` | runner on 1st/2nd, none on 3rd (no squeeze), fewer than two outs |
 | Intentional walk | `intentionalWalk` | any time your side pitches |
 | Pitching change | `changePitcher`, manual via `state.manualPitchingFor` (no auto-substitution for the player) | between batters when your side pitches |
 | Send / hold runners on hits | `state.deferAdvancesFor` pauses the play; `resolveAdvanceDecision` finishes it | every hit that creates an extra-base chance |

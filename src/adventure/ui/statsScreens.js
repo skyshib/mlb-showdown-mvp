@@ -174,6 +174,61 @@ export const gameStatsScreen = {
   }
 };
 
+// ---- Championship review -------------------------------------------------------
+
+// The World Series victory lap: every game played was one day of the season,
+// so the run's length is its headline stat, followed by the season MVPs.
+export const championshipScreen = {
+  render(app) {
+    const save = app.save;
+    const days = ensureSeasonStats(save).games;
+    const counters = save.progress.counters;
+    const rows = championshipRows(save);
+    const index = clampIndex(app.screen.index ?? 0, rows.length);
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CASCADE LEAGUE CHAMPION</span><span>DAY ${days}</span></div>
+      <div class="gq-body">
+        <div class="gq-frame gq-title-frame">
+          <b style="font-size:5cqw">&#9733; WORLD SERIES CHAMPION &#9733;</b>
+          <p class="gq-mt">THE SEASON TOOK <b>${days} DAY${days === 1 ? "" : "S"}</b> — ONE GAME A DAY.</p>
+          <p class="gq-dim">BATTLES ${counters.battlesWon}-${counters.battlesLost} &middot; ${counters.packsOpened} PACK${counters.packsOpened === 1 ? "" : "S"} RIPPED &middot; ${save.player.badges.length} BADGES</p>
+        </div>
+        <div class="gq-frame gq-scroll gq-map-node">${sectionedMenu(rows, index)}</div>
+      </div>
+      <div class="gq-textbox"><p class="gq-dim">% IS SEASON WPA. Hover a row to read the card.</p><p class="gq-blink">Z — BACK TO THE LEAGUE</p></div>
+    </div>`;
+  },
+  hoverCard(app, index) {
+    return cardById(championshipRows(app.save)[index]?.id) ?? null;
+  },
+  key(app, key) {
+    if (key === "up" || key === "down") {
+      const rows = championshipRows(app.save);
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
+    } else if (key === "a" || key === "b") {
+      return app.go("map");
+    }
+    app.rerender();
+  }
+};
+
+function championshipRows(save) {
+  const bats = [...seasonHitters(save)].sort((a, b) => b.wpa - a.wpa).slice(0, 3);
+  const arms = [...seasonPitchers(save)].sort((a, b) => b.wpa - a.wpa).slice(0, 2);
+  return [
+    ...bats.map((line) => ({
+      section: "SEASON MVP BATS",
+      id: line.id,
+      html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI &middot; ${line.games}G</span>`
+    })),
+    ...arms.map((line) => ({
+      section: "SEASON MVP ARMS",
+      id: line.id,
+      html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`
+    }))
+  ];
+}
+
 // ---- Season stats screen -------------------------------------------------------
 
 function seasonRows(save, view) {

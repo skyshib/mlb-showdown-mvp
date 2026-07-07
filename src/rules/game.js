@@ -277,8 +277,10 @@ function performStealAttempt(state, stealAttempt, rng) {
 
 // Can the batting team drop a sacrifice bunt right now? Needs a runner to
 // move, fewer than two outs, and no play already waiting on a decision.
+// Squeeze plays are disallowed: with a runner on third, the bunt is off.
 export function canBunt(state) {
-  return state.outs < 2 && state.bases.some(Boolean) && !state.pendingAdvance;
+  const [first, second, third] = state.bases;
+  return state.outs < 2 && Boolean(first || second) && !third && !state.pendingAdvance;
 }
 
 // The chance the current batter gets a bunt down cleanly, for display before
@@ -295,8 +297,9 @@ export function buntSuccessChance(state) {
 }
 
 // A sacrifice bunt as a full plate appearance. Clean bunt: batter out, every
-// runner moves up (third scores — the squeeze). Bobbled: fielder's choice,
-// the lead runner is cut down and the batter reaches. Auto play never bunts.
+// runner moves up (never from third — canBunt disallows the squeeze).
+// Bobbled: fielder's choice, the lead runner is cut down and the batter
+// reaches. Auto play never bunts.
 export function attemptBunt(state, rng) {
   if (!canBunt(state)) return null;
   const battingSide = state.half === "top" ? "away" : "home";
@@ -316,27 +319,20 @@ export function attemptBunt(state, rng) {
   const total = roll + Math.floor(fielding / 4);
   const target = 16 + Math.floor(speedTarget(batter) / 4);
   const clean = total <= target;
-  const [first, second, third] = state.bases;
-  let runs = 0;
+  // canBunt guarantees third is empty — no squeeze plays.
+  const [first, second] = state.bases;
+  const runs = 0;
   let leadOut = null;
 
   state.outs += 1;
   if (clean) {
     state.bases = [null, first ?? null, second ?? null];
-    if (third) runs += scoreRunner(state, battingSide, pitchingSide, third, pitcher);
   } else {
-    const lead = third ?? second ?? first;
-    leadOut = { runner: lead.name, at: third ? "home" : second ? "3B" : "2B" };
+    const lead = second ?? first;
+    leadOut = { runner: lead.name, at: second ? "3B" : "2B" };
     const keptFirst = first && first !== lead ? first : null;
-    const keptSecond = second && second !== lead ? second : null;
-    // Batter takes first; the survivors advance only where the force pushes.
-    state.bases = [runnerFor(batter, pitcher), null, null];
-    if (keptFirst) {
-      state.bases[1] = keptFirst;
-      if (keptSecond) state.bases[2] = keptSecond;
-    } else if (keptSecond) {
-      state.bases[1] = keptSecond;
-    }
+    // Batter takes first; the survivor advances only where the force pushes.
+    state.bases = [runnerFor(batter, pitcher), keptFirst, null];
   }
 
   const result = clean ? "SAC" : "FC";

@@ -5,9 +5,9 @@ const SAVE_KEY = "showdown-quest-save";
 // at the old shared universe, so they don't migrate.
 export const SAVE_VERSION = 2;
 
-// The roster budget is flat: every manager fields 5000 points. Getting ahead
+// The roster budget is flat: every manager fields 3500 points. Getting ahead
 // means finding bargains, not raising the cap; badges are trophies and gates.
-const POINT_CAP = 5000;
+const POINT_CAP = 3500;
 
 export const LOSS_FEE = 50;
 
