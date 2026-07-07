@@ -801,9 +801,15 @@ test("the NPC's mound arm shows its fatigue subtraction like the player's", asyn
   const phase = battlePhase(battle);
   assert.equal(phase.type, "player-batting");
   assert.ok(phase.opposingMound.fatiguePenalty >= 1, "NPC arms tire under the same rules");
+  assert.equal(phase.opposingMound.tiredAt, npcArm.ip * 4, "the displayed tank is the card's IP x 4");
   const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
   const html = battleScreen.render(app);
   assert.ok(html.includes(`&minus;${phase.opposingMound.fatiguePenalty} TIRED`), "the subtraction shows on their arm too");
+  // Charged runs deepen the penalty but never rewrite the printed tank.
+  npcArm.chargedRuns = 3;
+  const shelled = battlePhase(battle).opposingMound;
+  assert.equal(shelled.tiredAt, npcArm.ip * 4, "IP 1 always reads /4, however rough the outing");
+  assert.ok(shelled.fatiguePenalty > phase.opposingMound.fatiguePenalty, "while the penalty itself grows");
 });
 
 test("reported innings match the innings actually played", () => {

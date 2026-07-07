@@ -656,7 +656,9 @@ export function pitcherStatus(state, side) {
     outsRecorded: runtime.outsRecorded,
     plannedOuts: pitcher.plannedOuts,
     battersFaced: runtime.battersFaced ?? 0,
-    tiredAt: fatigueBatterLimit(pitcher),
+    // The card's printed tank (IP x 4). Charged runs deepen the fatigue
+    // penalty but never rewrite the tank on display — IP 1 always reads /4.
+    tiredAt: pitcherIpBatters(pitcher),
     fatiguePenalty: pitcherFatigue(runtime, pitcher),
     hasReliefAvailable: runtime.pitcherIndex < state[side].pitchers.length - 1
   };
