@@ -982,8 +982,10 @@ test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () =>
     assert.ok(workhorse.ip >= 7, "true workhorses keep their deep tanks");
     setUniverseSeed("mix-test", "mlb-history");
     const pool = adventurePool();
+    // At OB 16 Ruth owns ~65% of his rolls, so even 2 HR slots reproduce his
+    // 6.9% HR/PA — the advantage carries the power, not raw slot count.
     const ruth = pool.find((card) => card.name === "Babe Ruth");
-    assert.ok(slots(ruth, "HR") >= 3, "the Babe still slugs");
+    assert.ok(slots(ruth, "HR") >= 2 && ruth.onBase >= 14, "the Babe still slugs");
     // Under league-backout math a chart only carries a player's surplus over
     // what pitcher charts already concede, so the worst hitters legitimately
     // show empty hit columns — but the pool at large must stay singles-rich.

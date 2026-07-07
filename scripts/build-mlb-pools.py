@@ -135,25 +135,28 @@ def chart_string(parts):
 # a league-average chart, and any matchup reproduces real rates to first
 # order. League context is era-specific (per decade), PA-weighted for slices
 # spanning decades — a .350 OBP means more in 1968 than in 1930.
-ANCHOR_CTRL = 4
-ANCHOR_OB = 11
+# The classic Showdown shape: an average matchup is Control 3 vs OB 9 (30%
+# batter advantage), with HOT batter charts (65% on-base, outs 1-7) offset by
+# STINGY pitcher charts (outs ~1-16). The blend hits the era's league totals:
+# 0.30 x 65% + 0.70 x pitcherShare = league OBP, so pitcher charts get
+# stingier in dead-ball eras and looser in juiced ones. Both charts keep the
+# era's event MIX; strikeouts ride each chart's out share.
+ANCHOR_CTRL = 3
+ANCHOR_OB = 9
 ANCHOR_A = (ANCHOR_OB - ANCHOR_CTRL) / 20
-# Homers live mostly on batter charts: the league's pitcher charts carry only
-# this share of the era HR rate, and batter charts carry the surplus. This
-# keeps league totals intact while letting punchless hitters actually be
-# punchless (their floor is what pitcher charts concede, not the full league).
-HR_PITCHER_SHARE = 0.5
-K_PITCHER_SHARE = 0.7
+BATTER_ONBASE_SHARE = 0.65
 EVENTS = ["BB", "S", "D", "T", "HR"]
 
 def league_split(L):
-    """The league-average pitcher chart and batter chart implied by L."""
-    pitcher = dict(L)
-    pitcher["HR"] = L["HR"] * HR_PITCHER_SHARE
-    pitcher["K"] = L["K"] * K_PITCHER_SHARE
-    batter = dict(L)
-    batter["HR"] = (L["HR"] - (1 - ANCHOR_A) * pitcher["HR"]) / ANCHOR_A
-    batter["K"] = (L["K"] - (1 - ANCHOR_A) * pitcher["K"]) / ANCHOR_A
+    """League-average batter and pitcher charts implied by L and the anchor."""
+    pitcher_onbase = max(0.05, (L["OBP"] - ANCHOR_A * BATTER_ONBASE_SHARE) / (1 - ANCHOR_A))
+    batter_scale = BATTER_ONBASE_SHARE / L["OBP"]
+    pitcher_scale = pitcher_onbase / L["OBP"]
+    k_of_outs = L["K"] / max(1e-9, 1 - L["OBP"])
+    pitcher = {e: L[e] * pitcher_scale for e in EVENTS}
+    pitcher["K"] = k_of_outs * (1 - pitcher_onbase)
+    batter = {e: L[e] * batter_scale for e in EVENTS}
+    batter["K"] = k_of_outs * (1 - BATTER_ONBASE_SHARE)
     return pitcher, batter
 
 def league_tables(bat_decade):
@@ -196,7 +199,7 @@ def build_hitter(pid, t, pos, L):
     obp = (t["H"] + t["BB"]) / pa
     # OB scales off the ERA-relative on-base gap; the chart backs the league
     # out at that advantage, so OB and chart stay consistent by construction.
-    ob = clamp(round(ANCHOR_OB + (obp - L["OBP"]) * 50), 6, 15)
+    ob = clamp(round(ANCHOR_OB + (obp - L["OBP"]) * 50), 5, 16)
     A = (ob - ANCHOR_CTRL) / 20
     pitcher_league, _ = league_split(L)
     raw = {e: max(0.0, (b[e] - (1 - A) * pitcher_league[e]) / A) * 20 for e in EVENTS}
@@ -235,8 +238,8 @@ def build_pitcher(pid, t, L):
     Ap = (ANCHOR_OB - ctrl) / 20
     _, batter_league = league_split(L)
     back = lambda rate, l: max(0.0, (rate - Ap * l) / (1 - Ap)) * 20
-    raw = [back(allowed_bb, L["BB"]), back(allowed_s, L["S"]),
-           back(allowed_d, L["D"] + L["T"]), back(allowed_hr, batter_league["HR"])]
+    raw = [back(allowed_bb, batter_league["BB"]), back(allowed_s, batter_league["S"]),
+           back(allowed_d, batter_league["D"] + batter_league["T"]), back(allowed_hr, batter_league["HR"])]
     onbase_slots = clamp(round(sum(raw)), 1, 9)
     bb, s, d, hr = spread(onbase_slots, raw)
     outs = 20 - onbase_slots
