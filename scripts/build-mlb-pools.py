@@ -132,11 +132,10 @@ def build_hitter(pid, t, pos):
     walks = clamp(round(remaining * (t["BB"] / max(1, t["BB"] + t["H"]))), 0, remaining - 1)
     hits = remaining - walks
     share = lambda k: t[k] / max(1, t["H"])
-    hr, tr, db = spread(hits, [hits * share("HR"), hits * share("3B"), hits * share("2B")])
-    singles = hits - hr - tr - db
-    if singles < 0:
-        db += singles
-        singles = 0
+    # All four hit types round together so the chart mirrors the player's real
+    # hit mix — singles very much included (a slap hitter's chart is singles).
+    single_share = max(0.0, 1.0 - share("HR") - share("3B") - share("2B"))
+    hr, tr, db, singles = spread(hits, [hits * share("HR"), hits * share("3B"), hits * share("2B"), hits * single_share])
     so = clamp(round(outs * (t["SO"] / max(1, t["AB"] - t["H"]))), 0, outs)
     gb = round((outs - so) * 0.55)
     fb = outs - so - gb

@@ -954,6 +954,27 @@ test("every league builds a working universe with a legal starter pack", async (
   }
 });
 
+test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () => {
+  const slots = (card, result) => card.chart
+    .filter((row) => row.result === result)
+    .reduce((sum, row) => sum + Math.min(row.to, 20) - row.from + 1, 0);
+  try {
+    setUniverseSeed("mix-test", "franchise-SEA");
+    const cruz = adventurePool().find((card) => card.name === "Julio Cruz");
+    assert.ok(cruz, "Julio Cruz plays for the all-time Mariners");
+    assert.equal(slots(cruz, "HR"), 0, "a 0.5% HR/PA hitter gets no homer slots");
+    assert.ok(slots(cruz, "1B") >= 6, "his hits are singles");
+    setUniverseSeed("mix-test", "mlb-history");
+    const pool = adventurePool();
+    const ruth = pool.find((card) => card.name === "Babe Ruth");
+    assert.ok(slots(ruth, "HR") >= 3, "the Babe still slugs");
+    const singleless = pool.filter((card) => card.kind === "hitter" && slots(card, "1B") === 0);
+    assert.equal(singleless.length, 0, "every hitter keeps his singles");
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
 test("the binder pages by position with the arrow filters", async () => {
   const { binderRows, BINDER_FILTERS } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();
