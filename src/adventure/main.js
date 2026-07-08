@@ -2,17 +2,18 @@ import { loadSave } from "./state.js";
 import { setUniverseSeed, cardById } from "./packs.js";
 import { hydratePhotos } from "./photos.js";
 import { cardPanelHtml, escapeHtml } from "./ui/helpers.js";
-import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, starterRevealScreen } from "./ui/titleScreens.js";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
 import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
-import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen } from "./ui/collectionScreens.js";
-import { gameStatsScreen, seasonStatsScreen, championshipScreen } from "./ui/statsScreens.js";
+import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js";
+import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js";
 
 const SCREENS = {
   title: titleScreen,
   intro: introScreen,
   nameEntry: nameEntryScreen,
   leagueSelect: leagueSelectScreen,
+  modeSelect: modeSelectScreen,
   starterReveal: starterRevealScreen,
   map: mapScreen,
   trainerIntro: trainerIntroScreen,
@@ -27,6 +28,9 @@ const SCREENS = {
   sell: sellScreen,
   catalog: catalogScreen,
   binder: binderScreen,
+  compare: compareScreen,
+  almanac: almanacScreen,
+  trophies: trophyScreen,
   team: teamScreen,
   lineup: lineupScreen,
   packOpen: packOpenScreen,
@@ -76,10 +80,26 @@ if (app.save) setUniverseSeed(app.save.saveSeed, app.save.universe ?? "fictional
 document.addEventListener("keydown", (event) => {
   const inInput = event.target instanceof HTMLInputElement;
   if (inInput && event.key !== "Enter" && event.key !== "Escape") return;
+  const screen = SCREENS[app.screen.name];
+  // Searchable screens (binder, catalog): printable keys type into the name
+  // filter instead of acting — including Z and X, so Enter confirms and
+  // Escape backs out there. Backspace edits the query while one exists.
+  if (screen?.typed && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (event.key.length === 1 && /[a-z0-9 .'-]/i.test(event.key)) {
+      event.preventDefault();
+      screen.typed(app, event.key);
+      return;
+    }
+    if (event.key === "Backspace" && app.screen.query) {
+      event.preventDefault();
+      screen.typed(app, "\b");
+      return;
+    }
+  }
   const key = KEY_MAP[event.key];
   if (!key) return;
   event.preventDefault();
-  SCREENS[app.screen.name]?.key?.(app, key);
+  screen?.key?.(app, key);
 });
 
 // Mouse/touch parity: clicking a menu row moves the cursor there; clicking
@@ -101,7 +121,7 @@ document.addEventListener("click", (event) => {
 
 function clickCursorField(screen) {
   if (screen.mode === "pen") return "penIndex";
-  if (screen.mode === "pick") return "pickIndex";
+  if (screen.mode === "pick" || screen.mode === "dhFlip") return "pickIndex";
   if (screen.mode === "rosters") return "rosterIndex";
   if (screen.mode === "scout") return "scoutIndex";
   if (screen.mode === "log") return "logIndex";

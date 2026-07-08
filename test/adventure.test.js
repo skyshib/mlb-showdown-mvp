@@ -19,10 +19,12 @@ import {
   importSaveCode,
   addCardToCollection,
   removeCardFromCollection,
+  collectionCards,
   ownedCount,
   setRoster,
   setBattingOrder,
   rosterPoints,
+  rosterCards,
   managerFor,
   ensureSeasonStats,
   recordGameStats,
@@ -214,11 +216,54 @@ test("the starter pack is a legal 13-card roster: two rares, eleven commons, und
   );
 });
 
-test("the point cap is always 3500", () => {
+test("the budget-mode point cap is always 3500", () => {
   const save = testSave();
   assert.equal(pointCap(save), 3500);
   save.player.badges = ["ironwood", "galehook", "cascade", "pennant", "trophy"];
   assert.equal(pointCap(save), 3500, "badges do not move the cap");
+});
+
+test("uncapped mode drops the player's cap and swells boss budgets", async () => {
+  const { npcBudget } = await import("../src/adventure/region.js");
+  const save = testSave();
+  save.mode = "uncapped";
+  assert.equal(pointCap(save), Infinity, "no roster limit in uncapped");
+
+  const jojo = trainerById("scout-jojo");
+  const worldSeries = trainerById("post-worldseries");
+  assert.equal(npcBudget(testSave(), worldSeries), worldSeries.pointBudget, "budget mode reads the printed ladder");
+  assert.equal(npcBudget(save, jojo), jojo.pointBudget, "the first scout stays winnable");
+  const scaled = npcBudget(save, worldSeries);
+  assert.ok(scaled >= worldSeries.pointBudget * 1.6, `the summit swells (${worldSeries.pointBudget} -> ${scaled})`);
+  // The ladder still climbs in the same order, just steeper.
+  const ladder = [...TRAINERS].sort((a, b) => a.pointBudget - b.pointBudget);
+  for (let i = 1; i < ladder.length; i += 1) {
+    assert.ok(npcBudget(save, ladder[i]) >= npcBudget(save, ladder[i - 1]), "scaling keeps the progression monotone");
+    assert.ok(npcBudget(save, ladder[i]) >= ladder[i].pointBudget, "no boss gets cheaper");
+  }
+  // Teams still build legal at the scaled budget — and actually spend it.
+  const rich = buildNpcTeam(worldSeries, save);
+  assert.equal(validateRoster(rich).length, 0, "the uncapped boss fields a legal team");
+  assert.ok(rich.points <= scaled, "and stays inside the scaled budget");
+  assert.ok(rich.points > buildNpcTeam(worldSeries).points, "outspending his budget-mode self");
+});
+
+test("the opening menus offer budget and uncapped rules", async () => {
+  const { modeSelectScreen, leagueSelectScreen } = await import("../src/adventure/ui/titleScreens.js");
+  try {
+    const app = { save: null, screen: { name: "leagueSelect", playerName: "TEST", menuIndex: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+    leagueSelectScreen.key(app, "a"); // pick the fictional league
+    assert.equal(app.screen.name, "modeSelect", "the league pick leads to the rules pick");
+    const html = modeSelectScreen.render(app);
+    assert.ok(html.includes("BUDGET LEAGUE") && html.includes("UNCAPPED"), "both rule sets are offered");
+    modeSelectScreen.key(app, "down");
+    modeSelectScreen.key(app, "a");
+    assert.equal(app.screen.name, "starterReveal", "picking rules opens the starter pack");
+    assert.equal(app.save.mode, "uncapped", "the choice lands on the save");
+    assert.equal(pointCap(app.save), Infinity);
+  } finally {
+    setUniverseSeed("test-seed");
+  }
 });
 
 test("beating a trainer for the first time earns a card claim; repeats do not", () => {
@@ -722,6 +767,46 @@ test("replacement picks default to the outgoing card's position; 'all' widens to
   assert.ok(benchCards(save, starter, "all").some((card) => card.role === "RP"), "'all' shows the whole pen");
 });
 
+test("the team menu swaps the rotation and flips the DH, legally and durably", async () => {
+  const { rotationCards, swapRotation, dhFlipOptions, flipDhWith } = await import("../src/adventure/ui/collectionScreens.js");
+  const { canPlayerFillLineupSlot, assignLineupSlots } = await import("../src/rules/draft.js");
+  const save = testSave();
+
+  // Rotation: roster SP order is the rotation; the swap flips game 1.
+  const [sp1, sp2] = rotationCards(save);
+  assert.ok(sp1 && sp2, "the starter roster carries two SPs");
+  assert.equal(buildTeam(managerFor(save)).pitchers[0].id, sp1.id);
+  assert.equal(swapRotation(save), true);
+  assert.equal(buildTeam(managerFor(save)).pitchers[0].id, sp2.id, "the other arm takes game 1");
+  assert.deepEqual(rotationCards(save).map((card) => card.id), [sp2.id, sp1.id]);
+  assert.equal(buildTeam(managerFor(save), { starterIndex: 1 }).pitchers[0].id, sp1.id, "game 2 goes to the old game-1 arm");
+
+  // DH flips: every offered flip is legal, and applying one moves both men.
+  const flips = dhFlipOptions(save);
+  assert.ok(flips.length >= 1, "the 1B flip at minimum is always on the table");
+  assert.ok(flips.every((flip) => canPlayerFillLineupSlot(flip.dh, flip.label)), "only legal flips are offered");
+  assert.ok(flips.some((flip) => flip.label === "1B"), "anyone can take first");
+  const target = flips[0];
+  const before = buildTeam(managerFor(save)).lineup;
+  assert.equal(before.find((player) => player.assignedPosition === "DH").id, target.dh.id);
+  assert.equal(flipDhWith(save, target.label), true);
+  const after = buildTeam(managerFor(save)).lineup;
+  assert.equal(after.find((player) => player.assignedPosition === "DH").id, target.player.id, "the fielder now DHs");
+  assert.equal(after.find((player) => player.assignedPosition === target.label).id, target.dh.id, "the old DH takes the field");
+
+  // Illegal flips are refused (any slot the current DH can't play).
+  const nowLegal = new Set(dhFlipOptions(save).map((flip) => flip.label));
+  const illegal = ["C", "2B", "3B", "SS", "CF", "LF", "RF"].find((label) => !nowLegal.has(label));
+  if (illegal) assert.equal(flipDhWith(save, illegal), false, `${illegal} flip is refused`);
+
+  // The flip survives a bench swap: assignments keep every surviving id.
+  const assignmentsBefore = { ...save.roster.lineupAssignments };
+  setRoster(save, save.roster.cardIds);
+  assert.deepEqual(save.roster.lineupAssignments, assignmentsBefore, "roster edits keep the flip");
+  const slots = assignLineupSlots(rosterCards(save), save.roster.lineupAssignments).slots;
+  assert.equal(slots.find((slot) => slot.label === "DH").player.id, target.player.id);
+});
+
 test("the battle screen tags batter, pitcher, and runners with hoverable card ids", async () => {
   const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
   const { player, npc } = hookTeams();
@@ -805,16 +890,12 @@ test("the NPC's mound arm shows its fatigue subtraction like the player's", asyn
   const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
   const html = battleScreen.render(app);
   assert.ok(html.includes(`&minus;${phase.opposingMound.fatiguePenalty} TIRED`), "the subtraction shows on their arm too");
-  // Charged runs deepen the penalty but never rewrite the printed tank —
-  // and their share of the fatigue is reported (and shown) explicitly.
-  assert.equal(phase.opposingMound.fatigueFromRuns, 0, "no runs charged yet, no run fatigue");
-  npcArm.chargedRuns = 3;
-  const shelled = battlePhase(battle).opposingMound;
-  assert.equal(shelled.tiredAt, npcArm.ip * 4, "IP 1 always reads /4, however rough the outing");
-  assert.ok(shelled.fatiguePenalty > phase.opposingMound.fatiguePenalty, "while the penalty itself grows");
-  assert.equal(shelled.fatigueFromRuns, shelled.fatiguePenalty - phase.opposingMound.fatiguePenalty, "the growth is attributed to the runs");
-  const shelledHtml = battleScreen.render(app);
-  assert.ok(shelledHtml.includes(`(&minus;${shelled.fatigueFromRuns} FROM RUNS)`), "the run share shows on the mound line");
+  // Batters faced is the only fatigue input: deeper outings sink the penalty
+  // further, and the printed tank never moves.
+  battle.state.pitching.home.battersFaced = npcArm.ip * 4 + 6;
+  const deeper = battlePhase(battle).opposingMound;
+  assert.ok(deeper.fatiguePenalty > phase.opposingMound.fatiguePenalty, "more batters, more fatigue");
+  assert.equal(deeper.tiredAt, npcArm.ip * 4, "IP 1 always reads /4, however deep the outing");
 });
 
 test("reported innings match the innings actually played", () => {
@@ -995,6 +1076,16 @@ test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () =>
     assert.ok(pudge.fielding >= 8, "Pudge's arm is the real steal deterrent");
     assert.ok(rickey.speed >= 20, "Rickey flies");
     assert.ok(dunn.fielding <= 1, "the metrics remember Adam Dunn's glove");
+    // Speed is era-normalized: 1890s scorekeeping (steals credited for extra
+    // bases, dead-ball triples) no longer pins the scale, and modern burners
+    // rate fast against their own league.
+    const slidingBilly = pool.find((card) => card.name === "Billy Hamilton");
+    const rebootBilly = pool.find((card) => card.name === "Billy Hamilton '13");
+    const ichiro = pool.find((card) => card.name === "Ichiro Suzuki");
+    assert.ok(slidingBilly.speed <= 24, `1890s Hamilton is fast for his day, not scale-breaking (${slidingBilly.speed})`);
+    assert.ok(rebootBilly.speed >= 26, `the modern Billy Hamilton is the burner (${rebootBilly.speed})`);
+    assert.ok(rebootBilly.speed > slidingBilly.speed, "eras rank sanely against each other");
+    assert.ok(ichiro.speed >= 16, `Ichiro still rates a burner (${ichiro.speed})`);
     // Under league-backout math a chart only carries a player's surplus over
     // what pitcher charts already concede, so the worst hitters legitimately
     // show empty hit columns — but the pool at large must stay singles-rich.
@@ -1076,6 +1167,163 @@ function collectionCardCount(save) {
   return Object.keys(save.collection).length;
 }
 
+test("type-to-search narrows binder and catalog by name; X clears before leaving", async () => {
+  const { applyQuery, binderScreen, catalogScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const target = cardById(save.roster.cardIds[0]);
+  const fragment = target.name.split(" ")[1].slice(0, 3);
+
+  const filtered = applyQuery(adventurePool(), fragment, (card) => card.name);
+  assert.ok(filtered.length > 0, "the query matches");
+  assert.ok(filtered.every((card) => card.name.toUpperCase().includes(fragment.toUpperCase())));
+  assert.equal(applyQuery(adventurePool(), "", (card) => card.name).length, adventurePool().length, "empty query shows all");
+
+  const app = { save, screen: { name: "binder", index: 5, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  for (const char of fragment) binderScreen.typed(app, char);
+  assert.equal(app.screen.query, fragment, "typed letters build the query");
+  assert.equal(app.screen.index, 0, "the cursor resets to the top match");
+  binderScreen.typed(app, "\b");
+  assert.equal(app.screen.query, fragment.slice(0, -1), "backspace edits the query");
+  binderScreen.key(app, "b");
+  assert.equal(app.screen.query, "", "X clears the query first");
+  assert.equal(app.screen.name, "binder", "without leaving the binder");
+  binderScreen.key(app, "b");
+  assert.equal(app.screen.name, "map", "a second X leaves");
+
+  const catalogApp = { save, screen: { name: "catalog", index: 0, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  for (const char of fragment) catalogScreen.typed(catalogApp, char);
+  const html = catalogScreen.render(catalogApp);
+  assert.ok(html.includes(`SEARCH: <b>${fragment}</b>`), "the query shows on screen");
+});
+
+test("compare mode pins two cards from the binder and lays them side by side", async () => {
+  const { binderScreen, compareScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const rows = collectionCards(save);
+  const app = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  binderScreen.key(app, "a");
+  assert.equal(app.screen.pinnedId, rows[0].card.id, "Z pins the selected card");
+  assert.ok(binderScreen.render(app).includes("PINNED"), "the pin is announced");
+  binderScreen.key(app, "a");
+  assert.equal(app.screen.pinnedId, null, "Z on the same card unpins");
+  binderScreen.key(app, "a");
+  binderScreen.key(app, "down");
+  binderScreen.key(app, "a");
+  assert.equal(app.screen.name, "compare", "a second pin opens the compare screen");
+  assert.equal(app.screen.aId, rows[0].card.id);
+  assert.equal(app.screen.bId, rows[1].card.id);
+  const html = compareScreen.render(app);
+  for (const row of rows.slice(0, 2)) {
+    assert.ok(html.includes(row.card.name.toUpperCase()), `${row.card.name} is on the mat`);
+  }
+  compareScreen.key(app, "b");
+  assert.equal(app.screen.name, "binder", "X returns to the binder");
+  assert.equal(app.screen.pinnedId, null, "with the pin released");
+  assert.equal(app.screen.index, 1, "and the cursor where it was");
+});
+
+test("finished games write the almanac and rare feats fill the trophy room", async () => {
+  const { recordFinishedGame } = await import("../src/adventure/ui/battleScreen.js");
+  const { ensureAlmanac, ensureTrophies } = await import("../src/adventure/state.js");
+  const { almanacScreen, trophyScreen } = await import("../src/adventure/ui/statsScreens.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const { player, npc } = hookTeams();
+  const result = simulateGame(buildTeam(player), buildTeam(npc), "almanac-g1");
+  recordGameStats(save, result.boxScore.away);
+  const won = result.boxScore.away.runs > result.boxScore.home.runs;
+  recordFinishedGame(save, {
+    trainer,
+    boxScore: result.boxScore,
+    playerSide: "away",
+    events: result.events,
+    score: { away: result.boxScore.away.runs ?? result.away.runs, home: result.boxScore.home.runs ?? result.home.runs },
+    innings: result.innings,
+    won
+  });
+
+  const almanac = ensureAlmanac(save);
+  assert.equal(almanac.length, 1, "one game, one page of history");
+  const entry = almanac[0];
+  assert.equal(entry.day, 1, "the season game count is the day");
+  assert.equal(entry.opponent, trainer.name);
+  assert.equal(entry.won, won);
+  assert.ok(entry.boxScore.away.hitters.length >= 9, "the full box score rides along");
+
+  // A hand-built miracle proves feats persist as trophies with day and hero.
+  const bat = (id, over = {}) => ({ id, name: `Batter ${id}`, pa: 4, ab: 4, h: 1, d: 0, t: 0, hr: 0, r: 0, bb: 0, so: 0, sb: 0, cs: 0, rbi: 0, wpa: 0, ...over });
+  const cycleBox = {
+    away: {
+      runs: 5,
+      hitters: [bat("hero", { h: 4, d: 1, t: 1, hr: 1 }), ...Array.from({ length: 8 }, (_, i) => bat(`h${i}`))],
+      pitchers: [{ id: "arm", name: "Arm", bf: 30, outs: 27, h: 5, bb: 1, so: 6, hr: 0, r: 0, wpa: 0 }]
+    },
+    home: { runs: 0, hitters: [bat("t1"), bat("t2")], pitchers: [{ id: "them", name: "Them", bf: 30, outs: 27, h: 9, bb: 1, so: 3, hr: 1, r: 5, wpa: 0 }] }
+  };
+  recordGameStats(save, cycleBox.away);
+  const feats = recordFinishedGame(save, {
+    trainer, boxScore: cycleBox, playerSide: "away", events: [], score: { away: 5, home: 0 }, innings: 9, won: true
+  });
+  assert.ok(feats.some((feat) => feat.title.includes("CYCLE")), "the cycle fires");
+  const trophies = ensureTrophies(save);
+  assert.ok(trophies.length >= feats.length, "every feat is framed");
+  const cycleTrophy = trophies.find((trophy) => trophy.title.includes("CYCLE"));
+  assert.equal(cycleTrophy.day, 2, "the plaque carries the day");
+  assert.equal(cycleTrophy.cardId, "hero", "and the hero's card");
+  assert.equal(cycleTrophy.opponent, trainer.name);
+
+  // The almanac screen lists newest first and reopens the box score.
+  const app = { save, screen: { name: "almanac", index: 0 }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  const listHtml = almanacScreen.render(app);
+  assert.ok(listHtml.includes("2 GAMES"));
+  assert.ok(listHtml.indexOf("DAY 2") < listHtml.indexOf("DAY 1"), "newest game on top");
+  almanacScreen.key(app, "a");
+  assert.equal(app.screen.name, "gameStats", "Z reopens the game");
+  assert.deepEqual(app.screen.next, { name: "almanac", data: { index: 0 } }, "and the box score routes back");
+  assert.ok(app.screen.feats.some((feat) => feat.title.includes("CYCLE")), "with its feats");
+
+  const trophyApp = { save, screen: { name: "trophies", index: 0 }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  const caseHtml = trophyScreen.render(trophyApp);
+  assert.ok(caseHtml.includes("CYCLE"), "the case shows the plaque");
+  assert.ok(caseHtml.includes("DAY 2"), "with its date");
+});
+
+test("high-leverage plate appearances pause on the d20 before revealing", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { isDramaticMoment } = await import("../src/adventure/battle/controller.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "drama-seed" });
+  const state = battle.state;
+
+  assert.equal(isDramaticMoment(state), false, "top 1, nobody on: no drama");
+  state.outs = 2;
+  state.bases = [{ id: "r1", name: "A", speed: 10 }, { id: "r2", name: "B", speed: 10 }, { id: "r3", name: "C", speed: 10 }];
+  assert.equal(isDramaticMoment(state), true, "two outs, bases loaded: drama");
+  state.bases = [null, null, null];
+  state.outs = 0;
+  state.inning = 9;
+  state.score = { away: 2, home: 1 };
+  assert.equal(isDramaticMoment(state), true, "the 9th in a one-run game: drama");
+  state.score = { away: 9, home: 1 };
+  assert.equal(isDramaticMoment(state), false, "a 9th-inning blowout stays quick");
+
+  state.score = { away: 2, home: 1 };
+  const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  const eventsBefore = battle.events.length;
+  battleScreen.key(app, "a"); // SWING AWAY
+  assert.equal(app.screen.mode, "drama", "the swing lands in drama mode");
+  assert.ok(battle.events.length > eventsBefore, "the engine already rolled");
+  assert.equal(typeof app.screen.drama.roll, "number", "the real roll is staged");
+  assert.ok(app.screen.drama.roll >= 1 && app.screen.drama.roll <= 20);
+  const html = battleScreen.render(app);
+  assert.ok(html.includes("gq-die"), "the die is on screen");
+  assert.ok(!html.includes("gq-battle-hud"), "the HUD hides so the score can't spoil it");
+  battleScreen.key(app, "a"); // skip the suspense
+  assert.notEqual(app.screen.mode, "drama", "Z reveals immediately");
+  assert.equal(app.screen.drama, null, "the staged roll is consumed");
+});
+
 // ---- Easter eggs -------------------------------------------------------------
 
 test("rare feats fire for the games worth framing", async () => {
@@ -1145,6 +1393,28 @@ test("pack eggs and day whimsy stay rare", async () => {
   assert.ok(dayWhimsy(42).includes("ANSWER"), "day 42");
   assert.ok(dayWhimsy(162).includes("162"), "day 162");
   assert.equal(dayWhimsy(41), null, "ordinary days stay quiet");
+});
+
+test("pixel portraits are deterministic, era-styled, and cards carry their era", async () => {
+  const { pixelPortraitSvg } = await import("../src/adventure/photos.js");
+  const { eraYear } = await import("../src/adventure/ui/helpers.js");
+  const a = pixelPortraitSvg("Bid McPhee", 1882);
+  assert.equal(a, pixelPortraitSvg("Bid McPhee", 1882), "same name, same face");
+  assert.notEqual(a, pixelPortraitSvg("Sam Thompson", 1885), "different name, different face");
+  assert.ok(a.startsWith("<svg"), "portraits are inline SVG");
+  assert.ok(a.includes("#0f380f"), "drawn in the DMG palette");
+  // A spread of names in each era: vintage faces favor mustaches and beards.
+  const names = Array.from({ length: 40 }, (_, i) => `Test Player ${i}`);
+  const hairy = (era) => names.filter((name) => {
+    const svg = pixelPortraitSvg(name, era);
+    return svg.includes('y="10"') && svg.match(/y="10"[^/]*#0f380f/);
+  }).length;
+  assert.ok(hairy(1890) > hairy(2010), "the old leagues are mustache country");
+
+  assert.equal(eraYear({ setTag: "1989-2010" }), 1989, "MLB tags read their first year");
+  assert.equal(eraYear({ setTag: "'04 PR1" }), 2004, "classic tags read the card year");
+  assert.equal(eraYear({ setTag: "'93 BK" }), 1993, "two-digit years split the century sanely");
+  assert.equal(eraYear({}), 2000, "no tag defaults to modern");
 });
 
 // ---- Battle controller -----------------------------------------------------

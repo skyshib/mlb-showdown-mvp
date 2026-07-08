@@ -501,13 +501,12 @@ test("runs are charged to the pitcher responsible for inherited runners", () => 
 
   assert.equal(runs, 1);
   assert.equal(state.stats.pitchers.get("home:starter").r, 1);
-  assert.equal(state.home.pitchers[0].chargedRuns, 1);
   assert.equal(state.stats.pitchers.get("home:reliever")?.r ?? 0, 0);
 });
 
-test("charged runs reduce fatigue IP but do not change planned bullpen timing", () => {
+test("fatigue runs on batters faced alone and never forces the bullpen door", () => {
   const staff = {
-    name: "Charged Runs Staff",
+    name: "Workload Staff",
     lineup: teamB.lineup,
     pitchers: [
       makePitcher({ id: "starter", name: "Starter", control: 9, ip: 5, chart: [{ from: 1, to: 20, result: RESULTS.SO }] }),
@@ -517,17 +516,21 @@ test("charged runs reduce fatigue IP but do not change planned bullpen timing", 
     ]
   };
   const state = createInitialState(teamA, staff);
-  state.home.pitchers[0].chargedRuns = 3;
   state.pitching.home.outsRecorded = 12;
-  // Three charged runs shave a workload inning: the IP 5 tank drops to 16 BF.
+  // 16 batters into an IP 5 tank (20 BF): still fresh, whatever the score.
   state.pitching.home.battersFaced = 16;
 
-  const event = playPlateAppearance(state, repeatingRng(20, 1));
+  const fresh = playPlateAppearance(state, repeatingRng(20, 1));
+  assert.equal(fresh.pitcher, "Starter");
+  assert.equal(fresh.fatiguePenalty, 0);
+  assert.equal(fresh.effectiveControl, 9);
 
-  assert.equal(event.pitcher, "Starter");
-  assert.equal(event.fatiguePenalty, 1);
-  assert.equal(event.effectiveControl, 8);
-  assert.equal(state.pitching.home.pitcherIndex, 0);
+  // The 21st batter starts the slide — one point per four batters after.
+  state.pitching.home.battersFaced = 20;
+  const tired = playPlateAppearance(state, repeatingRng(20, 1));
+  assert.equal(tired.fatiguePenalty, 1);
+  assert.equal(tired.effectiveControl, 8);
+  assert.equal(state.pitching.home.pitcherIndex, 0, "fatigue never forces the bullpen door");
 });
 
 test("simulation is deterministic for a seed", () => {

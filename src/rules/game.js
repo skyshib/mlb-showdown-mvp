@@ -651,20 +651,14 @@ export function changePitcher(state, side, targetIndex = null) {
 export function pitcherStatus(state, side) {
   const pitcher = currentPitcher(state, side);
   const runtime = state.pitching[side];
-  const fatiguePenalty = pitcherFatigue(runtime, pitcher);
-  // How much of the penalty is the beating he's taken (charged runs shrink
-  // the effective tank) versus plain workload — the UI shows the split.
-  const workloadOnly = pitcherFatigue(runtime, { ...pitcher, chargedRuns: 0 });
   return {
     pitcher,
     outsRecorded: runtime.outsRecorded,
     plannedOuts: pitcher.plannedOuts,
     battersFaced: runtime.battersFaced ?? 0,
-    // The card's printed tank (IP x 4). Charged runs deepen the fatigue
-    // penalty but never rewrite the tank on display — IP 1 always reads /4.
+    // The card's printed tank (IP x 4) — IP 1 always reads /4.
     tiredAt: pitcherIpBatters(pitcher),
-    fatiguePenalty,
-    fatigueFromRuns: fatiguePenalty - workloadOnly,
+    fatiguePenalty: pitcherFatigue(runtime, pitcher),
     hasReliefAvailable: runtime.pitcherIndex < state[side].pitchers.length - 1
   };
 }
@@ -694,27 +688,22 @@ function buildPitchingPlan(pitchers) {
   const bullpenOuts = sortedBullpen.reduce((sum, pitcher) => sum + pitcherIpOuts(pitcher), 0);
   const starterTargetOuts = Math.max(0, 27 - bullpenOuts);
   return [
-    { ...starter, chargedRuns: 0, plannedOuts: starterTargetOuts },
-    ...sortedBullpen.map((pitcher) => ({ ...pitcher, chargedRuns: 0, plannedOuts: pitcherIpOuts(pitcher) }))
+    { ...starter, plannedOuts: starterTargetOuts },
+    ...sortedBullpen.map((pitcher) => ({ ...pitcher, plannedOuts: pitcherIpOuts(pitcher) }))
   ];
 }
 
-// Fatigue runs on batters faced: every IP of stamina covers four batters, so
-// an IP 6 starter handles 24 batters at full strength and tires on the 25th,
-// sinking another point every four batters after that. Charged runs shave a
-// "workload inning" (four batters) off the tank per three runs.
+// Fatigue runs on batters faced alone: every IP of stamina covers four
+// batters, so an IP 6 starter handles 24 batters at full strength and tires
+// on the 25th, sinking another point every four batters after that. Runs
+// allowed are a box-score fact, not a fatigue input.
 const BATTERS_PER_IP = 4;
 
 function pitcherFatigue(runtime, pitcher) {
-  const limit = fatigueBatterLimit(pitcher);
+  const limit = pitcherIpBatters(pitcher);
   const faced = runtime.battersFaced ?? 0;
   if (faced < limit) return 0;
   return Math.floor((faced - limit) / BATTERS_PER_IP) + 1;
-}
-
-function fatigueBatterLimit(pitcher) {
-  const runPenalty = Math.floor(Number(pitcher?.chargedRuns ?? 0) / 3) * BATTERS_PER_IP;
-  return Math.max(0, pitcherIpBatters(pitcher) - runPenalty);
 }
 
 function pitcherIpBatters(pitcher) {
@@ -932,7 +921,6 @@ function chargeRun(state, pitchingSide, pitcherId) {
   if (!pitchingSide || !pitcherId) return;
   const pitcher = state[pitchingSide].pitchers.find((item) => item.id === pitcherId);
   if (!pitcher) return;
-  pitcher.chargedRuns = Number(pitcher.chargedRuns ?? 0) + 1;
   ensurePitcherLine(state, pitcher).r += 1;
 }
 

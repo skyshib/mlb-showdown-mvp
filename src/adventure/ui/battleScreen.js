@@ -31,6 +31,9 @@ import {
   attemptNumber,
   recordSeriesGame,
   recordGameStats,
+  ensureSeasonStats,
+  recordAlmanacGame,
+  addTrophies,
   clearSeries,
   LOSS_FEE
 } from "../state.js";
@@ -45,7 +48,8 @@ import {
   actPitch,
   actChangePitcher,
   fastForward,
-  runSimSeries
+  runSimSeries,
+  isDramaticMoment
 } from "../battle/controller.js";
 
 export function startTrainerBattle(app, trainer) {
@@ -55,12 +59,23 @@ export function startTrainerBattle(app, trainer) {
     const attempt = attemptNumber(save, trainer.id);
     const series = runSimSeries({
       playerManager: managerFor(save),
-      npcManager: buildNpcTeam(trainer),
+      npcManager: buildNpcTeam(trainer, save),
       bestOf: trainer.battleFormat.bestOf,
       seed: deriveSeed(save, "sim", trainer.id, `a${attempt}`)
     });
     for (const game of series.games) {
       recordGameStats(save, game.playerIsAway ? game.boxScore.away : game.boxScore.home);
+      recordFinishedGame(save, {
+        trainer,
+        boxScore: game.boxScore,
+        playerSide: game.playerIsAway ? "away" : "home",
+        events: game.events,
+        score: game.playerIsAway
+          ? { away: game.playerRuns, home: game.npcRuns }
+          : { away: game.npcRuns, home: game.playerRuns },
+        innings: game.innings,
+        won: game.playerWon
+      });
     }
     const outcome = applyOutcome(app, trainer, series.playerWonSeries);
     persistSave(save);
@@ -82,7 +97,7 @@ function launchSeriesGame(app, trainer) {
   const playerIsAway = series.bestOf <= 1 || series.nextGame % 2 === 1;
   const battle = createBattle({
     playerManager: managerFor(save),
-    npcManager: buildNpcTeam(trainer),
+    npcManager: buildNpcTeam(trainer, save),
     trainer,
     seed: deriveSeed(save, "battle", trainer.id, `a${series.attempt}`, `g${series.nextGame}`),
     starterIndex: series.nextGame - 1,
@@ -136,6 +151,28 @@ export function applyOutcome(app, trainer, won) {
   return outcome;
 }
 
+// One finished game's history, wherever it came from (interactive battle or
+// sim series): feats detected, an almanac page written, trophies framed.
+// Returns the feats so the box-score screen can reuse them. Called after
+// recordGameStats, so the season game count IS the day this game happened.
+export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won }) {
+  const feats = gameFeats({ boxScore, playerSide, events, score, innings });
+  const day = ensureSeasonStats(save).games;
+  recordAlmanacGame(save, {
+    day,
+    trainerId: trainer.id,
+    opponent: trainer.name,
+    won,
+    score,
+    playerSide,
+    innings,
+    feats,
+    boxScore
+  });
+  addTrophies(save, feats, { day, opponent: trainer.name });
+  return feats;
+}
+
 // ---- Interactive battle ----------------------------------------------------
 
 function battleMenuItems(app, phase) {
@@ -143,7 +180,7 @@ function battleMenuItems(app, phase) {
     return advanceMenuItems(phase.pending);
   }
   if (phase.type === "player-batting") {
-    const items = [{ label: "SWING AWAY", run: (a) => afterAction(a, actSwing(a.screen.battle)) }];
+    const items = [{ label: "SWING AWAY", run: (a) => resolveWithDrama(a, () => actSwing(a.screen.battle)) }];
     if (phase.canBunt) {
       items.push({
         html: `SAC BUNT <span class="gq-dim">${Math.round(phase.buntChance * 100)}% CLEAN</span>`,
@@ -159,7 +196,7 @@ function battleMenuItems(app, phase) {
     items.push(rostersItem(), gameLogItem(), fastForwardItem());
     return items;
   }
-  const items = [{ label: "PITCH TO HIM", run: (a) => afterAction(a, actPitch(a.screen.battle)) }];
+  const items = [{ label: "PITCH TO HIM", run: (a) => resolveWithDrama(a, () => actPitch(a.screen.battle)) }];
   items.push({
     label: "INTENTIONAL WALK",
     run: (a) => afterAction(a, actIntentionalWalk(a.screen.battle))
@@ -250,6 +287,84 @@ function fastForwardItem() {
   };
 }
 
+// ---- Dice-roll drama ---------------------------------------------------------
+
+// High-leverage plate appearances (two outs and the bases loaded, or the 9th
+// onward in a tight game) pause on a tumbling d20 before the call. The engine
+// has already rolled — the pause is pure theater, and the die lands on the
+// real chart roll before the lines read out. The drama screen hides the HUD
+// so the updated score can't spoil the result. Z skips the suspense.
+function resolveWithDrama(app, act) {
+  const dramatic = isDramaticMoment(app.screen.battle.state);
+  const events = act();
+  const roll = dramatic ? lastRoll(events) : null;
+  if (roll === null) return afterAction(app, events);
+  app.screen.mode = "drama";
+  app.screen.drama = { events, roll };
+}
+
+// The roll worth staging: the chart roll of the newest event that has one
+// (steals keep theirs inside the attempt detail).
+function lastRoll(events) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (!event) continue;
+    if (typeof event.resultRoll === "number") return event.resultRoll;
+    const steal = event.playDetails?.stealAttempt;
+    if (typeof steal?.roll === "number") return steal.roll;
+  }
+  return null;
+}
+
+function revealDrama(app) {
+  stopDramaTimer();
+  const drama = app.screen.drama;
+  if (!drama) return;
+  app.screen.drama = null;
+  afterAction(app, drama.events);
+  app.rerender();
+}
+
+let dramaTimer = null;
+function stopDramaTimer() {
+  clearInterval(dramaTimer);
+  clearTimeout(dramaTimer);
+  dramaTimer = null;
+}
+
+function renderDrama(app, trainer) {
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>VS ${escapeHtml(trainer.name)}</span><span>&#9733; HIGH LEVERAGE &#9733;</span></div>
+    <div class="gq-body gq-center gq-drama">
+      <p>THE CROWD IS ON ITS FEET...</p>
+      <div class="gq-die" data-die>&#9670;</div>
+      <p class="gq-dim gq-blink">THE D20 TUMBLES</p>
+    </div>
+    <div class="gq-textbox"><p class="gq-dim">Z to skip the suspense.</p></div>
+  </div>`;
+}
+
+// The browser-side animation: cycle faces, land on the real roll, hold a
+// beat, then reveal. Tests drive reveal through the key handler instead.
+function mountDrama(app) {
+  const die = document.querySelector("[data-die]");
+  if (!die) return;
+  stopDramaTimer();
+  let ticks = 0;
+  dramaTimer = setInterval(() => {
+    if (!die.isConnected || !app.screen.drama) return stopDramaTimer();
+    ticks += 1;
+    if (ticks < 10) {
+      die.textContent = String(((ticks * 7) % 20) + 1);
+      return;
+    }
+    stopDramaTimer();
+    die.textContent = String(app.screen.drama.roll);
+    die.classList.add("gq-die-landed");
+    dramaTimer = setTimeout(() => revealDrama(app), 700);
+  }, 90);
+}
+
 function afterAction(app, events, presetLines = null) {
   const playerSide = app.screen.battle.playerSide;
   const lines = presetLines ?? events.filter(Boolean).flatMap((event) => describeEvent(event, playerSide));
@@ -311,6 +426,15 @@ function resolveGameEnd(app, phase) {
   const battle = app.screen.battle;
   const boxScore = buildBoxScore(battle.state);
   recordGameStats(save, boxScore[battle.playerSide]);
+  const feats = recordFinishedGame(save, {
+    trainer,
+    boxScore,
+    playerSide: battle.playerSide,
+    events: battle.events,
+    score: phase.score,
+    innings: inningsPlayed(battle.state),
+    won: phase.playerWon
+  });
   const status = recordSeriesGame(save, phase.playerWon);
   persistSave(save);
 
@@ -327,13 +451,7 @@ function resolveGameEnd(app, phase) {
     trainerId: trainer.id,
     boxScore,
     stars: gameStars(boxScore, battle.playerSide),
-    feats: gameFeats({
-      boxScore,
-      playerSide: battle.playerSide,
-      events: battle.events,
-      score: phase.score,
-      innings: inningsPlayed(battle.state)
-    }),
+    feats,
     events: battle.events,
     score: phase.score,
     playerSide: battle.playerSide,
@@ -401,6 +519,7 @@ export const battleScreen = {
     const trainer = trainerById(app.screen.trainerId);
     if (app.screen.mode === "rosters") return renderRosters(app, battle, trainer);
     if (app.screen.mode === "log") return renderGameLog(app, battle, trainer);
+    if (app.screen.mode === "drama") return renderDrama(app, trainer);
     const phase = battlePhase(battle);
     const series = app.save.activeSeries;
     return `<div class="gq-screen">
@@ -424,7 +543,14 @@ export const battleScreen = {
     if (app.screen.mode !== "rosters") return null;
     return rosterRows(app.screen.battle)[index]?.card ?? null;
   },
+  mounted(app) {
+    if (app.screen.mode === "drama" && app.screen.drama) mountDrama(app);
+  },
   key(app, key) {
+    if (app.screen.mode === "drama") {
+      if (key === "a" || key === "b") revealDrama(app);
+      return;
+    }
     const phase = battlePhase(app.screen.battle);
     if (app.screen.mode === "rosters") {
       const rows = rosterRows(app.screen.battle);
@@ -484,6 +610,13 @@ function fieldingNote(title, team) {
   return `${title}\nCATCHER ${signed(total(["C", "CA"]))}\nINFIELD ${signed(total(["1B", "2B", "3B", "SS"]))}\nOUTFIELD ${signed(total(["LF", "CF", "RF"]))}`;
 }
 
+// The matchup panel drops classic cards' year suffix ("B.AUSMUS '01" reads
+// "B.AUSMUS") — it's cramped in there, and the full card is a hover away.
+// Every other view keeps the year.
+function matchupName(name) {
+  return shortName(String(name).replace(/\s*'\d\d$/, ""));
+}
+
 function renderMatchup(phase) {
   if (phase.type === "over") return "";
   if (phase.type === "advance-decision") {
@@ -491,27 +624,23 @@ function renderMatchup(phase) {
   }
   if (phase.type === "player-batting") {
     return `<div class="gq-matchup">
-      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span></div>
-      <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(shortName(phase.opposingPitcher.name))}</b><br>
+      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span></div>
+      <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(matchupName(phase.opposingPitcher.name))}</b><br>
         ${moundLine(phase.opposingMound)}</div>
     </div>`;
   }
   return `<div class="gq-matchup">
-    <div>THEY SEND UP<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(shortName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span></div>
-    <div class="gq-right">YOUR ARM<br><b data-card-id="${escapeHtml(phase.mound.pitcher.id)}">${escapeHtml(shortName(phase.mound.pitcher.name))}</b><br>
+    <div>THEY SEND UP<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span></div>
+    <div class="gq-right">YOUR ARM<br><b data-card-id="${escapeHtml(phase.mound.pitcher.id)}">${escapeHtml(matchupName(phase.mound.pitcher.name))}</b><br>
       ${moundLine(phase.mound)}</div>
   </div>`;
 }
 
-// The mound readout: control, the fatigue subtraction with the run-charged
-// share called out explicitly, and the workload tank.
+// The mound readout: control, the fatigue subtraction, and the workload tank.
 function moundLine(mound) {
   if (!mound) return "";
   const fatigue = mound.fatiguePenalty ?? 0;
-  const fromRuns = mound.fatigueFromRuns ?? 0;
-  const tired = fatigue > 0
-    ? ` &minus;${fatigue} TIRED${fromRuns > 0 ? ` (&minus;${fromRuns} FROM RUNS)` : ""}`
-    : "";
+  const tired = fatigue > 0 ? ` &minus;${fatigue} TIRED` : "";
   return `<span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${mound.pitcher.control}${tired} &middot; ${mound.battersFaced}/${mound.tiredAt} BF</span>`;
 }
 
@@ -646,7 +775,7 @@ function claimComparisonHtml(app, selected) {
 export const claimCardScreen = {
   render(app) {
     const trainer = trainerById(app.screen.trainerId);
-    const roster = buildNpcTeam(trainer).roster;
+    const roster = buildNpcTeam(trainer, app.save).roster;
     const index = clampIndex(app.screen.index ?? 0, roster.length);
     const selected = roster[index];
     return `<div class="gq-screen">
@@ -659,11 +788,11 @@ export const claimCardScreen = {
     </div>`;
   },
   hoverCard(app, index) {
-    return buildNpcTeam(trainerById(app.screen.trainerId)).roster[index] ?? null;
+    return buildNpcTeam(trainerById(app.screen.trainerId), app.save).roster[index] ?? null;
   },
   key(app, key) {
     const trainer = trainerById(app.screen.trainerId);
-    const roster = buildNpcTeam(trainer).roster;
+    const roster = buildNpcTeam(trainer, app.save).roster;
     if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), roster.length);
     } else if (key === "a") {

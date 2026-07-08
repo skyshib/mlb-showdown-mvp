@@ -173,7 +173,7 @@ export const leagueSelectScreen = {
         app.screen.picker = choice.picker;
         app.screen.menuIndex = 0;
       } else {
-        finishNewGame(app, app.screen.playerName, choice.universe);
+        app.go("modeSelect", { playerName: app.screen.playerName, universe: choice.universe, menuIndex: 0 });
       }
     } else if (key === "b") {
       if (app.screen.picker) {
@@ -187,11 +187,52 @@ export const leagueSelectScreen = {
   }
 };
 
+// How hard should money matter? Budget is the classic game: a flat 3500-point
+// roster for everyone, where bargains win pennants. Uncapped drops the limit
+// entirely — and the bosses scale up much harder to match.
+const MODES = [
+  {
+    key: "budget",
+    label: "BUDGET LEAGUE",
+    blurb: "Every manager fields 3500 points, all season. Sticker prices lie — sharp scouting beats deep pockets."
+  },
+  {
+    key: "uncapped",
+    label: "UNCAPPED",
+    blurb: "No roster limit. Stack every legend you can afford — the bosses' checkbooks grow a lot faster out here."
+  }
+];
+
+export const modeSelectScreen = {
+  render(app) {
+    const index = clampIndex(app.screen.menuIndex ?? 0, MODES.length);
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CHOOSE YOUR RULES</span><span>${index + 1}/${MODES.length}</span></div>
+      <div class="gq-body">
+        <div class="gq-frame">${menuHtml(MODES.map((mode) => ({ label: mode.label })), index)}</div>
+        <div class="gq-frame"><p class="gq-dim">${escapeHtml(MODES[index].blurb)}</p></div>
+      </div>
+      <div class="gq-textbox"><p>Z picks. X backs out to the league list.</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key === "up" || key === "down") {
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), MODES.length);
+    } else if (key === "a") {
+      const mode = MODES[clampIndex(app.screen.menuIndex ?? 0, MODES.length)];
+      finishNewGame(app, app.screen.playerName, app.screen.universe, mode.key);
+    } else if (key === "b") {
+      app.go("leagueSelect", { playerName: app.screen.playerName, menuIndex: 0 });
+    }
+    app.rerender();
+  }
+};
+
 // A new save is a whole new universe: fresh seed, the chosen league's card
 // pool, fresh sealed starter pack. Nothing carries over but the player's wits.
-function finishNewGame(app, playerName, universe) {
+function finishNewGame(app, playerName, universe, mode = "budget") {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
-  const save = createSave({ name: playerName, saveSeed, universe });
+  const save = createSave({ name: playerName, saveSeed, universe, mode });
   setUniverseSeed(saveSeed, universe);
   const roster = starterPack(saveSeed);
   for (const card of roster) addCardToCollection(save, card.id);

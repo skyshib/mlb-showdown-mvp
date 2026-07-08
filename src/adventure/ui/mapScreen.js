@@ -1,6 +1,12 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js";
-import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js";
+import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js";
 import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js";
+
+// "1973/3500 PT" under the cap; uncapped saves just count.
+export function pointsLabel(save) {
+  const cap = pointCap(save);
+  return Number.isFinite(cap) ? `${rosterPoints(save)}/${cap} PT` : `${rosterPoints(save)} PT &middot; UNCAPPED`;
+}
 import { dayWhimsy } from "../feats.js";
 import { validateRoster } from "../../rules/draft.js";
 import { buildNpcTeam } from "../npcTeams.js";
@@ -49,6 +55,8 @@ function mapItems(app) {
   items.push({ section: "YOUR CLUB", label: "TEAM", run: (a) => a.go("team", { index: 0, mode: "roster" }) });
   items.push({ section: "YOUR CLUB", label: "BATTING ORDER", run: (a) => a.go("lineup", { index: 0 }) });
   items.push({ section: "YOUR CLUB", label: "SEASON STATS", run: (a) => a.go("seasonStats", { index: 0, view: "hitters" }) });
+  items.push({ section: "YOUR CLUB", label: "ALMANAC", run: (a) => a.go("almanac", { index: 0 }) });
+  items.push({ section: "YOUR CLUB", label: "TROPHY ROOM", run: (a) => a.go("trophies", { index: 0 }) });
   items.push({ section: "YOUR CLUB", label: "BINDER", run: (a) => a.go("binder", { index: 0 }) });
   return items;
 }
@@ -74,7 +82,7 @@ export const ambushScreen = {
           <b style="font-size:8cqw">&gt;:(</b><br>
           <b style="font-size:5cqw">[${escapeHtml(rival.sprite)}]</b><br>
           <b>${escapeHtml(rival.name)}</b><br>
-          <span class="gq-dim">HE LOOKS MEAN. ${rival.pointBudget} PT OF MEAN.</span>
+          <span class="gq-dim">HE LOOKS MEAN. ${npcBudget(app.save, rival)} PT OF MEAN.</span>
         </div>
       </div>
       <div class="gq-textbox">
@@ -113,7 +121,7 @@ export const mapScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar">
         <span>${escapeHtml(save.player.name)} &middot; DAY ${ensureSeasonStats(save).games + 1}</span>
-        <span>&#9679; ${save.player.coins} &middot; ${rosterPoints(save)}/${pointCap(save)} PT &middot; BADGES <span class="gq-badgeline">${badgeLine(save)}</span></span>
+        <span>&#9679; ${save.player.coins} &middot; ${pointsLabel(save)} &middot; BADGES <span class="gq-badgeline">${badgeLine(save)}</span></span>
       </div>
       <div class="gq-body">${html}</div>
       <div class="gq-textbox">${
@@ -156,8 +164,8 @@ function badgeLine(save) {
 }
 
 // The scouting report: the trainer's full squad, hitters then arms.
-function scoutRows(trainer) {
-  const npc = buildNpcTeam(trainer);
+function scoutRows(trainer, save) {
+  const npc = buildNpcTeam(trainer, save);
   return [
     ...npc.roster.filter((card) => card.kind === "hitter"),
     ...npc.roster.filter((card) => card.kind === "pitcher")
@@ -168,11 +176,11 @@ export const trainerIntroScreen = {
   render(app) {
     const trainer = trainerById(app.screen.trainerId);
     if (app.screen.mode === "scout") {
-      const rows = scoutRows(trainer);
+      const rows = scoutRows(trainer, app.save);
       const index = clampIndex(app.screen.scoutIndex ?? 0, rows.length);
       const selected = rows[index];
       return `<div class="gq-screen">
-        <div class="gq-topbar"><span>SCOUTING ${escapeHtml(trainer.name)}</span><span>${buildNpcTeam(trainer).points} PT</span></div>
+        <div class="gq-topbar"><span>SCOUTING ${escapeHtml(trainer.name)}</span><span>${buildNpcTeam(trainer, app.save).points} PT</span></div>
         <div class="gq-body"><div class="gq-columns">
           <div class="gq-frame gq-scroll">${menuHtml(rows.map((card) => ({ html: cardLine(card) })), index)}</div>
           <div>${selected ? cardPanelHtml(selected) : ""}</div>
@@ -189,7 +197,7 @@ export const trainerIntroScreen = {
         <div class="gq-frame gq-title-frame">
           <b style="font-size:6cqw">[${escapeHtml(trainer.sprite)}]</b><br>
           <b>${escapeHtml(trainer.name)}</b><br>
-          <span class="gq-dim">TEAM BUDGET ${trainer.pointBudget} PT &middot; PAYS &#9679; ${rewardCoins(app.save, trainer)}${beaten && trainer.repeatable ? " (REMATCH)" : ""}</span>
+          <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS &#9679; ${rewardCoins(app.save, trainer)}${beaten && trainer.repeatable ? " (REMATCH)" : ""}</span>
         </div>
       </div>
       <div class="gq-textbox">
@@ -210,7 +218,7 @@ export const trainerIntroScreen = {
   },
   hoverCard(app, index) {
     if (app.screen.mode !== "scout") return null;
-    return scoutRows(trainerById(app.screen.trainerId))[index] ?? null;
+    return scoutRows(trainerById(app.screen.trainerId), app.save)[index] ?? null;
   },
   key(app, key) {
     const trainer = trainerById(app.screen.trainerId);

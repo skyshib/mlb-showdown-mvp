@@ -215,6 +215,12 @@ h1.gq-logo {
   filter: grayscale(1) sepia(1) hue-rotate(55deg) saturate(1.6) brightness(0.95) contrast(1.05);
   image-rendering: pixelated;
 }
+/* Generated pixel portraits are already in the DMG palette — no wash. */
+.gq-card-headshot svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
 /* ---- Foil cards ---- */
 
 /* Foil printings (and legends everywhere) get a slow shine sweep and a
@@ -247,6 +253,53 @@ h1.gq-logo {
   0% { transform: translateX(-110%); }
   55% { transform: translateX(110%); }
   100% { transform: translateX(110%); }
+}
+
+/* ---- Dice-roll drama ---- */
+
+/* The high-leverage pause: a big square die tumbling (as much as a DMG can
+   tumble) until it lands on the real chart roll and goes reverse-video. */
+.gq-drama {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5cqw;
+  height: 100%;
+}
+
+.gq-die {
+  width: 17cqw;
+  height: 17cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.1cqw solid var(--gb-darkest);
+  background: var(--gb-lightest);
+  font-size: 8cqw;
+  font-weight: 700;
+  animation: gq-die-tumble 0.18s steps(2) infinite;
+}
+
+.gq-die-landed {
+  animation: none;
+  transform: scale(1.12);
+  background: var(--gb-darkest);
+  color: var(--gb-lightest);
+}
+
+@keyframes gq-die-tumble {
+  0% { transform: rotate(-9deg) translateY(-0.6cqw); }
+  100% { transform: rotate(9deg) translateY(0.6cqw); }
+}
+
+/* ---- Trophy room ---- */
+
+.gq-trophy-plaque {
+  border-style: double;
+  border-width: 1.1cqw;
+  text-align: center;
+  padding: 2cqw;
 }
 
 .gq-outs i {

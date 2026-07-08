@@ -1,4 +1,4 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag } from "./helpers.js";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js";
 import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool } from "../packs.js";
 import { packEggs } from "../feats.js";
 import {
@@ -18,7 +18,7 @@ import {
   managerFor,
   addLog
 } from "../state.js";
-import { validateRoster, buildTeam } from "../../rules/draft.js";
+import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js";
 
 // ---- Shop ------------------------------------------------------------------
 
@@ -47,6 +47,79 @@ function shopItems(app) {
   return items;
 }
 
+// ---- Type-to-search ----------------------------------------------------------
+
+// 10k-card pools need more than position paging: on searchable screens every
+// printable key builds a query that narrows the list by name ("\b" is the
+// backspace signal from main.js). X clears the query before it leaves the
+// screen, so search never traps the player.
+export function applyQuery(rows, query, nameOf) {
+  const needle = (query ?? "").trim().toUpperCase();
+  if (!needle) return rows;
+  return rows.filter((row) => nameOf(row).toUpperCase().includes(needle));
+}
+
+function typeIntoQuery(app, char) {
+  const query = app.screen.query ?? "";
+  app.screen.query = char === "\b" ? query.slice(0, -1) : (query + char).slice(0, 24);
+  app.screen.index = 0;
+  app.rerender();
+}
+
+function searchLine(query) {
+  return query
+    ? `<p>SEARCH: <b>${escapeHtml(query)}</b>_ <span class="gq-dim">X CLEARS</span></p>`
+    : "";
+}
+
+// ---- Compare mode --------------------------------------------------------------
+
+// Z pins a card; Z on a second card lays the two out side by side, claim-
+// screen style. Z on the pinned card itself unpins it.
+function pinOrCompare(app, card, returnTo) {
+  if (!card) return;
+  const pinned = app.screen.pinnedId;
+  if (!pinned || pinned === card.id) {
+    app.screen.pinnedId = pinned === card.id ? null : card.id;
+    return;
+  }
+  const returnData = { ...app.screen, pinnedId: null };
+  delete returnData.name;
+  app.go("compare", { aId: pinned, bId: card.id, returnTo, returnData });
+}
+
+function pinMark(app, card) {
+  return app.screen.pinnedId === card.id ? " &#9873;" : "";
+}
+
+function pinnedLine(app) {
+  const pinned = app.screen.pinnedId ? cardById(app.screen.pinnedId) : null;
+  return pinned
+    ? `<p>&#9873; PINNED: <b>${escapeHtml(shortName(pinned.name))}</b> — Z another card to compare.</p>`
+    : "";
+}
+
+export const compareScreen = {
+  render(app) {
+    const a = cardById(app.screen.aId);
+    const b = cardById(app.screen.bId);
+    const owned = (card) => ownedCount(app.save, card.id) || null;
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>COMPARE</span><span>${escapeHtml(shortName(a?.name ?? "?"))} &middot; ${escapeHtml(shortName(b?.name ?? "?"))}</span></div>
+      <div class="gq-body"><div class="gq-columns">
+        <div>${a ? cardPanelHtml(a, { count: owned(a) }) : ""}</div>
+        <div>${b ? cardPanelHtml(b, { count: owned(b) }) : ""}</div>
+      </div></div>
+      <div class="gq-textbox"><p class="gq-dim">Side by side, warts and all. Z or X to go back.</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key !== "a" && key !== "b") return;
+    app.go(app.screen.returnTo ?? "map", app.screen.returnData ?? {});
+    app.rerender();
+  }
+};
+
 // ---- Catalog: every card in this universe ------------------------------------
 
 // The full pool is big (up to ~10k cards), so rows sort once per filter and
@@ -67,43 +140,61 @@ export function catalogRows(filter = "ALL") {
   return rows;
 }
 
+function catalogVisibleRows(app) {
+  return applyQuery(catalogRows(app.screen.filter ?? "ALL"), app.screen.query, (card) => card.name);
+}
+
 export const catalogScreen = {
   render(app) {
     const filter = app.screen.filter ?? "ALL";
-    const rows = catalogRows(filter);
+    const rows = catalogVisibleRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const start = Math.max(0, Math.min(index - Math.floor(CATALOG_WINDOW / 2), rows.length - CATALOG_WINDOW));
     const visible = rows.slice(start, start + CATALOG_WINDOW);
     const selected = rows[index];
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)}</span><span>${index + 1}/${rows.length}</span></div>
+      <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)}</span><span>${rows.length ? index + 1 : 0}/${rows.length}</span></div>
       <div class="gq-body"><div class="gq-columns">
-        <div class="gq-frame gq-scroll">${menuHtml(
-          visible.map((card) => {
-            const owned = ownedCount(app.save, card.id);
-            return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">&#9670;x${owned}</span>` : ""}` };
-          }),
-          index - start,
-          { offset: start }
-        )}</div>
+        <div class="gq-frame gq-scroll">${
+          rows.length
+            ? menuHtml(
+                visible.map((card) => {
+                  const owned = ownedCount(app.save, card.id);
+                  return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">&#9670;x${owned}</span>` : ""}${pinMark(app, card)}` };
+                }),
+                index - start,
+                { offset: start }
+              )
+            : `<p class="gq-dim">NO CARD ANSWERS TO "${escapeHtml(app.screen.query ?? "")}".</p>`
+        }</div>
         <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
       </div></div>
-      <div class="gq-textbox"><p class="gq-dim">Every card in this league, best first. &#9664;/&#9654; page by position &middot; &#9670; = owned. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Every card in this league, best first. Type a name to search &middot; &#9664;/&#9654; page by position &middot; &#9670; = owned &middot; Z pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
-    return catalogRows(app.screen.filter ?? "ALL")[index] ?? null;
+    return catalogVisibleRows(app)[index] ?? null;
   },
+  typed: typeIntoQuery,
   key(app, key) {
-    const filter = app.screen.filter ?? "ALL";
+    const rows = catalogVisibleRows(app);
     if (key === "left" || key === "right") {
-      const at = BINDER_FILTERS.indexOf(filter);
+      const at = BINDER_FILTERS.indexOf(app.screen.filter ?? "ALL");
       app.screen.filter = BINDER_FILTERS[(at + (key === "right" ? 1 : -1) + BINDER_FILTERS.length) % BINDER_FILTERS.length];
       app.screen.index = 0;
     } else if (key === "up" || key === "down") {
-      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), catalogRows(filter).length);
-    } else if (key === "b" || key === "a") {
-      app.go("shop", { menuIndex: 0 });
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
+    } else if (key === "a") {
+      pinOrCompare(app, rows[clampIndex(app.screen.index ?? 0, rows.length)], "catalog");
+    } else if (key === "b") {
+      if (app.screen.query) {
+        app.screen.query = "";
+        app.screen.index = 0;
+      } else if (app.screen.pinnedId) {
+        app.screen.pinnedId = null;
+      } else {
+        app.go("shop", { menuIndex: 0 });
+      }
     }
     app.rerender();
   }
@@ -253,10 +344,14 @@ export function binderRows(save, filter = "ALL") {
   return rows.filter(({ card }) => card.kind === "hitter" && card.position === filter);
 }
 
+function binderVisibleRows(app) {
+  return applyQuery(binderRows(app.save, app.screen.filter ?? "ALL"), app.screen.query, ({ card }) => card.name);
+}
+
 export const binderScreen = {
   render(app) {
     const filter = app.screen.filter ?? "ALL";
-    const rows = binderRows(app.save, filter);
+    const rows = binderVisibleRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const selected = rows[index];
     return `<div class="gq-screen">
@@ -268,20 +363,21 @@ export const binderScreen = {
                 rows.map(({ card, count }) => ({
                   html: `${cardLine(card)}${count > 1 ? ` <span class="gq-dim">x${count}</span>` : ""}${
                     app.save.roster.cardIds.includes(card.id) ? " &#9670;" : ""
-                  }`
+                  }${pinMark(app, card)}`
                 })),
                 index
               )
-            : `<p class="gq-dim">NO ${escapeHtml(filter)} CARDS YET.</p>`
+            : `<p class="gq-dim">NO ${escapeHtml(filter)} CARDS${app.screen.query ? ` NAMED "${escapeHtml(app.screen.query)}"` : ""} YET.</p>`
         }</div>
         <div>${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
       </div></div>
-      <div class="gq-textbox"><p>&#9664;/&#9654; page by position. &#9670; = in roster. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Type a name to search &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; Z pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
-    return binderRows(app.save, app.screen.filter ?? "ALL")[index]?.card ?? null;
+    return binderVisibleRows(app)[index]?.card ?? null;
   },
+  typed: typeIntoQuery,
   key(app, key) {
     if (key === "left" || key === "right") {
       const at = BINDER_FILTERS.indexOf(app.screen.filter ?? "ALL");
@@ -289,14 +385,113 @@ export const binderScreen = {
       app.screen.filter = BINDER_FILTERS[next];
       app.screen.index = 0;
     } else if (key === "up" || key === "down") {
-      const rows = binderRows(app.save, app.screen.filter ?? "ALL");
+      const rows = binderVisibleRows(app);
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
-    } else if (key === "b" || key === "a") {
-      app.go("map");
+    } else if (key === "a") {
+      const rows = binderVisibleRows(app);
+      pinOrCompare(app, rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card, "binder");
+    } else if (key === "b") {
+      if (app.screen.query) {
+        app.screen.query = "";
+        app.screen.index = 0;
+      } else if (app.screen.pinnedId) {
+        app.screen.pinnedId = null;
+      } else {
+        app.go("map");
+      }
     }
     app.rerender();
   }
 };
+
+// ---- Rotation and DH management ----------------------------------------------
+
+// The starting rotation is the roster's SP order: the first arm takes game 1
+// (and odd games of a series). Exported for tests.
+export function rotationCards(save) {
+  return rosterCards(save).filter((card) => card.kind === "pitcher" && card.role === "SP");
+}
+
+// Swap the first two starters: the other arm takes game 1 now.
+export function swapRotation(save) {
+  const [first, second] = rotationCards(save);
+  if (!first || !second) return false;
+  const ids = [...save.roster.cardIds];
+  const a = ids.indexOf(first.id);
+  const b = ids.indexOf(second.id);
+  [ids[a], ids[b]] = [ids[b], ids[a]];
+  setRoster(save, ids);
+  return true;
+}
+
+function lineupSlots(save) {
+  return assignLineupSlots(rosterCards(save), save.roster.lineupAssignments).slots;
+}
+
+// Legal DH flips: any occupied slot the current DH could actually field.
+// Anyone can DH, so the other half of the flip is always legal; 1B is open
+// to every glove (at -1 out of position), the rest need the printed
+// position. Exported for tests.
+export function dhFlipOptions(save) {
+  const slots = lineupSlots(save);
+  const dh = slots.find((slot) => slot.label === "DH")?.player;
+  if (!dh) return [];
+  return slots
+    .filter((slot) => slot.label !== "DH" && slot.player && canPlayerFillLineupSlot(dh, slot.label))
+    .map((slot) => ({ label: slot.label, player: slot.player, dh }));
+}
+
+// Send the DH out to `label` and sit that slot's occupant at DH. Persists as
+// slot assignments, so it holds for every future game.
+export function flipDhWith(save, label) {
+  const option = dhFlipOptions(save).find((item) => item.label === label);
+  if (!option) return false;
+  save.roster.lineupAssignments = {
+    ...save.roster.lineupAssignments,
+    DH: option.player.id,
+    [label]: option.dh.id
+  };
+  return true;
+}
+
+function flipLine(option) {
+  const outOfPosition = option.label === "1B" && option.dh.position !== "1B";
+  return `${escapeHtml(option.label)} ${escapeHtml(shortName(option.player.name))} &#8644; DH ${escapeHtml(shortName(option.dh.name))}${
+    outOfPosition ? ` <span class="gq-dim">FLD -1 OUT OF POSITION</span>` : ""
+  }`;
+}
+
+// The Team menu's action rows, after the 13 cards.
+function teamActions(save) {
+  const rotation = rotationCards(save);
+  const flips = dhFlipOptions(save);
+  return [
+    {
+      html: rotation.length >= 2
+        ? `&#8645; SWAP ROTATION <span class="gq-dim">${escapeHtml(shortName(rotation[0].name))} &#8644; ${escapeHtml(shortName(rotation[1].name))}</span>`
+        : `&#8645; SWAP ROTATION <span class="gq-dim">NEEDS TWO STARTERS</span>`,
+      disabled: rotation.length < 2,
+      preview: rotation[0] ?? null,
+      run: (a) => {
+        if (!swapRotation(a.save)) return;
+        const [first] = rotationCards(a.save);
+        addLog(a.save, `${first.name} takes game 1.`);
+        persistSave(a.save);
+      }
+    },
+    {
+      html: flips.length
+        ? `&#8644; FLIP THE DH <span class="gq-dim">DH NOW: ${escapeHtml(shortName(flips[0].dh.name))}</span>`
+        : `&#8644; FLIP THE DH <span class="gq-dim">NO LEGAL FLIP</span>`,
+      disabled: !flips.length,
+      preview: flips[0]?.dh ?? null,
+      run: (a) => {
+        a.screen.mode = "dhFlip";
+        a.screen.pickIndex = 0;
+      }
+    }
+  ];
+}
 
 // ---- Team (roster editing) -------------------------------------------------
 
@@ -322,37 +517,60 @@ export const teamScreen = {
   render(app) {
     const save = app.save;
     const roster = rosterCards(save);
+    const actions = teamActions(save);
     const issues = validateRoster(managerFor(save));
     const points = rosterPoints(save);
     const cap = pointCap(save);
     if (points > cap) issues.push(`over cap by ${points - cap}`);
     const picking = app.screen.mode === "pick";
-    const rosterIndex = clampIndex(app.screen.index ?? 0, roster.length);
+    const flipping = app.screen.mode === "dhFlip";
+    const rosterIndex = clampIndex(app.screen.index ?? 0, roster.length + actions.length);
     const filter = app.screen.pickFilter ?? "position";
     const bench = picking ? benchCards(save, roster[rosterIndex], filter) : [];
-    const pickIndex = clampIndex(app.screen.pickIndex ?? 0, bench.length + 1);
+    const flips = flipping ? dhFlipOptions(save) : [];
+    const pickIndex = clampIndex(app.screen.pickIndex ?? 0, (picking ? bench.length : flips.length) + 1);
     const preview = picking
       ? bench[pickIndex] ?? null
-      : roster[rosterIndex] ?? null;
+      : flipping
+        ? flips[pickIndex]?.player ?? null
+        : rosterIndex < roster.length
+          ? roster[rosterIndex]
+          : actions[rosterIndex - roster.length]?.preview ?? null;
+    let list;
+    if (picking) {
+      list = `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
+        [...bench.map((card) => ({ html: cardLine(card) })), { label: "CANCEL" }],
+        pickIndex
+      )}`;
+    } else if (flipping) {
+      list = `<h3>FLIP THE DH</h3>${menuHtml(
+        [...flips.map((option) => ({ html: flipLine(option) })), { label: "CANCEL" }],
+        pickIndex
+      )}`;
+    } else {
+      list = menuHtml(
+        [
+          ...roster.map((card) => ({ html: cardLine(card) })),
+          ...actions.map((action) => ({ html: action.html, disabled: action.disabled }))
+        ],
+        rosterIndex
+      );
+    }
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>TEAM &middot; ${escapeHtml(save.player.name)}</span><span>${points}/${cap} PT</span></div>
+      <div class="gq-topbar"><span>TEAM &middot; ${escapeHtml(save.player.name)}</span><span>${Number.isFinite(cap) ? `${points}/${cap} PT` : `${points} PT &middot; UNCAPPED`}</span></div>
       <div class="gq-body"><div class="gq-columns">
-        <div class="gq-frame gq-scroll">${
-          picking
-            ? `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
-                [
-                  ...bench.map((card) => ({ html: cardLine(card) })),
-                  { label: "CANCEL" }
-                ],
-                pickIndex
-              )}`
-            : menuHtml(roster.map((card) => ({ html: cardLine(card) })), rosterIndex)
-        }</div>
+        <div class="gq-frame gq-scroll">${list}</div>
         <div>${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
       </div></div>
       <div class="gq-textbox">
         ${issues.length ? `<p>! ${escapeHtml(issues.join(", "))}</p>` : `<p>ROSTER IS GAME-READY.</p>`}
-        <p class="gq-dim">${picking ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels." : "Z swaps a card. Lineup slots fill automatically. X to leave."}</p>
+        <p class="gq-dim">${
+          picking
+            ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels."
+            : flipping
+              ? "Z sends the DH out there; the fielder DHs instead. X cancels."
+              : "Z swaps a card. Rotation and DH tools live below the roster. X to leave."
+        }</p>
       </div>
     </div>`;
   },
@@ -362,11 +580,16 @@ export const teamScreen = {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       return anchor ? benchCards(app.save, anchor, app.screen.pickFilter ?? "position")[index] ?? null : null;
     }
-    return roster[index] ?? null;
+    if (app.screen.mode === "dhFlip") {
+      return dhFlipOptions(app.save)[index]?.player ?? null;
+    }
+    if (index < roster.length) return roster[index] ?? null;
+    return teamActions(app.save)[index - roster.length]?.preview ?? null;
   },
   key(app, key) {
     const save = app.save;
     const roster = rosterCards(save);
+    const actions = teamActions(save);
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       const bench = benchCards(save, anchor, app.screen.pickFilter ?? "position");
@@ -387,12 +610,33 @@ export const teamScreen = {
       } else if (key === "b") {
         app.screen.mode = "roster";
       }
+    } else if (app.screen.mode === "dhFlip") {
+      const flips = dhFlipOptions(save);
+      if (key === "up" || key === "down") {
+        app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), flips.length + 1);
+      } else if (key === "a") {
+        const pickIndex = app.screen.pickIndex ?? 0;
+        const option = flips[pickIndex];
+        if (option && flipDhWith(save, option.label)) {
+          addLog(save, `${option.dh.name} takes ${option.label}; ${option.player.name} DHs.`);
+          persistSave(save);
+        }
+        app.screen.mode = "roster";
+      } else if (key === "b") {
+        app.screen.mode = "roster";
+      }
     } else if (key === "up" || key === "down") {
-      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), roster.length);
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), roster.length + actions.length);
     } else if (key === "a") {
-      app.screen.mode = "pick";
-      app.screen.pickIndex = 0;
-      app.screen.pickFilter = "position";
+      const index = clampIndex(app.screen.index ?? 0, roster.length + actions.length);
+      if (index < roster.length) {
+        app.screen.mode = "pick";
+        app.screen.pickIndex = 0;
+        app.screen.pickFilter = "position";
+      } else {
+        const action = actions[index - roster.length];
+        if (action && !action.disabled) action.run(app);
+      }
     } else if (key === "b") {
       app.go("map");
     }

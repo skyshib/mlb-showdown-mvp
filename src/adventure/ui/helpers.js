@@ -57,7 +57,7 @@ export function cardPanelHtml(card, { count = null } = {}) {
     : `${escapeHtml(card.position)} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${card.fielding >= 0 ? "+" : ""}${card.fielding}`;
   const foil = card.foil || card.rarity === "legend";
   return `<div class="gq-card gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">
-    ${card.real ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>` : ""}
+    ${card.real ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>` : ""}
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
     <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
@@ -71,6 +71,17 @@ export function cardPanelHtml(card, { count = null } = {}) {
 // the Wikipedia lookup.
 function photoName(name) {
   return name.replace(/\s*'\d\d$/, "");
+}
+
+// The card's first active year, for era-styling the generated pixel
+// portraits (pillbox caps and handlebars before the war). MLB set tags read
+// "1989-2010"; classic tags read "'04 PR1".
+export function eraYear(card) {
+  const four = /(\d{4})/.exec(card.setTag ?? "");
+  if (four) return Number(four[1]);
+  const two = /'(\d\d)/.exec(card.setTag ?? "");
+  if (two) return Number(two[1]) + (Number(two[1]) < 30 ? 2000 : 1900);
+  return 2000;
 }
 
 function chartRangeRows(card) {

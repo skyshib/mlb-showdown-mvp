@@ -192,6 +192,14 @@ export function isLeverageMoment(state) {
   return risp && diff <= 2;
 }
 
+// The moments that earn the slow d20: two outs with the bases loaded, any
+// time; or the 9th inning onward with the game within two runs. Checked
+// BEFORE the plate appearance resolves — the drama is in the wind-up.
+export function isDramaticMoment(state) {
+  if (state.outs === 2 && state.bases[0] && state.bases[1] && state.bases[2]) return true;
+  return state.inning >= 9 && Math.abs(state.score.home - state.score.away) <= 2;
+}
+
 // Auto-resolve on engine autopilot (decision matrix steals and advances,
 // fatigue-based pitching for both sides, NPC profile moves) until the next
 // leverage moment or the end of the game.
@@ -262,7 +270,10 @@ export function runSimSeries({ playerManager, npcManager, bestOf, seed }) {
       innings: result.innings,
       playerWon,
       topSwing: result.topSwing,
-      boxScore: result.boxScore
+      boxScore: result.boxScore,
+      // Feats (slams, comebacks) read the play-by-play; the events ride the
+      // transient series result but never land in the save.
+      events: result.events
     });
   }
 

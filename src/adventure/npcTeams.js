@@ -1,4 +1,5 @@
 import { adventurePool } from "./packs.js";
+import { npcBudget } from "./region.js";
 import { createRng } from "../rules/rng.js";
 
 // One roster slot per required lineup spot plus the four-man staff. "HITTER"
@@ -37,8 +38,12 @@ function slotMatches(slot, card) {
 // fill ORDER is shuffled per trainer — which position lands the star is part of
 // the trainer's identity, not always the catcher. Ace staffs still shop for
 // pitching first so the budget lands on the mound.
-export function buildNpcTeam(trainer) {
+// Pass the save so mode scaling applies (uncapped bosses shop richer);
+// without one the printed budget stands. Team identity (seeded slot order,
+// weights, picks) only shifts when the budget itself does.
+export function buildNpcTeam(trainer, save = null) {
   const pool = adventurePool();
+  const pointBudget = npcBudget(save, trainer);
   const score = ARCHETYPES[trainer.archetype] ?? ARCHETYPES.balanced;
   const rng = createRng(`npc-team:${trainer.teamSeed}`);
   const slots = trainer.archetype === "ace"
@@ -76,8 +81,8 @@ export function buildNpcTeam(trainer) {
   for (let index = 0; index < slots.length; index += 1) {
     const slot = slots[index];
     const reserve = reserveFor(slots.slice(index + 1));
-    const room = trainer.pointBudget - spent - reserve;
-    const allocation = (trainer.pointBudget * weights[index]) / weightTotal + carry;
+    const room = pointBudget - spent - reserve;
+    const allocation = (pointBudget * weights[index]) / weightTotal + carry;
     const target = Math.max(0, Math.min(allocation, room));
     const fits = unusedFits(slot);
     // Shop near the slot's allocation first; widen to anything affordable,

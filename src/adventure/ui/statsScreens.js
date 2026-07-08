@@ -1,7 +1,7 @@
-import { escapeHtml, menuHtml, clampIndex, shortName } from "./helpers.js";
+import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml } from "./helpers.js";
 import { trainerById } from "../region.js";
 import { cardById } from "../packs.js";
-import { seasonHitters, seasonPitchers, ensureSeasonStats } from "../state.js";
+import { seasonHitters, seasonPitchers, ensureSeasonStats, ensureAlmanac, ensureTrophies } from "../state.js";
 
 // ---- Formatting --------------------------------------------------------------
 
@@ -149,7 +149,9 @@ function gameLogMenuRows(app) {
 
 export const gameStatsScreen = {
   render(app) {
-    const trainer = trainerById(app.screen.trainerId);
+    // Almanac reopens can outlive a trainer id; the entry's own opponent
+    // name is the fallback.
+    const trainer = trainerById(app.screen.trainerId) ?? { name: app.screen.opponent ?? "?" };
     const logView = app.screen.view === "log";
     const hasLog = (app.screen.events ?? []).length > 0;
     let body;
@@ -181,6 +183,115 @@ export const gameStatsScreen = {
     } else if (key === "a" || key === "b") {
       const next = app.screen.next;
       return app.go(next.name, next.data);
+    }
+    app.rerender();
+  }
+};
+
+// ---- Campaign almanac ------------------------------------------------------------
+
+// Every game ever played, newest first: day, opponent, score, and a star for
+// any game that made the trophy case. Z reopens the full box score through
+// the regular post-game screen, which routes back here.
+function almanacRows(save) {
+  return [...ensureAlmanac(save)].reverse();
+}
+
+function almanacLine(entry) {
+  const you = entry.score[entry.playerSide];
+  const them = entry.score[entry.playerSide === "home" ? "away" : "home"];
+  return `DAY ${entry.day} &middot; ${entry.won ? "<b>W</b>" : "L"} ${you}-${them} VS ${escapeHtml(entry.opponent.toUpperCase())}${
+    entry.innings !== 9 ? ` <span class="gq-dim">(${entry.innings})</span>` : ""
+  }${entry.feats?.length ? " &#9733;" : ""}`;
+}
+
+export const almanacScreen = {
+  render(app) {
+    const rows = almanacRows(app.save);
+    const index = clampIndex(app.screen.index ?? 0, rows.length);
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CAMPAIGN ALMANAC</span><span>${rows.length} GAME${rows.length === 1 ? "" : "S"}</span></div>
+      <div class="gq-body"><div class="gq-frame gq-scroll">${
+        rows.length
+          ? menuHtml(rows.map((entry) => ({ html: almanacLine(entry) })), index)
+          : `<p class="gq-dim">NO GAMES ON RECORD YET. HISTORY STARTS WITH THE FIRST PITCH.</p>`
+      }</div></div>
+      <div class="gq-textbox"><p class="gq-dim">Newest first &middot; &#9733; = a rare feat lives in the trophy room. Z opens the box score. X to leave.</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    const rows = almanacRows(app.save);
+    if (key === "up" || key === "down") {
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
+    } else if (key === "a" && rows.length) {
+      const index = clampIndex(app.screen.index ?? 0, rows.length);
+      const entry = rows[index];
+      return app.go("gameStats", {
+        trainerId: entry.trainerId,
+        opponent: entry.opponent,
+        boxScore: entry.boxScore,
+        stars: gameStars(entry.boxScore, entry.playerSide),
+        feats: entry.feats ?? [],
+        events: [],
+        score: entry.score,
+        playerSide: entry.playerSide,
+        index: 0,
+        next: { name: "almanac", data: { index } }
+      });
+    } else if (key === "b") {
+      return app.go("map");
+    }
+    app.rerender();
+  }
+};
+
+// ---- Trophy room ------------------------------------------------------------------
+
+// The display case: every rare feat ever earned, newest first, each plaque
+// with its day, opponent, and — when a single hero owns the feat — the hero's
+// card alongside.
+function trophyRows(save) {
+  return [...ensureTrophies(save)].reverse();
+}
+
+export const trophyScreen = {
+  render(app) {
+    const rows = trophyRows(app.save);
+    const index = clampIndex(app.screen.index ?? 0, rows.length);
+    const selected = rows[index];
+    const hero = selected?.cardId ? cardById(selected.cardId) : null;
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>TROPHY ROOM</span><span>${rows.length} TROPH${rows.length === 1 ? "Y" : "IES"}</span></div>
+      <div class="gq-body"><div class="gq-columns">
+        <div class="gq-frame gq-scroll">${
+          rows.length
+            ? menuHtml(
+                rows.map((trophy) => ({ html: `<span class="gq-dim">DAY ${trophy.day}</span> <b>${escapeHtml(trophy.title)}</b>` })),
+                index
+              )
+            : `<p class="gq-dim">THE CASE IS EMPTY. PERFECT GAMES, CYCLES, AND SLAMS EARN THEIR PLAQUES HERE.</p>`
+        }</div>
+        <div>${
+          selected
+            ? `<div class="gq-frame gq-trophy-plaque">&#127942; <b>${escapeHtml(selected.title)}</b><br>
+                <span class="gq-dim">${escapeHtml(selected.blurb)}</span><br>
+                <span class="gq-dim">DAY ${selected.day} &middot; VS ${escapeHtml(selected.opponent.toUpperCase())}</span></div>${
+                hero ? cardPanelHtml(hero) : ""
+              }`
+            : ""
+        }</div>
+      </div></div>
+      <div class="gq-textbox"><p class="gq-dim">Feats framed forever, hero card attached. X to leave.</p></div>
+    </div>`;
+  },
+  hoverCard(app, index) {
+    return cardById(trophyRows(app.save)[index]?.cardId) ?? null;
+  },
+  key(app, key) {
+    if (key === "up" || key === "down") {
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), trophyRows(app.save).length);
+    } else if (key === "a" || key === "b") {
+      return app.go("map");
     }
     app.rerender();
   }

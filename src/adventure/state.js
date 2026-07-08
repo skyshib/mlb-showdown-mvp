@@ -5,17 +5,19 @@ const SAVE_KEY = "showdown-quest-save";
 // at the old shared universe, so they don't migrate.
 export const SAVE_VERSION = 2;
 
-// The roster budget is flat: every manager fields 3500 points. Getting ahead
-// means finding bargains, not raising the cap; badges are trophies and gates.
+// The roster budget in BUDGET mode is flat: every manager fields 3500
+// points, and getting ahead means finding bargains, not raising the cap.
+// UNCAPPED saves have no limit at all — and face far richer bosses.
 const POINT_CAP = 3500;
 
 export const LOSS_FEE = 50;
 
-export function createSave({ name, saveSeed, universe = "fictional" }) {
+export function createSave({ name, saveSeed, universe = "fictional", mode = "budget" }) {
   return {
     version: SAVE_VERSION,
     saveSeed,
     universe,
+    mode,
     player: {
       name,
       coins: 0,
@@ -34,8 +36,9 @@ export function createSave({ name, saveSeed, universe = "fictional" }) {
   };
 }
 
-export function pointCap() {
-  return POINT_CAP;
+// Older saves predate modes and read as "budget".
+export function pointCap(save) {
+  return save?.mode === "uncapped" ? Infinity : POINT_CAP;
 }
 
 export function deriveSeed(save, ...parts) {
@@ -140,9 +143,16 @@ export function managerFor(save) {
   };
 }
 
-export function setRoster(save, cardIds, lineupAssignments = {}) {
+export function setRoster(save, cardIds, lineupAssignments = null) {
   const battingOrder = (save.roster?.battingOrder ?? []).filter((id) => cardIds.includes(id));
-  save.roster = { cardIds: [...cardIds], lineupAssignments: { ...lineupAssignments }, battingOrder };
+  // Slot assignments (the DH flip) survive roster edits by default: keep
+  // every assignment that still points at a rostered card unless the caller
+  // supplies a fresh mapping.
+  const kept = lineupAssignments ?? save.roster?.lineupAssignments ?? {};
+  const assignments = Object.fromEntries(
+    Object.entries(kept).filter(([, cardId]) => cardIds.includes(cardId))
+  );
+  save.roster = { cardIds: [...cardIds], lineupAssignments: assignments, battingOrder };
 }
 
 // Persist the player's preferred batting order (a list of card ids, leadoff
@@ -205,6 +215,38 @@ export function seasonPitchers(save) {
       strikeoutsPerNine: line.outs ? (line.so * 27) / line.outs : 0
     }))
     .sort((a, b) => (a.outs === 0) - (b.outs === 0) || a.runsPerNine - b.runsPerNine || b.outs - a.outs);
+}
+
+// ---- Almanac and trophy case -------------------------------------------------
+
+// Older saves predate the almanac and the trophy case; grow the fields in
+// place instead of invalidating them with a version bump.
+export function ensureAlmanac(save) {
+  if (!save.almanac) save.almanac = [];
+  return save.almanac;
+}
+
+export function ensureTrophies(save) {
+  if (!save.trophies) save.trophies = [];
+  return save.trophies;
+}
+
+// One line of campaign history per finished game — day, opponent, the score,
+// the feats worth retelling, and the full box score so the almanac can reopen
+// the game later. Sim-series games record too: every game is a day.
+export function recordAlmanacGame(save, entry) {
+  ensureAlmanac(save).push(entry);
+  return entry;
+}
+
+// Rare feats persist in the display case: the feat, its hero card, and the
+// day it happened. A second perfect game earns a second plaque.
+export function addTrophies(save, feats, { day, opponent }) {
+  const trophies = ensureTrophies(save);
+  for (const feat of feats) {
+    trophies.push({ title: feat.title, blurb: feat.blurb, cardId: feat.cardId ?? null, day, opponent });
+  }
+  return trophies;
 }
 
 // ---- Coins -----------------------------------------------------------------

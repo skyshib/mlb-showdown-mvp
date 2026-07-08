@@ -2,7 +2,9 @@
 // (freely licensed / public-domain imagery served by Wikimedia, credited on
 // the card). Nothing is scraped or re-hosted: the browser asks Wikipedia for
 // a thumbnail by player name, and misses are cached so we only ask once.
-const CACHE_KEY = "sq-photo-cache-v1";
+// v2: the lookup grew a search-API second pass — retire v1's cached misses
+// so the old-timers get their retry.
+const CACHE_KEY = "sq-photo-cache-v2";
 const MISS = "none";
 
 let cache = null;
@@ -65,46 +67,192 @@ async function lookup(name) {
     if (requireBaseball && !`${data.description ?? ""} ${data.extract ?? ""}`.toLowerCase().includes("baseball")) continue;
     return data.thumbnail.source;
   }
+  return searchLookup(name);
+}
+
+// Second pass, mostly for the old-timers: a full-text Wikipedia search that
+// takes the thumbnail straight off the best baseball match. Catches
+// birth-year disambiguations ("Billy Hamilton (baseball, born 1866)"),
+// middle initials, and nickname titles the direct summary lookup misses.
+async function searchLookup(name) {
+  const url = "https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*"
+    + `&generator=search&gsrsearch=${encodeURIComponent(`${name} baseball`)}&gsrlimit=5`
+    + "&prop=pageimages%7Cdescription&piprop=thumbnail&pithumbsize=320";
+  const response = await fetch(url, { headers: { accept: "application/json" } });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const pages = Object.values(data?.query?.pages ?? {}).sort((a, b) => a.index - b.index);
+  const surname = name.trim().split(" ").pop().toLowerCase();
+  for (const page of pages) {
+    if (!page.thumbnail?.source) continue;
+    if (!page.title.toLowerCase().includes(surname)) continue;
+    const description = (page.description ?? "").toLowerCase();
+    if (description && !description.includes("baseball")) continue;
+    return page.thumbnail.source;
+  }
   return null;
 }
 
 // MLB's official headshot CDN, keyed by MLBAM id — the most reliable and
-// relevant source for the modern era. The URL carries the CDN's own generic
-// silhouette fallback, so it never 404s into a broken image.
+// relevant source for the modern era. No generic-silhouette fallback param:
+// a missing photo 404s, and the error handler walks down the cascade
+// (Wikipedia, then a generated pixel portrait) instead of showing a blank
+// gray stock bust.
 function mlbHeadshotUrl(mlbam) {
-  return `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,d_people:generic:headshot:silo:current.png,q_auto:best,f_auto/v1/people/${mlbam}/headshot/67/current`;
+  return `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_auto:best,f_auto/v1/people/${mlbam}/headshot/67/current`;
 }
 
+// MLBAM ids whose CDN photo already 404'd this session — skip straight to
+// the next source instead of re-requesting.
+const mlbMisses = new Set();
+
 // Fill every photo slot inside `root` (a rendered screen or the tooltip).
-// Cards with an MLBAM id use the official headshot; everyone else goes
-// through the Wikipedia lookup. Cached hits render on the next paint.
+// The cascade: official MLB headshot (when the card carries an MLBAM id),
+// then the Wikipedia lookup, then a deterministic DMG pixel portrait — every
+// real player gets a face, even the 1884 guys no camera ever loved.
 export function hydratePhotos(root) {
   for (const slot of root.querySelectorAll("[data-photo-name]")) {
-    if (slot.dataset.mlbam) {
-      fill(slot, mlbHeadshotUrl(slot.dataset.mlbam));
+    const mlbam = slot.dataset.mlbam;
+    if (mlbam && !mlbMisses.has(mlbam)) {
+      fill(slot, mlbHeadshotUrl(mlbam), () => {
+        mlbMisses.add(mlbam);
+        wikiOrPortrait(slot);
+      });
       continue;
     }
-    const name = slot.dataset.photoName;
-    const cached = cachedPhoto(name);
-    if (cached === null) {
-      slot.remove();
-      continue;
-    }
-    if (cached) {
-      fill(slot, cached);
-      continue;
-    }
-    resolvePhoto(name).then((url) => {
-      if (!slot.isConnected) return;
-      if (url) fill(slot, url);
-      else slot.remove();
-    });
+    wikiOrPortrait(slot);
   }
+}
+
+function wikiOrPortrait(slot) {
+  const name = slot.dataset.photoName;
+  const cached = cachedPhoto(name);
+  if (cached === null) return drawPortrait(slot);
+  if (cached) return fill(slot, cached);
+  resolvePhoto(name).then((url) => {
+    if (!slot.isConnected) return;
+    if (url) fill(slot, url);
+    else drawPortrait(slot);
+  });
 }
 
 // No per-card credit: the intro text carries the Wikipedia/Wikimedia
 // attribution once, so the cards stay clean.
-function fill(slot, url) {
-  if (slot.querySelector("img")) return;
-  slot.innerHTML = `<img src="${url}" alt="" loading="lazy">`;
+function fill(slot, url, onError = null) {
+  if (slot.querySelector("img, svg")) return;
+  const img = document.createElement("img");
+  img.alt = "";
+  img.loading = "lazy";
+  if (onError) {
+    img.onerror = () => {
+      img.remove();
+      if (slot.isConnected) onError();
+    };
+  }
+  img.src = url;
+  slot.replaceChildren(img);
+}
+
+function drawPortrait(slot) {
+  if (slot.querySelector("img, svg")) return;
+  slot.innerHTML = pixelPortraitSvg(slot.dataset.photoName ?? "", Number(slot.dataset.era) || 2000);
+}
+
+// ---- Pixel portraits ---------------------------------------------------------
+
+// The last resort is drawn, not fetched: a deterministic 1-bit trading-card
+// bust in the four DMG greens, seeded by the player's name and styled by his
+// era — pillbox caps and handlebar mustaches for the pre-war leagues, modern
+// caps after. The same player always gets the same face.
+const INK = { 0: "#9bbc0f", 1: "#8bac0f", 2: "#306230", 3: "#0f380f" };
+const W = 16;
+const H = 16;
+
+function nameHash(name) {
+  let hash = 5381;
+  for (const char of String(name)) hash = ((hash * 33) ^ char.codePointAt(0)) >>> 0;
+  return hash;
+}
+
+export function pixelPortraitSvg(name, era = 2000) {
+  const seed = nameHash(name);
+  const pick = (shift, n) => (seed >>> shift) % n;
+  const vintage = era < 1940;
+  const grid = Array.from({ length: H }, () => new Array(W).fill(0));
+  const put = (row, colFrom, colTo, ink) => {
+    for (let col = colFrom; col <= colTo; col += 1) {
+      if (row >= 0 && row < H && col >= 0 && col < W) grid[row][col] = ink;
+    }
+  };
+
+  const wide = pick(0, 2); // 0: narrow face, 1: wide face
+  const left = 5 - wide;
+  const right = 10 + wide;
+
+  // Face and ears.
+  for (let row = 5; row <= 11; row += 1) put(row, left, right, 1);
+  put(12, left + 1, right - 1, 1);
+
+  // Cap: vintage pillbox sits flat with a band; the modern dome curves.
+  if (vintage && pick(2, 3) > 0) {
+    put(2, left, right, 2);
+    put(3, left, right, pick(3, 2) ? 3 : 2); // band
+    put(4, left - 1, right + 1, 3);          // short flat brim
+  } else {
+    put(2, left + 1, right - 1, 3);
+    put(3, left, right, 3);
+    put(4, pick(3, 2) ? left : left + 4, right + 1, 3); // brim, sometimes cocked
+  }
+  put(5, left, right, pick(4, 3) === 0 ? 3 : 1); // hair peeking out (or not)
+
+  // Eyes: dots or a squint line.
+  const eyeInk = 3;
+  if (pick(5, 3) === 0) {
+    put(7, left + 2, left + 3, eyeInk);
+    put(7, right - 3, right - 2, eyeInk);
+  } else {
+    put(7, left + 2, left + 2, eyeInk);
+    put(7, right - 2, right - 2, eyeInk);
+  }
+  put(9, 7, 8, 2); // nose
+
+  // Facial hair: the old leagues are mustache country.
+  const styles = vintage ? ["stache", "handlebar", "handlebar", "beard", "none"] : ["none", "none", "none", "stache", "beard"];
+  const facial = styles[pick(8, styles.length)];
+  if (facial === "stache") {
+    put(10, left + 2, right - 2, 3);
+  } else if (facial === "handlebar") {
+    put(10, left + 1, right - 1, 3);
+    put(11, left + 1, left + 1, 3);
+    put(11, right - 1, right - 1, 3);
+  } else if (facial === "beard") {
+    put(10, left + 1, right - 1, 3);
+    put(11, left + 1, right - 1, 3);
+    put(12, left + 1, right - 1, 3);
+  }
+  if (facial === "none" || facial === "stache") put(11, 7, 8, 3); // mouth
+
+  // Shoulders and jersey; vintage collars ride high.
+  put(13, 2, 13, 2);
+  put(14, 1, 14, 2);
+  put(15, 1, 14, 2);
+  if (vintage) put(13, left + 1, right - 1, 0);
+  put(14, 7, 8, pick(9, 2) ? 3 : 0); // buttons or lace
+
+  // Emit one rect per horizontal run.
+  const rects = [];
+  for (let row = 0; row < H; row += 1) {
+    let col = 0;
+    while (col < W) {
+      const ink = grid[row][col];
+      let end = col;
+      while (end + 1 < W && grid[row][end + 1] === ink) end += 1;
+      if (ink !== 0) {
+        rects.push(`<rect x="${col}" y="${row}" width="${end - col + 1}" height="1" fill="${INK[ink]}"/>`);
+      }
+      col = end + 1;
+    }
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges" role="img" aria-label="">
+    <rect width="${W}" height="${H}" fill="${INK[0]}"/>${rects.join("")}</svg>`;
 }

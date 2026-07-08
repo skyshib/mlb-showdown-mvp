@@ -388,6 +388,17 @@ export function isTrainerAvailable(save, trainer) {
   return trainer.repeatable || timesBeaten(save, trainer.id) === 0;
 }
 
+// The NPC budget a save actually faces. Budget saves see the printed ladder
+// (2500 -> 7500). Uncapped saves swing much harder: budgets grow on a
+// power-1.5 curve anchored at the first scout's 2500, so the early routes
+// stay winnable while the World Series (7500 -> ~12800) shops for the best
+// thirteen cards money can print.
+export function npcBudget(save, trainer) {
+  if (save?.mode !== "uncapped") return trainer.pointBudget;
+  const anchor = 2500;
+  return Math.round((anchor * Math.pow(trainer.pointBudget / anchor, 1.5)) / 50) * 50;
+}
+
 // Repeatable rewards shrink on repeat wins so farming stays a floor, not an
 // exploit: 100%, 75%, 56%... with a floor of 50 coins.
 export function rewardCoins(save, trainer) {
