@@ -268,6 +268,19 @@ h1.gq-logo {
   height: 100%;
 }
 
+.gq-die-row {
+  display: flex;
+  gap: 7cqw;
+  justify-content: center;
+}
+
+.gq-die-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2cqw;
+}
+
 .gq-die {
   width: 17cqw;
   height: 17cqw;

@@ -119,6 +119,8 @@ export function playPlateAppearance(state, rng) {
   recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay);
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
+  // The at-bat is over: every runner's steal attempt refreshes.
+  state.stealAttemptsThisPA = [];
   state.pitching[pitchingSide].outsRecorded += outsOnPlay;
   state.pitching[pitchingSide].battersFaced += 1;
 
@@ -187,7 +189,9 @@ export function stealCandidates(state) {
   const fielding = totalCatcherFielding(state[pitchingSide]);
   const candidates = [];
 
-  if (runnerOnSecond && !runnerOnThird) {
+  // Real occupancy decides which bases are open; canStealThisPA only gates
+  // the runner's own eligibility (one attempt per runner per at-bat).
+  if (runnerOnSecond && !runnerOnThird && canStealThisPA(state, runnerOnSecond)) {
     candidates.push(createAdvanceCandidate({
       runner: runnerOnSecond,
       fromIndex: 1,
@@ -198,7 +202,7 @@ export function stealCandidates(state) {
       targetBonus: -5
     }));
   }
-  if (runnerOnFirst && !runnerOnSecond) {
+  if (runnerOnFirst && !runnerOnSecond && canStealThisPA(state, runnerOnFirst)) {
     candidates.push(createAdvanceCandidate({
       runner: runnerOnFirst,
       fromIndex: 0,
@@ -222,6 +226,8 @@ export function attemptSteal(state, fromIndex, rng) {
 }
 
 function performStealAttempt(state, stealAttempt, rng) {
+  // Safe or gunned down, this runner's attempt is spent until the next batter.
+  state.stealAttemptsThisPA = [...(state.stealAttemptsThisPA ?? []), stealAttempt.runner.id];
   const battingSide = state.half === "top" ? "away" : "home";
   const pitchingSide = battingSide === "away" ? "home" : "away";
   const battingTeam = state[battingSide];
@@ -365,6 +371,8 @@ export function attemptBunt(state, rng) {
   pitcherLine.outs += outsOnPlay;
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
+  // The at-bat is over: every runner's steal attempt refreshes.
+  state.stealAttemptsThisPA = [];
   state.pitching[pitchingSide].outsRecorded += outsOnPlay;
   state.pitching[pitchingSide].battersFaced += 1;
   state[battingSide].runs = state.score[battingSide];
@@ -442,6 +450,8 @@ export function intentionalWalk(state) {
   pitcherLine.bb += 1;
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
+  // The at-bat is over: every runner's steal attempt refreshes.
+  state.stealAttemptsThisPA = [];
   state.pitching[pitchingSide].battersFaced += 1;
   state[battingSide].runs = state.score[battingSide];
   state[pitchingSide].runsAllowed = state.score[battingSide];
@@ -603,8 +613,17 @@ export function createInitialState(awayTeam, homeTeam) {
     // themselves and extra-base advances resolve by the decision matrix.
     manualPitchingFor: null,
     deferAdvancesFor: null,
-    pendingAdvance: null
+    pendingAdvance: null,
+    // Runner ids that already attempted a steal during the current at-bat —
+    // one green light per runner per batter, safe or not.
+    stealAttemptsThisPA: []
   };
+}
+
+// One steal attempt per runner per at-bat: once a runner goes, he doesn't
+// get another until the batter's turn resolves.
+function canStealThisPA(state, runner) {
+  return Boolean(runner) && !(state.stealAttemptsThisPA ?? []).includes(runner.id);
 }
 
 function createRuntimeTeam(team) {
@@ -985,11 +1004,13 @@ function leadPrefixAttempts(candidates) {
 
 function chooseStealAttempt(state, pitchingSide) {
   if (state.outs >= 3) return null;
-  const [runnerOnFirst, runnerOnSecond, runnerOnThird] = state.bases;
+  const [first, runnerOnSecond, runnerOnThird] = state.bases;
+  // Auto play honors the same rule: one attempt per runner per at-bat.
+  const runnerOnFirst = canStealThisPA(state, first) ? first : null;
   const fielding = totalCatcherFielding(state[pitchingSide]);
   const candidates = [];
 
-  if (runnerOnSecond && !runnerOnThird) {
+  if (runnerOnSecond && !runnerOnThird && canStealThisPA(state, runnerOnSecond)) {
     candidates.push(createAdvanceCandidate({
       runner: runnerOnSecond,
       fromIndex: 1,

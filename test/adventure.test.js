@@ -55,6 +55,7 @@ import { validateRoster, buildTeam } from "../src/rules/draft.js";
 import {
   stealCandidates,
   attemptSteal,
+  playPlateAppearance,
   changePitcher,
   pitcherStatus,
   isGameOver,
@@ -516,6 +517,37 @@ test("stealCandidates lists every open-base runner; attemptSteal forces the run"
   assert.equal(event.type, "steal");
   assert.ok(["SB", "CS"].includes(event.result));
   assert.equal(attemptSteal(state, 2, createRng("x")), null, "no candidate on that base");
+});
+
+test("a runner gets one steal attempt per at-bat, refreshed by the next batter", () => {
+  const { player, npc } = hookTeams();
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "steal-once" });
+  const state = battle.state;
+  state.outs = 0;
+  state.bases = [{ id: "r1", name: "Runner One", speed: 28 }, null, null];
+
+  const event = attemptSteal(state, 0, createRng("steal-once-roll"));
+  assert.ok(event, "the first attempt goes");
+  assert.deepEqual(state.stealAttemptsThisPA, ["r1"], "the attempt is on the books");
+  if (event.result === "SB") {
+    assert.equal(state.bases[1]?.id, "r1", "safe at second");
+    assert.equal(stealCandidates(state).length, 0, "no second bite this at-bat");
+    assert.equal(attemptSteal(state, 1, createRng("x")), null, "forcing it is refused");
+  }
+
+  // A different runner still gets his own green light — and open-base checks
+  // read real occupancy, so nobody is waved into an occupied bag.
+  state.bases[0] = { id: "r2", name: "Runner Two", speed: 15 };
+  const others = stealCandidates(state);
+  if (state.bases[1]) {
+    assert.equal(others.length, 0, "second is occupied; r2 has nowhere to go");
+  } else {
+    assert.deepEqual(others.map((c) => c.runner.id), ["r2"], "r2 may still run");
+  }
+
+  // The next plate appearance clears the slate.
+  playPlateAppearance(state, createRng("steal-once-pa"));
+  assert.deepEqual(state.stealAttemptsThisPA, [], "a new batter refreshes everyone");
 });
 
 test("changePitcher walks the staff and stops at the last arm", () => {
@@ -1314,10 +1346,18 @@ test("high-leverage plate appearances pause on the d20 before revealing", async 
   battleScreen.key(app, "a"); // SWING AWAY
   assert.equal(app.screen.mode, "drama", "the swing lands in drama mode");
   assert.ok(battle.events.length > eventsBefore, "the engine already rolled");
-  assert.equal(typeof app.screen.drama.roll, "number", "the real roll is staged");
-  assert.ok(app.screen.drama.roll >= 1 && app.screen.drama.roll <= 20);
+  const stages = app.screen.drama.stages;
+  assert.deepEqual(stages.map((stage) => stage.label), ["PITCH", "SWING"], "both halves of the duel stage");
+  for (const stage of stages) {
+    assert.ok(stage.roll >= 1 && stage.roll <= 20, `${stage.label} is a real d20 roll`);
+  }
+  assert.match(stages[0].caption, /VS OB \d+ — (PITCHER|BATTER)'S CHART/, "the pitch die carries its verdict");
+  const last = battle.events[battle.events.length - 1];
+  assert.equal(stages[0].roll, last.controlRoll, "the pitch die lands on the pitcher's real roll");
+  assert.equal(stages[1].roll, last.resultRoll, "the swing die lands on the batter's real roll");
   const html = battleScreen.render(app);
-  assert.ok(html.includes("gq-die"), "the die is on screen");
+  assert.equal((html.match(/gq-die-stage/g) ?? []).length, 2, "two dice on screen");
+  assert.ok(html.includes("PITCH") && html.includes("SWING"), "each die is labeled");
   assert.ok(!html.includes("gq-battle-hud"), "the HUD hides so the score can't spoil it");
   battleScreen.key(app, "a"); // skip the suspense
   assert.notEqual(app.screen.mode, "drama", "Z reveals immediately");

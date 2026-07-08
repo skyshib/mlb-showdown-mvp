@@ -290,28 +290,42 @@ function fastForwardItem() {
 // ---- Dice-roll drama ---------------------------------------------------------
 
 // High-leverage plate appearances (two outs and the bases loaded, or the 9th
-// onward in a tight game) pause on a tumbling d20 before the call. The engine
-// has already rolled — the pause is pure theater, and the die lands on the
-// real chart roll before the lines read out. The drama screen hides the HUD
-// so the updated score can't spoil the result. Z skips the suspense.
+// onward in a tight game) pause on the tumbling d20s before the call. The
+// engine has already rolled — the pause is pure theater, staged the way the
+// tabletop plays it: the PITCH die lands first and calls whose chart it is,
+// then the SWING die lands, then the lines read out. The drama screen hides
+// the HUD so the updated score can't spoil the result. Z skips the suspense.
 function resolveWithDrama(app, act) {
   const dramatic = isDramaticMoment(app.screen.battle.state);
   const events = act();
-  const roll = dramatic ? lastRoll(events) : null;
-  if (roll === null) return afterAction(app, events);
+  const stages = dramatic ? dramaStages(events) : null;
+  if (!stages) return afterAction(app, events);
   app.screen.mode = "drama";
-  app.screen.drama = { events, roll };
+  app.screen.drama = { events, stages };
 }
 
-// The roll worth staging: the chart roll of the newest event that has one
-// (steals keep theirs inside the attempt detail).
-function lastRoll(events) {
+// The rolls worth staging, from the newest event that has any: a plate
+// appearance carries the pitcher's control roll AND the batter's chart roll;
+// an NPC steal only has the throw.
+function dramaStages(events) {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
     if (!event) continue;
-    if (typeof event.resultRoll === "number") return event.resultRoll;
     const steal = event.playDetails?.stealAttempt;
-    if (typeof steal?.roll === "number") return steal.roll;
+    if (typeof steal?.roll === "number") return [{ label: "THE THROW", roll: steal.roll }];
+    if (typeof event.resultRoll === "number") {
+      const stages = [];
+      if (typeof event.controlRoll === "number") {
+        stages.push({
+          label: "PITCH",
+          roll: event.controlRoll,
+          // The pitch verdict is half the drama: whose chart takes the swing.
+          caption: `${event.controlTotal} VS OB ${event.onBase} — ${event.chartOwner === "pitcher" ? "PITCHER'S" : "BATTER'S"} CHART`
+        });
+      }
+      stages.push({ label: "SWING", roll: event.resultRoll });
+      return stages;
+    }
   }
   return null;
 }
@@ -333,36 +347,51 @@ function stopDramaTimer() {
 }
 
 function renderDrama(app, trainer) {
+  const stages = app.screen.drama?.stages ?? [];
   return `<div class="gq-screen">
     <div class="gq-topbar"><span>VS ${escapeHtml(trainer.name)}</span><span>&#9733; HIGH LEVERAGE &#9733;</span></div>
     <div class="gq-body gq-center gq-drama">
       <p>THE CROWD IS ON ITS FEET...</p>
-      <div class="gq-die" data-die>&#9670;</div>
+      <div class="gq-die-row">${stages
+        .map((stage, index) => `<div class="gq-die-stage">
+          <div class="gq-die" data-die="${index}">&#9670;</div>
+          <p class="gq-dim">${escapeHtml(stage.label)}</p>
+        </div>`)
+        .join("")}</div>
+      <p class="gq-dim" data-die-caption>&nbsp;</p>
       <p class="gq-dim gq-blink">THE D20 TUMBLES</p>
     </div>
     <div class="gq-textbox"><p class="gq-dim">Z to skip the suspense.</p></div>
   </div>`;
 }
 
-// The browser-side animation: cycle faces, land on the real roll, hold a
-// beat, then reveal. Tests drive reveal through the key handler instead.
+// The browser-side animation, one die at a time: cycle faces, land on the
+// real roll (posting the pitch verdict under the dice), move to the next,
+// hold a beat, then reveal. Tests drive reveal through the key handler.
 function mountDrama(app) {
-  const die = document.querySelector("[data-die]");
-  if (!die) return;
   stopDramaTimer();
-  let ticks = 0;
-  dramaTimer = setInterval(() => {
-    if (!die.isConnected || !app.screen.drama) return stopDramaTimer();
-    ticks += 1;
-    if (ticks < 10) {
-      die.textContent = String(((ticks * 7) % 20) + 1);
-      return;
-    }
-    stopDramaTimer();
-    die.textContent = String(app.screen.drama.roll);
-    die.classList.add("gq-die-landed");
-    dramaTimer = setTimeout(() => revealDrama(app), 700);
-  }, 90);
+  const stages = app.screen.drama?.stages ?? [];
+  const spin = (index) => {
+    const die = document.querySelector(`[data-die="${index}"]`);
+    if (!die || !app.screen.drama) return stopDramaTimer();
+    let ticks = 0;
+    dramaTimer = setInterval(() => {
+      if (!die.isConnected || !app.screen.drama) return stopDramaTimer();
+      ticks += 1;
+      if (ticks < 8) {
+        die.textContent = String(((ticks * 7 + index * 5) % 20) + 1);
+        return;
+      }
+      stopDramaTimer();
+      die.textContent = String(stages[index].roll);
+      die.classList.add("gq-die-landed");
+      const caption = document.querySelector("[data-die-caption]");
+      if (stages[index].caption && caption) caption.textContent = stages[index].caption;
+      if (index + 1 < stages.length) dramaTimer = setTimeout(() => spin(index + 1), 350);
+      else dramaTimer = setTimeout(() => revealDrama(app), 700);
+    }, 85);
+  };
+  spin(0);
 }
 
 function afterAction(app, events, presetLines = null) {
