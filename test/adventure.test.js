@@ -986,6 +986,15 @@ test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () =>
     // 6.9% HR/PA — the advantage carries the power, not raw slot count.
     const ruth = pool.find((card) => card.name === "Babe Ruth");
     assert.ok(slots(ruth, "HR") >= 2 && ruth.onBase >= 14, "the Babe still slugs");
+    // Defense and speed come from real records now.
+    const ozzie = pool.find((card) => card.name === "Ozzie Smith");
+    const pudge = pool.find((card) => card.name === "Ivan Rodriguez");
+    const rickey = pool.find((card) => card.name === "Rickey Henderson");
+    const dunn = pool.find((card) => card.name === "Adam Dunn");
+    assert.ok(ozzie.fielding >= 4, "the Wizard tops the shortstop band");
+    assert.ok(pudge.fielding >= 8, "Pudge's arm is the real steal deterrent");
+    assert.ok(rickey.speed >= 20, "Rickey flies");
+    assert.ok(dunn.fielding <= 1, "the metrics remember Adam Dunn's glove");
     // Under league-backout math a chart only carries a player's surplus over
     // what pitcher charts already concede, so the worst hitters legitimately
     // show empty hit columns — but the pool at large must stay singles-rich.
@@ -1034,6 +1043,19 @@ test("simulated matchups reproduce real season rates within tolerance", () => {
   } finally {
     setUniverseSeed("test-seed", "fictional");
   }
+});
+
+test("the shop catalog lists the whole universe, best first", async () => {
+  const { catalogRows } = await import("../src/adventure/ui/collectionScreens.js");
+  const all = catalogRows("ALL");
+  assert.equal(all.length, adventurePool().length, "every card in the league shows");
+  for (let i = 1; i < Math.min(all.length, 200); i += 1) {
+    assert.ok(all[i - 1].points >= all[i].points, "sorted by printed points, best first");
+  }
+  const catchers = catalogRows("C");
+  assert.ok(catchers.length > 0 && catchers.every((card) => card.position === "C"), "position paging filters");
+  const arms = catalogRows("SP");
+  assert.ok(arms.every((card) => card.role === "SP"));
 });
 
 test("the binder pages by position with the arrow filters", async () => {

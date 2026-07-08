@@ -97,6 +97,33 @@ def h(pid, salt, lo, hi):
     digest = hashlib.sha1(f"{pid}:{salt}".encode()).digest()
     return lo + digest[0] % (hi - lo + 1)
 
+# Real defensive ratings: FanGraphs Defense runs z-scored by position/era,
+# databank range-factor/fielding-pct fallback, catcher arms from real
+# caught-stealing rates, Gold Gloves as a bump. See process-defense.py.
+try:
+    DEF_RATINGS = json.load(open(os.path.join(SP, "defense-ratings.json")))
+except FileNotFoundError:
+    DEF_RATINGS = {}
+
+def real_fielding(pid, pos):
+    lo, hi = FIELD_RANGE[pos]
+    if hi <= lo:
+        return lo
+    r = DEF_RATINGS.get(pid)
+    if not r:
+        # No defensive record: a fringe glove, just below band middle.
+        return round(lo + (hi - lo) * 0.4)
+    if pos == "C" and r.get("cs_z") is not None:
+        z = 0.7 * r["cs_z"] + 0.3 * r["z"]   # the engine uses C fielding as the arm
+    else:
+        z = r["z"]
+    z += min(r["gg"], 8) * 0.2
+    z = max(-2.0, min(2.75, z))
+    return round(lo + (hi - lo) * (z + 2.0) / 4.75)
+
+# Small positional priors on raw footspeed, per the design brief.
+SPEED_PRIOR = {"C": -2, "1B": -1, "DH": -1, "2B": 1, "SS": 1, "CF": 2, "3B": 0, "LF/RF": 0}
+
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
@@ -211,10 +238,15 @@ def build_hitter(pid, t, pos, L):
     so = clamp(round(max(0.0, ((t["SO"] / pa) - (1 - A) * pitcher_league["K"]) / A) * 20), 0, outs)
     gb = round((outs - so) * 0.55)
     fb = outs - so - gb
-    sb650 = t["SB"] / pa * 650
-    speed = clamp(round(8 + sb650 * 0.3 + (t["3B"] / max(1, t["H"])) * 30), 6, 22)
-    frange = FIELD_RANGE[pos]
-    fielding = h(pid, "fld", frange[0], frange[1])
+    # Speed: net steals (efficiency counts), triples as a footspeed proxy,
+    # and a small positional prior. Pre-1951 seasons often lack CS data —
+    # when a real base stealer shows zero CS, discount volume instead.
+    if t["CS"] == 0 and t["SB"] >= 15:
+        net = t["SB"] * 0.7
+    else:
+        net = max(0, t["SB"] - t["CS"])
+    speed = clamp(round(8 + SPEED_PRIOR.get(pos, 0) + (net / pa * 650) * 0.35 + (t["3B"] / max(1, t["H"])) * 25), 6, 22)
+    fielding = real_fielding(pid, pos)
     parts = [("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("T", tr), ("H", hr)]
     power = sum(CHART_POWER[c] * n for c, n in parts)
     points = ob * 20 + fielding * 7 + max(0, round((speed - 1) * 1.5)) + power

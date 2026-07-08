@@ -5,7 +5,7 @@ import { cardPanelHtml, escapeHtml } from "./ui/helpers.js";
 import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, starterRevealScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
 import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
-import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen } from "./ui/collectionScreens.js";
+import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen } from "./ui/collectionScreens.js";
 import { gameStatsScreen, seasonStatsScreen, championshipScreen } from "./ui/statsScreens.js";
 
 const SCREENS = {
@@ -25,6 +25,7 @@ const SCREENS = {
   claimCard: claimCardScreen,
   shop: shopScreen,
   sell: sellScreen,
+  catalog: catalogScreen,
   binder: binderScreen,
   team: teamScreen,
   lineup: lineupScreen,

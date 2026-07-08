@@ -1,5 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag } from "./helpers.js";
-import { PACKS, RARITIES, openPack, shopStock, cardById } from "../packs.js";
+import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool } from "../packs.js";
 import { packEggs } from "../feats.js";
 import {
   persistSave,
@@ -42,9 +42,72 @@ function shopItems(app) {
     });
   }
   items.push({ label: "SELL DUPLICATES", run: (a) => a.go("sell", { index: 0 }) });
+  items.push({ label: "CARD CATALOG", run: (a) => a.go("catalog", { index: 0, filter: "ALL" }) });
   items.push({ label: "LEAVE SHOP", run: (a) => a.go("map") });
   return items;
 }
+
+// ---- Catalog: every card in this universe ------------------------------------
+
+// The full pool is big (up to ~10k cards), so rows sort once per filter and
+// the list renders a window around the cursor instead of the whole thing.
+const CATALOG_WINDOW = 25;
+let catalogCache = { pool: null, filter: null, rows: null };
+
+export function catalogRows(filter = "ALL") {
+  const pool = adventurePool();
+  if (catalogCache.pool === pool && catalogCache.filter === filter) return catalogCache.rows;
+  const cards = filter === "ALL"
+    ? pool
+    : filter === "SP" || filter === "RP"
+      ? pool.filter((card) => card.role === filter)
+      : pool.filter((card) => card.kind === "hitter" && card.position === filter);
+  const rows = [...cards].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+  catalogCache = { pool, filter, rows };
+  return rows;
+}
+
+export const catalogScreen = {
+  render(app) {
+    const filter = app.screen.filter ?? "ALL";
+    const rows = catalogRows(filter);
+    const index = clampIndex(app.screen.index ?? 0, rows.length);
+    const start = Math.max(0, Math.min(index - Math.floor(CATALOG_WINDOW / 2), rows.length - CATALOG_WINDOW));
+    const visible = rows.slice(start, start + CATALOG_WINDOW);
+    const selected = rows[index];
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)}</span><span>${index + 1}/${rows.length}</span></div>
+      <div class="gq-body"><div class="gq-columns">
+        <div class="gq-frame gq-scroll">${menuHtml(
+          visible.map((card) => {
+            const owned = ownedCount(app.save, card.id);
+            return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">&#9670;x${owned}</span>` : ""}` };
+          }),
+          index - start,
+          { offset: start }
+        )}</div>
+        <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
+      </div></div>
+      <div class="gq-textbox"><p class="gq-dim">Every card in this league, best first. &#9664;/&#9654; page by position &middot; &#9670; = owned. X to leave.</p></div>
+    </div>`;
+  },
+  hoverCard(app, index) {
+    return catalogRows(app.screen.filter ?? "ALL")[index] ?? null;
+  },
+  key(app, key) {
+    const filter = app.screen.filter ?? "ALL";
+    if (key === "left" || key === "right") {
+      const at = BINDER_FILTERS.indexOf(filter);
+      app.screen.filter = BINDER_FILTERS[(at + (key === "right" ? 1 : -1) + BINDER_FILTERS.length) % BINDER_FILTERS.length];
+      app.screen.index = 0;
+    } else if (key === "up" || key === "down") {
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), catalogRows(filter).length);
+    } else if (key === "b" || key === "a") {
+      app.go("shop", { menuIndex: 0 });
+    }
+    app.rerender();
+  }
+};
 
 function buyPack(app, pack) {
   const save = app.save;
