@@ -195,11 +195,20 @@ export function isLeverageMoment(state) {
 }
 
 // The moments that earn the slow d20: two outs with the bases loaded, any
-// time; or the 9th inning onward with the game within two runs. Checked
-// BEFORE the plate appearance resolves — the drama is in the wind-up.
+// time; or the 9th inning onward while the game hangs — the side at the
+// plate tied or clawing back within two. A batting team already AHEAD is
+// mop-up for the losing arm, not drama, unless the bases are loaded under
+// him. Checked BEFORE the plate appearance resolves — the drama is in the
+// wind-up.
 export function isDramaticMoment(state) {
-  if (state.outs === 2 && state.bases[0] && state.bases[1] && state.bases[2]) return true;
-  return state.inning >= 9 && Math.abs(state.score.home - state.score.away) <= 2;
+  const basesLoaded = Boolean(state.bases[0] && state.bases[1] && state.bases[2]);
+  if (state.outs === 2 && basesLoaded) return true;
+  if (state.inning < 9) return false;
+  const battingSide = state.half === "top" ? "away" : "home";
+  const pitchingSide = battingSide === "away" ? "home" : "away";
+  const lead = state.score[battingSide] - state.score[pitchingSide];
+  if (lead > 0) return basesLoaded;
+  return lead >= -2;
 }
 
 // Auto-resolve on engine autopilot (decision matrix steals and advances,

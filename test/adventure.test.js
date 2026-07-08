@@ -1376,12 +1376,21 @@ test("high-leverage plate appearances pause on the d20 before revealing", async 
   state.bases = [null, null, null];
   state.outs = 0;
   state.inning = 9;
-  state.score = { away: 2, home: 1 };
-  assert.equal(isDramaticMoment(state), true, "the 9th in a one-run game: drama");
+  state.score = { away: 1, home: 2 };
+  assert.equal(isDramaticMoment(state), true, "trailing by one in the 9th: drama");
+  state.score = { away: 2, home: 2 };
+  assert.equal(isDramaticMoment(state), true, "tied in the 9th: drama");
   state.score = { away: 9, home: 1 };
   assert.equal(isDramaticMoment(state), false, "a 9th-inning blowout stays quick");
+  // The batting team piling onto a losing arm is mop-up, not drama...
+  state.score = { away: 3, home: 2 };
+  assert.equal(isDramaticMoment(state), false, "the pitching team losing in the 9th: no spotlight");
+  // ...unless the bases are loaded under him.
+  state.bases = [{ id: "r1", name: "A", speed: 10 }, { id: "r2", name: "B", speed: 10 }, { id: "r3", name: "C", speed: 10 }];
+  assert.equal(isDramaticMoment(state), true, "bases loaded brings the lights back");
+  state.bases = [null, null, null];
 
-  state.score = { away: 2, home: 1 };
+  state.score = { away: 1, home: 2 };
   const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
   const eventsBefore = battle.events.length;
   battleScreen.key(app, "a"); // SWING AWAY
