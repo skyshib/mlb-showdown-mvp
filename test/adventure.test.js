@@ -660,6 +660,12 @@ test("an intentional walk is free and forces a run with the bases full", () => {
   const event = intentionalWalk(state);
   assert.equal(event.result, "IBB");
   assert.equal(state.bases[0]?.name, event.batter, "batter takes first");
+  // No pitches thrown: the walk is charged, but the arm faced nobody — the
+  // box score and the fatigue tank both stay put.
+  assert.equal(state.pitching.home.battersFaced, 0, "the fatigue tank does not move");
+  const armLine = [...state.stats.pitchers.values()][0];
+  assert.equal(armLine.bb, 1, "the walk is charged");
+  assert.equal(armLine.bf, 0, "but no batter faced");
   state.bases[1] = { id: "r2", name: "Runner Two", speed: 10 };
   state.bases[2] = { id: "r3", name: "Runner Three", speed: 10 };
   const scoreBefore = state.score.away;

@@ -446,13 +446,14 @@ export function intentionalWalk(state) {
   hitterLine.pa += 1;
   hitterLine.bb += 1;
   hitterLine.rbi += runs;
-  pitcherLine.bf += 1;
+  // No pitches thrown: an intentional pass charges the walk but never counts
+  // as a batter faced — neither in the box score nor against the arm's
+  // fatigue tank.
   pitcherLine.bb += 1;
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
   // The at-bat is over: every runner's steal attempt refreshes.
   state.stealAttemptsThisPA = [];
-  state.pitching[pitchingSide].battersFaced += 1;
   state[battingSide].runs = state.score[battingSide];
   state[pitchingSide].runsAllowed = state.score[battingSide];
 
