@@ -137,7 +137,9 @@ def spread(total, weights):
 
 CHART_POWER = {"K": -4, "G": -2, "F": -2, "W": 4, "S": 5, "D": 9, "T": 11, "H": 14}
 PIT_POWER = {"P": 8, "K": 10, "G": 8, "F": 6, "W": -5, "S": -7, "D": -11, "H": -16}
-FIELD_RANGE = {"C": (3, 9), "1B": (0, 1), "2B": (1, 5), "3B": (0, 3), "SS": (1, 5), "LF/RF": (0, 2), "CF": (1, 3), "DH": (0, 0)}
+# Bands follow the real 2002-05 print ranges: elite catcher arms reach +14,
+# shortstop wizards +7, and the floors sit at 0 so the butchers show.
+FIELD_RANGE = {"C": (2, 14), "1B": (0, 2), "2B": (0, 6), "3B": (0, 4), "SS": (0, 7), "LF/RF": (0, 3), "CF": (0, 4), "DH": (0, 0)}
 
 def chart_string(parts):
     out = []
@@ -245,7 +247,7 @@ def build_hitter(pid, t, pos, L):
         net = t["SB"] * 0.7
     else:
         net = max(0, t["SB"] - t["CS"])
-    speed = clamp(round(8 + SPEED_PRIOR.get(pos, 0) + (net / pa * 650) * 0.35 + (t["3B"] / max(1, t["H"])) * 25), 6, 22)
+    speed = clamp(round(8 + SPEED_PRIOR.get(pos, 0) + (net / pa * 650) * 0.35 + (t["3B"] / max(1, t["H"])) * 25), 5, 25)
     fielding = real_fielding(pid, pos)
     parts = [("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("T", tr), ("H", hr)]
     power = sum(CHART_POWER[c] * n for c, n in parts)
@@ -284,7 +286,7 @@ def build_pitcher(pid, t, L):
         # Swingmen log relief innings too; estimate those out (~1.5 IP per
         # relief outing) so IP reflects innings per START, not per GS-divisor.
         start_outs = max(0.0, t["IPouts"] - (t["G"] - t["GS"]) * 4.5)
-        role, ip_card = "SP", clamp(round(start_outs / max(1, t["GS"]) / 3), 4, 8)
+        role, ip_card = "SP", clamp(round(start_outs / max(1, t["GS"]) / 3), 4, 9)
     else:
         role, ip_card = "RP", 1 if t["SV"] > 30 or t["IPouts"] / max(1, t["G"]) < 5 else 2
     parts = [("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("H", hr)]
@@ -332,6 +334,11 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
     for key, t in bat_slice.items():
         pid = key if isinstance(key, str) else key[0]
         if t["AB"] + t["BB"] < min_pa or pid not in people:
+            continue
+        # Pitchers who merely batted a lot (every dead-ball workhorse) don't
+        # get hitter cards; true two-way players (Ruth, Ohtani) keep both.
+        pitching = pit_slice.get(key)
+        if pitching and pitching["IPouts"] >= t["AB"] + t["BB"]:
             continue
         pos = pos_slice.get(key, "DH")
         card = build_hitter(pid, t, pos, bat_league_of(key))
