@@ -68,7 +68,7 @@ def num(row, key):
 
 field = defaultdict(lambda: defaultdict(int))  # (pid, pos, decade) -> sums
 cs_tot = defaultdict(lambda: defaultdict(int)) # (pid, decade) -> SB/CS against (catchers)
-for r in csv.DictReader(open(os.path.join(L, "Fielding.csv"))):
+for r in csv.DictReader(open(os.path.join(L, "Fielding.csv"), encoding="utf-8-sig")):
     pos = POS_NORM.get(r.get("POS") or "")
     if not pos:
         continue
@@ -114,7 +114,7 @@ for dec, table in cs_groups.items():
 
 # ---- Gold Gloves ----------------------------------------------------------------
 gg = defaultdict(int)
-for r in csv.DictReader(open(os.path.join(L, "AwardsPlayers.csv"))):
+for r in csv.DictReader(open(os.path.join(L, "AwardsPlayers.csv"), encoding="utf-8-sig")):
     if (r.get("awardID") or "").strip() == "Gold Glove":
         gg[r["playerID"]] += 1
 

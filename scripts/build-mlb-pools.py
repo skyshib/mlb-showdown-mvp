@@ -16,7 +16,9 @@ SP = os.path.dirname(os.path.abspath(__file__))
 L = os.path.join(SP, "lahman")
 
 def rows(name):
-    with open(os.path.join(L, name), newline="", encoding="utf-8", errors="replace") as f:
+    # utf-8-sig: some databank releases ship with a BOM, which would otherwise
+    # corrupt the first header name (yearID) and zero out every year.
+    with open(os.path.join(L, name), newline="", encoding="utf-8-sig", errors="replace") as f:
         yield from csv.DictReader(f)
 
 def num(row, key):
@@ -205,12 +207,26 @@ def league_tables(bat_decade):
         if pa < 50000:
             continue
         singles = t["H"] - t["2B"] - t["3B"] - t["HR"]
+        # League footspeed norms: net steals per PA (early decades lack CS
+        # entirely — discount raw SB the same way player cards do) and
+        # triples per hit. Speed ratings normalize against these, so 1890s
+        # scorekeeping can't blow out the scale.
+        net = (t["SB"] - t["CS"]) if t["CS"] > 0 else t["SB"] * 0.7
         tables[dec] = {
             "BB": t["BB"] / pa, "S": singles / pa, "D": t["2B"] / pa,
             "T": t["3B"] / pa, "HR": t["HR"] / pa, "K": t["SO"] / pa,
             "OBP": (t["H"] + t["BB"]) / pa,
+            "NET": max(0.0, net) / pa, "T_H": t["3B"] / max(1, t["H"]), "PA": pa,
         }
     return tables
+
+# The modern reference the norms rescale to: PA-weighted 1970s-2000s league
+# rates. A player who steals at 3x HIS league's clip rates like a modern
+# player stealing at 3x the modern clip, whatever the era's bookkeeping.
+def speed_reference(tables):
+    decs = [d for d in range(1970, 2010, 10) if d in tables]
+    total = sum(tables[d]["PA"] for d in decs)
+    return {k: sum(tables[d][k] * tables[d]["PA"] for d in decs) / total for k in ("NET", "T_H")}
 
 def blend_league(tables, weights):
     total = sum(w for dec, w in weights.items() if dec in tables)
@@ -223,6 +239,26 @@ def blend_league(tables, weights):
         for k, v in tables[dec].items():
             blend[k] += v * (w / total)
     return blend
+
+# Speed: net steals (efficiency counts) and triples-per-hit as footspeed
+# proxies, each normalized to the player's own era and rescaled toward the
+# modern reference norm (REF_SPEED), plus a small positional prior. Absolute
+# rates would let pre-1900 bookkeeping (steals credited for extra bases,
+# dead-ball triples) pin the whole scale. The era factor is square-root
+# damped: era gaps are half bookkeeping and strategy (normalize away), half
+# real rate signal (keep) — so Ichiro rates a burner against his own league,
+# 1890s 100-steal seasons read "fast for his day" instead of "faster than
+# Rickey", and the station-to-station 1950s don't inflate into track stars.
+# Pre-1951 seasons often lack CS data — when a real base stealer shows zero
+# CS, discount volume instead.
+def speed_rating(t, pa, pos, L):
+    if t["CS"] == 0 and t["SB"] >= 15:
+        net = t["SB"] * 0.7
+    else:
+        net = max(0, t["SB"] - t["CS"])
+    net_rate = (net / pa) * (REF_SPEED["NET"] / max(1e-4, L.get("NET", REF_SPEED["NET"]))) ** 0.5
+    t3_rate = (t["3B"] / max(1, t["H"])) * (REF_SPEED["T_H"] / max(1e-3, L.get("T_H", REF_SPEED["T_H"]))) ** 0.5
+    return clamp(round(8 + SPEED_PRIOR.get(pos, 0) + net_rate * 227.5 + t3_rate * 25), 8, 28)
 
 def build_hitter(pid, t, pos, L):
     pa = t["AB"] + t["BB"]
@@ -246,14 +282,7 @@ def build_hitter(pid, t, pos, L):
     so = clamp(round(max(0.0, ((t["SO"] / pa) - (1 - A) * pitcher_league["K"]) / A) * 20), 0, outs)
     gb = round((outs - so) * 0.55)
     fb = outs - so - gb
-    # Speed: net steals (efficiency counts), triples as a footspeed proxy,
-    # and a small positional prior. Pre-1951 seasons often lack CS data —
-    # when a real base stealer shows zero CS, discount volume instead.
-    if t["CS"] == 0 and t["SB"] >= 15:
-        net = t["SB"] * 0.7
-    else:
-        net = max(0, t["SB"] - t["CS"])
-    speed = clamp(round(8 + SPEED_PRIOR.get(pos, 0) + (net / pa * 650) * 0.35 + (t["3B"] / max(1, t["H"])) * 25), 8, 28)
+    speed = speed_rating(t, pa, pos, L)
     fielding = real_fielding(pid, pos)
     parts = [("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("T", tr), ("H", hr)]
     power = sum(CHART_POWER[c] * n for c, n in parts)
@@ -374,6 +403,7 @@ for key, span in bat_spans.items():
         spans_all[key] = [min(span[0], pit_spans[key][0]), max(span[1], pit_spans[key][1])]
 
 LEAGUE = league_tables(bat_decade)
+REF_SPEED = speed_reference(LEAGUE)
 
 # Era weights: a player's league context blends the decades he actually
 # played in, weighted by his PA (hitters) or IP (pitchers) in each.

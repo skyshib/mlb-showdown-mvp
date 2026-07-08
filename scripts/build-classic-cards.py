@@ -10,7 +10,7 @@ import csv as _csv
 try:
     _mlbam = json.load(open(os.path.join(SP, "mlbam-map.json")))
     _names = {}
-    for _r in _csv.DictReader(open(os.path.join(SP, "lahman", "People.csv"))):
+    for _r in _csv.DictReader(open(os.path.join(SP, "lahman", "People.csv"), encoding="utf-8-sig")):
         _n = f"{_r.get('nameFirst') or ''} {_r.get('nameLast') or ''}".strip()
         if _n in _names:
             _names[_n] = None  # ambiguous name: skip

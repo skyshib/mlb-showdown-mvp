@@ -35,9 +35,11 @@ for (const [from, to] of WINDOWS) {
 await writeFile(new URL("./fg-defense-raw.json", import.meta.url), JSON.stringify(rows));
 console.log("saved", rows.length, "player-window rows");
 
-// Chadwick register shards: fangraphs id -> bbref/lahman id.
+// Chadwick register shards: fangraphs id -> bbref/lahman id, plus
+// bbref/lahman id -> MLBAM id (the official-headshot key).
 await mkdir(new URL("./register/", import.meta.url), { recursive: true });
 const map = {};
+const mlbam = {};
 for (const shard of "0123456789abcdef") {
   const url = `https://raw.githubusercontent.com/chadwickbureau/register/master/data/people-${shard}.csv`;
   const response = await fetch(url, { headers: UA });
@@ -47,13 +49,16 @@ for (const shard of "0123456789abcdef") {
   const header = lines[0].split(",");
   const fgIdx = header.indexOf("key_fangraphs");
   const bbIdx = header.indexOf("key_bbref");
+  const mlbamIdx = header.indexOf("key_mlbam");
   for (const line of lines.slice(1)) {
     const cells = line.split(",");
-    const fg = cells[fgIdx], bb = cells[bbIdx];
+    const fg = cells[fgIdx], bb = cells[bbIdx], mlb = cells[mlbamIdx];
     if (fg && bb) map[fg] = bb;
+    if (bb && mlb) mlbam[bb] = Number(mlb);
   }
   console.log(`register ${shard}: ok (${Object.keys(map).length} mapped so far)`);
   await delay(300);
 }
 await writeFile(new URL("./fg-id-map.json", import.meta.url), JSON.stringify(map));
-console.log("id map saved:", Object.keys(map).length);
+await writeFile(new URL("./mlbam-map.json", import.meta.url), JSON.stringify(mlbam));
+console.log("id map saved:", Object.keys(map).length, "| mlbam map:", Object.keys(mlbam).length);
