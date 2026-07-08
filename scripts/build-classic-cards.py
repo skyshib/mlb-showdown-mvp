@@ -5,6 +5,21 @@ import json, os, re, sys
 SP = os.path.dirname(os.path.abspath(__file__))
 cards = json.load(open(os.path.join(SP, "classic-raw.json")))
 
+# Unique-name -> MLBAM id, for official headshots on the real cards.
+import csv as _csv
+try:
+    _mlbam = json.load(open(os.path.join(SP, "mlbam-map.json")))
+    _names = {}
+    for _r in _csv.DictReader(open(os.path.join(SP, "lahman", "People.csv"))):
+        _n = f"{_r.get('nameFirst') or ''} {_r.get('nameLast') or ''}".strip()
+        if _n in _names:
+            _names[_n] = None  # ambiguous name: skip
+        else:
+            _names[_n] = _mlbam.get(_r["playerID"])
+    NAME_MLBAM = {k: v for k, v in _names.items() if v}
+except FileNotFoundError:
+    NAME_MLBAM = {}
+
 RESULT_CODE = {"PU": "P", "SO": "K", "GB": "G", "FB": "F", "W": "W", "S": "S", "S+": "+", "DB": "D", "TR": "T", "HR": "H"}
 SPEED_LETTERS = {"A": 20, "B": 15, "C": 10}
 POS_MAP = {"LF-RF": "LF/RF", "OF": "CF", "IF": "SS", "---": "DH"}
@@ -78,10 +93,10 @@ for card in cards:
     foil = 1 if card.get("foil") else 0
     if card["pitcher"]:
         role = "SP" if card["positions"].split("|")[0].strip().startswith("Starter") else "RP"
-        out.append([card_id, display, card["team"], card["year"], card["edition"], 1, card["points"], obc, min(max(spd, 1), 9), role, 0, card["hand"], chart_str, foil])
+        out.append([card_id, display, card["team"], card["year"], card["edition"], 1, card["points"], obc, min(max(spd, 1), 9), role, 0, card["hand"], chart_str, foil, NAME_MLBAM.get(card["name"])])
     else:
         pos, fielding = primary_position(card["positions"])
-        out.append([card_id, display, card["team"], card["year"], card["edition"], 0, card["points"], obc, min(max(spd, 6), 25), pos, fielding, card["hand"], chart_str, foil])
+        out.append([card_id, display, card["team"], card["year"], card["edition"], 0, card["points"], obc, min(max(spd, 5), 28), pos, fielding, card["hand"], chart_str, foil, NAME_MLBAM.get(card["name"])])
 
 print(f"emitting {len(out)} cards ({skipped} skipped)", file=sys.stderr)
 

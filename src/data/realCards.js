@@ -32,9 +32,9 @@ function decodeChart(chartString) {
 
 export function decodeCardRows(tuples) {
   return tuples.map((row) => {
-    const [id, name, team, year, edition, isPitcher, points, obc, spdIp, posRole, fielding, hand, chartString, foil] = row;
+    const [id, name, team, year, edition, isPitcher, points, obc, spdIp, posRole, fielding, hand, chartString, foil, mlbam] = row;
     const setTag = edition === "MLB" ? team : `'${String(year).slice(2)} ${edition}`;
-    const shared = { id, name, team, setTag, points, real: true, foil: Boolean(foil), chart: decodeChart(chartString) };
+    const shared = { id, name, team, setTag, points, real: true, foil: Boolean(foil), mlbam: mlbam ?? null, chart: decodeChart(chartString) };
     if (isPitcher) {
       return { ...shared, kind: "pitcher", role: posRole, throws: hand, control: obc, ip: spdIp };
     }

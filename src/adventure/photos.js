@@ -68,11 +68,22 @@ async function lookup(name) {
   return null;
 }
 
+// MLB's official headshot CDN, keyed by MLBAM id — the most reliable and
+// relevant source for the modern era. The URL carries the CDN's own generic
+// silhouette fallback, so it never 404s into a broken image.
+function mlbHeadshotUrl(mlbam) {
+  return `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,d_people:generic:headshot:silo:current.png,q_auto:best,f_auto/v1/people/${mlbam}/headshot/67/current`;
+}
+
 // Fill every photo slot inside `root` (a rendered screen or the tooltip).
-// Cached hits render instantly on the next paint; fresh lookups inject when
-// they land, if the slot is still on the page.
+// Cards with an MLBAM id use the official headshot; everyone else goes
+// through the Wikipedia lookup. Cached hits render on the next paint.
 export function hydratePhotos(root) {
   for (const slot of root.querySelectorAll("[data-photo-name]")) {
+    if (slot.dataset.mlbam) {
+      fill(slot, mlbHeadshotUrl(slot.dataset.mlbam));
+      continue;
+    }
     const name = slot.dataset.photoName;
     const cached = cachedPhoto(name);
     if (cached === null) {

@@ -105,6 +105,11 @@ try:
 except FileNotFoundError:
     DEF_RATINGS = {}
 
+try:
+    MLBAM = json.load(open(os.path.join(SP, "mlbam-map.json")))
+except FileNotFoundError:
+    MLBAM = {}
+
 def real_fielding(pid, pos):
     lo, hi = FIELD_RANGE[pos]
     if hi <= lo:
@@ -139,7 +144,8 @@ CHART_POWER = {"K": -4, "G": -2, "F": -2, "W": 4, "S": 5, "D": 9, "T": 11, "H": 
 PIT_POWER = {"P": 8, "K": 10, "G": 8, "F": 6, "W": -5, "S": -7, "D": -11, "H": -16}
 # Bands follow the real 2002-05 print ranges: elite catcher arms reach +14,
 # shortstop wizards +7, and the floors sit at 0 so the butchers show.
-FIELD_RANGE = {"C": (2, 14), "1B": (0, 2), "2B": (0, 6), "3B": (0, 4), "SS": (0, 7), "LF/RF": (0, 3), "CF": (0, 4), "DH": (0, 0)}
+# Bands match the measured 2000-2005 print ranges from the classic set.
+FIELD_RANGE = {"C": (0, 12), "1B": (0, 1), "2B": (0, 6), "3B": (0, 5), "SS": (0, 6), "LF/RF": (0, 3), "CF": (0, 4), "DH": (0, 0)}
 
 def chart_string(parts):
     out = []
@@ -228,7 +234,7 @@ def build_hitter(pid, t, pos, L):
     obp = (t["H"] + t["BB"]) / pa
     # OB scales off the ERA-relative on-base gap; the chart backs the league
     # out at that advantage, so OB and chart stay consistent by construction.
-    ob = clamp(round(ANCHOR_OB + (obp - L["OBP"]) * 50), 5, 16)
+    ob = clamp(round(ANCHOR_OB + (obp - L["OBP"]) * 50), 4, 16)
     A = (ob - ANCHOR_CTRL) / 20
     pitcher_league, _ = league_split(L)
     raw = {e: max(0.0, (b[e] - (1 - A) * pitcher_league[e]) / A) * 20 for e in EVENTS}
@@ -247,7 +253,7 @@ def build_hitter(pid, t, pos, L):
         net = t["SB"] * 0.7
     else:
         net = max(0, t["SB"] - t["CS"])
-    speed = clamp(round(8 + SPEED_PRIOR.get(pos, 0) + (net / pa * 650) * 0.35 + (t["3B"] / max(1, t["H"])) * 25), 5, 25)
+    speed = clamp(round(8 + SPEED_PRIOR.get(pos, 0) + (net / pa * 650) * 0.35 + (t["3B"] / max(1, t["H"])) * 25), 8, 28)
     fielding = real_fielding(pid, pos)
     parts = [("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("T", tr), ("H", hr)]
     power = sum(CHART_POWER[c] * n for c, n in parts)
@@ -308,6 +314,9 @@ def finish(card, pid, span, used_names, tag, hand_key):
     card[3] = str(span[1])
     card[4] = "MLB"
     card[11] = info[hand_key]
+    card.append(0)  # foil flag (unused for MLB pools)
+    # Official headshots are reliable from ~1990 on; earlier eras use Wikipedia.
+    card.append(MLBAM.get(pid) if span[1] >= 1990 else None)
     return card
 
 # The runtime assigns rarity by rank within hitters / SP / RP, and the

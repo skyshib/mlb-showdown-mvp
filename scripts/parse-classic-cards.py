@@ -84,7 +84,9 @@ def main():
                 if is_foil:
                     seen[key]["foil"] = True
                 continue
-            is_pitcher = "PU" in chart or positions.split("|")[0].strip().split("+")[0].strip() in ("Starter", "Reliever", "Closer")
+            first_pos = positions.split("|")[0].strip().split("+")[0].strip()
+            is_pitcher = first_pos in ("Starter", "Reliever", "Closer") or (
+                "PU" in chart and first_pos not in ("C", "1B", "2B", "3B", "SS", "LF-RF", "CF", "OF", "IF", "DH", "---"))
             record = {
                 "slug": slug, "name": name, "team": team, "year": year,
                 "edition": edition, "number": number, "points": points,
