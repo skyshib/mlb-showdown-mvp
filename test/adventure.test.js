@@ -990,6 +990,10 @@ test("grand slams get called and celebrated", async () => {
   const call = describeEvent(slam, "away").join(" ");
   assert.ok(call.includes("GRAND SLAM!"), "the narration calls it");
   assert.ok(!call.includes("CRUSHES IT"), "and replaces the stock homer line");
+  // Classic cards' year suffix stays out of the booth.
+  const classic = describeEvent({ ...slam, batter: "Chipper Jones '00", runs: 1 }, "away").join(" ");
+  assert.ok(classic.includes("C.JONES "), "the booth says C.JONES");
+  assert.ok(!classic.includes("'00"), "without the card year");
   const bat = { id: "h1", name: "Al Smith", pa: 4, ab: 4, h: 2, d: 0, t: 0, hr: 1, r: 1, bb: 0, so: 0, sb: 0, cs: 0, rbi: 4 };
   const feats = gameFeats({
     boxScore: { away: { hitters: [bat], pitchers: [{ id: "p", name: "Arm", bf: 30, outs: 27, h: 5, bb: 2, so: 6, hr: 0, r: 2 }] }, home: { hitters: [], pitchers: [] } },

@@ -7,6 +7,7 @@ import {
   diamondHtml,
   outsHtml,
   shortName,
+  stripCardYear,
   cardPanelHtml,
   cardLine
 } from "./helpers.js";
@@ -641,9 +642,9 @@ function fieldingNote(title, team) {
 
 // The matchup panel drops classic cards' year suffix ("B.AUSMUS '01" reads
 // "B.AUSMUS") — it's cramped in there, and the full card is a hover away.
-// Every other view keeps the year.
+// The play-by-play does the same; roster and box-score views keep the year.
 function matchupName(name) {
-  return shortName(String(name).replace(/\s*'\d\d$/, ""));
+  return shortName(stripCardYear(name));
 }
 
 function renderMatchup(phase) {

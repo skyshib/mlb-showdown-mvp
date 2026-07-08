@@ -67,10 +67,15 @@ export function cardPanelHtml(card, { count = null } = {}) {
   </div>`;
 }
 
-// Classic card names carry their card year ("Mike Caruso '02") — strip it for
-// the Wikipedia lookup.
+// Classic card names carry their card year ("Mike Caruso '02"). Cramped or
+// conversational spots (the matchup panel, the play-by-play) drop it; the
+// binder, rosters, and box scores keep it so twin printings stay tellable.
+export function stripCardYear(name) {
+  return String(name).replace(/\s*'\d\d$/, "");
+}
+
 function photoName(name) {
-  return name.replace(/\s*'\d\d$/, "");
+  return stripCardYear(name);
 }
 
 // The card's first active year, for era-styling the generated pixel
@@ -109,6 +114,12 @@ const RESULT_LINES = {
   HR: "CRUSHES IT! HOME RUN!"
 };
 
+// Narration names: short, and without the card-year suffix — the booth says
+// "C.JONES", not "C.JONES '00".
+function playName(name) {
+  return shortName(stripCardYear(name));
+}
+
 // Scores always read from the player's side: up 3-0 is "3-0" whether the
 // player is home or away.
 function scoreCall(event, playerSide) {
@@ -120,10 +131,10 @@ function scoreCall(event, playerSide) {
 export function describeEvent(event, playerSide = "away") {
   if (!event) return [];
   if (event.type === "pitching-change") {
-    return [`${shortName(event.team)} goes to the pen: ${shortName(event.pitcher)} takes the hill.`];
+    return [`${playName(event.team)} goes to the pen: ${playName(event.pitcher)} takes the hill.`];
   }
   if (event.type === "intentional-walk") {
-    const lines = [`${shortName(event.batter)} is waved down to first. Intentional walk.`];
+    const lines = [`${playName(event.batter)} is waved down to first. Intentional walk.`];
     if (event.runs > 0) lines.push(`That forces in a run! ${scoreCall(event, playerSide)}`);
     return lines;
   }
@@ -131,10 +142,10 @@ export function describeEvent(event, playerSide = "away") {
     const details = event.playDetails;
     const lines = [];
     if (details?.clean) {
-      lines.push(`${shortName(event.batter)} lays it down. Textbook sacrifice.`);
+      lines.push(`${playName(event.batter)} lays it down. Textbook sacrifice.`);
     } else {
-      lines.push(`${shortName(event.batter)} bunts it right to the defense...`);
-      if (details?.leadOut) lines.push(`${shortName(details.leadOut.runner)} is FORCED at ${details.leadOut.at}!`);
+      lines.push(`${playName(event.batter)} bunts it right to the defense...`);
+      if (details?.leadOut) lines.push(`${playName(details.leadOut.runner)} is FORCED at ${details.leadOut.at}!`);
     }
     return lines;
   }
@@ -143,10 +154,10 @@ export function describeEvent(event, playerSide = "away") {
     for (const attempt of event.playDetails?.attempts ?? []) {
       if (attempt.thrown) {
         lines.push(attempt.safe
-          ? `${shortName(attempt.runner)} beats the throw to ${attempt.to}!`
-          : `${shortName(attempt.runner)} is cut down at ${attempt.to}!`);
+          ? `${playName(attempt.runner)} beats the throw to ${attempt.to}!`
+          : `${playName(attempt.runner)} is cut down at ${attempt.to}!`);
       } else {
-        lines.push(`${shortName(attempt.runner)} takes ${attempt.to}.`);
+        lines.push(`${playName(attempt.runner)} takes ${attempt.to}.`);
       }
     }
     if (event.runs > 0) {
@@ -163,24 +174,24 @@ export function describeEvent(event, playerSide = "away") {
     if (attempt) {
       lines.push(
         attempt.safe
-          ? `${shortName(attempt.runner)} steals ${attempt.to}! (rolled ${attempt.roll})`
-          : `${shortName(attempt.runner)} is GUNNED DOWN at ${attempt.to}! (rolled ${attempt.roll})`
+          ? `${playName(attempt.runner)} steals ${attempt.to}! (rolled ${attempt.roll})`
+          : `${playName(attempt.runner)} is GUNNED DOWN at ${attempt.to}! (rolled ${attempt.roll})`
       );
     }
     return lines;
   }
   if (event.result === "HR" && event.runs === 4) {
-    lines.push(`${shortName(event.batter)} unloads the bases... GRAND SLAM!`);
+    lines.push(`${playName(event.batter)} unloads the bases... GRAND SLAM!`);
   } else {
-    lines.push(`${shortName(event.batter)} ${RESULT_LINES[event.result] ?? event.result}`);
+    lines.push(`${playName(event.batter)} ${RESULT_LINES[event.result] ?? event.result}`);
   }
   if (event.playDetails?.doublePlayAttempt?.batterOut) lines.push("Double play! Two gone.");
   const thrown = event.playDetails?.thrownAttempt;
   if (thrown) {
     lines.push(
       thrown.safe
-        ? `${shortName(thrown.runner)} takes ${thrown.to} on the throw!`
-        : `${shortName(thrown.runner)} is cut down at ${thrown.to}!`
+        ? `${playName(thrown.runner)} takes ${thrown.to} on the throw!`
+        : `${playName(thrown.runner)} is cut down at ${thrown.to}!`
     );
   }
   if (event.runs > 0) {
