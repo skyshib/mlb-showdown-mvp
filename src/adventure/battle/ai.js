@@ -1,12 +1,13 @@
-import { stealCandidates, attemptSteal, pitcherStatus, changePitcher } from "../../rules/game.js";
+import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, changePitcher } from "../../rules/game.js";
 
-// Profiles are threshold tables over the two NPC decisions: how sure a runner
-// must be to go, and how much fatigue the skipper tolerates before pulling
-// the pitcher.
+// Profiles bend the two NPC decisions: stealBias shifts the league's
+// advance-decision matrix (negative = greener lights) rather than replacing
+// it, and pullAtFatigue is how much tiredness the skipper tolerates before
+// going to the pen.
 export const AI_PROFILES = {
-  balanced: { stealChance: 0.75, pullAtFatigue: 2 },
-  aggressive: { stealChance: 0.62, pullAtFatigue: 3 },
-  conservative: { stealChance: 0.85, pullAtFatigue: 1 }
+  balanced: { stealBias: 0, pullAtFatigue: 2 },
+  aggressive: { stealBias: -0.12, pullAtFatigue: 3 },
+  conservative: { stealBias: 0.1, pullAtFatigue: 1 }
 };
 
 export function profileFor(name) {
@@ -14,12 +15,14 @@ export function profileFor(name) {
 }
 
 // Called before an NPC plate appearance. Returns the steal event if the NPC
-// sends a runner, else null.
+// sends a runner, else null. The go/no-go bar is the same decision matrix
+// auto play uses, shifted by the trainer's personality.
 export function npcMaybeSteal(state, rng, profile) {
   const candidates = stealCandidates(state);
   if (!candidates.length) return null;
   const best = [...candidates].sort((a, b) => b.safeChance - a.safeChance || b.toIndex - a.toIndex)[0];
-  if (best.safeChance < profile.stealChance) return null;
+  const minimum = advanceDecisionMinimum(best.outsForDecision, best.destination) + (profile.stealBias ?? 0);
+  if (best.safeChance < minimum) return null;
   return attemptSteal(state, best.fromIndex, rng);
 }
 

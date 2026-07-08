@@ -2,11 +2,22 @@ import { RESULTS, resolveChart } from "./cards.js";
 import { createRng } from "./rng.js";
 import { winExpectancy } from "../data/winExpectancy.js";
 
+// Go/no-go floors for taking a base, by outs and destination. Second and
+// home loosen as outs mount (with two gone the runner is off on contact and
+// has nothing to lose — 40% sends him), but third TIGHTENS: with nobody out
+// there's a whole inning to cash him from third, and never, ever make the
+// third out there.
 const ADVANCE_DECISION_MATRIX = {
-  0: { second: 0.9, third: 0.85, home: 0.75 },
+  0: { second: 0.9, third: 0.65, home: 0.75 },
   1: { second: 0.8, third: 0.75, home: 0.65 },
-  2: { second: 0.7, third: 0.65, home: 0.55 }
+  2: { second: 0.7, third: 0.85, home: 0.4 }
 };
+
+// Exported so AI layers (the NPC skipper's personality) can bend this same
+// table instead of replacing it with their own thresholds.
+export function advanceDecisionMinimum(outs, destination) {
+  return ADVANCE_DECISION_MATRIX[outs]?.[destination] ?? 1;
+}
 
 // Probability that the home team wins from the given state, looked up in
 // MLB history (Retrosheet 1903-2025 via Greg Stoll's dataset — see
@@ -1124,8 +1135,7 @@ function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, f
 }
 
 function shouldAttemptAdvance(candidate) {
-  const minimum = ADVANCE_DECISION_MATRIX[candidate.outsForDecision]?.[candidate.destination] ?? 1;
-  return candidate.safeChance >= minimum;
+  return candidate.safeChance >= advanceDecisionMinimum(candidate.outsForDecision, candidate.destination);
 }
 
 function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rng) {

@@ -405,7 +405,9 @@ test("failed flyout tag-up records the extra out and clears the runner", () => {
 test("runner tagging home scores when defense throws out another tag-up for the third out", () => {
   const state = createInitialState(teamA, weakDefense);
   state.outs = 1;
-  state.bases = [null, { name: "Runner 2", speed: 13 }, { name: "Runner 3", speed: 20 }];
+  // SPD 18 clears the tightened two-out bar for third (85%) yet stays the
+  // shakiest runner, so the forced-20 throw cuts him down while home scores.
+  state.bases = [null, { name: "Runner 2", speed: 18 }, { name: "Runner 3", speed: 20 }];
 
   const runs = applyFlyout(state, "away", "home", { d20: () => 20 });
 
