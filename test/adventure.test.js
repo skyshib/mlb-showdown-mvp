@@ -247,6 +247,16 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
   assert.equal(validateRoster(rich).length, 0, "the uncapped boss fields a legal team");
   assert.ok(rich.points <= scaled, "and stays inside the scaled budget");
   assert.ok(rich.points > buildNpcTeam(worldSeries).points, "outspending his budget-mode self");
+
+  // Uncapped repricing prints honest stickers: no bargain noise on points.
+  try {
+    setUniverseSeed("uncapped-prices", "fictional", { priceNoise: false });
+    assert.ok(adventurePool().every((card) => card.points === card.truePoints), "uncapped stickers tell the truth");
+    setUniverseSeed("uncapped-prices", "fictional");
+    assert.ok(adventurePool().some((card) => card.points !== card.truePoints), "budget mode keeps its bargains");
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
 });
 
 test("the opening menus offer budget and uncapped rules", async () => {

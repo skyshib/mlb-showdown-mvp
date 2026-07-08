@@ -199,7 +199,7 @@ const MODES = [
   {
     key: "uncapped",
     label: "UNCAPPED",
-    blurb: "No roster limit. Stack every legend you can afford — the bosses' checkbooks grow a lot faster out here."
+    blurb: "No roster limit, and sticker prices tell the truth. Stack every legend you can afford — the bosses' checkbooks grow a lot faster out here."
   }
 ];
 
@@ -233,7 +233,7 @@ export const modeSelectScreen = {
 function finishNewGame(app, playerName, universe, mode = "budget") {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
   const save = createSave({ name: playerName, saveSeed, universe, mode });
-  setUniverseSeed(saveSeed, universe);
+  setUniverseSeed(saveSeed, universe, { priceNoise: mode !== "uncapped" });
   const roster = starterPack(saveSeed);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));

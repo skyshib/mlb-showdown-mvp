@@ -60,6 +60,8 @@ const UNIVERSE_TEAMS = 125;
 // than role players. The PRINTED point cost — what rosters and NPC budgets
 // actually pay — is the true value plus heavy noise, so some cards are
 // bargains and others are rip-offs. Rarity follows true strength, not price.
+// Uncapped saves print honest stickers (no noise): with no budget to beat,
+// bargain-hunting is not the game there.
 const PRICE_CURVE = { base: 90, span: 810, gamma: 6 };
 const PRICE_NOISE = 0.35;
 
@@ -105,18 +107,21 @@ const HIT_ODDS = [
 
 let universeSeed = DEFAULT_UNIVERSE_SEED;
 let universeMode = "fictional";
+let universeNoise = true;
 let poolCache = null;
 let poolIndexCache = null;
 
-// Point the adventure at a save's universe. Same seed+mode is a no-op; any
-// change drops the cache so the next adventurePool() call rebuilds.
-export function setUniverseSeed(seed, mode = "fictional") {
+// Point the adventure at a save's universe. Same seed+mode+pricing is a
+// no-op; any change drops the cache so the next adventurePool() call
+// rebuilds. priceNoise: false prints honest stickers (uncapped saves).
+export function setUniverseSeed(seed, mode = "fictional", { priceNoise = true } = {}) {
   const nextSeed = seed || DEFAULT_UNIVERSE_SEED;
   const config = universeConfig(mode);
   const nextMode = config ? config.key : "fictional";
-  if (nextSeed === universeSeed && nextMode === universeMode) return;
+  if (nextSeed === universeSeed && nextMode === universeMode && priceNoise === universeNoise) return;
   universeSeed = nextSeed;
   universeMode = nextMode;
+  universeNoise = priceNoise;
   poolCache = null;
   poolIndexCache = null;
 }
@@ -191,7 +196,7 @@ function calibrateUniverse(pool, seed) {
       const strength = (ranked.length - index) / ranked.length;
       const truePoints = Math.round(PRICE_CURVE.base + PRICE_CURVE.span * strength ** PRICE_CURVE.gamma);
       const noise = 1 + (rng.next() * 2 - 1) * PRICE_NOISE;
-      const points = Math.max(10, Math.round(truePoints * noise));
+      const points = universeNoise ? Math.max(10, Math.round(truePoints * noise)) : truePoints;
       priced.set(card.id, { rarity, truePoints, points });
     });
   }

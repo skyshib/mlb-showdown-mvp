@@ -75,7 +75,12 @@ const app = {
 
 // Every save lives in its own card universe, keyed by its seed and league.
 // Point the pool at the loaded save before anything renders a card.
-if (app.save) setUniverseSeed(app.save.saveSeed, app.save.universe ?? "fictional");
+// Uncapped saves print honest stickers — no bargain noise on points.
+if (app.save) {
+  setUniverseSeed(app.save.saveSeed, app.save.universe ?? "fictional", {
+    priceNoise: app.save.mode !== "uncapped"
+  });
+}
 
 document.addEventListener("keydown", (event) => {
   const inInput = event.target instanceof HTMLInputElement;
