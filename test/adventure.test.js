@@ -887,6 +887,11 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
   assert.ok(html.includes(`data-card-id="${phase.batter.id}"`), "batter is hoverable");
   assert.ok(html.includes(`data-card-id="${phase.opposingPitcher.id}"`), "pitcher is hoverable");
   assert.ok(html.includes('data-card-id="runner-card-id"'), "occupied base is hoverable");
+  // The on-deck batter shows (and hovers) too — always the next spot in order.
+  const lineup = battle.state[battle.playerSide].lineup;
+  assert.equal(phase.onDeck.id, lineup[(battle.state.lineupIndex[battle.playerSide] + 1) % lineup.length].id);
+  assert.ok(html.includes("ON DECK"), "the on-deck line shows");
+  assert.ok(html.includes(`data-card-id="${phase.onDeck.id}"`), "and the on-deck man is hoverable");
   // YOU/THEM carry defense summaries: catcher arm, infield, outfield sums.
   const notes = [...html.matchAll(/data-hover-note="([^"]+)"/g)].map((m) => m[1]);
   assert.equal(notes.length, 2, "both HUD sides carry a defense note");

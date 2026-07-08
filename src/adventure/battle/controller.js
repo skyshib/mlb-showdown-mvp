@@ -78,6 +78,7 @@ export function battlePhase(battle) {
     return {
       type: "player-batting",
       batter: team.lineup[state.lineupIndex[battle.playerSide] % team.lineup.length],
+      onDeck: team.lineup[(state.lineupIndex[battle.playerSide] + 1) % team.lineup.length],
       battingSpot: (state.lineupIndex[battle.playerSide] % team.lineup.length) + 1,
       stealOptions: stealCandidates(state),
       canBunt: canBunt(state),
@@ -92,6 +93,7 @@ export function battlePhase(battle) {
   return {
     type: "player-pitching",
     batter: npcTeam.lineup[state.lineupIndex[battle.npcSide] % npcTeam.lineup.length],
+    onDeck: npcTeam.lineup[(state.lineupIndex[battle.npcSide] + 1) % npcTeam.lineup.length],
     battingSpot: (state.lineupIndex[battle.npcSide] % npcTeam.lineup.length) + 1,
     mound: pitcherStatus(state, battle.playerSide),
     bullpen: availableRelievers(battle)

@@ -653,16 +653,22 @@ function renderMatchup(phase) {
   }
   if (phase.type === "player-batting") {
     return `<div class="gq-matchup">
-      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span></div>
+      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span><br>${onDeckLine(phase)}</div>
       <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(matchupName(phase.opposingPitcher.name))}</b><br>
         ${moundLine(phase.opposingMound)}</div>
     </div>`;
   }
   return `<div class="gq-matchup">
-    <div>THEY SEND UP<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span></div>
+    <div>THEY SEND UP<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span><br>${onDeckLine(phase)}</div>
     <div class="gq-right">YOUR ARM<br><b data-card-id="${escapeHtml(phase.mound.pitcher.id)}">${escapeHtml(matchupName(phase.mound.pitcher.name))}</b><br>
       ${moundLine(phase.mound)}</div>
   </div>`;
+}
+
+// A peek down the order, hoverable like everyone else in the matchup.
+function onDeckLine(phase) {
+  if (!phase.onDeck) return "";
+  return `<span class="gq-dim">ON DECK <span data-card-id="${escapeHtml(phase.onDeck.id)}">${escapeHtml(matchupName(phase.onDeck.name))}</span></span>`;
 }
 
 // The mound readout: control, the fatigue subtraction, and the workload tank.
