@@ -445,6 +445,49 @@ test("sell-all clears every duplicate at the pawn rate, keeping first copies", a
   assert.ok(RARITIES.common.sellValue <= 30, "the shop pays pawn rates now");
 });
 
+test("the shop never lists roster cards, hovers its rows, and sell-all wants a confirm", async () => {
+  const { sellScreen, sellAllCards } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const rosterCard = save.roster.cardIds[0];
+  const spare = adventurePool().find((card) => !save.roster.cardIds.includes(card.id));
+  addCardToCollection(save, rosterCard, 1); // one spare of a rostered card
+  addCardToCollection(save, spare.id, 2);   // two copies of a bench card
+  const app = { save, screen: { name: "sell", index: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+
+  // Roster cards themselves never list: only the spare copy shows, marked.
+  const html = sellScreen.render(app);
+  assert.ok(html.includes("x1 SPARE"), "the rostered card lists only its spare");
+  assert.ok(html.includes("SELL ALL CARDS"), "the sell-everything button exists");
+  // Thirteen roster cards, all single copies except our two additions: the
+  // list is exactly the spare + the bench card.
+  assert.ok(sellScreen.hoverCard(app, 0), "rows hover their card");
+  const listed = [sellScreen.hoverCard(app, 0)?.id, sellScreen.hoverCard(app, 1)?.id];
+  assert.deepEqual(new Set(listed), new Set([rosterCard, spare.id]), "only the spare and the bench card list");
+  assert.equal(sellScreen.hoverCard(app, 2), null, "action rows hover nothing");
+
+  // SELL ALL CARDS asks twice, X backs out without selling or leaving.
+  const rows = 2;
+  app.screen.index = rows + 1; // SELL ALL CARDS
+  sellScreen.key(app, "a");
+  assert.equal(app.screen.confirmSellAll, true, "first Z arms the confirm");
+  assert.ok(sellScreen.render(app).includes("Z again to confirm"), "and says so");
+  sellScreen.key(app, "b");
+  assert.equal(app.screen.confirmSellAll, false, "X disarms it");
+  assert.equal(app.screen.name, "sell", "without leaving the shop");
+  assert.equal(ownedCount(save, spare.id), 2, "nothing sold");
+
+  // Confirmed: everything sellable goes, roster copies survive.
+  app.screen.index = rows + 1;
+  sellScreen.key(app, "a");
+  sellScreen.key(app, "a");
+  assert.equal(ownedCount(save, spare.id), 0, "bench cards sell to zero");
+  assert.equal(ownedCount(save, rosterCard), 1, "the roster copy survives");
+  for (const id of save.roster.cardIds) {
+    assert.ok(ownedCount(save, id) >= 1, "every roster card keeps its copy");
+  }
+  assert.equal(sellAllCards(save), 0, "a second sweep finds nothing");
+});
+
 test("boss rosters spread the budget instead of stars-and-scrubs", () => {
   for (const trainer of TRAINERS) {
     const npc = buildNpcTeam(trainer);

@@ -250,13 +250,18 @@ export const shopScreen = {
   }
 };
 
-// ---- Sell duplicates -------------------------------------------------------
+// ---- Sell to the shop --------------------------------------------------------
 
+// What the shop will take: every copy EXCEPT roster copies — the active
+// thirteen are never for sale. A rostered card with spares lists only the
+// spares; a rostered card with one copy doesn't list at all.
 function sellableCards(save) {
-  return collectionCards(save).filter(({ card, count }) => {
-    const lockedForRoster = save.roster.cardIds.includes(card.id) ? 1 : 0;
-    return count > lockedForRoster;
-  });
+  return collectionCards(save)
+    .map(({ card, count }) => {
+      const locked = save.roster.cardIds.includes(card.id) ? 1 : 0;
+      return { card, count: count - locked, locked: locked > 0 };
+    })
+    .filter(({ count }) => count > 0);
 }
 
 // Everything past the first copy of each card (roster copies always kept).
@@ -274,11 +279,33 @@ export function sellAllDuplicates(save) {
   return coins;
 }
 
-// The haul from selling every spare copy at once, for the menu label. Every
-// card keeps its first copy.
+// The nuclear option: every sellable copy goes — non-roster cards to zero,
+// rostered cards down to their roster copy. Returns coins earned. Exported
+// for tests.
+export function sellAllCards(save) {
+  let coins = 0;
+  for (const { card, count } of sellableCards(save)) {
+    for (let copy = 0; copy < count; copy += 1) {
+      if (!removeCardFromCollection(save, card.id)) break;
+      coins += RARITIES[card.rarity].sellValue;
+    }
+  }
+  grantCoins(save, coins);
+  return coins;
+}
+
+// Menu-label hauls: duplicates keep one of each card, sell-all keeps only
+// roster copies.
 function duplicateHaul(save) {
   return sellableCards(save).reduce(
-    (coins, { card, count }) => coins + RARITIES[card.rarity].sellValue * (count - 1),
+    (coins, { card, count, locked }) => coins + RARITIES[card.rarity].sellValue * (locked ? count : count - 1),
+    0
+  );
+}
+
+function fullHaul(save) {
+  return sellableCards(save).reduce(
+    (coins, { card, count }) => coins + RARITIES[card.rarity].sellValue * count,
     0
   );
 }
@@ -286,46 +313,79 @@ function duplicateHaul(save) {
 export const sellScreen = {
   render(app) {
     const rows = sellableCards(app.save);
-    const haul = duplicateHaul(app.save);
+    const index = clampIndex(app.screen.index ?? 0, rows.length + (rows.length ? 2 : 0) + 1);
+    const selected = rows[index]?.card ?? null;
+    const confirming = Boolean(app.screen.confirmSellAll);
     const items = [
-      ...rows.map(({ card, count }) => ({
-        html: `${cardLine(card)} <span class="gq-dim">x${count} &#8594; &#9679; ${RARITIES[card.rarity].sellValue}</span>`
+      ...rows.map(({ card, count, locked }) => ({
+        html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; &#9679; ${RARITIES[card.rarity].sellValue}</span>`
       })),
-      ...(rows.length ? [{ html: `SELL ALL DUPLICATES <span class="gq-dim">&#8594; &#9679; ${haul}</span>` }] : []),
+      ...(rows.length
+        ? [
+            { html: `SELL ALL DUPLICATES <span class="gq-dim">&#8594; &#9679; ${duplicateHaul(app.save)}</span>` },
+            { html: `SELL ALL CARDS <span class="gq-dim">&#8594; &#9679; ${fullHaul(app.save)}</span>` }
+          ]
+        : []),
       { label: "DONE SELLING" }
     ];
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>SELL TO THE SHOP</span><span>&#9679; ${app.save.player.coins}</span></div>
-      <div class="gq-body"><div class="gq-frame">${
-        rows.length ? "" : `<p class="gq-dim">NOTHING SPARE TO SELL.</p>`
-      }${menuHtml(items, app.screen.index ?? 0)}</div></div>
-      <div class="gq-textbox"><p>Z sells one copy. Every card keeps its first copy; SELL ALL clears the rest.</p></div>
+      <div class="gq-body"><div class="gq-columns">
+        <div class="gq-frame gq-scroll">${
+          rows.length ? "" : `<p class="gq-dim">NOTHING SPARE TO SELL.</p>`
+        }${menuHtml(items, index)}</div>
+        <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) }) : ""}</div>
+      </div></div>
+      <div class="gq-textbox">${
+        confirming
+          ? `<p class="gq-blink"><b>SELL THE WHOLE BINDER? Z again to confirm. X keeps it.</b></p>`
+          : `<p>Z sells one copy. Roster cards are never for sale — only their spares list here.</p>`
+      }</div>
     </div>`;
+  },
+  hoverCard(app, index) {
+    return sellableCards(app.save)[index]?.card ?? null;
   },
   key(app, key) {
     const rows = sellableCards(app.save);
-    const hasSellAll = rows.length > 0;
-    const total = rows.length + (hasSellAll ? 1 : 0) + 1;
+    const extras = rows.length ? 2 : 0;
+    const total = rows.length + extras + 1;
+    const sellAllIndex = rows.length + 1;
+    const wasConfirming = Boolean(app.screen.confirmSellAll);
+    if (key !== "a") app.screen.confirmSellAll = false;
     if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), total);
     } else if (key === "a") {
-      const index = app.screen.index ?? 0;
+      const index = clampIndex(app.screen.index ?? 0, total);
+      if (index !== sellAllIndex || !extras) app.screen.confirmSellAll = false;
       if (index < rows.length) {
         const { card } = rows[index];
         if (removeCardFromCollection(app.save, card.id)) {
           grantCoins(app.save, RARITIES[card.rarity].sellValue);
           persistSave(app.save);
         }
-      } else if (hasSellAll && index === rows.length) {
+      } else if (extras && index === rows.length) {
         const coins = sellAllDuplicates(app.save);
         addLog(app.save, `Sold the duplicate pile (+${coins} coins).`);
         persistSave(app.save);
         app.screen.index = 0;
+      } else if (extras && index === sellAllIndex) {
+        // The whole binder wants a second Z: too much to lose to a slip.
+        if (!app.screen.confirmSellAll) {
+          app.screen.confirmSellAll = true;
+        } else {
+          app.screen.confirmSellAll = false;
+          const coins = sellAllCards(app.save);
+          addLog(app.save, `Sold the whole binder (+${coins} coins).`);
+          persistSave(app.save);
+          app.screen.index = 0;
+        }
       } else {
         app.go("shop", { menuIndex: 0 });
       }
     } else if (key === "b") {
-      app.go("shop", { menuIndex: 0 });
+      // X cancels a pending sell-all confirm; otherwise it leaves the shop.
+      if (!wasConfirming) app.go("shop", { menuIndex: 0 });
     }
     app.rerender();
   }
