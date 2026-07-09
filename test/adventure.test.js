@@ -1021,6 +1021,21 @@ test("grand slams get called and celebrated", async () => {
   const classic = describeEvent({ ...slam, batter: "Chipper Jones '00", runs: 1 }, "away").join(" ");
   assert.ok(classic.includes("C.JONES "), "the booth says C.JONES");
   assert.ok(!classic.includes("'00"), "without the card year");
+
+  // Every fielding check reports its d20, steal-call style.
+  const base = { batter: "Al Smith", pitcher: "Bo Diaz", runs: 0, outsAfter: 1, half: "top", inning: 4, scoreAfter: { away: 0, home: 0 } };
+  const sent = describeEvent({ ...base, result: "1B", playDetails: { thrownAttempt: { runner: "Lead Man", to: "3B", safe: true, roll: 7 } } }, "away").join(" ");
+  assert.ok(sent.includes("(rolled 7)"), "the throw on a hit reports its roll");
+  const advance = describeEvent({ ...base, type: "advance", playDetails: { attempts: [
+    { runner: "Lead Man", to: "HOME", thrown: true, safe: false, roll: 19 },
+    { runner: "Trail Man", to: "3B", thrown: false, safe: true }
+  ] } }, "away").join(" ");
+  assert.ok(advance.includes("(rolled 19)"), "the send-or-hold throw reports its roll");
+  assert.equal((advance.match(/rolled/g) ?? []).length, 1, "unthrown runners stay quiet");
+  const twinKilling = describeEvent({ ...base, result: "GB", outsAfter: 2, playDetails: { doublePlayAttempt: { batterOut: true, roll: 12 } } }, "away").join(" ");
+  assert.ok(twinKilling.includes("Double play! Two gone. (rolled 12)"), "the pivot reports its roll");
+  const bunt = describeEvent({ ...base, type: "bunt", playDetails: { clean: false, roll: 16, leadOut: { runner: "Lead Man", at: "2B" } } }, "away").join(" ");
+  assert.ok(bunt.includes("(rolled 16)"), "the bunt defense reports its roll");
   const bat = { id: "h1", name: "Al Smith", pa: 4, ab: 4, h: 2, d: 0, t: 0, hr: 1, r: 1, bb: 0, so: 0, sb: 0, cs: 0, rbi: 4 };
   const feats = gameFeats({
     boxScore: { away: { hitters: [bat], pitchers: [{ id: "p", name: "Arm", bf: 30, outs: 27, h: 5, bb: 2, so: 6, hr: 0, r: 2 }] }, home: { hitters: [], pitchers: [] } },

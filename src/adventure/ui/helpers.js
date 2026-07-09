@@ -120,6 +120,12 @@ function playName(name) {
   return shortName(stripCardYear(name));
 }
 
+// Every fielding check reports its d20 in parentheses, steal-call style, so
+// the table always sees the throw that decided the play.
+function rolled(attempt) {
+  return typeof attempt?.roll === "number" ? ` (rolled ${attempt.roll})` : "";
+}
+
 // Scores always read from the player's side: up 3-0 is "3-0" whether the
 // player is home or away.
 function scoreCall(event, playerSide) {
@@ -142,9 +148,9 @@ export function describeEvent(event, playerSide = "away") {
     const details = event.playDetails;
     const lines = [];
     if (details?.clean) {
-      lines.push(`${playName(event.batter)} lays it down. Textbook sacrifice.`);
+      lines.push(`${playName(event.batter)} lays it down. Textbook sacrifice.${rolled(details)}`);
     } else {
-      lines.push(`${playName(event.batter)} bunts it right to the defense...`);
+      lines.push(`${playName(event.batter)} bunts it right to the defense...${rolled(details)}`);
       if (details?.leadOut) lines.push(`${playName(details.leadOut.runner)} is FORCED at ${details.leadOut.at}!`);
     }
     return lines;
@@ -154,8 +160,8 @@ export function describeEvent(event, playerSide = "away") {
     for (const attempt of event.playDetails?.attempts ?? []) {
       if (attempt.thrown) {
         lines.push(attempt.safe
-          ? `${playName(attempt.runner)} beats the throw to ${attempt.to}!`
-          : `${playName(attempt.runner)} is cut down at ${attempt.to}!`);
+          ? `${playName(attempt.runner)} beats the throw to ${attempt.to}!${rolled(attempt)}`
+          : `${playName(attempt.runner)} is cut down at ${attempt.to}!${rolled(attempt)}`);
       } else {
         lines.push(`${playName(attempt.runner)} takes ${attempt.to}.`);
       }
@@ -185,13 +191,14 @@ export function describeEvent(event, playerSide = "away") {
   } else {
     lines.push(`${playName(event.batter)} ${RESULT_LINES[event.result] ?? event.result}`);
   }
-  if (event.playDetails?.doublePlayAttempt?.batterOut) lines.push("Double play! Two gone.");
+  const doublePlay = event.playDetails?.doublePlayAttempt;
+  if (doublePlay?.batterOut) lines.push(`Double play! Two gone.${rolled(doublePlay)}`);
   const thrown = event.playDetails?.thrownAttempt;
   if (thrown) {
     lines.push(
       thrown.safe
-        ? `${playName(thrown.runner)} takes ${thrown.to} on the throw!`
-        : `${playName(thrown.runner)} is cut down at ${thrown.to}!`
+        ? `${playName(thrown.runner)} takes ${thrown.to} on the throw!${rolled(thrown)}`
+        : `${playName(thrown.runner)} is cut down at ${thrown.to}!${rolled(thrown)}`
     );
   }
   if (event.runs > 0) {
