@@ -569,7 +569,9 @@ export const teamScreen = {
             ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels."
             : flipping
               ? "Z sends the DH out there; the fielder DHs instead. X cancels."
-              : "Z swaps a card. Rotation and DH tools live below the roster. X to leave."
+              : save.activeSeries
+                ? "SERIES IN PROGRESS — the roster is locked until it ends. Rotation, DH, and batting order stay yours."
+                : "Z swaps a card. Rotation and DH tools live below the roster. X to leave."
         }</p>
       </div>
     </div>`;
@@ -630,6 +632,9 @@ export const teamScreen = {
     } else if (key === "a") {
       const index = clampIndex(app.screen.index ?? 0, roster.length + actions.length);
       if (index < roster.length) {
+        // No re-tooling the squad mid-series: card swaps wait until it ends.
+        // Rotation, the DH flip, and batting order stay adjustable.
+        if (save.activeSeries) return;
         app.screen.mode = "pick";
         app.screen.pickIndex = 0;
         app.screen.pickFilter = "position";

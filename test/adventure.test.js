@@ -32,6 +32,7 @@ import {
   seasonPitchers,
   pointCap,
   startSeries,
+  clearSeries,
   recordSeriesGame,
   seriesNeeded,
   attemptNumber,
@@ -883,6 +884,22 @@ test("the team menu swaps the rotation and flips the DH, legally and durably", a
   assert.deepEqual(save.roster.lineupAssignments, assignmentsBefore, "roster edits keep the flip");
   const slots = assignLineupSlots(rosterCards(save), save.roster.lineupAssignments).slots;
   assert.equal(slots.find((slot) => slot.label === "DH").player.id, target.player.id);
+});
+
+test("the roster locks mid-series; rotation, DH, and batting order stay live", async () => {
+  const { teamScreen, swapRotation, dhFlipOptions } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  startSeries(save, "gym-garrick", 3);
+  const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  teamScreen.key(app, "a");
+  assert.notEqual(app.screen.mode, "pick", "no bench swaps mid-series");
+  assert.ok(teamScreen.render(app).includes("SERIES IN PROGRESS"), "the lock is explained");
+  assert.equal(swapRotation(save), true, "the rotation still swaps");
+  assert.ok(dhFlipOptions(save).length >= 1, "the DH flip stays on the table");
+
+  clearSeries(save);
+  teamScreen.key(app, "a");
+  assert.equal(app.screen.mode, "pick", "the lock lifts when the series ends");
 });
 
 test("the battle screen tags batter, pitcher, and runners with hoverable card ids", async () => {
