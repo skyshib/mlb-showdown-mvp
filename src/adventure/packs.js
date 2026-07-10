@@ -468,33 +468,38 @@ function dealStarterPack(seed) {
 
 // The sealed pack IS the opening roster, so it must fit under the budget
 // cap it deals into. Deal on flavor first, then repair: while over the cap,
-// swap the priciest card for the cheapest unused card that fills the same
-// slot (rarity be damned — thin pools price even commons dearly). The
-// repair is greedy and deterministic, so the same seed still deals the
-// same pack.
+// swap the priciest card for the cheapest unused SAME-RARITY card that
+// fills the same slot — the two rares stay rares — and only if rarity-
+// preserving swaps run dry does the repair break rarity (a thin pool can
+// price even commons dearly). Greedy and deterministic, so the same seed
+// still deals the same pack.
 export function starterPack(seed) {
   const pack = dealStarterPack(seed);
   const pool = adventurePool();
   const cap = budgetCap();
-  let guard = STARTER_PACK_SLOTS.length * 2;
-  while (pack.reduce((sum, card) => sum + card.points, 0) > cap && guard-- > 0) {
-    const order = [...pack.keys()].sort((a, b) => pack[b].points - pack[a].points);
-    let swapped = false;
-    for (const at of order) {
-      const others = pack.filter((_, index) => index !== at);
-      const cheaper = pool
-        .filter((card) => card.points < pack[at].points &&
-          slotMatches(STARTER_PACK_SLOTS[at], card) &&
-          !others.some((held) => held.id === card.id) &&
-          !personConflict(others, card))
-        .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name))[0];
-      if (cheaper) {
-        pack[at] = cheaper;
-        swapped = true;
-        break;
+  const overCap = () => pack.reduce((sum, card) => sum + card.points, 0) > cap;
+  for (const keepRarity of [true, false]) {
+    let guard = STARTER_PACK_SLOTS.length * 2;
+    while (overCap() && guard-- > 0) {
+      const order = [...pack.keys()].sort((a, b) => pack[b].points - pack[a].points);
+      let swapped = false;
+      for (const at of order) {
+        const others = pack.filter((_, index) => index !== at);
+        const cheaper = pool
+          .filter((card) => card.points < pack[at].points &&
+            (!keepRarity || card.rarity === pack[at].rarity) &&
+            slotMatches(STARTER_PACK_SLOTS[at], card) &&
+            !others.some((held) => held.id === card.id) &&
+            !personConflict(others, card))
+          .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name))[0];
+        if (cheaper) {
+          pack[at] = cheaper;
+          swapped = true;
+          break;
+        }
       }
+      if (!swapped) break; // this pass is dry; loosen or accept the pool
     }
-    if (!swapped) break; // nothing cheaper anywhere: the pool is the pool
   }
   return pack;
 }

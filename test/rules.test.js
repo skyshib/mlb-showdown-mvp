@@ -153,6 +153,29 @@ test("single advances runners one base", () => {
   );
 });
 
+test("1B+ auto-advances the batter to second when it's open", () => {
+  const state = createInitialState(teamA, teamB);
+  state.bases = [null, null, { name: "Runner 3" }];
+  const runs = applySingle(state, hitter, "away", null, null, null, true);
+  assert.equal(runs, 1);
+  assert.equal(state.score.away, 1);
+  assert.deepEqual(
+    state.bases.map((runner) => runner?.name ?? null),
+    [null, "Test Hitter", null]
+  );
+});
+
+test("1B+ plays as a plain single when second base ends up occupied", () => {
+  const state = createInitialState(teamA, teamB);
+  state.bases = [{ name: "Runner 1" }, null, null];
+  const runs = applySingle(state, hitter, "away", null, null, null, true);
+  assert.equal(runs, 0);
+  assert.deepEqual(
+    state.bases.map((runner) => runner?.name ?? null),
+    ["Test Hitter", "Runner 1", null]
+  );
+});
+
 test("double scores runners from second and third", () => {
   const state = createInitialState(teamA, teamB);
   state.bases = [{ name: "Runner 1" }, { name: "Runner 2" }, { name: "Runner 3" }];
@@ -222,6 +245,21 @@ test("failed extra-base attempt after a hit records an out for the pitcher", () 
   assert.equal(event.outsAfter, 3);
   assert.equal(event.playDetails.thrownAttempt.safe, false);
   assert.equal(state.stats.pitchers.get("home:wd-p").outs, 1);
+});
+
+test("1B+ from the chart resolves through the engine as an auto-advance single", () => {
+  const state = createInitialState(teamA, weakDefense);
+  const batter = makeHitter({ id: "plus-h", name: "Plus Hitter", chart: [{ from: 1, to: 20, result: RESULTS.SINGLE_PLUS }] });
+  state.away.lineup[0] = batter;
+
+  const event = playPlateAppearance(state, repeatingRng(1, 5));
+
+  assert.equal(event.result, RESULTS.SINGLE_PLUS);
+  assert.deepEqual(
+    state.bases.map((runner) => runner?.name ?? null),
+    [null, "Plus Hitter", null]
+  );
+  assert.equal(state.stats.hitters.get("away:plus-h").h, 1);
 });
 
 test("runner can steal second before the plate appearance", () => {

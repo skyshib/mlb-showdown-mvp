@@ -74,8 +74,9 @@ function shopItems(app) {
     seen.add(card.id);
     const partner = dualPartnerCard(card.id);
     const price = RARITIES[card.rarity].singlePrice + (partner ? RARITIES[partner.rarity].singlePrice : 0);
+    // Condensed row — the card panel beside the list shows the full stats.
     items.push({
-      html: `${cardLine(card)} <span class="gq-dim">&#9679; ${price}</span>`,
+      html: `${escapeHtml(shortName(card.name))} <span class="gq-dim">${card.points}PT &middot; &#9679; ${price}</span>`,
       card,
       disabled: save.player.coins < price,
       run: (a) => buySingle(a, card, price)
@@ -351,13 +352,13 @@ export const shopScreen = {
     const selected = items[app.screen.menuIndex ?? 0];
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>CEDAR YARDS CARD SHOP</span><span>&#9679; ${app.save.player.coins}</span></div>
-      <div class="gq-body">
-        <div class="gq-frame">${menuHtml(
+      <div class="gq-body"><div class="gq-columns">
+        <div class="gq-frame gq-scroll">${menuHtml(
           items.map((item) => ({ label: item.label, html: item.html, disabled: item.disabled })),
           app.screen.menuIndex ?? 0
         )}</div>
-        ${selected?.card ? cardPanelHtml(selected.card, { count: ownedCount(app.save, selected.card.id) || null }) : ""}
-      </div>
+        <div class="gq-card-side">${selected?.card ? cardPanelHtml(selected.card, { count: ownedCount(app.save, selected.card.id) || null }) : ""}</div>
+      </div></div>
       <div class="gq-textbox"><p>Singles restock every time you win a battle.</p></div>
     </div>`;
   },
@@ -828,7 +829,7 @@ export const teamScreen = {
       <div class="gq-topbar"><span>TEAM &middot; ${escapeHtml(save.player.name)}</span><span>${Number.isFinite(cap) ? `${points}/${cap} PT` : `${points} PT &middot; UNCAPPED`}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${list}</div>
-        <div>${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) + seasonStatsHtml(save, preview) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
+        <div class="gq-card-side">${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) + seasonStatsHtml(save, preview) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
       </div></div>
       <div class="gq-textbox">
         ${issues.length ? `<p>! ${escapeHtml(issues.join(", "))}</p>` : `<p>ROSTER IS GAME-READY.</p>`}

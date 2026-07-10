@@ -121,6 +121,9 @@ h1.gq-logo {
 
 .gq-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2cqw; height: 100%; min-height: 0; }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
+/* Screens that want the whole card visible without scrolling (the Team
+   view) shrink it a quarter and center it. */
+.gq-card-side .gq-card { width: 75%; margin-inline: auto; }
 
 /* ---- Cards ---- */
 
@@ -168,7 +171,6 @@ h1.gq-logo {
   font-size: 3.4cqw;
 }
 .gq-card-meta { font-size: 2.2cqw; margin-top: 0.3cqw; letter-spacing: 0.03em; }
-.gq-card-teams { font-size: 2cqw; margin-top: 0.2cqw; color: rgba(255, 255, 255, 0.72); }
 .gq-card .gq-dim { color: rgba(255, 255, 255, 0.72); }
 
 /* The dark lower panel: strip, tagline, clubs, chart on an accent wash. */
@@ -191,15 +193,15 @@ h1.gq-logo {
   align-items: center;
 }
 .gq-card-square {
-  min-width: 6.4cqw;
-  height: 6.4cqw;
+  min-width: 10cqw;
+  align-self: stretch;
   display: grid;
   place-items: center;
   padding: 0 0.6cqw;
   border-radius: 0.7cqw;
   background: #ffe56f;
   color: #b51225;
-  font-size: 4.2cqw;
+  font-size: 6.4cqw;
   font-weight: 950;
 }
 .gq-card-strip-text { min-width: 0; }
@@ -209,11 +211,28 @@ h1.gq-logo {
   white-space: nowrap;
   text-overflow: ellipsis;
   letter-spacing: 0;
-  font-size: 3cqw;
+  font-size: 3.8cqw;
 }
 /* Long position lists (1B+0 LF/RF+1) wrap rather than clip. */
-.gq-card-strip .gq-card-meta { letter-spacing: 0; }
-.gq-card-tagline { font-size: 2.2cqw; letter-spacing: 0; }
+.gq-card-strip .gq-card-meta { letter-spacing: 0; font-size: 2.6cqw; }
+
+/* Rarity, price, and clubs ride the photo's top-left corner. */
+.gq-card-overlay {
+  position: absolute;
+  top: 1.2cqw;
+  left: 1.2cqw;
+  z-index: 2;
+  display: grid;
+  gap: 0.5cqw;
+  justify-items: start;
+}
+.gq-card-overlay-line {
+  padding: 0.1cqw 0.7cqw;
+  border-radius: 0.5cqw;
+  background: rgba(5, 8, 10, 0.62);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 2.2cqw;
+}
 
 /* Chart: one column per merged die range, range on top, result under it,
    in the printed sets' result colors. */
@@ -240,17 +259,17 @@ h1.gq-logo {
   white-space: nowrap;
   background: #f8f4df;
   color: #111820;
-  font-size: 1.7cqw;
+  font-size: 2.6cqw;
   font-weight: 700;
   letter-spacing: 0;
-  line-height: 2;
+  line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
 .gq-chart-result {
-  font-size: 2.2cqw;
+  font-size: 2.75cqw;
   font-weight: 950;
   letter-spacing: 0;
-  line-height: 1.7;
+  line-height: 1.6;
   color: white;
   text-shadow: 0 0.2cqw 0.6cqw rgba(0, 0, 0, 0.58);
 }
@@ -260,6 +279,8 @@ h1.gq-logo {
 .gq-chart-double .gq-chart-result { background: #e88334; }
 .gq-chart-triple .gq-chart-result { background: #d9572d; }
 .gq-chart-homer .gq-chart-result { background: #e94c5f; }
+/* Outcomes the card doesn't roll keep their column, muted. */
+.gq-chart-empty .gq-chart-result { background: transparent; color: rgba(17, 24, 32, 0.32); text-shadow: none; }
 
 /* The rarity chip in the tagline wears its frame metal. */
 .gq-rarity {
@@ -506,7 +527,9 @@ h1.gq-logo {
 
 .gq-pack-stage { display: flex; flex-direction: column; align-items: stretch; justify-content: center; height: 100%; padding: 2cqw 6cqw; }
 .gq-pack-count { text-align: center; margin-bottom: 1.5cqw; }
-.gq-pack-reveal { animation: gq-reveal 0.25s steps(3); }
+/* The pulled card stands at two-thirds width so the whole 5:7 face fits
+   the stage. */
+.gq-pack-reveal { width: 66%; align-self: center; animation: gq-reveal 0.25s steps(3); }
 
 @keyframes gq-reveal {
   from { transform: scale(0.2); }

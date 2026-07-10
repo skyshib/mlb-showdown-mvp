@@ -736,6 +736,8 @@ function applyResult(state, result, batter, battingSide, pitchingSide, rng, pitc
       return applyWalk(state, batter, battingSide, pitchingSide, pitcher);
     case RESULTS.SINGLE:
       return applySingle(state, batter, battingSide, pitchingSide, rng, pitcher);
+    case RESULTS.SINGLE_PLUS:
+      return applySingle(state, batter, battingSide, pitchingSide, rng, pitcher, true);
     case RESULTS.DOUBLE:
       return applyDouble(state, batter, battingSide, pitchingSide, rng, pitcher);
     case RESULTS.TRIPLE:
@@ -845,7 +847,7 @@ export function applyWalk(state, batter, battingSide, pitchingSide = null, pitch
   return runs;
 }
 
-export function applySingle(state, batter, battingSide, pitchingSide = null, rng = null, pitcher = null) {
+export function applySingle(state, batter, battingSide, pitchingSide = null, rng = null, pitcher = null, extraBase = false) {
   const outsBefore = state.outs;
   let runs = 0;
   const [first, second, third] = state.bases;
@@ -853,6 +855,12 @@ export function applySingle(state, batter, battingSide, pitchingSide = null, rng
   state.bases[2] = second;
   state.bases[1] = first;
   state.bases[0] = runnerFor(batter, pitcher);
+  // 1B+: the real cards' auto-advance — if second is open after the routine
+  // shift above, the batter takes it uncontested, no roll, no decision.
+  if (extraBase && !state.bases[1]) {
+    state.bases[1] = state.bases[0];
+    state.bases[0] = null;
+  }
   runs += resolveHitExtraBaseAttempts({
     state,
     battingSide,
@@ -1271,7 +1279,7 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   pitcherLine.bf += 1;
   hitterLine.rbi += runs;
 
-  if ([RESULTS.SINGLE, RESULTS.DOUBLE, RESULTS.TRIPLE, RESULTS.HR].includes(result)) {
+  if ([RESULTS.SINGLE, RESULTS.SINGLE_PLUS, RESULTS.DOUBLE, RESULTS.TRIPLE, RESULTS.HR].includes(result)) {
     hitterLine.h += 1;
     pitcherLine.h += 1;
   }

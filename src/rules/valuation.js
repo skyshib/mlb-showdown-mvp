@@ -1,5 +1,5 @@
 import { createRng } from "./rng.js";
-import { normalizeResult, RESULTS } from "./cards.js";
+import { RESULTS } from "./cards.js";
 
 const HITTER_BASE_WEIGHTS = {
   onBase: 20,
@@ -20,6 +20,7 @@ const HITTER_CHART_VALUES = {
   [RESULTS.FB]: -2,
   [RESULTS.BB]: 4,
   [RESULTS.SINGLE]: 5,
+  [RESULTS.SINGLE_PLUS]: 5,
   [RESULTS.DOUBLE]: 9,
   [RESULTS.TRIPLE]: 11,
   [RESULTS.HR]: 14
@@ -94,7 +95,7 @@ function pitcherValue(player, weights) {
 
 function chartValue(chart, values) {
   return (chart ?? []).reduce(
-    (sum, entry) => sum + (entry.to - entry.from + 1) * (values[normalizeResult(entry.result)] ?? 0),
+    (sum, entry) => sum + (entry.to - entry.from + 1) * (values[entry.result] ?? 0),
     0
   );
 }

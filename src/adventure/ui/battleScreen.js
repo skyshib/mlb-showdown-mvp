@@ -683,12 +683,29 @@ function onDeckLine(phase) {
   return `<span class="gq-dim">ON DECK <span data-card-id="${escapeHtml(phase.onDeck.id)}">${escapeHtml(matchupName(phase.onDeck.name))}</span></span>`;
 }
 
-// The mound readout: control, the fatigue subtraction, and the workload tank.
+// The mound readout: control and the fatigue subtraction, how much of the
+// chart is outs, then the workload tank on its own line.
 function moundLine(mound) {
   if (!mound) return "";
   const fatigue = mound.fatiguePenalty ?? 0;
   const tired = fatigue > 0 ? ` &minus;${fatigue} TIRED` : "";
-  return `<span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${mound.pitcher.control}${tired} &middot; ${mound.battersFaced}/${mound.tiredAt} BF</span>`;
+  const outs = chartOutCount(mound.pitcher.chart);
+  return `<span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${mound.pitcher.control}${tired} &middot; ${outs} OUT</span><br><span class="gq-dim">${mound.battersFaced}/${mound.tiredAt} BF</span>`;
+}
+
+// Out slots (PU/SO/GB/FB) on the pitcher's d20 chart — "17 OUT" means 17 of
+// the 20 rolls retire the batter outright.
+const OUT_RESULTS = new Set(["PU", "SO", "GB", "FB"]);
+function chartOutCount(chart) {
+  if (!Array.isArray(chart)) return 0;
+  let outs = 0;
+  for (const entry of chart) {
+    if (!OUT_RESULTS.has(entry.result)) continue;
+    const from = Math.max(1, entry.from);
+    const to = Math.min(20, Number.isFinite(entry.to) ? entry.to : 20);
+    if (to >= from) outs += to - from + 1;
+  }
+  return outs;
 }
 
 // Defense menus (the NPC is hitting) read from the other dugout: right-

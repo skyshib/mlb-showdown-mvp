@@ -1,9 +1,9 @@
 import { actionShotUrl, headshotUrl } from "../data/headshots.js";
-import { formatRange, normalizeResult, positionsLabel, fieldingLabel, positionFieldingLabel } from "../rules/cards.js";
+import { formatRange, positionsLabel, fieldingLabel, positionFieldingLabel } from "../rules/cards.js";
 
-const HITTER_OUTCOMES = ["BB", "1B", "2B", "3B", "HR"];
+const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
-const HISTORY_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "3B", "HR"];
+const HISTORY_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
 
 export function playerPosition(player) {
   return player.kind === "hitter" ? player.position : player.role;
@@ -14,8 +14,8 @@ export function playerPrimary(player) {
 }
 
 export function playerPower(player) {
-  const weights = { BB: 1, "1B": 2, "2B": 4, "3B": 5, HR: 6 };
-  return player.chart.reduce((sum, entry) => sum + (entry.to - entry.from + 1) * (weights[normalizeResult(entry.result)] ?? 0), 0);
+  const weights = { BB: 1, "1B": 2, "1B+": 2, "2B": 4, "3B": 5, HR: 6 };
+  return player.chart.reduce((sum, entry) => sum + (entry.to - entry.from + 1) * (weights[entry.result] ?? 0), 0);
 }
 
 export function renderPlayerTable(players, options = {}) {
@@ -145,7 +145,7 @@ function renderOutcomeCells(player, outcomes) {
 function chartRanges(chart) {
   const ranges = new Map();
   for (const entry of chart) {
-    const result = normalizeResult(entry.result);
+    const result = entry.result;
     const resultRanges = ranges.get(result) ?? [];
     resultRanges.push(formatRange(entry));
     ranges.set(result, resultRanges);
@@ -503,7 +503,7 @@ function renderShowdownChart(player) {
   const cells = compactChartEntries(player)
     .sort((a, b) => a.from - b.from)
     .map((entry) => {
-      const result = normalizeResult(entry.result);
+      const result = entry.result;
       return `<div class="chart-cell ${resultClass(result)}" title="${formatRange(entry)} ${resultLabel(result)}">
         <span class="chart-range">${formatRange(entry)}</span>
         <span class="chart-result">${result}</span>
@@ -515,7 +515,6 @@ function renderShowdownChart(player) {
 
 function compactChartEntries(player) {
   return [...player.chart]
-    .map((entry) => ({ ...entry, result: normalizeResult(entry.result) }))
     .sort((a, b) => a.from - b.from)
     .reduce((merged, entry) => {
       const last = merged.at(-1);
@@ -532,6 +531,7 @@ function resultClass(result) {
   if (["SO", "GB", "FB", "PU"].includes(result)) return "out";
   if (result === "BB") return "walk";
   if (result === "1B") return "single";
+  if (result === "1B+") return "single";
   if (result === "2B") return "double";
   if (result === "3B") return "triple";
   if (result === "HR") return "homer";
@@ -546,6 +546,7 @@ function resultLabel(result) {
     FB: "Out(FB)",
     BB: "Walk",
     "1B": "Single",
+    "1B+": "Single+",
     "2B": "Double",
     "3B": "Triple",
     HR: "Homer"

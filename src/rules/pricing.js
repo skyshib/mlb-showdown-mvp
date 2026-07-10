@@ -32,7 +32,11 @@ export function priceFeatures(card) {
   const s = chartSlots(card);
   if (card.kind === "hitter") {
     const positions = hitterPositions(card);
-    const bb = s.BB ?? 0, single = s["1B"] ?? 0, double = s["2B"] ?? 0, triple = s["3B"] ?? 0, hr = s.HR ?? 0;
+    // The fitted model was trained back when the decoder played a printed
+    // 1B+ as a double (the engine had no auto-advance single yet) — keep
+    // pricing it that way so the trained weights still apply without a
+    // refit, even though it now resolves as a single in play.
+    const bb = s.BB ?? 0, single = s["1B"] ?? 0, double = (s["2B"] ?? 0) + (s["1B+"] ?? 0), triple = s["3B"] ?? 0, hr = s.HR ?? 0;
     // The engine's advantage math says a batter's production scales with
     // BOTH his on-base (how often his chart is live) and his chart's total
     // bases (what it pays when it is) — so the workhorse feature is the

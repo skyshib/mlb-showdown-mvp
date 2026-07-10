@@ -1,4 +1,4 @@
-import { normalizeResult, formatRange, positionsLabel, positionFieldingLabel } from "../../rules/cards.js";
+import { formatRange, positionsLabel, positionFieldingLabel } from "../../rules/cards.js";
 import { RARITIES, dualPartnerCard } from "../packs.js";
 import { CARD_IMAGE_FILES } from "../../data/cardImages.js";
 import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS } from "../../data/mlbTeams.js";
@@ -88,22 +88,37 @@ function cardStrip(card, { count = null, tag = "" } = {}) {
   </div>`;
 }
 
-// Adjacent same-result rolls merge into one column (5-8 BB), die range on
-// top, result underneath — the printed card's chart strip.
+// The chart prints a fixed column per outcome — SO GB FB BB 1B 1B+ 2B 3B HR
+// for hitters, PU SO GB FB BB 1B 2B HR for pitchers — die range on top,
+// result underneath, and a blank range where the card simply doesn't have
+// that outcome. Fixed positions make cards comparable at a glance. The
+// role's off-outcome (hitter PU, pitcher 3B) only appears on the rare card
+// that actually rolls it; 1B+ is batter-only and real classic cards are the
+// only source that ever prints it.
+const CHART_ORDER = ["PU", "SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
+
 function chartGrid(card) {
-  const cells = chartRangeCells(card)
-    .map((entry) => `<span class="gq-chart-cell gq-chart-${resultTone(entry.result)}">
-      <b class="gq-chart-range">${escapeHtml(formatRange(entry))}</b>
-      <span class="gq-chart-result">${escapeHtml(entry.result)}</span>
-    </span>`)
+  const merged = chartRangeCells(card);
+  const present = new Set(merged.map((entry) => entry.result));
+  const optional = new Set([card.kind === "pitcher" ? "3B" : "PU", "1B+"]);
+  const columns = CHART_ORDER.filter((result) => !optional.has(result) || present.has(result));
+  const cells = columns
+    .map((result) => {
+      const ranges = merged.filter((entry) => entry.result === result).map(formatRange).join(",");
+      return `<span class="gq-chart-cell gq-chart-${resultTone(result)}${ranges ? "" : " gq-chart-empty"}">
+      <b class="gq-chart-range">${ranges ? escapeHtml(ranges) : "&nbsp;"}</b>
+      <span class="gq-chart-result">${escapeHtml(result)}</span>
+    </span>`;
+    })
     .join("");
-  return `<div class="gq-chart" style="--gq-chart-cols:${chartRangeCells(card).length}">${cells}</div>`;
+  return `<div class="gq-chart" style="--gq-chart-cols:${columns.length}">${cells}</div>`;
 }
 
 function resultTone(result) {
   if (result === "HR") return "homer";
   if (result === "BB") return "walk";
   if (result === "1B") return "single";
+  if (result === "1B+") return "single";
   if (result === "2B") return "double";
   if (result === "3B") return "triple";
   return "out";
@@ -131,10 +146,17 @@ export function cardPanelHtml(card, { count = null } = {}) {
   // their initials), then the dark lower panel — player strip, tagline,
   // clubs, chart.
   const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
-  const photo = `<div class="gq-card-photo">${card.real
+  const teams = cardTeams(card);
+  // Rarity, price, and clubs float over the photo's top-left corner; the
+  // lower panel keeps just the player strip and the chart.
+  const overlay = `<div class="gq-card-overlay">
+    <span>${rarityTag(card)}</span>
+    <span class="gq-card-overlay-line">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span>
+    ${teams ? `<span class="gq-card-overlay-line">${teams.map(escapeHtml).join(" &middot; ")}</span>` : ""}
+  </div>`;
+  const photo = `<div class="gq-card-photo">${overlay}${card.real
     ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
     : `<span class="gq-card-initials">${escapeHtml(initials)}</span>`}</div>`;
-  const teams = cardTeams(card);
   // A simultaneous two-way pair prints as one card: the other half's strip
   // and chart stack under the primary's. Both roster separately.
   const partner = dualPartnerCard(card.id);
@@ -142,9 +164,7 @@ export function cardPanelHtml(card, { count = null } = {}) {
     ? `${cardStrip(partner, { tag: `<span class="gq-card-meta gq-dim">TWO-WAY</span>` })}
     ${chartGrid(partner)}`
     : "";
-  const tagline = `<div class="gq-card-meta gq-card-tagline">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>`;
-  const teamLine = teams ? `<div class="gq-card-teams">${teams.map(escapeHtml).join(" &middot; ")}</div>` : "";
-  return `<div class="${cardShell(card)}">${photo}<div class="gq-card-lower">${cardStrip(card, { count })}${tagline}${teamLine}${chartGrid(card)}${partnerBlock}</div></div>`;
+  return `<div class="${cardShell(card)}">${photo}<div class="gq-card-lower">${cardStrip(card, { count })}${chartGrid(card)}${partnerBlock}</div></div>`;
 }
 
 // Classic card names carry their card year ("Mike Caruso '02"). Cramped or
@@ -171,12 +191,11 @@ export function eraYear(card) {
 
 function chartRangeCells(card) {
   return [...card.chart]
-    .map((entry) => ({ ...entry, result: normalizeResult(entry.result) }))
     .sort((a, b) => a.from - b.from)
     .reduce((merged, entry) => {
       const last = merged.at(-1);
       if (last && last.result === entry.result && last.to + 1 === entry.from) last.to = entry.to;
-      else merged.push(entry);
+      else merged.push({ ...entry });
       return merged;
     }, []);
 }
@@ -190,6 +209,7 @@ const RESULT_LINES = {
   FB: "lofts a fly ball...",
   BB: "works a walk.",
   "1B": "lines a single!",
+  "1B+": "lines a single!",
   "2B": "rips a double!",
   "3B": "legs out a triple!",
   HR: "CRUSHES IT! HOME RUN!"
@@ -266,6 +286,9 @@ export function describeEvent(event, playerSide = "away") {
     lines.push(`${playName(event.batter)} unloads the bases... GRAND SLAM!`);
   } else {
     lines.push(`${playName(event.batter)} ${RESULT_LINES[event.result] ?? event.result}`);
+  }
+  if (event.result === "1B+" && event.basesAfter?.[1] === event.batter) {
+    lines.push(`${playName(event.batter)} alertly takes second, uncontested!`);
   }
   const doublePlay = event.playDetails?.doublePlayAttempt;
   if (doublePlay?.batterOut) lines.push(`Double play! Two gone.${rolled(doublePlay)}`);

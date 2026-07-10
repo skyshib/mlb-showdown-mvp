@@ -12,9 +12,9 @@ const CODE_RESULTS = {
   F: RESULTS.FB,
   W: RESULTS.BB,
   S: RESULTS.SINGLE,
-  // The real cards' 1B+ (single, runners take an extra base) plays as a
-  // double here — the engine has no auto-advance single.
-  "+": RESULTS.DOUBLE,
+  // The real cards' 1B+: a single, plus an automatic uncontested advance to
+  // second when it's open.
+  "+": RESULTS.SINGLE_PLUS,
   D: RESULTS.DOUBLE,
   T: RESULTS.TRIPLE,
   H: RESULTS.HR

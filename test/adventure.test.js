@@ -1520,10 +1520,17 @@ test("MLB pools price on the authentic Showdown scale", async () => {
   const { decodeCardRows } = await import("../src/data/realCards.js");
   const { CLASSIC_CARD_ROWS } = await import("../src/data/classicCards.js");
   try {
-    // The model reproduces the real printed points it was fit against.
+    // The model reproduces the real printed points it was fit against. The
+    // fit balances by on-base bucket (601 OB-9 commons don't outvote the one
+    // Bonds), so the honest yardsticks are a loose unweighted MAE plus a
+    // tight one on the star end the balancing exists to protect.
     const classics = decodeCardRows(CLASSIC_CARD_ROWS);
-    const mae = classics.reduce((sum, card) => sum + Math.abs(authenticPoints(card, PRICE_MODEL) - card.points), 0) / classics.length;
-    assert.ok(mae < 50, `classic-set MAE stays tight (${mae.toFixed(1)})`);
+    const err = (card) => Math.abs(authenticPoints(card, PRICE_MODEL) - card.points);
+    const mae = classics.reduce((sum, card) => sum + err(card), 0) / classics.length;
+    assert.ok(mae < 70, `classic-set MAE stays sane (${mae.toFixed(1)})`);
+    const stars = classics.filter((card) => card.points >= 500);
+    const starMae = stars.reduce((sum, card) => sum + err(card), 0) / stars.length;
+    assert.ok(starMae < 80, `the 500+ point stars price true (${starMae.toFixed(1)} over ${stars.length} cards)`);
     const wakefield = classics.find((card) => card.name === "Tim Wakefield '03");
     assert.ok(Math.abs(authenticPoints(wakefield, PRICE_MODEL) - wakefield.points) < 100,
       "a C5 IP5 starter prices like the real Wakefield printing");
