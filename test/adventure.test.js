@@ -415,6 +415,20 @@ test("trainer lineups bat best-first and the star position varies by trainer", (
 
 // ---- Save layer ------------------------------------------------------------
 
+test("the title menu offers save backup, and import screens explain themselves", async () => {
+  const { titleScreen, exportSaveScreen, importSaveScreen } = await import("../src/adventure/ui/titleScreens.js");
+  const withSave = { save: testSave(), screen: { name: "title", menuIndex: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  const html = titleScreen.render(withSave);
+  assert.ok(html.includes("EXPORT SAVE") && html.includes("IMPORT SAVE"), "backup lives on the title menu");
+  const fresh = { save: null, screen: { name: "title", menuIndex: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  const freshHtml = titleScreen.render(fresh);
+  assert.ok(!freshHtml.includes("EXPORT SAVE"), "nothing to export without a save");
+  assert.ok(freshHtml.includes("IMPORT SAVE"), "import is always there for a new device");
+  assert.ok(exportSaveScreen.render(withSave).includes("SAVE CODE"), "export shows the code box");
+  assert.ok(importSaveScreen.render(withSave).includes("REPLACES YOUR CURRENT SAVE"), "import warns before overwriting");
+  assert.ok(!importSaveScreen.render(fresh).includes("REPLACES"), "no warning when there's nothing to lose");
+});
+
 test("saves round-trip through storage and export codes", () => {
   const storage = fakeStorage();
   const save = testSave();

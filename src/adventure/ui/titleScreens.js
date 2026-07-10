@@ -8,7 +8,9 @@ import {
   setRoster,
   rosterCards,
   grantCoins,
-  addLog
+  addLog,
+  exportSaveCode,
+  importSaveCode
 } from "../state.js";
 
 const INTRO_PAGES = [
@@ -51,6 +53,8 @@ function titleItems(app) {
   const items = [];
   if (app.save) items.push({ label: "CONTINUE", run: (a) => a.go("map") });
   items.push({ label: "NEW GAME", run: (a) => a.go("intro", { page: 0 }) });
+  if (app.save) items.push({ label: "EXPORT SAVE", run: (a) => a.go("exportSave") });
+  items.push({ label: "IMPORT SAVE", run: (a) => a.go("importSave") });
   if (app.save) {
     items.push({
       label: "DELETE SAVE",
@@ -63,6 +67,81 @@ function titleItems(app) {
   }
   return items;
 }
+
+// ---- Save backup -----------------------------------------------------------------
+
+// The whole save as one base64 code: auto-copied to the clipboard where the
+// browser allows, and left selected in the box for a manual copy either way.
+export const exportSaveScreen = {
+  render() {
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>EXPORT SAVE</span><span>BACKUP</span></div>
+      <div class="gq-body gq-center">
+        <div class="gq-frame" style="text-align:left">
+          <p>YOUR SAVE CODE:</p>
+          <p class="gq-mt"><input id="gq-save-code" readonly spellcheck="false"
+            style="font:inherit;background:var(--gb-light);border:0.5cqw solid var(--gb-darkest);padding:0.5cqw 1cqw;width:100%"></p>
+          <p class="gq-dim gq-mt" id="gq-copy-note">SELECT AND COPY IT SOMEWHERE SAFE.</p>
+        </div>
+      </div>
+      <div class="gq-textbox"><p>Paste it into IMPORT SAVE on any device to pick the season back up. Z/X to go back.</p></div>
+    </div>`;
+  },
+  mounted(app) {
+    const input = document.getElementById("gq-save-code");
+    if (!input) return;
+    input.value = exportSaveCode(app.save);
+    input.focus();
+    input.select();
+    navigator.clipboard?.writeText(input.value).then(
+      () => {
+        const note = document.getElementById("gq-copy-note");
+        if (note) note.textContent = "COPIED TO YOUR CLIPBOARD.";
+      },
+      () => {}
+    );
+  },
+  key(app, key) {
+    if (key === "a" || key === "b") app.go("title", { menuIndex: 0 });
+    app.rerender();
+  }
+};
+
+export const importSaveScreen = {
+  render(app) {
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>IMPORT SAVE</span><span>RESTORE</span></div>
+      <div class="gq-body gq-center">
+        <div class="gq-frame" style="text-align:left">
+          <p>PASTE A SAVE CODE:</p>
+          <p class="gq-mt"><input id="gq-import-code" autocomplete="off" spellcheck="false"
+            style="font:inherit;background:var(--gb-light);border:0.5cqw solid var(--gb-darkest);padding:0.5cqw 1cqw;width:100%"></p>
+          ${app.screen.error ? `<p class="gq-mt"><b>THAT CODE DIDN'T TAKE. CHECK THE PASTE AND TRY AGAIN.</b></p>` : ""}
+        </div>
+      </div>
+      <div class="gq-textbox"><p>${app.save ? "! THIS REPLACES YOUR CURRENT SAVE. " : ""}ENTER imports &middot; ESC backs out.</p></div>
+    </div>`;
+  },
+  mounted() {
+    document.getElementById("gq-import-code")?.focus();
+  },
+  key(app, key) {
+    if (key === "a") {
+      const code = document.getElementById("gq-import-code")?.value.trim() ?? "";
+      const save = importSaveCode(code);
+      if (!save) {
+        app.screen.error = true;
+      } else {
+        app.save = persistSave(save);
+        setUniverseSeed(save.saveSeed, save.universe ?? "fictional", { priceNoise: save.mode !== "uncapped" });
+        return app.go("map");
+      }
+    } else if (key === "b") {
+      return app.go("title", { menuIndex: 0 });
+    }
+    app.rerender();
+  }
+};
 
 export const introScreen = {
   render(app) {
