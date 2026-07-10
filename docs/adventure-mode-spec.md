@@ -201,7 +201,12 @@ Every new save **picks a league** (`UNIVERSES` in `packs.js`):
   derived from real rates in the Baseball Databank (Chadwick Baseball
   Bureau / Sean Lahman, **CC BY-SA 3.0**), mapped into the generator's
   parameter space, then priced through the usual curve + seeded noise so the
-  bargain economy holds. Pre-1910 decades are omitted (no bullpens yet).
+  bargain economy holds. Rates are **peak-weighted with small-sample
+  regression**: seasons rank best-first on a geometric ladder (best full
+  season 50%, next 25%, ...) and unclaimed weight fills with league-average
+  rates — so a one-season stint reads "good," not "franchise legend," and
+  long-career stars are scored off their prime. Pre-1910 decades are omitted
+  (no bullpens yet).
 
 Real-player cards show a **portrait fetched at runtime from Wikipedia's public
 API** (freely licensed Wikimedia imagery, credited on the card, cached in

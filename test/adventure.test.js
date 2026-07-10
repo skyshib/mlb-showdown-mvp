@@ -1576,18 +1576,28 @@ test("simulated matchups reproduce real season rates within tolerance", () => {
       }
       return { obp: obp / arms.length, hr: hr / arms.length };
     };
-    const realLines = [
-      ["Travis Hafner", 0.378, 0.049],
+    // Steady careers: peak weighting barely moves flat season-to-season
+    // rates, so the card still reproduces the real decade aggregate.
+    const steadyLines = [
       ["Jose Vizcaino", 0.315, 0.008],
       ["Mark Grace", 0.372, 0.022]
     ];
-    for (const [name, realObp, realHr] of realLines) {
+    for (const [name, realObp, realHr] of steadyLines) {
       const bat = pool.find((card) => card.name === name);
       assert.ok(bat, `${name} is in the 2000s pool`);
       const sim = expectVs(bat);
       assert.ok(Math.abs(sim.obp - realObp) < 0.025, `${name} OBP ${sim.obp.toFixed(3)} ≈ real ${realObp}`);
       assert.ok(Math.abs(sim.hr - realHr) < 0.01, `${name} HR/PA ${(sim.hr * 100).toFixed(1)}% ≈ real ${(realHr * 100).toFixed(1)}%`);
     }
+    // Peaked careers skew toward the prime by design: Hafner's card should
+    // beat his decade aggregate (.378 OBP) but stay under his best season
+    // (.439 in 2006) — peak-weighted, not best-season-cherry-picked.
+    const hafner = pool.find((card) => card.name === "Travis Hafner");
+    assert.ok(hafner, "Travis Hafner is in the 2000s pool");
+    const sim = expectVs(hafner);
+    assert.ok(sim.obp > 0.378 && sim.obp < 0.439, `Hafner OBP ${sim.obp.toFixed(3)} sits between aggregate and peak`);
+    // HR rides 5%-wide chart slots, so peak lift can round away — fidelity only.
+    assert.ok(Math.abs(sim.hr - 0.049) < 0.01, `Hafner HR/PA ${(sim.hr * 100).toFixed(1)}% ≈ real 4.9%`);
   } finally {
     setUniverseSeed("test-seed", "fictional");
   }

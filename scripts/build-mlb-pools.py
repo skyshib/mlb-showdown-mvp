@@ -8,6 +8,12 @@ ratings derive from each player's real rates, mapped into the fictional card
 generator's parameter space; the game recalibrates raw points into printed
 prices per save. Slices that can't support a legal starter pack (a common and
 a rare at every slot) are dropped.
+
+Rates are PEAK-WEIGHTED with small-sample regression: a player's seasons in
+a slice rank best-first and blend on a geometric ladder (full best season
+50%, next 25%, then 12.5%, ...), and the residual weight fills with
+league-average rates. One great summer reads "good," not "franchise legend";
+a decade of stardom is scored off the prime. See "Peak-weighted sampling".
 """
 import csv, hashlib, json, os, sys
 from collections import defaultdict
@@ -51,32 +57,35 @@ def decade_of(year):
     return (year // 10) * 10
 
 def accumulate(source, keys):
-    """One pass: career / franchise / decade totals and year spans.
-    Decade cards pool a player's ENTIRE decade regardless of team; franchise
-    cards pool a player's entire career with that club regardless of decade."""
-    career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
-    stint_volume = defaultdict(lambda: defaultdict(int))  # (pid, fid) -> decade -> volume
-    volume_key = "IPouts" if "IPouts" in keys else "AB"
+    """One pass: per-season stat lines for the career / franchise / decade
+    slices, decade league totals, and year spans. Decade cards pool a
+    player's ENTIRE decade regardless of team; franchise cards pool a
+    player's entire career with that club regardless of decade. Seasons stay
+    separate within each slice (stints within a year merge) so cards can be
+    peak-weighted downstream."""
+    make = lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    career, by_franch, by_decade = make(), make(), make()
+    decade_totals = defaultdict(lambda: defaultdict(int))
     spans = defaultdict(lambda: [9999, 0])
     for r in rows(source):
         year = num(r, "yearID")
         pid = r["playerID"]
+        dec = decade_of(year)
         fid = franch_of.get((year, r.get("teamID", "")), None)
         for k in keys:
             v = num(r, k)
-            career[pid][k] += v
-            by_decade[(pid, decade_of(year))][k] += v
+            career[pid][year][k] += v
+            by_decade[(pid, dec)][year][k] += v
+            decade_totals[dec][k] += v
             if fid:
-                by_franch[(pid, fid)][k] += v
-        if fid:
-            stint_volume[(pid, fid)][decade_of(year)] += num(r, volume_key) + (num(r, "BB") if volume_key == "AB" else 0)
-        for key in (pid, (pid, decade_of(year)), (pid, fid) if fid else None):
+                by_franch[(pid, fid)][year][k] += v
+        for key in (pid, (pid, dec), (pid, fid) if fid else None):
             if key is None:
                 continue
             span = spans[key]
             span[0] = min(span[0], year)
             span[1] = max(span[1], year)
-    return career, by_franch, by_decade, spans, stint_volume
+    return career, by_franch, by_decade, decade_totals, spans
 
 def accumulate_positions():
     career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
@@ -93,7 +102,7 @@ def accumulate_positions():
             if fid:
                 by_franch[(pid, fid)][pos] += g
     pick = lambda table: {k: max(g, key=g.get) for k, g in table.items() if sum(g.values()) > 0}
-    return pick(career), pick(by_franch), pick(by_decade)
+    return pick(career), pick(by_franch), pick(by_decade), by_decade
 
 def h(pid, salt, lo, hi):
     digest = hashlib.sha1(f"{pid}:{salt}".encode()).digest()
@@ -196,13 +205,9 @@ def league_split(L):
     batter["K"] = k_of_outs * (1 - BATTER_ONBASE_SHARE)
     return pitcher, batter
 
-def league_tables(bat_decade):
-    lg = defaultdict(lambda: defaultdict(int))
-    for (pid, dec), t in bat_decade.items():
-        for k, v in t.items():
-            lg[dec][k] += v
+def league_tables(decade_totals):
     tables = {}
-    for dec, t in lg.items():
+    for dec, t in decade_totals.items():
         pa = t["AB"] + t["BB"]
         if pa < 50000:
             continue
@@ -239,6 +244,111 @@ def blend_league(tables, weights):
         for k, v in tables[dec].items():
             blend[k] += v * (w / total)
     return blend
+
+# ---- Peak-weighted sampling ---------------------------------------------------
+#
+# Slice rates are not raw totals. A player's seasons rank best-first
+# (era-relative quality, shrunk toward league so a hot cup of coffee can't
+# rank as a "best season") and blend on a geometric ladder: the best full
+# season carries 50% weight, the next 25%, and so on. Whatever weight the
+# real seasons don't claim goes to LEAGUE-AVERAGE rates. A one-great-summer
+# wonder blends about half league average and reads "good," not
+# "inner-circle legend" (the John McGraw 1900 Cardinals problem), while a
+# ten-year star pads ~0% and is scored off the shape of his prime instead
+# of his decline years. Season size is continuous — 250 PA claims half a
+# rung, a 700-PA workhorse year claims 1.4 — so partial seasons earn
+# partial weight and a tiny scorching September can never grab the top rung.
+# Bulk credit fades fast by design: the pad is 50% after one full season,
+# 12.5% after three, ~0 after eight. It's a confidence haircut, not a
+# career-length reward — five seasons vs three moves a star's card by less
+# than a rounding step.
+HIT_QUOTA = 500.0    # PA that counts as one full season on the ladder
+PIT_QUOTA = 540.0    # IPouts (~180 IP) likewise; relief seasons earn partial rungs
+RANK_PRIOR = 120.0   # PA/BF of league ballast when RANKING seasons
+
+WOBA_W = {"BB": 0.7, "S": 0.9, "D": 1.25, "T": 1.6, "HR": 2.0}
+
+def league_of_year(year, fixed=None):
+    if fixed is not None:
+        return fixed
+    dec = decade_of(year)
+    return LEAGUE.get(dec) or LEAGUE[min(LEAGUE, key=lambda d: abs(d - dec))]
+
+def hitter_season_score(t, L):
+    pa = t["AB"] + t["BB"]
+    singles = t["H"] - t["2B"] - t["3B"] - t["HR"]
+    val = (WOBA_W["BB"] * t["BB"] + WOBA_W["S"] * singles + WOBA_W["D"] * t["2B"]
+           + WOBA_W["T"] * t["3B"] + WOBA_W["HR"] * t["HR"])
+    lg = sum(WOBA_W[e] * L[e] for e in EVENTS)
+    return (val + lg * RANK_PRIOR) / (pa + RANK_PRIOR) - lg
+
+def pitcher_season_score(t, L):
+    bf = t["IPouts"] + t["H"] + t["BB"]
+    oba = (t["H"] + t["BB"] + L["OBP"] * RANK_PRIOR) / (bf + RANK_PRIOR)
+    return L["OBP"] - oba
+
+def ladder_weights(sizes):
+    """Geometric ladder over season-equivalents: the stretch [a, b] of the
+    sorted, sized seasons gets weight 2^-a - 2^-b; the tail past the last
+    real season is the league-average pad."""
+    x = 0.0
+    weights = []
+    for s in sizes:
+        weights.append(2.0 ** -x - 2.0 ** -(x + s))
+        x += s
+    return weights, 2.0 ** -x
+
+def peak_blend_hitter(years, fixed_league=None):
+    """Ladder-weighted per-PA rates, expressed as synthetic totals over the
+    player's real PA (downstream math is rate-based; volume only feeds
+    thresholds). Returns the totals and the matching league context, blended
+    with the same weights so the era backdrop tracks the seasons that count."""
+    seasons = [(y, t, t["AB"] + t["BB"]) for y, t in years.items() if t["AB"] + t["BB"] > 0]
+    if not seasons:
+        return None, None
+    seasons.sort(key=lambda s: -hitter_season_score(s[1], league_of_year(s[0], fixed_league)))
+    weights, pad = ladder_weights([pa / HIT_QUOTA for _, _, pa in seasons])
+    rate, dec_w = defaultdict(float), defaultdict(float)
+    for (y, t, pa), w in zip(seasons, weights):
+        for k in ("BB", "2B", "3B", "HR", "SO", "SB", "CS"):
+            rate[k] += w * t[k] / pa
+        rate["S"] += w * (t["H"] - t["2B"] - t["3B"] - t["HR"]) / pa
+        dec_w[decade_of(y)] += w
+    L = fixed_league if fixed_league is not None else blend_league(LEAGUE, dec_w)
+    # The pad is a league-average ghost: on-base mix from the league table,
+    # steals at the league net rate (CS 0 — NET already nets them out).
+    for k, lg in (("BB", "BB"), ("S", "S"), ("2B", "D"), ("3B", "T"),
+                  ("HR", "HR"), ("SO", "K"), ("SB", "NET")):
+        rate[k] += pad * L[lg]
+    pa_total = sum(pa for _, _, pa in seasons)
+    t = {k: rate[k] * pa_total for k in ("BB", "2B", "3B", "HR", "SO", "SB", "CS")}
+    t["H"] = (rate["S"] + rate["2B"] + rate["3B"] + rate["HR"]) * pa_total
+    t["AB"] = pa_total - t["BB"]
+    return t, L
+
+def peak_blend_pitcher(years, fixed_league=None):
+    seasons = [(y, t, t["IPouts"] + t["H"] + t["BB"]) for y, t in years.items() if t["IPouts"] > 0]
+    if not seasons:
+        return None, None
+    seasons.sort(key=lambda s: -pitcher_season_score(s[1], league_of_year(s[0], fixed_league)))
+    weights, pad = ladder_weights([t["IPouts"] / PIT_QUOTA for _, t, _ in seasons])
+    rate, dec_w = defaultdict(float), defaultdict(float)
+    for (y, t, bf), w in zip(seasons, weights):
+        for k in ("H", "BB", "HR", "SO"):
+            rate[k] += w * t[k] / bf
+        dec_w[decade_of(y)] += w
+    L = fixed_league if fixed_league is not None else blend_league(LEAGUE, dec_w)
+    rate["H"] += pad * (L["S"] + L["D"] + L["T"] + L["HR"])
+    rate["BB"] += pad * L["BB"]
+    rate["HR"] += pad * L["HR"]
+    rate["SO"] += pad * L["K"]
+    bf_total = sum(bf for _, _, bf in seasons)
+    t = {k: rate[k] * bf_total for k in ("H", "BB", "HR", "SO")}
+    t["IPouts"] = bf_total - t["H"] - t["BB"]
+    # Usage (role, workload, saves) stays real — regression is about rates.
+    for k in ("G", "GS", "SV"):
+        t[k] = sum(season[k] for _, season, _ in seasons)
+    return t, L
 
 # Speed: net steals (efficiency counts) and triples-per-hit as footspeed
 # proxies, each normalized to the player's own era and rescaled toward the
@@ -378,87 +488,110 @@ def pool_ok(pool):
             return False
     return True
 
-def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts, bat_league_of, pit_league_of):
+def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts, fixed_league=None):
+    """Slices hold per-season lines; entry thresholds gate on REAL volume,
+    then rates blend through the peak ladder. fixed_league pins the era
+    context (single-decade slices); None judges each season against its own
+    decade and blends the backdrop by the ladder weights."""
     used_names = defaultdict(int)
     pool = []
     batted = set()
-    for key, t in bat_slice.items():
+    for key, years in bat_slice.items():
         pid = key if isinstance(key, str) else key[0]
-        if t["AB"] + t["BB"] < min_pa or pid not in people:
+        pa_real = sum(t["AB"] + t["BB"] for t in years.values())
+        if pa_real < min_pa or pid not in people:
             continue
         # Pitchers who merely batted a lot (every dead-ball workhorse) don't
         # get hitter cards; true two-way players (Ruth, Ohtani) keep both.
-        pitching = pit_slice.get(key)
-        if pitching and pitching["IPouts"] >= t["AB"] + t["BB"]:
+        pit_years = pit_slice.get(key)
+        ip_real = sum(t["IPouts"] for t in pit_years.values()) if pit_years else 0
+        if ip_real >= pa_real:
             continue
         pos = pos_slice.get(key, "DH")
-        card = build_hitter(pid, t, pos, bat_league_of(key))
+        t, L = peak_blend_hitter(years, fixed_league)
+        card = build_hitter(pid, t, pos, L) if t else None
         if card:
             # Two-way players yield two cards; the bat half's id gets a
             # suffix so both live in one pool (bare id keeps meaning the
             # arm, which is what existing saves resolve to).
-            two_way = pitching is not None and pitching["IPouts"] >= min_ipouts
+            two_way = ip_real >= min_ipouts
             pool.append(finish(card, pid, spans[key], used_names, tag, "bats",
                                id_suffix="-bat" if two_way else ""))
             batted.add(key)
-    for key, t in pit_slice.items():
+    for key, years in pit_slice.items():
         pid = key if isinstance(key, str) else key[0]
-        if t["IPouts"] < min_ipouts or pid not in people:
+        if sum(t["IPouts"] for t in years.values()) < min_ipouts or pid not in people:
             continue
-        card = build_pitcher(pid, t, pit_league_of(key), spans[key][1])
+        t, L = peak_blend_pitcher(years, fixed_league)
+        card = build_pitcher(pid, t, L, spans[key][1]) if t else None
         if card:
             pool.append(finish(card, pid, spans[key], used_names, tag, "throws",
                                share_name=key in batted))
     return pool
 
 print("accumulating batting...", file=sys.stderr)
-bat_career, bat_franch, bat_decade, bat_spans, bat_stint_vol = accumulate("Batting.csv", BAT_KEYS)
+bat_career, bat_franch, bat_decade, bat_lg_totals, bat_spans = accumulate("Batting.csv", BAT_KEYS)
 print("accumulating pitching...", file=sys.stderr)
-pit_career, pit_franch, pit_decade, pit_spans, pit_stint_vol = accumulate("Pitching.csv", PIT_KEYS)
+pit_career, pit_franch, pit_decade, _, pit_spans = accumulate("Pitching.csv", PIT_KEYS)
 print("accumulating positions...", file=sys.stderr)
-pos_career, pos_franch, pos_decade = accumulate_positions()
+pos_career, pos_franch, pos_decade, pos_decade_games = accumulate_positions()
 spans_all = {**bat_spans, **pit_spans}
 for key, span in bat_spans.items():
     if key in pit_spans:
         spans_all[key] = [min(span[0], pit_spans[key][0]), max(span[1], pit_spans[key][1])]
 
-LEAGUE = league_tables(bat_decade)
+LEAGUE = league_tables(bat_lg_totals)
 REF_SPEED = speed_reference(LEAGUE)
 
-# Era weights: a player's league context blends the decades he actually
-# played in, weighted by his PA (hitters) or IP (pitchers) in each.
-def era_weights(by_decade, pid, volume_keys):
-    weights = defaultdict(float)
-    for (p, dec), t in by_decade.items():
-        if p == pid:
-            weights[dec] += sum(t[k] for k in volume_keys)
-    return weights
-
-bat_weight_cache = {}
-def bat_league_career(key):
-    pid = key if isinstance(key, str) else key[0]
-    if pid not in bat_weight_cache:
-        bat_weight_cache[pid] = blend_league(LEAGUE, era_weights(bat_decade, pid, ["AB", "BB"]))
-    return bat_weight_cache[pid]
-
-pit_weight_cache = {}
-def pit_league_career(key):
-    pid = key if isinstance(key, str) else key[0]
-    if pid not in pit_weight_cache:
-        pit_weight_cache[pid] = blend_league(LEAGUE, era_weights(pit_decade, pid, ["IPouts"]))
-    return pit_weight_cache[pid]
-
-history = build_slice("all", bat_career, pit_career, pos_career, spans_all, 400, 450, bat_league_career, pit_league_career)
+history = build_slice("all", bat_career, pit_career, pos_career, spans_all, 400, 450)
 print(f"history: {len(history)}", file=sys.stderr)
 
-# Decade cards pool the player's whole decade, every team combined.
+# Decade cards pool the player's whole decade, every team combined. The
+# earliest section is "the 1910s & earlier": dedicated relief pitching barely
+# exists before 1920 (the 1870s-1900s produce 0-5 RP cards each, under the
+# 10 pool_ok needs), so those decades can't stand alone — instead everything
+# through 1919 folds into one combined window, one card per player.
+EARLIEST = 1910
+
+def merge_early(by_decade):
+    merged = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    for (pid, dec), years in by_decade.items():
+        if dec <= EARLIEST:
+            for y, t in years.items():
+                for k, v in t.items():
+                    merged[(pid, EARLIEST)][y][k] += v
+    return merged
+
+def merge_early_flat(table):
+    merged = defaultdict(lambda: defaultdict(int))
+    for (pid, dec), g in table.items():
+        if dec <= EARLIEST:
+            for k, v in g.items():
+                merged[(pid, EARLIEST)][k] += v
+    return merged
+
+early_bat, early_pit = merge_early(bat_decade), merge_early(pit_decade)
+early_pos = {k: max(g, key=g.get) for k, g in merge_early_flat(pos_decade_games).items() if sum(g.values()) > 0}
+early_spans = dict(spans_all)
+for key, span in spans_all.items():
+    if isinstance(key, tuple) and isinstance(key[1], int) and key[1] <= EARLIEST:
+        merged = early_spans.get((key[0], EARLIEST), [9999, 0])
+        early_spans[(key[0], EARLIEST)] = [min(merged[0], span[0]), max(merged[1], span[1])]
+
 decades = {}
-for start in range(1870, 2030, 10):
+for start in range(EARLIEST, 2030, 10):
     tag = "00s" if start == 2000 else f"d{start}"
-    bat = {k: v for k, v in bat_decade.items() if k[1] == start}
-    pit = {k: v for k, v in pit_decade.items() if k[1] == start}
-    league = LEAGUE.get(start) or LEAGUE[max(LEAGUE)]
-    pool = build_slice(tag, bat, pit, pos_decade, spans_all, 250, 225, lambda key: league, lambda key: league)
+    if start == EARLIEST:
+        # No fixed league for the merged window: each season is judged
+        # against its own decade — an 1884 hitter against 1880s baseball,
+        # not the 1910s — and the backdrop blends by the ladder weights.
+        bat, pit, pos, spans, fixed = early_bat, early_pit, early_pos, early_spans, None
+    else:
+        bat = {k: v for k, v in bat_decade.items() if k[1] == start}
+        pit = {k: v for k, v in pit_decade.items() if k[1] == start}
+        pos, spans = pos_decade, spans_all
+        fixed = LEAGUE.get(start) or LEAGUE[max(LEAGUE)]
+    pool = build_slice(tag, bat, pit, pos, spans, 250, 225, fixed_league=fixed)
     if pool_ok(pool):
         decades[start] = pool
     else:
@@ -469,9 +602,7 @@ franchises = {}
 for fid, fname in sorted(franch_names.items()):
     bat = {k: v for k, v in bat_franch.items() if k[1] == fid}
     pit = {k: v for k, v in pit_franch.items() if k[1] == fid}
-    bat_lg = lambda key: blend_league(LEAGUE, bat_stint_vol.get(key, {}))
-    pit_lg = lambda key: blend_league(LEAGUE, pit_stint_vol.get(key, {}))
-    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 400, 350, bat_lg, pit_lg)
+    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 400, 350)
     if pool_ok(pool):
         franchises[fid] = pool
     else:
@@ -481,7 +612,9 @@ print(f"franchises kept: {len(franchises)}", file=sys.stderr)
 header = """// Real-MLB card pools built from the Baseball Databank (Chadwick Baseball
 // Bureau / Sean Lahman, CC BY-SA 3.0 — https://github.com/chadwickbureau/baseballdatabank).
 // Cards derive from each player's real rates (career, decade window, or
-// franchise stint), mapped into the fictional generator's parameter space.
+// franchise stint), peak-weighted — best seasons count most, small samples
+// regress toward league average — and mapped into the fictional generator's
+// parameter space.
 // Generated by scripts/build-mlb-pools.py; do not hand-edit.
 // Tuple: [id, name, yearsActive, lastYear, set, isPitcher, rawPoints,
 //         obcOrControl, speedOrIp, positionOrRole, fielding, hand, chart]
