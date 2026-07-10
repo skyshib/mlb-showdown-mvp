@@ -850,6 +850,53 @@ test("game box scores fold into rolling season stats with batch-style rates", as
   assert.ok(stars.every((star) => star.summary.length > 0));
 });
 
+test("season stats scope to the roster, search by name, and sort by column", async () => {
+  const { seasonStatsScreen, seasonLines } = await import("../src/adventure/ui/statsScreens.js");
+  const save = testSave();
+  const { player, npc } = hookTeams();
+  const result = simulateGame(buildTeam(player), buildTeam(npc), "season-screen");
+  recordGameStats(save, result.boxScore.away);
+  // A player who has since left the roster still lives in the season book.
+  save.seasonStats.hitters.departed = {
+    id: "departed", name: "Gone Guy", games: 1, pa: 4, ab: 4, h: 4, d: 0, t: 0, hr: 9, bb: 0, so: 0, r: 1, rbi: 2, sb: 0, cs: 0, gidp: 0, wpa: 0.4
+  };
+  const app = { save, screen: { name: "seasonStats", index: 0, view: "hitters" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+
+  // Default scope is the active roster: the departed man doesn't show.
+  assert.ok(seasonLines(app).lines.length >= 9, "the roster's hitters all show");
+  assert.ok(!seasonLines(app).lines.some((line) => line.id === "departed"), "ex-roster players hide by default");
+  seasonStatsScreen.key(app, "right");
+  assert.equal(app.screen.scope, "all");
+  assert.ok(seasonLines(app).lines.some((line) => line.id === "departed"), "ALL PLAYERS brings them back");
+
+  // Type-to-search narrows by name; X clears it before leaving.
+  seasonStatsScreen.typed(app, "g");
+  seasonStatsScreen.typed(app, "o");
+  seasonStatsScreen.typed(app, "n");
+  assert.deepEqual(seasonLines(app).lines.map((line) => line.id), ["departed"], "search finds Gone Guy");
+  seasonStatsScreen.key(app, "b");
+  assert.equal(app.screen.query, "", "X clears the search");
+  assert.equal(app.screen.name, "seasonStats", "without leaving");
+
+  // Digits sort; the same digit again flips the direction.
+  seasonStatsScreen.typed(app, "4"); // HR
+  const byHr = seasonLines(app);
+  assert.equal(byHr.sort.key, "hr");
+  assert.equal(byHr.lines[0].id, "departed", "the 9-homer man leads the HR sort");
+  for (let i = 1; i < byHr.lines.length; i += 1) {
+    assert.ok(byHr.lines[i - 1].hr >= byHr.lines[i].hr, "descending by HR");
+  }
+  seasonStatsScreen.typed(app, "4");
+  const flipped = seasonLines(app);
+  assert.equal(flipped.lines[flipped.lines.length - 1].id, "departed", "again flips to ascending");
+
+  // Z swaps to arms and resets the sort to the default RA9 ordering.
+  seasonStatsScreen.key(app, "a");
+  assert.equal(app.screen.view, "pitchers");
+  assert.equal(app.screen.sortKey, null, "the sort resets with the view");
+  assert.ok(seasonLines(app).lines.length >= 1, "the arms show");
+});
+
 test("sim series carry per-game box scores so season stats include them", () => {
   const save = testSave();
   const { player, npc } = hookTeams();

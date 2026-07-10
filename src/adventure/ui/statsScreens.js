@@ -354,46 +354,121 @@ function championshipRows(save) {
 
 // ---- Season stats screen -------------------------------------------------------
 
-function seasonRows(save, view) {
+// The sortable columns per view, keyed 1-9 on the keyboard. Pressing the
+// same number again flips the direction. RA9 defaults ascending (lower is
+// better); everything else descending.
+const HITTER_SORTS = [
+  { key: "wpa", label: "WPA" },
+  { key: "avg", label: "AVG" },
+  { key: "ops", label: "OPS" },
+  { key: "hr", label: "HR" },
+  { key: "rbi", label: "RBI" },
+  { key: "sb", label: "SB" },
+  { key: "games", label: "G" }
+];
+const PITCHER_SORTS = [
+  { key: "wpa", label: "WPA" },
+  { key: "runsPerNine", label: "RA9" },
+  { key: "so", label: "K" },
+  { key: "outs", label: "IP" },
+  { key: "games", label: "G" }
+];
+
+// The visible stat lines after scope (active roster vs everyone who ever
+// suited up), name search, and sort. Exported for tests.
+export function seasonLines(app) {
+  const view = app.screen.view ?? "hitters";
+  const all = view === "pitchers" ? seasonPitchers(app.save) : seasonHitters(app.save);
+  const scoped = (app.screen.scope ?? "roster") === "roster"
+    ? all.filter((line) => app.save.roster.cardIds.includes(line.id))
+    : all;
+  const needle = (app.screen.query ?? "").trim().toUpperCase();
+  const searched = needle ? scoped.filter((line) => line.name.toUpperCase().includes(needle)) : scoped;
+  const sorts = view === "pitchers" ? PITCHER_SORTS : HITTER_SORTS;
+  const sort = sorts.find((item) => item.key === app.screen.sortKey) ?? null;
+  if (!sort) return { view, sorts, sort, dir: null, lines: searched };
+  const dir = app.screen.sortDir ?? "desc";
+  const lines = [...searched].sort((a, b) => (dir === "desc" ? b[sort.key] - a[sort.key] : a[sort.key] - b[sort.key]));
+  return { view, sorts, sort, dir, lines };
+}
+
+function seasonLineHtml(line, view) {
   if (view === "pitchers") {
-    return seasonPitchers(save).map((line) => ({
-      id: line.id,
-      html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`
-    }));
+    return `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`;
   }
-  return seasonHitters(save).map((line) => ({
-    id: line.id,
-    html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G</span>`
-  }));
+  return `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G</span>`;
 }
 
 export const seasonStatsScreen = {
   render(app) {
     const save = app.save;
-    const view = app.screen.view ?? "hitters";
-    const rows = seasonRows(save, view);
-    const index = clampIndex(app.screen.index ?? 0, rows.length);
+    const { view, sorts, sort, dir, lines } = seasonLines(app);
+    const scope = app.screen.scope ?? "roster";
+    const index = clampIndex(app.screen.index ?? 0, lines.length);
     const games = ensureSeasonStats(save).games;
+    const sortBar = sorts
+      .map((item, at) => (sort?.key === item.key
+        ? `<b>${at + 1} ${item.label}${dir === "desc" ? "&#9660;" : "&#9650;"}</b>`
+        : `${at + 1} ${item.label}`))
+      .join(" &middot; ");
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>SEASON STATS &middot; ${view === "pitchers" ? "ARMS" : "BATS"}</span><span>${games} GAME${games === 1 ? "" : "S"}</span></div>
-      <div class="gq-body"><div class="gq-frame gq-scroll">${
-        rows.length ? menuHtml(rows, index) : `<p class="gq-dim">NO GAMES ON RECORD YET. GO PLAY SOMEBODY.</p>`
-      }</div></div>
-      <div class="gq-textbox"><p class="gq-dim">&#8592;/&#8594; BATS &middot; ARMS. % IS SEASON WPA. Hover a row to read the card. X to leave.</p></div>
+      <div class="gq-topbar"><span>SEASON STATS &middot; ${view === "pitchers" ? "ARMS" : "BATS"} &middot; ${scope === "roster" ? "ACTIVE ROSTER" : "ALL PLAYERS"}</span><span>${games} GAME${games === 1 ? "" : "S"}</span></div>
+      <div class="gq-body">
+        <p class="gq-dim">SORT: ${sortBar}</p>
+        <div class="gq-frame gq-scroll">${
+          lines.length
+            ? menuHtml(lines.map((line) => ({ html: seasonLineHtml(line, view) })), index)
+            : `<p class="gq-dim">${app.screen.query ? `NOBODY NAMED "${escapeHtml(app.screen.query)}" HERE.` : "NO GAMES ON RECORD YET. GO PLAY SOMEBODY."}</p>`
+        }</div>
+      </div>
+      <div class="gq-textbox">${
+        app.screen.query ? `<p>SEARCH: <b>${escapeHtml(app.screen.query)}</b>_ <span class="gq-dim">X CLEARS</span></p>` : ""
+      }<p class="gq-dim">&#8592;/&#8594; ROSTER &middot; EVERYONE. Z BATS/ARMS. Type a name to search &middot; 1-${sorts.length} sorts (again flips). X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
-    return cardById(seasonRows(app.save, app.screen.view ?? "hitters")[index]?.id) ?? null;
+    return cardById(seasonLines(app).lines[index]?.id) ?? null;
+  },
+  typed(app, char) {
+    if (/\d/.test(char)) {
+      const { sorts } = seasonLines(app);
+      const pick = sorts[Number(char) - 1];
+      if (!pick) return;
+      if (app.screen.sortKey === pick.key) {
+        app.screen.sortDir = (app.screen.sortDir ?? "desc") === "desc" ? "asc" : "desc";
+      } else {
+        app.screen.sortKey = pick.key;
+        app.screen.sortDir = pick.key === "runsPerNine" ? "asc" : "desc";
+      }
+    } else if (char === "\b") {
+      app.screen.query = (app.screen.query ?? "").slice(0, -1);
+      app.screen.index = 0;
+    } else {
+      app.screen.query = ((app.screen.query ?? "") + char).slice(0, 24);
+      app.screen.index = 0;
+    }
+    app.rerender();
   },
   key(app, key) {
     if (key === "left" || key === "right") {
-      app.screen.view = (app.screen.view ?? "hitters") === "hitters" ? "pitchers" : "hitters";
+      app.screen.scope = (app.screen.scope ?? "roster") === "roster" ? "all" : "roster";
       app.screen.index = 0;
     } else if (key === "up" || key === "down") {
-      const rows = seasonRows(app.save, app.screen.view ?? "hitters");
-      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
-    } else if (key === "b" || key === "a") {
-      return app.go("map");
+      const { lines } = seasonLines(app);
+      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), lines.length);
+    } else if (key === "a") {
+      // Different view, different columns: the sort resets with it.
+      app.screen.view = (app.screen.view ?? "hitters") === "hitters" ? "pitchers" : "hitters";
+      app.screen.sortKey = null;
+      app.screen.sortDir = null;
+      app.screen.index = 0;
+    } else if (key === "b") {
+      if (app.screen.query) {
+        app.screen.query = "";
+        app.screen.index = 0;
+      } else {
+        return app.go("map");
+      }
     }
     app.rerender();
   }
