@@ -760,18 +760,63 @@ test("a sacrifice bunt trades an out to move the runners", () => {
   const batterId = state.away.lineup[0].id;
   const event = attemptBunt(state, createRng("bunt-roll"));
   assert.equal(event.type, "bunt");
-  assert.ok(["SAC", "FC"].includes(event.result));
+  assert.ok(["SAC", "SO", "FC"].includes(event.result));
   assert.equal(state.outs, 1);
   assert.equal(state.lineupIndex.away, 1, "the bunt consumed the plate appearance");
   if (event.result === "SAC") {
     assert.equal(state.bases[1]?.id, "r1", "runner moved up");
     assert.equal(state.bases[0], null);
+  } else if (event.result === "SO") {
+    assert.equal(state.bases[0]?.id, "r1", "the runner holds on the strikeout");
   } else {
     assert.equal(state.bases[0]?.id, batterId, "batter reached on the fielder's choice");
-    assert.equal(state.bases[1], null, "lead runner was cut down");
+    assert.equal(state.bases[1], null, "lead runner was forced at second");
   }
   state.outs = 2;
   assert.equal(canBunt(state), false, "no bunting with two down");
+});
+
+test("failed bunts split between strikeouts and lead FORCE outs — never a tag", () => {
+  const { player, npc } = hookTeams();
+  const build = (bases, seed) => {
+    const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed });
+    battle.state.bases = bases.map((on, at) => (on ? { id: `r${at + 1}`, name: `Runner ${at + 1}`, speed: 8 } : null));
+    // A slow batter misses the clean bunt often, exercising the failure split.
+    battle.state.away.lineup[0] = { ...battle.state.away.lineup[0], speed: 0 };
+    return battle.state;
+  };
+
+  // Runner on second only: no force ahead, tags are off the table — failed
+  // bunts are the batter out (or a K), and the runner NEVER leaves second.
+  const outcomes = { SAC: 0, SO: 0, GB: 0, FC: 0 };
+  for (let i = 0; i < 120; i += 1) {
+    const state = build([false, true, false], `bunt-split-2b-${i}`);
+    const event = attemptBunt(state, createRng(`bunt-roll-2b-${i}`));
+    outcomes[event.result] += 1;
+    if (event.result !== "SAC") {
+      assert.equal(state.bases[1]?.id, "r2", `${event.result}: the runner stays on second`);
+      assert.equal(state.bases[0], null, "and the batter never sneaks aboard");
+    }
+    assert.equal(event.result === "SO", Boolean(event.playDetails.strikeout), "SO carries the strikeout detail");
+  }
+  assert.equal(outcomes.FC, 0, "no fielder's choice without a force");
+  assert.ok(outcomes.SO >= 15 && outcomes.GB >= 15, `failures split both ways (SO ${outcomes.SO}, GB ${outcomes.GB})`);
+  const failures = outcomes.SO + outcomes.GB;
+  assert.ok(Math.abs(outcomes.SO - failures / 2) <= failures * 0.25, "roughly half of failures are strikeouts");
+
+  // First and second occupied: the lead force is at third, everyone else up.
+  let sawForceAtThird = false;
+  for (let i = 0; i < 60 && !sawForceAtThird; i += 1) {
+    const state = build([true, true, false], `bunt-split-12-${i}`);
+    const event = attemptBunt(state, createRng(`bunt-roll-12-${i}`));
+    if (event.result === "FC") {
+      sawForceAtThird = true;
+      assert.equal(event.playDetails.leadOut.at, "3B", "the lead man is forced at third");
+      assert.equal(state.bases[1]?.id, "r1", "the trailing runner moves up to second");
+      assert.equal(state.bases[2], null);
+    }
+  }
+  assert.ok(sawForceAtThird, "the bases-ahead force still happens");
 });
 
 test("an intentional walk is free and forces a run with the bases full", () => {

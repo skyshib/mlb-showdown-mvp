@@ -323,8 +323,11 @@ export function buntSuccessChance(state) {
 
 // A sacrifice bunt as a full plate appearance. Clean bunt: batter out, every
 // runner moves up (never from third — canBunt disallows the squeeze).
-// Bobbled: fielder's choice, the lead runner is cut down and the batter
-// reaches. Auto play never bunts.
+// Failed bunts split down the middle: half are fouled into a strikeout
+// (runners hold), half the defense takes the lead FORCE out — never a tag
+// play, so with a runner on second only (no force ahead of him) the sure
+// out is the batter at first and the runner stays put. Auto play never
+// bunts.
 export function attemptBunt(state, rng) {
   if (!canBunt(state)) return null;
   const battingSide = state.half === "top" ? "away" : "home";
@@ -348,23 +351,39 @@ export function attemptBunt(state, rng) {
   const [first, second] = state.bases;
   const runs = 0;
   let leadOut = null;
+  let strikeout = false;
+  let batterOut = false;
+  let result;
 
   state.outs += 1;
   if (clean) {
     state.bases = [null, first ?? null, second ?? null];
-  } else {
+    result = "SAC";
+  } else if (rng.d20() <= 10) {
+    // Fouled into the strikeout: runners hold where they stand.
+    strikeout = true;
+    result = "SO";
+  } else if (first) {
+    // The defense takes the lead FORCE: with first and second occupied both
+    // runners are forced, so the lead man is out at third and everyone else
+    // moves up; with first only, he's forced at second.
     const lead = second ?? first;
     leadOut = { runner: lead.name, at: second ? "3B" : "2B" };
-    const keptFirst = first && first !== lead ? first : null;
-    // Batter takes first; the survivor advances only where the force pushes.
-    state.bases = [runnerFor(batter, pitcher), keptFirst, null];
+    state.bases = [runnerFor(batter, pitcher), second ? first : null, null];
+    result = "FC";
+  } else {
+    // Runner on second only: no force ahead of him, and tags are off the
+    // table — the sure out is the batter at first, the runner stays put.
+    batterOut = true;
+    result = "GB";
   }
 
-  const result = clean ? "SAC" : "FC";
   state.lastPlayDetails = {
     kind: "bunt",
     outsBefore,
     clean,
+    strikeout,
+    batterOut,
     roll,
     fielding,
     total,
@@ -377,6 +396,10 @@ export function attemptBunt(state, rng) {
   hitterLine.pa += 1;
   hitterLine.rbi += runs;
   if (!clean) hitterLine.ab += 1;
+  if (strikeout) {
+    hitterLine.so += 1;
+    pitcherLine.so += 1;
+  }
   pitcherLine.bf += 1;
   const outsOnPlay = state.outs - outsBefore;
   pitcherLine.outs += outsOnPlay;
