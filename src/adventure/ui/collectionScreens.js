@@ -41,7 +41,7 @@ function shopItems(app) {
       run: (a) => buySingle(a, card, price)
     });
   }
-  items.push({ label: "SELL DUPLICATES", run: (a) => a.go("sell", { index: 0 }) });
+  items.push({ label: "SELL CARDS", run: (a) => a.go("sell", { index: 0 }) });
   items.push({ label: "CARD CATALOG", run: (a) => a.go("catalog", { index: 0, filter: "ALL" }) });
   items.push({ label: "LEAVE SHOP", run: (a) => a.go("map") });
   return items;
