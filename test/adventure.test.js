@@ -445,6 +445,43 @@ test("sell-all clears every duplicate at the pawn rate, keeping first copies", a
   assert.ok(RARITIES.common.sellValue <= 30, "the shop pays pawn rates now");
 });
 
+test("stars flag keepers in binder and catalog; the sell sweeps can spare them", async () => {
+  const { binderScreen, catalogScreen, sellScreen, sellAllCards, sellAllDuplicates } = await import("../src/adventure/ui/collectionScreens.js");
+  const { isStarred } = await import("../src/adventure/state.js");
+  const save = testSave();
+  const keeper = adventurePool().find((card) => !save.roster.cardIds.includes(card.id));
+  addCardToCollection(save, keeper.id, 2);
+  const app = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+
+  // The * key stars the cursor card in the binder; again unstars.
+  const binderRowsNow = collectionCards(save);
+  app.screen.index = binderRowsNow.findIndex(({ card }) => card.id === keeper.id);
+  binderScreen.typed(app, "*");
+  assert.equal(isStarred(save, keeper.id), true, "* stars the keeper");
+  assert.ok(binderScreen.render(app).includes("&#9733;"), "the binder shows the star");
+  binderScreen.typed(app, "*");
+  assert.equal(isStarred(save, keeper.id), false, "* again unstars");
+  binderScreen.typed(app, "*");
+
+  // The catalog stars through the same key.
+  const catApp = { save, screen: { name: "catalog", index: 0, filter: "ALL", query: keeper.name }, go() {}, rerender() {} };
+  assert.ok(catalogScreen.render(catApp).includes("&#9733;"), "the catalog shows the star");
+  catalogScreen.typed(catApp, "*");
+  assert.equal(isStarred(save, keeper.id), false, "the catalog toggles the same flag");
+  catalogScreen.typed(catApp, "*");
+
+  // Sweeps spare starred keepers while the shield is up, and only then.
+  const sellApp = { save, screen: { name: "sell", index: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  assert.ok(sellScreen.render(sellApp).includes("PROTECT STARRED"), "the sell screen offers the shield");
+  assert.equal(sellApp.screen.spareStarred ?? true, true, "the shield defaults on");
+  sellAllDuplicates(save, { spareStarred: true });
+  assert.equal(ownedCount(save, keeper.id), 2, "protected keepers dodge the duplicate sweep");
+  sellAllCards(save, { spareStarred: true });
+  assert.equal(ownedCount(save, keeper.id), 2, "and the full sweep");
+  sellAllCards(save, { spareStarred: false });
+  assert.equal(ownedCount(save, keeper.id), 0, "shield down, the keeper sells");
+});
+
 test("the shop never lists roster cards, hovers its rows, and sell-all wants a confirm", async () => {
   const { sellScreen, sellAllCards } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();

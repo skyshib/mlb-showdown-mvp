@@ -10,6 +10,8 @@ import {
   removeCardFromCollection,
   collectionCards,
   ownedCount,
+  isStarred,
+  toggleStar,
   rosterCards,
   rosterPoints,
   pointCap,
@@ -66,6 +68,25 @@ function typeIntoQuery(app, char) {
   app.screen.query = char === "\b" ? query.slice(0, -1) : (query + char).slice(0, 24);
   app.screen.index = 0;
   app.rerender();
+}
+
+// The * key stars the cursor card (a keeper flag the sell sweeps can spare);
+// anything else types into the search.
+function starOrType(app, char, cardAtCursor) {
+  if (char === "*") {
+    const card = cardAtCursor();
+    if (card) {
+      toggleStar(app.save, card.id);
+      persistSave(app.save);
+      app.rerender();
+    }
+    return;
+  }
+  typeIntoQuery(app, char);
+}
+
+function starMark(save, card) {
+  return isStarred(save, card.id) ? " &#9733;" : "";
 }
 
 function searchLine(query) {
@@ -163,7 +184,7 @@ export const catalogScreen = {
                 visible.map((card) => {
                   const owned = ownedCount(app.save, card.id);
                   const rostered = app.save.roster.cardIds.includes(card.id);
-                  return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">*x${owned}</span>` : ""}${rostered ? " &#9679;" : ""}${pinMark(app, card)}` };
+                  return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">*x${owned}</span>` : ""}${rostered ? " &#9679;" : ""}${starMark(app.save, card)}${pinMark(app, card)}` };
                 }),
                 index - start,
                 { offset: start }
@@ -172,13 +193,18 @@ export const catalogScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Every card in this league, best first. Type a name to search &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; Z pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Every card in this league, best first. Type a name to search &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; the * key stars a keeper &#9733; &middot; Z pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
     return catalogVisibleRows(app)[index] ?? null;
   },
-  typed: typeIntoQuery,
+  typed(app, char) {
+    starOrType(app, char, () => {
+      const rows = catalogVisibleRows(app);
+      return rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
+    });
+  },
   key(app, key) {
     const rows = catalogVisibleRows(app);
     if (key === "left" || key === "right") {
@@ -267,11 +293,13 @@ function sellableCards(save) {
     .filter(({ count }) => count > 0);
 }
 
-// Everything past the first copy of each card (roster copies always kept).
-// Returns coins earned. Exported for tests.
-export function sellAllDuplicates(save) {
+// Everything past the first copy of each card (roster copies always kept;
+// spareStarred also skips the player's starred keepers). Returns coins
+// earned. Exported for tests.
+export function sellAllDuplicates(save, { spareStarred = false } = {}) {
   let coins = 0;
   for (const { card, count } of collectionCards(save)) {
+    if (spareStarred && isStarred(save, card.id)) continue;
     const keep = 1;
     for (let extra = count; extra > keep; extra -= 1) {
       if (!removeCardFromCollection(save, card.id)) break;
@@ -283,11 +311,12 @@ export function sellAllDuplicates(save) {
 }
 
 // The nuclear option: every sellable copy goes — non-roster cards to zero,
-// rostered cards down to their roster copy. Returns coins earned. Exported
-// for tests.
-export function sellAllCards(save) {
+// rostered cards down to their roster copy, starred keepers spared when
+// asked. Returns coins earned. Exported for tests.
+export function sellAllCards(save, { spareStarred = false } = {}) {
   let coins = 0;
   for (const { card, count } of sellableCards(save)) {
+    if (spareStarred && isStarred(save, card.id)) continue;
     for (let copy = 0; copy < count; copy += 1) {
       if (!removeCardFromCollection(save, card.id)) break;
       coins += RARITIES[card.rarity].sellValue;
@@ -298,17 +327,19 @@ export function sellAllCards(save) {
 }
 
 // Menu-label hauls: duplicates keep one of each card, sell-all keeps only
-// roster copies.
-function duplicateHaul(save) {
+// roster copies. Both respect the starred shield when it's up.
+function duplicateHaul(save, spareStarred) {
   return sellableCards(save).reduce(
-    (coins, { card, count, locked }) => coins + RARITIES[card.rarity].sellValue * (locked ? count : count - 1),
+    (coins, { card, count, locked }) => coins + (spareStarred && isStarred(save, card.id)
+      ? 0
+      : RARITIES[card.rarity].sellValue * (locked ? count : count - 1)),
     0
   );
 }
 
-function fullHaul(save) {
+function fullHaul(save, spareStarred) {
   return sellableCards(save).reduce(
-    (coins, { card, count }) => coins + RARITIES[card.rarity].sellValue * count,
+    (coins, { card, count }) => coins + (spareStarred && isStarred(save, card.id) ? 0 : RARITIES[card.rarity].sellValue * count),
     0
   );
 }
@@ -316,17 +347,19 @@ function fullHaul(save) {
 export const sellScreen = {
   render(app) {
     const rows = sellableCards(app.save);
-    const index = clampIndex(app.screen.index ?? 0, rows.length + (rows.length ? 2 : 0) + 1);
+    const spare = app.screen.spareStarred ?? true;
+    const index = clampIndex(app.screen.index ?? 0, rows.length + (rows.length ? 3 : 0) + 1);
     const selected = rows[index]?.card ?? null;
     const confirming = Boolean(app.screen.confirmSellAll);
     const items = [
       ...rows.map(({ card, count, locked }) => ({
-        html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; &#9679; ${RARITIES[card.rarity].sellValue}</span>`
+        html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; &#9679; ${RARITIES[card.rarity].sellValue}</span>${starMark(app.save, card)}`
       })),
       ...(rows.length
         ? [
-            { html: `SELL ALL DUPLICATES <span class="gq-dim">&#8594; &#9679; ${duplicateHaul(app.save)}</span>` },
-            { html: `SELL ALL CARDS <span class="gq-dim">&#8594; &#9679; ${fullHaul(app.save)}</span>` }
+            { html: `SELL ALL DUPLICATES <span class="gq-dim">&#8594; &#9679; ${duplicateHaul(app.save, spare)}</span>` },
+            { html: `SELL ALL CARDS <span class="gq-dim">&#8594; &#9679; ${fullHaul(app.save, spare)}</span>` },
+            { html: `&#9733; PROTECT STARRED <span class="gq-dim">${spare ? "ON — sweeps spare them" : "OFF — everything goes"}</span>` }
           ]
         : []),
       { label: "DONE SELLING" }
@@ -342,7 +375,7 @@ export const sellScreen = {
       <div class="gq-textbox">${
         confirming
           ? `<p class="gq-blink"><b>SELL THE WHOLE BINDER? Z again to confirm. X keeps it.</b></p>`
-          : `<p>Z sells one copy. Roster cards are never for sale — only their spares list here.</p>`
+          : `<p>Z sells one copy. Roster cards are never for sale — only their spares list here. &#9733; keepers dodge the sweeps while PROTECT is on.</p>`
       }</div>
     </div>`;
   },
@@ -351,9 +384,11 @@ export const sellScreen = {
   },
   key(app, key) {
     const rows = sellableCards(app.save);
-    const extras = rows.length ? 2 : 0;
+    const extras = rows.length ? 3 : 0;
     const total = rows.length + extras + 1;
     const sellAllIndex = rows.length + 1;
+    const protectIndex = rows.length + 2;
+    const spare = app.screen.spareStarred ?? true;
     const wasConfirming = Boolean(app.screen.confirmSellAll);
     if (key !== "a") app.screen.confirmSellAll = false;
     if (key === "up" || key === "down") {
@@ -368,7 +403,7 @@ export const sellScreen = {
           persistSave(app.save);
         }
       } else if (extras && index === rows.length) {
-        const coins = sellAllDuplicates(app.save);
+        const coins = sellAllDuplicates(app.save, { spareStarred: spare });
         addLog(app.save, `Sold the duplicate pile (+${coins} coins).`);
         persistSave(app.save);
         app.screen.index = 0;
@@ -378,11 +413,13 @@ export const sellScreen = {
           app.screen.confirmSellAll = true;
         } else {
           app.screen.confirmSellAll = false;
-          const coins = sellAllCards(app.save);
+          const coins = sellAllCards(app.save, { spareStarred: spare });
           addLog(app.save, `Sold the whole binder (+${coins} coins).`);
           persistSave(app.save);
           app.screen.index = 0;
         }
+      } else if (extras && index === protectIndex) {
+        app.screen.spareStarred = !spare;
       } else {
         app.go("shop", { menuIndex: 0 });
       }
@@ -426,7 +463,7 @@ export const binderScreen = {
                 rows.map(({ card, count }) => ({
                   html: `${cardLine(card)}${count > 1 ? ` <span class="gq-dim">x${count}</span>` : ""}${
                     app.save.roster.cardIds.includes(card.id) ? " &#9670;" : ""
-                  }${pinMark(app, card)}`
+                  }${starMark(app.save, card)}${pinMark(app, card)}`
                 })),
                 index
               )
@@ -434,13 +471,18 @@ export const binderScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Type a name to search &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; Z pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Type a name to search &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; the * key stars a keeper &#9733; &middot; Z pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
     return binderVisibleRows(app)[index]?.card ?? null;
   },
-  typed: typeIntoQuery,
+  typed(app, char) {
+    starOrType(app, char, () => {
+      const rows = binderVisibleRows(app);
+      return rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card ?? null;
+    });
+  },
   key(app, key) {
     if (key === "left" || key === "right") {
       const at = BINDER_FILTERS.indexOf(app.screen.filter ?? "ALL");

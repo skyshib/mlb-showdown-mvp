@@ -90,7 +90,7 @@ document.addEventListener("keydown", (event) => {
   // filter instead of acting — including Z and X, so Enter confirms and
   // Escape backs out there. Backspace edits the query while one exists.
   if (screen?.typed && !event.ctrlKey && !event.metaKey && !event.altKey) {
-    if (event.key.length === 1 && /[a-z0-9 .'-]/i.test(event.key)) {
+    if (event.key.length === 1 && /[a-z0-9 .'*-]/i.test(event.key)) {
       event.preventDefault();
       screen.typed(app, event.key);
       return;

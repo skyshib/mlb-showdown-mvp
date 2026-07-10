@@ -217,6 +217,27 @@ export function seasonPitchers(save) {
     .sort((a, b) => (a.outs === 0) - (b.outs === 0) || a.runsPerNine - b.runsPerNine || b.outs - a.outs);
 }
 
+// ---- Starred cards -------------------------------------------------------------
+
+// Keepers, flagged by the player in the binder or catalog. Older saves grow
+// the field in place. The sell screen's sweeps can spare them.
+export function ensureStarred(save) {
+  if (!Array.isArray(save.starred)) save.starred = [];
+  return save.starred;
+}
+
+export function isStarred(save, cardId) {
+  return ensureStarred(save).includes(cardId);
+}
+
+export function toggleStar(save, cardId) {
+  const starred = ensureStarred(save);
+  const at = starred.indexOf(cardId);
+  if (at >= 0) starred.splice(at, 1);
+  else starred.push(cardId);
+  return at < 0;
+}
+
 // ---- Almanac and trophy case -------------------------------------------------
 
 // Older saves predate the almanac and the trophy case; grow the fields in
