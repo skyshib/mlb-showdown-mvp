@@ -685,6 +685,14 @@ function benchLabel(anchor, filter) {
   return filter === "all" ? `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}` : `SPARE ${slot} ONLY`;
 }
 
+// The replacement picker's rows: the bench candidates plus the incumbent
+// himself, everyone sorted into point order so he reads at his true rank.
+function pickRowsFor(save, anchor, filter) {
+  if (!anchor) return [];
+  return [...benchCards(save, anchor, filter), anchor]
+    .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+}
+
 // The previewed card's season line, shown under the card panel on the Team
 // screen — how the man is actually hitting, not just what he's rated.
 function seasonStatsHtml(save, card) {
@@ -711,11 +719,11 @@ export const teamScreen = {
     const flipping = app.screen.mode === "dhFlip";
     const rosterIndex = clampIndex(app.screen.index ?? 0, roster.length + actions.length);
     const filter = app.screen.pickFilter ?? "position";
-    const bench = picking ? benchCards(save, roster[rosterIndex], filter) : [];
     const flips = flipping ? dhFlipOptions(save) : [];
-    // The pick list leads with the man being replaced, diamond-marked like
-    // the binder — picking him keeps him.
-    const pickRows = picking ? [roster[rosterIndex], ...bench] : [];
+    // The pick list holds the man being replaced too, diamond-marked like
+    // the binder and sorted into his rightful spot by points — picking him
+    // keeps him.
+    const pickRows = picking ? pickRowsFor(save, roster[rosterIndex], filter) : [];
     const pickIndex = clampIndex(app.screen.pickIndex ?? 0, (picking ? pickRows.length : flips.length) + 1);
     const preview = picking
       ? pickRows[pickIndex] ?? null
@@ -726,9 +734,10 @@ export const teamScreen = {
           : actions[rosterIndex - roster.length]?.preview ?? null;
     let list;
     if (picking) {
+      const anchorId = roster[rosterIndex]?.id;
       list = `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
         [
-          ...pickRows.map((card, rowIndex) => ({ html: `${cardLine(card)}${rowIndex === 0 ? " &#9670;" : ""}` })),
+          ...pickRows.map((card) => ({ html: `${cardLine(card)}${card.id === anchorId ? " &#9670;" : ""}` })),
           { label: "CANCEL" }
         ],
         pickIndex
@@ -772,8 +781,7 @@ export const teamScreen = {
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       if (!anchor) return null;
-      if (index === 0) return anchor;
-      return benchCards(app.save, anchor, app.screen.pickFilter ?? "position")[index - 1] ?? null;
+      return pickRowsFor(app.save, anchor, app.screen.pickFilter ?? "position")[index] ?? null;
     }
     if (app.screen.mode === "dhFlip") {
       return dhFlipOptions(app.save)[index]?.player ?? null;
@@ -787,18 +795,19 @@ export const teamScreen = {
     const actions = teamActions(save);
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
-      const bench = benchCards(save, anchor, app.screen.pickFilter ?? "position");
-      // Row 0 is the incumbent himself; picking him keeps him.
-      const total = bench.length + 2;
+      const rows = pickRowsFor(save, anchor, app.screen.pickFilter ?? "position");
+      const total = rows.length + 1;
       if (key === "left" || key === "right") {
         app.screen.pickFilter = (app.screen.pickFilter ?? "position") === "position" ? "all" : "position";
-        app.screen.pickIndex = 0;
+        const widened = pickRowsFor(save, anchor, app.screen.pickFilter);
+        app.screen.pickIndex = Math.max(0, widened.findIndex((card) => card.id === anchor.id));
       } else if (key === "up" || key === "down") {
         app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), total);
       } else if (key === "a") {
-        const pickIndex = app.screen.pickIndex ?? 0;
-        if (pickIndex > 0 && pickIndex <= bench.length) {
-          const cardIds = save.roster.cardIds.map((id) => (id === anchor.id ? bench[pickIndex - 1].id : id));
+        const pick = rows[app.screen.pickIndex ?? 0];
+        // Picking the incumbent (or CANCEL) keeps him; anyone else swaps in.
+        if (pick && pick.id !== anchor.id) {
+          const cardIds = save.roster.cardIds.map((id) => (id === anchor.id ? pick.id : id));
           setRoster(save, cardIds);
           persistSave(save);
         }
@@ -830,8 +839,10 @@ export const teamScreen = {
         // Rotation, the DH flip, and batting order stay adjustable.
         if (save.activeSeries) return;
         app.screen.mode = "pick";
-        app.screen.pickIndex = 0;
         app.screen.pickFilter = "position";
+        // The cursor opens on the incumbent, wherever his points rank him.
+        const opened = pickRowsFor(save, roster[index], "position");
+        app.screen.pickIndex = Math.max(0, opened.findIndex((card) => card.id === roster[index].id));
       } else {
         const action = actions[index - roster.length];
         if (action && !action.disabled) action.run(app);
