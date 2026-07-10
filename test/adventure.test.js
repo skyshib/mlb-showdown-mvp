@@ -1503,6 +1503,59 @@ test("every league builds a working universe with a legal starter pack", async (
   }
 });
 
+test("one era of a player per roster: 1990s and 2000s Bonds never share a team", async () => {
+  const { canPickPlayer, createDraft, duplicateEraPeople } = await import("../src/rules/draft.js");
+  const { personConflict, playerIdentity } = await import("../src/rules/cards.js");
+  const { benchCards } = await import("../src/adventure/ui/collectionScreens.js");
+  setUniverseSeed("era-rule", "decades-1910,1920,1990,2000");
+  try {
+    const pool = adventurePool();
+    const bonds90 = cardById("mlb-d1990-bondsba01");
+    const bonds00 = cardById("mlb-00s-bondsba01");
+    assert.ok(bonds90 && bonds00, "both Bonds eras are in the pool");
+    assert.equal(playerIdentity(bonds90.id).person, playerIdentity(bonds00.id).person, "same human");
+
+    // The rules layer flags the pair and drafts refuse the second pick.
+    const issues = validateRoster({ roster: [bonds90, bonds00], lineupAssignments: {} });
+    assert.ok(issues.some((issue) => issue.includes("two eras of Barry Bonds")), "validateRoster names the clash");
+    const draft = createDraft(["Era"], pool, 13, "era-rule");
+    draft.managers[0].roster.push(bonds90);
+    draft.pickedIds.add(bonds90.id);
+    const refusal = canPickPlayer(draft, draft.managers[0], bonds00);
+    assert.equal(refusal.ok, false, "the draft refuses the second era");
+    assert.match(refusal.reason, /already has Barry Bonds/);
+
+    // A two-way player's bat and arm halves share a slice: the legal pairing.
+    const bat = pool.find((card) => card.id.endsWith("-bat"));
+    const arm = cardById(bat.id.slice(0, -4));
+    assert.ok(arm, "the arm half exists");
+    assert.equal(duplicateEraPeople([bat, arm]).length, 0, "same-era halves are no clash");
+    assert.equal(personConflict([bat], arm), null);
+
+    // Sealed products and NPC squads obey the rule from birth.
+    for (const seed of ["a", "b", "c", "d", "e"]) {
+      assert.equal(duplicateEraPeople(starterPack(`era-rule-${seed}`)).length, 0, `starter pack ${seed} is era-clean`);
+    }
+    for (const trainer of TRAINERS.slice(0, 6)) {
+      assert.equal(duplicateEraPeople(buildNpcTeam(trainer).roster).length, 0, `${trainer.id} fields one era per player`);
+    }
+
+    // The roster editor's bench hides the other era — unless the swap target
+    // IS the other era, which is exactly how you change decades.
+    const save = createSave({ name: "ERA", saveSeed: "era-rule", universe: "decades-1910,1920,1990,2000" });
+    const dealt = starterPack("era-rule-bench").filter((card) => card.id !== bonds90.id && card.id !== bonds00.id);
+    const outfielder = dealt.find((card) => card.kind === "hitter" && card.position === "LF/RF");
+    const rosterIds = dealt.map((card) => (card.id === outfielder.id ? bonds90.id : card.id));
+    for (const id of [...rosterIds, bonds00.id]) addCardToCollection(save, id);
+    setRoster(save, rosterIds);
+    const otherHitter = rosterCards(save).find((card) => card.kind === "hitter" && card.id !== bonds90.id);
+    assert.ok(!benchCards(save, otherHitter, "all").some((card) => card.id === bonds00.id), "the other era never lists for a different slot");
+    assert.ok(benchCards(save, bonds90, "position").some((card) => card.id === bonds00.id), "swapping Bonds for Bonds stays on the menu");
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
 test("MLB charts mirror real hit mixes: slap hitters slap, sluggers slug", () => {
   const slots = (card, result) => card.chart
     .filter((row) => row.result === result)

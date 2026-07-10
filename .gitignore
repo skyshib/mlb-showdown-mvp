@@ -5,3 +5,5 @@ scripts/fg-defense-raw.json
 scripts/pages/
 scripts/store-pages/
 scripts/card-images-raw/
+scripts/mlbPools.js
+scripts/mlbTeams.js

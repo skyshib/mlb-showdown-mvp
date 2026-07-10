@@ -3,6 +3,7 @@ import { createRng } from "../rules/rng.js";
 import { decodeCardRows } from "../data/realCards.js";
 import { CLASSIC_CARD_ROWS } from "../data/classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES } from "../data/mlbPools.js";
+import { personConflict } from "../rules/cards.js";
 
 // Every save picks a league at new game. The fictional league regenerates
 // from the save seed; the real leagues share fixed card sets, but the MLB
@@ -26,9 +27,14 @@ export const UNIVERSES = {
   }
 };
 
-// The parameterized leagues: any decade since relief pitching existed, and
-// any active franchise (players rated on their years with that club).
+// The parameterized leagues: one section per decade since relief pitching
+// existed — the earliest folds everything through 1919 into one combined
+// pool ("the 1910s & earlier") — and any active franchise (players rated
+// on their years with that club).
 export const DECADES = Object.keys(MLB_DECADE_ROWS).map(Number).sort((a, b) => a - b);
+export const EARLIEST_DECADE = DECADES[0];
+export const decadeLabel = (start) =>
+  Number(start) === EARLIEST_DECADE ? `${start}s & EARLIER` : `${start}s`;
 export const FRANCHISES = Object.keys(MLB_FRANCHISE_ROWS)
   .map((id) => ({ id, name: MLB_FRANCHISE_NAMES[id] }))
   .sort((a, b) => a.name.localeCompare(b.name));
@@ -46,13 +52,20 @@ export function universeConfig(mode) {
     if (picked.length) {
       const span = picked.length === DECADES.length
         ? "every decade"
-        : picked.map((start) => `the ${start.slice(2)}s`).join(", ");
+        : picked.map((start) => Number(start) === EARLIEST_DECADE ? `the ${start.slice(2)}s & earlier` : `the ${start.slice(2)}s`).join(", ");
       return { key: mode, name: "MLB: ALL TEAMS", blurb: `Real players from ${span} — one card per player per decade.` };
     }
   }
   const decade = /^decade-(\d{4})$/.exec(mode ?? "");
   if (decade && MLB_DECADE_ROWS[decade[1]]) {
-    return { key: mode, name: `MLB: THE ${decade[1].slice(2)}s`, blurb: `Real big leaguers rated on their ${decade[1]}-${Number(decade[1]) + 9} numbers.` };
+    const early = Number(decade[1]) === EARLIEST_DECADE;
+    return {
+      key: mode,
+      name: `MLB: THE ${decade[1].slice(2)}s${early ? " & EARLIER" : ""}`,
+      blurb: early
+        ? `Real big leaguers rated on their numbers through ${EARLIEST_DECADE + 9} — the dead-ball era and everything before it.`
+        : `Real big leaguers rated on their ${decade[1]}-${Number(decade[1]) + 9} numbers.`
+    };
   }
   const franchise = /^franchise-([A-Z]{2,3})$/.exec(mode ?? "");
   if (franchise && MLB_FRANCHISE_ROWS[franchise[1]]) {
@@ -355,19 +368,24 @@ export function starterPack(seed) {
     rareSlots.add(rareable[rng.int(0, rareable.length - 1)]);
   }
   const used = new Set();
+  const dealt = [];
+  // The pack doubles as the opening roster, so it obeys the roster rule
+  // too: one era of a player — never two decades of the same man.
+  const dealable = (card) => !used.has(card.id) && !personConflict(dealt, card);
   return STARTER_PACK_SLOTS.map((slot, index) => {
     const rarity = rareSlots.has(index) ? "rare" : "common";
-    let fits = pool.filter((card) => !used.has(card.id) && card.rarity === rarity && slotMatches(slot, card));
+    let fits = pool.filter((card) => dealable(card) && card.rarity === rarity && slotMatches(slot, card));
     if (!fits.length) {
       // Thin pool at this slot: take the cheapest few of whatever exists.
       fits = pool
-        .filter((card) => !used.has(card.id) && slotMatches(slot, card))
+        .filter((card) => dealable(card) && slotMatches(slot, card))
         .sort((a, b) => a.points - b.points)
         .slice(0, 5);
     }
     if (!fits.length) throw new Error(`Starter pack cannot fill ${slot}`);
     const card = rng.pick(fits);
     used.add(card.id);
+    dealt.push(card);
     return card;
   });
 }

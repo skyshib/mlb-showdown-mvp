@@ -146,6 +146,7 @@ h1.gq-logo {
 
 .gq-card-name { font-weight: 700; font-size: 3.4cqw; }
 .gq-card-meta { font-size: 2.9cqw; margin-top: 0.3cqw; }
+.gq-card-teams { font-size: 2.4cqw; margin-top: 0.4cqw; color: var(--gb-dark); }
 .gq-card-chart { display: flex; flex-wrap: wrap; gap: 0.4cqw 1.6cqw; margin-top: 1cqw; font-size: 2.6cqw; border-top: 0.3cqw solid var(--gb-dark); padding-top: 0.8cqw; }
 .gq-chart-cell b { display: inline-block; min-width: 3.4cqw; }
 

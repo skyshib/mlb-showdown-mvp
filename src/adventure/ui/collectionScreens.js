@@ -21,6 +21,7 @@ import {
   addLog
 } from "../state.js";
 import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js";
+import { personConflict } from "../../rules/cards.js";
 import { rateText, ipText, wpaHtml } from "./statsScreens.js";
 import { seasonHitters, seasonPitchers } from "../state.js";
 
@@ -669,11 +670,16 @@ function teamActions(save) {
 
 // Replacement candidates for a roster card. The default view sticks to the
 // outgoing card's own position (role for pitchers); "all" widens to every
-// unrostered card of the same kind. Exported for tests.
+// unrostered card of the same kind. Cards that would put a second era of a
+// rostered player on the team don't list — unless the anchor IS the other
+// era, in which case the swap is exactly how you change decades. Exported
+// for tests.
 export function benchCards(save, anchor, filter = "position") {
+  const roster = rosterCards(save);
   const spares = collectionCards(save)
     .map(({ card }) => card)
-    .filter((card) => card.kind === anchor.kind && !save.roster.cardIds.includes(card.id));
+    .filter((card) => card.kind === anchor.kind && !save.roster.cardIds.includes(card.id))
+    .filter((card) => !personConflict(roster, card, anchor.id));
   if (filter === "all") return spares;
   return spares.filter((card) =>
     anchor.kind === "pitcher" ? card.role === anchor.role : card.position === anchor.position

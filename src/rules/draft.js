@@ -1,5 +1,6 @@
 import { createRng } from "./rng.js";
 import { createValuationModel } from "./valuation.js";
+import { personConflict, playerIdentity } from "./cards.js";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -116,6 +117,10 @@ export function canPickPlayer(draft, manager, player) {
   }
   if (manager.roster.length >= draft.rosterSize) {
     return { ok: false, reason: "roster full" };
+  }
+  const eraDupe = personConflict(manager.roster, player);
+  if (eraDupe) {
+    return { ok: false, reason: `already has ${eraDupe.name} (${eraDupe.setTag})` };
   }
   const hitterLegality = canAddHitterToLineup(manager.roster, player);
   if (!hitterLegality.ok) {
@@ -641,10 +646,30 @@ export function applyBattingOrder(lineup, battingOrder) {
   });
 }
 
+// One era of a real player per team: 1990s Barry Bonds and 2000s Barry
+// Bonds can't both suit up. Returns one name per offending person.
+export function duplicateEraPeople(roster) {
+  const seen = new Map();
+  const names = [];
+  for (const player of roster) {
+    const identity = playerIdentity(player.id);
+    if (!identity) continue;
+    const prior = seen.get(identity.person);
+    if (prior && prior !== identity.slice) {
+      if (!names.includes(player.name)) names.push(player.name);
+    } else {
+      seen.set(identity.person, identity.slice);
+    }
+  }
+  return names;
+}
+
 export function validateRoster(manager) {
   const lineup = lineupStatus(manager.roster);
   const staff = staffStatus(manager.roster);
   const issues = [];
+  const eraDupes = duplicateEraPeople(manager.roster);
+  if (eraDupes.length) issues.push(`two eras of ${eraDupes.join("/")}`);
   if (lineup.hitters.length < HITTER_TARGET) issues.push(`needs ${HITTER_TARGET - lineup.hitters.length} more hitter${HITTER_TARGET - lineup.hitters.length === 1 ? "" : "s"}`);
   if (lineup.missingPositions.length) issues.push(`missing ${lineup.missingPositions.join("/")}`);
   if (lineup.extraDuplicates.length) issues.push(`too many ${lineup.extraDuplicates.join("/")} hitters`);
@@ -746,6 +771,23 @@ export function canPlayerFillLineupSlot(player, label) {
 }
 
 function repairManagerRoster(draft, manager) {
+  // Era duplicates repair by subtraction: keep each person's best era, drop
+  // the rest, then refill the hole like any other shortfall.
+  const byPerson = new Map();
+  for (const player of manager.roster) {
+    const identity = playerIdentity(player.id);
+    if (!identity) continue;
+    byPerson.set(identity.person, [...(byPerson.get(identity.person) ?? []), { player, slice: identity.slice }]);
+  }
+  for (const cards of byPerson.values()) {
+    if (new Set(cards.map((card) => card.slice)).size < 2) continue;
+    const keep = [...cards].sort((a, b) => b.player.points - a.player.points)[0].slice;
+    for (const { player, slice } of cards) {
+      if (slice === keep) continue;
+      manager.roster = manager.roster.filter((item) => item.id !== player.id);
+      draft.pickedIds.delete(player.id);
+    }
+  }
   let guard = 0;
   while (validateRoster(manager).length > 0 && guard < draft.rosterSize * 2) {
     guard += 1;
@@ -756,6 +798,7 @@ function repairManagerRoster(draft, manager) {
     const neededRole = needs.starter > 0 ? "SP" : needs.bullpen > 0 ? "RP" : null;
     const replacement = availablePlayers(draft)
       .filter((player) => player.kind === neededKind)
+      .filter((player) => !personConflict(manager.roster, player))
       .filter((player) => !neededRole || pitcherRole(player) === neededRole)
       .filter((player) => !neededPosition || positionMatchesSlot(player.position, neededPosition))
       .filter((player) => neededKind !== "hitter" || canAddHitterToLineup(manager.roster, player).ok)

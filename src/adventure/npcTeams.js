@@ -1,6 +1,7 @@
 import { adventurePool } from "./packs.js";
 import { npcBudget } from "./region.js";
 import { createRng } from "../rules/rng.js";
+import { personConflict } from "../rules/cards.js";
 
 // One roster slot per required lineup spot plus the four-man staff. "HITTER"
 // is the DH: any bat qualifies.
@@ -54,7 +55,9 @@ export function buildNpcTeam(trainer, save = null) {
   const roster = [];
   let spent = 0;
 
-  const unusedFits = (slot) => pool.filter((card) => !used.has(card.id) && slotMatches(slot, card));
+  // One era of a player per team: a slot never fills with a second decade
+  // of someone already on the roster.
+  const unusedFits = (slot) => pool.filter((card) => !used.has(card.id) && !personConflict(roster, card) && slotMatches(slot, card));
 
   const reserveFor = (remainingSlots) => {
     const reserved = new Set();
@@ -116,6 +119,7 @@ export function buildNpcTeam(trainer, save = null) {
       for (const card of pool) {
         if (used.has(card.id) || card.points > ceiling || card.points <= current.points) continue;
         if (!slotMatches(slots[index], card)) continue;
+        if (personConflict(roster, card, current.id)) continue;
         const gain = score(card) - score(current);
         if (gain <= 0) continue;
         if (!best || gain > best.gain || (gain === best.gain && card.points < best.card.points)) {

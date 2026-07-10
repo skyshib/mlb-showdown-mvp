@@ -1,5 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, FRANCHISES, universeConfig } from "../packs.js";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js";
 import {
   createSave,
   persistSave,
@@ -205,9 +205,10 @@ export const nameEntryScreen = {
 };
 
 // Which baseball do you want? A fresh fictional league, the real 2000-2005
-// Showdown card set, or real players: ALL TEAMS (check the decades you want
-// in the pool — all of them by default) or a single FRANCHISE. Both open
-// sub-screens.
+// Showdown card set, or real players three ways: ALL TIME (career ratings,
+// one card per player ever), ALL TEAMS (check the decades you want in the
+// pool — all of them by default, one card per player per decade), or a
+// single FRANCHISE. The latter two open sub-screens.
 function checkedDecades(app) {
   if (!app.screen.checkedDecades) app.screen.checkedDecades = [...DECADES];
   return app.screen.checkedDecades;
@@ -216,11 +217,19 @@ function checkedDecades(app) {
 function leagueOptions(app) {
   if (app.screen.picker === "decades") {
     const checked = checkedDecades(app);
+    const allChecked = checked.length === DECADES.length;
     return [
+      {
+        label: `${allChecked ? "[X]" : "[ ]"} EVERY DECADE`,
+        toggleAll: true,
+        blurb: allChecked ? "Uncheck all, then pick just the eras you want." : "Check every era at once."
+      },
       ...DECADES.map((start) => ({
-        label: `${checked.includes(start) ? "[X]" : "[ ]"} THE ${start}s`,
+        label: `${checked.includes(start) ? "[X]" : "[ ]"} THE ${decadeLabel(start)}`,
         toggle: start,
-        blurb: `Real big leaguers rated on their ${start}-${start + 9} numbers.`
+        blurb: start === EARLIEST_DECADE
+          ? `Real big leaguers rated on their numbers through ${start + 9} — the dead-ball era and everything before it, one pool.`
+          : `Real big leaguers rated on their ${start}-${start + 9} numbers.`
       })),
       {
         label: "PLAY BALL",
@@ -238,9 +247,7 @@ function leagueOptions(app) {
     }));
   }
   return [
-    ...Object.values(UNIVERSES)
-      .filter((league) => league.key !== "mlb-history")
-      .map((league) => ({ label: league.name, universe: league.key })),
+    ...Object.values(UNIVERSES).map((league) => ({ label: league.name, universe: league.key })),
     { label: "MLB: ALL TEAMS", picker: "decades", blurb: "Real players from every team — check the decades you want in the pool." },
     { label: "MLB: FRANCHISE", picker: "franchise", blurb: "Pick a club and play its all-time roster — every player rated on their years there." }
   ];
@@ -268,7 +275,9 @@ export const leagueSelectScreen = {
       app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), options.length);
     } else if (key === "a") {
       const choice = options[clampIndex(app.screen.menuIndex ?? 0, options.length)];
-      if (choice.toggle != null) {
+      if (choice.toggleAll) {
+        app.screen.checkedDecades = checkedDecades(app).length === DECADES.length ? [] : [...DECADES];
+      } else if (choice.toggle != null) {
         const checked = checkedDecades(app);
         app.screen.checkedDecades = checked.includes(choice.toggle)
           ? checked.filter((start) => start !== choice.toggle)

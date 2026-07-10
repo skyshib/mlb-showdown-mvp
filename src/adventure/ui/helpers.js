@@ -1,6 +1,7 @@
 import { normalizeResult, formatRange } from "../../rules/cards.js";
 import { RARITIES } from "../packs.js";
 import { CARD_IMAGE_FILES } from "../../data/cardImages.js";
+import { MLB_TEAM_NAMES, MLB_PLAYER_TEAMS } from "../../data/mlbTeams.js";
 
 export function escapeHtml(value) {
   return String(value)
@@ -47,6 +48,24 @@ export function shortName(name) {
   return `${parts[0][0]}.${parts.slice(1).join(" ")}`.toUpperCase();
 }
 
+// The clubs behind an MLB-pool card, most years worn first. The card id
+// carries the slice (mlb-all-, mlb-d1990-, mlb-00s-) and the databank player
+// id; career cards list the whole ride, decade cards just that window.
+// Franchise-pool ids (mlb-fSEA-) don't match — the club IS the pool there.
+const TEAM_LIST_CAP = 6;
+
+function cardTeams(card) {
+  const match = /^mlb-(all|00s|d\d{4})-(.+?)(-bat)?$/.exec(String(card.id ?? ""));
+  if (!match) return null;
+  const window = match[1] === "all" ? "all" : match[1] === "00s" ? "2000" : match[1].slice(1);
+  const list = MLB_PLAYER_TEAMS[match[2]]?.[window];
+  if (!list?.length) return null;
+  const names = list.map((index) => MLB_TEAM_NAMES[index]);
+  return names.length > TEAM_LIST_CAP + 1
+    ? [...names.slice(0, TEAM_LIST_CAP), `+${names.length - TEAM_LIST_CAP} more`]
+    : names;
+}
+
 // Full card panel: the binder/pack view. Chart rows collapse to the compact
 // range map used by the main app. Real-player cards (classic and MLB
 // leagues) get a photo slot that main.js hydrates from Wikipedia, plus their
@@ -64,10 +83,12 @@ export function cardPanelHtml(card, { count = null } = {}) {
   const headshot = !scan && card.real
     ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
     : "";
+  const teams = cardTeams(card);
   const body = `${headshot}
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
     <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
+    ${teams ? `<div class="gq-card-teams">${teams.map(escapeHtml).join(" &middot; ")}</div>` : ""}
     <div class="gq-card-chart">${ranges
       .map(([result, range]) => `<span class="gq-chart-cell"><b>${escapeHtml(result)}</b> ${escapeHtml(range)}</span>`)
       .join("")}</div>`;
