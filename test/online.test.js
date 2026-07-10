@@ -407,3 +407,72 @@ test("shared sim actions are logged after the draft completes and survive restar
   assert.equal(revived.data.complete, true);
   assert.equal(revived.data.actions.length, room.data.actions.length);
 });
+
+test("the hall of fame API stores runs, dedupes, sanitizes, and survives restarts", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+
+  const empty = await api(base, "GET", "/api/hall-of-fame");
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.data.entries, []);
+
+  const entry = {
+    saveSeed: "seed-1",
+    name: "SKY",
+    mode: "budget",
+    universe: "fictional",
+    finishedAt: 1720000000000,
+    days: 34,
+    wins: 28,
+    losses: 6,
+    battlesWon: 20,
+    battlesLost: 2,
+    badges: ["trophy"],
+    rosterPoints: 3400,
+    roster: [{ id: "c1", name: "Slugger", kind: "hitter", position: "CF", points: 500, onBase: 10, speed: 18, fielding: 2, rarity: "rare", chart: [{ result: "HR", from: 18, to: null }] }],
+    hitters: [{ id: "c1", name: "Slugger", games: 34, hr: 12, wpa: 1.2, avg: 0.31 }],
+    pitchers: []
+  };
+  const created = await api(base, "POST", "/api/hall-of-fame", entry);
+  assert.equal(created.status, 201);
+
+  // Same campaign again (a retry, a second device): no second plaque.
+  const duplicate = await api(base, "POST", "/api/hall-of-fame", { ...entry, days: 1 });
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.data.duplicate, true);
+
+  const malformed = await api(base, "POST", "/api/hall-of-fame", { name: "NOBODY" });
+  assert.equal(malformed.status, 400);
+
+  // The endpoint is open, so junk is rebuilt on the way in: unknown enums pin
+  // to their defaults, strings are sliced, unlisted fields are dropped.
+  const sketchy = await api(base, "POST", "/api/hall-of-fame", {
+    saveSeed: "seed-2",
+    name: "AN OVERLY LONG CHAMPION NAME",
+    mode: "hacked",
+    days: 20,
+    wins: 18,
+    losses: 2,
+    roster: [{ id: "x", name: "X", kind: "hitter", rarity: "\"><img onerror=x>", position: "CF", points: "900", chart: null, extra: "nope" }]
+  });
+  assert.equal(sketchy.status, 201);
+
+  const listed = await api(base, "GET", "/api/hall-of-fame");
+  assert.equal(listed.data.entries.length, 2);
+  const first = listed.data.entries.find((item) => item.saveSeed === "seed-1");
+  assert.equal(first.days, 34, "the duplicate submit did not overwrite the original");
+  assert.equal(first.roster[0].chart[0].to, null, "open-ended chart ranges survive");
+  const second = listed.data.entries.find((item) => item.saveSeed === "seed-2");
+  assert.equal(second.mode, "budget", "unknown modes pin to budget");
+  assert.ok(second.name.length <= 12, "names are sliced");
+  assert.equal(second.roster[0].rarity, "common", "unknown rarities pin to common");
+  assert.equal(second.roster[0].extra, undefined, "unlisted fields are dropped");
+  assert.equal(second.roster[0].points, 900, "numeric strings coerce");
+
+  // The board is one JSON file next to the rooms: a fresh server on the same
+  // data dir reloads it.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const base2 = await startServer(t, dataDir);
+  const reloaded = await api(base2, "GET", "/api/hall-of-fame");
+  assert.equal(reloaded.data.entries.length, 2);
+});

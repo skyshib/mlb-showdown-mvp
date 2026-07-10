@@ -135,7 +135,7 @@ function gameStatRows(app) {
   return rows;
 }
 
-function sectionedMenu(rows, index) {
+export function sectionedMenu(rows, index) {
   const sections = [];
   rows.forEach((row, rowIndex) => {
     if (row.section !== rows[rowIndex - 1]?.section) sections.push({ header: row.section, start: rowIndex });

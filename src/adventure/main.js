@@ -7,6 +7,7 @@ import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
 import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js";
 import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js";
+import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js";
 
 const SCREENS = {
   title: titleScreen,
@@ -38,7 +39,9 @@ const SCREENS = {
   packOpen: packOpenScreen,
   gameStats: gameStatsScreen,
   seasonStats: seasonStatsScreen,
-  championship: championshipScreen
+  championship: championshipScreen,
+  hallOfFame: hallOfFameScreen,
+  hofTeam: hofTeamScreen
 };
 
 const KEY_MAP = {

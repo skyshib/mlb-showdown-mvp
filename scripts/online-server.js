@@ -29,7 +29,7 @@ const MIME_TYPES = {
 
 export function createOnlineServer(options = {}) {
   const dataDir = options.dataDir ?? process.env.ROOMS_DIR ?? join(root, "data", "rooms");
-  const store = { dataDir, rooms: loadRooms(dataDir) };
+  const store = { dataDir, rooms: loadRooms(dataDir), hallOfFame: loadHallOfFameFile(dataDir) };
 
   const server = createServer(async (request, response) => {
     try {
@@ -62,7 +62,7 @@ function loadRooms(dataDir) {
   const rooms = new Map();
   mkdirSync(dataDir, { recursive: true });
   for (const file of readdirSync(dataDir)) {
-    if (!file.endsWith(".json")) continue;
+    if (!file.endsWith(".json") || file === HOF_FILE) continue;
     try {
       const saved = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
       const room = reviveRoom(saved);
@@ -139,8 +139,166 @@ function persistRoom(store, room) {
     .catch((error) => console.error(`Failed to save room ${room.id}: ${error.message}`));
 }
 
+// ---- Hall of fame -----------------------------------------------------------
+//
+// The shared leaderboard of completed adventure runs, one JSON file alongside
+// the rooms, capped to the best runs per rule set. The submit endpoint is
+// open, so every entry is rebuilt field-by-field on the way in: strings are
+// sliced, numbers are clamped, and enums are pinned to their known values —
+// nothing lands in the file (or later in another player's DOM) that was not
+// typed here.
+
+const HOF_FILE = "hall-of-fame.json";
+const HOF_MAX_PER_MODE = 100;
+const HOF_RARITIES = new Set(["common", "uncommon", "rare", "legend"]);
+// Every stat key the client's season lines render, hitters and pitchers both.
+const HOF_STAT_KEYS = [
+  "games", "pa", "ab", "h", "d", "t", "hr", "bb", "so", "r", "rbi", "sb", "cs", "gidp", "wpa",
+  "avg", "obp", "slg", "ops", "bf", "outs", "runsPerNine", "strikeoutsPerNine"
+];
+
+function loadHallOfFameFile(dataDir) {
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    const entries = JSON.parse(readFileSync(join(dataDir, HOF_FILE), "utf8"));
+    return Array.isArray(entries) ? entries : [];
+  } catch {
+    return [];
+  }
+}
+
+// Atomic write (tmp + rename) chained like the rooms, so saves never interleave.
+function persistHallOfFame(store) {
+  if (!store.dataDir) return;
+  const target = join(store.dataDir, HOF_FILE);
+  const tmp = `${target}.tmp`;
+  store.hofSaveChain = (store.hofSaveChain ?? Promise.resolve())
+    .then(() => writeFile(tmp, JSON.stringify(store.hallOfFame)))
+    .then(() => rename(tmp, target))
+    .catch((error) => console.error(`Failed to save the hall of fame: ${error.message}`));
+}
+
+function hofNumber(value, max = 1e9) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(-max, Math.min(max, number));
+}
+
+function hofString(value, max) {
+  return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+// Chart rows keep the shape formatRange expects; an Infinity `to` arrives as
+// null through JSON and stays null (formatRange reads that as open-ended).
+function sanitizeChart(chart) {
+  if (!Array.isArray(chart)) return [];
+  return chart.slice(0, 40).map((row) => ({
+    result: hofString(row?.result, 3),
+    from: hofNumber(row?.from, 100),
+    to: Number.isFinite(Number(row?.to)) && row?.to !== null ? hofNumber(row.to, 100) : null
+  }));
+}
+
+function sanitizeCard(card) {
+  if (!card || typeof card !== "object") return null;
+  const clean = {
+    id: hofString(card.id, 60),
+    name: hofString(card.name, 40),
+    kind: card.kind === "pitcher" ? "pitcher" : "hitter",
+    points: hofNumber(card.points, 9999),
+    rarity: HOF_RARITIES.has(card.rarity) ? card.rarity : "common",
+    foil: Boolean(card.foil),
+    real: Boolean(card.real),
+    setTag: hofString(card.setTag, 20),
+    chart: sanitizeChart(card.chart)
+  };
+  if (clean.kind === "pitcher") {
+    clean.role = hofString(card.role, 8);
+    clean.control = hofNumber(card.control, 99);
+    clean.ip = hofNumber(card.ip, 99);
+    clean.throws = hofString(card.throws, 2);
+  } else {
+    clean.position = hofString(card.position, 8);
+    clean.onBase = hofNumber(card.onBase, 99);
+    clean.speed = hofNumber(card.speed, 99);
+    clean.fielding = hofNumber(card.fielding, 99);
+  }
+  if (card.mlbam != null) clean.mlbam = hofNumber(card.mlbam, 1e7);
+  return clean;
+}
+
+function sanitizeStatLine(line) {
+  if (!line || typeof line !== "object") return null;
+  const clean = { id: hofString(line.id, 60), name: hofString(line.name, 40) };
+  for (const key of HOF_STAT_KEYS) {
+    if (line[key] !== undefined) clean[key] = hofNumber(line[key], 1e7);
+  }
+  return clean;
+}
+
+function sanitizeHofEntry(body) {
+  if (!body || typeof body !== "object") return null;
+  const saveSeed = hofString(body.saveSeed, 60);
+  const name = hofString(body.name, 12);
+  const days = hofNumber(body.days, 1e6);
+  if (!saveSeed || !name || days <= 0) return null;
+  return {
+    saveSeed,
+    name,
+    mode: body.mode === "uncapped" ? "uncapped" : "budget",
+    universe: hofString(body.universe, 40) || "fictional",
+    finishedAt: hofNumber(body.finishedAt, 4102444800000) || Date.now(),
+    days,
+    wins: hofNumber(body.wins, 1e6),
+    losses: hofNumber(body.losses, 1e6),
+    battlesWon: hofNumber(body.battlesWon, 1e6),
+    battlesLost: hofNumber(body.battlesLost, 1e6),
+    badges: Array.isArray(body.badges) ? body.badges.slice(0, 10).map((badge) => hofString(badge, 20)) : [],
+    rosterPoints: hofNumber(body.rosterPoints, 1e6),
+    roster: Array.isArray(body.roster) ? body.roster.slice(0, 30).map(sanitizeCard).filter(Boolean) : [],
+    hitters: Array.isArray(body.hitters) ? body.hitters.slice(0, 30).map(sanitizeStatLine).filter(Boolean) : [],
+    pitchers: Array.isArray(body.pitchers) ? body.pitchers.slice(0, 30).map(sanitizeStatLine).filter(Boolean) : []
+  };
+}
+
+// The board stays a leaderboard, not an archive: per rule set, only the
+// fastest HOF_MAX_PER_MODE runs survive a trim.
+function trimHallOfFame(entries) {
+  const byMode = new Map();
+  for (const entry of entries) {
+    const list = byMode.get(entry.mode) ?? [];
+    list.push(entry);
+    byMode.set(entry.mode, list);
+  }
+  const kept = [];
+  for (const list of byMode.values()) {
+    list.sort((a, b) => a.days - b.days || a.losses - b.losses || a.finishedAt - b.finishedAt);
+    kept.push(...list.slice(0, HOF_MAX_PER_MODE));
+  }
+  return kept;
+}
+
+async function postHallOfFameEntry(store, request, response) {
+  const body = await readJsonBody(request);
+  const entry = sanitizeHofEntry(body);
+  if (!entry) return sendJson(response, 400, { error: "Malformed hall of fame entry" });
+  // One plaque per campaign: a resubmitted run (retry, second device) is a no-op.
+  if (store.hallOfFame.some((existing) => existing.saveSeed === entry.saveSeed)) {
+    return sendJson(response, 200, { ok: true, duplicate: true });
+  }
+  store.hallOfFame = trimHallOfFame([...store.hallOfFame, entry]);
+  persistHallOfFame(store);
+  sendJson(response, 201, { ok: true });
+}
+
 async function handleApi(store, request, response, url) {
   const segments = url.pathname.split("/").filter(Boolean);
+  // /api/hall-of-fame — the shared leaderboard of finished adventure runs.
+  if (segments[1] === "hall-of-fame" && !segments[2]) {
+    if (request.method === "GET") return sendJson(response, 200, { entries: store.hallOfFame });
+    if (request.method === "POST") return postHallOfFameEntry(store, request, response);
+    return sendJson(response, 404, { error: "Unknown API route" });
+  }
   // /api/rooms | /api/rooms/:id | /api/rooms/:id/(join|actions|stream)
   if (segments[1] !== "rooms") return sendJson(response, 404, { error: "Unknown API route" });
   const roomId = segments[2];
