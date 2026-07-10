@@ -12,7 +12,7 @@ import { personConflict } from "../rules/cards.js";
 export const UNIVERSES = {
   fictional: {
     key: "fictional",
-    name: "CASCADE LEAGUE",
+    name: "FICTIONAL PLAYERS",
     blurb: "A brand-new fictional league, invented fresh for this save."
   },
   classic: {
@@ -53,7 +53,7 @@ export function universeConfig(mode) {
       const span = picked.length === DECADES.length
         ? "every decade"
         : picked.map((start) => Number(start) === EARLIEST_DECADE ? `the ${start.slice(2)}s & earlier` : `the ${start.slice(2)}s`).join(", ");
-      return { key: mode, name: "MLB: ALL TEAMS", blurb: `Real players from ${span} — one card per player per decade.` };
+      return { key: mode, name: "MLB: BY DECADE", blurb: `Real players from ${span} — one card per player per decade.` };
     }
   }
   const decade = /^decade-(\d{4})$/.exec(mode ?? "");

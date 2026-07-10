@@ -204,11 +204,12 @@ export const nameEntryScreen = {
   }
 };
 
-// Which baseball do you want? A fresh fictional league, the real 2000-2005
-// Showdown card set, or real players three ways: ALL TIME (career ratings,
-// one card per player ever), ALL TEAMS (check the decades you want in the
-// pool — all of them by default, one card per player per decade), or a
-// single FRANCHISE. The latter two open sub-screens.
+// Which baseball do you want? The real 2000-2005 Showdown card set, real
+// players three ways — ALL TIME (career ratings, one card per player ever),
+// BY DECADE (check the decades you want in the pool — all of them by
+// default, one card per player per decade), or BY FRANCHISE — or a fresh
+// FICTIONAL PLAYERS league, last on the list. The BY pickers open
+// sub-screens.
 function checkedDecades(app) {
   if (!app.screen.checkedDecades) app.screen.checkedDecades = [...DECADES];
   return app.screen.checkedDecades;
@@ -247,9 +248,11 @@ function leagueOptions(app) {
     }));
   }
   return [
-    ...Object.values(UNIVERSES).map((league) => ({ label: league.name, universe: league.key })),
-    { label: "MLB: ALL TEAMS", picker: "decades", blurb: "Real players from every team — check the decades you want in the pool." },
-    { label: "MLB: FRANCHISE", picker: "franchise", blurb: "Pick a club and play its all-time roster — every player rated on their years there." }
+    { label: UNIVERSES.classic.name, universe: "classic" },
+    { label: UNIVERSES["mlb-history"].name, universe: "mlb-history" },
+    { label: "MLB: BY DECADE", picker: "decades", blurb: "Real players from every team — check the decades you want in the pool." },
+    { label: "MLB: BY FRANCHISE", picker: "franchise", blurb: "Pick a club and play its all-time roster — every player rated on their years there." },
+    { label: UNIVERSES.fictional.name, universe: "fictional" }
   ];
 }
 

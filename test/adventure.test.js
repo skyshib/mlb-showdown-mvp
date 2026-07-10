@@ -271,8 +271,8 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
 test("the opening menus offer budget and uncapped rules", async () => {
   const { modeSelectScreen, leagueSelectScreen } = await import("../src/adventure/ui/titleScreens.js");
   try {
-    const app = { save: null, screen: { name: "leagueSelect", playerName: "TEST", menuIndex: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
-    leagueSelectScreen.key(app, "a"); // pick the fictional league
+    const app = { save: null, screen: { name: "leagueSelect", playerName: "TEST", menuIndex: 4 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+    leagueSelectScreen.key(app, "a"); // pick FICTIONAL PLAYERS, last on the list
     assert.equal(app.screen.name, "modeSelect", "the league pick leads to the rules pick");
     const html = modeSelectScreen.render(app);
     assert.ok(html.includes("BUDGET LEAGUE") && html.includes("UNCAPPED"), "both rule sets are offered");
