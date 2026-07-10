@@ -81,6 +81,8 @@ function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = fal
   }
   app.screen.notice = null;
   const lower = char.toLowerCase();
+  // Any key other than a repeated S disarms a pending quick-sell confirm.
+  if (lower !== "s") app.screen.confirmSell = null;
   if (lower === "f") {
     app.screen.searching = true;
     app.rerender();
@@ -94,18 +96,30 @@ function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = fal
   }
 }
 
-// The binder's quick sell: one copy of the cursor card at the pawn rate.
-// The roster's last copy refuses, same as the shop.
+// The binder's quick sell: one copy of the cursor card at the pawn rate,
+// behind an are-you-sure — the first S arms it, S again on the same card
+// sells, anything else keeps it. The roster's last copy refuses outright.
 function sellCursorCard(app, cardAtCursor) {
   const card = cardAtCursor();
   if (!card) return;
+  const rosterLocked = app.save.roster.cardIds.includes(card.id) && ownedCount(app.save, card.id) <= 1;
+  if (rosterLocked) {
+    app.screen.confirmSell = null;
+    app.screen.notice = "ROSTER COPY &mdash; NOT FOR SALE.";
+    app.rerender();
+    return;
+  }
+  if (app.screen.confirmSell !== card.id) {
+    app.screen.confirmSell = card.id;
+    app.rerender();
+    return;
+  }
+  app.screen.confirmSell = null;
   if (removeCardFromCollection(app.save, card.id)) {
     const value = RARITIES[card.rarity].sellValue;
     grantCoins(app.save, value);
     persistSave(app.save);
     app.screen.notice = `SOLD ${shortName(card.name)} &#8594; &#9679; ${value} (NOW &#9679; ${app.save.player.coins})`;
-  } else {
-    app.screen.notice = "ROSTER COPY &mdash; NOT FOR SALE.";
   }
   app.rerender();
 }
@@ -120,6 +134,13 @@ function starCursorCard(app, cardAtCursor) {
 
 function starMark(save, card) {
   return isStarred(save, card.id) ? " &#9733;" : "";
+}
+
+// The quick-sell are-you-sure, blinking until answered.
+function confirmSellLine(app) {
+  const card = app.screen.confirmSell ? cardById(app.screen.confirmSell) : null;
+  if (!card) return "";
+  return `<p class="gq-blink"><b>SELL ${escapeHtml(shortName(card.name))} FOR &#9679; ${RARITIES[card.rarity].sellValue}? S again sells &middot; any other key keeps him.</b></p>`;
 }
 
 function searchLine(query, searching = false) {
@@ -508,7 +529,7 @@ export const binderScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">F finds &middot; S sells a copy &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${confirmSellLine(app)}${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">F finds &middot; S sells a copy &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
@@ -521,6 +542,8 @@ export const binderScreen = {
     }, "binder", { quickSell: true });
   },
   key(app, key) {
+    // Any navigation or action answers a pending quick-sell confirm with "no".
+    app.screen.confirmSell = null;
     if (key === "left" || key === "right") {
       const at = BINDER_FILTERS.indexOf(app.screen.filter ?? "ALL");
       const next = (at + (key === "right" ? 1 : -1) + BINDER_FILTERS.length) % BINDER_FILTERS.length;

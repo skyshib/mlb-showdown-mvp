@@ -1636,7 +1636,16 @@ test("the binder's S key quick-sells a copy, never the roster's last", async () 
   app.screen.index = rows.findIndex(({ card }) => card.id === spare.id);
   const before = save.player.coins;
   binderScreen.typed(app, "s");
-  assert.equal(ownedCount(save, spare.id), 1, "S sells one copy");
+  assert.equal(app.screen.confirmSell, spare.id, "the first S arms the are-you-sure");
+  assert.equal(ownedCount(save, spare.id), 2, "nothing sold yet");
+  assert.ok(binderScreen.render(app).includes("S again sells"), "the confirm asks out loud");
+  binderScreen.key(app, "down");
+  assert.equal(app.screen.confirmSell, null, "any other key keeps him");
+  assert.equal(ownedCount(save, spare.id), 2, "still nothing sold");
+  binderScreen.key(app, "up");
+  binderScreen.typed(app, "s");
+  binderScreen.typed(app, "s");
+  assert.equal(ownedCount(save, spare.id), 1, "S twice sells one copy");
   assert.equal(save.player.coins, before + RARITIES[spare.rarity].sellValue, "at the pawn rate");
   assert.ok(binderScreen.render(app).includes("SOLD"), "the sale is announced");
 
