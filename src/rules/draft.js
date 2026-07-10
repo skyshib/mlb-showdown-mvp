@@ -1,6 +1,6 @@
 import { createRng } from "./rng.js";
 import { createValuationModel } from "./valuation.js";
-import { personConflict, playerIdentity } from "./cards.js";
+import { personConflict, playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -15,17 +15,28 @@ export function isCornerOutfielder(position) {
   return position === CORNER_OUTFIELD_POSITION || CORNER_OUTFIELD_SLOTS.includes(position);
 }
 
+function cardIsCornerOutfielder(player) {
+  return hitterPositions(player).some((entry) => isCornerOutfielder(entry.pos));
+}
+
 // Rewrites bare "LF"/"RF" card labels to the lumped LF/RF position so every
 // pool source drafts and displays corners as one position.
 export function normalizeCardPosition(player) {
-  if (player?.kind !== "hitter" || !isCornerOutfielder(player.position)) return player;
-  if (player.position === CORNER_OUTFIELD_POSITION) return player;
-  return { ...player, position: CORNER_OUTFIELD_POSITION };
+  if (player?.kind !== "hitter") return player;
+  const lump = (pos) => (isCornerOutfielder(pos) ? CORNER_OUTFIELD_POSITION : pos);
+  const changed = lump(player.position) !== player.position
+    || (Array.isArray(player.positions) && player.positions.some((entry) => lump(entry.pos) !== entry.pos));
+  if (!changed) return player;
+  const next = { ...player, position: lump(player.position) };
+  if (Array.isArray(player.positions)) {
+    next.positions = player.positions.map((entry) => ({ ...entry, pos: lump(entry.pos) }));
+  }
+  return next;
 }
 
-function positionMatchesSlot(position, label) {
-  if (CORNER_OUTFIELD_SLOTS.includes(label)) return isCornerOutfielder(position);
-  return position === label;
+function positionMatchesSlot(player, label) {
+  if (CORNER_OUTFIELD_SLOTS.includes(label)) return cardIsCornerOutfielder(player);
+  return playsPosition(player, label);
 }
 const HITTER_TARGET = 9;
 const STARTER_TARGET = 2;
@@ -717,7 +728,7 @@ export function lineupStatus(roster) {
   }
   const missingPositions = assigned.slots.filter((slot) => slot.label !== "DH" && !slot.player).map((slot) => slot.label);
   const duplicatePositions = assigned.slots
-    .filter((slot) => slot.player && !positionMatchesSlot(slot.player.position, slot.label) && slot.label !== "DH")
+    .filter((slot) => slot.player && !positionMatchesSlot(slot.player, slot.label) && slot.label !== "DH")
     .map((slot) => `${slot.player.position}->${slot.label}`);
   const extraDuplicates = assigned.extras.map((player) => player.position);
 
@@ -742,17 +753,21 @@ export function assignLineupSlots(roster, assignments = {}) {
     if (player && canPlayerFillLineupSlot(player, label)) assignFirst(slots, used, label, player, slotOptions(player, label));
   }
 
-  for (const label of EXACT_REQUIRED_POSITIONS) {
-    assignFirst(slots, used, label, hitters.find((player) => player.position === label && !used.has(player.id)));
+  // The exact slots (1B included, for cards that actually list it) fill as a
+  // MATCHING, not first-fit: with multi-position cards a greedy pass can
+  // strand a slot (the 2B/SS card grabs 2B and the pure 2B ends up at DH
+  // while SS sits empty). Kuhn's augmenting paths over at most 9 hitters x 8
+  // slots; each card tries its primary spot first, so the utility man only
+  // slides over when that seats one more starter.
+  for (const [label, player] of matchExactSlots(slots, hitters, used)) {
+    assignFirst(slots, used, label, player);
   }
 
-  for (const label of CORNER_OUTFIELD_SLOTS) {
-    assignFirst(slots, used, label, hitters.find((player) => isCornerOutfielder(player.position) && !used.has(player.id)));
+  // Nobody lists first base: any glove covers it at a flat -1.
+  if (!slots.find((slot) => slot.label === "1B").player) {
+    const fallbackFirstBase = hitters.find((player) => !used.has(player.id));
+    assignFirst(slots, used, "1B", fallbackFirstBase, { firstBaseOutOfPosition: Boolean(fallbackFirstBase) });
   }
-
-  const exactFirstBase = hitters.find((player) => player.position === "1B" && !used.has(player.id));
-  const fallbackFirstBase = hitters.find((player) => !used.has(player.id));
-  assignFirst(slots, used, "1B", exactFirstBase ?? fallbackFirstBase, { firstBaseOutOfPosition: !exactFirstBase && Boolean(fallbackFirstBase) });
 
   const dh = hitters.find((player) => !used.has(player.id));
   assignFirst(slots, used, "DH", dh);
@@ -763,11 +778,58 @@ export function assignLineupSlots(roster, assignments = {}) {
   };
 }
 
+// Maximum matching of unassigned hitters onto the open exact slots
+// (C/2B/3B/SS/CF, 1B, and the two corners). Hitters seat in roster order;
+// each tries the slots it plays, primary position first, and may push an
+// earlier card to one of its other spots to make room. Returns a Map of
+// label -> player. 1B only matches cards that actually LIST first base —
+// the anyone-covers-1B rule stays a fallback outside the matching.
+function matchExactSlots(slots, hitters, used) {
+  const openLabels = [...EXACT_REQUIRED_POSITIONS, "1B", ...CORNER_OUTFIELD_SLOTS]
+    .filter((label) => !slots.find((slot) => slot.label === label)?.player);
+  const fits = (player, label) =>
+    CORNER_OUTFIELD_SLOTS.includes(label) ? cardIsCornerOutfielder(player) : playsPosition(player, label);
+  const primaryFirst = (player) => {
+    const primary = (label) =>
+      CORNER_OUTFIELD_SLOTS.includes(label) ? isCornerOutfielder(player.position) : player.position === label;
+    return [...openLabels].sort((a, b) => Number(primary(b)) - Number(primary(a)));
+  };
+  const seated = new Map();
+  const tryPlace = (player, visited) => {
+    const labels = primaryFirst(player).filter((label) => fits(player, label) && !visited.has(label));
+    // A free slot always wins before bumping anyone — two LF/RF cards land
+    // LF then RF in roster order, exactly as the greedy filler used to.
+    for (const label of labels) {
+      if (!seated.get(label)) {
+        seated.set(label, player);
+        return true;
+      }
+    }
+    for (const label of labels) {
+      visited.add(label);
+      if (tryPlace(seated.get(label), visited)) {
+        seated.set(label, player);
+        return true;
+      }
+    }
+    return false;
+  };
+  // Primary-position players seat before secondary-only ones, so a DH bat
+  // with a 3B side-listing never bumps the true third baseman to DH.
+  const primarySlot = (player) =>
+    EXACT_REQUIRED_POSITIONS.includes(player.position) || player.position === "1B" || isCornerOutfielder(player.position);
+  const order = [...hitters.filter(primarySlot), ...hitters.filter((player) => !primarySlot(player))];
+  for (const player of order) {
+    if (!used.has(player.id)) tryPlace(player, new Set());
+  }
+  return seated;
+}
+
 export function canPlayerFillLineupSlot(player, label) {
   if (player?.kind !== "hitter") return false;
   if (label === "DH") return true;
   if (label === "1B") return true;
-  return positionMatchesSlot(player.position, label);
+  return positionMatchesSlot(player, label);
 }
 
 function repairManagerRoster(draft, manager) {
@@ -800,7 +862,7 @@ function repairManagerRoster(draft, manager) {
       .filter((player) => player.kind === neededKind)
       .filter((player) => !personConflict(manager.roster, player))
       .filter((player) => !neededRole || pitcherRole(player) === neededRole)
-      .filter((player) => !neededPosition || positionMatchesSlot(player.position, neededPosition))
+      .filter((player) => !neededPosition || positionMatchesSlot(player, neededPosition))
       .filter((player) => neededKind !== "hitter" || canAddHitterToLineup(manager.roster, player).ok)
       .sort((a, b) => b.points - a.points)[0] ?? makeEmergencyReplacement(draft, manager, neededKind, neededRole, neededPosition);
 
@@ -876,8 +938,12 @@ function leagueSupply(players) {
   for (const player of players) {
     if (player.kind === "hitter") {
       hitters += 1;
-      if (EXACT_REQUIRED_POSITIONS.includes(player.position)) positions[player.position] += 1;
-      if (isCornerOutfielder(player.position)) cornerOutfield += 1;
+      // A multi-position card supplies every spot it lists — it can only
+      // fill one at a time, but this check is a loose feasibility bound.
+      for (const entry of hitterPositions(player)) {
+        if (EXACT_REQUIRED_POSITIONS.includes(entry.pos)) positions[entry.pos] += 1;
+      }
+      if (cardIsCornerOutfielder(player)) cornerOutfield += 1;
     } else if (pitcherRole(player) === "SP") {
       starter += 1;
     } else {
@@ -986,6 +1052,8 @@ function positionDropoffs(players, values) {
 }
 
 function positionGroup(player) {
+  // Dropoff scarcity groups by the PRIMARY position: that's the job the
+  // card usually holds down, and one group per card keeps the math simple.
   if (player.kind === "pitcher") return `pitcher-${pitcherRole(player)}`;
   if (isCornerOutfielder(player.position)) return `hitter-${CORNER_OUTFIELD_POSITION}`;
   return `hitter-${player.position}`;
@@ -1001,10 +1069,10 @@ function managerNeedsPositionGroup(manager, player, needs) {
   if (player.kind === "pitcher") return pitcherNeed(player, needs) > 0;
   if (needs.hitter <= 0) return false;
   const lineup = lineupStatus(manager.roster);
-  if (isCornerOutfielder(player.position)) {
-    return lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF");
-  }
-  return lineup.missingPositions.includes(player.position);
+  return hitterPositions(player).some((entry) =>
+    isCornerOutfielder(entry.pos)
+      ? lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF")
+      : lineup.missingPositions.includes(entry.pos));
 }
 
 function canAddPitcherToStaff(roster, player) {
@@ -1047,8 +1115,11 @@ function canAddHitterToLineup(roster, player) {
 function hitterPositionBonus(roster, player) {
   if (player.kind !== "hitter") return 0;
   const lineup = lineupStatus(roster);
-  if (lineup.missingPositions.includes(player.position)) return 60;
-  if (isCornerOutfielder(player.position) && (lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF"))) return 60;
+  const fillsMissing = hitterPositions(player).some((entry) =>
+    isCornerOutfielder(entry.pos)
+      ? lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF")
+      : lineup.missingPositions.includes(entry.pos));
+  if (fillsMissing) return 60;
   if (lineup.missingPositions.includes("1B")) return 20;
   if (!lineup.dhFilled) return 15;
   return 0;
@@ -1060,13 +1131,24 @@ function assignFirst(slots, used, label, player, options = {}) {
   if (!slot || slot.player) return;
   slot.player = player;
   slot.outOfPosition = Boolean(options.firstBaseOutOfPosition);
-  slot.fielding = options.firstBaseOutOfPosition ? -1 : Number(player.fielding) || 0;
+  slot.fielding = options.firstBaseOutOfPosition ? -1 : slotFielding(player, label);
   used.add(player.id);
+}
+
+// The glove a card brings to a specific slot: the listed rating for that
+// position (a 2B+3/SS+2 card fields +2 at short), the corner rating at
+// either LF or RF, and the primary rating everywhere else (DH, out-of-slot).
+function slotFielding(player, label) {
+  if (CORNER_OUTFIELD_SLOTS.includes(label)) {
+    const corner = hitterPositions(player).find((entry) => isCornerOutfielder(entry.pos));
+    if (corner) return Number(corner.fielding) || 0;
+  }
+  return fieldingAt(player, label) ?? (Number(player.fielding) || 0);
 }
 
 function slotOptions(player, label) {
   return {
-    firstBaseOutOfPosition: label === "1B" && player?.position !== "1B"
+    firstBaseOutOfPosition: label === "1B" && !playsPosition(player, "1B")
   };
 }
 

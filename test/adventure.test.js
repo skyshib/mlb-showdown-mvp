@@ -1503,6 +1503,56 @@ test("every league builds a working universe with a legal starter pack", async (
   }
 });
 
+test("simultaneous two-way players bundle: one owned card, both halves", async () => {
+  const { dualPartnerId, dualPrimaryId } = await import("../src/adventure/packs.js");
+  const { MLB_DUAL_PERSONS } = await import("../src/data/mlbPools.js");
+  const { binderRows, catalogRows } = await import("../src/adventure/ui/collectionScreens.js");
+  const { personConflict } = await import("../src/rules/cards.js");
+  setUniverseSeed("dual-test", "mlb-history");
+  try {
+    // The strict Ohtani-likes merge; converts and part-timers don't.
+    assert.ok(MLB_DUAL_PERSONS.includes("ohtansh01"), "Ohtani merges");
+    assert.ok(MLB_DUAL_PERSONS.includes("dihigma99"), "Dihigo merges");
+    assert.equal(dualPartnerId("mlb-all-ankieri01"), null, "Ankiel converted sequentially — two separate cards");
+    assert.equal(dualPartnerId("mlb-all-ruthba01"), null, "Ruth's overlap was part-time — two separate cards");
+
+    const arm = cardById("mlb-all-ohtansh01");
+    const bat = cardById("mlb-all-ohtansh01-bat");
+    assert.ok(arm && bat, "both Ohtani halves are in the pool");
+    assert.equal(dualPartnerId(arm.id), bat.id, "the halves know each other");
+    assert.equal(dualPrimaryId(arm.id), dualPrimaryId(bat.id), "one primary face for the pair");
+
+    // Acquiring either half grants the pair; removal takes the pair.
+    const save = { collection: {}, roster: { cardIds: [] } };
+    addCardToCollection(save, arm.id);
+    assert.equal(ownedCount(save, arm.id), 1, "the arm arrives");
+    assert.equal(ownedCount(save, bat.id), 1, "the bat arrives with it");
+    assert.ok(removeCardFromCollection(save, arm.id), "the pair sells");
+    assert.equal(ownedCount(save, arm.id) + ownedCount(save, bat.id), 0, "both halves gone");
+
+    // Either half's roster copy protects the pair from sale.
+    addCardToCollection(save, bat.id);
+    save.roster.cardIds = [arm.id];
+    assert.equal(removeCardFromCollection(save, bat.id), false, "rostered arm locks the bat too");
+    save.roster.cardIds = [];
+
+    // Browse surfaces show one combined entry answering to both slots.
+    addCardToCollection(save, arm.id);
+    const owned = binderRows(save, "ALL").filter(({ card }) => card.name === "Shohei Ohtani");
+    assert.equal(owned.length, 1, "the binder shows one Ohtani");
+    assert.ok(binderRows(save, "SP").some(({ card }) => card.name === "Shohei Ohtani"), "he pages under SP");
+    assert.ok(binderRows(save, "DH").some(({ card }) => card.name === "Shohei Ohtani"), "and under DH");
+    const catalog = catalogRows("ALL").filter((card) => card.name === "Shohei Ohtani");
+    assert.equal(catalog.length, 1, "the catalog lists the pair once");
+
+    // Both halves still roster together — that's the two-slot cost — and
+    // the pairing is legal under the era rule.
+    assert.equal(personConflict([bat], arm), null, "bat and arm share a team");
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
 test("one era of a player per roster: 1990s and 2000s Bonds never share a team", async () => {
   const { canPickPlayer, createDraft, duplicateEraPeople } = await import("../src/rules/draft.js");
   const { personConflict, playerIdentity } = await import("../src/rules/cards.js");

@@ -1123,3 +1123,105 @@ test("draftHistory lists picks in snake order with the picking manager", () => {
   undoLastPick(draft);
   assert.equal(draftHistory(draft).length, 3);
 });
+
+// ---- Multi-position cards ------------------------------------------------------
+
+// A 13-man roster around one flexible infielder, with `flexPositions` as his
+// eligibility list (primary first) and a pure 2B alongside him.
+function multiPositionRoster(flexPositions) {
+  return {
+    name: "Utility Crew",
+    roster: [
+      makeHitter({ id: "mp-c", position: "C" }),
+      makeHitter({ id: "mp-1b", position: "1B" }),
+      makeHitter({ id: "mp-2b", name: "Pure Second", position: "2B", fielding: 4 }),
+      makeHitter({ id: "mp-3b", position: "3B" }),
+      makeHitter({
+        id: "mp-flex",
+        name: "Utility Man",
+        position: flexPositions[0].pos,
+        fielding: flexPositions[0].fielding,
+        positions: flexPositions
+      }),
+      makeHitter({ id: "mp-cf", position: "CF" }),
+      makeHitter({ id: "mp-lf", position: "LF/RF" }),
+      makeHitter({ id: "mp-rf", position: "LF/RF" }),
+      makeHitter({ id: "mp-dh", position: "C" }),
+      makePitcher({ id: "mp-sp-1", role: "SP" }),
+      makePitcher({ id: "mp-sp-2", role: "SP" }),
+      makePitcher({ id: "mp-rp-1", role: "RP", ip: 1 }),
+      makePitcher({ id: "mp-rp-2", role: "RP", ip: 1 })
+    ]
+  };
+}
+
+test("a multi-position card covers its secondary slot at the listed fielding", () => {
+  const manager = multiPositionRoster([
+    { pos: "2B", fielding: 3 },
+    { pos: "SS", fielding: 2 }
+  ]);
+
+  assert.deepEqual(validateRoster(manager), []);
+
+  const team = buildTeam(manager);
+  const shortstop = team.lineup.find((player) => player.defensivePosition === "SS");
+  const second = team.lineup.find((player) => player.defensivePosition === "2B");
+  // The pure 2B holds his spot; the 2B/SS card slides to short at his
+  // SS rating, not his primary 2B rating.
+  assert.equal(second.id, "mp-2b");
+  assert.equal(shortstop.id, "mp-flex");
+  assert.equal(shortstop.fielding, 2);
+});
+
+test("lineup matching reseats a multi-position card instead of stranding a slot", () => {
+  // The flex card seats at 2B first (his primary, listed before SS), and the
+  // matching must push him to SS when the pure 2B shows up later.
+  const manager = multiPositionRoster([
+    { pos: "2B", fielding: 3 },
+    { pos: "SS", fielding: 2 }
+  ]);
+  manager.roster = [
+    manager.roster.find((player) => player.id === "mp-flex"),
+    ...manager.roster.filter((player) => player.id !== "mp-flex")
+  ];
+
+  assert.deepEqual(validateRoster(manager), []);
+  const slots = assignLineupSlots(manager.roster).slots;
+  assert.equal(slots.find((slot) => slot.label === "SS").player.id, "mp-flex");
+  assert.equal(slots.find((slot) => slot.label === "2B").player.id, "mp-2b");
+});
+
+test("a 1B side-listing plays first base at its printed rating, not minus one", () => {
+  const manager = {
+    name: "Corner Crew",
+    roster: [
+      makeHitter({ id: "corner-c", position: "C" }),
+      makeHitter({
+        id: "corner-3b1b",
+        name: "Corner Man",
+        position: "3B",
+        fielding: 2,
+        positions: [{ pos: "3B", fielding: 2 }, { pos: "1B", fielding: 0 }]
+      }),
+      makeHitter({ id: "corner-2b", position: "2B" }),
+      makeHitter({ id: "corner-3b", position: "3B" }),
+      makeHitter({ id: "corner-ss", position: "SS" }),
+      makeHitter({ id: "corner-cf", position: "CF" }),
+      makeHitter({ id: "corner-lf", position: "LF/RF" }),
+      makeHitter({ id: "corner-rf", position: "LF/RF" }),
+      makeHitter({ id: "corner-dh", position: "C" }),
+      makePitcher({ id: "corner-sp-1", role: "SP" }),
+      makePitcher({ id: "corner-sp-2", role: "SP" }),
+      makePitcher({ id: "corner-rp-1", role: "RP", ip: 1 }),
+      makePitcher({ id: "corner-rp-2", role: "RP", ip: 1 })
+    ]
+  };
+
+  const team = buildTeam(manager);
+  const firstBase = team.lineup.find((player) => player.defensivePosition === "1B");
+  assert.equal(firstBase.id, "corner-3b1b");
+  assert.equal(firstBase.fielding, 0);
+  assert.equal(firstBase.outOfPosition, false);
+  const thirdBase = team.lineup.find((player) => player.defensivePosition === "3B");
+  assert.equal(thirdBase.id, "corner-3b");
+});

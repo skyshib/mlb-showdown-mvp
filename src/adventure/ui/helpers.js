@@ -1,5 +1,5 @@
-import { normalizeResult, formatRange } from "../../rules/cards.js";
-import { RARITIES } from "../packs.js";
+import { normalizeResult, formatRange, positionsLabel, fieldingLabel } from "../../rules/cards.js";
+import { RARITIES, dualPartnerCard } from "../packs.js";
 import { CARD_IMAGE_FILES } from "../../data/cardImages.js";
 import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS } from "../../data/mlbTeams.js";
 
@@ -38,7 +38,7 @@ export function rarityTag(card) {
 export function cardLine(card) {
   const stat = card.kind === "pitcher"
     ? `${card.role} CTRL${card.control} IP${card.ip}`
-    : `${escapeHtml(card.position)} OB${card.onBase} SPD${card.speed}`;
+    : `${escapeHtml(positionsLabel(card))} OB${card.onBase} SPD${card.speed}`;
   return `${escapeHtml(shortName(card.name))} <span class="gq-dim">${stat} ${card.points}PT</span>`;
 }
 
@@ -70,11 +70,20 @@ function cardTeams(card) {
 // range map used by the main app. Real-player cards (classic and MLB
 // leagues) get a photo slot that main.js hydrates from Wikipedia, plus their
 // set tag / years-active line.
-export function cardPanelHtml(card, { count = null } = {}) {
-  const ranges = chartRangeRows(card);
-  const header = card.kind === "pitcher"
+function cardHeaderLine(card) {
+  return card.kind === "pitcher"
     ? `${card.role} &middot; CTRL ${card.control} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
-    : `${escapeHtml(card.position)} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${card.fielding >= 0 ? "+" : ""}${card.fielding}`;
+    : `${escapeHtml(positionsLabel(card))} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${escapeHtml(fieldingLabel(card))}`;
+}
+
+function chartCells(card) {
+  return chartRangeRows(card)
+    .map(([result, range]) => `<span class="gq-chart-cell"><b>${escapeHtml(result)}</b> ${escapeHtml(range)}</span>`)
+    .join("");
+}
+
+export function cardPanelHtml(card, { count = null } = {}) {
+  const header = cardHeaderLine(card);
   const foil = card.foil || card.rarity === "legend";
   // Classic cards with a real scan show the actual printed card (courtesy of
   // ShowdownCards.com), full color on purpose; everyone else keeps the
@@ -84,14 +93,20 @@ export function cardPanelHtml(card, { count = null } = {}) {
     ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
     : "";
   const teams = cardTeams(card);
+  // A simultaneous two-way pair prints as one card: the other half's line
+  // and chart stack under the primary's. Both roster separately.
+  const partner = dualPartnerCard(card.id);
+  const partnerBlock = partner
+    ? `<div class="gq-card-meta"><b>TWO-WAY</b> &middot; ${cardHeaderLine(partner)} <span class="gq-dim">${partner.points} PT</span></div>
+    <div class="gq-card-chart">${chartCells(partner)}</div>`
+    : "";
   const body = `${headshot}
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
     <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
     ${teams ? `<div class="gq-card-teams">${teams.map(escapeHtml).join(" &middot; ")}</div>` : ""}
-    <div class="gq-card-chart">${ranges
-      .map(([result, range]) => `<span class="gq-chart-cell"><b>${escapeHtml(result)}</b> ${escapeHtml(range)}</span>`)
-      .join("")}</div>`;
+    <div class="gq-card-chart">${chartCells(card)}</div>
+    ${partnerBlock}`;
   // Scanned cards lay out as text | card image, so the panel grows to fit
   // the scan instead of the scan spilling out of the frame.
   if (scan) {

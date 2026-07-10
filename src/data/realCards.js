@@ -3,6 +3,8 @@ import { RESULTS } from "../rules/cards.js";
 // Decoder for the compact real-card tuples in classicCards.js / mlbPools.js.
 // Tuple: [id, name, team, year, edition, isPitcher, points, obcOrControl,
 //         speedOrIp, positionOrRole, fielding, hand, chart]
+// Multi-position hitters carry arrays at the position/fielding slots
+// (["2B","SS"] with [3,2]); the first entry is the primary spot.
 const CODE_RESULTS = {
   P: RESULTS.PU,
   K: RESULTS.SO,
@@ -38,6 +40,18 @@ export function decodeCardRows(tuples) {
     if (isPitcher) {
       return { ...shared, kind: "pitcher", role: posRole, throws: hand, control: obc, ip: spdIp };
     }
-    return { ...shared, kind: "hitter", position: posRole, bats: hand, onBase: obc, speed: spdIp, fielding };
+    const positions = Array.isArray(posRole)
+      ? posRole.map((pos, index) => ({ pos, fielding: Number(Array.isArray(fielding) ? fielding[index] : fielding) || 0 }))
+      : [{ pos: posRole, fielding: Number(fielding) || 0 }];
+    return {
+      ...shared,
+      kind: "hitter",
+      position: positions[0].pos,
+      bats: hand,
+      onBase: obc,
+      speed: spdIp,
+      fielding: positions[0].fielding,
+      positions
+    };
   });
 }

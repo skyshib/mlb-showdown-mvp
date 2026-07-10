@@ -1,4 +1,4 @@
-import { cardById } from "./packs.js";
+import { cardById, dualPartnerId } from "./packs.js";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
@@ -96,8 +96,12 @@ export function importSaveCode(code) {
 
 // ---- Collection ------------------------------------------------------------
 
+// A simultaneous two-way player is one owned card: either half arrives with
+// its partner (packs.dualPartnerId knows the pairs).
 export function addCardToCollection(save, cardId, count = 1) {
   save.collection[cardId] = (save.collection[cardId] ?? 0) + count;
+  const partner = dualPartnerId(cardId);
+  if (partner) save.collection[partner] = (save.collection[partner] ?? 0) + count;
 }
 
 export function ownedCount(save, cardId) {
@@ -105,13 +109,22 @@ export function ownedCount(save, cardId) {
 }
 
 // Removing a card refuses to break the active roster: roster copies are the
-// last to go.
+// last to go. A two-way pair leaves together — selling either half sells
+// both, and either half's roster copy protects the pair.
 export function removeCardFromCollection(save, cardId) {
-  const owned = ownedCount(save, cardId);
-  const inRoster = save.roster.cardIds.includes(cardId) ? 1 : 0;
-  if (owned - 1 < inRoster) return false;
-  if (owned <= 1) delete save.collection[cardId];
-  else save.collection[cardId] = owned - 1;
+  const ids = [cardId];
+  const partner = dualPartnerId(cardId);
+  if (partner && ownedCount(save, partner) > 0) ids.push(partner);
+  for (const id of ids) {
+    const owned = ownedCount(save, id);
+    const inRoster = save.roster.cardIds.includes(id) ? 1 : 0;
+    if (owned - 1 < inRoster) return false;
+  }
+  for (const id of ids) {
+    const owned = ownedCount(save, id);
+    if (owned <= 1) delete save.collection[id];
+    else save.collection[id] = owned - 1;
+  }
   return true;
 }
 

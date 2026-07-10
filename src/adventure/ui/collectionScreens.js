@@ -1,5 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js";
-import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool } from "../packs.js";
+import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js";
 import { packEggs } from "../feats.js";
 import {
   persistSave,
@@ -21,9 +21,37 @@ import {
   addLog
 } from "../state.js";
 import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js";
-import { personConflict } from "../../rules/cards.js";
+import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js";
 import { rateText, ipText, wpaHtml } from "./statsScreens.js";
 import { seasonHitters, seasonPitchers } from "../state.js";
+
+// ---- Two-way pairs -----------------------------------------------------------
+
+// A simultaneous two-way player (an Ohtani-like) is one owned card: the
+// stronger half fronts every browse list, the weaker "shadow" half folds in
+// behind it, and sales price the pair together (state.js removes both).
+// Roster screens still see both halves — playing both roles costs both slots.
+function ownedPartner(save, card) {
+  const partner = dualPartnerCard(card.id);
+  return partner && ownedCount(save, partner.id) > 0 ? partner : null;
+}
+
+function isShadowHalf(save, card) {
+  return Boolean(ownedPartner(save, card)) && dualPrimaryId(card.id) !== card.id;
+}
+
+// Pawn value, pair-priced when the partner sells along with it. Compute
+// BEFORE the removal — the partner leaves in the same transaction.
+function sellValueOf(save, card) {
+  const partner = ownedPartner(save, card);
+  return RARITIES[card.rarity].sellValue + (partner ? RARITIES[partner.rarity].sellValue : 0);
+}
+
+// Either half's last roster copy locks the whole pair.
+function pairRosterLocked(save, card) {
+  return [card, ownedPartner(save, card)].filter(Boolean)
+    .some((half) => save.roster.cardIds.includes(half.id) && ownedCount(save, half.id) <= 1);
+}
 
 // ---- Shop ------------------------------------------------------------------
 
@@ -37,8 +65,15 @@ function shopItems(app) {
     disabled: save.player.coins < pack.price,
     run: (a) => buyPack(a, pack)
   });
-  for (const card of stock) {
-    const price = RARITIES[card.rarity].singlePrice;
+  // A rolled two-way half sells as its whole pair: one shelf line, the
+  // stronger face, both halves' prices combined, both granted on purchase.
+  const seen = new Set();
+  for (const rolled of stock) {
+    const card = cardById(dualPrimaryId(rolled.id)) ?? rolled;
+    if (seen.has(card.id)) continue;
+    seen.add(card.id);
+    const partner = dualPartnerCard(card.id);
+    const price = RARITIES[card.rarity].singlePrice + (partner ? RARITIES[partner.rarity].singlePrice : 0);
     items.push({
       html: `${cardLine(card)} <span class="gq-dim">&#9679; ${price}</span>`,
       card,
@@ -103,8 +138,7 @@ function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = fal
 function sellCursorCard(app, cardAtCursor) {
   const card = cardAtCursor();
   if (!card) return;
-  const rosterLocked = app.save.roster.cardIds.includes(card.id) && ownedCount(app.save, card.id) <= 1;
-  if (rosterLocked) {
+  if (pairRosterLocked(app.save, card)) {
     app.screen.confirmSell = null;
     app.screen.notice = "ROSTER COPY &mdash; NOT FOR SALE.";
     app.rerender();
@@ -116,8 +150,8 @@ function sellCursorCard(app, cardAtCursor) {
     return;
   }
   app.screen.confirmSell = null;
+  const value = sellValueOf(app.save, card);
   if (removeCardFromCollection(app.save, card.id)) {
-    const value = RARITIES[card.rarity].sellValue;
     grantCoins(app.save, value);
     persistSave(app.save);
     app.screen.notice = `SOLD ${shortName(card.name)} &#8594; &#9679; ${value} (NOW &#9679; ${app.save.player.coins})`;
@@ -207,11 +241,17 @@ let catalogCache = { pool: null, filter: null, rows: null };
 export function catalogRows(filter = "ALL") {
   const pool = adventurePool();
   if (catalogCache.pool === pool && catalogCache.filter === filter) return catalogCache.rows;
-  const cards = filter === "ALL"
-    ? pool
-    : filter === "SP" || filter === "RP"
-      ? pool.filter((card) => card.role === filter)
-      : pool.filter((card) => card.kind === "hitter" && card.position === filter);
+  // Two-way pairs list once, fronted by the stronger half, answering to
+  // both halves' position pages.
+  const matches = (card) => (filter === "SP" || filter === "RP")
+    ? card.role === filter
+    : card.kind === "hitter" && playsPosition(card, filter);
+  const cards = pool.filter((card) => {
+    if (dualPrimaryId(card.id) !== card.id) return false;
+    if (filter === "ALL") return true;
+    const partner = dualPartnerCard(card.id);
+    return matches(card) || (partner && matches(partner));
+  });
   const rows = [...cards].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
   catalogCache = { pool, filter, rows };
   return rows;
@@ -345,9 +385,21 @@ export const shopScreen = {
 // spares; a rostered card with one copy doesn't list at all.
 function sellableCards(save) {
   return collectionCards(save)
+    .filter(({ card }) => !isShadowHalf(save, card))
     .map(({ card, count }) => {
       const locked = save.roster.cardIds.includes(card.id) ? 1 : 0;
-      return { card, count: count - locked, locked: locked > 0 };
+      // A pair sells as one unit: spares exist only where BOTH halves have
+      // an unlocked copy, and the line prices the pair together.
+      const partner = ownedPartner(save, card);
+      const spare = partner
+        ? Math.min(count - locked, ownedCount(save, partner.id) - (save.roster.cardIds.includes(partner.id) ? 1 : 0))
+        : count - locked;
+      return {
+        card,
+        count: spare,
+        locked: locked > 0 || Boolean(partner && save.roster.cardIds.includes(partner.id)),
+        value: sellValueOf(save, card)
+      };
     })
     .filter(({ count }) => count > 0);
 }
@@ -358,11 +410,13 @@ function sellableCards(save) {
 export function sellAllDuplicates(save, { spareStarred = false } = {}) {
   let coins = 0;
   for (const { card, count } of collectionCards(save)) {
+    if (isShadowHalf(save, card)) continue; // the pair sells via its primary
     if (spareStarred && isStarred(save, card.id)) continue;
     const keep = 1;
     for (let extra = count; extra > keep; extra -= 1) {
+      const value = sellValueOf(save, card);
       if (!removeCardFromCollection(save, card.id)) break;
-      coins += RARITIES[card.rarity].sellValue;
+      coins += value;
     }
   }
   grantCoins(save, coins);
@@ -377,8 +431,9 @@ export function sellAllCards(save, { spareStarred = false } = {}) {
   for (const { card, count } of sellableCards(save)) {
     if (spareStarred && isStarred(save, card.id)) continue;
     for (let copy = 0; copy < count; copy += 1) {
+      const value = sellValueOf(save, card);
       if (!removeCardFromCollection(save, card.id)) break;
-      coins += RARITIES[card.rarity].sellValue;
+      coins += value;
     }
   }
   grantCoins(save, coins);
@@ -389,16 +444,16 @@ export function sellAllCards(save, { spareStarred = false } = {}) {
 // roster copies. Both respect the starred shield when it's up.
 function duplicateHaul(save, spareStarred) {
   return sellableCards(save).reduce(
-    (coins, { card, count, locked }) => coins + (spareStarred && isStarred(save, card.id)
+    (coins, { card, count, locked, value }) => coins + (spareStarred && isStarred(save, card.id)
       ? 0
-      : RARITIES[card.rarity].sellValue * (locked ? count : count - 1)),
+      : value * (locked ? count : count - 1)),
     0
   );
 }
 
 function fullHaul(save, spareStarred) {
   return sellableCards(save).reduce(
-    (coins, { card, count }) => coins + (spareStarred && isStarred(save, card.id) ? 0 : RARITIES[card.rarity].sellValue * count),
+    (coins, { card, count, value }) => coins + (spareStarred && isStarred(save, card.id) ? 0 : value * count),
     0
   );
 }
@@ -411,8 +466,8 @@ export const sellScreen = {
     const selected = rows[index]?.card ?? null;
     const confirming = Boolean(app.screen.confirmSellAll);
     const items = [
-      ...rows.map(({ card, count, locked }) => ({
-        html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; &#9679; ${RARITIES[card.rarity].sellValue}</span>${starMark(app.save, card)}`
+      ...rows.map(({ card, count, locked, value }) => ({
+        html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; &#9679; ${value}</span>${starMark(app.save, card)}`
       })),
       ...(rows.length
         ? [
@@ -456,9 +511,9 @@ export const sellScreen = {
       const index = clampIndex(app.screen.index ?? 0, total);
       if (index !== sellAllIndex || !extras) app.screen.confirmSellAll = false;
       if (index < rows.length) {
-        const { card } = rows[index];
+        const { card, value } = rows[index];
         if (removeCardFromCollection(app.save, card.id)) {
-          grantCoins(app.save, RARITIES[card.rarity].sellValue);
+          grantCoins(app.save, value);
           persistSave(app.save);
         }
       } else if (extras && index === rows.length) {
@@ -497,10 +552,17 @@ export const sellScreen = {
 export const BINDER_FILTERS = ["ALL", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
 
 export function binderRows(save, filter = "ALL") {
-  const rows = collectionCards(save);
+  // Two-way pairs page as one entry that answers to BOTH halves' slots:
+  // the combined card shows under DH and under SP alike.
+  const rows = collectionCards(save).filter(({ card }) => !isShadowHalf(save, card));
   if (!filter || filter === "ALL") return rows;
-  if (filter === "SP" || filter === "RP") return rows.filter(({ card }) => card.role === filter);
-  return rows.filter(({ card }) => card.kind === "hitter" && card.position === filter);
+  const matches = (card) => (filter === "SP" || filter === "RP")
+    ? card.role === filter
+    : card.kind === "hitter" && playsPosition(card, filter);
+  return rows.filter(({ card }) => {
+    const partner = ownedPartner(save, card);
+    return matches(card) || (partner && matches(partner));
+  });
 }
 
 function binderVisibleRows(app) {
@@ -628,7 +690,7 @@ export function flipDhWith(save, label) {
 }
 
 function flipLine(option) {
-  const outOfPosition = option.label === "1B" && option.dh.position !== "1B";
+  const outOfPosition = option.label === "1B" && !playsPosition(option.dh, "1B");
   return `${escapeHtml(option.label)} ${escapeHtml(shortName(option.player.name))} &#8644; DH ${escapeHtml(shortName(option.dh.name))}${
     outOfPosition ? ` <span class="gq-dim">FLD -1 OUT OF POSITION</span>` : ""
   }`;
@@ -682,7 +744,7 @@ export function benchCards(save, anchor, filter = "position") {
     .filter((card) => !personConflict(roster, card, anchor.id));
   if (filter === "all") return spares;
   return spares.filter((card) =>
-    anchor.kind === "pitcher" ? card.role === anchor.role : card.position === anchor.position
+    anchor.kind === "pitcher" ? card.role === anchor.role : positionsOverlap(card, anchor)
   );
 }
 

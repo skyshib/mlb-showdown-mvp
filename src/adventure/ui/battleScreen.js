@@ -18,6 +18,7 @@ import { buildBoxScore, inningsPlayed } from "../../rules/game.js";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js";
 import { gameFeats } from "../feats.js";
 import { buildNpcTeam } from "../npcTeams.js";
+import { positionsOverlap } from "../../rules/cards.js";
 import {
   persistSave,
   deriveSeed,
@@ -865,7 +866,7 @@ export const battleResultScreen = {
 function claimComparisonHtml(app, selected) {
   if (!selected) return "";
   const mine = rosterCards(app.save).filter((card) =>
-    selected.kind === "pitcher" ? card.role === selected.role : card.position === selected.position
+    selected.kind === "pitcher" ? card.role === selected.role : card.kind === "hitter" && positionsOverlap(card, selected)
   );
   const slot = selected.kind === "pitcher" ? selected.role : selected.position;
   return `${cardPanelHtml(selected)}

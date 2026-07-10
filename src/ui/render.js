@@ -1,5 +1,5 @@
 import { actionShotUrl, headshotUrl } from "../data/headshots.js";
-import { formatRange, normalizeResult } from "../rules/cards.js";
+import { formatRange, normalizeResult, positionsLabel, fieldingLabel, positionFieldingLabel } from "../rules/cards.js";
 
 const HITTER_OUTCOMES = ["BB", "1B", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
@@ -57,10 +57,10 @@ export function renderPlayerTable(players, options = {}) {
         <td class="num">${player.control}</td>
         <td>${escapeHtml(player.throws)}HP</td>
         <td class="num">${player.ip}</td>`
-        : `<td>${escapeHtml(player.position)}</td>
+        : `<td>${escapeHtml(positionsLabel(player))}</td>
         <td class="num">${player.onBase}</td>
         <td class="num">${formatSpeed(player.speed)}</td>
-        <td class="num">${formatSignedNumber(player.fielding)}</td>`;
+        <td class="num">${escapeHtml(fieldingLabel(player))}</td>`;
       return `<tr class="draft-player-row">
         <td>${action}</td>
         <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
@@ -168,7 +168,7 @@ export function renderPlayerCard(player) {
   const rarity = cardRarity(player);
   const meta = isPitcher
     ? `${player.points} pt&nbsp;&nbsp;CTRL ${player.control}&nbsp;&nbsp;IP ${player.ip}&nbsp;&nbsp;${escapeHtml(player.throws)}HP`
-    : `${player.points} pt&nbsp;&nbsp;SPD ${formatSpeed(player.speed)}&nbsp;&nbsp;${escapeHtml(player.position)}${formatSignedNumber(player.fielding)}&nbsp;&nbsp;BATS ${escapeHtml(player.bats)}`;
+    : `${player.points} pt&nbsp;&nbsp;SPD ${formatSpeed(player.speed)}&nbsp;&nbsp;${escapeHtml(positionFieldingLabel(player))}&nbsp;&nbsp;BATS ${escapeHtml(player.bats)}`;
   return `<article class="player-card ${isPitcher ? "pitcher-card" : "hitter-card"} rarity-${rarity.key}" style="--card-accent:${color};--card-accent-dark:${teamDark};--rarity-frame:${rarity.frame}">
     <div class="card-photo">
       <div class="card-logo"><span>MLB Showdown</span></div>

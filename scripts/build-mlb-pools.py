@@ -88,6 +88,8 @@ def accumulate(source, keys):
     return career, by_franch, by_decade, decade_totals, spans
 
 def accumulate_positions():
+    """Full games-by-position tables per slice; position_list() reduces each
+    to an eligibility list at build time."""
     career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
     for r in rows("Appearances.csv"):
         year = num(r, "yearID")
@@ -101,8 +103,25 @@ def accumulate_positions():
             by_decade[(pid, decade_of(year))][pos] += g
             if fid:
                 by_franch[(pid, fid)][pos] += g
-    pick = lambda table: {k: max(g, key=g.get) for k, g in table.items() if sum(g.values()) > 0}
-    return pick(career), pick(by_franch), pick(by_decade), by_decade
+    return career, by_franch, by_decade
+
+def position_list(games, floor=30, share=0.25, cap=3):
+    """A card's defensive eligibility, like the real Showdown multi-position
+    printings ("2B+3 SS+2"). Primary spot = most games in the slice;
+    secondary spots need a real share of the slice's defensive games (>=25%,
+    min 30 G) so a September cameo doesn't print on the card. DH never lists
+    as a secondary — anyone can DH already."""
+    if not games:
+        return ["DH"]
+    ranked = sorted(games.items(), key=lambda kv: (-kv[1], kv[0]))
+    total = sum(games.values())
+    out = [ranked[0][0]]
+    for pos, g in ranked[1:]:
+        if len(out) >= cap:
+            break
+        if pos != "DH" and g >= floor and g >= share * total:
+            out.append(pos)
+    return out
 
 def h(pid, salt, lo, hi):
     digest = hashlib.sha1(f"{pid}:{salt}".encode()).digest()
@@ -370,7 +389,8 @@ def speed_rating(t, pa, pos, L):
     t3_rate = (t["3B"] / max(1, t["H"])) * (REF_SPEED["T_H"] / max(1e-3, L.get("T_H", REF_SPEED["T_H"]))) ** 0.5
     return clamp(round(8 + SPEED_PRIOR.get(pos, 0) + net_rate * 227.5 + t3_rate * 25), 8, 28)
 
-def build_hitter(pid, t, pos, L):
+def build_hitter(pid, t, positions, L):
+    pos = positions[0]
     pa = t["AB"] + t["BB"]
     if pa <= 0 or t["AB"] == 0:
         return None
@@ -393,11 +413,14 @@ def build_hitter(pid, t, pos, L):
     gb = round((outs - so) * 0.55)
     fb = outs - so - gb
     speed = speed_rating(t, pa, pos, L)
-    fielding = real_fielding(pid, pos)
+    # One fielding per listed position, each from the same defensive record
+    # mapped into that position's band. Points price the primary glove.
+    fieldings = [real_fielding(pid, p) for p in positions]
     parts = [("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("T", tr), ("H", hr)]
     power = sum(CHART_POWER[c] * n for c, n in parts)
-    points = ob * 20 + fielding * 7 + max(0, round((speed - 1) * 1.5)) + power
-    return [None, None, None, None, None, 0, points, ob, speed, pos, fielding, None, chart_string(parts)]
+    points = ob * 20 + fieldings[0] * 7 + max(0, round((speed - 1) * 1.5)) + power
+    pos_field = (positions, fieldings) if len(positions) > 1 else (positions[0], fieldings[0])
+    return [None, None, None, None, None, 0, points, ob, speed, pos_field[0], pos_field[1], None, chart_string(parts)]
 
 def build_pitcher(pid, t, L, last_year=9999):
     ip = t["IPouts"] / 3
@@ -474,6 +497,9 @@ def finish(card, pid, span, used_names, tag, hand_key, id_suffix="", share_name=
 # starter pack falls back gracefully in thin spots — so a slice only needs
 # basic depth: enough of each group, and every position represented in the
 # common band (the pack's bread and butter).
+def card_positions(c):
+    return c[9] if isinstance(c[9], list) else [c[9]]
+
 def pool_ok(pool):
     hitters = [c for c in pool if c[5] == 0]
     sps = [c for c in pool if c[5] == 1 and c[9] == "SP"]
@@ -484,7 +510,7 @@ def pool_ok(pool):
     n = len(ranked)
     common = [c for i, c in enumerate(ranked) if (i + 1) / n > 0.30]
     for pos in ("C", "1B", "2B", "3B", "SS", "LF/RF", "CF"):
-        if sum(1 for c in hitters if c[9] == pos) < 3 or not any(c[9] == pos for c in common):
+        if sum(1 for c in hitters if pos in card_positions(c)) < 3 or not any(pos in card_positions(c) for c in common):
             return False
     return True
 
@@ -507,9 +533,9 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
         ip_real = sum(t["IPouts"] for t in pit_years.values()) if pit_years else 0
         if ip_real >= pa_real:
             continue
-        pos = pos_slice.get(key, "DH")
+        positions = position_list(pos_slice.get(key))
         t, L = peak_blend_hitter(years, fixed_league)
-        card = build_hitter(pid, t, pos, L) if t else None
+        card = build_hitter(pid, t, positions, L) if t else None
         if card:
             # Two-way players yield two cards; the bat half's id gets a
             # suffix so both live in one pool (bare id keeps meaning the
@@ -534,7 +560,7 @@ bat_career, bat_franch, bat_decade, bat_lg_totals, bat_spans = accumulate("Batti
 print("accumulating pitching...", file=sys.stderr)
 pit_career, pit_franch, pit_decade, _, pit_spans = accumulate("Pitching.csv", PIT_KEYS)
 print("accumulating positions...", file=sys.stderr)
-pos_career, pos_franch, pos_decade, pos_decade_games = accumulate_positions()
+pos_career, pos_franch, pos_decade = accumulate_positions()
 spans_all = {**bat_spans, **pit_spans}
 for key, span in bat_spans.items():
     if key in pit_spans:
@@ -571,7 +597,7 @@ def merge_early_flat(table):
     return merged
 
 early_bat, early_pit = merge_early(bat_decade), merge_early(pit_decade)
-early_pos = {k: max(g, key=g.get) for k, g in merge_early_flat(pos_decade_games).items() if sum(g.values()) > 0}
+early_pos = merge_early_flat(pos_decade)
 early_spans = dict(spans_all)
 for key, span in spans_all.items():
     if isinstance(key, tuple) and isinstance(key[1], int) and key[1] <= EARLIEST:
@@ -602,12 +628,46 @@ franchises = {}
 for fid, fname in sorted(franch_names.items()):
     bat = {k: v for k, v in bat_franch.items() if k[1] == fid}
     pit = {k: v for k, v in pit_franch.items() if k[1] == fid}
-    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 400, 350)
+    # Franchise pools run the loosest gate (250 PA / ~75 IP with the club,
+    # matching the decade slices): the whole point is a deep bench of guys
+    # who actually wore the uniform, and peak-weighted regression already
+    # keeps the short-timers priced like short-timers.
+    pool = build_slice(f"f{fid}", bat, pit, pos_franch, spans_all, 250, 225)
     if pool_ok(pool):
         franchises[fid] = pool
     else:
         print(f"  franchise {fid} ({fname}) skipped ({len(pool)})", file=sys.stderr)
 print(f"franchises kept: {len(franchises)}", file=sys.stderr)
+
+# ---- Simultaneous two-way bundles ---------------------------------------------
+#
+# The Ohtani rule: a player whose bat and arm value came AT THE SAME TIME
+# merges into one owned card in the app (the halves still roster separately,
+# so playing both roles costs both roster slots). Strict career-level test:
+# seasons with 100+ PA and 45+ IP at once must hold 40%+ of BOTH career PA
+# and career IP. Ohtani and Martin Dihigo pass; Ruth (five overlap seasons
+# of twenty-two) and converts like Ankiel stay two separate cards. The
+# bundle discount (weaker half at 60%) applies at PRICING time in the app —
+# raw points here stay honest so rarity ranks true strength.
+def dual_persons():
+    out = []
+    for card in history:
+        if not card[0].endswith("-bat"):
+            continue
+        pid = card[0][len("mlb-all-"):-len("-bat")]
+        pa = {y: t["AB"] + t["BB"] for y, t in bat_career.get(pid, {}).items()}
+        ip = {y: t["IPouts"] for y, t in pit_career.get(pid, {}).items()}
+        overlap = [y for y in set(pa) & set(ip) if pa[y] >= 100 and ip[y] >= 135]
+        tot_pa, tot_ip = sum(pa.values()), sum(ip.values())
+        if not overlap or tot_pa <= 0 or tot_ip <= 0:
+            continue
+        if (sum(pa[y] for y in overlap) / tot_pa >= 0.4
+                and sum(ip[y] for y in overlap) / tot_ip >= 0.4):
+            out.append(pid)
+    return sorted(out)
+
+DUAL_PERSONS = dual_persons()
+print(f"dual two-way persons: {[people[p]['name'] for p in DUAL_PERSONS]}", file=sys.stderr)
 
 header = """// Real-MLB card pools built from the Baseball Databank (Chadwick Baseball
 // Bureau / Sean Lahman, CC BY-SA 3.0 — https://github.com/chadwickbureau/baseballdatabank).
@@ -618,6 +678,8 @@ header = """// Real-MLB card pools built from the Baseball Databank (Chadwick Ba
 // Generated by scripts/build-mlb-pools.py; do not hand-edit.
 // Tuple: [id, name, yearsActive, lastYear, set, isPitcher, rawPoints,
 //         obcOrControl, speedOrIp, positionOrRole, fielding, hand, chart]
+// Multi-position hitters carry aligned arrays at the position/fielding
+// slots (["2B","SS"] with [3,2]); the first entry is the primary spot.
 """
 def dump(f, name, pool):
     f.write(f"export const {name} = [\n")
@@ -644,5 +706,9 @@ with open(os.path.join(SP, "mlbPools.js"), "w") as f:
     f.write("};\n")
     f.write("export const MLB_FRANCHISE_NAMES = ")
     f.write(json.dumps({fid: franch_names[fid] for fid in sorted(franchises)}, indent=None))
+    f.write(";\n")
+    f.write("// Simultaneous two-way players: one owned card per pool, bat and arm together.\n")
+    f.write("export const MLB_DUAL_PERSONS = ")
+    f.write(json.dumps(DUAL_PERSONS))
     f.write(";\n")
 print("wrote mlbPools.js", file=sys.stderr)

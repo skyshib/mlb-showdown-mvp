@@ -2,8 +2,8 @@ import { generatePlayerPool } from "../data/playerGeneration.js";
 import { createRng } from "../rules/rng.js";
 import { decodeCardRows } from "../data/realCards.js";
 import { CLASSIC_CARD_ROWS } from "../data/classicCards.js";
-import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES } from "../data/mlbPools.js";
-import { personConflict } from "../rules/cards.js";
+import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "../data/mlbPools.js";
+import { personConflict, playerIdentity, playsPosition } from "../rules/cards.js";
 
 // Every save picks a league at new game. The fictional league regenerates
 // from the save seed; the real leagues share fixed card sets, but the MLB
@@ -202,7 +202,7 @@ export function poolCeiling() {
         .filter((card) => !taken.has(card.id) &&
           (slot === "HITTER" ? card.kind === "hitter"
             : slot === "SP" || slot === "RP" ? card.role === slot
-            : card.kind === "hitter" && card.position === slot))
+            : card.kind === "hitter" && playsPosition(card, slot)))
         .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))[0];
       if (!best) continue;
       taken.add(best.id);
@@ -267,6 +267,40 @@ export function cardById(id) {
   return poolIndexCache.get(id) ?? null;
 }
 
+// ---- Simultaneous two-way pairs ----------------------------------------------
+//
+// Ohtani-likes (players whose bat and arm value came at the same time —
+// decided at build time, MLB_DUAL_PERSONS) merge into ONE owned card: the
+// pool still carries a bat half and an arm half, and they still roster
+// separately (playing both roles costs both slots), but acquiring either
+// grants the pair, selling one sells both, and browse screens show a single
+// combined face. A pool bundles only when it holds both halves; sequential
+// converts (Ankiel) and part-time overlaps (Ruth) stay two separate cards.
+const DUAL_PERSONS = new Set(MLB_DUAL_PERSONS);
+
+export function dualPartnerId(id) {
+  const identity = playerIdentity(id);
+  if (!identity || !DUAL_PERSONS.has(identity.person)) return null;
+  const partner = String(id).endsWith("-bat") ? String(id).slice(0, -4) : `${id}-bat`;
+  return cardById(partner) ? partner : null;
+}
+
+export function dualPartnerCard(id) {
+  const partner = dualPartnerId(id);
+  return partner ? cardById(partner) : null;
+}
+
+// The half that fronts the pair in lists: the stronger card by printed
+// points (the bat half on a tie). The other half is the "shadow".
+export function dualPrimaryId(id) {
+  const partner = dualPartnerId(id);
+  if (!partner) return id;
+  const self = cardById(id);
+  const other = cardById(partner);
+  if (self.points !== other.points) return self.points > other.points ? id : partner;
+  return String(id).endsWith("-bat") ? id : partner;
+}
+
 // Rank each group by the generator's raw quality score, then price the rank:
 // truePoints from the curve, printed points with seeded noise on top.
 function calibrateUniverse(pool, seed) {
@@ -289,6 +323,21 @@ function calibrateUniverse(pool, seed) {
       const points = universeNoise ? Math.max(10, Math.round(truePoints * noise)) : truePoints;
       priced.set(card.id, { rarity, truePoints, points });
     });
+  }
+  // Bundle discount: the weaker half of a simultaneous two-way pair prices
+  // at 60% AFTER the curve — the pair is one purchase, and full freight for
+  // both halves would price the duo out of budget play. Rarity keeps the
+  // honest rank; only the sticker softens.
+  const byId = new Map(pool.map((card) => [card.id, card]));
+  for (const bat of pool) {
+    if (!String(bat.id).endsWith("-bat")) continue;
+    const identity = playerIdentity(bat.id);
+    if (!identity || !DUAL_PERSONS.has(identity.person)) continue;
+    const arm = byId.get(String(bat.id).slice(0, -4));
+    if (!arm) continue;
+    const entry = priced.get((bat.points <= arm.points ? bat : arm).id);
+    entry.truePoints = Math.max(10, Math.round(entry.truePoints * 0.6));
+    entry.points = Math.max(10, Math.round(entry.points * 0.6));
   }
   return pool.map((card) => ({ ...card, ...priced.get(card.id) }));
 }
@@ -349,7 +398,7 @@ const STARTER_RARE_COUNT = 2;
 function slotMatches(slot, card) {
   if (slot === "HITTER") return card.kind === "hitter";
   if (slot === "SP" || slot === "RP") return card.role === slot;
-  return card.kind === "hitter" && card.position === slot;
+  return card.kind === "hitter" && playsPosition(card, slot);
 }
 
 // The sealed starter deck: like the real product, two rares and the rest

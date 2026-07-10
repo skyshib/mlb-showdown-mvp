@@ -61,6 +61,7 @@ import {
   summarizeBatch
 } from "./rules/batch.js?v=20260708-mlb-win-prob";
 import { computeAwards } from "./rules/awards.js?v=20260705-wpa-two-decimals";
+import { hitterPositions, playsPosition } from "./rules/cards.js";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import {
@@ -2865,7 +2866,7 @@ function renderLineupSlot(player, slotLabel, manager) {
 
 function rosterSlotDescription(player, slotLabel) {
   if (player.kind === "pitcher") return playerPosition(player);
-  if (slotLabel === "1B" && player.position !== "1B") return `${player.position} at 1B | Field -1`;
+  if (slotLabel === "1B" && !playsPosition(player, "1B")) return `${player.position} at 1B | Field -1`;
   return playerPosition(player);
 }
 
@@ -3032,8 +3033,11 @@ function filteredPlayers(players) {
 }
 
 function matchesPositionFilter(player, filterPosition) {
-  if (filterPosition === CORNER_OUTFIELD_POSITION) return isCornerOutfielder(playerPosition(player));
-  return playerPosition(player) === filterPosition;
+  if (player.kind !== "hitter") return playerPosition(player) === filterPosition;
+  if (filterPosition === CORNER_OUTFIELD_POSITION) {
+    return hitterPositions(player).some((entry) => isCornerOutfielder(entry.pos));
+  }
+  return playsPosition(player, filterPosition);
 }
 
 function assignPlayersToSlots(players, labels, labelForPlayer) {

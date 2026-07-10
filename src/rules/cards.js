@@ -34,6 +34,49 @@ export function personConflict(roster, player, excludeId = null) {
   }) ?? null;
 }
 
+// A hitter's defensive eligibility, primary spot first: [{ pos, fielding }].
+// Multi-position cards (real Showdown "2B+3 / SS+2" printings, MLB players
+// with a real secondary spot) carry a positions array; single-position cards
+// read as a one-entry list, so every consumer can treat the two the same.
+export function hitterPositions(card) {
+  if (Array.isArray(card?.positions) && card.positions.length) return card.positions;
+  return [{ pos: card?.position, fielding: Number(card?.fielding) || 0 }];
+}
+
+export function playsPosition(card, pos) {
+  return hitterPositions(card).some((entry) => entry.pos === pos);
+}
+
+// Fielding at a listed position, or null when the card doesn't list it.
+export function fieldingAt(card, pos) {
+  const entry = hitterPositions(card).find((item) => item.pos === pos);
+  return entry ? Number(entry.fielding) || 0 : null;
+}
+
+// Two hitters cover the same ground if any listed position overlaps.
+export function positionsOverlap(a, b) {
+  return hitterPositions(a).some((entry) => playsPosition(b, entry.pos));
+}
+
+const signedFielding = (value) => `${value >= 0 ? "+" : ""}${value}`;
+
+// "2B·SS" — position text for table cells and compact lines.
+export function positionsLabel(card) {
+  return hitterPositions(card).map((entry) => entry.pos).join("·");
+}
+
+// "+3/+2" — the matching fielding text, one value per listed position.
+export function fieldingLabel(card) {
+  return hitterPositions(card).map((entry) => signedFielding(Number(entry.fielding) || 0)).join("/");
+}
+
+// "2B+3 SS+2" — the card-face pairing, as the real cards print it.
+export function positionFieldingLabel(card) {
+  return hitterPositions(card)
+    .map((entry) => `${entry.pos}${signedFielding(Number(entry.fielding) || 0)}`)
+    .join(" ");
+}
+
 export function resolveChart(chart, roll) {
   const match = chart.find((entry) => roll >= entry.from && roll <= entry.to);
   if (!match) {

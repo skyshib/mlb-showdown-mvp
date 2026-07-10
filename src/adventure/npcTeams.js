@@ -1,7 +1,7 @@
 import { adventurePool } from "./packs.js";
 import { npcBudget } from "./region.js";
 import { createRng } from "../rules/rng.js";
-import { personConflict } from "../rules/cards.js";
+import { personConflict, playsPosition } from "../rules/cards.js";
 
 // One roster slot per required lineup spot plus the four-man staff. "HITTER"
 // is the DH: any bat qualifies.
@@ -30,7 +30,7 @@ function chartSlots(card, result) {
 function slotMatches(slot, card) {
   if (slot === "HITTER") return card.kind === "hitter";
   if (slot === "SP" || slot === "RP") return card.role === slot;
-  return card.kind === "hitter" && card.position === slot;
+  return card.kind === "hitter" && playsPosition(card, slot);
 }
 
 // Greedy under budget: fill slots one at a time, always leaving enough budget
