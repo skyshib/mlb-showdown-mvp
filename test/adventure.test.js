@@ -929,6 +929,38 @@ test("the team menu swaps the rotation and flips the DH, legally and durably", a
   assert.equal(slots.find((slot) => slot.label === "DH").player.id, target.player.id);
 });
 
+test("the replacement picker leads with the incumbent, diamond-marked; picking him keeps him", async () => {
+  const { teamScreen, benchCards } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const spare = adventurePool().find((card) =>
+    !save.roster.cardIds.includes(card.id) && card.position === cardById(save.roster.cardIds[0]).position
+  );
+  addCardToCollection(save, spare.id);
+  const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  const anchor = rosterCards(save)[0];
+  teamScreen.key(app, "a"); // open the picker on the first roster card
+  assert.equal(app.screen.mode, "pick");
+  const html = teamScreen.render(app);
+  const anchorAt = html.indexOf(anchor.name.split(" ").pop().toUpperCase());
+  assert.ok(anchorAt >= 0 && html.indexOf("&#9670;", anchorAt) > anchorAt, "the incumbent leads the list with the diamond");
+  assert.equal(teamScreen.hoverCard(app, 0)?.id, anchor.id, "row 0 hovers the incumbent");
+  assert.equal(teamScreen.hoverCard(app, 1)?.id, benchCards(save, anchor, "position")[0]?.id, "bench rows follow");
+
+  // Picking the incumbent keeps the roster exactly as it was.
+  const before = [...save.roster.cardIds];
+  app.screen.pickIndex = 0;
+  teamScreen.key(app, "a");
+  assert.deepEqual(save.roster.cardIds, before, "picking the incumbent changes nothing");
+  assert.equal(app.screen.mode, "roster");
+
+  // Picking a bench row still swaps.
+  teamScreen.key(app, "a");
+  app.screen.pickIndex = 1;
+  teamScreen.key(app, "a");
+  assert.ok(save.roster.cardIds.includes(spare.id), "bench picks still swap in");
+  assert.ok(!save.roster.cardIds.includes(anchor.id), "and the incumbent departs");
+});
+
 test("the roster locks mid-series; rotation, DH, and batting order stay live", async () => {
   const { teamScreen, swapRotation, dhFlipOptions } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();

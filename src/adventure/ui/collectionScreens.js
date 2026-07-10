@@ -588,9 +588,12 @@ export const teamScreen = {
     const filter = app.screen.pickFilter ?? "position";
     const bench = picking ? benchCards(save, roster[rosterIndex], filter) : [];
     const flips = flipping ? dhFlipOptions(save) : [];
-    const pickIndex = clampIndex(app.screen.pickIndex ?? 0, (picking ? bench.length : flips.length) + 1);
+    // The pick list leads with the man being replaced, diamond-marked like
+    // the binder — picking him keeps him.
+    const pickRows = picking ? [roster[rosterIndex], ...bench] : [];
+    const pickIndex = clampIndex(app.screen.pickIndex ?? 0, (picking ? pickRows.length : flips.length) + 1);
     const preview = picking
-      ? bench[pickIndex] ?? null
+      ? pickRows[pickIndex] ?? null
       : flipping
         ? flips[pickIndex]?.player ?? null
         : rosterIndex < roster.length
@@ -599,7 +602,10 @@ export const teamScreen = {
     let list;
     if (picking) {
       list = `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
-        [...bench.map((card) => ({ html: cardLine(card) })), { label: "CANCEL" }],
+        [
+          ...pickRows.map((card, rowIndex) => ({ html: `${cardLine(card)}${rowIndex === 0 ? " &#9670;" : ""}` })),
+          { label: "CANCEL" }
+        ],
         pickIndex
       )}`;
     } else if (flipping) {
@@ -640,7 +646,9 @@ export const teamScreen = {
     const roster = rosterCards(app.save);
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
-      return anchor ? benchCards(app.save, anchor, app.screen.pickFilter ?? "position")[index] ?? null : null;
+      if (!anchor) return null;
+      if (index === 0) return anchor;
+      return benchCards(app.save, anchor, app.screen.pickFilter ?? "position")[index - 1] ?? null;
     }
     if (app.screen.mode === "dhFlip") {
       return dhFlipOptions(app.save)[index]?.player ?? null;
@@ -655,7 +663,8 @@ export const teamScreen = {
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       const bench = benchCards(save, anchor, app.screen.pickFilter ?? "position");
-      const total = bench.length + 1;
+      // Row 0 is the incumbent himself; picking him keeps him.
+      const total = bench.length + 2;
       if (key === "left" || key === "right") {
         app.screen.pickFilter = (app.screen.pickFilter ?? "position") === "position" ? "all" : "position";
         app.screen.pickIndex = 0;
@@ -663,8 +672,8 @@ export const teamScreen = {
         app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), total);
       } else if (key === "a") {
         const pickIndex = app.screen.pickIndex ?? 0;
-        if (pickIndex < bench.length) {
-          const cardIds = save.roster.cardIds.map((id) => (id === anchor.id ? bench[pickIndex].id : id));
+        if (pickIndex > 0 && pickIndex <= bench.length) {
+          const cardIds = save.roster.cardIds.map((id) => (id === anchor.id ? bench[pickIndex - 1].id : id));
           setRoster(save, cardIds);
           persistSave(save);
         }
