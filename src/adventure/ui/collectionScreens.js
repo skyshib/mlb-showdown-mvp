@@ -160,7 +160,8 @@ export const catalogScreen = {
             ? menuHtml(
                 visible.map((card) => {
                   const owned = ownedCount(app.save, card.id);
-                  return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">&#9670;x${owned}</span>` : ""}${pinMark(app, card)}` };
+                  const rostered = app.save.roster.cardIds.includes(card.id);
+                  return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">*x${owned}</span>` : ""}${rostered ? " &#9679;" : ""}${pinMark(app, card)}` };
                 }),
                 index - start,
                 { offset: start }
@@ -169,7 +170,7 @@ export const catalogScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Every card in this league, best first. Type a name to search &middot; &#9664;/&#9654; page by position &middot; &#9670; = owned &middot; Z pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Every card in this league, best first. Type a name to search &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; Z pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {

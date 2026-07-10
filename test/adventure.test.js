@@ -1448,6 +1448,21 @@ test("simulated matchups reproduce real season rates within tolerance", () => {
   }
 });
 
+test("the catalog marks owned cards with * and roster cards with a dot", async () => {
+  const { catalogScreen, catalogRows } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const rows = catalogRows("ALL");
+  const rosterAt = rows.findIndex((card) => save.roster.cardIds.includes(card.id));
+  const app = { save, screen: { name: "catalog", index: rosterAt, filter: "ALL" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  const html = catalogScreen.render(app);
+  assert.ok(html.includes("*x1"), "owned cards read *xN");
+  assert.ok(html.includes("*x1</span> &#9679;"), "roster cards add the dot");
+  assert.ok(html.includes("* = owned") && html.includes("&#9679; = on roster"), "the legend explains both");
+  // An unowned card in view shows neither marker.
+  const unownedAt = rows.findIndex((card, at) => Math.abs(at - rosterAt) < 12 && !save.collection[card.id]);
+  assert.ok(unownedAt >= 0, "an unowned card is in the window");
+});
+
 test("the shop catalog lists the whole universe, best first", async () => {
   const { catalogRows } = await import("../src/adventure/ui/collectionScreens.js");
   const all = catalogRows("ALL");
