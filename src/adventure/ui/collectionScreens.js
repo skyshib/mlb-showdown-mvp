@@ -70,16 +70,18 @@ function typeIntoQuery(app, char) {
   app.rerender();
 }
 
-// Binder/catalog key scheme: letters are inert until S opens search mode
-// (then they type into the query); * or ENTER stars the cursor card as a
-// keeper; C pins it for compare.
-function searchableTyped(app, char, cardAtCursor, pinReturnTo) {
+// Binder/catalog key scheme: letters are inert until F ("find") opens search
+// mode (they then type into the query); * or ENTER stars the cursor card as
+// a keeper; C pins it for compare; S quick-sells a copy where the screen
+// allows it (the binder).
+function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = false } = {}) {
   if (app.screen.searching || char === "\b") {
     typeIntoQuery(app, char);
     return;
   }
+  app.screen.notice = null;
   const lower = char.toLowerCase();
-  if (lower === "s") {
+  if (lower === "f") {
     app.screen.searching = true;
     app.rerender();
   } else if (char === "*") {
@@ -87,7 +89,25 @@ function searchableTyped(app, char, cardAtCursor, pinReturnTo) {
   } else if (lower === "c") {
     pinOrCompare(app, cardAtCursor(), pinReturnTo);
     app.rerender();
+  } else if (lower === "s" && quickSell) {
+    sellCursorCard(app, cardAtCursor);
   }
+}
+
+// The binder's quick sell: one copy of the cursor card at the pawn rate.
+// The roster's last copy refuses, same as the shop.
+function sellCursorCard(app, cardAtCursor) {
+  const card = cardAtCursor();
+  if (!card) return;
+  if (removeCardFromCollection(app.save, card.id)) {
+    const value = RARITIES[card.rarity].sellValue;
+    grantCoins(app.save, value);
+    persistSave(app.save);
+    app.screen.notice = `SOLD ${shortName(card.name)} &#8594; &#9679; ${value} (NOW &#9679; ${app.save.player.coins})`;
+  } else {
+    app.screen.notice = "ROSTER COPY &mdash; NOT FOR SALE.";
+  }
+  app.rerender();
 }
 
 function starCursorCard(app, cardAtCursor) {
@@ -205,7 +225,7 @@ export const catalogScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">Every card in this league, best first. S searches &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">Every card in this league, best first. F finds &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
@@ -488,7 +508,7 @@ export const binderScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">S searches &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">F finds &middot; S sells a copy &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
@@ -498,7 +518,7 @@ export const binderScreen = {
     searchableTyped(app, char, () => {
       const rows = binderVisibleRows(app);
       return rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card ?? null;
-    }, "binder");
+    }, "binder", { quickSell: true });
   },
   key(app, key) {
     if (key === "left" || key === "right") {

@@ -1587,9 +1587,9 @@ test("type-to-search narrows binder and catalog by name; X clears before leaving
 
   const app = { save, screen: { name: "binder", index: 5, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
   for (const char of fragment) binderScreen.typed(app, char);
-  assert.equal(app.screen.query ?? "", "", "letters are inert until S opens search");
-  binderScreen.typed(app, "s");
-  assert.equal(app.screen.searching, true, "S opens search");
+  assert.equal(app.screen.query ?? "", "", "letters are inert until F opens search");
+  binderScreen.typed(app, "f");
+  assert.equal(app.screen.searching, true, "F opens search");
   for (const char of fragment) binderScreen.typed(app, char);
   assert.equal(app.screen.query, fragment, "typed letters build the query");
   assert.equal(app.screen.index, 0, "the cursor resets to the top match");
@@ -1605,10 +1605,40 @@ test("type-to-search narrows binder and catalog by name; X clears before leaving
   assert.equal(app.screen.name, "map", "a second X leaves");
 
   const catalogApp = { save, screen: { name: "catalog", index: 0, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
-  catalogScreen.typed(catalogApp, "s");
+  catalogScreen.typed(catalogApp, "f");
   for (const char of fragment) catalogScreen.typed(catalogApp, char);
   const html = catalogScreen.render(catalogApp);
   assert.ok(html.includes(`SEARCH: <b>${fragment}</b>`), "the query shows on screen");
+});
+
+test("the binder's S key quick-sells a copy, never the roster's last", async () => {
+  const { binderScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const spare = adventurePool().find((card) => !save.roster.cardIds.includes(card.id));
+  addCardToCollection(save, spare.id, 2);
+  const app = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+
+  const rows = collectionCards(save);
+  app.screen.index = rows.findIndex(({ card }) => card.id === spare.id);
+  const before = save.player.coins;
+  binderScreen.typed(app, "s");
+  assert.equal(ownedCount(save, spare.id), 1, "S sells one copy");
+  assert.equal(save.player.coins, before + RARITIES[spare.rarity].sellValue, "at the pawn rate");
+  assert.ok(binderScreen.render(app).includes("SOLD"), "the sale is announced");
+
+  // The roster's last copy refuses, with a notice instead of a sale.
+  const rosterRowsNow = collectionCards(save);
+  app.screen.index = rosterRowsNow.findIndex(({ card }) => card.id === save.roster.cardIds[0]);
+  const coinsBefore = save.player.coins;
+  binderScreen.typed(app, "s");
+  assert.equal(ownedCount(save, save.roster.cardIds[0]), 1, "the roster copy survives");
+  assert.equal(save.player.coins, coinsBefore, "no coins change hands");
+  assert.ok(binderScreen.render(app).includes("NOT FOR SALE"), "and the refusal is explained");
+
+  // While searching, S is just a letter.
+  binderScreen.typed(app, "f");
+  binderScreen.typed(app, "s");
+  assert.equal(app.screen.query, "s", "searching swallows the S");
 });
 
 test("compare mode pins two cards from the binder and lays them side by side", async () => {
