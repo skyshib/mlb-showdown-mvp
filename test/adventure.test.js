@@ -64,6 +64,7 @@ import {
   simulateGame,
   canBunt,
   attemptBunt,
+  buntSuccessChance,
   intentionalWalk,
   applySingle,
   resolveAdvanceDecision
@@ -757,66 +758,25 @@ test("a sacrifice bunt trades an out to move the runners", () => {
   state.bases[2] = { id: "r3", name: "Runner Three", speed: 12 };
   assert.equal(canBunt(state), false, "no squeeze plays: a runner on third kills the bunt");
   state.bases[2] = null;
-  const batterId = state.away.lineup[0].id;
-  const event = attemptBunt(state, createRng("bunt-roll"));
+  const linesBefore = state.stats.hitters.get?.("x") ?? null;
+  const event = attemptBunt(state);
   assert.equal(event.type, "bunt");
-  assert.ok(["SAC", "SO", "FC"].includes(event.result));
+  assert.equal(event.result, "SAC", "traditional Showdown: the sacrifice always gets down");
   assert.equal(state.outs, 1);
   assert.equal(state.lineupIndex.away, 1, "the bunt consumed the plate appearance");
-  if (event.result === "SAC") {
-    assert.equal(state.bases[1]?.id, "r1", "runner moved up");
-    assert.equal(state.bases[0], null);
-  } else if (event.result === "SO") {
-    assert.equal(state.bases[0]?.id, "r1", "the runner holds on the strikeout");
-  } else {
-    assert.equal(state.bases[0]?.id, batterId, "batter reached on the fielder's choice");
-    assert.equal(state.bases[1], null, "lead runner was forced at second");
-  }
+  assert.equal(state.bases[1]?.id, "r1", "runner moved up");
+  assert.equal(state.bases[0], null, "batter is out, no roll about it");
+  assert.equal(linesBefore, null);
+
+  // Runners on first and second both move up; buntSuccessChance reads 1.
+  state.outs = 0;
+  state.bases = [{ id: "a1", name: "A", speed: 8 }, { id: "a2", name: "B", speed: 8 }, null];
+  assert.equal(buntSuccessChance(state), 1, "the menu shows a sure thing");
+  attemptBunt(state);
+  assert.deepEqual([state.bases[0], state.bases[1]?.id, state.bases[2]?.id], [null, "a1", "a2"], "everyone moves up");
+
   state.outs = 2;
   assert.equal(canBunt(state), false, "no bunting with two down");
-});
-
-test("failed bunts split between strikeouts and lead FORCE outs — never a tag", () => {
-  const { player, npc } = hookTeams();
-  const build = (bases, seed) => {
-    const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed });
-    battle.state.bases = bases.map((on, at) => (on ? { id: `r${at + 1}`, name: `Runner ${at + 1}`, speed: 8 } : null));
-    // A slow batter misses the clean bunt often, exercising the failure split.
-    battle.state.away.lineup[0] = { ...battle.state.away.lineup[0], speed: 0 };
-    return battle.state;
-  };
-
-  // Runner on second only: no force ahead, tags are off the table — failed
-  // bunts are the batter out (or a K), and the runner NEVER leaves second.
-  const outcomes = { SAC: 0, SO: 0, GB: 0, FC: 0 };
-  for (let i = 0; i < 120; i += 1) {
-    const state = build([false, true, false], `bunt-split-2b-${i}`);
-    const event = attemptBunt(state, createRng(`bunt-roll-2b-${i}`));
-    outcomes[event.result] += 1;
-    if (event.result !== "SAC") {
-      assert.equal(state.bases[1]?.id, "r2", `${event.result}: the runner stays on second`);
-      assert.equal(state.bases[0], null, "and the batter never sneaks aboard");
-    }
-    assert.equal(event.result === "SO", Boolean(event.playDetails.strikeout), "SO carries the strikeout detail");
-  }
-  assert.equal(outcomes.FC, 0, "no fielder's choice without a force");
-  assert.ok(outcomes.SO >= 15 && outcomes.GB >= 15, `failures split both ways (SO ${outcomes.SO}, GB ${outcomes.GB})`);
-  const failures = outcomes.SO + outcomes.GB;
-  assert.ok(Math.abs(outcomes.SO - failures / 2) <= failures * 0.25, "roughly half of failures are strikeouts");
-
-  // First and second occupied: the lead force is at third, everyone else up.
-  let sawForceAtThird = false;
-  for (let i = 0; i < 60 && !sawForceAtThird; i += 1) {
-    const state = build([true, true, false], `bunt-split-12-${i}`);
-    const event = attemptBunt(state, createRng(`bunt-roll-12-${i}`));
-    if (event.result === "FC") {
-      sawForceAtThird = true;
-      assert.equal(event.playDetails.leadOut.at, "3B", "the lead man is forced at third");
-      assert.equal(state.bases[1]?.id, "r1", "the trailing runner moves up to second");
-      assert.equal(state.bases[2], null);
-    }
-  }
-  assert.ok(sawForceAtThird, "the bases-ahead force still happens");
 });
 
 test("an intentional walk is free and forces a run with the bases full", () => {
@@ -1195,6 +1155,23 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
   assert.ok(notes[0].includes(`INFIELD ${infield >= 0 ? "+" : ""}${infield}`), "infield total matches the lineup");
 });
 
+test("the menu right-aligns when the opponent is hitting", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  // Home game, top 1: the NPC bats, the player pitches — defense menu.
+  const homeGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "align-home", playerIsAway: false });
+  const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle: homeGame, mode: "menu", menuIndex: 0, lines: [] } };
+  assert.ok(battleScreen.render(app).includes("gq-menu-right"), "the defense menu reads from the other dugout");
+  app.screen.mode = "pen";
+  app.screen.penIndex = 0;
+  assert.ok(battleScreen.render(app).includes("gq-menu-right"), "the bullpen list too");
+  // Road game, top 1: the player bats — the offense menu stays left.
+  const roadGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "align-road" });
+  const roadApp = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle: roadGame, mode: "menu", menuIndex: 0, lines: [] } };
+  assert.ok(!battleScreen.render(roadApp).includes("gq-menu-right"), "the batting menu stays left-aligned");
+});
+
 test("series games can put the player at home, batting second", () => {
   const { player, npc } = hookTeams();
   const trainer = trainerById("gym-garrick");
@@ -1323,8 +1300,6 @@ test("grand slams get called and celebrated", async () => {
   assert.equal((advance.match(/rolled/g) ?? []).length, 1, "unthrown runners stay quiet");
   const twinKilling = describeEvent({ ...base, result: "GB", outsAfter: 2, playDetails: { doublePlayAttempt: { batterOut: true, roll: 12 } } }, "away").join(" ");
   assert.ok(twinKilling.includes("Double play! Two gone. (rolled 12)"), "the pivot reports its roll");
-  const bunt = describeEvent({ ...base, type: "bunt", playDetails: { clean: false, roll: 16, leadOut: { runner: "Lead Man", at: "2B" } } }, "away").join(" ");
-  assert.ok(bunt.includes("(rolled 16)"), "the bunt defense reports its roll");
   const bat = { id: "h1", name: "Al Smith", pa: 4, ab: 4, h: 2, d: 0, t: 0, hr: 1, r: 1, bb: 0, so: 0, sb: 0, cs: 0, rbi: 4 };
   const feats = gameFeats({
     boxScore: { away: { hitters: [bat], pitchers: [{ id: "p", name: "Arm", bf: 30, outs: 27, h: 5, bb: 2, so: 6, hr: 0, r: 2 }] }, home: { hitters: [], pitchers: [] } },
@@ -1387,6 +1362,14 @@ test("the game log lines carry player-perspective WPA", async () => {
   assert.ok(atHome.includes("1-3"), "the score flips to read from the home player's side");
   const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
   assert.ok(pen.includes("PEN"), "pitching changes log without WPA");
+
+  // Rows carry the base-out situation the play happened in: "1o 1-3" reads
+  // one out, runners on first and third.
+  const situated = gameLogLine({ ...swing, outsBefore: 1, basesBefore: ["A Runner", null, "C Runner"] }, "away");
+  assert.ok(situated.includes("1o 1-3"), "outs and bases show before the actor");
+  const empty = gameLogLine({ ...swing, outsBefore: 0, basesBefore: [null, null, null] }, "away");
+  assert.ok(empty.includes("0o ---"), "empty bases read ---");
+  assert.ok(!gameLogLine(swing, "away").includes("o "), "rows without a snapshot stay clean");
 });
 
 // ---- Real-card leagues -------------------------------------------------------

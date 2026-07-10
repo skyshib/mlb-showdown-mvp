@@ -112,6 +112,8 @@ h1.gq-logo {
 
 .gq-menu { list-style: none; }
 .gq-menu li { padding: 0.35cqw 0.8cqw; display: flex; gap: 0.8cqw; align-items: baseline; cursor: pointer; }
+/* Defense menus (the opponent is hitting) read from the other dugout. */
+.gq-menu-right li { justify-content: flex-end; text-align: right; }
 .gq-menu li.gq-cursor { background: var(--gb-darkest); color: var(--gb-lightest); }
 .gq-menu li.gq-cursor .gq-dim { color: var(--gb-light); }
 .gq-menu li.gq-disabled { color: var(--gb-dark); opacity: 0.65; }

@@ -140,9 +140,10 @@ export function actSteal(battle, fromIndex) {
   return event ? [pushEvent(battle, event)] : [];
 }
 
-// Player action while batting: lay down a sacrifice bunt.
+// Player action while batting: lay down a sacrifice bunt (traditional
+// Showdown — it always gets down, so no dice ride on it).
 export function actBunt(battle) {
-  const event = attemptBunt(battle.state, battle.rng);
+  const event = attemptBunt(battle.state);
   return event ? [pushEvent(battle, event)] : [];
 }
 

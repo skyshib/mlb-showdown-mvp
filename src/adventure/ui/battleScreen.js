@@ -186,7 +186,7 @@ function battleMenuItems(app, phase) {
     const items = [{ label: "SWING AWAY", run: (a) => resolveWithDrama(a, () => actSwing(a.screen.battle)) }];
     if (phase.canBunt) {
       items.push({
-        html: `SAC BUNT <span class="gq-dim">${Math.round(phase.buntChance * 100)}% CLEAN</span>`,
+        label: "SAC BUNT",
         run: (a) => afterAction(a, actBunt(a.screen.battle))
       });
     }
@@ -686,17 +686,20 @@ function moundLine(mound) {
   return `<span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${mound.pitcher.control}${tired} &middot; ${mound.battersFaced}/${mound.tiredAt} BF</span>`;
 }
 
+// Defense menus (the NPC is hitting) read from the other dugout: right-
+// aligned, mirroring the matchup panel's YOUR ARM side.
 function renderBattleMenu(app, phase) {
   if (phase.type === "over") return "";
   if (app.screen.mode === "pen") {
     const options = (phase.bullpen ?? []).map(({ pitcher }) => ({
       html: `${escapeHtml(pitcher.role)} ${escapeHtml(shortName(pitcher.name))} <span class="gq-dim">CTRL${pitcher.control} IP${pitcher.ip}</span>`
     }));
-    return menuHtml([...options, { label: "NEVER MIND" }], app.screen.penIndex ?? 0);
+    return menuHtml([...options, { label: "NEVER MIND" }], app.screen.penIndex ?? 0, { className: "gq-menu-right" });
   }
   return menuHtml(
     battleMenuItems(app, phase).map((item) => ({ label: item.label, html: item.html, disabled: item.disabled })),
-    app.screen.menuIndex ?? 0
+    app.screen.menuIndex ?? 0,
+    { className: phase.type === "player-pitching" ? "gq-menu-right" : "" }
   );
 }
 

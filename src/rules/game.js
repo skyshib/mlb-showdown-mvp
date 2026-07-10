@@ -308,27 +308,16 @@ export function canBunt(state) {
   return state.outs < 2 && Boolean(first || second) && !third && !state.pendingAdvance;
 }
 
-// The chance the current batter gets a bunt down cleanly, for display before
-// the player commits. Mirrors the roll in attemptBunt.
+// Traditional Showdown: the sacrifice always gets down, so the only call is
+// whether the out is worth the bases. Shown as 1 wherever a chance is asked.
 export function buntSuccessChance(state) {
-  if (!canBunt(state)) return 0;
-  const battingSide = state.half === "top" ? "away" : "home";
-  const pitchingSide = battingSide === "away" ? "home" : "away";
-  const battingTeam = state[battingSide];
-  const batter = battingTeam.lineup[state.lineupIndex[battingSide] % battingTeam.lineup.length];
-  const target = 16 + Math.floor(speedTarget(batter) / 4);
-  const penalty = Math.floor(totalInfieldFielding(state[pitchingSide]) / 4);
-  return Math.max(0, Math.min(20, target - penalty)) / 20;
+  return canBunt(state) ? 1 : 0;
 }
 
-// A sacrifice bunt as a full plate appearance. Clean bunt: batter out, every
-// runner moves up (never from third — canBunt disallows the squeeze).
-// Failed bunts split down the middle: half are fouled into a strikeout
-// (runners hold), half the defense takes the lead FORCE out — never a tag
-// play, so with a runner on second only (no force ahead of him) the sure
-// out is the batter at first and the runner stays put. Auto play never
-// bunts.
-export function attemptBunt(state, rng) {
+// A sacrifice bunt as a full plate appearance, traditional MLB Showdown
+// rules: no roll — the batter is out and every runner moves up, always
+// (never from third: canBunt disallows the squeeze). Auto play never bunts.
+export function attemptBunt(state) {
   if (!canBunt(state)) return null;
   const battingSide = state.half === "top" ? "away" : "home";
   const pitchingSide = battingSide === "away" ? "home" : "away";
@@ -342,64 +331,25 @@ export function attemptBunt(state, rng) {
   const scoreBefore = { ...state.score };
   const wpBefore = winProbabilityHome(state);
 
-  const roll = rng.d20();
-  const fielding = totalInfieldFielding(state[pitchingSide]);
-  const total = roll + Math.floor(fielding / 4);
-  const target = 16 + Math.floor(speedTarget(batter) / 4);
-  const clean = total <= target;
   // canBunt guarantees third is empty — no squeeze plays.
   const [first, second] = state.bases;
   const runs = 0;
-  let leadOut = null;
-  let strikeout = false;
-  let batterOut = false;
-  let result;
 
   state.outs += 1;
-  if (clean) {
-    state.bases = [null, first ?? null, second ?? null];
-    result = "SAC";
-  } else if (rng.d20() <= 10) {
-    // Fouled into the strikeout: runners hold where they stand.
-    strikeout = true;
-    result = "SO";
-  } else if (first) {
-    // The defense takes the lead FORCE: with first and second occupied both
-    // runners are forced, so the lead man is out at third and everyone else
-    // moves up; with first only, he's forced at second.
-    const lead = second ?? first;
-    leadOut = { runner: lead.name, at: second ? "3B" : "2B" };
-    state.bases = [runnerFor(batter, pitcher), second ? first : null, null];
-    result = "FC";
-  } else {
-    // Runner on second only: no force ahead of him, and tags are off the
-    // table — the sure out is the batter at first, the runner stays put.
-    batterOut = true;
-    result = "GB";
-  }
+  state.bases = [null, first ?? null, second ?? null];
+  const result = "SAC";
 
   state.lastPlayDetails = {
     kind: "bunt",
     outsBefore,
-    clean,
-    strikeout,
-    batterOut,
-    roll,
-    fielding,
-    total,
-    target,
-    leadOut
+    clean: true,
+    leadOut: null
   };
 
   const hitterLine = ensureHitterLine(state, batter);
   const pitcherLine = ensurePitcherLine(state, pitcher);
   hitterLine.pa += 1;
   hitterLine.rbi += runs;
-  if (!clean) hitterLine.ab += 1;
-  if (strikeout) {
-    hitterLine.so += 1;
-    pitcherLine.so += 1;
-  }
   pitcherLine.bf += 1;
   const outsOnPlay = state.outs - outsBefore;
   pitcherLine.outs += outsOnPlay;
@@ -433,7 +383,7 @@ export function attemptBunt(state, rng) {
     controlTotal: null,
     onBase: batter.onBase,
     chartOwner: "bunt",
-    resultRoll: roll,
+    resultRoll: null,
     result,
     outsBefore,
     outsAfter: state.outs,

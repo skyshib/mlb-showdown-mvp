@@ -45,8 +45,17 @@ export function wpaHtml(wpa) {
 
 // ---- Game log ------------------------------------------------------------------
 
-// One play-by-play row: inning, actor, result, score when it changed, and the
-// play's WPA from the PLAYER'S side (a big opponent rally reads negative).
+// The scorebook situation a play happened in: outs and occupied bases
+// BEFORE the pitch, compact ("0o 1-3" = nobody out, first and third).
+function situationTag(event) {
+  if (!Array.isArray(event.basesBefore) || typeof event.outsBefore !== "number") return "";
+  const bases = event.basesBefore.map((runner, at) => (runner ? String(at + 1) : "-")).join("");
+  return `<span class="gq-dim">${event.outsBefore}o ${bases}</span> `;
+}
+
+// One play-by-play row: inning, the base-out situation, actor, result, score
+// when it changed, and the play's WPA from the PLAYER'S side (a big opponent
+// rally reads negative).
 export function gameLogLine(event, playerSide) {
   const inning = `${event.half === "top" ? "T" : "B"}${event.inning}`;
   if (event.type === "pitching-change") {
@@ -62,7 +71,7 @@ export function gameLogLine(event, playerSide) {
   const npcSide = playerSide === "home" ? "away" : "home";
   const scoreText = event.scoreAfter ? `${event.scoreAfter[playerSide]}-${event.scoreAfter[npcSide]}` : "";
   const score = scoreText ? (event.runs > 0 ? ` <b>${scoreText}</b>` : ` <span class="gq-dim">${scoreText}</span>`) : "";
-  return `${inning} ${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
+  return `${inning} ${situationTag(event)}${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
 }
 
 // ---- Stars of the game -------------------------------------------------------

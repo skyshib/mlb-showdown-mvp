@@ -147,16 +147,7 @@ export function describeEvent(event, playerSide = "away") {
   if (event.type === "bunt") {
     const details = event.playDetails;
     const lines = [];
-    if (details?.clean) {
-      lines.push(`${playName(event.batter)} lays it down. Textbook sacrifice.${rolled(details)}`);
-    } else if (details?.strikeout) {
-      lines.push(`${playName(event.batter)} can't get it down — bunts it foul, STRIKES OUT!${rolled(details)} The runners hold.`);
-    } else if (details?.batterOut) {
-      lines.push(`${playName(event.batter)} bunts it right to the defense...${rolled(details)} They take the sure out at first. The runners hold.`);
-    } else {
-      lines.push(`${playName(event.batter)} bunts it right to the defense...${rolled(details)}`);
-      if (details?.leadOut) lines.push(`${playName(details.leadOut.runner)} is FORCED at ${details.leadOut.at}!`);
-    }
+    lines.push(`${playName(event.batter)} lays it down. Textbook sacrifice.`);
     return lines;
   }
   if (event.type === "advance") {
