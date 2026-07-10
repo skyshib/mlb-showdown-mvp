@@ -61,20 +61,25 @@ export function cardPanelHtml(card, { count = null } = {}) {
   // ShowdownCards.com), full color on purpose; everyone else keeps the
   // headshot slot.
   const scan = CARD_IMAGE_FILES[card.id];
-  const media = scan
-    ? `<img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">`
-    : card.real
-      ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
-      : "";
-  return `<div class="gq-card gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">
-    ${media}
+  const headshot = !scan && card.real
+    ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
+    : "";
+  const body = `${headshot}
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
     <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
     <div class="gq-card-chart">${ranges
       .map(([result, range]) => `<span class="gq-chart-cell"><b>${escapeHtml(result)}</b> ${escapeHtml(range)}</span>`)
-      .join("")}</div>
-  </div>`;
+      .join("")}</div>`;
+  // Scanned cards lay out as text | card image, so the panel grows to fit
+  // the scan instead of the scan spilling out of the frame.
+  if (scan) {
+    return `<div class="gq-card gq-card-has-scan gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">
+      <div class="gq-card-body">${body}</div>
+      <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
+    </div>`;
+  }
+  return `<div class="gq-card gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">${body}</div>`;
 }
 
 // Classic card names carry their card year ("Mike Caruso '02"). Cramped or
