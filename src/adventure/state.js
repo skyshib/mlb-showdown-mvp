@@ -1,14 +1,16 @@
-import { cardById, dualPartnerId } from "./packs.js";
+import { cardById, dualPartnerId, poolCeiling, LADDER_REFERENCE } from "./packs.js";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
 // at the old shared universe, so they don't migrate.
 export const SAVE_VERSION = 2;
 
-// The roster budget in BUDGET mode is flat: every manager fields 3500
-// points, and getting ahead means finding bargains, not raising the cap.
-// UNCAPPED saves have no limit at all — and face far richer bosses.
-const POINT_CAP = 3500;
+// The roster budget in BUDGET mode matches the first scout's rung (Jojo's
+// 2500, see region.js TRAINERS) and scales with the pool like the whole NPC
+// ladder does — the opener is always an even-budget fight, and getting
+// ahead means finding bargains, not raising the cap. UNCAPPED saves have no
+// limit at all — and face far richer bosses.
+const CAP_RUNG = 2500;
 
 export const LOSS_FEE = 50;
 
@@ -38,7 +40,8 @@ export function createSave({ name, saveSeed, universe = "fictional", mode = "bud
 
 // Older saves predate modes and read as "budget".
 export function pointCap(save) {
-  return save?.mode === "uncapped" ? Infinity : POINT_CAP;
+  if (save?.mode === "uncapped") return Infinity;
+  return Math.round((CAP_RUNG * poolCeiling() / LADDER_REFERENCE) / 50) * 50;
 }
 
 export function deriveSeed(save, ...parts) {

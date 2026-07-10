@@ -1,11 +1,12 @@
 import { timesBeaten } from "./state.js";
-import { poolCeiling } from "./packs.js";
+import { poolCeiling, LADDER_REFERENCE } from "./packs.js";
 
 // The Cascade League: one town so far, with routes climbing past it. Trainers
 // are pure data — teams build deterministically from teamSeed + pointBudget.
 // Budgets ladder from 2500 up through the 6500-point summit and into the
 // postseason (division series, championship series, world series at 7500):
-// late bosses out-spend the player's flat 3500, so winning means bargains.
+// the player's cap is pinned to the FIRST rung (Jojo's), so every boss
+// after the opener out-spends the player and winning means bargains.
 export const REGION = {
   name: "CASCADE LEAGUE",
   towns: [
@@ -393,20 +394,23 @@ export function isTrainerAvailable(save, trainer) {
   return trainer.repeatable || timesBeaten(save, trainer.id) === 0;
 }
 
-// The NPC budget a save actually faces. Budget saves see the printed ladder
-// (2500 -> 8800). Uncapped saves swing much harder: budgets grow on a
-// power-1.5 curve anchored at the first scout's 2500 — but capped by the
-// POOL, at the pool's best-13 ceiling scaled to the trainer's rung. Only the
-// World Series shops for the best thirteen cards money can print; without
-// the cap, small universes (a franchise pool tops out near 9k) hit their
-// ceiling by mid-ladder and every boss after fields the same maxed team.
+// The NPC budget a save actually faces. The printed ladder (2500 -> 8800)
+// was tuned against the fictional league, whose best legal 13-card roster
+// prices near LADDER_REFERENCE — but pools print very different ceilings
+// (a thin expansion franchise ~4k, the all-time MLB pool ~8.8k), so the
+// ladder keeps its SHAPE and rescales to the pool: the World Series boss
+// always shops the same fraction of what this pool can actually field.
+// Uncapped saves still swing harder: budgets grow on a power-1.5 curve
+// anchored at the first scout's rung, capped at the pool ceiling scaled to
+// the trainer's rung so mid-ladder bosses don't max out small universes.
 export function npcBudget(save, trainer) {
-  if (save?.mode !== "uncapped") return trainer.pointBudget;
-  const anchor = 2500;
-  const curve = Math.round((anchor * Math.pow(trainer.pointBudget / anchor, 1.5)) / 50) * 50;
+  const scale = poolCeiling() / LADDER_REFERENCE;
+  const printed = Math.round((trainer.pointBudget * scale) / 50) * 50;
+  if (save?.mode !== "uncapped") return printed;
+  const curve = Math.round((2500 * scale * Math.pow(trainer.pointBudget / 2500, 1.5)) / 50) * 50;
   const maxPrinted = Math.max(...TRAINERS.map((t) => t.pointBudget));
   const rung = Math.round((poolCeiling() * trainer.pointBudget / maxPrinted) / 50) * 50;
-  return Math.max(trainer.pointBudget, Math.min(curve, rung));
+  return Math.max(printed, Math.min(curve, rung));
 }
 
 // Repeatable rewards shrink on repeat wins so farming stays a floor, not an

@@ -308,14 +308,15 @@ export const leagueSelectScreen = {
   }
 };
 
-// How hard should money matter? Budget is the classic game: a flat 3500-point
-// roster for everyone, where bargains win pennants. Uncapped drops the limit
-// entirely — and the bosses scale up much harder to match.
+// How hard should money matter? Budget is the classic game: your roster
+// budget matches the first scout's rung, scaled to the pool, and bargains
+// win pennants. Uncapped drops the limit entirely — and the bosses scale up
+// much harder to match.
 const MODES = [
   {
     key: "budget",
     label: "BUDGET LEAGUE",
-    blurb: "Every manager fields 3500 points, all season. Sticker prices lie — sharp scouting beats deep pockets."
+    blurb: "You field the first scout's budget, sized to this league's pool. Sticker prices lie — sharp scouting beats deep pockets."
   },
   {
     key: "uncapped",

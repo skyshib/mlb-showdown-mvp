@@ -1,4 +1,4 @@
-import { normalizeResult, formatRange, positionsLabel, fieldingLabel } from "../../rules/cards.js";
+import { normalizeResult, formatRange, positionsLabel, positionFieldingLabel } from "../../rules/cards.js";
 import { RARITIES, dualPartnerCard } from "../packs.js";
 import { CARD_IMAGE_FILES } from "../../data/cardImages.js";
 import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS } from "../../data/mlbTeams.js";
@@ -66,46 +66,71 @@ function cardTeams(card) {
     : codes;
 }
 
-// Full card panel: the binder/pack view. Chart rows collapse to the compact
-// range map used by the main app. Real-player cards (classic and MLB
-// leagues) get a photo slot that main.js hydrates from Wikipedia, plus their
-// set tag / years-active line.
-function cardHeaderLine(card) {
+// Full card panel: the binder/pack view, laid out like the main app's card —
+// a player strip with the big On-Base/Control square, name over one compact
+// meta line ("896 PT · SPD 10 · 2B+3"), then the chart as a range-map grid.
+// Real-player cards (classic and MLB leagues) get a photo band up top that
+// main.js hydrates from Wikipedia, plus their set tag / years-active line.
+function stripMetaLine(card) {
   return card.kind === "pitcher"
-    ? `${card.role} &middot; CTRL ${card.control} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
-    : `${escapeHtml(positionsLabel(card))} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${escapeHtml(fieldingLabel(card))}`;
+    ? `${card.points} PT &middot; ${escapeHtml(card.role)} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
+    : `${card.points} PT &middot; SPD ${card.speed} &middot; ${escapeHtml(positionFieldingLabel(card))}`;
 }
 
-function chartCells(card) {
-  return chartRangeRows(card)
-    .map(([result, range]) => `<span class="gq-chart-cell"><b>${escapeHtml(result)}</b> ${escapeHtml(range)}</span>`)
+function cardStrip(card, { count = null, tag = "" } = {}) {
+  return `<div class="gq-card-strip">
+    <span class="gq-card-square">${card.kind === "pitcher" ? card.control : card.onBase}</span>
+    <span class="gq-card-strip-text">
+      <span class="gq-card-name">${escapeHtml(card.name.toUpperCase())}${count !== null ? ` <span class="gq-dim">x${count}</span>` : ""}</span>
+      <span class="gq-card-meta">${stripMetaLine(card)}</span>
+    </span>
+    ${tag}
+  </div>`;
+}
+
+// Adjacent same-result rolls merge into one column (5-8 BB), die range on
+// top, result underneath — the printed card's chart strip.
+function chartGrid(card) {
+  const cells = chartRangeCells(card)
+    .map((entry) => `<span class="gq-chart-cell gq-chart-${resultTone(entry.result)}">
+      <b class="gq-chart-range">${escapeHtml(formatRange(entry))}</b>
+      <span class="gq-chart-result">${escapeHtml(entry.result)}</span>
+    </span>`)
     .join("");
+  return `<div class="gq-chart" style="--gq-chart-cols:${chartRangeCells(card).length}">${cells}</div>`;
+}
+
+function resultTone(result) {
+  if (result === "HR") return "homer";
+  if (result === "BB") return "walk";
+  if (["1B", "2B", "3B"].includes(result)) return "hit";
+  return "out";
 }
 
 export function cardPanelHtml(card, { count = null } = {}) {
-  const header = cardHeaderLine(card);
   const foil = card.foil || card.rarity === "legend";
   // Classic cards with a real scan show the actual printed card (courtesy of
   // ShowdownCards.com), full color on purpose; everyone else keeps the
-  // headshot slot.
+  // photo band.
   const scan = CARD_IMAGE_FILES[card.id];
-  const headshot = !scan && card.real
-    ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
+  const photo = !scan && card.real
+    ? `<div class="gq-card-photo"><div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div></div>`
     : "";
   const teams = cardTeams(card);
-  // A simultaneous two-way pair prints as one card: the other half's line
+  const setLine = [card.setTag ? escapeHtml(card.setTag) : "", ...(teams ?? []).map(escapeHtml)]
+    .filter(Boolean)
+    .join(" &middot; ");
+  // A simultaneous two-way pair prints as one card: the other half's strip
   // and chart stack under the primary's. Both roster separately.
   const partner = dualPartnerCard(card.id);
   const partnerBlock = partner
-    ? `<div class="gq-card-meta"><b>TWO-WAY</b> &middot; ${cardHeaderLine(partner)} <span class="gq-dim">${partner.points} PT</span></div>
-    <div class="gq-card-chart">${chartCells(partner)}</div>`
+    ? `${cardStrip(partner, { tag: `<span class="gq-card-meta gq-dim">TWO-WAY</span>` })}
+    ${chartGrid(partner)}`
     : "";
-  const body = `${headshot}
-    <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
-    <div class="gq-card-meta">${header}</div>
-    <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>
-    ${teams ? `<div class="gq-card-teams">${teams.map(escapeHtml).join(" &middot; ")}</div>` : ""}
-    <div class="gq-card-chart">${chartCells(card)}</div>
+  const body = `${photo}
+    ${cardStrip(card, { count, tag: rarityTag(card) })}
+    ${setLine ? `<div class="gq-card-teams">${setLine}</div>` : ""}
+    ${chartGrid(card)}
     ${partnerBlock}`;
   // Scanned cards lay out as text | card image, so the panel grows to fit
   // the scan instead of the scan spilling out of the frame.
@@ -140,15 +165,16 @@ export function eraYear(card) {
   return 2000;
 }
 
-function chartRangeRows(card) {
-  const ranges = new Map();
-  for (const entry of card.chart) {
-    const result = normalizeResult(entry.result);
-    const list = ranges.get(result) ?? [];
-    list.push(formatRange(entry));
-    ranges.set(result, list);
-  }
-  return [...ranges].map(([result, list]) => [result, list.join(",")]);
+function chartRangeCells(card) {
+  return [...card.chart]
+    .map((entry) => ({ ...entry, result: normalizeResult(entry.result) }))
+    .sort((a, b) => a.from - b.from)
+    .reduce((merged, entry) => {
+      const last = merged.at(-1);
+      if (last && last.result === entry.result && last.to + 1 === entry.from) last.to = entry.to;
+      else merged.push(entry);
+      return merged;
+    }, []);
 }
 
 // ---- Battle narration ------------------------------------------------------

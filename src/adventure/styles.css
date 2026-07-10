@@ -146,9 +146,74 @@ h1.gq-logo {
 
 .gq-card-name { font-weight: 700; font-size: 3.4cqw; }
 .gq-card-meta { font-size: 2.9cqw; margin-top: 0.3cqw; }
-.gq-card-teams { font-size: 2.4cqw; margin-top: 0.4cqw; color: var(--gb-dark); }
-.gq-card-chart { display: flex; flex-wrap: wrap; gap: 0.4cqw 1.6cqw; margin-top: 1cqw; font-size: 2.6cqw; border-top: 0.3cqw solid var(--gb-dark); padding-top: 0.8cqw; }
-.gq-chart-cell b { display: inline-block; min-width: 3.4cqw; }
+.gq-card-teams { font-size: 2.4cqw; margin-top: 0.5cqw; color: var(--gb-dark); }
+
+/* Player strip: the main-app card's layout — big On-Base/Control square,
+   name over one compact meta line, rarity tag on the right. */
+.gq-card-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 1.3cqw;
+  align-items: center;
+}
+/* The two-way partner's strip stacks under the primary's chart. */
+.gq-chart + .gq-card-strip { margin-top: 1.6cqw; }
+.gq-card-square {
+  min-width: 7cqw;
+  height: 7cqw;
+  display: grid;
+  place-items: center;
+  padding: 0 0.6cqw;
+  background: var(--gb-darkest);
+  color: var(--gb-lightest);
+  font-size: 4.4cqw;
+  font-weight: 700;
+}
+.gq-card-strip-text { min-width: 0; }
+.gq-card-strip .gq-card-name,
+.gq-card-strip .gq-card-meta {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Chart: one column per merged die range, range on top, result under it. */
+.gq-chart {
+  display: grid;
+  grid-template-columns: repeat(var(--gq-chart-cols), minmax(0, 1fr));
+  margin-top: 1.2cqw;
+  border: 0.4cqw solid var(--gb-darkest);
+  text-align: center;
+}
+.gq-chart-cell {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto auto;
+  border-right: 0.3cqw solid var(--gb-darkest);
+}
+.gq-chart-cell:last-child { border-right: 0; }
+.gq-chart-range {
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--gb-lightest);
+  color: var(--gb-darkest);
+  font-size: 2.3cqw;
+  line-height: 1.6;
+}
+.gq-chart-result {
+  font-size: 2.6cqw;
+  font-weight: 700;
+  line-height: 1.55;
+}
+.gq-chart-out .gq-chart-result { background: var(--gb-darkest); color: var(--gb-lightest); }
+.gq-chart-walk .gq-chart-result { background: var(--gb-dark); color: var(--gb-lightest); }
+.gq-chart-hit .gq-chart-result { background: var(--gb-light); color: var(--gb-darkest); }
+/* Four shades of green don't leave a fifth for homers: stripes instead. */
+.gq-chart-homer .gq-chart-result {
+  background: repeating-linear-gradient(45deg, var(--gb-darkest) 0 1cqw, var(--gb-dark) 1cqw 2cqw);
+  color: var(--gb-lightest);
+}
 
 .gq-rarity { font-weight: 700; padding: 0 0.7cqw; border: 0.3cqw solid var(--gb-darkest); font-size: 2.5cqw; }
 .gq-rarity-uncommon { background: var(--gb-light); }
@@ -210,19 +275,27 @@ h1.gq-logo {
 
 /* ---- Real-player headshots (Wikipedia thumbnails) ---- */
 
-/* A narrow portrait box matching the source photos' aspect ratio, so faces
-   stay in frame; the DMG green wash keeps them on-palette. */
-.gq-card-headshot {
-  float: right;
-  position: relative;
-  width: 13cqw;
-  aspect-ratio: 3 / 4;
-  margin: 0 0 1cqw 1.2cqw;
+/* A full-bleed band across the top of the card (the main-app card's photo
+   area), portrait centered on the light stage. The portrait box keeps the
+   source photos' aspect ratio so faces stay in frame; the DMG green wash
+   keeps them on-palette. */
+.gq-card-photo {
+  height: 16cqw;
+  /* Bleed through the card's own padding to its border. */
+  margin: -1.2cqw -1.6cqw 1.2cqw;
+  display: flex;
+  justify-content: center;
   overflow: hidden;
-  border: 0.5cqw solid var(--gb-darkest);
   background: var(--gb-light);
+  border-bottom: 0.5cqw solid var(--gb-darkest);
 }
-.gq-card-headshot:empty { display: none; }
+.gq-card-headshot {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+}
+.gq-card-headshot:empty { visibility: hidden; }
 .gq-card-headshot img {
   width: 100%;
   height: 100%;

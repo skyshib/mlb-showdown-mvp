@@ -221,11 +221,14 @@ test("the starter pack is a legal 13-card roster: two rares, eleven commons, und
   );
 });
 
-test("the budget-mode point cap is always 3500", () => {
+test("the budget-mode point cap matches the first scout's rung", async () => {
+  const { npcBudget } = await import("../src/adventure/region.js");
   const save = testSave();
-  assert.equal(pointCap(save), 3500);
+  // The opener is an even-budget fight in every pool: the player's cap IS
+  // Jojo's pool-scaled budget.
+  assert.equal(pointCap(save), npcBudget(save, trainerById("scout-jojo")));
   save.player.badges = ["ironwood", "galehook", "cascade", "pennant", "trophy"];
-  assert.equal(pointCap(save), 3500, "badges do not move the cap");
+  assert.equal(pointCap(save), npcBudget(save, trainerById("scout-jojo")), "badges do not move the cap");
 });
 
 test("uncapped mode drops the player's cap and swells boss budgets", async () => {
@@ -236,20 +239,27 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
 
   const jojo = trainerById("scout-jojo");
   const worldSeries = trainerById("post-worldseries");
-  assert.equal(npcBudget(testSave(), worldSeries), worldSeries.pointBudget, "budget mode reads the printed ladder");
-  assert.equal(npcBudget(save, jojo), jojo.pointBudget, "the first scout stays winnable");
+  // Budget mode reads the printed ladder RESCALED to this pool's best-13
+  // ceiling: same shape, sized to what the pool can actually field.
+  const { poolCeiling, LADDER_REFERENCE } = await import("../src/adventure/packs.js");
+  const scale = poolCeiling() / LADDER_REFERENCE;
+  assert.equal(
+    npcBudget(testSave(), worldSeries),
+    Math.round((worldSeries.pointBudget * scale) / 50) * 50,
+    "budget mode reads the pool-scaled ladder"
+  );
+  assert.ok(Math.abs(npcBudget(save, jojo) - jojo.pointBudget * scale) <= 50, "the first scout stays winnable");
   // The summit swells to the POOL's best-13 ceiling (within rounding), not an
   // absolute figure: small universes escalate all the way up instead of every
   // late boss fielding the same maxed team from mid-ladder on.
-  const { poolCeiling } = await import("../src/adventure/packs.js");
   const scaled = npcBudget(save, worldSeries);
-  assert.ok(scaled > worldSeries.pointBudget, `the summit swells (${worldSeries.pointBudget} -> ${scaled})`);
+  assert.ok(scaled > npcBudget(testSave(), worldSeries), `the summit swells past its budget-mode self (${scaled})`);
   assert.ok(Math.abs(scaled - poolCeiling()) <= 50, `and lands at the pool ceiling (${scaled} vs ${poolCeiling()})`);
   // The ladder still climbs in the same order, just steeper.
   const ladder = [...TRAINERS].sort((a, b) => a.pointBudget - b.pointBudget);
   for (let i = 1; i < ladder.length; i += 1) {
     assert.ok(npcBudget(save, ladder[i]) >= npcBudget(save, ladder[i - 1]), "scaling keeps the progression monotone");
-    assert.ok(npcBudget(save, ladder[i]) >= ladder[i].pointBudget, "no boss gets cheaper");
+    assert.ok(npcBudget(save, ladder[i]) >= npcBudget(testSave(), ladder[i]), "no boss dips under his budget-mode self");
   }
   // Teams still build legal at the scaled budget — and actually spend it.
   const rich = buildNpcTeam(worldSeries, save);
@@ -395,11 +405,13 @@ test("pack reveals can rewind with the left arrow without re-adding cards", asyn
 
 // ---- NPC teams -------------------------------------------------------------
 
-test("every trainer builds a legal team within budget, deterministically", () => {
+test("every trainer builds a legal team within budget, deterministically", async () => {
+  const { npcBudget } = await import("../src/adventure/region.js");
   for (const trainer of TRAINERS) {
+    const budget = npcBudget(null, trainer); // the pool-scaled ladder rung
     const npc = buildNpcTeam(trainer);
     assert.equal(validateRoster(npc).length, 0, `${trainer.id} legal`);
-    assert.ok(npc.points <= trainer.pointBudget, `${trainer.id} within budget (${npc.points}/${trainer.pointBudget})`);
+    assert.ok(npc.points <= budget, `${trainer.id} within budget (${npc.points}/${budget})`);
     const again = buildNpcTeam(trainer);
     assert.deepEqual(npc.roster.map((card) => card.id), again.roster.map((card) => card.id));
   }
@@ -1498,6 +1510,32 @@ test("every league builds a working universe with a legal starter pack", async (
     const mariners = adventurePool();
     const junior = mariners.find((card) => card.name === "Ken Griffey");
     assert.equal(junior?.setTag, "1989-2010", "franchise cards span the whole career with the club, decades be damned");
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
+test("MLB pools price on the authentic Showdown scale", async () => {
+  const { authenticPoints } = await import("../src/rules/pricing.js");
+  const { PRICE_MODEL } = await import("../src/data/priceModel.js");
+  const { decodeCardRows } = await import("../src/data/realCards.js");
+  const { CLASSIC_CARD_ROWS } = await import("../src/data/classicCards.js");
+  try {
+    // The model reproduces the real printed points it was fit against.
+    const classics = decodeCardRows(CLASSIC_CARD_ROWS);
+    const mae = classics.reduce((sum, card) => sum + Math.abs(authenticPoints(card, PRICE_MODEL) - card.points), 0) / classics.length;
+    assert.ok(mae < 50, `classic-set MAE stays tight (${mae.toFixed(1)})`);
+    const wakefield = classics.find((card) => card.name === "Tim Wakefield '03");
+    assert.ok(Math.abs(authenticPoints(wakefield, PRICE_MODEL) - wakefield.points) < 100,
+      "a C5 IP5 starter prices like the real Wakefield printing");
+
+    // Same mechanics cost the same in any pool: no more 70-point Ohtani arms
+    // in deep pools. Honest stickers (no noise) to compare scales directly.
+    setUniverseSeed("price-scale", "mlb-history", { priceNoise: false });
+    const arm = cardById("mlb-all-ohtansh01");
+    assert.ok(arm.truePoints >= 200, `a C5 IP5 modern arm prices on the real scale, not the pool-rank floor (${arm.truePoints})`);
+    const top = Math.max(...adventurePool().map((card) => card.points));
+    assert.ok(top >= 700 && top <= 1000, `all-time legends price like real legend printings (${top})`);
   } finally {
     setUniverseSeed("test-seed", "fictional");
   }

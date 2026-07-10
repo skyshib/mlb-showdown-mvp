@@ -200,8 +200,11 @@ Every new save **picks a league** (`UNIVERSES` in `packs.js`):
   its all-time roster, players rated on their years with the club) — cards
   derived from real rates in the Baseball Databank (Chadwick Baseball
   Bureau / Sean Lahman, **CC BY-SA 3.0**), mapped into the generator's
-  parameter space, then priced through the usual curve + seeded noise so the
-  bargain economy holds. Rates are **peak-weighted with small-sample
+  parameter space, then priced on the **authentic Showdown scale**: a model
+  fit against the 3,544 classic printings prices each card's mechanics at
+  what the real 2000-2005 sets charged (a Control 5 starter costs Wakefield
+  money in every pool), with the usual seeded price noise on top so the
+  bargain economy holds. Rarity still ranks within the pool. Rates are **peak-weighted with small-sample
   regression**: seasons rank best-first on a geometric ladder (best full
   season 50%, next 25%, ...) and unclaimed weight fills with league-average
   rates — so a one-season stint reads "good," not "franchise legend," and

@@ -40,9 +40,13 @@ export function decodeCardRows(tuples) {
     if (isPitcher) {
       return { ...shared, kind: "pitcher", role: posRole, throws: hand, control: obc, ip: spdIp };
     }
-    const positions = Array.isArray(posRole)
+    const listed = Array.isArray(posRole)
       ? posRole.map((pos, index) => ({ pos, fielding: Number(Array.isArray(fielding) ? fielding[index] : fielding) || 0 }))
       : [{ pos: posRole, fielding: Number(fielding) || 0 }];
+    // A DH listing next to a real position is noise — anyone can DH — so the
+    // card prints only where he fields. Pure DHs keep the label.
+    const fielders = listed.filter((entry) => entry.pos !== "DH");
+    const positions = fielders.length ? fielders : listed;
     return {
       ...shared,
       kind: "hitter",

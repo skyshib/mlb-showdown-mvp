@@ -4,6 +4,8 @@ import { decodeCardRows } from "../data/realCards.js";
 import { CLASSIC_CARD_ROWS } from "../data/classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "../data/mlbPools.js";
 import { personConflict, playerIdentity, playsPosition } from "../rules/cards.js";
+import { authenticPoints } from "../rules/pricing.js";
+import { PRICE_MODEL } from "../data/priceModel.js";
 
 // Every save picks a league at new game. The fictional league regenerates
 // from the save seed; the real leagues share fixed card sets, but the MLB
@@ -186,9 +188,15 @@ export function setUniverseSeed(seed, mode = "fictional", { priceNoise = true } 
 }
 
 // The most a legal 13-card roster can cost in this universe: greedy
-// best-per-slot at printed prices. Uncapped NPC budgets scale against this so
-// the ladder keeps escalating even in small pools (a franchise universe tops
-// out near 9k, not the fictional set's ceiling).
+// best-per-slot at TRUE (noiseless) prices, so the number is a stable fact
+// of the pool rather than of one save's price noise. The whole budget
+// economy rescales against this — NPC ladder and player cap alike — so a
+// thin expansion franchise and the all-time pool each field teams sized to
+// what their pool can actually print.
+// LADDER_REFERENCE is the fictional league's ceiling, the pool everything
+// was originally tuned against: scale = poolCeiling() / LADDER_REFERENCE.
+export const LADDER_REFERENCE = 10500;
+
 let poolCeilingCache = null;
 const CEILING_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER", "SP", "SP", "RP", "RP"];
 
@@ -203,10 +211,10 @@ export function poolCeiling() {
           (slot === "HITTER" ? card.kind === "hitter"
             : slot === "SP" || slot === "RP" ? card.role === slot
             : card.kind === "hitter" && playsPosition(card, slot)))
-        .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))[0];
+        .sort((a, b) => b.truePoints - a.truePoints || a.name.localeCompare(b.name))[0];
       if (!best) continue;
       taken.add(best.id);
-      total += best.points;
+      total += best.truePoints;
     }
     poolCeilingCache = total;
   }
@@ -226,13 +234,14 @@ export function adventurePool() {
       // Real Showdown cards keep their authentic printed points — no noise.
       poolCache = assignAuthenticRarity(decodeCardRows(CLASSIC_CARD_ROWS));
     } else if (universeMode === "mlb-history" || decade || multi || franchise) {
-      // Real players, but the bargain economy stays: rate-derived quality
-      // runs through the same curve + seeded price noise as the fictional set.
+      // Real players price on the AUTHENTIC Showdown scale (the classic-set
+      // model), so a Control 5 starter costs Wakefield money in any pool;
+      // the bargain economy stays via the same seeded price noise.
       const rows = decade ? MLB_DECADE_ROWS[decade[1]]
         : multi ? multi[1].split(",").filter((start) => MLB_DECADE_ROWS[start]).flatMap((start) => MLB_DECADE_ROWS[start])
         : franchise ? MLB_FRANCHISE_ROWS[franchise[1]]
         : MLB_HISTORY_ROWS;
-      poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:${universeSeed}`);
+      poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:${universeSeed}`, { authentic: true });
     } else {
       const raw = generatePlayerPool(`universe:${universeSeed}`, UNIVERSE_TEAMS, 13);
       poolCache = calibrateUniverse(raw, universeSeed);
@@ -301,9 +310,15 @@ export function dualPrimaryId(id) {
   return String(id).endsWith("-bat") ? id : partner;
 }
 
-// Rank each group by the generator's raw quality score, then price the rank:
-// truePoints from the curve, printed points with seeded noise on top.
-function calibrateUniverse(pool, seed) {
+// Price each group, then noise the stickers. Two scales:
+// - authentic (MLB pools): truePoints from the classic-set price model — a
+//   card's mechanics cost what the real 2000-2005 printings charged for
+//   them, the same in every pool. Rarity still ranks within THIS pool, so a
+//   franchise league keeps commons and legends.
+// - rank curve (fictional pool): the generator's raw scores have no
+//   authentic meaning, so truePoints come from strength rank on a convex
+//   curve, as ever.
+function calibrateUniverse(pool, seed, { authentic = false } = {}) {
   const rng = createRng(`universe-prices:${seed}`);
   const groups = [
     [pool.filter((card) => card.kind === "hitter"), PRICE_CURVE],
@@ -311,14 +326,18 @@ function calibrateUniverse(pool, seed) {
     [pool.filter((card) => card.role === "RP"), RP_PRICE_CURVE]
   ];
   const priced = new Map();
+  const modelPoints = authentic ? new Map(pool.map((card) => [card.id, authenticPoints(card, PRICE_MODEL)])) : null;
+  const score = (card) => (authentic ? modelPoints.get(card.id) : card.points);
   for (const [group, curve] of groups) {
-    const ranked = [...group].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+    const ranked = [...group].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
     const shares = scaledRarityShares(pool.length, ranked.length);
     ranked.forEach((card, index) => {
       const fromTop = (index + 1) / ranked.length;
       const rarity = shares.find(([, share]) => fromTop <= share)[0];
       const strength = (ranked.length - index) / ranked.length;
-      const truePoints = Math.round(curve.base + curve.span * strength ** curve.gamma);
+      const truePoints = authentic
+        ? modelPoints.get(card.id)
+        : Math.round(curve.base + curve.span * strength ** curve.gamma);
       const noise = 1 + (rng.next() * 2 - 1) * PRICE_NOISE;
       const points = universeNoise ? Math.max(10, Math.round(truePoints * noise)) : truePoints;
       priced.set(card.id, { rarity, truePoints, points });
