@@ -11,7 +11,8 @@ import {
   cardPanelHtml,
   cardLine
 } from "./helpers.js";
-import { gameStars, gameLogLine } from "./statsScreens.js";
+import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js";
+import { cardById } from "../packs.js";
 import { buildBoxScore, inningsPlayed } from "../../rules/game.js";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js";
 import { gameFeats } from "../feats.js";
@@ -50,7 +51,8 @@ import {
   actChangePitcher,
   fastForward,
   runSimSeries,
-  isDramaticMoment
+  isDramaticMoment,
+  npcMoundVisit
 } from "../battle/controller.js";
 
 export function startTrainerBattle(app, trainer) {
@@ -398,6 +400,10 @@ function mountDrama(app) {
 function afterAction(app, events, presetLines = null) {
   const playerSide = app.screen.battle.playerSide;
   const lines = presetLines ?? events.filter(Boolean).flatMap((event) => describeEvent(event, playerSide));
+  // The NPC's between-batters mound visit is its own beat: it announces
+  // itself here, before the player picks an action against the new arm.
+  const visit = npcMoundVisit(app.screen.battle);
+  if (visit) lines.push(...describeEvent(visit, playerSide));
   app.screen.lines = lines.length ? lines : app.screen.lines;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
@@ -702,10 +708,43 @@ function yourScore(screen) {
 
 // ---- Between series games --------------------------------------------------
 
+// Everyone who has played in THIS series, bats then arms, for the stats view.
+function seriesStatRows(save) {
+  const { hitters, pitchers } = seriesStatLines(save);
+  return [
+    ...hitters.map((line) => ({ section: "YOUR BATS", id: line.id, html: statLineHtml(line, "hitters") })),
+    ...pitchers.map((line) => ({ section: "YOUR ARMS", id: line.id, html: statLineHtml(line, "pitchers") }))
+  ];
+}
+
 export const seriesBreakScreen = {
   render(app) {
     const trainer = trainerById(app.screen.trainerId);
     const series = app.save.activeSeries;
+    if (app.screen.mode === "stats") {
+      const rows = seriesStatRows(app.save);
+      const index = clampIndex(app.screen.statIndex ?? 0, rows.length);
+      const sections = [];
+      rows.forEach((row, rowIndex) => {
+        if (row.section !== rows[rowIndex - 1]?.section) sections.push({ header: row.section, start: rowIndex });
+      });
+      let listHtml = "";
+      for (const [sectionIndex, section] of sections.entries()) {
+        const end = sections[sectionIndex + 1]?.start ?? rows.length;
+        listHtml += `<h3>${section.header}</h3>${menuHtml(
+          rows.slice(section.start, end).map((row) => ({ html: row.html })),
+          index - section.start,
+          { offset: section.start }
+        )}`;
+      }
+      return `<div class="gq-screen">
+        <div class="gq-topbar"><span>SERIES STATS &middot; VS ${escapeHtml(trainer.name)}</span><span>${series.wins}-${series.losses} (BO${series.bestOf})</span></div>
+        <div class="gq-body"><div class="gq-frame gq-scroll gq-map-node">${
+          rows.length ? listHtml : `<p class="gq-dim">NO GAMES IN THE BOOK YET.</p>`
+        }</div></div>
+        <div class="gq-textbox"><p class="gq-dim">This series only. % IS SERIES WPA. Hover a row to read the card. X to go back.</p></div>
+      </div>`;
+    }
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>SERIES VS ${escapeHtml(trainer.name)}</span><span>BO${series.bestOf}</span></div>
       <div class="gq-body gq-center">
@@ -718,15 +757,29 @@ export const seriesBreakScreen = {
       </div>
       <div class="gq-textbox">
         ${menuHtml(
-          [{ label: `PLAY GAME ${series.nextGame}` }, { label: "SET LINEUP" }, { label: "BACK TO MAP (RESUME LATER)" }],
+          [{ label: `PLAY GAME ${series.nextGame}` }, { label: "SET LINEUP" }, { label: "SERIES STATS" }, { label: "BACK TO MAP (RESUME LATER)" }],
           app.screen.menuIndex ?? 0
         )}
       </div>
     </div>`;
   },
+  hoverCard(app, index) {
+    if (app.screen.mode !== "stats") return null;
+    return cardById(seriesStatRows(app.save)[index]?.id) ?? null;
+  },
   key(app, key) {
+    if (app.screen.mode === "stats") {
+      const rows = seriesStatRows(app.save);
+      if (key === "up" || key === "down") {
+        app.screen.statIndex = clampIndex((app.screen.statIndex ?? 0) + (key === "down" ? 1 : -1), rows.length);
+      } else if (key === "a" || key === "b") {
+        app.screen.mode = null;
+      }
+      app.rerender();
+      return;
+    }
     if (key === "up" || key === "down") {
-      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), 3);
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), 4);
     } else if (key === "a") {
       const choice = app.screen.menuIndex ?? 0;
       if (choice === 0) return launchSeriesGame(app, trainerById(app.screen.trainerId));
@@ -742,7 +795,12 @@ export const seriesBreakScreen = {
           }
         });
       }
-      app.go("map");
+      if (choice === 2) {
+        app.screen.mode = "stats";
+        app.screen.statIndex = 0;
+      } else {
+        app.go("map");
+      }
     }
     app.rerender();
   }

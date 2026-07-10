@@ -1,7 +1,7 @@
 import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml } from "./helpers.js";
 import { trainerById } from "../region.js";
 import { cardById } from "../packs.js";
-import { seasonHitters, seasonPitchers, ensureSeasonStats, ensureAlmanac, ensureTrophies } from "../state.js";
+import { seasonHitters, seasonPitchers, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js";
 
 // ---- Formatting --------------------------------------------------------------
 
@@ -392,11 +392,27 @@ export function seasonLines(app) {
   return { view, sorts, sort, dir, lines };
 }
 
-function seasonLineHtml(line, view) {
+export function statLineHtml(line, view) {
   if (view === "pitchers") {
     return `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`;
   }
   return `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G</span>`;
+}
+
+// Just this series' numbers: the active series' games are the newest almanac
+// entries (nothing else can be played mid-series), so fold their box scores
+// into a throwaway season book and read the same rate lines from it.
+export function seriesStatLines(save) {
+  const series = save.activeSeries;
+  const played = series ? series.wins + series.losses : 0;
+  const temp = { seasonStats: { games: 0, hitters: {}, pitchers: {} } };
+  if (played > 0) {
+    for (const entry of ensureAlmanac(save).slice(-played)) {
+      if (entry.trainerId !== series.trainerId || !entry.boxScore) continue;
+      recordGameStats(temp, entry.boxScore[entry.playerSide]);
+    }
+  }
+  return { hitters: seasonHitters(temp), pitchers: seasonPitchers(temp), games: temp.seasonStats.games };
 }
 
 export const seasonStatsScreen = {
@@ -417,7 +433,7 @@ export const seasonStatsScreen = {
         <p class="gq-dim">SORT: ${sortBar}</p>
         <div class="gq-frame gq-scroll">${
           lines.length
-            ? menuHtml(lines.map((line) => ({ html: seasonLineHtml(line, view) })), index)
+            ? menuHtml(lines.map((line) => ({ html: statLineHtml(line, view) })), index)
             : `<p class="gq-dim">${app.screen.query ? `NOBODY NAMED "${escapeHtml(app.screen.query)}" HERE.` : "NO GAMES ON RECORD YET. GO PLAY SOMEBODY."}</p>`
         }</div>
       </div>

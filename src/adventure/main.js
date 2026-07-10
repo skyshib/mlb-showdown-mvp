@@ -128,6 +128,7 @@ function clickCursorField(screen) {
   if (screen.mode === "pen") return "penIndex";
   if (screen.mode === "pick" || screen.mode === "dhFlip") return "pickIndex";
   if (screen.mode === "rosters") return "rosterIndex";
+  if (screen.mode === "stats") return "statIndex";
   if (screen.mode === "scout") return "scoutIndex";
   if (screen.mode === "log") return "logIndex";
   if (screen.confirming) return "confirmIndex";

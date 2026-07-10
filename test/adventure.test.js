@@ -897,6 +897,49 @@ test("season stats scope to the roster, search by name, and sort by column", asy
   assert.ok(seasonLines(app).lines.length >= 1, "the arms show");
 });
 
+test("the series break offers stats folded from this series alone", async () => {
+  const { seriesStatLines } = await import("../src/adventure/ui/statsScreens.js");
+  const { seriesBreakScreen, recordFinishedGame } = await import("../src/adventure/ui/battleScreen.js");
+  const save = testSave();
+  const { player, npc } = hookTeams();
+  const finish = (trainer, seed, won) => {
+    const result = simulateGame(buildTeam(player), buildTeam(npc), seed);
+    recordGameStats(save, result.boxScore.away);
+    recordFinishedGame(save, {
+      trainer, boxScore: result.boxScore, playerSide: "away", events: [],
+      score: { away: won ? 1 : 0, home: won ? 0 : 1 }, innings: 9, won
+    });
+    return result;
+  };
+
+  // A game BEFORE the series must not leak into the series book.
+  finish(trainerById("scout-jojo"), "series-stats-pre", true);
+  startSeries(save, "gym-garrick", 5);
+  const g1 = finish(trainerById("gym-garrick"), "series-stats-g1", true);
+  recordSeriesGame(save, true);
+  const g2 = finish(trainerById("gym-garrick"), "series-stats-g2", false);
+  recordSeriesGame(save, false);
+
+  const { hitters, pitchers, games } = seriesStatLines(save);
+  assert.equal(games, 2, "the series book holds exactly this series' games");
+  const paTotal = [g1, g2].reduce((sum, game) => sum + game.boxScore.away.hitters.reduce((s, l) => s + l.pa, 0), 0);
+  assert.equal(hitters.reduce((sum, line) => sum + line.pa, 0), paTotal, "PAs fold from the two series games only");
+  assert.ok(pitchers.length >= 1, "the arms show too");
+
+  // The screen: a SERIES STATS entry opens a browsable, hoverable list.
+  const app = { save, screen: { name: "seriesBreak", trainerId: "gym-garrick", lastWon: false, score: { away: 0, home: 1 }, playerSide: "away", menuIndex: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  assert.ok(seriesBreakScreen.render(app).includes("SERIES STATS"), "the menu offers it");
+  app.screen.menuIndex = 2;
+  seriesBreakScreen.key(app, "a");
+  assert.equal(app.screen.mode, "stats");
+  const html = seriesBreakScreen.render(app);
+  assert.ok(html.includes("YOUR BATS") && html.includes("YOUR ARMS"), "bats and arms section");
+  assert.ok(seriesBreakScreen.hoverCard(app, 0), "rows hover their card");
+  seriesBreakScreen.key(app, "b");
+  assert.equal(app.screen.mode, null, "X returns to the break menu");
+  assert.equal(app.screen.name, "seriesBreak");
+});
+
 test("sim series carry per-game box scores so season stats include them", () => {
   const save = testSave();
   const { player, npc } = hookTeams();
@@ -1095,6 +1138,34 @@ test("games land on a FINAL screen naming the winner and the last play", async (
   assert.match(html.replace(/<[^>]+>/g, " "), /YOU \d+ .* THEM \d+/, "the final score reads from your side");
   gameOverScreen.key(app, "a");
   assert.equal(app.screen.name, "gameStats", "Z continues to the box score");
+});
+
+test("the NPC mound visit is its own event, never smuggled into the swing", async () => {
+  const { npcMoundVisit } = await import("../src/adventure/battle/controller.js");
+  const { AI_PROFILES } = await import("../src/adventure/battle/ai.js");
+  const { player, npc } = hookTeams();
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "mound-visit" });
+  battle.profile = AI_PROFILES.conservative;
+  const starter = battle.state.home.pitchers[0];
+  battle.state.pitching.home.battersFaced = starter.ip * 4 + 4;
+
+  // The visit fires as its own event before the batter decision.
+  const visit = npcMoundVisit(battle);
+  assert.equal(visit?.type, "pitching-change", "the change is a standalone event");
+  assert.equal(battle.events[battle.events.length - 1], visit, "and lands in the game log");
+  const onMound = battle.state.pitching.home.pitcherIndex;
+  assert.notEqual(onMound, 0, "the tired starter is gone before anyone swings");
+
+  // The swing itself never carries a pitching change, however tired the arm.
+  const reliever = battle.state.home.pitchers[onMound];
+  battle.state.pitching.home.battersFaced = reliever.ip * 4 + 8;
+  const events = actSwing(battle);
+  assert.ok(events.every((event) => event?.type !== "pitching-change"), "the swing is pure batter action");
+  assert.equal(battle.state.pitching.home.pitcherIndex, onMound, "no mid-swing mound change");
+
+  // No visits while the NPC is batting.
+  battle.state.half = "bottom";
+  assert.equal(npcMoundVisit(battle), null, "their turn at the plate, no visit");
 });
 
 test("the NPC's mound arm shows its fatigue subtraction like the player's", async () => {

@@ -117,14 +117,21 @@ function pushEvent(battle, event) {
   return event;
 }
 
-// Player action while batting: let the plate appearance rip. The NPC gets its
-// between-batters pitching-change look first, like a real mound visit.
-export function actSwing(battle) {
+// The NPC skipper's between-batters mound visit, as its OWN event: the UI
+// calls this when a new plate appearance is about to start, so the change
+// announces itself before the player picks an action against the new arm —
+// never inside the swing. Only fires between batters (no mid-play changes,
+// no pending advance decision).
+export function npcMoundVisit(battle) {
+  if (battlePhase(battle).type !== "player-batting") return null;
   const pulled = npcMaybePullPitcher(battle.state, battle.npcSide, battle.profile);
-  const events = [];
-  if (pulled) events.push(pushEvent(battle, pitchingChangeEvent(battle, battle.npcSide, pulled)));
-  events.push(pushEvent(battle, playPlateAppearance(battle.state, battle.rng)));
-  return events;
+  if (!pulled) return null;
+  return pushEvent(battle, pitchingChangeEvent(battle, battle.npcSide, pulled));
+}
+
+// Player action while batting: let the plate appearance rip.
+export function actSwing(battle) {
+  return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng))];
 }
 
 // Player action while batting: send the runner on the chosen base.
@@ -133,15 +140,10 @@ export function actSteal(battle, fromIndex) {
   return event ? [pushEvent(battle, event)] : [];
 }
 
-// Player action while batting: lay down a sacrifice bunt. The NPC gets its
-// mound-visit look first, same as before a swing.
+// Player action while batting: lay down a sacrifice bunt.
 export function actBunt(battle) {
-  const pulled = npcMaybePullPitcher(battle.state, battle.npcSide, battle.profile);
-  const events = [];
-  if (pulled) events.push(pushEvent(battle, pitchingChangeEvent(battle, battle.npcSide, pulled)));
   const event = attemptBunt(battle.state, battle.rng);
-  if (event) events.push(pushEvent(battle, event));
-  return events;
+  return event ? [pushEvent(battle, event)] : [];
 }
 
 // Player decision after their own hit or fly ball: send the first `sendCount`
