@@ -1,5 +1,6 @@
 import { normalizeResult, formatRange } from "../../rules/cards.js";
 import { RARITIES } from "../packs.js";
+import { CARD_IMAGE_FILES } from "../../data/cardImages.js";
 
 export function escapeHtml(value) {
   return String(value)
@@ -56,8 +57,17 @@ export function cardPanelHtml(card, { count = null } = {}) {
     ? `${card.role} &middot; CTRL ${card.control} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
     : `${escapeHtml(card.position)} &middot; OB ${card.onBase} &middot; SPD ${card.speed} &middot; FLD ${card.fielding >= 0 ? "+" : ""}${card.fielding}`;
   const foil = card.foil || card.rarity === "legend";
+  // Classic cards with a real scan show the actual printed card (courtesy of
+  // ShowdownCards.com), full color on purpose; everyone else keeps the
+  // headshot slot.
+  const scan = CARD_IMAGE_FILES[card.id];
+  const media = scan
+    ? `<img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">`
+    : card.real
+      ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
+      : "";
   return `<div class="gq-card gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">
-    ${card.real ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>` : ""}
+    ${media}
     <div class="gq-card-name">${escapeHtml(card.name.toUpperCase())} ${count !== null ? `<span class="gq-dim">x${count}</span>` : ""}</div>
     <div class="gq-card-meta">${header}</div>
     <div class="gq-card-meta">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>

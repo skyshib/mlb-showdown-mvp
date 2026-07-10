@@ -462,7 +462,8 @@ test("stars flag keepers in binder and catalog; the sell sweeps can spare them",
   assert.ok(binderScreen.render(app).includes("&#9733;"), "the binder shows the star");
   binderScreen.typed(app, "*");
   assert.equal(isStarred(save, keeper.id), false, "* again unstars");
-  binderScreen.typed(app, "*");
+  binderScreen.key(app, "a");
+  assert.equal(isStarred(save, keeper.id), true, "ENTER stars the keeper too");
 
   // The catalog stars through the same key.
   const catApp = { save, screen: { name: "catalog", index: 0, filter: "ALL", query: keeper.name }, go() {}, rerender() {} };
@@ -1586,10 +1587,17 @@ test("type-to-search narrows binder and catalog by name; X clears before leaving
 
   const app = { save, screen: { name: "binder", index: 5, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
   for (const char of fragment) binderScreen.typed(app, char);
+  assert.equal(app.screen.query ?? "", "", "letters are inert until S opens search");
+  binderScreen.typed(app, "s");
+  assert.equal(app.screen.searching, true, "S opens search");
+  for (const char of fragment) binderScreen.typed(app, char);
   assert.equal(app.screen.query, fragment, "typed letters build the query");
   assert.equal(app.screen.index, 0, "the cursor resets to the top match");
   binderScreen.typed(app, "\b");
   assert.equal(app.screen.query, fragment.slice(0, -1), "backspace edits the query");
+  binderScreen.key(app, "a");
+  assert.equal(app.screen.searching, false, "ENTER closes the search, keeping the filter");
+  assert.equal(app.screen.query, fragment.slice(0, -1));
   binderScreen.key(app, "b");
   assert.equal(app.screen.query, "", "X clears the query first");
   assert.equal(app.screen.name, "binder", "without leaving the binder");
@@ -1597,6 +1605,7 @@ test("type-to-search narrows binder and catalog by name; X clears before leaving
   assert.equal(app.screen.name, "map", "a second X leaves");
 
   const catalogApp = { save, screen: { name: "catalog", index: 0, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
+  catalogScreen.typed(catalogApp, "s");
   for (const char of fragment) catalogScreen.typed(catalogApp, char);
   const html = catalogScreen.render(catalogApp);
   assert.ok(html.includes(`SEARCH: <b>${fragment}</b>`), "the query shows on screen");
@@ -1607,14 +1616,14 @@ test("compare mode pins two cards from the binder and lays them side by side", a
   const save = testSave();
   const rows = collectionCards(save);
   const app = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
-  binderScreen.key(app, "a");
-  assert.equal(app.screen.pinnedId, rows[0].card.id, "Z pins the selected card");
+  binderScreen.typed(app, "c");
+  assert.equal(app.screen.pinnedId, rows[0].card.id, "C pins the selected card");
   assert.ok(binderScreen.render(app).includes("PINNED"), "the pin is announced");
-  binderScreen.key(app, "a");
-  assert.equal(app.screen.pinnedId, null, "Z on the same card unpins");
-  binderScreen.key(app, "a");
+  binderScreen.typed(app, "c");
+  assert.equal(app.screen.pinnedId, null, "C on the same card unpins");
+  binderScreen.typed(app, "c");
   binderScreen.key(app, "down");
-  binderScreen.key(app, "a");
+  binderScreen.typed(app, "c");
   assert.equal(app.screen.name, "compare", "a second pin opens the compare screen");
   assert.equal(app.screen.aId, rows[0].card.id);
   assert.equal(app.screen.bId, rows[1].card.id);
@@ -1816,6 +1825,22 @@ test("pack eggs and day whimsy stay rare", async () => {
   assert.ok(dayWhimsy(42).includes("ANSWER"), "day 42");
   assert.ok(dayWhimsy(162).includes("162"), "day 162");
   assert.equal(dayWhimsy(41), null, "ordinary days stay quiet");
+});
+
+test("cards with a real Showdown scan show it in place of the headshot", async () => {
+  const { cardPanelHtml } = await import("../src/adventure/ui/helpers.js");
+  const { CARD_IMAGE_FILES } = await import("../src/data/cardImages.js");
+  const card = adventurePool()[0];
+  try {
+    CARD_IMAGE_FILES[card.id] = "118-lou-brock-mlb-2004-trading-deadline.jpg";
+    const html = cardPanelHtml(card);
+    assert.ok(html.includes('class="gq-card-scan"'), "the scan renders");
+    assert.ok(html.includes("assets/cards/118-lou-brock-mlb-2004-trading-deadline.jpg"), "from assets/cards");
+    assert.ok(!html.includes("gq-card-headshot"), "and replaces the headshot slot");
+  } finally {
+    delete CARD_IMAGE_FILES[card.id];
+  }
+  assert.ok(!cardPanelHtml(card).includes("gq-card-scan"), "no scan, no img");
 });
 
 test("pixel portraits are deterministic, era-styled, and cards carry their era", async () => {

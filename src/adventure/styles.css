@@ -223,6 +223,17 @@ h1.gq-logo {
   height: 100%;
   display: block;
 }
+
+/* Real Showdown card scans (ShowdownCards.com) run full color on purpose —
+   the actual printed card is the point. Floated like the headshot, larger. */
+.gq-card-scan {
+  float: right;
+  width: 21cqw;
+  aspect-ratio: 255 / 356;
+  margin: 0 0 1cqw 1.2cqw;
+  border: 0.4cqw solid var(--gb-darkest);
+  image-rendering: auto;
+}
 /* ---- Foil cards ---- */
 
 /* Foil printings (and legends everywhere) get a slow shine sweep and a

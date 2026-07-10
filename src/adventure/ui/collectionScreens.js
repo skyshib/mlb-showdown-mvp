@@ -70,29 +70,41 @@ function typeIntoQuery(app, char) {
   app.rerender();
 }
 
-// The * key stars the cursor card (a keeper flag the sell sweeps can spare);
-// anything else types into the search.
-function starOrType(app, char, cardAtCursor) {
-  if (char === "*") {
-    const card = cardAtCursor();
-    if (card) {
-      toggleStar(app.save, card.id);
-      persistSave(app.save);
-      app.rerender();
-    }
+// Binder/catalog key scheme: letters are inert until S opens search mode
+// (then they type into the query); * or ENTER stars the cursor card as a
+// keeper; C pins it for compare.
+function searchableTyped(app, char, cardAtCursor, pinReturnTo) {
+  if (app.screen.searching || char === "\b") {
+    typeIntoQuery(app, char);
     return;
   }
-  typeIntoQuery(app, char);
+  const lower = char.toLowerCase();
+  if (lower === "s") {
+    app.screen.searching = true;
+    app.rerender();
+  } else if (char === "*") {
+    starCursorCard(app, cardAtCursor);
+  } else if (lower === "c") {
+    pinOrCompare(app, cardAtCursor(), pinReturnTo);
+    app.rerender();
+  }
+}
+
+function starCursorCard(app, cardAtCursor) {
+  const card = cardAtCursor();
+  if (!card) return;
+  toggleStar(app.save, card.id);
+  persistSave(app.save);
+  app.rerender();
 }
 
 function starMark(save, card) {
   return isStarred(save, card.id) ? " &#9733;" : "";
 }
 
-function searchLine(query) {
-  return query
-    ? `<p>SEARCH: <b>${escapeHtml(query)}</b>_ <span class="gq-dim">X CLEARS</span></p>`
-    : "";
+function searchLine(query, searching = false) {
+  if (!query && !searching) return "";
+  return `<p>SEARCH: <b>${escapeHtml(query ?? "")}</b>_ <span class="gq-dim">${searching ? "ENTER DONE &middot; X CLEARS" : "X CLEARS"}</span></p>`;
 }
 
 // ---- Compare mode --------------------------------------------------------------
@@ -193,17 +205,17 @@ export const catalogScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Every card in this league, best first. Type a name to search &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; the * key stars a keeper &#9733; &middot; Z pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">Every card in this league, best first. S searches &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
     return catalogVisibleRows(app)[index] ?? null;
   },
   typed(app, char) {
-    starOrType(app, char, () => {
+    searchableTyped(app, char, () => {
       const rows = catalogVisibleRows(app);
       return rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
-    });
+    }, "catalog");
   },
   key(app, key) {
     const rows = catalogVisibleRows(app);
@@ -214,9 +226,14 @@ export const catalogScreen = {
     } else if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
     } else if (key === "a") {
-      pinOrCompare(app, rows[clampIndex(app.screen.index ?? 0, rows.length)], "catalog");
+      if (app.screen.searching) {
+        app.screen.searching = false;
+      } else {
+        starCursorCard(app, () => rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null);
+      }
     } else if (key === "b") {
-      if (app.screen.query) {
+      if (app.screen.searching || app.screen.query) {
+        app.screen.searching = false;
         app.screen.query = "";
         app.screen.index = 0;
       } else if (app.screen.pinnedId) {
@@ -471,17 +488,17 @@ export const binderScreen = {
         }</div>
         <div>${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query)}<p class="gq-dim">Type a name to search &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; the * key stars a keeper &#9733; &middot; Z pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">S searches &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
     return binderVisibleRows(app)[index]?.card ?? null;
   },
   typed(app, char) {
-    starOrType(app, char, () => {
+    searchableTyped(app, char, () => {
       const rows = binderVisibleRows(app);
       return rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card ?? null;
-    });
+    }, "binder");
   },
   key(app, key) {
     if (key === "left" || key === "right") {
@@ -493,10 +510,17 @@ export const binderScreen = {
       const rows = binderVisibleRows(app);
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
     } else if (key === "a") {
-      const rows = binderVisibleRows(app);
-      pinOrCompare(app, rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card, "binder");
+      // ENTER closes an open search (keeping the filter); otherwise it stars
+      // the cursor card as a keeper.
+      if (app.screen.searching) {
+        app.screen.searching = false;
+      } else {
+        const rows = binderVisibleRows(app);
+        starCursorCard(app, () => rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card ?? null);
+      }
     } else if (key === "b") {
-      if (app.screen.query) {
+      if (app.screen.searching || app.screen.query) {
+        app.screen.searching = false;
         app.screen.query = "";
         app.screen.index = 0;
       } else if (app.screen.pinnedId) {
