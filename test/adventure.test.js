@@ -11,6 +11,8 @@ import {
   PACKS
 } from "../src/adventure/packs.js";
 import { applyOutcome } from "../src/adventure/ui/battleScreen.js";
+import { recordCompletedRun, loadHallOfFame, hallOfFameByMode, mergeEntries } from "../src/adventure/hallOfFame.js";
+import { hallOfFameScreen, hofTeamScreen } from "../src/adventure/ui/hallOfFameScreen.js";
 import {
   createSave,
   persistSave,
@@ -236,8 +238,13 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
   const worldSeries = trainerById("post-worldseries");
   assert.equal(npcBudget(testSave(), worldSeries), worldSeries.pointBudget, "budget mode reads the printed ladder");
   assert.equal(npcBudget(save, jojo), jojo.pointBudget, "the first scout stays winnable");
+  // The summit swells to the POOL's best-13 ceiling (within rounding), not an
+  // absolute figure: small universes escalate all the way up instead of every
+  // late boss fielding the same maxed team from mid-ladder on.
+  const { poolCeiling } = await import("../src/adventure/packs.js");
   const scaled = npcBudget(save, worldSeries);
-  assert.ok(scaled >= worldSeries.pointBudget * 1.6, `the summit swells (${worldSeries.pointBudget} -> ${scaled})`);
+  assert.ok(scaled > worldSeries.pointBudget, `the summit swells (${worldSeries.pointBudget} -> ${scaled})`);
+  assert.ok(Math.abs(scaled - poolCeiling()) <= 50, `and lands at the pool ceiling (${scaled} vs ${poolCeiling()})`);
   // The ladder still climbs in the same order, just steeper.
   const ladder = [...TRAINERS].sort((a, b) => a.pointBudget - b.pointBudget);
   for (let i = 1; i < ladder.length; i += 1) {
@@ -2008,4 +2015,100 @@ test("attempt numbers derive distinct battle seeds", () => {
   const first = attemptNumber(save, "scout-jojo");
   const second = attemptNumber(save, "scout-jojo");
   assert.notEqual(first, second);
+});
+
+// ---- Hall of fame ------------------------------------------------------------
+
+// A finished campaign, faked in miniature: `days` games in the books with
+// `losses` defeats, all in the mode asked for.
+async function finishedSave(saveSeed, { mode = "budget", days = 30, losses = 5 } = {}) {
+  const { recordAlmanacGame } = await import("../src/adventure/state.js");
+  const save = testSave();
+  save.saveSeed = saveSeed;
+  save.mode = mode;
+  for (let i = 0; i < days; i += 1) {
+    ensureSeasonStats(save).games += 1;
+    recordAlmanacGame(save, {
+      day: i + 1,
+      trainerId: "scout-jojo",
+      opponent: "SCOUT JOJO",
+      won: i >= losses,
+      score: { away: 3, home: 1 },
+      playerSide: "away",
+      innings: 9,
+      feats: [],
+      boxScore: null
+    });
+  }
+  return save;
+}
+
+test("winning the world series puts the run in the hall of fame, once", async () => {
+  const save = await finishedSave("hof-champion-seed", { days: 34, losses: 6 });
+  const app = { save };
+  const outcome = applyOutcome(app, trainerById("post-worldseries"), true);
+  assert.equal(outcome.badge, "trophy");
+  const entry = loadHallOfFame().find((item) => item.saveSeed === "hof-champion-seed");
+  assert.ok(entry, "the trophy writes the plaque");
+  assert.equal(entry.days, 34, "days are games played");
+  assert.equal(entry.wins, 28);
+  assert.equal(entry.losses, 6);
+  assert.equal(entry.mode, "budget");
+  assert.ok(entry.roster.length >= 13, "the roster is snapshotted");
+  assert.ok(entry.roster.every((card) => card.name && card.points && card.chart), "as full card objects");
+  // The plaque is once per campaign: a re-record is refused.
+  assert.equal(recordCompletedRun(save), null);
+  assert.equal(loadHallOfFame().filter((item) => item.saveSeed === "hof-champion-seed").length, 1);
+});
+
+test("the leaderboard splits by mode and ranks by fewest days, losses breaking ties", async () => {
+  const storage = fakeStorage();
+  recordCompletedRun(await finishedSave("hof-a", { mode: "budget", days: 40, losses: 4 }), storage);
+  recordCompletedRun(await finishedSave("hof-b", { mode: "budget", days: 33, losses: 2 }), storage);
+  recordCompletedRun(await finishedSave("hof-c", { mode: "uncapped", days: 51, losses: 0 }), storage);
+  recordCompletedRun(await finishedSave("hof-d", { mode: "budget", days: 33, losses: 1 }), storage);
+  const grouped = hallOfFameByMode(loadHallOfFame(storage));
+  assert.deepEqual(grouped.map((group) => group.mode), ["budget", "uncapped"], "budget leads, one group per rule set");
+  assert.deepEqual(grouped[0].entries.map((entry) => entry.saveSeed), ["hof-d", "hof-b", "hof-a"]);
+  assert.deepEqual(grouped[1].entries.map((entry) => entry.saveSeed), ["hof-c"]);
+});
+
+test("local and global hall of fame entries merge to one row per campaign", () => {
+  const local = [{ saveSeed: "x", days: 5 }, { saveSeed: "y", days: 9 }];
+  const remote = [{ saveSeed: "x", days: 5 }, { saveSeed: "z", days: 7 }];
+  assert.deepEqual(mergeEntries(local, remote).map((entry) => entry.saveSeed).sort(), ["x", "y", "z"]);
+  assert.deepEqual(mergeEntries(local, null).map((entry) => entry.saveSeed), ["x", "y"], "no server, local still shows");
+});
+
+test("the hall of fame screens list champions and open the team page", async () => {
+  const save = await finishedSave("hof-screen-seed", { days: 21, losses: 3 });
+  save.player.name = "ICHIRO";
+  // One recorded game gives the roster's first bat a season line to render.
+  const hero = rosterCards(save).find((card) => card.kind !== "pitcher");
+  recordGameStats(save, {
+    hitters: [{ id: hero.id, name: hero.name, pa: 4, ab: 4, h: 2, d: 1, t: 0, hr: 1, bb: 0, so: 1, r: 1, rbi: 2, sb: 0, cs: 0, gidp: 0, wpa: 0.2 }],
+    pitchers: []
+  });
+  ensureSeasonStats(save).games = 21;
+  recordCompletedRun(save);
+  const app = {
+    save: null,
+    screen: { name: "hallOfFame", index: 0 },
+    go(name, data = {}) { this.screen = { name, ...data }; },
+    rerender() {}
+  };
+  const listHtml = hallOfFameScreen.render(app);
+  assert.ok(listHtml.includes("BUDGET LEAGUE"), "runs group under their rule set");
+  assert.ok(listHtml.includes("ICHIRO"), "the champion is listed");
+  assert.ok(listHtml.includes("21 DAYS"), "days to the trophy lead the line");
+  assert.ok(listHtml.includes("18-3"), "the final record shows");
+  const entry = loadHallOfFame().find((item) => item.saveSeed === "hof-screen-seed");
+  app.screen = { name: "hofTeam", entry, index: 0 };
+  const teamHtml = hofTeamScreen.render(app);
+  assert.ok(teamHtml.includes("WORLD SERIES CHAMPION"));
+  assert.ok(teamHtml.includes("THE BATS") && teamHtml.includes("THE ARMS"), "the roster renders in sections");
+  assert.ok(teamHtml.includes("18-3"), "the record repeats on the team page");
+  assert.ok(hofTeamScreen.hoverCard(app, 0), "rows hover to the snapshotted card");
+  hofTeamScreen.key(app, "b");
+  assert.equal(app.screen.name, "hallOfFame", "X returns to the leaderboard");
 });

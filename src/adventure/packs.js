@@ -38,9 +38,21 @@ export const FRANCHISES = Object.keys(MLB_FRANCHISE_ROWS)
 export function universeConfig(mode) {
   if (UNIVERSES[mode]) return UNIVERSES[mode];
   if (mode === "mlb-2000s") return universeConfig("decade-2000");
+  // "All teams" with a decade checklist: the pool is the union of the checked
+  // decade sets, one card per player per decade played.
+  const multi = /^decades-([\d,]+)$/.exec(mode ?? "");
+  if (multi) {
+    const picked = multi[1].split(",").filter((start) => MLB_DECADE_ROWS[start]);
+    if (picked.length) {
+      const span = picked.length === DECADES.length
+        ? "every decade"
+        : picked.map((start) => `the ${start.slice(2)}s`).join(", ");
+      return { key: mode, name: "MLB: ALL TEAMS", blurb: `Real players from ${span} — one card per player per decade.` };
+    }
+  }
   const decade = /^decade-(\d{4})$/.exec(mode ?? "");
   if (decade && MLB_DECADE_ROWS[decade[1]]) {
-    return { key: mode, name: `MLB: THE ${decade[1].slice(2)}0s`, blurb: `Real big leaguers rated on their ${decade[1]}-${Number(decade[1]) + 9} numbers.` };
+    return { key: mode, name: `MLB: THE ${decade[1].slice(2)}s`, blurb: `Real big leaguers rated on their ${decade[1]}-${Number(decade[1]) + 9} numbers.` };
   }
   const franchise = /^franchise-([A-Z]{2,3})$/.exec(mode ?? "");
   if (franchise && MLB_FRANCHISE_ROWS[franchise[1]]) {
@@ -63,6 +75,12 @@ const UNIVERSE_TEAMS = 125;
 // Uncapped saves print honest stickers (no noise): with no budget to beat,
 // bargain-hunting is not the game there.
 const PRICE_CURVE = { base: 90, span: 810, gamma: 6 };
+// Relievers live on a shorter curve: in the real Showdown sets the priciest
+// RP (Sasaki '02) is 410 while hitters and starters run to 830-910. A 1-2
+// inning arm never decides a game the way a star bat or ace does, so the
+// best reliever in any pool tops out near the authentic scale instead of
+// costing Randy Johnson money.
+const RP_PRICE_CURVE = { base: 90, span: 320, gamma: 6 };
 const PRICE_NOISE = 0.35;
 
 // Rarity is a rank within each group, so relievers get legends too.
@@ -72,6 +90,19 @@ const RARITY_SHARES = [
   ["uncommon", 0.3],
   ["common", 1]
 ];
+
+// Tier shares scale with the pool: the full-size sets earn their 7% legends,
+// but 7% of a 300-card franchise pool would crown 21 — half its top tier.
+// Shares shrink on a square root so small pools keep only the true icons,
+// with a floor of one card per tier per group (packs and the shop draw by
+// rarity and need every shelf stocked).
+const RARITY_REFERENCE = 1600;
+
+function scaledRarityShares(poolSize, groupSize) {
+  const scale = Math.min(1, Math.sqrt(poolSize / RARITY_REFERENCE));
+  return RARITY_SHARES.map(([tier, share], index) =>
+    [tier, tier === "common" ? 1 : Math.max(share * scale, (index + 1) / groupSize)]);
+}
 
 // Sell values run ~15% of shop price: the shop is a pawnbroker, not a buyer.
 export const RARITIES = {
@@ -105,6 +136,20 @@ const HIT_ODDS = [
   ["legend", 1]
 ];
 
+// Legend pull odds shrink with the tier: rarity scaling already cuts a small
+// pool's legend shelf to the true icons, and an unscaled 3%-per-slot pull
+// against a 7-card tier would hand a player most of them by midseason. The
+// same sqrt factor that shrinks the tier shrinks the roll; the lost legend
+// probability falls through to the tier below.
+function scaledOdds(odds) {
+  const scale = Math.min(1, Math.sqrt(adventurePool().length / RARITY_REFERENCE));
+  if (scale >= 1) return odds;
+  const legendShare = 1 - odds[odds.length - 2][1];
+  const shifted = legendShare * (1 - scale);
+  return odds.map(([tier, cumulative], index) =>
+    [tier, index === odds.length - 2 ? Math.min(1, cumulative + shifted) : cumulative]);
+}
+
 let universeSeed = DEFAULT_UNIVERSE_SEED;
 let universeMode = "fictional";
 let universeNoise = true;
@@ -124,6 +169,35 @@ export function setUniverseSeed(seed, mode = "fictional", { priceNoise = true } 
   universeNoise = priceNoise;
   poolCache = null;
   poolIndexCache = null;
+  poolCeilingCache = null;
+}
+
+// The most a legal 13-card roster can cost in this universe: greedy
+// best-per-slot at printed prices. Uncapped NPC budgets scale against this so
+// the ladder keeps escalating even in small pools (a franchise universe tops
+// out near 9k, not the fictional set's ceiling).
+let poolCeilingCache = null;
+const CEILING_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER", "SP", "SP", "RP", "RP"];
+
+export function poolCeiling() {
+  if (poolCeilingCache == null) {
+    const pool = adventurePool();
+    const taken = new Set();
+    let total = 0;
+    for (const slot of CEILING_SLOTS) {
+      const best = pool
+        .filter((card) => !taken.has(card.id) &&
+          (slot === "HITTER" ? card.kind === "hitter"
+            : slot === "SP" || slot === "RP" ? card.role === slot
+            : card.kind === "hitter" && card.position === slot))
+        .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))[0];
+      if (!best) continue;
+      taken.add(best.id);
+      total += best.points;
+    }
+    poolCeilingCache = total;
+  }
+  return poolCeilingCache;
 }
 
 export function universeKey() {
@@ -133,14 +207,16 @@ export function universeKey() {
 export function adventurePool() {
   if (!poolCache) {
     const decade = /^decade-(\d{4})$/.exec(universeMode);
+    const multi = /^decades-([\d,]+)$/.exec(universeMode);
     const franchise = /^franchise-([A-Z]{2,3})$/.exec(universeMode);
     if (universeMode === "classic") {
       // Real Showdown cards keep their authentic printed points — no noise.
       poolCache = assignAuthenticRarity(decodeCardRows(CLASSIC_CARD_ROWS));
-    } else if (universeMode === "mlb-history" || decade || franchise) {
+    } else if (universeMode === "mlb-history" || decade || multi || franchise) {
       // Real players, but the bargain economy stays: rate-derived quality
       // runs through the same curve + seeded price noise as the fictional set.
       const rows = decade ? MLB_DECADE_ROWS[decade[1]]
+        : multi ? multi[1].split(",").filter((start) => MLB_DECADE_ROWS[start]).flatMap((start) => MLB_DECADE_ROWS[start])
         : franchise ? MLB_FRANCHISE_ROWS[franchise[1]]
         : MLB_HISTORY_ROWS;
       poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:${universeSeed}`);
@@ -183,18 +259,19 @@ export function cardById(id) {
 function calibrateUniverse(pool, seed) {
   const rng = createRng(`universe-prices:${seed}`);
   const groups = [
-    pool.filter((card) => card.kind === "hitter"),
-    pool.filter((card) => card.role === "SP"),
-    pool.filter((card) => card.role === "RP")
+    [pool.filter((card) => card.kind === "hitter"), PRICE_CURVE],
+    [pool.filter((card) => card.role === "SP"), PRICE_CURVE],
+    [pool.filter((card) => card.role === "RP"), RP_PRICE_CURVE]
   ];
   const priced = new Map();
-  for (const group of groups) {
+  for (const [group, curve] of groups) {
     const ranked = [...group].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+    const shares = scaledRarityShares(pool.length, ranked.length);
     ranked.forEach((card, index) => {
       const fromTop = (index + 1) / ranked.length;
-      const rarity = RARITY_SHARES.find(([, share]) => fromTop <= share)[0];
+      const rarity = shares.find(([, share]) => fromTop <= share)[0];
       const strength = (ranked.length - index) / ranked.length;
-      const truePoints = Math.round(PRICE_CURVE.base + PRICE_CURVE.span * strength ** PRICE_CURVE.gamma);
+      const truePoints = Math.round(curve.base + curve.span * strength ** curve.gamma);
       const noise = 1 + (rng.next() * 2 - 1) * PRICE_NOISE;
       const points = universeNoise ? Math.max(10, Math.round(truePoints * noise)) : truePoints;
       priced.set(card.id, { rarity, truePoints, points });
@@ -217,8 +294,8 @@ export function openPack(packId, seed) {
   if (!pack) throw new Error(`Unknown pack ${packId}`);
   const rng = createRng(seed);
   return pack.slots.map((slot) => {
-    const rarity = slot === "wild" ? rollRarity(rng, WILD_ODDS)
-      : slot === "hit" ? rollRarity(rng, HIT_ODDS)
+    const rarity = slot === "wild" ? rollRarity(rng, scaledOdds(WILD_ODDS))
+      : slot === "hit" ? rollRarity(rng, scaledOdds(HIT_ODDS))
       : slot;
     return rng.pick(cardsOfRarity(rarity));
   });
@@ -228,7 +305,9 @@ export function openPack(packId, seed) {
 // number (battles won) reshuffles the shelf, so beating anyone changes stock.
 export function shopStock(saveSeed, townId, cycle, count = 4) {
   const rng = createRng(`${saveSeed}:shop:${townId}:cycle-${cycle}`);
-  const tiers = ["common", "uncommon", "uncommon", rng.next() < 0.1 ? "legend" : "rare"];
+  // The legend slot obeys the same pool scaling as pack pulls.
+  const legendChance = 0.1 * Math.min(1, Math.sqrt(adventurePool().length / RARITY_REFERENCE));
+  const tiers = ["common", "uncommon", "uncommon", rng.next() < legendChance ? "legend" : "rare"];
   const stock = [];
   const seen = new Set();
   for (const tier of tiers.slice(0, count)) {

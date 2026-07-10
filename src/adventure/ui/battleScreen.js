@@ -12,6 +12,7 @@ import {
   cardLine
 } from "./helpers.js";
 import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js";
+import { recordCompletedRun } from "../hallOfFame.js";
 import { cardById } from "../packs.js";
 import { buildBoxScore, inningsPlayed } from "../../rules/game.js";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js";
@@ -141,6 +142,9 @@ export function applyOutcome(app, trainer, won) {
   if (trainer.rewards.badge && !save.player.badges.includes(trainer.rewards.badge)) {
     grantBadge(save, trainer.rewards.badge);
     outcome.badge = trainer.rewards.badge;
+    // The Commissioner's Trophy finishes the campaign: the run enters the
+    // hall of fame the moment it is won.
+    if (trainer.rewards.badge === "trophy") recordCompletedRun(save);
   }
   if (trainer.rewards.pack) {
     save.progress.counters.packsOpened += 1;
@@ -869,10 +873,22 @@ function claimComparisonHtml(app, selected) {
     ${mine.length ? mine.map((card) => cardPanelHtml(card)).join("") : `<p class="gq-dim">NOBODY. OPEN SLOT.</p>`}`;
 }
 
+// What the beaten trainer actually puts on the table. Only the postseason
+// (legendClaims trainers) stakes its legends: in a small universe every
+// mid-ladder boss fields pool-elite cards, and letting the winner lift the
+// best of them fight after fight hands over the whole top tier by the gym
+// circuit. Falls back to the full roster if somehow every card is a legend.
+function claimableRoster(trainer, save) {
+  const roster = buildNpcTeam(trainer, save).roster;
+  if (trainer.legendClaims) return roster;
+  const staked = roster.filter((card) => card.rarity !== "legend");
+  return staked.length ? staked : roster;
+}
+
 export const claimCardScreen = {
   render(app) {
     const trainer = trainerById(app.screen.trainerId);
-    const roster = buildNpcTeam(trainer, app.save).roster;
+    const roster = claimableRoster(trainer, app.save);
     const index = clampIndex(app.screen.index ?? 0, roster.length);
     const selected = roster[index];
     return `<div class="gq-screen">
@@ -885,11 +901,11 @@ export const claimCardScreen = {
     </div>`;
   },
   hoverCard(app, index) {
-    return buildNpcTeam(trainerById(app.screen.trainerId), app.save).roster[index] ?? null;
+    return claimableRoster(trainerById(app.screen.trainerId), app.save)[index] ?? null;
   },
   key(app, key) {
     const trainer = trainerById(app.screen.trainerId);
-    const roster = buildNpcTeam(trainer, app.save).roster;
+    const roster = claimableRoster(trainer, app.save);
     if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), roster.length);
     } else if (key === "a") {

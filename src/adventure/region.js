@@ -1,4 +1,5 @@
 import { timesBeaten } from "./state.js";
+import { poolCeiling } from "./packs.js";
 
 // The Cascade League: one town so far, with routes climbing past it. Trainers
 // are pure data — teams build deterministically from teamSeed + pointBudget.
@@ -264,12 +265,13 @@ export const TRAINERS = [
   },
   {
     id: "post-division",
+    legendClaims: true,
     name: "OCTOBER GATEKEEPER IVY",
     title: "Division Series",
     sprite: "IV",
     archetype: "speed",
     aiProfile: "aggressive",
-    teamSeed: "post-division-v1",
+    teamSeed: "post-division-v6",
     pointBudget: 6800,
     battleFormat: { type: "series", bestOf: 5 },
     repeatable: false,
@@ -287,13 +289,14 @@ export const TRAINERS = [
   },
   {
     id: "post-championship",
+    legendClaims: true,
     name: "PENNANT SHARK OKABE",
     title: "Championship Series",
     sprite: "OK",
     archetype: "ace",
     aiProfile: "balanced",
-    teamSeed: "post-championship-v1",
-    pointBudget: 7200,
+    teamSeed: "post-championship-v4",
+    pointBudget: 7800,
     battleFormat: { type: "series", bestOf: 7 },
     repeatable: false,
     requires: ["post-division"],
@@ -313,6 +316,7 @@ export const TRAINERS = [
   },
   {
     id: "rival-4",
+    legendClaims: true,
     name: "RIVAL CAM",
     title: "Rival",
     ambush: true,
@@ -320,7 +324,7 @@ export const TRAINERS = [
     archetype: "power",
     aiProfile: "aggressive",
     teamSeed: "rival-cam-4",
-    pointBudget: 7350,
+    pointBudget: 8000,
     battleFormat: { type: "game" },
     repeatable: false,
     requires: ["post-championship"],
@@ -340,13 +344,14 @@ export const TRAINERS = [
   },
   {
     id: "post-worldseries",
+    legendClaims: true,
     name: "MR. NOVEMBER GRAVES",
     title: "World Series",
     sprite: "GR",
     archetype: "balanced",
     aiProfile: "aggressive",
-    teamSeed: "post-worldseries-v1",
-    pointBudget: 7500,
+    teamSeed: "post-worldseries-v6",
+    pointBudget: 8800,
     battleFormat: { type: "series", bestOf: 7 },
     repeatable: false,
     requires: ["post-championship"],
@@ -354,7 +359,7 @@ export const TRAINERS = [
     dialog: {
       intro: [
         "Every October ends the same way: with me holding the trophy.",
-        "Seventy-five hundred points. The best money can assemble.",
+        "Eighty-eight hundred points. The best money can assemble.",
         "Seven games for everything. Play ball."
       ],
       win: [
@@ -389,14 +394,19 @@ export function isTrainerAvailable(save, trainer) {
 }
 
 // The NPC budget a save actually faces. Budget saves see the printed ladder
-// (2500 -> 7500). Uncapped saves swing much harder: budgets grow on a
-// power-1.5 curve anchored at the first scout's 2500, so the early routes
-// stay winnable while the World Series (7500 -> ~12800) shops for the best
-// thirteen cards money can print.
+// (2500 -> 8800). Uncapped saves swing much harder: budgets grow on a
+// power-1.5 curve anchored at the first scout's 2500 — but capped by the
+// POOL, at the pool's best-13 ceiling scaled to the trainer's rung. Only the
+// World Series shops for the best thirteen cards money can print; without
+// the cap, small universes (a franchise pool tops out near 9k) hit their
+// ceiling by mid-ladder and every boss after fields the same maxed team.
 export function npcBudget(save, trainer) {
   if (save?.mode !== "uncapped") return trainer.pointBudget;
   const anchor = 2500;
-  return Math.round((anchor * Math.pow(trainer.pointBudget / anchor, 1.5)) / 50) * 50;
+  const curve = Math.round((anchor * Math.pow(trainer.pointBudget / anchor, 1.5)) / 50) * 50;
+  const maxPrinted = Math.max(...TRAINERS.map((t) => t.pointBudget));
+  const rung = Math.round((poolCeiling() * trainer.pointBudget / maxPrinted) / 50) * 50;
+  return Math.max(trainer.pointBudget, Math.min(curve, rung));
 }
 
 // Repeatable rewards shrink on repeat wins so farming stays a floor, not an

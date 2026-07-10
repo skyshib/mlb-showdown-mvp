@@ -101,6 +101,38 @@ export function buildNpcTeam(trainer, save = null) {
     carry = allocation - pick.points;
   }
 
+  // Upgrade pass: roll unspent budget into the roster instead of leaving it
+  // on the table. Keep taking the single best swap — same slot, unused card,
+  // better archetype fit — until the leftover can't buy one. Every swap must
+  // spend MORE (this is budget-filling, not sidegrade-shopping), so the loop
+  // is bounded by the leftover and the team lands close to the limit.
+  let swapped = true;
+  while (swapped) {
+    swapped = false;
+    let best = null;
+    for (let index = 0; index < roster.length; index += 1) {
+      const current = roster[index];
+      const ceiling = pointBudget - spent + current.points;
+      for (const card of pool) {
+        if (used.has(card.id) || card.points > ceiling || card.points <= current.points) continue;
+        if (!slotMatches(slots[index], card)) continue;
+        const gain = score(card) - score(current);
+        if (gain <= 0) continue;
+        if (!best || gain > best.gain || (gain === best.gain && card.points < best.card.points)) {
+          best = { index, card, gain };
+        }
+      }
+    }
+    if (best) {
+      const outgoing = roster[best.index];
+      used.delete(outgoing.id);
+      used.add(best.card.id);
+      roster[best.index] = best.card;
+      spent += best.card.points - outgoing.points;
+      swapped = true;
+    }
+  }
+
   // Present (and bat) the squad best-first: hitters by printed points, then
   // pitchers by printed points, so the top starter also opens game 1.
   const byPoints = (a, b) => b.points - a.points || a.name.localeCompare(b.name);
