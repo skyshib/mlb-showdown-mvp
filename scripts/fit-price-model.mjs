@@ -38,15 +38,26 @@ function fit(rows) {
   const dim = keys.length + 1; // + intercept
   const XtX = Array.from({ length: dim }, () => Array(dim).fill(0));
   const Xty = Array(dim).fill(0);
-  for (const { features, y } of rows) {
+  for (const { features, y, weight = 1 } of rows) {
     const x = [1, ...keys.map((key) => features[key])];
     for (let i = 0; i < dim; i += 1) {
-      Xty[i] += x[i] * y;
-      for (let j = 0; j < dim; j += 1) XtX[i][j] += x[i] * x[j];
+      Xty[i] += weight * x[i] * y;
+      for (let j = 0; j < dim; j += 1) XtX[i][j] += weight * x[i] * x[j];
     }
   }
   const w = solve(XtX, Xty);
   return { intercept: w[0], weights: Object.fromEntries(keys.map((key, i) => [key, w[i + 1]])) };
+}
+
+// Hitters fit with each on-base level counting equally, not per printed
+// card: the sets printed 601 OB 9s and one OB 16 (Bonds '03, 900), and an
+// unweighted fit buys 5-point wins on commons by writing off the stars the
+// curve exists to price. Balancing holds every bucket's mean residual
+// within +-18 and costs the global holdout nothing (MAE 39.9 vs 39.8).
+function balanceByOnBase(rows) {
+  const counts = new Map();
+  for (const { ob } of rows) counts.set(ob, (counts.get(ob) ?? 0) + 1);
+  return rows.map((row) => ({ ...row, weight: 1 / counts.get(row.ob) }));
 }
 
 function predict(model, features) {
@@ -70,8 +81,9 @@ function report(model, rows) {
 const cards = decodeCardRows(CLASSIC_CARD_ROWS);
 const groups = { hitter: [], SP: [], RP: [] };
 for (const card of cards) {
-  groups[priceGroup(card)].push({ features: priceFeatures(card), y: card.points });
+  groups[priceGroup(card)].push({ features: priceFeatures(card), y: card.points, ob: card.onBase });
 }
+groups.hitter = balanceByOnBase(groups.hitter);
 
 const model = {};
 const stats = {};

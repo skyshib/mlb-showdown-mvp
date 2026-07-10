@@ -221,14 +221,13 @@ test("the starter pack is a legal 13-card roster: two rares, eleven commons, und
   );
 });
 
-test("the budget-mode point cap matches the first scout's rung", async () => {
-  const { npcBudget } = await import("../src/adventure/region.js");
+test("the budget-mode point cap scales with the pool: 1.4x the first scout's rung", async () => {
+  const { poolCeiling, LADDER_REFERENCE } = await import("../src/adventure/packs.js");
   const save = testSave();
-  // The opener is an even-budget fight in every pool: the player's cap IS
-  // Jojo's pool-scaled budget.
-  assert.equal(pointCap(save), npcBudget(save, trainerById("scout-jojo")));
+  const expected = Math.round((3500 * poolCeiling() / LADDER_REFERENCE) / 50) * 50;
+  assert.equal(pointCap(save), expected, "3500 in the reference league, the same fraction elsewhere");
   save.player.badges = ["ironwood", "galehook", "cascade", "pennant", "trophy"];
-  assert.equal(pointCap(save), npcBudget(save, trainerById("scout-jojo")), "badges do not move the cap");
+  assert.equal(pointCap(save), expected, "badges do not move the cap");
 });
 
 test("uncapped mode drops the player's cap and swells boss budgets", async () => {

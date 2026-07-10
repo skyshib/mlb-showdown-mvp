@@ -38,9 +38,22 @@ export function priceFeatures(card) {
     // bases (what it pays when it is) — so the workhorse feature is the
     // product, not either alone.
     const totalBases = single + 2 * double + 3 * triple + 4 * hr;
+    // Printed points grow convexly with how good a card is, not linearly —
+    // the sets charged a superstar premium. It rides two smooth power bases:
+    // expected production (on-base × the chart's reach-base slots — how
+    // often the chart is live times how often it pays) as a cubic whose
+    // fitted negative cube saturates near the Bonds '03 extreme, and
+    // on-base itself as a cube, because the sets priced the on-base axis
+    // steeper than production alone explains (Edgar '95 printed 660 while
+    // equal-production Helton '05 printed 500, one OB apart).
+    const reach = bb + single + double + triple + hr;
+    const production = (card.onBase * reach) / 20;
     return {
       onBase: card.onBase,
       onBaseSq: card.onBase * card.onBase,
+      obCube: card.onBase * card.onBase * card.onBase,
+      prodSq: production * production,
+      prodCube: production * production * production,
       obTotalBases: card.onBase * totalBases,
       obWalks: card.onBase * bb,
       speed: card.speed,

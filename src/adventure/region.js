@@ -5,8 +5,9 @@ import { poolCeiling, LADDER_REFERENCE } from "./packs.js";
 // are pure data — teams build deterministically from teamSeed + pointBudget.
 // Budgets ladder from 2500 up through the 6500-point summit and into the
 // postseason (division series, championship series, world series at 7500):
-// the player's cap is pinned to the FIRST rung (Jojo's), so every boss
-// after the opener out-spends the player and winning means bargains.
+// the player's cap is 1.4x the first rung (3500 in the reference league),
+// so mid-ladder bosses catch the player and the summit out-spends him
+// badly — winning means bargains.
 export const REGION = {
   name: "CASCADE LEAGUE",
   towns: [

@@ -197,6 +197,14 @@ export function setUniverseSeed(seed, mode = "fictional", { priceNoise = true } 
 // was originally tuned against: scale = poolCeiling() / LADDER_REFERENCE.
 export const LADDER_REFERENCE = 10500;
 
+// The budget-mode roster cap: 3500 in the fictional reference league (1.4x
+// the first scout's 2500 rung), and the same fraction of any other pool's
+// ceiling. Lives here rather than state.js so the starter pack can deal
+// under it.
+export function budgetCap() {
+  return Math.round((3500 * poolCeiling() / LADDER_REFERENCE) / 50) * 50;
+}
+
 let poolCeilingCache = null;
 const CEILING_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER", "SP", "SP", "RP", "RP"];
 
@@ -424,7 +432,7 @@ function slotMatches(slot, card) {
 // commons, randomized per save. Which two slots get the rares is part of the
 // luck of the draw — but only slots that actually stock a rare are in the
 // running, so thin pools (small franchises, old decades) still deal a pack.
-export function starterPack(seed) {
+function dealStarterPack(seed) {
   const rng = createRng(`starter-pack:${seed}`);
   const pool = adventurePool();
   const rareable = STARTER_PACK_SLOTS
@@ -456,4 +464,37 @@ export function starterPack(seed) {
     dealt.push(card);
     return card;
   });
+}
+
+// The sealed pack IS the opening roster, so it must fit under the budget
+// cap it deals into. Deal on flavor first, then repair: while over the cap,
+// swap the priciest card for the cheapest unused card that fills the same
+// slot (rarity be damned — thin pools price even commons dearly). The
+// repair is greedy and deterministic, so the same seed still deals the
+// same pack.
+export function starterPack(seed) {
+  const pack = dealStarterPack(seed);
+  const pool = adventurePool();
+  const cap = budgetCap();
+  let guard = STARTER_PACK_SLOTS.length * 2;
+  while (pack.reduce((sum, card) => sum + card.points, 0) > cap && guard-- > 0) {
+    const order = [...pack.keys()].sort((a, b) => pack[b].points - pack[a].points);
+    let swapped = false;
+    for (const at of order) {
+      const others = pack.filter((_, index) => index !== at);
+      const cheaper = pool
+        .filter((card) => card.points < pack[at].points &&
+          slotMatches(STARTER_PACK_SLOTS[at], card) &&
+          !others.some((held) => held.id === card.id) &&
+          !personConflict(others, card))
+        .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name))[0];
+      if (cheaper) {
+        pack[at] = cheaper;
+        swapped = true;
+        break;
+      }
+    }
+    if (!swapped) break; // nothing cheaper anywhere: the pool is the pool
+  }
+  return pack;
 }

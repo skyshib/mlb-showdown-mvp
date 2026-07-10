@@ -124,105 +124,153 @@ h1.gq-logo {
 
 /* ---- Cards ---- */
 
+/* Card panels break from the DMG palette on purpose: they print in the main
+   app's full-color card design (src/styles.css .player-card) — real trading
+   card proportions (5:7), rarity metal frames, a team-accent photo stage,
+   and the classic chart colors. The rest of the screen stays green; the
+   cards are the color in the world. */
 .gq-card {
-  border: 0.8cqw solid var(--gb-darkest);
-  padding: 1.2cqw 1.6cqw;
+  --rarity-frame: #9c6a3f;
+  --rarity-glow: rgba(156, 106, 63, 0.32);
+  --card-accent: #365f91;
+  --card-accent-dark: #0c354f;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 5 / 7;
+  padding: 0.7cqw;
   margin-bottom: 1.5cqw;
-  background: var(--gb-lightest);
-  display: flow-root; /* floats (headshots) stay inside the frame */
+  overflow: hidden;
+  border-radius: 2cqw;
+  background: var(--rarity-frame);
+  box-shadow: 0 1.2cqw 2.4cqw rgba(28, 37, 33, 0.22), 0 0 2.2cqw var(--rarity-glow);
+  color: white;
+}
+.gq-card-pitcher {
+  --card-accent: #9a2f28;
+  --card-accent-dark: #3c110d;
 }
 
-/* Scanned cards: text on the left, the printed card on the right, the panel
-   growing to fit the scan instead of the scan spilling out. */
-.gq-card-has-scan {
+/* Rarity is the frame metal, exactly like the main app's cards. */
+.gq-rarity-border-uncommon { --rarity-frame: #c9d2d8; --rarity-glow: rgba(152, 186, 205, 0.36); }
+.gq-rarity-border-rare { --rarity-frame: #e1b64b; --rarity-glow: rgba(221, 173, 57, 0.42); }
+.gq-rarity-border-legend { --rarity-frame: #e1b64b; --rarity-glow: rgba(120, 180, 255, 0.52); }
+
+/* Scanned classics: the printed card IS the picture — it fills the frame,
+   and only a slim chart tray rides below at the same width. The scan sets
+   the height (its 255:356 print ratio is a whisker off 5:7). */
+.gq-card-has-scan { aspect-ratio: auto; }
+.gq-card-has-scan .gq-card-lower { gap: 0.4cqw; padding: 0.8cqw; }
+
+.gq-card-name {
+  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
+  font-weight: 950;
+  font-size: 3.4cqw;
+}
+.gq-card-meta { font-size: 2.2cqw; margin-top: 0.3cqw; letter-spacing: 0.03em; }
+.gq-card-teams { font-size: 2cqw; margin-top: 0.2cqw; color: rgba(255, 255, 255, 0.72); }
+.gq-card .gq-dim { color: rgba(255, 255, 255, 0.72); }
+
+/* The dark lower panel: strip, tagline, clubs, chart on an accent wash. */
+.gq-card-lower {
   display: grid;
-  /* The scan takes a share of the CARD's own width, so it scales the same
-     in a half-width binder column, the pack stage, and the tooltip. */
-  grid-template-columns: minmax(0, 1fr) 38%;
-  gap: 1.6cqw;
-  align-items: start;
+  gap: 0.8cqw;
+  border-radius: 0 0 1.4cqw 1.4cqw;
+  padding: 1cqw 1.2cqw 1.2cqw;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.46)),
+    linear-gradient(90deg, var(--card-accent-dark), var(--card-accent));
 }
-.gq-card-body { min-width: 0; }
 
-.gq-card-name { font-weight: 700; font-size: 3.4cqw; }
-.gq-card-meta { font-size: 2.9cqw; margin-top: 0.3cqw; }
-.gq-card-teams { font-size: 2.4cqw; margin-top: 0.5cqw; color: var(--gb-dark); }
-
-/* Player strip: the main-app card's layout — big On-Base/Control square,
-   name over one compact meta line, rarity tag on the right. */
+/* Player strip: big On-Base/Control square in the printed yellow, name over
+   one compact meta line, count or TWO-WAY tag on the right. */
 .gq-card-strip {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 1.3cqw;
   align-items: center;
 }
-/* The two-way partner's strip stacks under the primary's chart. */
-.gq-chart + .gq-card-strip { margin-top: 1.6cqw; }
 .gq-card-square {
-  min-width: 7cqw;
-  height: 7cqw;
+  min-width: 6.4cqw;
+  height: 6.4cqw;
   display: grid;
   place-items: center;
   padding: 0 0.6cqw;
-  background: var(--gb-darkest);
-  color: var(--gb-lightest);
-  font-size: 4.4cqw;
-  font-weight: 700;
+  border-radius: 0.7cqw;
+  background: #ffe56f;
+  color: #b51225;
+  font-size: 4.2cqw;
+  font-weight: 950;
 }
 .gq-card-strip-text { min-width: 0; }
-.gq-card-strip .gq-card-name,
-.gq-card-strip .gq-card-meta {
+.gq-card-strip .gq-card-name {
   display: block;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  letter-spacing: 0;
+  font-size: 3cqw;
 }
+/* Long position lists (1B+0 LF/RF+1) wrap rather than clip. */
+.gq-card-strip .gq-card-meta { letter-spacing: 0; }
+.gq-card-tagline { font-size: 2.2cqw; letter-spacing: 0; }
 
-/* Chart: one column per merged die range, range on top, result under it. */
+/* Chart: one column per merged die range, range on top, result under it,
+   in the printed sets' result colors. */
 .gq-chart {
   display: grid;
   grid-template-columns: repeat(var(--gq-chart-cols), minmax(0, 1fr));
-  margin-top: 1.2cqw;
-  border: 0.4cqw solid var(--gb-darkest);
+  overflow: hidden;
+  border: 0.3cqw solid rgba(12, 16, 19, 0.84);
+  border-radius: 0.7cqw;
+  background: #f4efd8;
   text-align: center;
+  box-shadow: 0 0.2cqw 0 rgba(255, 255, 255, 0.38) inset, 0 0.2cqw 1.4cqw rgba(0, 0, 0, 0.2);
 }
 .gq-chart-cell {
   min-width: 0;
   display: grid;
   grid-template-rows: auto auto;
-  border-right: 0.3cqw solid var(--gb-darkest);
+  border-right: 0.2cqw solid rgba(12, 16, 19, 0.34);
+  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
 }
 .gq-chart-cell:last-child { border-right: 0; }
 .gq-chart-range {
   overflow: hidden;
   white-space: nowrap;
-  background: var(--gb-lightest);
-  color: var(--gb-darkest);
-  font-size: 2.3cqw;
-  line-height: 1.6;
+  background: #f8f4df;
+  color: #111820;
+  font-size: 1.7cqw;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 2;
+  font-variant-numeric: tabular-nums;
 }
 .gq-chart-result {
-  font-size: 2.6cqw;
+  font-size: 2.2cqw;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1.7;
+  color: white;
+  text-shadow: 0 0.2cqw 0.6cqw rgba(0, 0, 0, 0.58);
+}
+.gq-chart-out .gq-chart-result { background: #253544; color: #c3d0d6; }
+.gq-chart-walk .gq-chart-result { background: #16825e; }
+.gq-chart-single .gq-chart-result { background: #d7aa36; color: #241a08; text-shadow: none; }
+.gq-chart-double .gq-chart-result { background: #e88334; }
+.gq-chart-triple .gq-chart-result { background: #d9572d; }
+.gq-chart-homer .gq-chart-result { background: #e94c5f; }
+
+/* The rarity chip in the tagline wears its frame metal. */
+.gq-rarity {
   font-weight: 700;
-  line-height: 1.55;
+  padding: 0 0.7cqw;
+  border-radius: 0.5cqw;
+  background: var(--rarity-frame);
+  color: #171512;
+  font-size: 2.2cqw;
 }
-.gq-chart-out .gq-chart-result { background: var(--gb-darkest); color: var(--gb-lightest); }
-.gq-chart-walk .gq-chart-result { background: var(--gb-dark); color: var(--gb-lightest); }
-.gq-chart-hit .gq-chart-result { background: var(--gb-light); color: var(--gb-darkest); }
-/* Four shades of green don't leave a fifth for homers: stripes instead. */
-.gq-chart-homer .gq-chart-result {
-  background: repeating-linear-gradient(45deg, var(--gb-darkest) 0 1cqw, var(--gb-dark) 1cqw 2cqw);
-  color: var(--gb-lightest);
-}
-
-.gq-rarity { font-weight: 700; padding: 0 0.7cqw; border: 0.3cqw solid var(--gb-darkest); font-size: 2.5cqw; }
-.gq-rarity-uncommon { background: var(--gb-light); }
-.gq-rarity-rare { background: var(--gb-dark); color: var(--gb-lightest); }
-.gq-rarity-legend { background: var(--gb-darkest); color: var(--gb-lightest); animation: gq-blink 1.2s steps(2) infinite; }
-
-.gq-rarity-border-uncommon { border-style: double; }
-.gq-rarity-border-rare { border-width: 1.1cqw; }
-.gq-rarity-border-legend { border-width: 1.1cqw; border-style: double; box-shadow: 0 0 0 0.5cqw var(--gb-light); }
+.gq-rarity-legend { animation: gq-blink 1.2s steps(2) infinite; }
 
 /* ---- Battle screen ---- */
 
@@ -273,21 +321,30 @@ h1.gq-logo {
   margin: 2cqw 0;
 }
 
-/* ---- Real-player headshots (Wikipedia thumbnails) ---- */
+/* ---- Card photo stage (portraits, scans) ---- */
 
-/* A full-bleed band across the top of the card (the main-app card's photo
-   area), portrait centered on the light stage. The portrait box keeps the
-   source photos' aspect ratio so faces stay in frame; the DMG green wash
-   keeps them on-palette. */
+/* The photo stage is the card: it takes all the height the lower panel
+   doesn't, on a team-accent gradient with the printed cards' bottom-fade
+   vignette. Real portraits render in grayscale and blend luminosity-style,
+   so the accent tints them like the main app's cards. */
 .gq-card-photo {
-  height: 16cqw;
-  /* Bleed through the card's own padding to its border. */
-  margin: -1.2cqw -1.6cqw 1.2cqw;
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   justify-content: center;
   overflow: hidden;
-  background: var(--gb-light);
-  border-bottom: 0.5cqw solid var(--gb-darkest);
+  border-radius: 1.4cqw 1.4cqw 0 0;
+  background: linear-gradient(155deg, var(--card-accent), var(--card-accent-dark));
+}
+.gq-card-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 86% at 50% 27%, transparent 46%, rgba(0, 0, 0, 0.26)),
+    linear-gradient(to bottom, transparent 58%, rgba(5, 8, 10, 0.7));
 }
 .gq-card-headshot {
   position: relative;
@@ -301,29 +358,34 @@ h1.gq-logo {
   height: 100%;
   object-fit: cover;
   object-position: center top;
-  filter: grayscale(1) sepia(1) hue-rotate(55deg) saturate(1.6) brightness(0.95) contrast(1.05);
-  image-rendering: pixelated;
+  filter: grayscale(1) contrast(1.05) brightness(1.08);
+  mix-blend-mode: luminosity;
 }
-/* Generated pixel portraits are already in the DMG palette — no wash. */
+/* Generated pixel portraits keep their own palette — no blend. */
 .gq-card-headshot svg {
   width: 100%;
   height: 100%;
   display: block;
 }
-
-/* Real Showdown card scans (ShowdownCards.com) run full color on purpose —
-   the actual printed card is the point. Fills its grid column. */
-.gq-card-scan {
-  width: 100%;
-  aspect-ratio: 255 / 356;
-  border: 0.4cqw solid var(--gb-darkest);
-  image-rendering: auto;
+/* Fictional players with no portrait show their monogram on the stage. */
+.gq-card-initials {
   align-self: center;
+  color: rgba(255, 255, 255, 0.72);
+  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
+  font-size: 10cqw;
+  font-weight: 950;
+  letter-spacing: 0.08em;
 }
 
-/* Coarse pointers (phones): the scan cedes room to the text. */
-@media (pointer: coarse) {
-  .gq-card-has-scan { grid-template-columns: minmax(0, 1fr) 30%; }
+/* Real Showdown card scans (ShowdownCards.com) run full color on purpose —
+   the actual printed card is the point. It fills the frame's width; the
+   chart tray below matches it exactly. */
+.gq-card-scan {
+  display: block;
+  width: 100%;
+  aspect-ratio: 255 / 356;
+  border-radius: 1.4cqw 1.4cqw 0 0;
+  image-rendering: auto;
 }
 /* ---- Foil cards ---- */
 
@@ -464,21 +526,17 @@ h1.gq-logo {
 /* ---- Hover card tooltip ---- */
 
 /* Floats outside the shell, so it declares its own container: cqw units in
-   the card panel resolve against the tooltip's width. */
+   the card panel resolve against the tooltip's width. Sized so the 5:7
+   card stands fully on screen. */
 .gq-tooltip {
   position: fixed;
   z-index: 50;
-  width: min(54vw, 68vh);
+  width: min(36vw, 58vh);
   container-type: inline-size;
   pointer-events: none;
   filter: drop-shadow(0 0.5em 1.5em rgba(0, 0, 0, 0.55));
 }
-.gq-tooltip .gq-card {
-  border-width: 0.8cqw;
-  background: var(--gb-lightest);
-  color: var(--gb-darkest);
-  font-family: "Courier New", ui-monospace, monospace;
-}
+.gq-tooltip .gq-card { margin-bottom: 0; }
 
 /* ---- Touch controls (the rest of the Game Boy) ---- */
 

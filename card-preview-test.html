@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Card restyle preview (temp)</title>
+  <link rel="stylesheet" href="./src/adventure/styles.css">
+  <style>
+    body { display: block; padding: 24px; background: #2b2b28; }
+    main { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+    .stage { width: 300px; container-type: inline-size; }
+    .label { color: #ddd; font: 12px monospace; margin: 0 0 6px; }
+  </style>
+</head>
+<body>
+  <main id="stages"></main>
+  <script type="module">
+    import { setUniverseSeed, adventurePool, cardById } from "./src/adventure/packs.js";
+    import { cardPanelHtml } from "./src/adventure/ui/helpers.js";
+    const stages = document.getElementById("stages");
+    const show = (label, html) => {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = `<p class="label">${label}</p><div class="stage">${html}</div>`;
+      stages.appendChild(wrap);
+    };
+    setUniverseSeed("preview", "classic", { priceNoise: true });
+    const classics = adventurePool();
+    const scanned = classics.find((c) => c.name.includes("Pujols")) ?? classics[40];
+    show("classic scan", cardPanelHtml(scanned, { count: 2 }));
+    setUniverseSeed("preview", "mlb-history", { priceNoise: true });
+    show("MLB hitter (legend)", cardPanelHtml(cardById("mlb-all-bondsba01")));
+    show("MLB pitcher", cardPanelHtml(cardById("mlb-all-johnsra05")));
+    show("two-way (Ohtani)", cardPanelHtml(cardById("mlb-all-ohtansh01-bat"), { count: 1 }));
+    setUniverseSeed("preview", "fictional", { priceNoise: true });
+    const fictional = adventurePool();
+    show("fictional common", cardPanelHtml(fictional.find((c) => c.rarity === "common" && c.kind === "hitter")));
+  </script>
+</body>
+</html>

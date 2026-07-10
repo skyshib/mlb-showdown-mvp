@@ -73,18 +73,18 @@ function cardTeams(card) {
 // main.js hydrates from Wikipedia, plus their set tag / years-active line.
 function stripMetaLine(card) {
   return card.kind === "pitcher"
-    ? `${card.points} PT &middot; ${escapeHtml(card.role)} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
-    : `${card.points} PT &middot; SPD ${card.speed} &middot; ${escapeHtml(positionFieldingLabel(card))}`;
+    ? `${escapeHtml(card.role)} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
+    : `SPD ${card.speed} &middot; ${escapeHtml(positionFieldingLabel(card))}`;
 }
 
 function cardStrip(card, { count = null, tag = "" } = {}) {
   return `<div class="gq-card-strip">
     <span class="gq-card-square">${card.kind === "pitcher" ? card.control : card.onBase}</span>
     <span class="gq-card-strip-text">
-      <span class="gq-card-name">${escapeHtml(card.name.toUpperCase())}${count !== null ? ` <span class="gq-dim">x${count}</span>` : ""}</span>
+      <span class="gq-card-name">${escapeHtml(card.name.toUpperCase())}</span>
       <span class="gq-card-meta">${stripMetaLine(card)}</span>
     </span>
-    ${tag}
+    ${count !== null ? `<span class="gq-card-meta gq-dim">x${count}</span>` : tag}
   </div>`;
 }
 
@@ -103,23 +103,38 @@ function chartGrid(card) {
 function resultTone(result) {
   if (result === "HR") return "homer";
   if (result === "BB") return "walk";
-  if (["1B", "2B", "3B"].includes(result)) return "hit";
+  if (result === "1B") return "single";
+  if (result === "2B") return "double";
+  if (result === "3B") return "triple";
   return "out";
 }
 
-export function cardPanelHtml(card, { count = null } = {}) {
+function cardShell(card, extra = "") {
   const foil = card.foil || card.rarity === "legend";
-  // Classic cards with a real scan show the actual printed card (courtesy of
-  // ShowdownCards.com), full color on purpose; everyone else keeps the
-  // photo band.
+  return `gq-card gq-card-${card.kind === "pitcher" ? "pitcher" : "hitter"} gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}${extra}`;
+}
+
+export function cardPanelHtml(card, { count = null } = {}) {
+  // Classic cards with a real scan ARE the card: the printed scan fills the
+  // frame (courtesy of ShowdownCards.com), with just a compact chart tray
+  // below at the scan's width — no rarity chip, no set tag; the print
+  // already says everything else.
   const scan = CARD_IMAGE_FILES[card.id];
-  const photo = !scan && card.real
-    ? `<div class="gq-card-photo"><div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div></div>`
-    : "";
+  if (scan) {
+    return `<div class="${cardShell(card, " gq-card-has-scan")}">
+      <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
+      <div class="gq-card-lower">${chartGrid(card)}${count !== null ? `<div class="gq-card-meta gq-dim">x${count}</div>` : ""}</div>
+    </div>`;
+  }
+  // Everyone else prints in the main app's card layout: team-accent photo
+  // stage up top (Wikipedia headshots hydrate in; fictional players show
+  // their initials), then the dark lower panel — player strip, tagline,
+  // clubs, chart.
+  const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
+  const photo = `<div class="gq-card-photo">${card.real
+    ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
+    : `<span class="gq-card-initials">${escapeHtml(initials)}</span>`}</div>`;
   const teams = cardTeams(card);
-  const setLine = [card.setTag ? escapeHtml(card.setTag) : "", ...(teams ?? []).map(escapeHtml)]
-    .filter(Boolean)
-    .join(" &middot; ");
   // A simultaneous two-way pair prints as one card: the other half's strip
   // and chart stack under the primary's. Both roster separately.
   const partner = dualPartnerCard(card.id);
@@ -127,20 +142,9 @@ export function cardPanelHtml(card, { count = null } = {}) {
     ? `${cardStrip(partner, { tag: `<span class="gq-card-meta gq-dim">TWO-WAY</span>` })}
     ${chartGrid(partner)}`
     : "";
-  const body = `${photo}
-    ${cardStrip(card, { count, tag: rarityTag(card) })}
-    ${setLine ? `<div class="gq-card-teams">${setLine}</div>` : ""}
-    ${chartGrid(card)}
-    ${partnerBlock}`;
-  // Scanned cards lay out as text | card image, so the panel grows to fit
-  // the scan instead of the scan spilling out of the frame.
-  if (scan) {
-    return `<div class="gq-card gq-card-has-scan gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">
-      <div class="gq-card-body">${body}</div>
-      <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
-    </div>`;
-  }
-  return `<div class="gq-card gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}">${body}</div>`;
+  const tagline = `<div class="gq-card-meta gq-card-tagline">${rarityTag(card)} <span class="gq-dim">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span></div>`;
+  const teamLine = teams ? `<div class="gq-card-teams">${teams.map(escapeHtml).join(" &middot; ")}</div>` : "";
+  return `<div class="${cardShell(card)}">${photo}<div class="gq-card-lower">${cardStrip(card, { count })}${tagline}${teamLine}${chartGrid(card)}${partnerBlock}</div></div>`;
 }
 
 // Classic card names carry their card year ("Mike Caruso '02"). Cramped or
