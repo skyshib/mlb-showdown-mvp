@@ -1,7 +1,7 @@
 import { normalizeResult, formatRange } from "../../rules/cards.js";
 import { RARITIES } from "../packs.js";
 import { CARD_IMAGE_FILES } from "../../data/cardImages.js";
-import { MLB_TEAM_NAMES, MLB_PLAYER_TEAMS } from "../../data/mlbTeams.js";
+import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS } from "../../data/mlbTeams.js";
 
 export function escapeHtml(value) {
   return String(value)
@@ -60,10 +60,10 @@ function cardTeams(card) {
   const window = match[1] === "all" ? "all" : match[1] === "00s" ? "2000" : match[1].slice(1);
   const list = MLB_PLAYER_TEAMS[match[2]]?.[window];
   if (!list?.length) return null;
-  const names = list.map((index) => MLB_TEAM_NAMES[index]);
-  return names.length > TEAM_LIST_CAP + 1
-    ? [...names.slice(0, TEAM_LIST_CAP), `+${names.length - TEAM_LIST_CAP} more`]
-    : names;
+  const codes = list.map((index) => MLB_TEAM_CODES[index]);
+  return codes.length > TEAM_LIST_CAP + 1
+    ? [...codes.slice(0, TEAM_LIST_CAP), `+${codes.length - TEAM_LIST_CAP} more`]
+    : codes;
 }
 
 // Full card panel: the binder/pack view. Chart rows collapse to the compact
