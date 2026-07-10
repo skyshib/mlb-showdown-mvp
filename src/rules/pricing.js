@@ -68,6 +68,11 @@ export function priceFeatures(card) {
     };
   }
   const outs = (s.PU ?? 0) + (s.SO ?? 0) + (s.GB ?? 0) + (s.FB ?? 0);
+  // Pitcher production mirrors the hitter feature: control (how often the
+  // pitcher's chart is the one rolled) times its out slots (what the chart
+  // pays when it is). Convex powers and the stamina interaction let ace
+  // value grow superlinearly the way the printed sets charged for it.
+  const quality = (card.control * outs) / 20;
   return {
     control: card.control,
     controlSq: card.control * card.control,
@@ -76,6 +81,9 @@ export function priceFeatures(card) {
     // control decides how often that chart is the one rolled.
     ctrlIp: card.control * card.ip,
     ctrlOuts: card.control * outs,
+    qualitySq: quality * quality,
+    qualityCube: quality * quality * quality,
+    qualityIp: quality * card.ip,
     so: s.SO ?? 0,
     pu: s.PU ?? 0,
     bb: s.BB ?? 0,
