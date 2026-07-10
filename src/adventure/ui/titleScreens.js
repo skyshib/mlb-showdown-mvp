@@ -55,6 +55,7 @@ function titleItems(app) {
   items.push({ label: "NEW GAME", run: (a) => a.go("intro", { page: 0 }) });
   if (app.save) items.push({ label: "EXPORT SAVE", run: (a) => a.go("exportSave") });
   items.push({ label: "IMPORT SAVE", run: (a) => a.go("importSave") });
+  items.push({ label: "HALL OF FAME", run: (a) => a.go("hallOfFame", { index: 0 }) });
   if (app.save) {
     items.push({
       label: "DELETE SAVE",
@@ -204,14 +205,31 @@ export const nameEntryScreen = {
 };
 
 // Which baseball do you want? A fresh fictional league, the real 2000-2005
-// Showdown card set, real players (all time, any decade, or any franchise).
-// DECADE and FRANCHISE open sub-lists.
+// Showdown card set, or real players: ALL TEAMS (check the decades you want
+// in the pool — all of them by default) or a single FRANCHISE. Both open
+// sub-screens.
+function checkedDecades(app) {
+  if (!app.screen.checkedDecades) app.screen.checkedDecades = [...DECADES];
+  return app.screen.checkedDecades;
+}
+
 function leagueOptions(app) {
-  if (app.screen.picker === "decade") {
-    return DECADES.map((start) => ({
-      label: `THE ${start}s`,
-      universe: `decade-${start}`
-    }));
+  if (app.screen.picker === "decades") {
+    const checked = checkedDecades(app);
+    return [
+      ...DECADES.map((start) => ({
+        label: `${checked.includes(start) ? "[X]" : "[ ]"} THE ${start}s`,
+        toggle: start,
+        blurb: `Real big leaguers rated on their ${start}-${start + 9} numbers.`
+      })),
+      {
+        label: "PLAY BALL",
+        confirm: true,
+        blurb: checked.length
+          ? `Start with ${checked.length === DECADES.length ? "every decade" : `${checked.length} decade${checked.length === 1 ? "" : "s"}`} in the pool — one card per player per decade.`
+          : "Check at least one decade first."
+      }
+    ];
   }
   if (app.screen.picker === "franchise") {
     return FRANCHISES.map((franchise) => ({
@@ -220,8 +238,10 @@ function leagueOptions(app) {
     }));
   }
   return [
-    ...Object.values(UNIVERSES).map((league) => ({ label: league.name, universe: league.key })),
-    { label: "MLB: DECADE", picker: "decade", blurb: "Pick any decade from the 1910s on — players rated on those ten years." },
+    ...Object.values(UNIVERSES)
+      .filter((league) => league.key !== "mlb-history")
+      .map((league) => ({ label: league.name, universe: league.key })),
+    { label: "MLB: ALL TEAMS", picker: "decades", blurb: "Real players from every team — check the decades you want in the pool." },
     { label: "MLB: FRANCHISE", picker: "franchise", blurb: "Pick a club and play its all-time roster — every player rated on their years there." }
   ];
 }
@@ -232,14 +252,14 @@ export const leagueSelectScreen = {
     const index = clampIndex(app.screen.menuIndex ?? 0, options.length);
     const selected = options[index];
     const blurb = selected.blurb ?? universeConfig(selected.universe)?.blurb ?? "";
-    const title = app.screen.picker === "decade" ? "PICK A DECADE" : app.screen.picker === "franchise" ? "PICK A FRANCHISE" : "CHOOSE YOUR LEAGUE";
+    const title = app.screen.picker === "decades" ? "CHECK YOUR DECADES" : app.screen.picker === "franchise" ? "PICK A FRANCHISE" : "CHOOSE YOUR LEAGUE";
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>${title}</span><span>${index + 1}/${options.length}</span></div>
       <div class="gq-body">
         <div class="gq-frame gq-scroll" style="max-height:62%">${menuHtml(options.map((option) => ({ label: option.label })), index)}</div>
         ${blurb ? `<div class="gq-frame"><p class="gq-dim">${escapeHtml(blurb)}</p></div>` : ""}
       </div>
-      <div class="gq-textbox"><p>Z picks. ${app.screen.picker ? "X backs out." : "Your starter pack comes from the league you choose."}</p></div>
+      <div class="gq-textbox"><p>${app.screen.picker === "decades" ? "Z toggles a decade. PLAY BALL starts. X backs out." : `Z picks. ${app.screen.picker ? "X backs out." : "Your starter pack comes from the league you choose."}`}</p></div>
     </div>`;
   },
   key(app, key) {
@@ -248,7 +268,17 @@ export const leagueSelectScreen = {
       app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), options.length);
     } else if (key === "a") {
       const choice = options[clampIndex(app.screen.menuIndex ?? 0, options.length)];
-      if (choice.picker) {
+      if (choice.toggle != null) {
+        const checked = checkedDecades(app);
+        app.screen.checkedDecades = checked.includes(choice.toggle)
+          ? checked.filter((start) => start !== choice.toggle)
+          : [...checked, choice.toggle];
+      } else if (choice.confirm) {
+        const picked = DECADES.filter((start) => checkedDecades(app).includes(start));
+        if (picked.length) {
+          app.go("modeSelect", { playerName: app.screen.playerName, universe: `decades-${picked.join(",")}`, menuIndex: 0 });
+        }
+      } else if (choice.picker) {
         app.screen.picker = choice.picker;
         app.screen.menuIndex = 0;
       } else {
