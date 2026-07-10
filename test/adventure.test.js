@@ -1051,6 +1051,20 @@ test("the replacement picker leads with the incumbent, diamond-marked; picking h
   assert.ok(!save.roster.cardIds.includes(anchor.id), "and the incumbent departs");
 });
 
+test("the team screen shows the previewed card's season stats", async () => {
+  const { teamScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  assert.ok(teamScreen.render(app).includes("THIS SEASON: NO GAMES YET."), "a fresh season says so");
+
+  const { player, npc } = hookTeams();
+  const result = simulateGame(buildTeam(player), buildTeam(npc), "team-stats");
+  recordGameStats(save, result.boxScore.away);
+  const withStats = teamScreen.render(app);
+  assert.ok(withStats.includes("THIS SEASON"), "the season line shows");
+  assert.match(withStats.replace(/<[^>]+>/g, " "), /OPS.*1G/, "with the hitter's rates and games");
+});
+
 test("the roster locks mid-series; rotation, DH, and batting order stay live", async () => {
   const { teamScreen, swapRotation, dhFlipOptions } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();

@@ -19,6 +19,8 @@ import {
   addLog
 } from "../state.js";
 import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js";
+import { rateText, ipText, wpaHtml } from "./statsScreens.js";
+import { seasonHitters, seasonPitchers } from "../state.js";
 
 // ---- Shop ------------------------------------------------------------------
 
@@ -574,6 +576,19 @@ function benchLabel(anchor, filter) {
   return filter === "all" ? `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}` : `SPARE ${slot} ONLY`;
 }
 
+// The previewed card's season line, shown under the card panel on the Team
+// screen — how the man is actually hitting, not just what he's rated.
+function seasonStatsHtml(save, card) {
+  if (!card) return "";
+  const isArm = card.kind === "pitcher";
+  const line = (isArm ? seasonPitchers(save) : seasonHitters(save)).find((item) => item.id === card.id);
+  if (!line) return `<div class="gq-frame"><p class="gq-dim">THIS SEASON: NO GAMES YET.</p></div>`;
+  const body = isArm
+    ? `${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G`
+    : `${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G`;
+  return `<div class="gq-frame"><p class="gq-dim">THIS SEASON ${wpaHtml(line.wpa)}</p><p>${body}</p></div>`;
+}
+
 export const teamScreen = {
   render(app) {
     const save = app.save;
@@ -627,7 +642,7 @@ export const teamScreen = {
       <div class="gq-topbar"><span>TEAM &middot; ${escapeHtml(save.player.name)}</span><span>${Number.isFinite(cap) ? `${points}/${cap} PT` : `${points} PT &middot; UNCAPPED`}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${list}</div>
-        <div>${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
+        <div>${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) + seasonStatsHtml(save, preview) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
       </div></div>
       <div class="gq-textbox">
         ${issues.length ? `<p>! ${escapeHtml(issues.join(", "))}</p>` : `<p>ROSTER IS GAME-READY.</p>`}
