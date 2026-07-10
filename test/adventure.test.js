@@ -548,6 +548,41 @@ test("the shop never lists roster cards, hovers its rows, and sell-all wants a c
   assert.equal(sellAllCards(save), 0, "a second sweep finds nothing");
 });
 
+test("two-way players field both halves: bat card at DH, arm on the staff", () => {
+  try {
+    setUniverseSeed("two-way-test", "decade-2020");
+    const pool = adventurePool();
+    const bat = pool.find((card) => card.id === "mlb-d2020-ohtansh01-bat");
+    const arm = pool.find((card) => card.id === "mlb-d2020-ohtansh01");
+    assert.ok(bat && arm, "both Ohtani halves live in the pool");
+    assert.equal(bat.name, arm.name, "one name, two cards");
+    assert.equal(bat.kind, "hitter");
+    assert.equal(bat.position, "DH", "the bat half occupies the DH slot");
+    assert.equal(arm.kind, "pitcher");
+    // Roster both halves — playing him two-way costs two of the thirteen
+    // spots — and the lineup builder seats the bat while the arm pitches.
+    const taken = new Set([bat.id, arm.id]);
+    const roster = [bat, arm];
+    for (const [slot, byRole] of [["C"], ["1B"], ["2B"], ["3B"], ["SS"], ["LF/RF"], ["LF/RF"], ["CF"], ["SP", true], ["RP", true], ["RP", true]]) {
+      const fit = pool.find((card) => !taken.has(card.id) &&
+        (byRole ? card.role === slot : card.kind === "hitter" && card.position === slot));
+      assert.ok(fit, `pool covers ${slot}`);
+      taken.add(fit.id);
+      roster.push(fit);
+    }
+    const manager = { id: "p", name: "P", roster, lineupAssignments: {}, battingOrder: [] };
+    assert.equal(validateRoster(manager).length, 0, "both halves fit one legal roster");
+    const team = buildTeam(manager);
+    assert.ok(team.lineup.some((card) => card.id === bat.id), "the bat half is in the batting order");
+    // Rostering only one half works too: drop the bat card, DH someone else.
+    const replacementDh = pool.find((card) => card.kind === "hitter" && !taken.has(card.id));
+    const soloArm = { ...manager, roster: roster.filter((card) => card.id !== bat.id).concat(replacementDh) };
+    assert.equal(validateRoster(soloArm).length, 0, "the arm plays alone just fine");
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
 test("boss rosters spread the budget instead of stars-and-scrubs", () => {
   for (const trainer of TRAINERS) {
     const npc = buildNpcTeam(trainer);

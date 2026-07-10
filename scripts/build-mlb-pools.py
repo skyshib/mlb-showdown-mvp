@@ -339,14 +339,16 @@ def build_pitcher(pid, t, L, last_year=9999):
     points = round((ctrl * 35 + power) * ((ip_card + 4) / 10)) + ip_card * 8
     return [None, None, None, None, None, 1, points, ctrl, ip_card, role, 0, None, chart_string(parts)]
 
-def finish(card, pid, span, used_names, tag, hand_key):
+def finish(card, pid, span, used_names, tag, hand_key, id_suffix="", share_name=False):
     team = None
-    id_suffix = ""
     info = people[pid]
     name = info["name"] or pid
-    used_names[name] += 1
-    if used_names[name] > 1:
-        name = f"{name} '{str(span[0])[2:]}"
+    # A two-way arm shares its bat card's plain name (the card kind tells the
+    # halves apart); only genuinely different players earn the year suffix.
+    if not share_name:
+        used_names[name] += 1
+        if used_names[name] > 1:
+            name = f"{name} '{str(span[0])[2:]}"
     card[0] = f"mlb-{tag}-{pid}{id_suffix}"
     card[1] = name
     card[2] = f"{team} {span[0]}-{span[1]}" if team else f"{span[0]}-{span[1]}"
@@ -379,6 +381,7 @@ def pool_ok(pool):
 def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts, bat_league_of, pit_league_of):
     used_names = defaultdict(int)
     pool = []
+    batted = set()
     for key, t in bat_slice.items():
         pid = key if isinstance(key, str) else key[0]
         if t["AB"] + t["BB"] < min_pa or pid not in people:
@@ -391,14 +394,21 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
         pos = pos_slice.get(key, "DH")
         card = build_hitter(pid, t, pos, bat_league_of(key))
         if card:
-            pool.append(finish(card, pid, spans[key], used_names, tag, "bats"))
+            # Two-way players yield two cards; the bat half's id gets a
+            # suffix so both live in one pool (bare id keeps meaning the
+            # arm, which is what existing saves resolve to).
+            two_way = pitching is not None and pitching["IPouts"] >= min_ipouts
+            pool.append(finish(card, pid, spans[key], used_names, tag, "bats",
+                               id_suffix="-bat" if two_way else ""))
+            batted.add(key)
     for key, t in pit_slice.items():
         pid = key if isinstance(key, str) else key[0]
         if t["IPouts"] < min_ipouts or pid not in people:
             continue
         card = build_pitcher(pid, t, pit_league_of(key), spans[key][1])
         if card:
-            pool.append(finish(card, pid, spans[key], used_names, tag, "throws"))
+            pool.append(finish(card, pid, spans[key], used_names, tag, "throws",
+                               share_name=key in batted))
     return pool
 
 print("accumulating batting...", file=sys.stderr)
