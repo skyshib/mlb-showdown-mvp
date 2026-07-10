@@ -289,7 +289,7 @@ def build_hitter(pid, t, pos, L):
     points = ob * 20 + fielding * 7 + max(0, round((speed - 1) * 1.5)) + power
     return [None, None, None, None, None, 0, points, ob, speed, pos, fielding, None, chart_string(parts)]
 
-def build_pitcher(pid, t, L):
+def build_pitcher(pid, t, L, last_year=9999):
     ip = t["IPouts"] / 3
     if ip <= 0:
         return None
@@ -317,13 +317,23 @@ def build_pitcher(pid, t, L):
     rest = outs - so - pu
     gb = round(rest * 0.55)
     fb = rest - gb
+    outs_per_g = t["IPouts"] / max(1, t["G"])
     if t["GS"] / max(1, t["G"]) >= 0.4:
         # Swingmen log relief innings too; estimate those out (~1.5 IP per
         # relief outing) so IP reflects innings per START, not per GS-divisor.
         start_outs = max(0.0, t["IPouts"] - (t["G"] - t["GS"]) * 4.5)
         role, ip_card = "SP", clamp(round(start_outs / max(1, t["GS"]) / 3), 4, 9)
+    elif outs_per_g >= 9 and last_year >= 1950:
+        # Opener-era bulk guys and true swingmen: few official GS, but 3+
+        # innings every time out. Lahman's GS undercounts their de facto
+        # starts, so rate them as short starters, not monster relievers —
+        # otherwise a 2019 Milone outranks every real closer in the pool.
+        # Era-gated to the relief-specialist age: before ~1950 every arm
+        # worked long, and reclassifying them would leave dead-ball pools
+        # with no bullpen at all for the two RP roster slots.
+        role, ip_card = "SP", clamp(round(outs_per_g / 3), 4, 9)
     else:
-        role, ip_card = "RP", 1 if t["SV"] > 30 or t["IPouts"] / max(1, t["G"]) < 5 else 2
+        role, ip_card = "RP", 1 if t["SV"] > 30 or outs_per_g < 5 else 2
     parts = [("P", pu), ("K", so), ("G", gb), ("F", fb), ("W", bb), ("S", s), ("D", d), ("H", hr)]
     power = sum(PIT_POWER[c] * n for c, n in parts)
     points = round((ctrl * 35 + power) * ((ip_card + 4) / 10)) + ip_card * 8
@@ -386,7 +396,7 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
         pid = key if isinstance(key, str) else key[0]
         if t["IPouts"] < min_ipouts or pid not in people:
             continue
-        card = build_pitcher(pid, t, pit_league_of(key))
+        card = build_pitcher(pid, t, pit_league_of(key), spans[key][1])
         if card:
             pool.append(finish(card, pid, spans[key], used_names, tag, "throws"))
     return pool
