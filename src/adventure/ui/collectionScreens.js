@@ -286,7 +286,7 @@ export const catalogScreen = {
               )
             : `<p class="gq-dim">NO CARD ANSWERS TO "${escapeHtml(app.screen.query ?? "")}".</p>`
         }</div>
-        <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
+        <div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
       </div></div>
       <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">Every card in this league, best first. F finds &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
     </div>`;

@@ -140,8 +140,10 @@ h1.gq-logo {
 .gq-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2cqw; height: 100%; min-height: 0; }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
 /* Screens that want the whole card visible without scrolling (the Team
-   view) shrink it a quarter and center it. */
+   view) shrink it a quarter and center it; the catalog goes a notch
+   smaller still. */
 .gq-card-side .gq-card { width: 75%; margin-inline: auto; }
+.gq-card-side-sm .gq-card { width: 70%; }
 
 /* ---- Cards: the 2005 face ---- */
 
@@ -330,6 +332,7 @@ h1.gq-logo {
 .gq-name-bar .gq-name {
   min-width: 0;
   margin-right: auto; /* pushes the badges to the bar's right edge */
+  padding-right: 0.8cqw; /* room for the italic overhang — GRIFFEY keeps his Y */
   overflow: hidden;
   color: #0d1740;
   font-size: 6.25cqw;

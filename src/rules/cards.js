@@ -63,20 +63,38 @@ export function positionsOverlap(a, b) {
 
 const signedFielding = (value) => `${value >= 0 ? "+" : ""}${value}`;
 
+// Display-only grouping: a card that lists EVERY infield spot at one rating
+// reads "IF+1" (outfield likewise "OF+2"), the way the real printings
+// compressed the true utility men. Eligibility math keeps the full list.
+const POSITION_GROUPS = [["IF", ["1B", "2B", "3B", "SS"]], ["OF", ["LF/RF", "CF"]]];
+
+function displayPositions(card) {
+  let entries = hitterPositions(card).map((entry) => ({ pos: entry.pos, fielding: Number(entry.fielding) || 0 }));
+  for (const [label, group] of POSITION_GROUPS) {
+    const members = entries.filter((entry) => group.includes(entry.pos));
+    if (members.length !== group.length) continue;
+    if (new Set(members.map((entry) => entry.fielding)).size !== 1) continue;
+    const first = entries.findIndex((entry) => group.includes(entry.pos));
+    entries = entries.filter((entry) => !group.includes(entry.pos));
+    entries.splice(Math.min(first, entries.length), 0, { pos: label, fielding: members[0].fielding });
+  }
+  return entries;
+}
+
 // "2B·SS" — position text for table cells and compact lines.
 export function positionsLabel(card) {
-  return hitterPositions(card).map((entry) => entry.pos).join("·");
+  return displayPositions(card).map((entry) => entry.pos).join("·");
 }
 
 // "+3/+2" — the matching fielding text, one value per listed position.
 export function fieldingLabel(card) {
-  return hitterPositions(card).map((entry) => signedFielding(Number(entry.fielding) || 0)).join("/");
+  return displayPositions(card).map((entry) => signedFielding(entry.fielding)).join("/");
 }
 
 // "2B+3, SS+2" — the card-face pairing, comma-separated.
 export function positionFieldingLabel(card) {
-  return hitterPositions(card)
-    .map((entry) => `${entry.pos}${signedFielding(Number(entry.fielding) || 0)}`)
+  return displayPositions(card)
+    .map((entry) => `${entry.pos}${signedFielding(entry.fielding)}`)
     .join(", ");
 }
 
