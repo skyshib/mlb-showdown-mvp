@@ -111,7 +111,7 @@ function typeIntoQuery(app, char) {
 // mode (they then type into the query); * or ENTER stars the cursor card as
 // a keeper; C pins it for compare; S quick-sells a copy where the screen
 // allows it (the binder).
-function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = false } = {}) {
+function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = false, letterActions = true } = {}) {
   if (app.screen.searching || char === "\b") {
     typeIntoQuery(app, char);
     return;
@@ -123,7 +123,12 @@ function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = fal
   if (lower === "f") {
     app.screen.searching = true;
     app.rerender();
-  } else if (char === "*") {
+    return;
+  }
+  // Screens with the card action menu (the catalog) drop the letter
+  // shortcuts — the menu carries the actions.
+  if (!letterActions) return;
+  if (char === "*") {
     starCursorCard(app, cardAtCursor);
   } else if (lower === "c") {
     pinOrCompare(app, cardAtCursor(), pinReturnTo);
@@ -262,12 +267,12 @@ function catalogVisibleRows(app) {
   return applyQuery(catalogRows(app.screen.filter ?? "ALL"), app.screen.query, (card) => card.name);
 }
 
-// The card action menu: Z (or a tap) on a catalog row opens options instead
-// of demanding letter keys, so touch players can star and compare too. The
-// letter shortcuts (*, C, F) keep working for keyboards.
+// The card action menu: Z/ENTER (or a tap) on a catalog row opens the
+// actions — star, compare, sell a spare copy — replacing the letter keys
+// entirely, so keyboard and touch drive the same way.
 function catalogActions(app, card) {
   if (!card) return [{ label: "CANCEL", run: () => {} }];
-  return [
+  const actions = [
     {
       label: isStarred(app.save, card.id) ? "&#9733; UNSTAR KEEPER" : "&#9733; STAR AS KEEPER",
       run: () => { toggleStar(app.save, card.id); persistSave(app.save); }
@@ -275,9 +280,27 @@ function catalogActions(app, card) {
     {
       label: app.screen.pinnedId === card.id ? "UNPIN" : app.screen.pinnedId ? "COMPARE WITH PINNED" : "PIN TO COMPARE",
       run: () => pinOrCompare(app, card, "catalog")
-    },
-    { label: "CANCEL", run: () => {} }
+    }
   ];
+  if (ownedCount(app.save, card.id) > 0) {
+    const locked = pairRosterLocked(app.save, card);
+    const value = sellValueOf(app.save, card);
+    actions.push({
+      label: locked
+        ? `SELL A COPY <span class="gq-dim">ROSTER COPY &mdash; NOT FOR SALE</span>`
+        : `SELL A COPY <span class="gq-dim">&#8594; &#9679; ${value}</span>`,
+      disabled: locked,
+      run: () => {
+        if (removeCardFromCollection(app.save, card.id)) {
+          grantCoins(app.save, value);
+          addLog(app.save, `Sold ${card.name} (+${value} coins).`);
+          persistSave(app.save);
+        }
+      }
+    });
+  }
+  actions.push({ label: "CANCEL", run: () => {} });
+  return actions;
 }
 
 export const catalogScreen = {
@@ -290,7 +313,7 @@ export const catalogScreen = {
     const selected = rows[index];
     const list = app.screen.actionMenu
       ? `<h3>${escapeHtml(selected?.name?.toUpperCase() ?? "")}</h3>${menuHtml(
-          catalogActions(app, selected).map((action) => ({ html: action.label })),
+          catalogActions(app, selected).map((action) => ({ html: action.label, disabled: action.disabled })),
           clampIndex(app.screen.actionIndex ?? 0, catalogActions(app, selected).length)
         )}`
       : rows.length
@@ -313,7 +336,7 @@ export const catalogScreen = {
       <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">${
         app.screen.actionMenu
           ? "Z picks an action. X closes."
-          : "Every card in this league, best first. Z opens card actions &middot; F finds &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; &#9733; = keeper. X to leave."
+          : "Every card in this league, best first. Z/ENTER opens card actions &middot; F finds &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; &#9733; = keeper. X to leave."
       }</p></div>
     </div>`;
   },
@@ -326,7 +349,7 @@ export const catalogScreen = {
     searchableTyped(app, char, () => {
       const rows = catalogVisibleRows(app);
       return rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
-    }, "catalog");
+    }, "catalog", { letterActions: false });
   },
   key(app, key) {
     const rows = catalogVisibleRows(app);
@@ -336,8 +359,11 @@ export const catalogScreen = {
       if (key === "up" || key === "down") {
         app.screen.actionIndex = clampIndex((app.screen.actionIndex ?? 0) + (key === "down" ? 1 : -1), actions.length);
       } else if (key === "a") {
-        actions[clampIndex(app.screen.actionIndex ?? 0, actions.length)].run();
-        app.screen.actionMenu = false;
+        const action = actions[clampIndex(app.screen.actionIndex ?? 0, actions.length)];
+        if (!action.disabled) {
+          action.run();
+          app.screen.actionMenu = false;
+        }
       } else if (key === "b") {
         app.screen.actionMenu = false;
       }

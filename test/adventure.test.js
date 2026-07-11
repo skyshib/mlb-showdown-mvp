@@ -497,12 +497,20 @@ test("stars flag keepers in binder and catalog; the sell sweeps can spare them",
   binderScreen.key(app, "a");
   assert.equal(isStarred(save, keeper.id), true, "ENTER stars the keeper too");
 
-  // The catalog stars through the same key.
+  // The catalog stars through its action menu: Z/ENTER opens it, and the
+  // star toggle is the first action (the letter shortcuts are gone here).
   const catApp = { save, screen: { name: "catalog", index: 0, filter: "ALL", query: keeper.name }, go() {}, rerender() {} };
   assert.ok(catalogScreen.render(catApp).includes("&#9733;"), "the catalog shows the star");
-  catalogScreen.typed(catApp, "*");
+  catalogScreen.key(catApp, "a");
+  assert.equal(catApp.screen.actionMenu, true, "Z opens the card actions");
+  assert.ok(catalogScreen.render(catApp).includes("UNSTAR KEEPER"), "the menu offers the star toggle");
+  catalogScreen.key(catApp, "a");
   assert.equal(isStarred(save, keeper.id), false, "the catalog toggles the same flag");
+  assert.equal(catApp.screen.actionMenu, false, "acting closes the menu");
   catalogScreen.typed(catApp, "*");
+  assert.equal(isStarred(save, keeper.id), false, "the * shortcut is retired in the catalog");
+  catalogScreen.key(catApp, "a");
+  catalogScreen.key(catApp, "a");
 
   // Sweeps spare starred keepers while the shield is up, and only then.
   const sellApp = { save, screen: { name: "sell", index: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
