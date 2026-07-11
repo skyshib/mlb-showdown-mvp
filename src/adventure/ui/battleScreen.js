@@ -895,11 +895,18 @@ function claimComparisonHtml(app, selected) {
 // (legendClaims trainers) stakes its legends: in a small universe every
 // mid-ladder boss fields pool-elite cards, and letting the winner lift the
 // best of them fight after fight hands over the whole top tier by the gym
-// circuit. Falls back to the full roster if somehow every card is a legend.
+// circuit.
+//
+// Relievers are the exception. Rarity ranks WITHIN a group, and the pen is
+// only two slots deep, so every competitive boss fields two "legend" arms —
+// but a legend reliever is just the best of a small, cheaply-priced pool, not
+// a true top-tier card. Excluding them locked relievers out of the claim
+// entirely from the first rival on, so the pen is always claimable.
+// Falls back to the full roster if somehow every card is a legend.
 function claimableRoster(trainer, save) {
   const roster = buildNpcTeam(trainer, save).roster;
   if (trainer.legendClaims) return roster;
-  const staked = roster.filter((card) => card.rarity !== "legend");
+  const staked = roster.filter((card) => card.rarity !== "legend" || card.role === "RP");
   return staked.length ? staked : roster;
 }
 
