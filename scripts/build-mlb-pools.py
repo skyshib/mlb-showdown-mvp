@@ -34,10 +34,23 @@ def num(row, key):
     except ValueError:
         return 0
 
+# Name suffixes (Jr./Sr./II) from the Chadwick register + MLB StatsAPI —
+# Lahman's People.csv has none, so without these the two Vladimir Guerreros
+# collide and the son cards as "Vladimir Guerrero '19" instead of "Jr.".
+# See scripts/fetch-name-suffixes.mjs.
+try:
+    SUFFIXES = json.load(open(os.path.join(SP, "name-suffixes.json")))
+except FileNotFoundError:
+    SUFFIXES = {}
+
 people = {}
 for r in rows("People.csv"):
-    people[r["playerID"]] = {
-        "name": f"{r.get('nameFirst') or ''} {r.get('nameLast') or ''}".strip(),
+    pid = r["playerID"]
+    name = f"{r.get('nameFirst') or ''} {r.get('nameLast') or ''}".strip()
+    if pid in SUFFIXES:
+        name = f"{name} {SUFFIXES[pid]}"
+    people[pid] = {
+        "name": name,
         "bats": (r.get("bats") or "R")[:1] or "R",
         "throws": (r.get("throws") or "R")[:1] or "R",
     }

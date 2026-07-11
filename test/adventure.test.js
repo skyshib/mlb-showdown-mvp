@@ -1507,7 +1507,7 @@ test("every league builds a working universe with a legal starter pack", async (
     );
     setUniverseSeed("league-test", "franchise-SEA");
     const mariners = adventurePool();
-    const junior = mariners.find((card) => card.name === "Ken Griffey");
+    const junior = mariners.find((card) => card.name === "Ken Griffey Jr.");
     assert.equal(junior?.setTag, "1989-2010", "franchise cards span the whole career with the club, decades be damned");
   } finally {
     setUniverseSeed("test-seed", "fictional");
