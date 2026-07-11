@@ -165,6 +165,16 @@ function teamMark(card) {
   return { code: team.slice(0, 3).toUpperCase(), club: MLB_TEAM_CLUB_NAMES[team] ?? null };
 }
 
+// Long names shrink to fit the name bar instead of ellipsizing — VLADIMIR
+// GUERRERO JR. prints whole, just smaller. The budget is the bar width
+// minus the rarity badge (and the 2-WAY badge when the card wears one),
+// at roughly 0.52em per condensed-caps character.
+function nameFontSize(name, twoWay) {
+  const budget = twoWay ? 42 : 52; // cqw of text room on the bar
+  const size = budget / (0.52 * Math.max(1, name.length));
+  return Math.max(3.4, Math.min(6.25, size)).toFixed(2);
+}
+
 function statLineHtml(card) {
   return card.kind === "pitcher"
     ? `<span>${card.points} PTS</span><span>IP ${card.ip}</span><span>${escapeHtml(card.role)}</span>`
@@ -254,7 +264,7 @@ export function cardPanelHtml(card, { count = null } = {}) {
     ${mark ? `<div class="gq-team-mark"${mark.club ? ` data-team-logo="${escapeHtml(mark.club)}"` : ""}>${escapeHtml(mark.code)}</div>` : ""}
     <div class="gq-strip">
       <div class="gq-strip-bg">${stripBackdrop(card.id)}</div>
-      <div class="gq-name-bar"><span class="gq-name">${escapeHtml(card.name.toUpperCase())}</span>${nameBadge}${rarityTag(card)}</div>
+      <div class="gq-name-bar"><span class="gq-name" style="font-size:${nameFontSize(card.name, Boolean(partner))}cqw">${escapeHtml(card.name.toUpperCase())}</span>${nameBadge}${rarityTag(card)}</div>
       <div class="gq-plate${partner ? " gq-plate-combo" : ""}"><span>${plate}</span></div>
       <div class="gq-plate-label">${plateLabel}</div>
       <div class="gq-stat-line">${stat}</div>
