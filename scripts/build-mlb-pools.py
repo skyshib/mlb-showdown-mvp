@@ -485,16 +485,10 @@ def build_pitcher(pid, t, L, last_year=9999):
     points = round((ctrl * 35 + power) * ((ip_card + 4) / 10)) + ip_card * 8
     return [None, None, None, None, None, 1, points, ctrl, ip_card, role, 0, None, chart_string(parts)]
 
-def finish(card, pid, span, used_names, tag, hand_key, id_suffix="", share_name=False):
+def finish(card, pid, span, metas, tag, hand_key, id_suffix=""):
     team = None
     info = people[pid]
     name = info["name"] or pid
-    # A two-way arm shares its bat card's plain name (the card kind tells the
-    # halves apart); only genuinely different players earn the year suffix.
-    if not share_name:
-        used_names[name] += 1
-        if used_names[name] > 1:
-            name = f"{name} '{str(span[0])[2:]}"
     card[0] = f"mlb-{tag}-{pid}{id_suffix}"
     card[1] = name
     card[2] = f"{team} {span[0]}-{span[1]}" if team else f"{span[0]}-{span[1]}"
@@ -504,7 +498,34 @@ def finish(card, pid, span, used_names, tag, hand_key, id_suffix="", share_name=
     card.append(0)  # foil flag (unused for MLB pools)
     # Official headshots are reliable from ~1990 on; earlier eras use Wikipedia.
     card.append(MLBAM.get(pid) if span[1] >= 1990 else None)
+    # Namesakes are disambiguated in a second pass (see disambiguate_names);
+    # record what that pass needs so it can pick which printing keeps the
+    # plain name and which earns the year suffix.
+    metas.append({"card": card, "pid": pid, "base": name, "span0": span[0]})
     return card
+
+# Two genuinely different players can share a name within one slice (both
+# Frank Thomases have a career card; both Randy Johnsons pitch and hit). The
+# more prominent printing — most card points — keeps the clean name; the rest
+# earn a year suffix ("Frank Thomas '51"). Grouping by player id means a
+# two-way player's bat and arm halves, which share an id, never suffix each
+# other. Card ids are id-based, not name-based, so this only moves display
+# names; saved collections still resolve.
+def disambiguate_names(metas):
+    by_name = defaultdict(list)
+    for m in metas:
+        by_name[m["base"]].append(m)
+    for base, group in by_name.items():
+        pids = {m["pid"] for m in group}
+        if len(pids) <= 1:
+            continue
+        prominence = {}
+        for m in group:
+            prominence[m["pid"]] = max(prominence.get(m["pid"], -1), m["card"][6])
+        keep = min(pids, key=lambda p: (-prominence[p], p))
+        for m in group:
+            if m["pid"] != keep:
+                m["card"][1] = f"{base} '{str(m['span0'])[2:]}"
 
 # The runtime assigns rarity by rank within hitters / SP / RP, and the
 # starter pack falls back gracefully in thin spots — so a slice only needs
@@ -532,9 +553,8 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
     then rates blend through the peak ladder. fixed_league pins the era
     context (single-decade slices); None judges each season against its own
     decade and blends the backdrop by the ladder weights."""
-    used_names = defaultdict(int)
+    metas = []
     pool = []
-    batted = set()
     for key, years in bat_slice.items():
         pid = key if isinstance(key, str) else key[0]
         pa_real = sum(t["AB"] + t["BB"] for t in years.values())
@@ -554,9 +574,8 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
             # suffix so both live in one pool (bare id keeps meaning the
             # arm, which is what existing saves resolve to).
             two_way = ip_real >= min_ipouts
-            pool.append(finish(card, pid, spans[key], used_names, tag, "bats",
+            pool.append(finish(card, pid, spans[key], metas, tag, "bats",
                                id_suffix="-bat" if two_way else ""))
-            batted.add(key)
     for key, years in pit_slice.items():
         pid = key if isinstance(key, str) else key[0]
         if sum(t["IPouts"] for t in years.values()) < min_ipouts or pid not in people:
@@ -564,8 +583,8 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
         t, L = peak_blend_pitcher(years, fixed_league)
         card = build_pitcher(pid, t, L, spans[key][1]) if t else None
         if card:
-            pool.append(finish(card, pid, spans[key], used_names, tag, "throws",
-                               share_name=key in batted))
+            pool.append(finish(card, pid, spans[key], metas, tag, "throws"))
+    disambiguate_names(metas)
     return pool
 
 print("accumulating batting...", file=sys.stderr)

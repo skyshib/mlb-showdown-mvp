@@ -519,8 +519,8 @@ h1.gq-logo {
 .gq-scan-wrap { position: relative; }
 .gq-scan-tray { padding: 1.5cqw 1.75cqw 2cqw; }
 
-/* Rarity chips, tiered: common light grey, uncommon bronze, rare
-   yellow-silver, legend gold. */
+/* Rarity chips, tiered: common gray, uncommon bronze, rare gold,
+   legendary blue. */
 .gq-rarity {
   font-weight: 700;
   padding: 0 0.7cqw;
@@ -530,8 +530,15 @@ h1.gq-logo {
   font-size: 2.5cqw;
 }
 .gq-rarity-uncommon { background: #b07c4a; }
-.gq-rarity-rare { background: #d8d0a2; }
-.gq-rarity-legend { background: #e1b64b; }
+.gq-rarity-rare { background: #e1b64b; }
+.gq-rarity-legend { background: #2f6fd0; color: #f4f1ea; }
+
+/* Card face borders track the rarity chips: common gray, uncommon
+   bronze, rare gold, legendary blue. */
+.gq-rarity-border-common .gq-face { border: 0.6cqw solid #cdd3d7; }
+.gq-rarity-border-uncommon .gq-face { border: 0.6cqw solid #b07c4a; }
+.gq-rarity-border-rare .gq-face { border: 0.6cqw solid #e1b64b; }
+.gq-rarity-border-legend .gq-face { border: 0.6cqw solid #2f6fd0; }
 
 /* ---- Battle screen ---- */
 
