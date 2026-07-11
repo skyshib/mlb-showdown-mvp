@@ -1863,7 +1863,16 @@ test("the binder's card menu sells a copy, never the roster's last", async () =>
   binderScreen.key(app, "a");
   app.screen.actionIndex = 1; // ADD TO TEAM, SELL, STAR, PIN, CANCEL
   binderScreen.key(app, "a");
-  assert.equal(ownedCount(save, spare.id), 1, "the menu sells one copy");
+  assert.equal(ownedCount(save, spare.id), 2, "picking SELL asks first, sells nothing");
+  assert.ok(binderScreen.render(app).includes("SELL " + spare.name.toUpperCase() + "?"), "the are-you-sure comes up");
+  app.screen.actionIndex = 1; // NO — KEEP HIM
+  binderScreen.key(app, "a");
+  assert.equal(ownedCount(save, spare.id), 2, "NO keeps him");
+  binderScreen.key(app, "a");
+  app.screen.actionIndex = 1;
+  binderScreen.key(app, "a");
+  binderScreen.key(app, "a"); // YES — SELL leads the confirm
+  assert.equal(ownedCount(save, spare.id), 1, "YES sells one copy");
   assert.equal(save.player.coins, before + RARITIES[spare.rarity].sellValue, "at the pawn rate");
   assert.equal(app.screen.actionMenu, false, "acting closes the menu");
 

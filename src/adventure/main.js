@@ -91,11 +91,14 @@ document.addEventListener("keydown", (event) => {
   const inInput = event.target instanceof HTMLInputElement;
   if (inInput && event.key !== "Enter" && event.key !== "Escape") return;
   const screen = SCREENS[app.screen.name];
-  // Searchable screens (binder, catalog): printable keys type into the name
-  // filter instead of acting — including Z and X, so Enter confirms and
-  // Escape backs out there. Backspace edits the query while one exists.
+  // Searchable screens (binder, catalog): while the search prompt is OPEN,
+  // printable keys type into the name filter — including Z and X, so names
+  // spell out; Enter confirms and Escape backs out. Outside search, only F
+  // (open find) routes to typing, so Z and X always work as buttons and X
+  // cancels menus exactly like Escape and Backspace do.
   if (screen?.typed && !event.ctrlKey && !event.metaKey && !event.altKey) {
-    if (event.key.length === 1 && /[a-z0-9 .'*-]/i.test(event.key)) {
+    const printable = event.key.length === 1 && /[a-z0-9 .'*-]/i.test(event.key);
+    if (printable && (app.screen.searching || event.key.toLowerCase() === "f")) {
       event.preventDefault();
       screen.typed(app, event.key);
       return;

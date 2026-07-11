@@ -233,6 +233,7 @@ function actionMenuKey(app, key, actions) {
     }
   } else if (key === "b") {
     app.screen.actionMenu = false;
+    app.screen.confirmSell = null;
   }
 }
 
@@ -256,7 +257,8 @@ function compareAction(app, card, returnTo) {
 }
 
 // Selling a copy at the pair-priced pawn rate; the roster's last copy
-// stays, visibly. Null when the player owns none.
+// stays, visibly. Null when the player owns none. Choosing it arms an
+// are-you-sure — the menu re-opens as the confirm.
 function sellAction(app, card) {
   if (ownedCount(app.save, card.id) <= 0) return null;
   const locked = pairRosterLocked(app.save, card);
@@ -267,13 +269,39 @@ function sellAction(app, card) {
       : `SELL A COPY <span class="gq-dim">&#8594; &#9679; ${value}</span>`,
     disabled: locked,
     run: () => {
-      if (removeCardFromCollection(app.save, card.id)) {
-        grantCoins(app.save, value);
-        addLog(app.save, `Sold ${card.name} (+${value} coins).`);
-        persistSave(app.save);
-      }
+      openActionMenu(app);
+      app.screen.confirmSell = card.id;
     }
   };
+}
+
+function sellConfirmActions(app, card) {
+  const value = sellValueOf(app.save, card);
+  return [
+    {
+      label: `YES &mdash; SELL FOR &#9679; ${value}`,
+      run: () => {
+        app.screen.confirmSell = null;
+        if (removeCardFromCollection(app.save, card.id)) {
+          grantCoins(app.save, value);
+          addLog(app.save, `Sold ${card.name} (+${value} coins).`);
+          persistSave(app.save);
+        }
+      }
+    },
+    { label: "NO &mdash; KEEP HIM", run: () => { app.screen.confirmSell = null; } }
+  ];
+}
+
+// The screen's action list, unless a sale is waiting on its are-you-sure.
+function menuActions(app, card, builder) {
+  if (card && app.screen.confirmSell === card.id) return sellConfirmActions(app, card);
+  return builder(app, card);
+}
+
+function actionMenuTitle(app, card) {
+  if (!card) return "";
+  return app.screen.confirmSell === card.id ? `SELL ${card.name.toUpperCase()}?` : card.name.toUpperCase();
 }
 
 function catalogActions(app, card) {
@@ -294,7 +322,7 @@ export const catalogScreen = {
     const visible = rows.slice(start, start + CATALOG_WINDOW);
     const selected = rows[index];
     const list = app.screen.actionMenu
-      ? actionMenuHtml(selected?.name?.toUpperCase() ?? "", catalogActions(app, selected), app.screen.actionIndex)
+      ? actionMenuHtml(actionMenuTitle(app, selected), menuActions(app, selected, catalogActions), app.screen.actionIndex)
       : rows.length
         ? menuHtml(
             visible.map((card) => {
@@ -331,7 +359,7 @@ export const catalogScreen = {
     const rows = catalogVisibleRows(app);
     if (app.screen.actionMenu) {
       const selected = rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
-      actionMenuKey(app, key, catalogActions(app, selected));
+      actionMenuKey(app, key, menuActions(app, selected, catalogActions));
       app.rerender();
       return;
     }
@@ -643,7 +671,7 @@ export const binderScreen = {
     const selected = rows[index];
     let list;
     if (app.screen.actionMenu) {
-      list = actionMenuHtml(selected?.card?.name?.toUpperCase() ?? "", binderActions(app, selected?.card), app.screen.actionIndex);
+      list = actionMenuHtml(actionMenuTitle(app, selected?.card), menuActions(app, selected?.card, binderActions), app.screen.actionIndex);
     } else if (app.screen.mode === "team-swap" && selected) {
       const targets = swapTargets(app.save, selected.card);
       list = `<h3>WHO SITS FOR ${escapeHtml(selected.card.name.toUpperCase())}?</h3>${menuHtml(
@@ -687,7 +715,7 @@ export const binderScreen = {
     const rows = binderVisibleRows(app);
     const selected = rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
     if (app.screen.actionMenu) {
-      actionMenuKey(app, key, binderActions(app, selected?.card));
+      actionMenuKey(app, key, menuActions(app, selected?.card, binderActions));
       app.rerender();
       return;
     }
@@ -926,7 +954,7 @@ export const teamScreen = {
           : actions[rosterIndex - roster.length]?.preview ?? null;
     let list;
     if (app.screen.actionMenu && rosterIndex < roster.length) {
-      list = actionMenuHtml(roster[rosterIndex].name.toUpperCase(), teamCardActions(app, roster[rosterIndex]), app.screen.actionIndex);
+      list = actionMenuHtml(actionMenuTitle(app, roster[rosterIndex]), menuActions(app, roster[rosterIndex], teamCardActions), app.screen.actionIndex);
     } else if (picking) {
       const anchorId = roster[rosterIndex]?.id;
       list = `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
@@ -989,7 +1017,7 @@ export const teamScreen = {
     const actions = teamActions(save);
     if (app.screen.actionMenu) {
       const card = roster[clampIndex(app.screen.index ?? 0, roster.length + actions.length)] ?? null;
-      actionMenuKey(app, key, teamCardActions(app, card));
+      actionMenuKey(app, key, menuActions(app, card, teamCardActions));
       app.rerender();
       return;
     }
