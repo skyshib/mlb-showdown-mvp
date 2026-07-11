@@ -486,16 +486,17 @@ test("stars flag keepers in binder and catalog; the sell sweeps can spare them",
   addCardToCollection(save, keeper.id, 2);
   const app = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
 
-  // The * key stars the cursor card in the binder; again unstars.
+  // The binder stars through the card action menu — the letter keys retired.
   const binderRowsNow = collectionCards(save);
   app.screen.index = binderRowsNow.findIndex(({ card }) => card.id === keeper.id);
   binderScreen.typed(app, "*");
-  assert.equal(isStarred(save, keeper.id), true, "* stars the keeper");
-  assert.ok(binderScreen.render(app).includes("&#9733;"), "the binder shows the star");
-  binderScreen.typed(app, "*");
-  assert.equal(isStarred(save, keeper.id), false, "* again unstars");
+  assert.equal(isStarred(save, keeper.id), false, "the * shortcut is retired");
   binderScreen.key(app, "a");
-  assert.equal(isStarred(save, keeper.id), true, "ENTER stars the keeper too");
+  assert.equal(app.screen.actionMenu, true, "Z opens the card actions");
+  app.screen.actionIndex = 2; // ADD TO TEAM, SELL, STAR, PIN, CANCEL
+  binderScreen.key(app, "a");
+  assert.equal(isStarred(save, keeper.id), true, "the menu stars the keeper");
+  assert.ok(binderScreen.render(app).includes("&#9733;"), "the binder shows the star");
 
   // The catalog stars through its action menu: Z/ENTER opens it, and the
   // star toggle is the first action (the letter shortcuts are gone here).
@@ -1153,7 +1154,8 @@ test("the replacement picker ranks the incumbent by points, diamond-marked; pick
   addCardToCollection(save, cheaper.id);
 
   const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
-  teamScreen.key(app, "a"); // open the picker on the first roster card
+  teamScreen.key(app, "a"); // open the card's action menu
+  teamScreen.key(app, "a"); // SWAP THIS CARD leads it
   assert.equal(app.screen.mode, "pick");
   const rows = [0, 1, 2].map((at) => teamScreen.hoverCard(app, at));
   const anchorAt = rows.findIndex((card) => card?.id === anchor.id);
@@ -1172,6 +1174,7 @@ test("the replacement picker ranks the incumbent by points, diamond-marked; pick
 
   // Picking another row still swaps.
   teamScreen.key(app, "a");
+  teamScreen.key(app, "a");
   app.screen.pickIndex = anchorAt === 0 ? 1 : 0;
   teamScreen.key(app, "a");
   assert.ok(save.roster.cardIds.includes(pricier.id), "bench picks still swap in");
@@ -1182,7 +1185,7 @@ test("the team screen shows the previewed card's season stats", async () => {
   const { teamScreen } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();
   const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
-  assert.ok(teamScreen.render(app).includes("THIS SEASON: NO GAMES YET."), "a fresh season says so");
+  assert.ok(!teamScreen.render(app).includes("THIS SEASON"), "a fresh season shows no season line");
 
   const { player, npc } = hookTeams();
   const result = simulateGame(buildTeam(player), buildTeam(npc), "team-stats");
@@ -1841,7 +1844,7 @@ test("type-to-search narrows binder and catalog by name; X clears before leaving
   assert.ok(html.includes(`SEARCH: <b>${fragment}</b>`), "the query shows on screen");
 });
 
-test("the binder's S key quick-sells a copy, never the roster's last", async () => {
+test("the binder's card menu sells a copy, never the roster's last", async () => {
   const { binderScreen } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();
   const spare = adventurePool().find((card) => !save.roster.cardIds.includes(card.id));
@@ -1851,30 +1854,33 @@ test("the binder's S key quick-sells a copy, never the roster's last", async () 
   const rows = collectionCards(save);
   app.screen.index = rows.findIndex(({ card }) => card.id === spare.id);
   const before = save.player.coins;
-  binderScreen.typed(app, "s");
-  assert.equal(app.screen.confirmSell, spare.id, "the first S arms the are-you-sure");
-  assert.equal(ownedCount(save, spare.id), 2, "nothing sold yet");
-  assert.ok(binderScreen.render(app).includes("S again sells"), "the confirm asks out loud");
-  binderScreen.key(app, "down");
-  assert.equal(app.screen.confirmSell, null, "any other key keeps him");
-  assert.equal(ownedCount(save, spare.id), 2, "still nothing sold");
-  binderScreen.key(app, "up");
-  binderScreen.typed(app, "s");
-  binderScreen.typed(app, "s");
-  assert.equal(ownedCount(save, spare.id), 1, "S twice sells one copy");
+  binderScreen.key(app, "a");
+  assert.equal(app.screen.actionMenu, true, "Z opens the card actions");
+  assert.ok(binderScreen.render(app).includes("SELL A COPY"), "selling is on the menu");
+  assert.equal(ownedCount(save, spare.id), 2, "nothing sold by just looking");
+  binderScreen.key(app, "b");
+  assert.equal(app.screen.actionMenu, false, "X closes without selling");
+  binderScreen.key(app, "a");
+  app.screen.actionIndex = 1; // ADD TO TEAM, SELL, STAR, PIN, CANCEL
+  binderScreen.key(app, "a");
+  assert.equal(ownedCount(save, spare.id), 1, "the menu sells one copy");
   assert.equal(save.player.coins, before + RARITIES[spare.rarity].sellValue, "at the pawn rate");
-  assert.ok(binderScreen.render(app).includes("SOLD"), "the sale is announced");
+  assert.equal(app.screen.actionMenu, false, "acting closes the menu");
 
-  // The roster's last copy refuses, with a notice instead of a sale.
+  // The roster's last copy shows why it won't sell, and the entry is dead.
   const rosterRowsNow = collectionCards(save);
   app.screen.index = rosterRowsNow.findIndex(({ card }) => card.id === save.roster.cardIds[0]);
   const coinsBefore = save.player.coins;
-  binderScreen.typed(app, "s");
+  binderScreen.key(app, "a");
+  assert.ok(binderScreen.render(app).includes("NOT FOR SALE"), "the refusal is explained on the entry");
+  app.screen.actionIndex = 1;
+  binderScreen.key(app, "a");
   assert.equal(ownedCount(save, save.roster.cardIds[0]), 1, "the roster copy survives");
   assert.equal(save.player.coins, coinsBefore, "no coins change hands");
-  assert.ok(binderScreen.render(app).includes("NOT FOR SALE"), "and the refusal is explained");
+  assert.equal(app.screen.actionMenu, true, "a dead entry doesn't even close the menu");
+  binderScreen.key(app, "b");
 
-  // While searching, S is just a letter.
+  // While searching, letters are just letters.
   binderScreen.typed(app, "f");
   binderScreen.typed(app, "s");
   assert.equal(app.screen.query, "s", "searching swallows the S");
@@ -1885,14 +1891,19 @@ test("compare mode pins two cards from the binder and lays them side by side", a
   const save = testSave();
   const rows = collectionCards(save);
   const app = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
-  binderScreen.typed(app, "c");
-  assert.equal(app.screen.pinnedId, rows[0].card.id, "C pins the selected card");
+  const pinViaMenu = () => {
+    binderScreen.key(app, "a");
+    app.screen.actionIndex = 3; // ADD TO TEAM, SELL, STAR, PIN, CANCEL
+    binderScreen.key(app, "a");
+  };
+  pinViaMenu();
+  assert.equal(app.screen.pinnedId, rows[0].card.id, "the menu pins the selected card");
   assert.ok(binderScreen.render(app).includes("PINNED"), "the pin is announced");
-  binderScreen.typed(app, "c");
-  assert.equal(app.screen.pinnedId, null, "C on the same card unpins");
-  binderScreen.typed(app, "c");
+  pinViaMenu();
+  assert.equal(app.screen.pinnedId, null, "the same menu entry unpins");
+  pinViaMenu();
   binderScreen.key(app, "down");
-  binderScreen.typed(app, "c");
+  pinViaMenu();
   assert.equal(app.screen.name, "compare", "a second pin opens the compare screen");
   assert.equal(app.screen.aId, rows[0].card.id);
   assert.equal(app.screen.bId, rows[1].card.id);

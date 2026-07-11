@@ -107,81 +107,23 @@ function typeIntoQuery(app, char) {
   app.rerender();
 }
 
-// Binder/catalog key scheme: letters are inert until F ("find") opens search
-// mode (they then type into the query); * or ENTER stars the cursor card as
-// a keeper; C pins it for compare; S quick-sells a copy where the screen
-// allows it (the binder).
-function searchableTyped(app, char, cardAtCursor, pinReturnTo, { quickSell = false, letterActions = true } = {}) {
+// Binder/catalog typing: letters are inert until F ("find") opens search
+// mode (they then type into the query). Every card ACTION lives in the
+// Z/ENTER action menu — no letter shortcuts.
+function searchableTyped(app, char) {
   if (app.screen.searching || char === "\b") {
     typeIntoQuery(app, char);
     return;
   }
   app.screen.notice = null;
-  const lower = char.toLowerCase();
-  // Any key other than a repeated S disarms a pending quick-sell confirm.
-  if (lower !== "s") app.screen.confirmSell = null;
-  if (lower === "f") {
+  if (char.toLowerCase() === "f") {
     app.screen.searching = true;
     app.rerender();
-    return;
   }
-  // Screens with the card action menu (the catalog) drop the letter
-  // shortcuts — the menu carries the actions.
-  if (!letterActions) return;
-  if (char === "*") {
-    starCursorCard(app, cardAtCursor);
-  } else if (lower === "c") {
-    pinOrCompare(app, cardAtCursor(), pinReturnTo);
-    app.rerender();
-  } else if (lower === "s" && quickSell) {
-    sellCursorCard(app, cardAtCursor);
-  }
-}
-
-// The binder's quick sell: one copy of the cursor card at the pawn rate,
-// behind an are-you-sure — the first S arms it, S again on the same card
-// sells, anything else keeps it. The roster's last copy refuses outright.
-function sellCursorCard(app, cardAtCursor) {
-  const card = cardAtCursor();
-  if (!card) return;
-  if (pairRosterLocked(app.save, card)) {
-    app.screen.confirmSell = null;
-    app.screen.notice = "ROSTER COPY &mdash; NOT FOR SALE.";
-    app.rerender();
-    return;
-  }
-  if (app.screen.confirmSell !== card.id) {
-    app.screen.confirmSell = card.id;
-    app.rerender();
-    return;
-  }
-  app.screen.confirmSell = null;
-  const value = sellValueOf(app.save, card);
-  if (removeCardFromCollection(app.save, card.id)) {
-    grantCoins(app.save, value);
-    persistSave(app.save);
-    app.screen.notice = `SOLD ${shortName(card.name)} &#8594; &#9679; ${value} (NOW &#9679; ${app.save.player.coins})`;
-  }
-  app.rerender();
-}
-
-function starCursorCard(app, cardAtCursor) {
-  const card = cardAtCursor();
-  if (!card) return;
-  toggleStar(app.save, card.id);
-  persistSave(app.save);
-  app.rerender();
 }
 
 function starMark(save, card) {
   return isStarred(save, card.id) ? " &#9733;" : "";
-}
-
-// The quick-sell are-you-sure, blinking until answered.
-function confirmSellLine(app) {
-  const card = app.screen.confirmSell ? cardById(app.screen.confirmSell) : null;
-  if (!card) return "";
-  return `<p class="gq-blink"><b>SELL ${escapeHtml(shortName(card.name))} FOR &#9679; ${RARITIES[card.rarity].sellValue}? S again sells &middot; any other key keeps him.</b></p>`;
 }
 
 function searchLine(query, searching = false) {
@@ -267,38 +209,78 @@ function catalogVisibleRows(app) {
   return applyQuery(catalogRows(app.screen.filter ?? "ALL"), app.screen.query, (card) => card.name);
 }
 
-// The card action menu: Z/ENTER (or a tap) on a catalog row opens the
-// actions — star, compare, sell a spare copy — replacing the letter keys
-// entirely, so keyboard and touch drive the same way.
+// ---- The card action menu ------------------------------------------------
+//
+// One driving scheme everywhere: Z/ENTER (or a tap) on a card opens its
+// actions, arrows move, Z runs, X closes. The binder, catalog, and team
+// screens all speak it; each supplies its own list from the shared entries
+// below. No letter keys required anywhere (F still finds, for keyboards).
+function actionMenuHtml(title, actions, actionIndex) {
+  return `<h3>${escapeHtml(title)}</h3>${menuHtml(
+    actions.map((action) => ({ html: action.label, disabled: action.disabled })),
+    clampIndex(actionIndex ?? 0, actions.length)
+  )}`;
+}
+
+function actionMenuKey(app, key, actions) {
+  if (key === "up" || key === "down") {
+    app.screen.actionIndex = clampIndex((app.screen.actionIndex ?? 0) + (key === "down" ? 1 : -1), actions.length);
+  } else if (key === "a") {
+    const action = actions[clampIndex(app.screen.actionIndex ?? 0, actions.length)];
+    if (!action.disabled) {
+      app.screen.actionMenu = false;
+      action.run();
+    }
+  } else if (key === "b") {
+    app.screen.actionMenu = false;
+  }
+}
+
+function openActionMenu(app) {
+  app.screen.actionMenu = true;
+  app.screen.actionIndex = 0;
+}
+
+function starAction(app, card) {
+  return {
+    label: isStarred(app.save, card.id) ? "&#9733; UNSTAR KEEPER" : "&#9733; STAR AS KEEPER",
+    run: () => { toggleStar(app.save, card.id); persistSave(app.save); }
+  };
+}
+
+function compareAction(app, card, returnTo) {
+  return {
+    label: app.screen.pinnedId === card.id ? "UNPIN" : app.screen.pinnedId ? "COMPARE WITH PINNED" : "PIN TO COMPARE",
+    run: () => pinOrCompare(app, card, returnTo)
+  };
+}
+
+// Selling a copy at the pair-priced pawn rate; the roster's last copy
+// stays, visibly. Null when the player owns none.
+function sellAction(app, card) {
+  if (ownedCount(app.save, card.id) <= 0) return null;
+  const locked = pairRosterLocked(app.save, card);
+  const value = sellValueOf(app.save, card);
+  return {
+    label: locked
+      ? `SELL A COPY <span class="gq-dim">ROSTER COPY &mdash; NOT FOR SALE</span>`
+      : `SELL A COPY <span class="gq-dim">&#8594; &#9679; ${value}</span>`,
+    disabled: locked,
+    run: () => {
+      if (removeCardFromCollection(app.save, card.id)) {
+        grantCoins(app.save, value);
+        addLog(app.save, `Sold ${card.name} (+${value} coins).`);
+        persistSave(app.save);
+      }
+    }
+  };
+}
+
 function catalogActions(app, card) {
   if (!card) return [{ label: "CANCEL", run: () => {} }];
-  const actions = [
-    {
-      label: isStarred(app.save, card.id) ? "&#9733; UNSTAR KEEPER" : "&#9733; STAR AS KEEPER",
-      run: () => { toggleStar(app.save, card.id); persistSave(app.save); }
-    },
-    {
-      label: app.screen.pinnedId === card.id ? "UNPIN" : app.screen.pinnedId ? "COMPARE WITH PINNED" : "PIN TO COMPARE",
-      run: () => pinOrCompare(app, card, "catalog")
-    }
-  ];
-  if (ownedCount(app.save, card.id) > 0) {
-    const locked = pairRosterLocked(app.save, card);
-    const value = sellValueOf(app.save, card);
-    actions.push({
-      label: locked
-        ? `SELL A COPY <span class="gq-dim">ROSTER COPY &mdash; NOT FOR SALE</span>`
-        : `SELL A COPY <span class="gq-dim">&#8594; &#9679; ${value}</span>`,
-      disabled: locked,
-      run: () => {
-        if (removeCardFromCollection(app.save, card.id)) {
-          grantCoins(app.save, value);
-          addLog(app.save, `Sold ${card.name} (+${value} coins).`);
-          persistSave(app.save);
-        }
-      }
-    });
-  }
+  const actions = [starAction(app, card), compareAction(app, card, "catalog")];
+  const sell = sellAction(app, card);
+  if (sell) actions.push(sell);
   actions.push({ label: "CANCEL", run: () => {} });
   return actions;
 }
@@ -312,10 +294,7 @@ export const catalogScreen = {
     const visible = rows.slice(start, start + CATALOG_WINDOW);
     const selected = rows[index];
     const list = app.screen.actionMenu
-      ? `<h3>${escapeHtml(selected?.name?.toUpperCase() ?? "")}</h3>${menuHtml(
-          catalogActions(app, selected).map((action) => ({ html: action.label, disabled: action.disabled })),
-          clampIndex(app.screen.actionIndex ?? 0, catalogActions(app, selected).length)
-        )}`
+      ? actionMenuHtml(selected?.name?.toUpperCase() ?? "", catalogActions(app, selected), app.screen.actionIndex)
       : rows.length
         ? menuHtml(
             visible.map((card) => {
@@ -346,27 +325,13 @@ export const catalogScreen = {
   },
   typed(app, char) {
     if (app.screen.actionMenu) return;
-    searchableTyped(app, char, () => {
-      const rows = catalogVisibleRows(app);
-      return rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
-    }, "catalog", { letterActions: false });
+    searchableTyped(app, char);
   },
   key(app, key) {
     const rows = catalogVisibleRows(app);
     if (app.screen.actionMenu) {
       const selected = rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
-      const actions = catalogActions(app, selected);
-      if (key === "up" || key === "down") {
-        app.screen.actionIndex = clampIndex((app.screen.actionIndex ?? 0) + (key === "down" ? 1 : -1), actions.length);
-      } else if (key === "a") {
-        const action = actions[clampIndex(app.screen.actionIndex ?? 0, actions.length)];
-        if (!action.disabled) {
-          action.run();
-          app.screen.actionMenu = false;
-        }
-      } else if (key === "b") {
-        app.screen.actionMenu = false;
-      }
+      actionMenuKey(app, key, catalogActions(app, selected));
       app.rerender();
       return;
     }
@@ -380,8 +345,7 @@ export const catalogScreen = {
       if (app.screen.searching) {
         app.screen.searching = false;
       } else if (rows.length) {
-        app.screen.actionMenu = true;
-        app.screen.actionIndex = 0;
+        openActionMenu(app);
       }
     } else if (key === "b") {
       if (app.screen.searching || app.screen.query) {
@@ -639,60 +603,124 @@ function binderVisibleRows(app) {
   return applyQuery(binderRows(app.save, app.screen.filter ?? "ALL"), app.screen.query, ({ card }) => card.name);
 }
 
+// Roster spots this card could take: same kind, and not a second era of
+// someone already on the team (unless he's the one sitting down).
+function swapTargets(save, card) {
+  const roster = rosterCards(save);
+  return roster.filter((target) =>
+    target.kind === card.kind && target.id !== card.id && !personConflict(roster, card, target.id));
+}
+
+function binderActions(app, card) {
+  if (!card) return [{ label: "CANCEL", run: () => {} }];
+  const rostered = app.save.roster.cardIds.includes(card.id);
+  const targets = swapTargets(app.save, card);
+  const blocked = rostered ? "ALREADY ON THE TEAM"
+    : app.save.activeSeries ? "SERIES IN PROGRESS"
+    : targets.length === 0 ? "NO LEGAL SPOT"
+    : null;
+  const actions = [
+    {
+      label: blocked ? `ADD TO TEAM <span class="gq-dim">${blocked}</span>` : "ADD TO TEAM &#8594; PICK WHO SITS",
+      disabled: Boolean(blocked),
+      run: () => {
+        app.screen.mode = "team-swap";
+        app.screen.pickIndex = 0;
+      }
+    }
+  ];
+  const sell = sellAction(app, card);
+  if (sell) actions.push(sell);
+  actions.push(starAction(app, card), compareAction(app, card, "binder"), { label: "CANCEL", run: () => {} });
+  return actions;
+}
+
 export const binderScreen = {
   render(app) {
     const filter = app.screen.filter ?? "ALL";
     const rows = binderVisibleRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const selected = rows[index];
+    let list;
+    if (app.screen.actionMenu) {
+      list = actionMenuHtml(selected?.card?.name?.toUpperCase() ?? "", binderActions(app, selected?.card), app.screen.actionIndex);
+    } else if (app.screen.mode === "team-swap" && selected) {
+      const targets = swapTargets(app.save, selected.card);
+      list = `<h3>WHO SITS FOR ${escapeHtml(selected.card.name.toUpperCase())}?</h3>${menuHtml(
+        [...targets.map((target) => ({ html: cardLine(target) })), { label: "CANCEL" }],
+        clampIndex(app.screen.pickIndex ?? 0, targets.length + 1)
+      )}`;
+    } else {
+      list = rows.length
+        ? menuHtml(
+            rows.map(({ card, count }) => ({
+              html: `${cardLine(card)}${count > 1 ? ` <span class="gq-dim">x${count}</span>` : ""}${
+                app.save.roster.cardIds.includes(card.id) ? " &#9670;" : ""
+              }${starMark(app.save, card)}${pinMark(app, card)}`
+            })),
+            index
+          )
+        : `<p class="gq-dim">NO ${escapeHtml(filter)} CARDS${app.screen.query ? ` NAMED "${escapeHtml(app.screen.query)}"` : ""} YET.</p>`;
+    }
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>BINDER &middot; ${escapeHtml(filter)}</span><span>${rows.length} CARDS &middot; ${rows.reduce((sum, row) => sum + row.count, 0)} TOTAL</span></div>
       <div class="gq-body"><div class="gq-columns">
-        <div class="gq-frame gq-scroll">${
-          rows.length
-            ? menuHtml(
-                rows.map(({ card, count }) => ({
-                  html: `${cardLine(card)}${count > 1 ? ` <span class="gq-dim">x${count}</span>` : ""}${
-                    app.save.roster.cardIds.includes(card.id) ? " &#9670;" : ""
-                  }${starMark(app.save, card)}${pinMark(app, card)}`
-                })),
-                index
-              )
-            : `<p class="gq-dim">NO ${escapeHtml(filter)} CARDS${app.screen.query ? ` NAMED "${escapeHtml(app.screen.query)}"` : ""} YET.</p>`
-        }</div>
-        <div>${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
+        <div class="gq-frame gq-scroll">${list}</div>
+        <div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${confirmSellLine(app)}${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">F finds &middot; S sells a copy &middot; &#9664;/&#9654; page by position &middot; &#9670; = in roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">${
+        app.screen.actionMenu ? "Z picks an action. X closes."
+          : app.screen.mode === "team-swap" ? "Z benches him for your card. X cancels."
+          : "Z/ENTER opens card actions &middot; F finds &middot; &#9664;/&#9654; page by position &middot; &#9670; = on team &middot; &#9733; = keeper. X to leave."
+      }</p></div>
     </div>`;
   },
   hoverCard(app, index) {
+    if (app.screen.actionMenu || app.screen.mode === "team-swap") return null;
     return binderVisibleRows(app)[index]?.card ?? null;
   },
   typed(app, char) {
-    searchableTyped(app, char, () => {
-      const rows = binderVisibleRows(app);
-      return rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card ?? null;
-    }, "binder", { quickSell: true });
+    if (app.screen.actionMenu || app.screen.mode === "team-swap") return;
+    searchableTyped(app, char);
   },
   key(app, key) {
-    // Any navigation or action answers a pending quick-sell confirm with "no".
-    app.screen.confirmSell = null;
+    const rows = binderVisibleRows(app);
+    const selected = rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
+    if (app.screen.actionMenu) {
+      actionMenuKey(app, key, binderActions(app, selected?.card));
+      app.rerender();
+      return;
+    }
+    if (app.screen.mode === "team-swap") {
+      const targets = selected ? swapTargets(app.save, selected.card) : [];
+      if (key === "up" || key === "down") {
+        app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), targets.length + 1);
+      } else if (key === "a") {
+        const target = targets[clampIndex(app.screen.pickIndex ?? 0, targets.length + 1)];
+        if (target && selected) {
+          setRoster(app.save, app.save.roster.cardIds.map((id) => (id === target.id ? selected.card.id : id)));
+          addLog(app.save, `${selected.card.name} takes ${target.name}'s roster spot.`);
+          persistSave(app.save);
+        }
+        app.screen.mode = null;
+      } else if (key === "b") {
+        app.screen.mode = null;
+      }
+      app.rerender();
+      return;
+    }
     if (key === "left" || key === "right") {
       const at = BINDER_FILTERS.indexOf(app.screen.filter ?? "ALL");
       const next = (at + (key === "right" ? 1 : -1) + BINDER_FILTERS.length) % BINDER_FILTERS.length;
       app.screen.filter = BINDER_FILTERS[next];
       app.screen.index = 0;
     } else if (key === "up" || key === "down") {
-      const rows = binderVisibleRows(app);
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
     } else if (key === "a") {
-      // ENTER closes an open search (keeping the filter); otherwise it stars
-      // the cursor card as a keeper.
       if (app.screen.searching) {
         app.screen.searching = false;
-      } else {
-        const rows = binderVisibleRows(app);
-        starCursorCard(app, () => rows[clampIndex(app.screen.index ?? 0, rows.length)]?.card ?? null);
+      } else if (rows.length) {
+        openActionMenu(app);
       }
     } else if (key === "b") {
       if (app.screen.searching || app.screen.query) {
@@ -837,11 +865,37 @@ function seasonStatsHtml(save, card) {
   if (!card) return "";
   const isArm = card.kind === "pitcher";
   const line = (isArm ? seasonPitchers(save) : seasonHitters(save)).find((item) => item.id === card.id);
-  if (!line) return `<div class="gq-frame"><p class="gq-dim">THIS SEASON: NO GAMES YET.</p></div>`;
+  if (!line) return "";
   const body = isArm
     ? `${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G`
     : `${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G`;
   return `<div class="gq-frame"><p class="gq-dim">THIS SEASON ${wpaHtml(line.wpa)}</p><p>${body}</p></div>`;
+}
+
+// The roster card's action menu: swap him out, jump to the batting order,
+// sell a spare copy, star him — all on Z/X/arrows.
+function teamCardActions(app, card) {
+  if (!card) return [{ label: "CANCEL", run: () => {} }];
+  const save = app.save;
+  const actions = [
+    {
+      label: save.activeSeries ? `SWAP THIS CARD <span class="gq-dim">SERIES IN PROGRESS</span>` : "SWAP THIS CARD",
+      disabled: Boolean(save.activeSeries),
+      run: () => {
+        app.screen.mode = "pick";
+        app.screen.pickFilter = "position";
+        const opened = pickRowsFor(save, card, "position");
+        app.screen.pickIndex = Math.max(0, opened.findIndex((row) => row.id === card.id));
+      }
+    }
+  ];
+  if (card.kind === "hitter") {
+    actions.push({ label: "BATTING ORDER", run: () => app.go("lineup", { returnTo: "team", index: 0 }) });
+  }
+  const sell = sellAction(app, card);
+  if (sell) actions.push(sell);
+  actions.push(starAction(app, card), { label: "CANCEL", run: () => {} });
+  return actions;
 }
 
 export const teamScreen = {
@@ -871,7 +925,9 @@ export const teamScreen = {
           ? roster[rosterIndex]
           : actions[rosterIndex - roster.length]?.preview ?? null;
     let list;
-    if (picking) {
+    if (app.screen.actionMenu && rosterIndex < roster.length) {
+      list = actionMenuHtml(roster[rosterIndex].name.toUpperCase(), teamCardActions(app, roster[rosterIndex]), app.screen.actionIndex);
+    } else if (picking) {
       const anchorId = roster[rosterIndex]?.id;
       list = `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
         [
@@ -908,8 +964,8 @@ export const teamScreen = {
             : flipping
               ? "Z sends the DH out there; the fielder DHs instead. X cancels."
               : save.activeSeries
-                ? "SERIES IN PROGRESS — the roster is locked until it ends. Rotation, DH, and batting order stay yours."
-                : "Z swaps a card. Rotation and DH tools live below the roster. X to leave."
+                ? "SERIES IN PROGRESS — swaps wait until it ends. Everything else in the card menu stays yours."
+                : "Z opens a card's actions — swap, batting order, sell, star. Rotation and DH tools live below the roster. X to leave."
         }</p>
       </div>
     </div>`;
@@ -931,6 +987,12 @@ export const teamScreen = {
     const save = app.save;
     const roster = rosterCards(save);
     const actions = teamActions(save);
+    if (app.screen.actionMenu) {
+      const card = roster[clampIndex(app.screen.index ?? 0, roster.length + actions.length)] ?? null;
+      actionMenuKey(app, key, teamCardActions(app, card));
+      app.rerender();
+      return;
+    }
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       const rows = pickRowsFor(save, anchor, app.screen.pickFilter ?? "position");
@@ -973,14 +1035,9 @@ export const teamScreen = {
     } else if (key === "a") {
       const index = clampIndex(app.screen.index ?? 0, roster.length + actions.length);
       if (index < roster.length) {
-        // No re-tooling the squad mid-series: card swaps wait until it ends.
-        // Rotation, the DH flip, and batting order stay adjustable.
-        if (save.activeSeries) return;
-        app.screen.mode = "pick";
-        app.screen.pickFilter = "position";
-        // The cursor opens on the incumbent, wherever his points rank him.
-        const opened = pickRowsFor(save, roster[index], "position");
-        app.screen.pickIndex = Math.max(0, opened.findIndex((card) => card.id === roster[index].id));
+        // The card's actions live in one menu: swap, batting order, sell,
+        // star. Mid-series the swap entry is disabled, not the whole menu.
+        openActionMenu(app);
       } else {
         const action = actions[index - roster.length];
         if (action && !action.disabled) action.run(app);
