@@ -267,7 +267,6 @@ export const TRAINERS = [
   },
   {
     id: "post-division",
-    legendClaims: true,
     name: "OCTOBER GATEKEEPER IVY",
     title: "Division Series",
     sprite: "IV",
@@ -291,7 +290,6 @@ export const TRAINERS = [
   },
   {
     id: "post-championship",
-    legendClaims: true,
     name: "PENNANT SHARK OKABE",
     title: "Championship Series",
     sprite: "OK",
@@ -318,7 +316,6 @@ export const TRAINERS = [
   },
   {
     id: "rival-4",
-    legendClaims: true,
     name: "RIVAL CAM",
     title: "Rival",
     ambush: true,
@@ -346,7 +343,6 @@ export const TRAINERS = [
   },
   {
     id: "post-worldseries",
-    legendClaims: true,
     name: "MR. NOVEMBER GRAVES",
     title: "World Series",
     sprite: "GR",
