@@ -1012,7 +1012,7 @@ export const packOpenScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>${escapeHtml(PACKS[pending.packId].name.toUpperCase())}</span><span>${revealed}/${cards.length}</span></div>
       <div class="gq-pack-stage">
-        <p class="gq-pack-count">${revealed === 0 ? "&#9993; RIP IT OPEN!" : `${rarityTag(current)}${rewound ? ` <span class="gq-dim">CARD ${viewing} OF ${revealed}</span>` : ""}`}</p>
+        ${revealed === 0 ? `<p class="gq-pack-count">&#9993; RIP IT OPEN!</p>` : rewound ? `<p class="gq-pack-count"><span class="gq-dim">CARD ${viewing} OF ${revealed}</span></p>` : ""}
         ${current ? `<div class="gq-pack-reveal">${cardPanelHtml(current, { count: ownedCount(save, current.id) })}</div>` : ""}
       </div>
       <div class="gq-textbox">

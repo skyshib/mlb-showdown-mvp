@@ -379,7 +379,7 @@ export const starterRevealScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>STARTER PACK</span><span>${revealed}/${cards.length}</span></div>
       <div class="gq-pack-stage">
-        <p class="gq-pack-count">${revealed === 0 ? "&#9993; YOUR SEALED STARTER PACK. RIP IT OPEN!" : `${rarityTag(current)}${rewound ? ` <span class="gq-dim">CARD ${viewing} OF ${revealed}</span>` : ""}`}</p>
+        ${revealed === 0 ? `<p class="gq-pack-count">&#9993; YOUR SEALED STARTER PACK. RIP IT OPEN!</p>` : rewound ? `<p class="gq-pack-count"><span class="gq-dim">CARD ${viewing} OF ${revealed}</span></p>` : ""}
         ${current ? `<div class="gq-pack-reveal">${cardPanelHtml(current)}</div>` : ""}
       </div>
       <div class="gq-textbox">
