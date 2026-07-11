@@ -40,8 +40,16 @@ def num(row, key):
 EARLIEST = 1910
 
 team_code = {}
+# code -> the club name from the code's LAST season, for logo lookups and
+# alt text: MON reads "Montreal Expos", TBD "Tampa Bay Devil Rays" — the
+# era-correct code picks the era-correct club.
+club_name = {}
 for r in rows("Teams.csv"):
-    team_code[(num(r, "yearID"), r["teamID"])] = r.get("teamIDBR") or r["teamID"]
+    code = r.get("teamIDBR") or r["teamID"]
+    year = num(r, "yearID")
+    team_code[(year, r["teamID"])] = code
+    if code not in club_name or year > club_name[code][0]:
+        club_name[code] = (year, r["name"])
 
 # pid -> window ("all" or decade string) -> club code -> set of years worn.
 seen = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
@@ -100,4 +108,8 @@ with open(os.path.join(SP, "mlbTeams.js"), "w") as f:
     for pid, windows in players.items():
         f.write(json.dumps(pid) + ":" + json.dumps(windows, separators=(",", ":")) + ",\n")
     f.write("};\n")
+    f.write("// Each code's club name from its final season, for logo lookups.\n")
+    f.write("export const MLB_TEAM_CLUB_NAMES = ")
+    f.write(json.dumps({code: name for code, (year, name) in sorted(club_name.items())}, separators=(",", ":")))
+    f.write(";\n")
 print(f"wrote mlbTeams.js: {len(players)} players, {len(TEAM_LIST)} club codes", file=sys.stderr)

@@ -202,11 +202,12 @@ function hoveredCard(target) {
 }
 
 // Plain-text hover notes (e.g. the HUD's team defense summary) render as a
-// small card-styled panel: first line is the title, the rest are rows.
+// small panel of their own — the card face is a picture card now, not a
+// text box.
 function notePanelHtml(note) {
   const [title, ...lines] = note.split("\n");
-  return `<div class="gq-card"><div class="gq-card-name">${escapeHtml(title)}</div>${lines
-    .map((line) => `<div class="gq-card-meta">${escapeHtml(line)}</div>`)
+  return `<div class="gq-note-panel"><div class="gq-note-title">${escapeHtml(title)}</div>${lines
+    .map((line) => `<div class="gq-note-row">${escapeHtml(line)}</div>`)
     .join("")}</div>`;
 }
 

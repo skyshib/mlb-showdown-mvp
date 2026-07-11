@@ -73,11 +73,11 @@ export function fieldingLabel(card) {
   return hitterPositions(card).map((entry) => signedFielding(Number(entry.fielding) || 0)).join("/");
 }
 
-// "2B+3 SS+2" — the card-face pairing, as the real cards print it.
+// "2B+3, SS+2" — the card-face pairing, comma-separated.
 export function positionFieldingLabel(card) {
   return hitterPositions(card)
     .map((entry) => `${entry.pos}${signedFielding(Number(entry.fielding) || 0)}`)
-    .join(" ");
+    .join(", ");
 }
 
 export function resolveChart(chart, roll) {

@@ -665,7 +665,7 @@ function renderMatchup(phase) {
   }
   if (phase.type === "player-batting") {
     return `<div class="gq-matchup">
-      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} SPD ${phase.batter.speed}</span><br>${onDeckLine(phase)}</div>
+      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} &middot; SPD ${phase.batter.speed}</span><br>${onDeckLine(phase)}</div>
       <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(matchupName(phase.opposingPitcher.name))}</b><br>
         ${moundLine(phase.opposingMound)}</div>
     </div>`;

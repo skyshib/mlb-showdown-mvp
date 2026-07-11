@@ -1,7 +1,7 @@
 import { formatRange, positionsLabel, positionFieldingLabel } from "../../rules/cards.js";
 import { RARITIES, dualPartnerCard } from "../packs.js";
 import { CARD_IMAGE_FILES } from "../../data/cardImages.js";
-import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS } from "../../data/mlbTeams.js";
+import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS, MLB_TEAM_CLUB_NAMES } from "../../data/mlbTeams.js";
 
 export function escapeHtml(value) {
   return String(value)
@@ -66,51 +66,71 @@ function cardTeams(card) {
     : codes;
 }
 
-// Full card panel: the binder/pack view, laid out like the main app's card —
-// a player strip with the big On-Base/Control square, name over one compact
-// meta line ("896 PT · SPD 10 · 2B+3"), then the chart as a range-map grid.
-// Real-player cards (classic and MLB leagues) get a photo band up top that
-// main.js hydrates from Wikipedia, plus their set tag / years-active line.
-function stripMetaLine(card) {
-  return card.kind === "pitcher"
-    ? `${escapeHtml(card.role)} &middot; IP ${card.ip} &middot; ${escapeHtml(card.throws)}HP`
-    : `SPD ${card.speed} &middot; ${escapeHtml(positionFieldingLabel(card))}`;
-}
-
-function cardStrip(card, { count = null, tag = "" } = {}) {
-  return `<div class="gq-card-strip">
-    <span class="gq-card-square">${card.kind === "pitcher" ? card.control : card.onBase}</span>
-    <span class="gq-card-strip-text">
-      <span class="gq-card-name">${escapeHtml(card.name.toUpperCase())}</span>
-      <span class="gq-card-meta">${stripMetaLine(card)}</span>
-    </span>
-    ${count !== null ? `<span class="gq-card-meta gq-dim">x${count}</span>` : tag}
-  </div>`;
-}
+// ---- The 2005 card face --------------------------------------------------
+//
+// Non-classic cards are a faithful port of card-lab-2005.html: black frame,
+// full-card photo window, the silver name bar, the white home-plate
+// On-Base/Control plate with its pill label, one white stat line, and the
+// two-row d20 chart over a stadium-green strip. The one deliberate tweak:
+// chart outcomes keep the colored result chips instead of plain white text.
+// Geometry is the mock's 400px measurements in card-relative units — the
+// card is its own CSS container, so 1cqw inside it = 1% of card width.
 
 // The chart prints a fixed column per outcome — SO GB FB BB 1B 1B+ 2B 3B HR
 // for hitters, PU SO GB FB BB 1B 2B HR for pitchers — die range on top,
-// result underneath, and a blank range where the card simply doesn't have
-// that outcome. Fixed positions make cards comparable at a glance. The
+// result underneath, and an em-dash range where the card simply doesn't
+// have that outcome. Fixed positions make cards comparable at a glance. The
 // role's off-outcome (hitter PU, pitcher 3B) only appears on the rare card
 // that actually rolls it; 1B+ is batter-only and real classic cards are the
 // only source that ever prints it.
 const CHART_ORDER = ["PU", "SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
 
-function chartGrid(card) {
+function fixedChartColumns(card) {
   const merged = chartRangeCells(card);
   const present = new Set(merged.map((entry) => entry.result));
   const optional = new Set([card.kind === "pitcher" ? "3B" : "PU", "1B+"]);
-  const columns = CHART_ORDER.filter((result) => !optional.has(result) || present.has(result));
-  const cells = columns
-    .map((result) => {
-      const ranges = merged.filter((entry) => entry.result === result).map(formatRange).join(",");
-      return `<span class="gq-chart-cell gq-chart-${resultTone(result)}${ranges ? "" : " gq-chart-empty"}">
-      <b class="gq-chart-range">${ranges ? escapeHtml(ranges) : "&nbsp;"}</b>
-      <span class="gq-chart-result">${escapeHtml(result)}</span>
-    </span>`;
-    })
+  return CHART_ORDER
+    .filter((result) => !optional.has(result) || present.has(result))
+    .map((result) => ({
+      result,
+      text: merged.filter((entry) => entry.result === result).map(formatRange).join(",")
+    }));
+}
+
+// Two grid rows, exactly like the printed card: every range across the top,
+// every result beneath it.
+function chartRows(card, extra = "") {
+  const columns = fixedChartColumns(card);
+  const ranges = columns
+    .map(({ text }) => `<span class="gq-chart-range">${text ? escapeHtml(text) : "&mdash;"}</span>`)
     .join("");
+  const results = columns
+    .map(({ result, text }) =>
+      `<span class="gq-chart-result gq-chart-${resultTone(result)}${text ? "" : " gq-chart-empty"}">${escapeHtml(result)}</span>`)
+    .join("");
+  return `<div class="gq-chart${extra}" style="--gq-chart-cols:${columns.length}">${ranges}${results}</div>`;
+}
+
+// A two-way pair prints ONE chart: the outcome labels once, the bat's die
+// ranges above them and the arm's below. The column set is the full union —
+// PU and 3B both show — with an em-dash on any side that lacks the outcome.
+function comboChartRows(bat, arm) {
+  const textOf = (card) => {
+    const merged = chartRangeCells(card);
+    return (result) => merged.filter((entry) => entry.result === result).map(formatRange).join(",");
+  };
+  const batText = textOf(bat);
+  const armText = textOf(arm);
+  const present = new Set([...chartRangeCells(bat), ...chartRangeCells(arm)].map((entry) => entry.result));
+  const columns = CHART_ORDER.filter((result) => result !== "1B+" || present.has(result));
+  const range = (text) => `<span class="gq-chart-range">${text ? escapeHtml(text) : "&mdash;"}</span>`;
+  const cells =
+    columns.map((result) => range(batText(result))).join("") +
+    columns
+      .map((result) =>
+        `<span class="gq-chart-result gq-chart-${resultTone(result)}${batText(result) || armText(result) ? "" : " gq-chart-empty"}">${escapeHtml(result)}</span>`)
+      .join("") +
+    columns.map((result) => range(armText(result))).join("");
   return `<div class="gq-chart" style="--gq-chart-cols:${columns.length}">${cells}</div>`;
 }
 
@@ -129,6 +149,62 @@ function cardShell(card, extra = "") {
   return `gq-card gq-card-${card.kind === "pitcher" ? "pitcher" : "hitter"} gq-rarity-border-${card.rarity}${foil ? " gq-foil" : ""}${extra}`;
 }
 
+// The team mark over the photo's lower right: a small club logo (hydrated
+// at runtime from the club's Wikipedia page image, same pipeline as player
+// portraits) with the era-correct code as the standing fallback. The code
+// picks the club name, so an Expos-era player gets the Expos logo, never
+// the Nationals'. Fictional teams have no logo and keep their letters.
+function teamMark(card) {
+  const codes = cardTeams(card);
+  const code = codes?.length
+    ? codes[0]
+    : /^mlb-f([A-Z]{2,3})-/.exec(String(card.id ?? ""))?.[1] ?? null;
+  if (code) return { code, club: MLB_TEAM_CLUB_NAMES[code] ?? null };
+  const team = String(card.team ?? "").trim();
+  if (!team) return null;
+  return { code: team.slice(0, 3).toUpperCase(), club: MLB_TEAM_CLUB_NAMES[team] ?? null };
+}
+
+function statLineHtml(card) {
+  return card.kind === "pitcher"
+    ? `<span>${card.points} PTS</span><span>IP ${card.ip}</span><span>${escapeHtml(card.role)}</span>`
+    : `<span>${card.points} PTS</span><span>SPEED ${card.speed}</span><span>${escapeHtml(positionFieldingLabel(card))}</span>`;
+}
+
+// The stadium backdrop behind the strip: blurred crowd lights over outfield
+// green, seeded off the card id so each card keeps its own night sky.
+function stripBackdrop(id) {
+  let seed = [...String(id)].reduce((hash, ch) => (hash * 31 + ch.charCodeAt(0)) >>> 0, 99) || 7;
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const uid = `gq${(seed % 99991).toString(36)}`;
+  const lights = [];
+  for (let i = 0; i < 26; i += 1) {
+    const x = (rand() * 386).toFixed(1);
+    const y = (8 + rand() * 40).toFixed(1);
+    const r = (2 + rand() * 5).toFixed(1);
+    lights.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="hsl(140 22% ${(30 + rand() * 22).toFixed(0)}%)"/>`);
+  }
+  return `<svg viewBox="0 0 386 138" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="386" height="138" fill="#0f2716"/>
+    <g filter="url(#${uid}b)" opacity="0.75">
+      ${lights.join("")}
+      <rect y="52" width="386" height="26" fill="#1b4a2c"/>
+      <rect y="76" width="386" height="62" fill="#0c2413"/>
+    </g>
+    <rect width="386" height="138" fill="url(#${uid}s)"/>
+    <defs>
+      <filter id="${uid}b"><feGaussianBlur stdDeviation="6"/></filter>
+      <linearGradient id="${uid}s" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="rgba(4,12,7,0.25)"/>
+        <stop offset="1" stop-color="rgba(3,9,5,0.72)"/>
+      </linearGradient>
+    </defs>
+  </svg>`;
+}
+
 export function cardPanelHtml(card, { count = null } = {}) {
   // Classic cards with a real scan ARE the card: the printed scan fills the
   // frame (courtesy of ShowdownCards.com), with just a compact chart tray
@@ -136,35 +212,55 @@ export function cardPanelHtml(card, { count = null } = {}) {
   // already says everything else.
   const scan = CARD_IMAGE_FILES[card.id];
   if (scan) {
-    return `<div class="${cardShell(card, " gq-card-has-scan")}">
-      <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
-      <div class="gq-card-lower">${chartGrid(card)}${count !== null ? `<div class="gq-card-meta gq-dim">x${count}</div>` : ""}</div>
-    </div>`;
+    return `<div class="${cardShell(card, " gq-card-has-scan")}"><div class="gq-face">
+      <div class="gq-scan-wrap">
+        <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
+        ${count !== null ? `<span class="gq-photo-tag">x${count}</span>` : ""}
+      </div>
+      <div class="gq-scan-tray"><div class="gq-stat-line">${statLineHtml(card)}</div>${chartRows(card)}</div>
+    </div></div>`;
   }
-  // Everyone else prints in the main app's card layout: team-accent photo
-  // stage up top (Wikipedia headshots hydrate in; fictional players show
-  // their initials), then the dark lower panel — player strip, tagline,
-  // clubs, chart.
   const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
+  const mark = teamMark(card);
+  // Years active and clubs float in the photo's top-left corner — the
+  // identity facts the printed face doesn't carry. Rarity badges the name
+  // bar instead.
   const teams = cardTeams(card);
-  // Rarity, price, and clubs float over the photo's top-left corner; the
-  // lower panel keeps just the player strip and the chart.
   const overlay = `<div class="gq-card-overlay">
-    <span>${rarityTag(card)}</span>
-    <span class="gq-card-overlay-line">${card.points} PT${card.setTag ? ` &middot; ${escapeHtml(card.setTag)}` : ""}</span>
-    ${teams ? `<span class="gq-card-overlay-line">${teams.map(escapeHtml).join(" &middot; ")}</span>` : ""}
+    ${card.setTag ? `<span class="gq-card-overlay-line">${escapeHtml(card.setTag)}</span>` : ""}
+    ${teams?.length ? `<span class="gq-card-overlay-line">${teams.map(escapeHtml).join(" &middot; ")}</span>` : ""}
   </div>`;
-  const photo = `<div class="gq-card-photo">${overlay}${card.real
-    ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
-    : `<span class="gq-card-initials">${escapeHtml(initials)}</span>`}</div>`;
-  // A simultaneous two-way pair prints as one card: the other half's strip
-  // and chart stack under the primary's. Both roster separately.
+  // A simultaneous two-way pair prints as ONE card: "NAME - 2-WAY", a
+  // combined 13|5 plate labeled OB|CTRL, one stat line (points for the
+  // pair, the bat's speed, the arm's IP and role — the bat half DHs, so
+  // its position goes without saying), and both charts stacked, bat over
+  // arm. Both halves still roster separately.
   const partner = dualPartnerCard(card.id);
-  const partnerBlock = partner
-    ? `${cardStrip(partner, { tag: `<span class="gq-card-meta gq-dim">TWO-WAY</span>` })}
-    ${chartGrid(partner)}`
-    : "";
-  return `<div class="${cardShell(card)}">${photo}<div class="gq-card-lower">${cardStrip(card, { count })}${chartGrid(card)}${partnerBlock}</div></div>`;
+  const bat = partner ? (card.kind === "hitter" ? card : partner) : null;
+  const arm = partner ? (card.kind === "pitcher" ? card : partner) : null;
+  const nameBadge = partner ? `<span class="gq-name-badge">2-WAY</span>` : "";
+  const plate = partner ? `${bat.onBase}|${arm.control}` : card.kind === "pitcher" ? card.control : card.onBase;
+  const plateLabel = partner ? "OB|CTRL" : card.kind === "pitcher" ? "CTRL" : "OB";
+  const stat = partner
+    ? `<span>${card.points + partner.points} PTS</span><span>SPEED ${bat.speed}</span><span>IP ${arm.ip}</span><span>${escapeHtml(arm.role)}</span>`
+    : statLineHtml(card);
+  const charts = partner ? comboChartRows(bat, arm) : chartRows(card);
+  return `<div class="${cardShell(card, partner ? " gq-card-two-way" : "")}"><div class="gq-face">
+    <div class="gq-photo">${card.real
+      ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
+      : `<span class="gq-card-initials">${escapeHtml(initials)}</span>`}
+      ${overlay}
+      ${count !== null ? `<span class="gq-photo-tag">x${count}</span>` : ""}</div>
+    ${mark ? `<div class="gq-team-mark"${mark.club ? ` data-team-logo="${escapeHtml(mark.club)}"` : ""}>${escapeHtml(mark.code)}</div>` : ""}
+    <div class="gq-strip">
+      <div class="gq-strip-bg">${stripBackdrop(card.id)}</div>
+      <div class="gq-name-bar"><span class="gq-name">${escapeHtml(card.name.toUpperCase())}</span>${nameBadge}${rarityTag(card)}</div>
+      <div class="gq-plate${partner ? " gq-plate-combo" : ""}"><span>${plate}</span></div>
+      <div class="gq-plate-label">${plateLabel}</div>
+      <div class="gq-stat-line">${stat}</div>
+      ${charts}
+    </div>
+  </div></div>`;
 }
 
 // Classic card names carry their card year ("Mike Caruso '02"). Cramped or

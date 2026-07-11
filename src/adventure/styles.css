@@ -2,6 +2,24 @@
    10:9 stage (the Game Boy screen ratio); everything scales off container
    query units so one constraint does the aesthetic work. */
 
+/* Card face type: Archivo Narrow (SIL Open Font License), self-hosted so
+   the game stays offline-complete. The 600-1000 weight range maps the
+   card's heavy weights onto the 700 file without synthetic bolding. */
+@font-face {
+  font-family: "Archivo Narrow";
+  font-style: normal;
+  font-weight: 600 1000;
+  font-display: swap;
+  src: url("../../assets/fonts/archivo-narrow-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo Narrow";
+  font-style: italic;
+  font-weight: 600 1000;
+  font-display: swap;
+  src: url("../../assets/fonts/archivo-narrow-700-italic.woff2") format("woff2");
+}
+
 :root {
   --gb-darkest: #0f380f;
   --gb-dark: #306230;
@@ -125,173 +143,382 @@ h1.gq-logo {
    view) shrink it a quarter and center it. */
 .gq-card-side .gq-card { width: 75%; margin-inline: auto; }
 
-/* ---- Cards ---- */
+/* ---- Cards: the 2005 face ---- */
 
-/* Card panels break from the DMG palette on purpose: they print in the main
-   app's full-color card design (src/styles.css .player-card) — real trading
-   card proportions (5:7), rarity metal frames, a team-accent photo stage,
-   and the classic chart colors. The rest of the screen stays green; the
-   cards are the color in the world. */
+/* Non-classic cards are a faithful port of card-lab-2005.html. The .gq-card
+   box is its own container, so every unit inside .gq-face is card-relative:
+   the mock's 400x560px geometry maps 1px -> 0.25cqw. The one deliberate
+   tweak from the mock: chart outcomes keep the colored result chips. */
 .gq-card {
-  --rarity-frame: #9c6a3f;
-  --rarity-glow: rgba(156, 106, 63, 0.32);
-  --card-accent: #365f91;
-  --card-accent-dark: #0c354f;
+  --team-mark-fill: #3f6fb5;
   position: relative;
-  display: flex;
-  flex-direction: column;
+  container-type: inline-size;
   aspect-ratio: 5 / 7;
-  padding: 0.7cqw;
   margin-bottom: 1.5cqw;
+}
+.gq-card-pitcher { --team-mark-fill: #9a2f28; }
+
+.gq-face {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  border-radius: 2cqw;
-  background: var(--rarity-frame);
-  box-shadow: 0 1.2cqw 2.4cqw rgba(28, 37, 33, 0.22), 0 0 2.2cqw var(--rarity-glow);
-  color: white;
-}
-.gq-card-pitcher {
-  --card-accent: #9a2f28;
-  --card-accent-dark: #3c110d;
+  border-radius: 3.75cqw;
+  background: linear-gradient(160deg, #131313, #000000);
+  box-shadow: 0 2cqw 6cqw rgba(0, 0, 0, 0.55);
+  /* Overridable so the card lab can audition typefaces. */
+  font-family: var(--gq-card-font, "Archivo Narrow", "Arial Narrow", "Roboto Condensed", sans-serif);
+  color: #ffffff;
 }
 
-/* Rarity is the frame metal, exactly like the main app's cards. */
-.gq-rarity-border-uncommon { --rarity-frame: #c9d2d8; --rarity-glow: rgba(152, 186, 205, 0.36); }
-.gq-rarity-border-rare { --rarity-frame: #e1b64b; --rarity-glow: rgba(221, 173, 57, 0.42); }
-.gq-rarity-border-legend { --rarity-frame: #e1b64b; --rarity-glow: rgba(120, 180, 255, 0.52); }
-
-/* Scanned classics: the printed card IS the picture — it fills the frame,
-   and only a slim chart tray rides below at the same width. The scan sets
-   the height (its 255:356 print ratio is a whisker off 5:7). */
-.gq-card-has-scan { aspect-ratio: auto; }
-.gq-card-has-scan .gq-card-lower { gap: 0.4cqw; padding: 0.8cqw; }
-
-.gq-card-name {
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
-  font-weight: 950;
-  font-size: 3.4cqw;
+/* photo window: frame is ~7px sides, ~9px top, ~13px bottom on the mock */
+.gq-photo {
+  position: absolute;
+  inset: 2.25cqw 1.75cqw 3.25cqw;
+  overflow: hidden;
+  border-radius: 2.25cqw;
+  background: #24313c;
 }
-.gq-card-meta { font-size: 2.2cqw; margin-top: 0.3cqw; letter-spacing: 0.03em; }
-.gq-card .gq-dim { color: rgba(255, 255, 255, 0.72); }
-
-/* The dark lower panel: strip, tagline, clubs, chart on an accent wash. */
-.gq-card-lower {
-  display: grid;
-  gap: 0.8cqw;
-  border-radius: 0 0 1.4cqw 1.4cqw;
-  padding: 1cqw 1.2cqw 1.2cqw;
-  background:
-    linear-gradient(90deg, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.46)),
-    linear-gradient(90deg, var(--card-accent-dark), var(--card-accent));
+.gq-card-headshot { position: absolute; inset: 0; }
+.gq-card-headshot:empty { visibility: hidden; }
+.gq-card-headshot img,
+.gq-card-headshot svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
 }
-
-/* Player strip: big On-Base/Control square in the printed yellow, name over
-   one compact meta line, count or TWO-WAY tag on the right. */
-.gq-card-strip {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 1.3cqw;
-  align-items: center;
+/* Action heroes are landscape game photos: crop like the printed cards. */
+.gq-card-headshot img.gq-action-shot { object-position: center 30%; }
+/* Ultra-wide banners (no vertical shot on the CDN) show as a sharp band —
+   60% of the window, biased toward the top of the frame where the player
+   is — over a blurred cover of themselves. Crop-lab winner: "band 60%". */
+.gq-card-headshot img.gq-wide-shot {
+  /* The lab's winning band was ~3:2 (width : height); size it off the card
+     width so the window's tall shape can't re-zoom the banner, and center
+     it in the photo area above the strip. */
+  top: 16cqw;
+  bottom: auto;
+  height: 63cqw;
+  object-fit: cover;
+  object-position: center 25%;
+  z-index: 1;
 }
-.gq-card-square {
-  min-width: 10cqw;
-  align-self: stretch;
+.gq-card-headshot .gq-photo-backdrop {
+  object-fit: cover;
+  filter: blur(2.5cqw) brightness(0.7);
+  transform: scale(1.12);
+}
+.gq-card-initials {
+  position: absolute;
+  inset: 0 0 30cqw;
   display: grid;
   place-items: center;
-  padding: 0 0.6cqw;
-  border-radius: 0.7cqw;
-  background: #ffe56f;
-  color: #b51225;
-  font-size: 6.4cqw;
-  font-weight: 950;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 17cqw;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.06em;
 }
-.gq-card-strip-text { min-width: 0; }
-.gq-card-strip .gq-card-name {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  letter-spacing: 0;
-  font-size: 3.8cqw;
+/* Owned-count tag, photo-slot style — top right; the overlay owns the left. */
+.gq-photo-tag {
+  position: absolute;
+  top: 1.75cqw;
+  right: 1.75cqw;
+  z-index: 3;
+  padding: 0.6cqw 1.9cqw;
+  border-radius: 1.2cqw;
+  background: rgba(5, 10, 8, 0.5);
+  color: rgba(237, 243, 244, 0.8);
+  font-size: 4.8cqw;
+  font-weight: 700;
+  letter-spacing: 0.14em;
 }
-/* Long position lists (1B+0 LF/RF+1) wrap rather than clip. */
-.gq-card-strip .gq-card-meta { letter-spacing: 0; font-size: 2.6cqw; }
 
-/* Rarity, price, and clubs ride the photo's top-left corner. */
+/* Rarity badge, years active, and clubs float in the photo's top left. */
 .gq-card-overlay {
   position: absolute;
-  top: 1.2cqw;
-  left: 1.2cqw;
-  z-index: 2;
+  top: 1.75cqw;
+  left: 1.75cqw;
+  z-index: 3;
   display: grid;
-  gap: 0.5cqw;
+  gap: 0.6cqw;
   justify-items: start;
 }
+.gq-card-overlay .gq-rarity { font-size: 2.6cqw; }
 .gq-card-overlay-line {
-  padding: 0.1cqw 0.7cqw;
-  border-radius: 0.5cqw;
-  background: rgba(5, 8, 10, 0.62);
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 2.2cqw;
+  padding: 0.5cqw 1.6cqw;
+  border-radius: 1.2cqw;
+  background: rgba(5, 10, 8, 0.55);
+  color: rgba(237, 243, 244, 0.85);
+  font-size: 3.9cqw;
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
 
-/* Chart: one column per merged die range, range on top, result under it,
-   in the printed sets' result colors. */
+/* Team mark over the photo, above the strip: the real club logo in a small
+   white circle mask once it hydrates; the era-correct code text until then
+   (and for fictional clubs, forever). */
+.gq-team-mark {
+  position: absolute;
+  right: 5cqw;
+  bottom: 33.5cqw;
+  z-index: 2;
+  color: var(--team-mark-fill);
+  font-size: 11.5cqw;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  -webkit-text-stroke: 0.6cqw #ffffff;
+  paint-order: stroke fill;
+  text-shadow: 0 0.75cqw 1.75cqw rgba(0, 0, 0, 0.65);
+}
+.gq-team-mark img {
+  display: block;
+  width: 13cqw;
+  height: 13cqw;
+  padding: 1.4cqw;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  object-fit: contain;
+  box-shadow: 0 0.75cqw 1.75cqw rgba(0, 0, 0, 0.5);
+}
+
+/* ---- bottom strip: name bar, plate, stat line, chart ---- */
+.gq-strip {
+  position: absolute;
+  left: 1.75cqw;
+  right: 1.75cqw;
+  bottom: 3.25cqw;
+  height: 29cqw;
+}
+.gq-card-two-way .gq-strip { height: 35cqw; }
+.gq-card-two-way .gq-team-mark { bottom: 39.5cqw; }
+.gq-strip-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 0 0 2.25cqw 2.25cqw;
+}
+.gq-strip-bg svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* silver name bar */
+.gq-name-bar {
+  position: absolute;
+  left: 15.5cqw;
+  right: 0;
+  top: 0;
+  height: 7.25cqw;
+  display: flex;
+  align-items: center;
+  padding: 0 2cqw 0.25cqw 3cqw;
+  background: linear-gradient(180deg, #fdfdfd 0%, #f2f4f6 40%, #c2cbd4 78%, #98a5b1 100%);
+  box-shadow:
+    inset 0 0.25cqw 0 rgba(255, 255, 255, 0.9),
+    0 -0.25cqw 0 rgba(0, 0, 0, 0.5),
+    0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.55);
+}
+.gq-name-bar { gap: 0.8cqw; }
+.gq-name-bar .gq-name {
+  min-width: 0;
+  margin-right: auto; /* pushes the badges to the bar's right edge */
+  overflow: hidden;
+  color: #0d1740;
+  font-size: 6.25cqw;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: scaleY(1.04);
+  transform-origin: left center;
+}
+/* Badges on the name row: 2-WAY first (when the card is one), rarity after. */
+.gq-name-bar .gq-name-badge {
+  flex: none;
+  padding: 0.4cqw 1.5cqw 0.5cqw;
+  border-radius: 1cqw;
+  background: #14161c;
+  color: #ffffff;
+  font-size: 3cqw;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.gq-name-bar .gq-rarity {
+  flex: none;
+  padding: 0.4cqw 1.5cqw 0.5cqw;
+  border-radius: 1cqw;
+  font-size: 3cqw;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+/* on-base number: white home-plate pentagon, number in red, overlapping
+   above the name bar */
+.gq-plate {
+  position: absolute;
+  left: 4cqw;
+  top: -2.5cqw;
+  z-index: 4;
+  width: 12cqw;
+  height: 12cqw;
+  filter: drop-shadow(0 0.75cqw 1.25cqw rgba(0, 0, 0, 0.55));
+}
+.gq-plate::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(0% 0%, 100% 0%, 100% 52%, 50% 100%, 0% 52%);
+  background: #14161c;
+}
+.gq-plate span {
+  position: absolute;
+  inset: 0.6cqw;
+  clip-path: polygon(0% 0%, 100% 0%, 100% 52%, 50% 100%, 0% 52%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 3.25cqw;
+  background: linear-gradient(180deg, #ffffff 55%, #e6eaee 100%);
+  color: #cf2318;
+  font-size: 7.5cqw;
+  font-weight: 900;
+  text-shadow: 0 0.25cqw 0 rgba(0, 0, 0, 0.15);
+}
+
+/* Two-way combined plate ("13|5") squeezes its number down a size. */
+.gq-plate-combo span { font-size: 5cqw; }
+
+/* OB / CTRL / OB|CTRL pill over the plate's point — sized to its text and
+   centered on the plate's axis. */
+.gq-plate-label {
+  position: absolute;
+  left: 10cqw; /* the plate's center */
+  transform: translateX(-50%);
+  top: 8.75cqw;
+  z-index: 5;
+  min-width: 12cqw;
+  height: 4.75cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2cqw 0.25cqw;
+  background: linear-gradient(180deg, #2c2c2c, #040404);
+  border: 0.5cqw solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 0.75cqw 1.5cqw rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  font-size: 3cqw;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.06em;
+}
+
+/* stat line: PT. / SPEED / POS+FLD (IP / role for arms). Positioned in the
+   strip; flows in the classic scan tray. */
+.gq-stat-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #ffffff;
+  font-size: 4.1cqw;
+  font-weight: 800;
+  letter-spacing: 0.025em;
+  text-shadow: 0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+}
+.gq-strip .gq-stat-line {
+  position: absolute;
+  left: 26cqw;
+  right: 3cqw;
+  top: 7.75cqw;
+  height: 6.5cqw;
+}
+.gq-scan-tray .gq-stat-line { margin-bottom: 1.2cqw; }
+
+/* d20 chart: two grid rows — every range, then every result. The mock
+   prints results as plain white text; ours keep the colored chips. */
 .gq-chart {
   display: grid;
   grid-template-columns: repeat(var(--gq-chart-cols), minmax(0, 1fr));
-  overflow: hidden;
-  border: 0.3cqw solid rgba(12, 16, 19, 0.84);
-  border-radius: 0.7cqw;
-  background: #f4efd8;
+  row-gap: 0.75cqw;
   text-align: center;
-  box-shadow: 0 0.2cqw 0 rgba(255, 255, 255, 0.38) inset, 0 0.2cqw 1.4cqw rgba(0, 0, 0, 0.2);
 }
-.gq-chart-cell {
-  min-width: 0;
-  display: grid;
-  grid-template-rows: auto auto;
-  border-right: 0.2cqw solid rgba(12, 16, 19, 0.34);
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
+.gq-strip .gq-chart {
+  position: absolute;
+  left: 2.75cqw;
+  right: 2.75cqw;
+  top: 15cqw;
+  border-top: 0.5cqw solid #ffffff;
+  padding-top: 1.5cqw;
 }
-.gq-chart-cell:last-child { border-right: 0; }
 .gq-chart-range {
   overflow: hidden;
   white-space: nowrap;
-  background: #f8f4df;
-  color: #111820;
-  font-size: 2.6cqw;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1.6;
+  color: #ffffff;
+  font-size: 4.25cqw;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  text-shadow: 0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.8);
   font-variant-numeric: tabular-nums;
 }
 .gq-chart-result {
-  font-size: 2.75cqw;
-  font-weight: 950;
-  letter-spacing: 0;
-  line-height: 1.6;
-  color: white;
-  text-shadow: 0 0.2cqw 0.6cqw rgba(0, 0, 0, 0.58);
+  margin: 0 0.3cqw;
+  padding: 0.5cqw 0;
+  border-radius: 0.75cqw;
+  color: #ffffff;
+  font-size: 3.5cqw;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  text-shadow: 0 0.25cqw 0.5cqw rgba(0, 0, 0, 0.45);
 }
-.gq-chart-out .gq-chart-result { background: #253544; color: #c3d0d6; }
-.gq-chart-walk .gq-chart-result { background: #16825e; }
-.gq-chart-single .gq-chart-result { background: #d7aa36; color: #241a08; text-shadow: none; }
-.gq-chart-double .gq-chart-result { background: #e88334; }
-.gq-chart-triple .gq-chart-result { background: #d9572d; }
-.gq-chart-homer .gq-chart-result { background: #e94c5f; }
+.gq-chart-out { background: #253544; color: #c3d0d6; }
+.gq-chart-walk { background: #16825e; }
+.gq-chart-single { background: #d7aa36; color: #241a08; text-shadow: none; }
+.gq-chart-double { background: #e88334; }
+.gq-chart-triple { background: #d9572d; }
+.gq-chart-homer { background: #e94c5f; }
 /* Outcomes the card doesn't roll keep their column, muted. */
-.gq-chart-empty .gq-chart-result { background: transparent; color: rgba(17, 24, 32, 0.32); text-shadow: none; }
+.gq-chart-result.gq-chart-empty { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.35); text-shadow: none; }
 
-/* The rarity chip in the tagline wears its frame metal. */
+
+/* Scanned classics keep their treatment: the printed card fills the frame,
+   a slim chart tray rides below at the same width. */
+.gq-card-has-scan { aspect-ratio: auto; }
+.gq-card-has-scan .gq-face { position: static; }
+.gq-card-scan {
+  display: block;
+  width: 100%;
+  aspect-ratio: 255 / 356;
+}
+/* The count tag overlays the scan itself, same as the photo window. */
+.gq-scan-wrap { position: relative; }
+.gq-scan-tray { padding: 1.5cqw 1.75cqw 2cqw; }
+
+/* Rarity chips, tiered: common light grey, uncommon bronze, rare
+   yellow-silver, legend gold. */
 .gq-rarity {
   font-weight: 700;
   padding: 0 0.7cqw;
   border-radius: 0.5cqw;
-  background: var(--rarity-frame);
+  background: #cdd3d7;
   color: #171512;
-  font-size: 2.2cqw;
+  font-size: 2.5cqw;
 }
-.gq-rarity-legend { animation: gq-blink 1.2s steps(2) infinite; }
+.gq-rarity-uncommon { background: #b07c4a; }
+.gq-rarity-rare { background: #d8d0a2; }
+.gq-rarity-legend { background: #e1b64b; }
 
 /* ---- Battle screen ---- */
 
@@ -342,76 +569,9 @@ h1.gq-logo {
   margin: 2cqw 0;
 }
 
-/* ---- Card photo stage (portraits, scans) ---- */
-
-/* The photo stage is the card: it takes all the height the lower panel
-   doesn't, on a team-accent gradient with the printed cards' bottom-fade
-   vignette. Real portraits render in grayscale and blend luminosity-style,
-   so the accent tints them like the main app's cards. */
-.gq-card-photo {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  justify-content: center;
-  overflow: hidden;
-  border-radius: 1.4cqw 1.4cqw 0 0;
-  background: linear-gradient(155deg, var(--card-accent), var(--card-accent-dark));
-}
-.gq-card-photo::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(120% 86% at 50% 27%, transparent 46%, rgba(0, 0, 0, 0.26)),
-    linear-gradient(to bottom, transparent 58%, rgba(5, 8, 10, 0.7));
-}
-.gq-card-headshot {
-  position: relative;
-  height: 100%;
-  aspect-ratio: 3 / 4;
-  overflow: hidden;
-}
-.gq-card-headshot:empty { visibility: hidden; }
-.gq-card-headshot img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center top;
-  filter: grayscale(1) contrast(1.05) brightness(1.08);
-  mix-blend-mode: luminosity;
-}
-/* Generated pixel portraits keep their own palette — no blend. */
-.gq-card-headshot svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-/* Fictional players with no portrait show their monogram on the stage. */
-.gq-card-initials {
-  align-self: center;
-  color: rgba(255, 255, 255, 0.72);
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
-  font-size: 10cqw;
-  font-weight: 950;
-  letter-spacing: 0.08em;
-}
-
-/* Real Showdown card scans (ShowdownCards.com) run full color on purpose —
-   the actual printed card is the point. It fills the frame's width; the
-   chart tray below matches it exactly. */
-.gq-card-scan {
-  display: block;
-  width: 100%;
-  aspect-ratio: 255 / 356;
-  border-radius: 1.4cqw 1.4cqw 0 0;
-  image-rendering: auto;
-}
 /* ---- Foil cards ---- */
 
-/* Foil printings (and legends everywhere) get a slow shine sweep and a
-   twinkling star — as much sparkle as four shades of green allow. */
+/* Foil printings (and legends everywhere) get the slow shine sweep. */
 .gq-foil {
   position: relative;
   overflow: hidden;
@@ -420,20 +580,10 @@ h1.gq-logo {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
   background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.4) 50%, transparent 58%);
   transform: translateX(-110%);
   animation: gq-foil-sweep 2.8s ease-in-out infinite;
-  pointer-events: none;
-}
-.gq-foil::before {
-  content: "\2726";
-  position: absolute;
-  top: 0.6cqw;
-  right: 1cqw;
-  z-index: 1;
-  color: var(--gb-lightest);
-  text-shadow: 0 0 1cqw var(--gb-light);
-  animation: gq-blink 1.3s steps(2) infinite;
   pointer-events: none;
 }
 @keyframes gq-foil-sweep {
@@ -560,6 +710,15 @@ h1.gq-logo {
   filter: drop-shadow(0 0.5em 1.5em rgba(0, 0, 0, 0.55));
 }
 .gq-tooltip .gq-card { margin-bottom: 0; }
+/* Plain-text hover notes (team defense summaries) keep the DMG look. */
+.gq-note-panel {
+  border: 0.8cqw solid var(--gb-darkest);
+  padding: 1.2cqw 1.6cqw;
+  background: var(--gb-lightest);
+  color: var(--gb-darkest);
+}
+.gq-note-panel .gq-note-title { font-weight: 700; font-size: 3.2cqw; }
+.gq-note-panel .gq-note-row { font-size: 2.8cqw; margin-top: 0.3cqw; }
 
 /* ---- Touch controls (the rest of the Game Boy) ---- */
 

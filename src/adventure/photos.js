@@ -65,7 +65,8 @@ async function lookup(name) {
     const data = await response.json();
     if (data.type !== "standard" || !data.thumbnail?.source) continue;
     if (requireBaseball && !`${data.description ?? ""} ${data.extract ?? ""}`.toLowerCase().includes("baseball")) continue;
-    return data.thumbnail.source;
+    // The summary thumbnail is ~320px; the card window deserves double.
+    return data.thumbnail.source.replace(/\/320px-/, "/640px-");
   }
   return searchLookup(name);
 }
@@ -77,7 +78,7 @@ async function lookup(name) {
 async function searchLookup(name) {
   const url = "https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*"
     + `&generator=search&gsrsearch=${encodeURIComponent(`${name} baseball`)}&gsrlimit=5`
-    + "&prop=pageimages%7Cdescription&piprop=thumbnail&pithumbsize=320";
+    + "&prop=pageimages%7Cdescription&piprop=thumbnail&pithumbsize=640";
   const response = await fetch(url, { headers: { accept: "application/json" } });
   if (!response.ok) return null;
   const data = await response.json();
@@ -102,26 +103,81 @@ function mlbHeadshotUrl(mlbam) {
   return `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_auto:best,f_auto/v1/people/${mlbam}/headshot/67/current`;
 }
 
+// The same CDN's game-action shots — the 2004-05 printed cards were action
+// photos, so these are the preferred faces. VERTICAL is a purpose-built
+// portrait crop (recent players only); HERO is the wide banner everyone
+// else has, which the window letterboxes.
+function mlbVerticalUrl(mlbam) {
+  return `https://img.mlbstatic.com/mlb-photos/image/upload/w_426,q_auto:best,f_auto/v1/people/${mlbam}/action/vertical/current`;
+}
+
+function mlbActionUrl(mlbam) {
+  return `https://img.mlbstatic.com/mlb-photos/image/upload/w_426,q_auto:best,f_auto/v1/people/${mlbam}/action/hero/current`;
+}
+
 // MLBAM ids whose CDN photo already 404'd this session — skip straight to
 // the next source instead of re-requesting.
 const mlbMisses = new Set();
+const actionMisses = new Set();
+const verticalMisses = new Set();
 
 // Fill every photo slot inside `root` (a rendered screen or the tooltip).
 // The cascade: official MLB headshot (when the card carries an MLBAM id),
 // then the Wikipedia lookup, then a deterministic DMG pixel portrait — every
 // real player gets a face, even the 1884 guys no camera ever loved.
 export function hydratePhotos(root) {
+  // The cascade prefers game photos, best-shaped first: the MLB portrait
+  // action shot, the wide action hero, the MLB headshot, Wikipedia, and
+  // finally the drawn pixel portrait.
   for (const slot of root.querySelectorAll("[data-photo-name]")) {
     const mlbam = slot.dataset.mlbam;
-    if (mlbam && !mlbMisses.has(mlbam)) {
-      fill(slot, mlbHeadshotUrl(mlbam), () => {
-        mlbMisses.add(mlbam);
-        wikiOrPortrait(slot);
-      });
+    if (mlbam && !verticalMisses.has(mlbam)) {
+      fill(slot, mlbVerticalUrl(mlbam), () => {
+        verticalMisses.add(mlbam);
+        heroOrHeadshot(slot);
+      }, "gq-action-shot");
       continue;
     }
-    wikiOrPortrait(slot);
+    heroOrHeadshot(slot);
   }
+  // Team marks: the club's Wikipedia page image is its logo. The era-correct
+  // code text stands until the logo lands, and stays on a miss.
+  for (const slot of root.querySelectorAll("[data-team-logo]")) {
+    const club = slot.dataset.teamLogo;
+    const cached = cachedPhoto(club);
+    if (cached === null) continue;
+    if (cached) {
+      fill(slot, cached);
+      continue;
+    }
+    resolvePhoto(club).then((url) => {
+      if (url && slot.isConnected) fill(slot, url);
+    });
+  }
+}
+
+function heroOrHeadshot(slot) {
+  const mlbam = slot.dataset.mlbam;
+  if (mlbam && !actionMisses.has(mlbam)) {
+    fill(slot, mlbActionUrl(mlbam), () => {
+      actionMisses.add(mlbam);
+      headshotOrWiki(slot);
+    }, "gq-action-shot");
+    return;
+  }
+  headshotOrWiki(slot);
+}
+
+function headshotOrWiki(slot) {
+  const mlbam = slot.dataset.mlbam;
+  if (mlbam && !mlbMisses.has(mlbam)) {
+    fill(slot, mlbHeadshotUrl(mlbam), () => {
+      mlbMisses.add(mlbam);
+      wikiOrPortrait(slot);
+    });
+    return;
+  }
+  wikiOrPortrait(slot);
 }
 
 function wikiOrPortrait(slot) {
@@ -138,17 +194,31 @@ function wikiOrPortrait(slot) {
 
 // No per-card credit: the intro text carries the Wikipedia/Wikimedia
 // attribution once, so the cards stay clean.
-function fill(slot, url, onError = null) {
+function fill(slot, url, onError = null, className = "") {
   if (slot.querySelector("img, svg")) return;
   const img = document.createElement("img");
   img.alt = "";
   img.loading = "lazy";
+  if (className) img.className = className;
   if (onError) {
     img.onerror = () => {
       img.remove();
       if (slot.isConnected) onError();
     };
   }
+  // Ultra-wide action heroes (the CDN's are ~3:1 banners) can't fill a
+  // portrait window without cropping the player out — letterbox the full
+  // shot over a blurred cover of itself instead.
+  img.onload = () => {
+    if (!img.classList.contains("gq-action-shot")) return;
+    if (img.naturalWidth < img.naturalHeight * 1.5) return;
+    const backdrop = img.cloneNode();
+    backdrop.className = "gq-photo-backdrop";
+    backdrop.onerror = null;
+    backdrop.onload = null;
+    img.classList.add("gq-wide-shot");
+    slot.prepend(backdrop);
+  };
   img.src = url;
   slot.replaceChildren(img);
 }
