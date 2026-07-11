@@ -175,10 +175,13 @@ function nameFontSize(name, twoWay) {
   return Math.max(3.4, Math.min(6.25, size)).toFixed(2);
 }
 
-function statLineHtml(card) {
+// rating: lead with OB/CTRL — for the classic scan tray, where there's no
+// home-plate graphic carrying the number.
+function statLineHtml(card, { rating = false } = {}) {
+  const lead = rating ? `<span>${card.kind === "pitcher" ? `CTRL ${card.control}` : `OB ${card.onBase}`}</span>` : "";
   return card.kind === "pitcher"
-    ? `<span>${card.points} PTS</span><span>IP ${card.ip}</span><span>${escapeHtml(card.role)}</span>`
-    : `<span>${card.points} PTS</span><span>SPEED ${card.speed}</span><span>${escapeHtml(positionFieldingLabel(card))}</span>`;
+    ? `${lead}<span>${card.points} PTS</span><span>IP ${card.ip}</span><span>${escapeHtml(card.role)}</span>`
+    : `${lead}<span>${card.points} PTS</span><span>SPEED ${card.speed}</span><span>${escapeHtml(positionFieldingLabel(card))}</span>`;
 }
 
 // The stadium backdrop behind the strip: blurred crowd lights over outfield
@@ -227,7 +230,7 @@ export function cardPanelHtml(card, { count = null } = {}) {
         <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
         ${count !== null ? `<span class="gq-photo-tag">x${count}</span>` : ""}
       </div>
-      <div class="gq-scan-tray"><div class="gq-stat-line">${statLineHtml(card)}</div>${chartRows(card)}</div>
+      <div class="gq-scan-tray"><div class="gq-stat-line">${statLineHtml(card, { rating: true })}</div>${chartRows(card)}</div>
     </div></div>`;
   }
   const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
