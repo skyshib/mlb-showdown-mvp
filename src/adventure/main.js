@@ -130,6 +130,7 @@ document.addEventListener("click", (event) => {
 });
 
 function clickCursorField(screen) {
+  if (screen.actionMenu) return "actionIndex";
   if (screen.mode === "pen") return "penIndex";
   if (screen.mode === "pick" || screen.mode === "dhFlip") return "pickIndex";
   if (screen.mode === "rosters") return "rosterIndex";

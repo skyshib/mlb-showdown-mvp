@@ -262,6 +262,24 @@ function catalogVisibleRows(app) {
   return applyQuery(catalogRows(app.screen.filter ?? "ALL"), app.screen.query, (card) => card.name);
 }
 
+// The card action menu: Z (or a tap) on a catalog row opens options instead
+// of demanding letter keys, so touch players can star and compare too. The
+// letter shortcuts (*, C, F) keep working for keyboards.
+function catalogActions(app, card) {
+  if (!card) return [{ label: "CANCEL", run: () => {} }];
+  return [
+    {
+      label: isStarred(app.save, card.id) ? "&#9733; UNSTAR KEEPER" : "&#9733; STAR AS KEEPER",
+      run: () => { toggleStar(app.save, card.id); persistSave(app.save); }
+    },
+    {
+      label: app.screen.pinnedId === card.id ? "UNPIN" : app.screen.pinnedId ? "COMPARE WITH PINNED" : "PIN TO COMPARE",
+      run: () => pinOrCompare(app, card, "catalog")
+    },
+    { label: "CANCEL", run: () => {} }
+  ];
+}
+
 export const catalogScreen = {
   render(app) {
     const filter = app.screen.filter ?? "ALL";
@@ -270,31 +288,41 @@ export const catalogScreen = {
     const start = Math.max(0, Math.min(index - Math.floor(CATALOG_WINDOW / 2), rows.length - CATALOG_WINDOW));
     const visible = rows.slice(start, start + CATALOG_WINDOW);
     const selected = rows[index];
+    const list = app.screen.actionMenu
+      ? `<h3>${escapeHtml(selected?.name?.toUpperCase() ?? "")}</h3>${menuHtml(
+          catalogActions(app, selected).map((action) => ({ html: action.label })),
+          clampIndex(app.screen.actionIndex ?? 0, catalogActions(app, selected).length)
+        )}`
+      : rows.length
+        ? menuHtml(
+            visible.map((card) => {
+              const owned = ownedCount(app.save, card.id);
+              const rostered = app.save.roster.cardIds.includes(card.id);
+              return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">*x${owned}</span>` : ""}${rostered ? " &#9679;" : ""}${starMark(app.save, card)}${pinMark(app, card)}` };
+            }),
+            index - start,
+            { offset: start }
+          )
+        : `<p class="gq-dim">NO CARD ANSWERS TO "${escapeHtml(app.screen.query ?? "")}".</p>`;
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)}</span><span>${rows.length ? index + 1 : 0}/${rows.length}</span></div>
       <div class="gq-body"><div class="gq-columns">
-        <div class="gq-frame gq-scroll">${
-          rows.length
-            ? menuHtml(
-                visible.map((card) => {
-                  const owned = ownedCount(app.save, card.id);
-                  const rostered = app.save.roster.cardIds.includes(card.id);
-                  return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">*x${owned}</span>` : ""}${rostered ? " &#9679;" : ""}${starMark(app.save, card)}${pinMark(app, card)}` };
-                }),
-                index - start,
-                { offset: start }
-              )
-            : `<p class="gq-dim">NO CARD ANSWERS TO "${escapeHtml(app.screen.query ?? "")}".</p>`
-        }</div>
+        <div class="gq-frame gq-scroll">${list}</div>
         <div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
       </div></div>
-      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">Every card in this league, best first. F finds &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; ENTER stars a keeper &#9733; &middot; C pins to compare. X to leave.</p></div>
+      <div class="gq-textbox">${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">${
+        app.screen.actionMenu
+          ? "Z picks an action. X closes."
+          : "Every card in this league, best first. Z opens card actions &middot; F finds &middot; &#9664;/&#9654; page by position &middot; * = owned &middot; &#9679; = on roster &middot; &#9733; = keeper. X to leave."
+      }</p></div>
     </div>`;
   },
   hoverCard(app, index) {
+    if (app.screen.actionMenu) return null;
     return catalogVisibleRows(app)[index] ?? null;
   },
   typed(app, char) {
+    if (app.screen.actionMenu) return;
     searchableTyped(app, char, () => {
       const rows = catalogVisibleRows(app);
       return rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
@@ -302,6 +330,20 @@ export const catalogScreen = {
   },
   key(app, key) {
     const rows = catalogVisibleRows(app);
+    if (app.screen.actionMenu) {
+      const selected = rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null;
+      const actions = catalogActions(app, selected);
+      if (key === "up" || key === "down") {
+        app.screen.actionIndex = clampIndex((app.screen.actionIndex ?? 0) + (key === "down" ? 1 : -1), actions.length);
+      } else if (key === "a") {
+        actions[clampIndex(app.screen.actionIndex ?? 0, actions.length)].run();
+        app.screen.actionMenu = false;
+      } else if (key === "b") {
+        app.screen.actionMenu = false;
+      }
+      app.rerender();
+      return;
+    }
     if (key === "left" || key === "right") {
       const at = BINDER_FILTERS.indexOf(app.screen.filter ?? "ALL");
       app.screen.filter = BINDER_FILTERS[(at + (key === "right" ? 1 : -1) + BINDER_FILTERS.length) % BINDER_FILTERS.length];
@@ -311,8 +353,9 @@ export const catalogScreen = {
     } else if (key === "a") {
       if (app.screen.searching) {
         app.screen.searching = false;
-      } else {
-        starCursorCard(app, () => rows[clampIndex(app.screen.index ?? 0, rows.length)] ?? null);
+      } else if (rows.length) {
+        app.screen.actionMenu = true;
+        app.screen.actionIndex = 0;
       }
     } else if (key === "b") {
       if (app.screen.searching || app.screen.query) {
