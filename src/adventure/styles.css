@@ -213,6 +213,16 @@ h1.gq-logo {
   filter: blur(2.5cqw) brightness(0.7);
   transform: scale(1.12);
 }
+/* Fictional players wear illustrated faces (DiceBear Open Peeps, the card
+   lab's pick) on the photo stage; the monogram stands behind until the
+   face loads — or forever, offline. */
+.gq-fictional-face {
+  position: absolute;
+  inset: 4cqw 10cqw 30cqw;
+  z-index: 1;
+  object-fit: contain;
+  object-position: center bottom;
+}
 .gq-card-initials {
   position: absolute;
   inset: 0 0 30cqw;

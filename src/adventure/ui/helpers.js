@@ -261,7 +261,8 @@ export function cardPanelHtml(card, { count = null } = {}) {
   return `<div class="${cardShell(card, partner ? " gq-card-two-way" : "")}"><div class="gq-face">
     <div class="gq-photo">${card.real
       ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
-      : `<span class="gq-card-initials">${escapeHtml(initials)}</span>`}
+      : `<span class="gq-card-initials">${escapeHtml(initials)}</span>
+      <img class="gq-fictional-face" src="https://api.dicebear.com/9.x/open-peeps/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}`)}&backgroundColor=transparent" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`}
       ${overlay}
       ${count !== null ? `<span class="gq-photo-tag">x${count}</span>` : ""}</div>
     ${mark ? `<div class="gq-team-mark"${mark.club ? ` data-team-logo="${escapeHtml(mark.club)}"` : ""}>${escapeHtml(mark.code)}</div>` : ""}

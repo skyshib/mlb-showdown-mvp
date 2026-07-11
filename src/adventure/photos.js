@@ -225,7 +225,54 @@ function fill(slot, url, onError = null, className = "") {
 
 function drawPortrait(slot) {
   if (slot.querySelector("img, svg")) return;
-  slot.innerHTML = pixelPortraitSvg(slot.dataset.photoName ?? "", Number(slot.dataset.era) || 2000);
+  slot.innerHTML = silhouettePhotoSvg(slot.dataset.photoName ?? "");
+}
+
+// The no-photo last resort: the card lab's placeholder scene — blurred
+// crowd bokeh, an outfield wall, and a batting-stance silhouette — seeded
+// by the player's name so his crowd never changes.
+export function silhouettePhotoSvg(name) {
+  let seed = nameHash(name) || 7;
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const uid = `gqsil${(nameHash(name) % 99991).toString(36)}`;
+  const blobs = [];
+  for (let i = 0; i < 110; i += 1) {
+    const x = (rand() * 400).toFixed(1);
+    const y = (rand() * 330).toFixed(1);
+    const r = (7 + rand() * 16).toFixed(1);
+    const hue = ((nameHash(name) % 360) * 3 + rand() * 60) % 360;
+    const sat = (8 + rand() * 12).toFixed(0);
+    const light = (22 + rand() * 34).toFixed(0);
+    blobs.push(`<circle cx="${x}" cy="${y}" r="${r}" fill="hsl(${hue.toFixed(0)} ${sat}% ${light}%)"/>`);
+  }
+  return `<svg viewBox="0 0 400 538" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="">
+    <rect width="400" height="538" fill="#39434c"/>
+    <g filter="url(#${uid}c)">
+      <rect width="400" height="335" fill="#414c56"/>
+      ${blobs.join("")}
+    </g>
+    <rect y="322" width="400" height="30" fill="#16301f"/>
+    <rect y="350" width="400" height="188" fill="url(#${uid}t)"/>
+    <g filter="url(#${uid}b)" fill="#171c22" opacity="0.93">
+      <rect x="216" y="118" width="10" height="128" rx="5" transform="rotate(32 221 246)"/>
+      <circle cx="196" cy="176" r="19"/>
+      <path d="M 186 196 C 214 200 228 226 226 262 L 220 320 L 236 448 L 210 452 L 194 342 L 172 450 L 146 446 L 168 316 L 166 252 C 164 220 168 200 186 196 Z"/>
+      <path d="M 196 206 C 212 200 224 214 228 232 L 236 250 L 222 258 L 210 238 C 204 226 196 218 188 216 Z"/>
+      <circle cx="230" cy="248" r="10"/>
+      <path d="M 186 210 C 172 218 166 232 168 246 L 182 246 C 182 234 188 224 196 220 Z"/>
+    </g>
+    <defs>
+      <filter id="${uid}c"><feGaussianBlur stdDeviation="8"/></filter>
+      <filter id="${uid}b"><feGaussianBlur stdDeviation="1.1"/></filter>
+      <linearGradient id="${uid}t" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#31573a"/>
+        <stop offset="1" stop-color="#48744c"/>
+      </linearGradient>
+    </defs>
+  </svg>`;
 }
 
 // ---- Pixel portraits ---------------------------------------------------------
