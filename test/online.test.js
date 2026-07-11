@@ -2,7 +2,7 @@ import test from "node:test";
 import { maxRealPoolManagers } from "../src/data/realPlayers.js";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
@@ -399,8 +399,15 @@ test("shared sim actions are logged after the draft completes and survive restar
   assert.equal(logged.type, "batch");
   assert.equal(logged.salt, "abc123");
 
-  // Restart: sim actions in the log must not break the draft replay.
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  // Restart: sim actions in the log must not break the draft replay. The
+  // server's writes are a fire-and-forget chain, so wait until the last
+  // action actually lands on disk instead of trusting a fixed sleep.
+  const roomFile = join(dataDir, `${roomId}.json`);
+  for (let tries = 0; tries < 80; tries += 1) {
+    const onDisk = await readFile(roomFile, "utf8").then((raw) => JSON.parse(raw)).catch(() => null);
+    if (onDisk?.actions?.length === room.data.actions.length) break;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  }
   const second = await startServer(t, dataDir);
   const revived = await api(second, "GET", `/api/rooms/${roomId}`);
   assert.equal(revived.status, 200);
