@@ -1,5 +1,5 @@
-import { actionShotUrl, headshotUrl } from "../data/headshots.js";
-import { formatRange, positionsLabel, fieldingLabel, positionFieldingLabel } from "../rules/cards.js";
+import { formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js";
+import { cardPanelHtml } from "./cardFace.js";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
@@ -153,49 +153,12 @@ function chartRanges(chart) {
   return new Map([...ranges].map(([result, resultRanges]) => [result, resultRanges.join(", ")]));
 }
 
-export function renderCardGrid(players, options = {}) {
-  if (!players.length) return `<p class="empty">No cards yet.</p>`;
-  return `<div class="card-grid ${options.compact ? "compact-cards" : ""}">
-    ${players.map((player) => renderPlayerCard(player)).join("")}
-  </div>`;
-}
-
+// One card face for both games: a classic card shows its real printed scan,
+// an MLB or fictional card shows the 2005 front. The photo slots inside are
+// empty until hydratePhotos fills them, so a caller that renders cards must
+// hydrate afterwards.
 export function renderPlayerCard(player) {
-  const isPitcher = player.kind === "pitcher";
-  const primaryValue = isPitcher ? player.control : player.onBase;
-  const color = teamColor(player.name);
-  const teamDark = shade(color, -42);
-  const rarity = cardRarity(player);
-  const meta = isPitcher
-    ? `${player.points} pt&nbsp;&nbsp;CTRL ${player.control}&nbsp;&nbsp;IP ${player.ip}&nbsp;&nbsp;${escapeHtml(player.throws)}HP`
-    : `${player.points} pt&nbsp;&nbsp;SPD ${formatSpeed(player.speed)}&nbsp;&nbsp;${escapeHtml(positionFieldingLabel(player))}&nbsp;&nbsp;BATS ${escapeHtml(player.bats)}`;
-  return `<article class="player-card ${isPitcher ? "pitcher-card" : "hitter-card"} rarity-${rarity.key}" style="--card-accent:${color};--card-accent-dark:${teamDark};--rarity-frame:${rarity.frame}">
-    <div class="card-photo">
-      <div class="card-logo"><span>MLB Showdown</span></div>
-      <div class="card-portrait-stage">
-        ${renderPortraitImage(player)}
-        <span>${escapeHtml(initials(player.name))}</span>
-      </div>
-    </div>
-    <div class="card-lower-panel">
-      <div class="card-player-strip">
-        <div class="card-primary-square">${primaryValue}</div>
-        <div class="card-strip-text">
-          <h3>${escapeHtml(player.name)}</h3>
-          <div class="card-strip-meta">${meta}</div>
-        </div>
-        <div class="card-team-mark">${isPitcher ? escapeHtml(player.role) : escapeHtml(player.bats)}</div>
-      </div>
-      ${renderShowdownChart(player)}
-    </div>
-  </article>`;
-}
-
-function cardRarity(player) {
-  if (player.points >= 390) return { key: "rainbow", frame: "conic-gradient(from 40deg, #ff6279, #ffd15e, #53d69e, #4f9dff, #c27cff, #ff6279)" };
-  if (player.points >= 340) return { key: "gold", frame: "#e1b64b" };
-  if (player.points >= 285) return { key: "silver", frame: "#c9d2d8" };
-  return { key: "bronze", frame: "#9c6a3f" };
+  return cardPanelHtml(player);
 }
 
 export function renderBoxScore(game, playersById = new Map()) {
@@ -460,15 +423,6 @@ function formatInnings(outs) {
   return `${innings}.${remainder}`;
 }
 
-function initials(name) {
-  return name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 function formatSpeed(speed) {
   return String(speed ?? "");
 }
@@ -478,98 +432,4 @@ function formatSignedNumber(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return String(value);
   return number > 0 ? `+${number}` : String(number);
-}
-
-function renderPortraitImage(player) {
-  const imageUrl = playerImageUrl(player);
-  if (!imageUrl) return "";
-  const actionUrl = player.team ? actionShotUrl(player.name) : null;
-  if (!actionUrl) {
-    return `<img class="player-portrait" src="${imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()" />`;
-  }
-  return `<img class="player-portrait action-shot" src="${actionUrl}" data-fallback="${imageUrl}" alt="" loading="lazy" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="if (this.dataset.fallback) { this.src = this.dataset.fallback; this.dataset.fallback = ''; this.classList.remove('action-shot'); } else { this.remove(); }" />`;
-}
-
-// Real-pool players (they carry a team) get real photos; fictional generated
-// players keep the illustrated avatars. A real player with no known photo
-// shows the initials placeholder instead of a cartoon.
-function playerImageUrl(player) {
-  if (player.team) return headshotUrl(player.name);
-  const seed = encodeURIComponent(`${player.name}-${player.kind}-${playerPosition(player)}`);
-  return `https://api.dicebear.com/9.x/adventurer/svg?seed=${seed}&backgroundColor=transparent`;
-}
-
-function renderShowdownChart(player) {
-  const cells = compactChartEntries(player)
-    .sort((a, b) => a.from - b.from)
-    .map((entry) => {
-      const result = entry.result;
-      return `<div class="chart-cell ${resultClass(result)}" title="${formatRange(entry)} ${resultLabel(result)}">
-        <span class="chart-range">${formatRange(entry)}</span>
-        <span class="chart-result">${result}</span>
-      </div>`;
-    })
-    .join("");
-  return `<div class="showdown-chart" style="--chart-columns:${compactChartEntries(player).length}" aria-label="${escapeHtml(player.name)} result chart">${cells}</div>`;
-}
-
-function compactChartEntries(player) {
-  return [...player.chart]
-    .sort((a, b) => a.from - b.from)
-    .reduce((merged, entry) => {
-      const last = merged.at(-1);
-      if (last && last.result === entry.result && last.to + 1 === entry.from) {
-        last.to = entry.to;
-      } else {
-        merged.push({ ...entry });
-      }
-      return merged;
-    }, []);
-}
-
-function resultClass(result) {
-  if (["SO", "GB", "FB", "PU"].includes(result)) return "out";
-  if (result === "BB") return "walk";
-  if (result === "1B") return "single";
-  if (result === "1B+") return "single";
-  if (result === "2B") return "double";
-  if (result === "3B") return "triple";
-  if (result === "HR") return "homer";
-  return "out";
-}
-
-function resultLabel(result) {
-  const labels = {
-    PU: "Out(PU)",
-    SO: "Out(SO)",
-    GB: "Out(GB)",
-    FB: "Out(FB)",
-    BB: "Walk",
-    "1B": "Single",
-    "1B+": "Single+",
-    "2B": "Double",
-    "3B": "Triple",
-    HR: "Homer"
-  };
-  return labels[result] ?? result;
-}
-
-function fictionalTeam(name) {
-  const marks = ["Rockets", "Comets", "Pilots", "Foundry", "Caps", "Tides"];
-  let total = 0;
-  for (let i = 0; i < name.length; i += 1) total += name.charCodeAt(i);
-  return marks[total % marks.length];
-}
-
-function teamColor(seed) {
-  const colors = ["#0b6b53", "#365f91", "#8a4c22", "#8f3147", "#4f6f2b", "#5a4f91"];
-  let total = 0;
-  for (let i = 0; i < seed.length; i += 1) total += seed.charCodeAt(i);
-  return colors[total % colors.length];
-}
-
-function shade(hex, amount) {
-  const value = hex.replace("#", "");
-  const channels = [0, 2, 4].map((index) => Math.max(0, Math.min(255, parseInt(value.slice(index, index + 2), 16) + amount)));
-  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }

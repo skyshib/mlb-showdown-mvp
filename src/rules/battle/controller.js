@@ -14,9 +14,9 @@ import {
   intentionalWalk,
   pendingAdvanceDecision,
   resolveAdvanceDecision
-} from "../../rules/game.js";
-import { buildTeam } from "../../rules/draft.js";
-import { createRng } from "../../rules/rng.js";
+} from "../game.js";
+import { buildTeam } from "../draft.js";
+import { createRng } from "../rng.js";
 import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js";
 
 // The interactive battle: one seeded game where the engine pauses before

@@ -53,7 +53,7 @@ import {
   actChangePitcher,
   fastForward,
   runSimSeries
-} from "../src/adventure/battle/controller.js";
+} from "../src/rules/battle/controller.js";
 import { validateRoster, buildTeam } from "../src/rules/draft.js";
 import {
   stealCandidates,
@@ -690,7 +690,7 @@ test("stealCandidates lists every open-base runner; attemptSteal forces the run"
 
 test("third tightens as outs mount; NPC profiles bend the matrix, not replace it", async () => {
   const { advanceDecisionMinimum } = await import("../src/rules/game.js");
-  const { npcMaybeSteal, AI_PROFILES } = await import("../src/adventure/battle/ai.js");
+  const { npcMaybeSteal, AI_PROFILES } = await import("../src/rules/battle/ai.js");
 
   assert.equal(advanceDecisionMinimum(0, "third"), 0.65, "bold to third early");
   assert.equal(advanceDecisionMinimum(1, "third"), 0.75);
@@ -819,7 +819,7 @@ test("manual pitching keeps every arm in until pulled — yours by hand, theirs 
   state.pitching.home.battersFaced = npcStarter.ip * 4 + 1;
   assert.equal(pitcherStatus(state, "home").pitcher.id, npcStarter.id, "NPC arm stays until the AI pulls it");
   assert.ok(pitcherStatus(state, "home").fatiguePenalty >= 1, "and shows real fatigue while he waits");
-  const { npcMaybePullPitcher, AI_PROFILES } = await import("../src/adventure/battle/ai.js");
+  const { npcMaybePullPitcher, AI_PROFILES } = await import("../src/rules/battle/ai.js");
   const pulled = npcMaybePullPitcher(state, "home", AI_PROFILES.conservative);
   assert.ok(pulled, "a tired NPC arm gets pulled by the profile");
   assert.notEqual(pitcherStatus(state, "home").pitcher.id, npcStarter.id);
@@ -1302,8 +1302,8 @@ test("games land on a FINAL screen naming the winner and the last play", async (
 });
 
 test("the NPC mound visit is its own event, never smuggled into the swing", async () => {
-  const { npcMoundVisit } = await import("../src/adventure/battle/controller.js");
-  const { AI_PROFILES } = await import("../src/adventure/battle/ai.js");
+  const { npcMoundVisit } = await import("../src/rules/battle/controller.js");
+  const { AI_PROFILES } = await import("../src/rules/battle/ai.js");
   const { player, npc } = hookTeams();
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "mound-visit" });
   battle.profile = AI_PROFILES.conservative;
@@ -1994,7 +1994,7 @@ test("finished games write the almanac and rare feats fill the trophy room", asy
 
 test("high-leverage plate appearances pause on the d20 before revealing", async () => {
   const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
-  const { isDramaticMoment } = await import("../src/adventure/battle/controller.js");
+  const { isDramaticMoment } = await import("../src/rules/battle/controller.js");
   const { player, npc } = hookTeams();
   const trainer = trainerById("scout-jojo");
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "drama-seed" });
@@ -2133,7 +2133,7 @@ test("cards with a real Showdown scan show it in place of the headshot", async (
 });
 
 test("pixel portraits are deterministic, era-styled, and cards carry their era", async () => {
-  const { pixelPortraitSvg } = await import("../src/adventure/photos.js");
+  const { pixelPortraitSvg } = await import("../src/ui/photos.js");
   const { eraYear } = await import("../src/adventure/ui/helpers.js");
   const a = pixelPortraitSvg("Bid McPhee", 1882);
   assert.equal(a, pixelPortraitSvg("Bid McPhee", 1882), "same name, same face");

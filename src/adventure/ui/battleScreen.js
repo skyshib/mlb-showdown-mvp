@@ -55,7 +55,7 @@ import {
   runSimSeries,
   isDramaticMoment,
   npcMoundVisit
-} from "../battle/controller.js";
+} from "../../rules/battle/controller.js";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;

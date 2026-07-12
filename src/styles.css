@@ -247,8 +247,37 @@ td span {
   border-left: 2px solid var(--line);
 }
 
-.pool-mode:has(input[name="poolMode"][value="random"]:checked) .pool-suboptions {
-  opacity: 0.55;
+/* The two parameterized card sets carry a picker under their radio: a
+   decade checklist and a club dropdown. Only the selected set shows one. */
+.pool-suboptions[hidden] {
+  display: none;
+}
+
+.decade-checklist {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px 14px;
+}
+
+.decade-checklist small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.decade-option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.franchise-field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
 }
 
 .form-error {
@@ -847,284 +876,6 @@ button.roster-slot[draggable="true"]:active {
   overflow-x: auto;
 }
 
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 14px;
-}
-
-.compact-cards {
-  grid-template-columns: repeat(auto-fit, minmax(242px, 1fr));
-}
-
-.player-card {
-  --rarity-frame: #9c6a3f;
-  --rarity-glow: rgba(156, 106, 63, 0.32);
-  position: relative;
-  display: block;
-  min-height: 0;
-  padding: 3px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 20px;
-  background: var(--rarity-frame);
-  box-shadow: 0 12px 24px rgba(28, 37, 33, 0.22), 0 0 22px var(--rarity-glow);
-  aspect-ratio: 5 / 7;
-}
-
-.player-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  background: linear-gradient(115deg, transparent 36%, rgba(255, 255, 255, 0.12) 47%, transparent 58%);
-  pointer-events: none;
-}
-
-.rarity-bronze {
-  --rarity-frame: #9c6a3f;
-  --rarity-glow: rgba(156, 106, 63, 0.32);
-}
-
-.rarity-silver {
-  --rarity-frame: #c9d2d8;
-  --rarity-glow: rgba(152, 186, 205, 0.36);
-}
-
-.rarity-gold {
-  --rarity-frame: #e1b64b;
-  --rarity-glow: rgba(221, 173, 57, 0.42);
-}
-
-.rarity-rainbow {
-  --rarity-glow: rgba(120, 180, 255, 0.52);
-}
-
-.pitcher-card {
-  --card-accent: #9a2f28;
-}
-
-.card-photo {
-  position: relative;
-  height: 73%;
-  min-height: 0;
-  overflow: hidden;
-  border-radius: 16px 16px 0 0;
-  background: linear-gradient(155deg, var(--card-accent), var(--card-accent-dark));
-}
-
-.card-photo::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background:
-    radial-gradient(120% 86% at 50% 27%, transparent 46%, rgba(0, 0, 0, 0.26)),
-    linear-gradient(to bottom, transparent 58%, rgba(5, 8, 10, 0.88));
-}
-
-.card-logo {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  right: 12px;
-  z-index: 2;
-  display: grid;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 9px;
-  font-weight: 950;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-}
-
-.card-portrait-stage {
-  position: absolute;
-  inset: 18px 0 -8px;
-  display: grid;
-  place-items: center;
-  color: rgba(255, 255, 255, 0.76);
-  font-size: 42px;
-  font-weight: 950;
-}
-
-.player-portrait {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  filter: grayscale(1) contrast(1.05) brightness(1.08);
-  mix-blend-mode: luminosity;
-  object-fit: contain;
-  object-position: center 55%;
-}
-
-/* Action shots are landscape game photos; fill the frame like the 2004-05
-   printed cards instead of letterboxing. */
-.player-portrait.action-shot {
-  object-fit: cover;
-  object-position: center 30%;
-}
-
-.player-portrait.loaded {
-  opacity: 1;
-}
-
-.player-portrait + span {
-  position: relative;
-  z-index: 1;
-}
-
-.player-portrait.loaded + span {
-  opacity: 0;
-}
-
-.card-lower-panel {
-  display: grid;
-  gap: 6px;
-  overflow: hidden;
-  border-radius: 0 0 16px 16px;
-  padding: 7px 8px 9px;
-  background:
-    linear-gradient(90deg, rgba(0, 0, 0, 0.78), rgba(0, 0, 0, 0.46)),
-    linear-gradient(90deg, var(--card-accent-dark), var(--card-accent));
-}
-
-.card-player-strip {
-  display: grid;
-  grid-template-columns: 50px minmax(0, 1fr) auto;
-  gap: 7px;
-  align-items: center;
-}
-
-.card-primary-square {
-  display: grid;
-  height: 40px;
-  place-items: center;
-  border-radius: 5px;
-  background: #ffe56f;
-  color: #b51225;
-  font-size: 27px;
-  font-weight: 950;
-}
-
-.card-strip-text {
-  min-width: 0;
-}
-
-.card-strip-text h3 {
-  margin: 0;
-  overflow: hidden;
-  color: white;
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
-  font-size: 20px;
-  font-weight: 950;
-  line-height: 0.95;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.card-strip-meta {
-  margin-top: 4px;
-  overflow: hidden;
-  color: white;
-  font-size: 9px;
-  font-weight: 850;
-  letter-spacing: 0.03em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.card-team-mark {
-  color: #b51225;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 28px;
-  font-weight: 900;
-}
-
-.pitcher-card .card-team-mark {
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
-  font-size: 20px;
-}
-
-.showdown-chart {
-  display: grid;
-  grid-template-columns: repeat(var(--chart-columns), minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid rgba(12, 16, 19, 0.84);
-  border-radius: 3px;
-  background: #f4efd8;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.38) inset,
-    0 1px 7px rgba(0, 0, 0, 0.2);
-}
-
-.chart-cell {
-  display: grid;
-  grid-template-rows: 16px 23px;
-  min-width: 0;
-  border-right: 1px solid rgba(12, 16, 19, 0.34);
-  font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue Condensed", sans-serif;
-  font-weight: 950;
-  text-align: center;
-}
-
-.chart-cell:last-child {
-  border-right: 0;
-}
-
-.chart-range,
-.chart-result {
-  display: grid;
-  min-width: 0;
-  place-items: center;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.chart-range {
-  background: #f8f4df;
-  color: #111820;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.chart-result {
-  color: white;
-  font-size: 12px;
-  line-height: 1;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.58);
-}
-
-.chart-cell.out .chart-result {
-  background: #253544;
-  color: #c3d0d6;
-}
-
-.chart-cell.walk .chart-result {
-  background: #16825e;
-}
-
-.chart-cell.single .chart-result {
-  background: #d7aa36;
-  color: #241a08;
-  text-shadow: none;
-}
-
-.chart-cell.double .chart-result {
-  background: #e88334;
-}
-
-.chart-cell.triple .chart-result {
-  background: #d9572d;
-}
-
-.chart-cell.homer .chart-result {
-  background: #e94c5f;
-}
-
 .player-table {
   min-width: 760px;
 }
@@ -1186,13 +937,13 @@ button.roster-slot[draggable="true"]:active {
   transform: translateY(0) scale(1);
 }
 
-.hover-card-preview .player-card {
-  min-height: 364px;
+/* The floating card is the printed face (src/ui/cardFace.css), which sizes
+   itself off its own width — so the preview just sets that width and drops
+   a shadow under it. A classic card's scan is taller than the 5:7 face, and
+   the tray under it grows the box; both are fine, it's a floating panel. */
+.hover-card-preview .gq-card {
   box-shadow: 0 10px 24px rgba(28, 37, 33, 0.28);
-}
-
-.hover-card-preview .showdown-chart {
-  font-size: 10px;
+  margin-bottom: 0;
 }
 
 .box-score {
@@ -1236,9 +987,6 @@ button.roster-slot[draggable="true"]:active {
     position: static;
   }
 
-  .compact-cards {
-    grid-template-columns: repeat(auto-fit, minmax(min(242px, 100%), 1fr));
-  }
 
   .lineup-slots {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1573,8 +1321,20 @@ button.roster-slot[draggable="true"]:active {
   border-radius: 50%;
 }
 
-.race-skip {
+.race-controls {
+  display: flex;
+  gap: 8px;
   justify-self: start;
+}
+
+.race-fast-forward {
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
+
+.race-fast-forward:hover:not(:disabled) {
+  background: #e8f1ec;
 }
 
 .race-results-panel {
@@ -1871,4 +1631,212 @@ button.roster-slot[draggable="true"]:active {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* ---- The interactive game ---- */
+
+.play-game-control {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.play-game-control label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.game-screen {
+  display: grid;
+  gap: 18px;
+}
+
+.game-bar {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.game-score {
+  display: grid;
+  gap: 4px;
+}
+
+.game-team {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: baseline;
+  min-width: 200px;
+  color: var(--muted);
+}
+
+.game-team b {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-team.leading {
+  color: var(--ink);
+}
+
+.game-situation {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.game-inning {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.game-outs {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.game-outs i {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+.game-outs i.on {
+  border-color: var(--warn);
+  background: var(--warn);
+}
+
+/* The diamond, seen from behind the plate: second at the top, third to the
+   left, first to the right — bases light up when they are occupied. */
+.game-diamond {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 42px;
+}
+
+.game-base {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  transform: rotate(45deg);
+}
+
+.game-base.on {
+  border-color: var(--accent-dark);
+  background: var(--accent);
+}
+
+.game-base.second { top: 2px; left: 15px; }
+.game-base.third { top: 15px; left: 2px; }
+.game-base.first { top: 15px; right: 2px; }
+
+.game-matchup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+  justify-items: center;
+}
+
+.game-card {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 260px;
+  text-align: center;
+}
+
+.game-ondeck,
+.game-mound {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.game-mound.fatigued {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.game-lower {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.4fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.game-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.game-action {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  text-align: left;
+  width: 100%;
+}
+
+.game-action small {
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.game-action.fast-forward {
+  margin-top: 6px;
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
+
+.game-log {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px 12px 30px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--panel);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.game-log li::marker {
+  color: var(--line);
+}
+
+.game-final {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.game-final h2 {
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .game-lower {
+    grid-template-columns: 1fr;
+  }
 }

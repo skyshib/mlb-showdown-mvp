@@ -6,9 +6,24 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
-import { buildRealDraftPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
+import { buildRealDraftPool } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
-import { applyDraftAction, createDraft, currentManager, draftHistory, normalizePickTimerSeconds, SIM_ACTION_TYPES } from "../src/rules/draft.js";
+import { buildDraftPool, universeConfig } from "../src/data/universes.js";
+import {
+  applyDraftAction,
+  canCancelLot,
+  cpuSealedBid,
+  createDraft,
+  currentManager,
+  draftHistory,
+  isAuctionDraft,
+  maxPoolManagers,
+  nominateBestTarget,
+  normalizeAuctionBudget,
+  normalizePickTimerSeconds,
+  sealedBidder,
+  SIM_ACTION_TYPES
+} from "../src/rules/draft.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -75,38 +90,67 @@ function loadRooms(dataDir) {
   return rooms;
 }
 
+// The deck a room drafts from. Rooms opened before the card sets became
+// universes stored a poolMode/realPool pair instead of a universe key, and
+// their decks came from the old hand-built pools — so they still deal from
+// those. A saved room MUST deal exactly as it did the day it was created, or
+// its replayed action log references cards the revived deck doesn't hold.
+function roomPool(room) {
+  if (!room.universe) {
+    return room.poolMode === "real"
+      ? room.realPool === "mariners"
+        ? buildMarinersDraftPool(room.seed)
+        : buildRealDraftPool(room.seed)
+      : buildFictionalDraftPool(room.seed);
+  }
+  return buildDraftPool(room.universe, room.seed);
+}
+
 function reviveRoom(saved) {
   const managerNames = saved.managerNames ?? [];
   const cpuNames = Array.isArray(saved.cpuNames) ? saved.cpuNames : [];
+  const universe = universeConfig(saved.universe)?.key ?? null;
   const realPool = saved.realPool === "mariners" ? "mariners" : "stars";
-  // Must deal exactly as createRoom did, or the replayed action log references
-  // cards that are not in the revived pool.
-  const pool = saved.poolMode === "real"
-    ? realPool === "mariners"
-      ? buildMarinersDraftPool(saved.seed)
-      : buildRealDraftPool(saved.seed)
-    : buildFictionalDraftPool(saved.seed);
+  const pool = roomPool({
+    universe,
+    seed: saved.seed,
+    poolMode: saved.poolMode,
+    realPool
+  });
+  const draftType = saved.draftType === "auction" ? "auction" : "snake";
+  const auctionBudget = draftType === "auction"
+    ? normalizeAuctionBudget(saved.auctionBudget, saved.rosterSize)
+    : null;
   const draft = createDraft(
     managerNames.map((name) => ({ name, cpu: cpuNames.includes(name) })),
     pool,
     saved.rosterSize,
-    saved.seed
+    saved.seed,
+    { draftType, budget: auctionBudget }
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
     if (!SIM_ACTION_TYPES.has(entry.action?.type)) applyDraftAction(draft, entry.action);
   }
+  // Bids for a lot that had not sold yet never made it into the action log (see
+  // recordSealedBid), so they are saved separately and replayed after it.
+  const pendingBids = Array.isArray(saved.pendingBids) ? saved.pendingBids : [];
+  for (const action of pendingBids) applyDraftAction(draft, action);
   return {
     id: saved.id,
     seed: saved.seed,
     rosterSize: saved.rosterSize,
+    universe,
     poolMode: saved.poolMode === "real" ? "real" : "random",
     realPool,
     pickTimer: normalizePickTimerSeconds(saved.pickTimer),
+    draftType,
+    auctionBudget,
     cpuNames,
     managerNames,
     draft,
     actions,
+    pendingBids,
     seats: new Map(Object.entries(saved.seats ?? {})),
     hostToken: saved.hostToken,
     streams: new Set(),
@@ -121,14 +165,18 @@ function persistRoom(store, room) {
     id: room.id,
     seed: room.seed,
     rosterSize: room.rosterSize,
+    universe: room.universe,
     poolMode: room.poolMode,
     realPool: room.realPool,
     pickTimer: room.pickTimer,
+    draftType: room.draftType,
+    auctionBudget: room.auctionBudget,
     cpuNames: room.cpuNames ?? [],
     managerNames: room.managerNames,
     hostToken: room.hostToken,
     seats: Object.fromEntries(room.seats),
     actions: room.actions,
+    pendingBids: room.pendingBids ?? [],
     createdAt: room.createdAt
   });
   const target = join(store.dataDir, `${room.id}.json`);
@@ -325,45 +373,54 @@ async function createRoom(store, request, response) {
   if (managers.length > 8) return sendJson(response, 400, { error: "At most eight managers are supported" });
   const seed = String(body.seed ?? "").trim() || "showdown";
   const rosterSize = 13;
-  const poolMode = body.poolMode === "real" ? "real" : "random";
-  const realPool = body.realPool === "mariners" ? "mariners" : "stars";
+  // No card set named is the fictional league, as it always was; a card set
+  // named that we don't have is a mistake worth saying out loud.
+  const universe = body.universe == null ? "fictional" : universeConfig(body.universe)?.key;
+  if (!universe) return sendJson(response, 400, { error: `Unknown card set "${body.universe}"` });
   const pickTimer = normalizePickTimerSeconds(body.pickTimer);
+  const draftType = body.draftType === "auction" ? "auction" : "snake";
+  const auctionBudget = draftType === "auction" ? normalizeAuctionBudget(body.budget, rosterSize) : null;
   const cpuNames = Array.isArray(body.cpu)
     ? body.cpu.map((name) => String(name)).filter((name) => managers.includes(name))
     : [];
 
-  // Every pool flavor deals a seeded slice of a deep set; the deal is
+  // Every universe deals a seeded deck out of a deep card set; the deal is
   // deterministic in the seed so clients rebuild the identical deck.
-  const pool = poolMode === "real"
-    ? realPool === "mariners" ? buildMarinersDraftPool(seed) : buildRealDraftPool(seed)
-    : buildFictionalDraftPool(seed);
-  const managerLimit = maxRealPoolManagers(pool);
+  const pool = buildDraftPool(universe, seed);
+  const managerLimit = maxPoolManagers(pool);
   if (managers.length > managerLimit) {
-    const poolLabel = poolMode === "real"
-      ? realPool === "mariners" ? "all-era Mariners" : "real player"
-      : "fictional";
     return sendJson(response, 400, {
-      error: `The ${poolLabel} pool deals position depth for up to ${managerLimit} managers`
+      error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers`
     });
   }
-  const draft = createDraft(managers.map((name) => ({ name, cpu: cpuNames.includes(name) })), pool, rosterSize, seed);
+  const draft = createDraft(
+    managers.map((name) => ({ name, cpu: cpuNames.includes(name) })),
+    pool,
+    rosterSize,
+    seed,
+    { draftType, budget: auctionBudget }
+  );
   const room = {
     id: newRoomId(store.rooms),
     seed,
     rosterSize,
-    poolMode,
-    realPool,
+    universe,
     pickTimer,
+    draftType,
+    auctionBudget,
     cpuNames,
     managerNames: managers,
     draft,
     actions: [],
+    pendingBids: [],
     seats: new Map(),
     hostToken: newToken(),
     streams: new Set(),
     createdAt: Date.now()
   };
   store.rooms.set(room.id, room);
+  // A computer first nominator opens the block before anyone arrives.
+  runCpuAuction(store, room);
   persistRoom(store, room);
   sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room) });
 }
@@ -393,17 +450,101 @@ async function postAction(store, room, request, response) {
   const denial = denyAction(room.draft, seat, isHost, action);
   if (denial) return sendJson(response, 409, { error: denial });
 
+  // Finishing auto-bids the rest of the draft from the current lot, so every
+  // replica has to be looking at the same lot first: release anything withheld
+  // before the draft runs away from the clients.
+  if (action?.type === "finish") flushSealedBids(store, room);
+
   try {
     if (!SIM_ACTION_TYPES.has(action?.type)) applyDraftAction(room.draft, action);
   } catch (error) {
     return sendJson(response, 409, { error: error.message });
   }
 
+  if (action.type === "seal-bid") {
+    recordSealedBid(store, room, action);
+  } else {
+    // Throwing the lot away throws its withheld bids away with it: the room
+    // never saw them, so no replica ever has to unwind them.
+    if (action.type === "cancel-lot" || action.type === "undo") room.pendingBids = [];
+    appendAction(store, room, action);
+  }
+  runCpuAuction(store, room);
+  broadcastLot(room);
+  sendJson(response, 200, { seq: room.actions.length });
+}
+
+function appendAction(store, room, action) {
   const entry = { seq: room.actions.length + 1, action };
   room.actions.push(entry);
   persistRoom(store, room);
   broadcast(room, "action", entry);
-  sendJson(response, 200, { seq: entry.seq });
+  return entry;
+}
+
+// A sealed bid is withheld from the room until the lot resolves. The server
+// applies it to its own draft and tells everyone only *that* it landed; the
+// amounts join the action log the moment the card sells, in the order they were
+// placed, so every client replays to the identical draft. Broadcasting each bid
+// as it arrived would hand it straight to the next bidder — the SSE stream goes
+// to every browser, so "sealed" would only hold until someone opened devtools.
+function recordSealedBid(store, room, action) {
+  room.pendingBids.push(action);
+  if (room.draft.auction.lot) {
+    // Still bidding, or a tie forced a rebid round. Reveal nothing yet.
+    persistRoom(store, room);
+    return;
+  }
+  flushSealedBids(store, room);
+}
+
+function flushSealedBids(store, room) {
+  if (!room.pendingBids?.length) return;
+  const revealed = room.pendingBids;
+  room.pendingBids = [];
+  for (const bid of revealed) appendAction(store, room, bid);
+}
+
+// Computer managers act on the server, not through the host's browser like they
+// do in a snake room: only the server can see the sealed lot, so only the server
+// can bid into it. A room of computers also finishes with nobody watching.
+function runCpuAuction(store, room) {
+  const draft = room.draft;
+  if (!isAuctionDraft(draft)) return;
+  let guard = draft.managers.length * draft.rosterSize * 4 + 20;
+  while (!draft.complete && guard > 0) {
+    guard -= 1;
+    if (draft.auction.lot) {
+      const bidder = sealedBidder(draft);
+      if (!bidder?.cpu) return;
+      const action = { type: "seal-bid", managerId: bidder.id, amount: cpuSealedBid(draft, bidder) };
+      applyDraftAction(draft, action);
+      recordSealedBid(store, room, action);
+      continue;
+    }
+    if (!currentManager(draft).cpu) return;
+    const lot = nominateBestTarget(draft);
+    appendAction(store, room, { type: "nominate", playerId: lot.playerId });
+  }
+}
+
+// The public half of a live lot: who has bid, never how much.
+function lotView(room) {
+  const lot = isAuctionDraft(room.draft) ? room.draft.auction.lot : null;
+  if (!lot) return null;
+  return {
+    playerId: lot.playerId,
+    nominatorId: lot.nominatorId,
+    round: lot.round,
+    tie: lot.tie,
+    pending: [...lot.pending],
+    bidsIn: Object.keys(lot.bids)
+  };
+}
+
+function broadcastLot(room) {
+  if (!isAuctionDraft(room.draft)) return;
+  broadcast(room, "lot", { lot: lotView(room) });
 }
 
 // Light turn enforcement: enough to keep a friendly room orderly, not
@@ -413,7 +554,18 @@ function denyAction(draft, seat, isHost, action) {
   const type = action?.type;
   if (type === "pick" || type === "autopick") {
     if (draft.complete) return "The draft is already complete";
+    // An autopick resolves a whole lot, entering bids for managers who never
+    // made them. Only a deliberate host finish may do that; a room's auto
+    // button uses auto-nominate.
+    if (isAuctionDraft(draft)) return "Auction rooms nominate and bid instead of auto-picking";
     if (!isHost && currentManager(draft).id !== seat?.managerId) return "It is not your turn";
+    return null;
+  }
+  if (type === "auto-nominate") {
+    if (draft.complete) return "The draft is already complete";
+    if (!isAuctionDraft(draft)) return "This room is not an auction draft";
+    if (draft.auction.lot) return "A card is already on the block";
+    if (!isHost && currentManager(draft).id !== seat?.managerId) return "It is not your nomination";
     return null;
   }
   if (type === "finish") {
@@ -421,7 +573,39 @@ function denyAction(draft, seat, isHost, action) {
     if (!isHost) return "Only the host can auto-finish the draft";
     return null;
   }
+  if (type === "nominate") {
+    if (draft.complete) return "The draft is already complete";
+    if (!isAuctionDraft(draft)) return "This room is not an auction draft";
+    if (draft.auction.lot) return "A card is already on the block";
+    if (!isHost && currentManager(draft).id !== seat?.managerId) return "It is not your nomination";
+    return null;
+  }
+  if (type === "seal-bid") {
+    if (!isAuctionDraft(draft)) return "This room is not an auction draft";
+    const bidder = sealedBidder(draft);
+    if (!bidder) return "No card is on the block";
+    // The host may bid for a stalled seat, but nobody bids out of turn and
+    // nobody bids as someone else.
+    if (bidder.id !== action.managerId) return `${bidder.name} bids next`;
+    if (!isHost && bidder.id !== seat?.managerId) return "It is not your bid";
+    return null;
+  }
+  if (type === "cancel-lot") {
+    if (!isAuctionDraft(draft) || !draft.auction.lot) return "No card is on the block";
+    if (!isHost && draft.auction.lot.nominatorId !== seat?.managerId) {
+      return "Only the host or the nominator can cancel";
+    }
+    if (!canCancelLot(draft)) return "A manager has already bid on this card";
+    return null;
+  }
   if (type === "undo") {
+    // An open lot is itself undoable, before any card has been sold.
+    if (isAuctionDraft(draft) && draft.auction.lot) {
+      if (!isHost && draft.auction.lot.nominatorId !== seat?.managerId) {
+        return "Only the host or the nominator can undo";
+      }
+      return null;
+    }
     if (draft.pickNumber <= 0) return "There is nothing to undo";
     const lastPick = draftHistory(draft).at(-1);
     if (!isHost && lastPick?.manager.id !== seat?.managerId) return "Only the host or the last picker can undo";
@@ -449,6 +633,11 @@ function openStream(room, request, response, url) {
   for (const entry of room.actions.slice(since)) {
     response.write(`event: action\ndata: ${JSON.stringify(entry)}\n\n`);
   }
+  // The in-flight lot is not in the action log, so a reconnecting client would
+  // otherwise render a lot that nobody has bid on.
+  if (isAuctionDraft(room.draft)) {
+    response.write(`event: lot\ndata: ${JSON.stringify({ lot: lotView(room) })}\n\n`);
+  }
   room.streams.add(response);
   request.on("close", () => room.streams.delete(response));
 }
@@ -463,9 +652,12 @@ function roomSnapshot(room) {
     roomId: room.id,
     seed: room.seed,
     rosterSize: room.rosterSize,
+    universe: room.universe ?? null,
     poolMode: room.poolMode,
     realPool: room.realPool ?? "stars",
     pickTimer: room.pickTimer ?? 0,
+    draftType: room.draftType ?? "snake",
+    auctionBudget: room.auctionBudget ?? null,
     managers: room.draft.managers.map((manager) => ({
       id: manager.id,
       name: manager.name,
@@ -473,6 +665,7 @@ function roomSnapshot(room) {
       claimed: room.seats.has(manager.id)
     })),
     actions: room.actions,
+    lot: lotView(room),
     complete: room.draft.complete
   };
 }

@@ -1,7 +1,7 @@
 const SEAT_STORAGE_PREFIX = "mlb-showdown-online-seat-";
 
-export async function createRoom({ seed, managers, poolMode, realPool, pickTimer }) {
-  return request("POST", "/api/rooms", { seed, managers, poolMode, realPool, pickTimer });
+export async function createRoom({ seed, managers, universe, pickTimer, cpu, draftType, budget }) {
+  return request("POST", "/api/rooms", { seed, managers, universe, pickTimer, cpu, draftType, budget });
 }
 
 export async function fetchRoom(roomId) {
@@ -23,6 +23,9 @@ export function subscribeRoom(roomId, since, handlers) {
   source.addEventListener("action", (event) => handlers.onAction?.(JSON.parse(event.data)));
   source.addEventListener("seats", (event) => handlers.onSeats?.(JSON.parse(event.data)));
   source.addEventListener("hello", (event) => handlers.onHello?.(JSON.parse(event.data)));
+  // A live auction lot: who is up and who has bid, but never the amounts —
+  // those only arrive as actions once the card sells.
+  source.addEventListener("lot", (event) => handlers.onLot?.(JSON.parse(event.data)));
   source.onerror = () => handlers.onError?.();
   return source;
 }

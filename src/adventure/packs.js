@@ -1,123 +1,30 @@
-import { generatePlayerPool } from "../data/playerGeneration.js";
 import { createRng } from "../rules/rng.js";
-import { decodeCardRows } from "../data/realCards.js";
-import { CLASSIC_CARD_ROWS } from "../data/classicCards.js";
-import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "../data/mlbPools.js";
-import { personConflict, playerIdentity, playsPosition } from "../rules/cards.js";
-import { authenticPoints } from "../rules/pricing.js";
-import { PRICE_MODEL } from "../data/priceModel.js";
+import { personConflict, playsPosition } from "../rules/cards.js";
+import { RARITY_REFERENCE, setUniverse, universePool } from "../data/universes.js";
 
-// Every save picks a league at new game. The fictional league regenerates
-// from the save seed; the real leagues share fixed card sets, but the MLB
-// leagues still reprice per save (the noise is seeded). Screens set the
-// universe once (on boot or new game) and the pool caches until it changes.
-export const UNIVERSES = {
-  fictional: {
-    key: "fictional",
-    name: "FICTIONAL PLAYERS",
-    blurb: "A brand-new fictional league, invented fresh for this save."
-  },
-  classic: {
-    key: "classic",
-    name: "CLASSIC SHOWDOWN",
-    blurb: "Every real MLB Showdown card, 2000-2005. Authentic printed points."
-  },
-  "mlb-history": {
-    key: "mlb-history",
-    name: "MLB: ALL TIME",
-    blurb: "A century of real players — stars, scrubs, and everyone between."
-  }
-};
+// The adventure's economy on top of the shared card universes: what a card
+// is worth at the shop counter, what a booster pulls, what the sealed
+// starter deck holds, and what a roster may spend. The universes themselves
+// — the card sets, their charts, their prices — live in data/universes.js,
+// because the draft rooms deal out of the same leagues.
+export {
+  DECADES,
+  EARLIEST_DECADE,
+  FRANCHISES,
+  UNIVERSES,
+  cardById,
+  decadeLabel,
+  dualPartnerCard,
+  dualPartnerId,
+  dualPrimaryId,
+  universeConfig,
+  universeKey
+} from "../data/universes.js";
 
-// The parameterized leagues: one section per decade since relief pitching
-// existed — the earliest folds everything through 1919 into one combined
-// pool ("the 1910s & earlier") — and any active franchise (players rated
-// on their years with that club).
-export const DECADES = Object.keys(MLB_DECADE_ROWS).map(Number).sort((a, b) => a - b);
-export const EARLIEST_DECADE = DECADES[0];
-export const decadeLabel = (start) =>
-  Number(start) === EARLIEST_DECADE ? `${start}s & EARLIER` : `${start}s`;
-export const FRANCHISES = Object.keys(MLB_FRANCHISE_ROWS)
-  .map((id) => ({ id, name: MLB_FRANCHISE_NAMES[id] }))
-  .sort((a, b) => a.name.localeCompare(b.name));
-
-// Resolve any universe key — fixed, decade-YYYY, franchise-XXX, or the
-// legacy mlb-2000s alias — to a descriptor, or null if unknown.
-export function universeConfig(mode) {
-  if (UNIVERSES[mode]) return UNIVERSES[mode];
-  if (mode === "mlb-2000s") return universeConfig("decade-2000");
-  // "All teams" with a decade checklist: the pool is the union of the checked
-  // decade sets, one card per player per decade played.
-  const multi = /^decades-([\d,]+)$/.exec(mode ?? "");
-  if (multi) {
-    const picked = multi[1].split(",").filter((start) => MLB_DECADE_ROWS[start]);
-    if (picked.length) {
-      const span = picked.length === DECADES.length
-        ? "every decade"
-        : picked.map((start) => Number(start) === EARLIEST_DECADE ? `the ${start.slice(2)}s & earlier` : `the ${start.slice(2)}s`).join(", ");
-      return { key: mode, name: "MLB: BY DECADE", blurb: `Real players from ${span} — one card per player per decade.` };
-    }
-  }
-  const decade = /^decade-(\d{4})$/.exec(mode ?? "");
-  if (decade && MLB_DECADE_ROWS[decade[1]]) {
-    const early = Number(decade[1]) === EARLIEST_DECADE;
-    return {
-      key: mode,
-      name: `MLB: THE ${decade[1].slice(2)}s${early ? " & EARLIER" : ""}`,
-      blurb: early
-        ? `Real big leaguers rated on their numbers through ${EARLIEST_DECADE + 9} — the dead-ball era and everything before it.`
-        : `Real big leaguers rated on their ${decade[1]}-${Number(decade[1]) + 9} numbers.`
-    };
-  }
-  const franchise = /^franchise-([A-Z]{2,3})$/.exec(mode ?? "");
-  if (franchise && MLB_FRANCHISE_ROWS[franchise[1]]) {
-    return { key: mode, name: MLB_FRANCHISE_NAMES[franchise[1]].toUpperCase(), blurb: `Every ${MLB_FRANCHISE_NAMES[franchise[1]]} of all time, rated on their years with the club.` };
-  }
-  return null;
-}
-
-const DEFAULT_UNIVERSE_SEED = "adventure-universe-v2";
-// generatePlayerPool yields 24 cards per "team": 125 teams ≈ a 3000-card set.
-const UNIVERSE_TEAMS = 125;
-
-// ---- Pricing ----------------------------------------------------------------
-//
-// A card's TRUE value comes from its strength rank within its group (hitters /
-// starters / relievers), mapped onto a convex price curve: stars cost far more
-// than role players. The PRINTED point cost — what rosters and NPC budgets
-// actually pay — is the true value plus heavy noise, so some cards are
-// bargains and others are rip-offs. Rarity follows true strength, not price.
-// Uncapped saves print honest stickers (no noise): with no budget to beat,
-// bargain-hunting is not the game there.
-const PRICE_CURVE = { base: 90, span: 810, gamma: 6 };
-// Relievers live on a shorter curve: in the real Showdown sets the priciest
-// RP (Sasaki '02) is 410 while hitters and starters run to 830-910. A 1-2
-// inning arm never decides a game the way a star bat or ace does, so the
-// best reliever in any pool tops out near the authentic scale instead of
-// costing Randy Johnson money.
-const RP_PRICE_CURVE = { base: 90, span: 320, gamma: 6 };
-const PRICE_NOISE = 0.35;
-
-// Rarity is a rank within each group, so relievers get legends too.
-const RARITY_SHARES = [
-  ["legend", 0.07],
-  ["rare", 0.18],
-  ["uncommon", 0.3],
-  ["common", 1]
-];
-
-// Tier shares scale with the pool: the full-size sets earn their 7% legends,
-// but 7% of a 300-card franchise pool would crown 21 — half its top tier.
-// Shares shrink on a square root so small pools keep only the true icons,
-// with a floor of one card per tier per group (packs and the shop draw by
-// rarity and need every shelf stocked).
-const RARITY_REFERENCE = 1600;
-
-function scaledRarityShares(poolSize, groupSize) {
-  const scale = Math.min(1, Math.sqrt(poolSize / RARITY_REFERENCE));
-  return RARITY_SHARES.map(([tier, share], index) =>
-    [tier, tier === "common" ? 1 : Math.max(share * scale, (index + 1) / groupSize)]);
-}
+// The adventure names these two after itself; the shared module speaks of
+// universes generally.
+export const setUniverseSeed = setUniverse;
+export const adventurePool = universePool;
 
 // Sell values run ~15% of shop price: the shop is a pawnbroker, not a buyer.
 export const RARITIES = {
@@ -165,28 +72,6 @@ function scaledOdds(odds) {
     [tier, index === odds.length - 2 ? Math.min(1, cumulative + shifted) : cumulative]);
 }
 
-let universeSeed = DEFAULT_UNIVERSE_SEED;
-let universeMode = "fictional";
-let universeNoise = true;
-let poolCache = null;
-let poolIndexCache = null;
-
-// Point the adventure at a save's universe. Same seed+mode+pricing is a
-// no-op; any change drops the cache so the next adventurePool() call
-// rebuilds. priceNoise: false prints honest stickers (uncapped saves).
-export function setUniverseSeed(seed, mode = "fictional", { priceNoise = true } = {}) {
-  const nextSeed = seed || DEFAULT_UNIVERSE_SEED;
-  const config = universeConfig(mode);
-  const nextMode = config ? config.key : "fictional";
-  if (nextSeed === universeSeed && nextMode === universeMode && priceNoise === universeNoise) return;
-  universeSeed = nextSeed;
-  universeMode = nextMode;
-  universeNoise = priceNoise;
-  poolCache = null;
-  poolIndexCache = null;
-  poolCeilingCache = null;
-}
-
 // The most a legal 13-card roster can cost in this universe: greedy
 // best-per-slot at TRUE (noiseless) prices, so the number is a stable fact
 // of the pool rather than of one save's price noise. The whole budget
@@ -205,168 +90,29 @@ export function budgetCap() {
   return Math.round((3500 * poolCeiling() / LADDER_REFERENCE) / 50) * 50;
 }
 
+// Keyed on the pool itself: a new universe — or the same one under a new
+// save seed — rebuilds the pool, and a fresh array means a stale ceiling.
 let poolCeilingCache = null;
+let poolCeilingFor = null;
 const CEILING_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER", "SP", "SP", "RP", "RP"];
 
 export function poolCeiling() {
-  if (poolCeilingCache == null) {
-    const pool = adventurePool();
+  const pool = adventurePool();
+  if (poolCeilingCache == null || poolCeilingFor !== pool) {
     const taken = new Set();
     let total = 0;
     for (const slot of CEILING_SLOTS) {
       const best = pool
-        .filter((card) => !taken.has(card.id) &&
-          (slot === "HITTER" ? card.kind === "hitter"
-            : slot === "SP" || slot === "RP" ? card.role === slot
-            : card.kind === "hitter" && playsPosition(card, slot)))
+        .filter((card) => !taken.has(card.id) && slotMatches(slot, card))
         .sort((a, b) => b.truePoints - a.truePoints || a.name.localeCompare(b.name))[0];
       if (!best) continue;
       taken.add(best.id);
       total += best.truePoints;
     }
     poolCeilingCache = total;
+    poolCeilingFor = pool;
   }
   return poolCeilingCache;
-}
-
-export function universeKey() {
-  return universeMode;
-}
-
-export function adventurePool() {
-  if (!poolCache) {
-    const decade = /^decade-(\d{4})$/.exec(universeMode);
-    const multi = /^decades-([\d,]+)$/.exec(universeMode);
-    const franchise = /^franchise-([A-Z]{2,3})$/.exec(universeMode);
-    if (universeMode === "classic") {
-      // Real Showdown cards keep their authentic printed points — no noise.
-      poolCache = assignAuthenticRarity(decodeCardRows(CLASSIC_CARD_ROWS));
-    } else if (universeMode === "mlb-history" || decade || multi || franchise) {
-      // Real players price on the AUTHENTIC Showdown scale (the classic-set
-      // model), so a Control 5 starter costs Wakefield money in any pool;
-      // the bargain economy stays via the same seeded price noise.
-      const rows = decade ? MLB_DECADE_ROWS[decade[1]]
-        : multi ? multi[1].split(",").filter((start) => MLB_DECADE_ROWS[start]).flatMap((start) => MLB_DECADE_ROWS[start])
-        : franchise ? MLB_FRANCHISE_ROWS[franchise[1]]
-        : MLB_HISTORY_ROWS;
-      poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:${universeSeed}`, { authentic: true });
-    } else {
-      const raw = generatePlayerPool(`universe:${universeSeed}`, UNIVERSE_TEAMS, 13);
-      poolCache = calibrateUniverse(raw, universeSeed);
-    }
-    poolIndexCache = new Map(poolCache.map((card) => [card.id, card]));
-  }
-  return poolCache;
-}
-
-// Classic cards are the real thing: rarity ranks true strength via the raw
-// formula-free signal we have (the printed points ARE the truth), so both
-// truePoints and points stay authentic.
-function assignAuthenticRarity(pool) {
-  const groups = [
-    pool.filter((card) => card.kind === "hitter"),
-    pool.filter((card) => card.role === "SP"),
-    pool.filter((card) => card.role === "RP")
-  ];
-  const tiers = new Map();
-  for (const group of groups) {
-    const ranked = [...group].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
-    ranked.forEach((card, index) => {
-      const fromTop = (index + 1) / ranked.length;
-      tiers.set(card.id, RARITY_SHARES.find(([, share]) => fromTop <= share)[0]);
-    });
-  }
-  return pool.map((card) => ({ ...card, rarity: tiers.get(card.id), truePoints: card.points }));
-}
-
-export function cardById(id) {
-  adventurePool();
-  return poolIndexCache.get(id) ?? null;
-}
-
-// ---- Simultaneous two-way pairs ----------------------------------------------
-//
-// Ohtani-likes (players whose bat and arm value came at the same time —
-// decided at build time, MLB_DUAL_PERSONS) merge into ONE owned card: the
-// pool still carries a bat half and an arm half, and they still roster
-// separately (playing both roles costs both slots), but acquiring either
-// grants the pair, selling one sells both, and browse screens show a single
-// combined face. A pool bundles only when it holds both halves; sequential
-// converts (Ankiel) and part-time overlaps (Ruth) stay two separate cards.
-const DUAL_PERSONS = new Set(MLB_DUAL_PERSONS);
-
-export function dualPartnerId(id) {
-  const identity = playerIdentity(id);
-  if (!identity || !DUAL_PERSONS.has(identity.person)) return null;
-  const partner = String(id).endsWith("-bat") ? String(id).slice(0, -4) : `${id}-bat`;
-  return cardById(partner) ? partner : null;
-}
-
-export function dualPartnerCard(id) {
-  const partner = dualPartnerId(id);
-  return partner ? cardById(partner) : null;
-}
-
-// The half that fronts the pair in lists: the stronger card by printed
-// points (the bat half on a tie). The other half is the "shadow".
-export function dualPrimaryId(id) {
-  const partner = dualPartnerId(id);
-  if (!partner) return id;
-  const self = cardById(id);
-  const other = cardById(partner);
-  if (self.points !== other.points) return self.points > other.points ? id : partner;
-  return String(id).endsWith("-bat") ? id : partner;
-}
-
-// Price each group, then noise the stickers. Two scales:
-// - authentic (MLB pools): truePoints from the classic-set price model — a
-//   card's mechanics cost what the real 2000-2005 printings charged for
-//   them, the same in every pool. Rarity still ranks within THIS pool, so a
-//   franchise league keeps commons and legends.
-// - rank curve (fictional pool): the generator's raw scores have no
-//   authentic meaning, so truePoints come from strength rank on a convex
-//   curve, as ever.
-function calibrateUniverse(pool, seed, { authentic = false } = {}) {
-  const rng = createRng(`universe-prices:${seed}`);
-  const groups = [
-    [pool.filter((card) => card.kind === "hitter"), PRICE_CURVE],
-    [pool.filter((card) => card.role === "SP"), PRICE_CURVE],
-    [pool.filter((card) => card.role === "RP"), RP_PRICE_CURVE]
-  ];
-  const priced = new Map();
-  const modelPoints = authentic ? new Map(pool.map((card) => [card.id, authenticPoints(card, PRICE_MODEL)])) : null;
-  const score = (card) => (authentic ? modelPoints.get(card.id) : card.points);
-  for (const [group, curve] of groups) {
-    const ranked = [...group].sort((a, b) => score(b) - score(a) || a.name.localeCompare(b.name));
-    const shares = scaledRarityShares(pool.length, ranked.length);
-    ranked.forEach((card, index) => {
-      const fromTop = (index + 1) / ranked.length;
-      const rarity = shares.find(([, share]) => fromTop <= share)[0];
-      const strength = (ranked.length - index) / ranked.length;
-      const truePoints = authentic
-        ? modelPoints.get(card.id)
-        : Math.round(curve.base + curve.span * strength ** curve.gamma);
-      const noise = 1 + (rng.next() * 2 - 1) * PRICE_NOISE;
-      const points = universeNoise ? Math.max(10, Math.round(truePoints * noise)) : truePoints;
-      priced.set(card.id, { rarity, truePoints, points });
-    });
-  }
-  // Bundle discount: the weaker half of a simultaneous two-way pair prices
-  // at 60% AFTER the curve — the pair is one purchase, and full freight for
-  // both halves would price the duo out of budget play. Rarity keeps the
-  // honest rank; only the sticker softens.
-  const byId = new Map(pool.map((card) => [card.id, card]));
-  for (const bat of pool) {
-    if (!String(bat.id).endsWith("-bat")) continue;
-    const identity = playerIdentity(bat.id);
-    if (!identity || !DUAL_PERSONS.has(identity.person)) continue;
-    const arm = byId.get(String(bat.id).slice(0, -4));
-    if (!arm) continue;
-    const entry = priced.get((bat.points <= arm.points ? bat : arm).id);
-    entry.truePoints = Math.max(10, Math.round(entry.truePoints * 0.6));
-    entry.points = Math.max(10, Math.round(entry.points * 0.6));
-  }
-  return pool.map((card) => ({ ...card, ...priced.get(card.id) }));
 }
 
 function cardsOfRarity(rarity) {

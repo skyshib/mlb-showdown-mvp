@@ -1,6 +1,6 @@
 import { loadSave } from "./state.js";
 import { setUniverseSeed, cardById } from "./packs.js";
-import { hydratePhotos } from "./photos.js";
+import { hydratePhotos } from "../ui/photos.js";
 import { cardPanelHtml, escapeHtml } from "./ui/helpers.js";
 import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";

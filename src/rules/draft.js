@@ -44,6 +44,25 @@ const BULLPEN_TARGET = 2;
 const PITCHER_TARGET = STARTER_TARGET + BULLPEN_TARGET;
 const DEFAULT_ROSTER_SIZE = HITTER_TARGET + PITCHER_TARGET;
 
+// How many managers a pool can seat: every team needs a catcher, a middle
+// infield, a center fielder, two corners, two starters and two relievers —
+// whichever of those runs out first caps the room. Counts read a card's
+// PRIMARY position, so the answer is a floor: a pool that seats eight this
+// way seats eight however the secondary listings fall.
+export function maxPoolManagers(pool) {
+  const hitters = pool.filter((player) => player.kind === "hitter");
+  const pitchers = pool.filter((player) => player.kind === "pitcher");
+  const countPosition = (position) => hitters.filter((player) => player.position === position).length;
+  return Math.min(
+    ...EXACT_REQUIRED_POSITIONS.map(countPosition),
+    Math.floor(countPosition(CORNER_OUTFIELD_POSITION) / 2),
+    Math.floor(hitters.length / HITTER_TARGET),
+    Math.floor(pitchers.filter((player) => player.role === "SP").length / STARTER_TARGET),
+    Math.floor(pitchers.filter((player) => player.role !== "SP").length / BULLPEN_TARGET),
+    Math.floor(pool.length / DEFAULT_ROSTER_SIZE)
+  );
+}
+
 export const AUCTION_MIN_BID = 5;
 export const AUCTION_MIN_RAISE = 5;
 export const AUCTION_DEFAULT_BUDGET = 5000;
@@ -365,15 +384,19 @@ function sellLotTo(draft, winnerId, price) {
 
 // Only an effectively untouched nomination can be canceled: instant computer
 // bids don't count as touching it, a bid from another human does.
-export function cancelLot(draft) {
+export function canCancelLot(draft) {
   const lot = draft.auction?.lot;
-  if (!lot) return null;
-  const touched = Object.keys(lot.bids).some((managerId) => {
+  if (!lot) return false;
+  return !Object.keys(lot.bids).some((managerId) => {
     if (managerId === lot.nominatorId) return false;
     const manager = draft.managers.find((item) => item.id === managerId);
     return Boolean(manager) && !manager.cpu;
   });
-  if (touched) return null;
+}
+
+export function cancelLot(draft) {
+  const lot = draft.auction?.lot;
+  if (!lot || !canCancelLot(draft)) return null;
   draft.auction.lot = null;
   return lot;
 }
@@ -469,6 +492,11 @@ export function applyDraftAction(draft, action) {
       return;
     case "cancel-lot":
       cancelLot(draft);
+      return;
+    case "auto-nominate":
+      // Puts the nominator's best target on the block and stops there, so a
+      // stalled nomination never turns into bids nobody entered.
+      nominateBestTarget(draft);
       return;
     case "autopick":
       autopick(draft);

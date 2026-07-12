@@ -1,5 +1,4 @@
 import test from "node:test";
-import { maxRealPoolManagers } from "../src/data/realPlayers.js";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtemp, readFile } from "node:fs/promises";
@@ -7,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
+import { buildDraftPool } from "../src/data/universes.js";
 import { applyDraftAction, createDraft, currentManager } from "../src/rules/draft.js";
 
 async function startServer(t, dataDir) {
@@ -125,7 +125,7 @@ test("online room rejects out-of-turn manual picks and unknown actions", async (
   const dee = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
 
   const room = await api(base, "GET", `/api/rooms/${roomId}`);
-  const pool = generatePlayerPool(room.data.seed, 2, room.data.rosterSize);
+  const pool = buildDraftPool(room.data.universe, room.data.seed);
   const bestHitter = pool.find((player) => player.kind === "hitter");
 
   const wrongSeat = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
@@ -224,25 +224,33 @@ function availableHitterId(draft) {
   return draft.pool.find((player) => player.kind === "hitter" && !draft.pickedIds.has(player.id) && manager).id;
 }
 
-test("online room can use the real player pool and enforces its manager limit", async (t) => {
+test("online rooms draft any card set, and the client rebuilds the same deck", async (t) => {
   const base = await startServer(t);
+
+  const unknown = await api(base, "POST", "/api/rooms", {
+    seed: "real-room",
+    managers: ["A", "B"],
+    universe: "franchise-SPACE-JAM"
+  });
+  assert.equal(unknown.status, 400);
+  assert.match(unknown.data.error, /Unknown card set/);
 
   const tooMany = await api(base, "POST", "/api/rooms", {
     seed: "real-room",
-    managers: Array.from({ length: maxRealPoolManagers() + 1 }, (_, index) => `M${index + 1}`),
-    poolMode: "real"
+    managers: Array.from({ length: 9 }, (_, index) => `M${index + 1}`),
+    universe: "classic"
   });
   assert.equal(tooMany.status, 400);
-  // Either guard may fire first: the pool-depth limit or the room-size cap.
+  // Either guard may fire first: the deck-depth limit or the room-size cap.
   assert.match(tooMany.data.error, /managers/);
 
   const created = await api(base, "POST", "/api/rooms", {
     seed: "real-room",
     managers: ["A", "B"],
-    poolMode: "real"
+    universe: "franchise-SEA"
   });
   assert.equal(created.status, 201);
-  assert.equal(created.data.poolMode, "real");
+  assert.equal(created.data.universe, "franchise-SEA");
 
   const seat = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-1" });
   const pick = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
@@ -251,10 +259,15 @@ test("online room can use the real player pool and enforces its manager limit", 
   });
   assert.equal(pick.status, 200);
 
-  // Client replay for real-pool rooms uses buildRealPlayerPool.
-  const { buildRealPlayerPool } = await import("../src/data/realPlayers.js");
+  // The client deals its own copy of the room's deck from the universe key
+  // and the seed, then replays the log — the same cards must be there.
   const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
-  const replica = createDraft(["A", "B"], buildRealPlayerPool(), room.data.rosterSize, room.data.seed);
+  const replica = createDraft(
+    ["A", "B"],
+    buildDraftPool(room.data.universe, room.data.seed),
+    room.data.rosterSize,
+    room.data.seed
+  );
   for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
   assert.equal(replica.managers[0].roster.length, 1);
 });

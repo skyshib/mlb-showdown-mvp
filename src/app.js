@@ -1,6 +1,16 @@
-import { buildFictionalDraftPool, buildFictionalUniverse } from "./data/playerGeneration.js?v=20260706-version-sync";
-import { buildRealPlayerPool, buildRealDraftPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260706-version-sync";
-import { buildMarinersPool, buildMarinersDraftPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-version-sync";
+import {
+  DECADES,
+  EARLIEST_DECADE,
+  FRANCHISES,
+  UNIVERSES,
+  buildDraftPool,
+  decadeLabel,
+  setUniverse,
+  universeConfig
+} from "./data/universes.js?v=20260711-shared-universes";
+import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
+import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
 import {
   applyDraftAction,
   AUCTION_DEFAULT_BUDGET,
@@ -14,6 +24,7 @@ import {
   availablePlayers,
   buildTeam,
   canNominatePlayer,
+  canCancelLot,
   cancelLot,
   canPlaceSealedBid,
   canPlayerFillLineupSlot,
@@ -29,6 +40,7 @@ import {
   isCornerOutfielder,
   lineupStatus,
   managerValuation,
+  maxPoolManagers,
   nominateBestTarget,
   nominatePlayer,
   normalizeAuctionBudget,
@@ -41,7 +53,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260707-cpu-sealed-auction";
+} from "./rules/draft.js?v=20260711-online-auction";
 import {
   createRoom,
   fetchRoom,
@@ -50,7 +62,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260707-cpu-sealed-auction";
+} from "./onlineClient.js?v=20260711-online-auction";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -79,24 +91,8 @@ import {
   renderWinProbabilityChart
 } from "./ui/render.js?v=20260708-mlb-win-prob";
 
-const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
-// Every pool flavor keeps a deep set behind the scenes and deals a seeded
-// slice per draft. Deals share a fixed per-position shape, so any probe seed
-// reports the manager limit that every deal of that pool supports.
-const FICTIONAL_POOL_INFO = (() => {
-  const dealt = buildFictionalDraftPool("probe");
-  return { size: buildFictionalUniverse().length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
-})();
-const REAL_POOL_INFO = (() => {
-  const fullSet = buildRealPlayerPool();
-  const dealt = buildRealDraftPool("probe");
-  return { size: fullSet.length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
-})();
-const MARINERS_POOL_INFO = (() => {
-  const fullSet = buildMarinersPool();
-  const dealt = buildMarinersDraftPool("probe");
-  return { size: fullSet.length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
-})();
+const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
+const DEFAULT_UNIVERSE = "classic";
 const app = document.querySelector("#app");
 const cardPreview = document.createElement("div");
 cardPreview.className = "hover-card-preview";
@@ -112,8 +108,16 @@ chartTip.append(chartTipValue, chartTipPlay);
 document.body.append(chartTip);
 
 let state = loadState() ?? defaultState();
+// A restored draft carries its own dealt cards, so it never re-deals — but
+// the card faces still look the rest of the universe up (a two-way player's
+// other half, most of all), so point it at the room's card set on the way in.
+setUniverse(state.seed, state.universe, { priceNoise: false });
 let selectedLineupMove = null;
 let draggedLineupMove = null;
+// The open game, if one is being played. A game is a sitting rather than a
+// save: it holds live engine state (the seeded rng included), so it lives in
+// memory only and a reload puts you back on the draft board.
+let liveGame = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
 let onlineStream = null;
@@ -138,13 +142,14 @@ function pickClockTurn() {
   if (!draft || draft.complete) return null;
   // Computer turns resolve instantly, so the clock only times humans: picks,
   // nominations, and each sealed-bid entry while a lot is on the block.
-  if (isAuctionDraft(draft) && draft.auction.lot) {
-    const bidder = sealedBidder(draft);
+  const lot = liveLot(draft);
+  if (isAuctionDraft(draft) && lot) {
+    const bidder = sealedBidder(liveDraft(draft));
     if (!bidder || bidder.cpu) return null;
     return {
       current: bidder,
       bidTurn: true,
-      key: `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.pickNumber}:bid:${draft.auction.lot.round}:${bidder.id}`
+      key: `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.pickNumber}:bid:${lot.round}:${bidder.id}`
     };
   }
   const current = currentManager(draft);
@@ -190,12 +195,20 @@ function handlePickClockExpiry(turn) {
     afterLocalDraftAction();
     return;
   }
-  if (turn.bidTurn) return;
-  const myPick = online.managerId === turn.current.id;
-  if (!myPick && !online.host) return;
-  if (!myPick && Date.now() < pickClockDeadline + 2000) return;
+  const myTurn = online.managerId === turn.current.id;
+  // Whoever is on the clock times themselves out. The host covers a seat that
+  // has gone quiet, a beat later so the two don't race.
+  if (!myTurn && !online.host) return;
+  if (!myTurn && Date.now() < pickClockDeadline + 2000) return;
   pickClockTimeoutKey = turn.key;
-  sendOnlineAction({ type: "autopick" });
+  if (turn.bidTurn) {
+    // A stalled bid is entered at that manager's own willingness, exactly as a
+    // local draft would — otherwise one player stepping away freezes the lot.
+    const live = liveDraft(state.draft);
+    sendOnlineAction({ type: "seal-bid", managerId: turn.current.id, amount: cpuSealedBid(live, turn.current) });
+    return;
+  }
+  sendOnlineAction({ type: isAuctionDraft(state.draft) ? "auto-nominate" : "autopick" });
 }
 
 // Everything a computer manager is currently up for happens at once: snake
@@ -305,8 +318,7 @@ function defaultState() {
     seed: "coefficient-classic",
     managers: ["Kasey", "Milo", "Nico", "Rafa"],
     cpuManagers: [],
-    poolMode: "random",
-    realPool: "stars",
+    universe: DEFAULT_UNIVERSE,
     draftType: "snake",
     auctionBudget: AUCTION_DEFAULT_BUDGET,
     pickTimerSeconds: 0,
@@ -341,6 +353,8 @@ function defaultState() {
 function renderCurrentScreen() {
   if (state.online && !state.online.managerId && !state.online.spectator) {
     renderSeatSelect();
+  } else if (liveGame) {
+    renderLiveGame();
   } else if (state.view === "batch" && state.batch && state.draft) {
     renderBatch();
   } else if (state.draft) {
@@ -384,9 +398,10 @@ async function bootOnlineRoom(roomId) {
   state.seed = room.seed;
   state.managers = room.managers.map((manager) => manager.name);
   state.rosterSize = room.rosterSize;
-  state.poolMode = room.poolMode === "real" ? "real" : "random";
-  state.realPool = room.realPool === "mariners" ? "mariners" : "stars";
+  state.universe = universeConfig(room.universe)?.key ?? DEFAULT_UNIVERSE;
   state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
+  state.draftType = room.draftType === "auction" ? "auction" : "snake";
+  state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, room.rosterSize);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
   state.online = {
     roomId,
@@ -397,7 +412,8 @@ async function bootOnlineRoom(roomId) {
     spectator: Boolean(seat?.spectator),
     claimedSeats: room.managers.filter((manager) => manager.claimed).map((manager) => manager.id),
     appliedSeq: 0,
-    status: ""
+    status: "",
+    lot: null
   };
   rebuildOnlineDraft(room);
   subscribeOnline();
@@ -405,17 +421,18 @@ async function bootOnlineRoom(roomId) {
 }
 
 function rebuildOnlineDraft(room) {
-  const pool = room.poolMode === "real"
-    ? room.realPool === "mariners"
-      ? buildMarinersDraftPool(room.seed)
-      : buildRealDraftPool(room.seed)
-    : buildFictionalDraftPool(room.seed);
+  const pool = buildDraftPool(state.universe, room.seed);
   state.draft = createDraft(
     room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
     pool,
     room.rosterSize,
-    room.seed
+    room.seed,
+    { draftType: state.draftType, budget: state.auctionBudget }
   );
+  // The bids on the card currently up are withheld until it sells, so the
+  // replayed draft only knows the lot was nominated; the room's lot event
+  // carries the rest of it.
+  state.online.lot = room.lot ?? null;
   let lastSim = null;
   for (const entry of room.actions) {
     if (SIM_ACTION_TYPES.has(entry.action?.type)) {
@@ -479,6 +496,11 @@ function subscribeOnline() {
     onSeats: (payload) => {
       if (!state.online) return;
       state.online.claimedSeats = payload.seats;
+      renderCurrentScreen();
+    },
+    onLot: (payload) => {
+      if (!state.online) return;
+      state.online.lot = payload.lot;
       renderCurrentScreen();
     },
     onError: () => {
@@ -626,12 +648,73 @@ function onlineCanUndo(draft) {
   return Boolean(lastPick && lastPick.manager.id === online.managerId);
 }
 
+// The card set the room drafts out of, as the setup form sees it: which of
+// the five choices is selected, plus the sub-picker state each of the two
+// parameterized ones carries. The universe key is the whole truth — the form
+// reads its shape back out rather than keeping a second copy in state.
+function universeChoice(key) {
+  const multi = /^decades-([\d,]+)$/.exec(key ?? "");
+  if (multi) return { pick: "decades", decades: multi[1].split(",").map(Number), franchise: FRANCHISES[0].id };
+  const decade = /^decade-(\d{4})$/.exec(key ?? "");
+  if (decade) return { pick: "decades", decades: [Number(decade[1])], franchise: FRANCHISES[0].id };
+  const franchise = /^franchise-([A-Z]{2,3})$/.exec(key ?? "");
+  if (franchise) return { pick: "franchise", decades: [...DECADES], franchise: franchise[1] };
+  return { pick: UNIVERSES[key] ? key : DEFAULT_UNIVERSE, decades: [...DECADES], franchise: FRANCHISES[0].id };
+}
+
+// The other direction: what the form is showing becomes a universe key.
+function universeFromForm(form) {
+  const pick = String(form.get("universe") ?? DEFAULT_UNIVERSE);
+  if (pick === "decades") {
+    const checked = DECADES.filter((start) => form.getAll("decade").includes(String(start)));
+    return checked.length ? `decades-${checked.join(",")}` : null;
+  }
+  if (pick === "franchise") return `franchise-${String(form.get("franchise"))}`;
+  return UNIVERSES[pick] ? pick : DEFAULT_UNIVERSE;
+}
+
+function renderUniverseFieldset(key) {
+  const choice = universeChoice(key);
+  const option = (value, title, blurb) => `<label class="pool-option">
+    <input type="radio" name="universe" value="${value}" ${choice.pick === value ? "checked" : ""} />
+    <span><strong>${title}</strong><small>${blurb}</small></span>
+  </label>`;
+  return `<fieldset class="pool-mode universe-mode">
+    <legend>Card set</legend>
+    ${option("classic", "Classic Showdown",
+      "Every real MLB Showdown card, 2000&ndash;2005 &mdash; the printed charts, the printed points, and the printed card fronts.")}
+    ${option("mlb-history", "MLB: all time",
+      "A century of real big leaguers rated on their whole careers &mdash; stars, scrubs, and everyone between.")}
+    ${option("decades", "MLB: by decade",
+      "Real players rated on one decade's numbers. Check the decades you want in the pool.")}
+    <div class="pool-suboptions decade-checklist" ${choice.pick === "decades" ? "" : "hidden"}>
+      ${DECADES.map((start) => `<label class="decade-option">
+        <input type="checkbox" name="decade" value="${start}" ${choice.decades.includes(start) ? "checked" : ""} />
+        <span>The ${escapeHtml(decadeLabel(start).toLowerCase())}</span>
+      </label>`).join("")}
+      <small>The ${EARLIEST_DECADE}s bucket folds in the dead-ball era and everything before it. A player who lasted three decades prints three cards &mdash; you may only roster one of them.</small>
+    </div>
+    ${option("franchise", "MLB: by franchise",
+      "One club's all-time roster, every player rated on his years there.")}
+    <div class="pool-suboptions" ${choice.pick === "franchise" ? "" : "hidden"}>
+      <label class="franchise-field">
+        Club
+        <select name="franchise">
+          ${FRANCHISES.map((franchise) => `<option value="${franchise.id}" ${choice.franchise === franchise.id ? "selected" : ""}>${escapeHtml(franchise.name)}</option>`).join("")}
+        </select>
+      </label>
+    </div>
+    ${option("fictional", "Fictional players",
+      "A made-up league, invented fresh from the seed above. Nobody has scouting reports on these guys.")}
+  </fieldset>`;
+}
+
 function renderSetup(setupError = "") {
   resetAppHandlers();
   app.innerHTML = `<section class="panel setup">
     <div>
       <p class="eyebrow">MLB Showdown-ish MVP</p>
-      <h1>Draft fictional or real cards. Sim a tournament.</h1>
+      <h1>Draft a real card set. Play the games.</h1>
       <p class="lede">Private local prototype. It now saves your room in this browser, so reloads should not wipe the draft.</p>
     </div>
     <form id="setup-form" class="setup-grid">
@@ -669,7 +752,7 @@ function renderSetup(setupError = "") {
         </label>
         <label class="pool-option">
           <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
-          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then anyone can bid on it. Highest bid wins the card and pays from that manager's budget. Local rooms only for now.</small></span>
+          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
         </label>
         <label class="auction-budget-field">
           Budget per manager
@@ -677,27 +760,7 @@ function renderSetup(setupError = "") {
           <small>A strong 13-card roster adds up to roughly 5000 card points, so 5000 bids like the classic Showdown cap.</small>
         </label>
       </fieldset>
-      <fieldset class="pool-mode">
-        <legend>Player pool</legend>
-        <label class="pool-option">
-          <input type="radio" name="poolMode" value="random" ${state.poolMode === "real" ? "" : "checked"} />
-          <span><strong>Fictional randoms</strong><small>The seed above deals ${FICTIONAL_POOL_INFO.dealt} of a fixed ${FICTIONAL_POOL_INFO.size}-player invented league — the same made-up guys resurface night after night. Up to ${FICTIONAL_POOL_INFO.managerLimit} managers.</small></span>
-        </label>
-        <label class="pool-option">
-          <input type="radio" name="poolMode" value="real" ${state.poolMode === "real" ? "checked" : ""} />
-          <span><strong>Real MLB players</strong><small>Cards built from real stat lines. Pick a pool below.</small></span>
-        </label>
-        <div class="pool-suboptions">
-          <label class="pool-option">
-            <input type="radio" name="realPool" value="stars" ${state.realPool === "mariners" ? "" : "checked"} />
-            <span><strong>All of baseball history</strong><small>The seed above deals ${REAL_POOL_INFO.dealt} of ${REAL_POOL_INFO.size} cards from ${REAL_POOL_SEASON} — legends, today's stars, role players, and cult heroes. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
-          </label>
-          <label class="pool-option">
-            <input type="radio" name="realPool" value="mariners" ${state.realPool === "mariners" ? "checked" : ""} />
-            <span><strong>Mariners, every era</strong><small>The seed above deals ${MARINERS_POOL_INFO.dealt} of ${MARINERS_POOL_INFO.size} M's cards from ${MARINERS_POOL_ERAS} — Junior and Edgar one night, Willie Bloomquist the next. Up to ${MARINERS_POOL_INFO.managerLimit} managers.</small></span>
-          </label>
-        </div>
-      </fieldset>
+      ${renderUniverseFieldset(state.universe)}
       ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
       <button type="submit">Start draft</button>
       <div class="online-setup">
@@ -712,11 +775,19 @@ function renderSetup(setupError = "") {
   </section>`;
 
   const setupForm = document.querySelector("#setup-form");
-  // Picking a real-pool flavor implies the real mode; keep the parent radio in sync.
+  // Only the selected card set shows its picker, and touching a picker
+  // selects the set it belongs to — checking a decade means you want decades.
+  const syncUniversePickers = () => {
+    const pick = new FormData(setupForm).get("universe");
+    setupForm.querySelector(".decade-checklist").hidden = pick !== "decades";
+    setupForm.querySelector(".franchise-field").closest(".pool-suboptions").hidden = pick !== "franchise";
+  };
   setupForm.addEventListener("change", (event) => {
-    if (event.target.name === "realPool") {
-      setupForm.querySelector('input[name="poolMode"][value="real"]').checked = true;
-    }
+    const owner = event.target.name === "decade" ? "decades"
+      : event.target.name === "franchise" ? "franchise"
+      : null;
+    if (owner) setupForm.querySelector(`input[name="universe"][value="${owner}"]`).checked = true;
+    if (owner || event.target.name === "universe") syncUniversePickers();
   });
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
@@ -745,28 +816,23 @@ function renderSetup(setupError = "") {
     const cpuChecked = new Set(form.getAll("cpu").map(String));
     state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));
     state.rosterSize = 13;
-    state.poolMode = form.get("poolMode") === "real" ? "real" : "random";
-    state.realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
+    const universe = universeFromForm(form);
+    if (!universe) {
+      renderSetup("Check at least one decade, or pick a different card set.");
+      return;
+    }
+    state.universe = universe;
     state.draftType = form.get("draftType") === "auction" ? "auction" : "snake";
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
     state.pickTimerSeconds = normalizePickTimerSeconds(form.get("pickTimer"));
-    const poolInfo = state.poolMode === "real"
-      ? state.realPool === "mariners" ? MARINERS_POOL_INFO : REAL_POOL_INFO
-      : FICTIONAL_POOL_INFO;
-    const poolLabel = state.poolMode === "real"
-      ? state.realPool === "mariners" ? "all-era Mariners" : "real player"
-      : "fictional";
-    if (state.managers.length > poolInfo.managerLimit) {
+    const pool = buildDraftPool(state.universe, state.seed);
+    const managerLimit = maxPoolManagers(pool);
+    if (state.managers.length > managerLimit) {
       renderSetup(
-        `The ${poolLabel} pool deals position depth for up to ${poolInfo.managerLimit} managers. Trim the manager list or pick a different pool.`
+        `The ${universeConfig(state.universe).name} deck deals position depth for up to ${managerLimit} managers. Trim the manager list or pick a different card set.`
       );
       return;
     }
-    const pool = state.poolMode === "real"
-      ? state.realPool === "mariners"
-        ? buildMarinersDraftPool(state.seed)
-        : buildRealDraftPool(state.seed)
-      : buildFictionalDraftPool(state.seed);
     state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
       draftType: state.draftType,
       budget: state.auctionBudget
@@ -793,20 +859,26 @@ function renderSetup(setupError = "") {
         .filter(Boolean)
     );
     const seed = String(form.get("seed")).trim() || "showdown";
-    const poolMode = form.get("poolMode") === "real" ? "real" : "random";
-    const realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
+    const universe = universeFromForm(form);
     const pickTimer = normalizePickTimerSeconds(form.get("pickTimer"));
+    const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
+    const budget = normalizeAuctionBudget(form.get("auctionBudget"), 13);
     const cpuChecked = form.getAll("cpu").map(String);
+    if (!universe) {
+      note.textContent = "Check at least one decade, or pick a different card set.";
+      return;
+    }
     button.disabled = true;
     note.textContent = "Creating online room…";
     try {
       const room = await createRoom({
         seed,
         managers: managers.length >= 2 ? managers : ["Home", "Away"],
-        poolMode,
-        realPool,
+        universe,
         pickTimer,
-        cpu: cpuChecked.filter((name) => managers.includes(name))
+        cpu: cpuChecked.filter((name) => managers.includes(name)),
+        draftType,
+        budget
       });
       storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
       location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
@@ -843,6 +915,7 @@ function renderDraft() {
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot ? "Undo nomination" : "Undo last pick"}</button>
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
+    ${renderPlayGameControl(draft)}
     <span class="pick-clock" data-pick-timer hidden></span>
   </section>
   ${renderDraftFocus(draft, focusManager)}
@@ -884,13 +957,41 @@ function renderDraft() {
   pickClockTick();
 }
 
+// A live online lot is only half-visible here: the amounts stay on the server
+// until the card sells, so the replayed draft still shows the lot exactly as it
+// was nominated. The room's lot event carries the public half — who is up, who
+// has bid, the round, the tie — and this merges it back over the draft so the
+// panel, the pick clock, and the bid checks see the real lot without ever
+// seeing a number. Local drafts hold the whole lot already.
+function liveLot(draft) {
+  const lot = draft?.auction?.lot;
+  if (!lot) return null;
+  const shared = state.online?.lot;
+  if (!shared || shared.playerId !== lot.playerId) return lot;
+  return {
+    ...lot,
+    round: shared.round,
+    tie: shared.tie,
+    pending: [...shared.pending],
+    // Who has bid is all the room needs; the amounts arrive with the sale.
+    bids: Object.fromEntries(shared.bidsIn.map((managerId) => [managerId, null]))
+  };
+}
+
+// A read-only stand-in for the rules helpers that take a whole draft.
+function liveDraft(draft) {
+  const lot = liveLot(draft);
+  if (!draft?.auction || lot === draft.auction.lot) return draft;
+  return { ...draft, auction: { ...draft.auction, lot } };
+}
+
 function renderAuctionLotPanel(draft) {
-  const lot = draft.auction.lot;
+  const lot = liveLot(draft);
   const player = auctionLotPlayer(draft);
-  if (!player) return "";
+  if (!player || !lot) return "";
   const online = state.online;
   const nominator = draft.managers.find((manager) => manager.id === lot.nominatorId);
-  const upNow = sealedBidder(draft);
+  const upNow = sealedBidder(liveDraft(draft));
   const canEnterFor = (manager) => !online || online.host || manager.id === online.managerId;
   const participants = draft.managers.filter((manager) =>
     lot.round === 2 ? lot.tie.managerIds.includes(manager.id) : manager.id in lot.bids || lot.pending.includes(manager.id)
@@ -944,15 +1045,10 @@ function renderAuctionLotPanel(draft) {
   </section>`;
 }
 
-// Mirrors cancelLot's rule so the button only shows when it would work.
+// Online, whether a bid has landed is only knowable from the live lot — the
+// replayed draft still shows the nomination as untouched.
 function allowCancelLot(draft) {
-  const lot = draft.auction?.lot;
-  if (!lot) return false;
-  return !Object.keys(lot.bids).some((managerId) => {
-    if (managerId === lot.nominatorId) return false;
-    const manager = draft.managers.find((item) => item.id === managerId);
-    return Boolean(manager) && !manager.cpu;
-  });
+  return canCancelLot(liveDraft(draft));
 }
 
 // After a sale the sealed bids get revealed alongside the price paid.
@@ -1047,7 +1143,7 @@ function bindDraftActions() {
       const input = app.querySelector("[data-sealed-bid]");
       const amount = action === "seal-pass" ? 0 : Math.round(Number(input?.value));
       lotEntryError = "";
-      const legality = canPlaceSealedBid(state.draft, manager, amount);
+      const legality = canPlaceSealedBid(liveDraft(state.draft), manager, amount);
       if (!legality.ok) {
         lotEntryError = legality.reason;
         renderDraft();
@@ -1076,7 +1172,10 @@ function bindDraftActions() {
     if (action === "autopick") {
       if (button.disabled) return;
       if (state.online) {
-        sendOnlineAction({ type: "autopick" });
+        // Auto in an online auction only puts a card on the block: autopick
+        // would run the whole lot, entering bids for managers who never made
+        // them. Everyone still bids for themselves.
+        sendOnlineAction({ type: isAuctionDraft(state.draft) ? "auto-nominate" : "autopick" });
         return;
       }
       autopick(state.draft);
@@ -1118,6 +1217,9 @@ function bindDraftActions() {
     }
     if (action === "batch") {
       requestBatchRun(DEFAULT_BATCH_RUNS);
+    }
+    if (action === "play-game") {
+      startGame(app.querySelector("[data-play-opponent]")?.value);
     }
 
   };
@@ -1284,6 +1386,25 @@ function managerDescriptors(names, cpuNames) {
   return names.map((name) => ({ name, cpu: cpuSet.has(name) }));
 }
 
+// Once every roster is legal, you can stop simulating and go play one. The
+// team you play is whichever roster the board is focused on; the select picks
+// who you play against.
+function renderPlayGameControl(draft) {
+  if (!canSimulate(draft)) {
+    return `<button data-action="play-game" disabled>Play a game</button>`;
+  }
+  const you = state.selectedTeamName ?? draft.managers[0].name;
+  const opponents = draft.managers.filter((manager) => manager.name !== you);
+  return `<span class="play-game-control">
+    <button data-action="play-game">Play a game as ${escapeHtml(you)}</button>
+    <label>vs
+      <select data-play-opponent>
+        ${opponents.map((manager) => `<option value="${escapeHtml(manager.name)}">${escapeHtml(manager.name)}</option>`).join("")}
+      </select>
+    </label>
+  </span>`;
+}
+
 function renderCpuChoices(names, cpuNames) {
   const cpuSet = new Set(cpuNames ?? []);
   if (!names.length) return `<small class="cpu-note">Add managers above first.</small>`;
@@ -1303,6 +1424,41 @@ function dedupeManagerNames(names) {
     const count = seen.get(name) ?? 0;
     seen.set(name, count + 1);
     return count === 0 ? name : `${name} ${count + 1}`;
+  });
+}
+
+// ---- The interactive game ----------------------------------------------------
+//
+// One game between two drafted rosters, played a plate appearance at a time
+// on the same engine the adventure's battles run on. You are the away team
+// (you're the one who travelled); the opponent's dugout is run by the
+// balanced AI profile, so its arms tire and its runners go under exactly the
+// rules yours do.
+function startGame(opponentName) {
+  const draft = state.draft;
+  if (!draft || !canSimulate(draft)) return;
+  const you = draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0];
+  const them = draft.managers.find((manager) => manager.name === opponentName)
+    ?? draft.managers.find((manager) => manager.id !== you.id);
+  if (!them) return;
+  const battle = createBattle({
+    playerManager: you,
+    npcManager: them,
+    trainer: { name: them.name, aiProfile: "balanced" },
+    seed: `${state.seed}:game:${you.id}-vs-${them.id}:${newBatchSalt()}`
+  });
+  liveGame = createGame({ battle, playerName: you.name, opponentName: them.name });
+  renderCurrentScreen();
+}
+
+function renderLiveGame() {
+  resetAppHandlers();
+  renderGame(app, liveGame, {
+    onExit: () => {
+      liveGame = null;
+      renderCurrentScreen();
+    },
+    onRerender: renderCurrentScreen
   });
 }
 
@@ -1334,11 +1490,15 @@ function startBatchRun(runs, options = {}) {
   const series = [];
   let completed = 0;
   let skipRequested = Boolean(options.instant);
+  // The race has two speeds and an exit: watch it, fast forward through the
+  // dull middle innings of the season, or skip straight to the table.
+  let fastForwarding = false;
 
   resetAppHandlers();
   hideHoverCard();
   app.onclick = (event) => {
     if (event.target.closest("button[data-action=batch-skip]")) skipRequested = true;
+    if (event.target.closest("button[data-action=batch-fast-forward]")) fastForwarding = true;
   };
 
   const pushFrame = () => {
@@ -1375,19 +1535,22 @@ function startBatchRun(runs, options = {}) {
       finalize();
       return;
     }
-    const size = Math.min(gamesPerFrame, count - completed);
+    // Fast forward runs the same race, just with a longer stride per frame —
+    // the chart still draws, it simply gets where it is going sooner.
+    const perFrame = fastForwarding ? gamesPerFrame * 8 : gamesPerFrame;
+    const size = Math.min(perFrame, count - completed);
     runBatchChunk(batchState, teams, seed, completed, size);
     completed += size;
     const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
-    renderBatchRace({ snapshot, series, completed, total: count, teamNames });
+    renderBatchRace({ snapshot, series, completed, total: count, teamNames, fastForwarding });
     if (completed >= count) {
-      setTimeout(finalize, 700);
+      setTimeout(finalize, fastForwarding ? 250 : 700);
       return;
     }
-    setTimeout(step, raceFrameDelay(completed / count));
+    setTimeout(step, fastForwarding ? 16 : raceFrameDelay(completed / count));
   };
 
-  renderBatchRace({ snapshot: null, series, completed: 0, total: count, teamNames });
+  renderBatchRace({ snapshot: null, series, completed: 0, total: count, teamNames, fastForwarding });
   setTimeout(step, 250);
 }
 
@@ -1408,7 +1571,7 @@ function downsampleSeries(series, maxPoints = 160) {
   return sampled;
 }
 
-function renderBatchRace({ snapshot, series, completed, total, teamNames }) {
+function renderBatchRace({ snapshot, series, completed, total, teamNames, fastForwarding = false }) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
   const tallies = (snapshot?.rows ?? teamNames.map((name) => ({ team: name, wins: 0, losses: 0, share: 0 })))
     .slice()
@@ -1430,7 +1593,12 @@ function renderBatchRace({ snapshot, series, completed, total, teamNames }) {
     <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
     ${renderRaceChart({ teamNames, totalRuns: total, series })}
     <div class="race-chips">${chips}</div>
-    <button data-action="batch-skip" class="small race-skip">Skip to results</button>
+    <div class="race-controls">
+      <button data-action="batch-fast-forward" class="small race-fast-forward" ${fastForwarding ? "disabled" : ""}>
+        ${fastForwarding ? "⏩ Fast forwarding" : "⏩ Fast forward"}
+      </button>
+      <button data-action="batch-skip" class="small race-skip">Skip to results</button>
+    </div>
   </section>`;
 }
 
@@ -2127,6 +2295,9 @@ function showHoverCard(row, clientX, clientY) {
   const previewId = row.dataset.previewId ?? cardHtml;
   if (cardPreview.dataset.previewId !== previewId) {
     cardPreview.innerHTML = cardHtml;
+    // The face renders with an empty photo window; the cascade fills it (and
+    // the club logo) from the MLB and Wikipedia image APIs, cached per name.
+    hydratePhotos(cardPreview);
     cardPreview.dataset.previewId = previewId;
   }
   cardPreview.classList.add("active");
@@ -2950,9 +3121,12 @@ function findRosterPlayer(managerId, playerId) {
 }
 
 function renderFilters() {
+  // Pure DHs only exist in card sets that print them — no deck from the
+  // dead-ball decades has one, so the filter doesn't offer an empty shelf.
+  const hasDesignatedHitters = state.draft?.pool.some((player) => player.position === "DH");
   const positions = state.filters.type === "pitcher"
     ? ["all", "SP", "RP"]
-    : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", ...(state.poolMode === "real" ? ["DH"] : [])];
+    : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", ...(hasDesignatedHitters ? ["DH"] : [])];
   const sortOptions = [
     ["points", "Best points"],
     ["primary", "Best OB/CTRL"],
@@ -3218,8 +3392,7 @@ function reviveState(value) {
     ...defaultState(),
     ...value,
     rosterSize: 13,
-    poolMode: value.poolMode === "real" ? "real" : "random",
-    realPool: value.realPool === "mariners" ? "mariners" : "stars",
+    universe: universeConfig(value.universe)?.key ?? DEFAULT_UNIVERSE,
     draftType: value.draftType === "auction" ? "auction" : "snake",
     auctionBudget: normalizeAuctionBudget(value.auctionBudget ?? AUCTION_DEFAULT_BUDGET, 13),
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
