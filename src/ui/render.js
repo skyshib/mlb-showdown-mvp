@@ -161,6 +161,17 @@ export function renderPlayerCard(player) {
   return cardPanelHtml(player);
 }
 
+// The draft board's price tier: how dear a card is, in four bands. A different
+// question from the card's rarity — how GOOD it is, printed on the face — and
+// the board asks both: the dock chips and the recent-picks feed colour by what
+// a card cost, while the card itself wears what it is worth.
+export function cardRarity(player) {
+  if (player.points >= 390) return { key: "rainbow" };
+  if (player.points >= 340) return { key: "gold" };
+  if (player.points >= 285) return { key: "silver" };
+  return { key: "bronze" };
+}
+
 export function renderBoxScore(game, playersById = new Map()) {
   if (!game?.boxScore) return "";
   return `<div class="box-score">

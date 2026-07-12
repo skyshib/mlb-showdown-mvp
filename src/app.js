@@ -78,6 +78,7 @@ import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuatio
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import {
   basesText,
+  cardRarity,
   escapeHtml,
   playerPosition,
   playerPower,
@@ -326,6 +327,7 @@ function defaultState() {
     rosterSize: 13,
     draft: null,
     draftTab: "available",
+    rosterDock: "open",
     online: null,
     tournament: null,
     batch: null,
@@ -904,6 +906,7 @@ function renderDraft() {
   const focusManager = current ?? (state.selectedTeamName
     ? draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0]
     : draft.managers[0]);
+  const dockViewerId = state.online?.managerId ?? focusManager?.id;
 
   const online = state.online;
   const canUndo = (auction ? draft.pickNumber > 0 || Boolean(lot) : draft.pickNumber > 0)
@@ -949,9 +952,11 @@ function renderDraft() {
     </div>
     <div class="panel">
       <h2>Rosters</h2>
+      ${renderRecentPicks(draft)}
       <div class="rosters">${rosters}</div>
     </div>
-  </section>`;
+  </section>
+  ${renderRosterDock(draft, dockViewerId)}`;
 
   bindDraftActions();
   pickClockTick();
@@ -1099,6 +1104,12 @@ function bindDraftActions() {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const action = button.dataset.action;
+    if (action === "toggle-dock") {
+      state.rosterDock = state.rosterDock === "collapsed" ? "open" : "collapsed";
+      saveState();
+      renderDraft();
+      return;
+    }
     if (action === "reset") {
       if (state.online) {
         leaveOnlineRoom();
@@ -2870,22 +2881,29 @@ function renderAdvanceAttempts(attempts) {
 
 function renderRoster(manager, draft) {
   const counts = rosterCounts(manager.roster);
-  const budgetLine = isAuctionDraft(draft)
-    ? ` &middot; ${auctionBudget(draft, manager)} budget left`
+  const auction = isAuctionDraft(draft);
+  const history = draftHistory(draft);
+  const slotContext = {
+    prices: auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null,
+    lastPickedId: history.at(-1)?.player.id ?? null
+  };
+  const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
+  const budgetLine = auction
+    ? ` &middot; ${auctionBudget(draft, manager)} left &middot; max bid ${draft.complete ? 0 : auctionMaxBid(draft, manager)}`
     : "";
   return `<article class="roster">
-    <h3>${escapeHtml(manager.name)}</h3>
+    <h3>${escapeHtml(manager.name)} <span class="roster-points">${totalPoints} pts</span></h3>
     <p>${manager.roster.length}/${draft.rosterSize} drafted${budgetLine}</p>
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
       <span class="${counts.starters >= 2 ? "ok" : "warn"}">${counts.starters}/2 starters</span>
       <span class="${counts.bullpen >= 2 ? "ok" : "warn"}">${counts.bullpen}/2 bullpen</span>
     </div>
-    ${renderRosterDepthChart(manager)}
+    ${renderRosterDepthChart(manager, slotContext)}
   </article>`;
 }
 
-function renderRosterDepthChart(manager) {
+function renderRosterDepthChart(manager, slotContext = {}) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
@@ -2896,27 +2914,103 @@ function renderRosterDepthChart(manager) {
   return `<div class="mini-roster-board">
     <div class="mini-roster-section">
       <span class="mini-roster-heading">Lineup</span>
-      <div class="mini-slot-grid">${lineupSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label)).join("")}</div>
+      <div class="mini-slot-grid">${lineupSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label, slotContext)).join("")}</div>
     </div>
     <div class="mini-roster-section">
       <span class="mini-roster-heading">Staff</span>
-      <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label)).join("")}</div>
+      <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label, slotContext)).join("")}</div>
     </div>
   </div>`;
 }
 
-function renderMiniRosterSlot(player, slotLabel) {
+function renderMiniRosterSlot(player, slotLabel, slotContext = {}) {
   if (!player) {
     return `<div class="mini-roster-slot empty-mini-slot">
       <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
       <span class="mini-slot-name">open</span>
     </div>`;
   }
-  return `<div class="mini-roster-slot filled-mini-slot">
+  const tier = cardRarity(player).key;
+  const price = slotContext.prices?.get(player.id);
+  const flash = player.id === slotContext.lastPickedId ? " just-picked" : "";
+  return `<div class="mini-roster-slot filled-mini-slot tier-${tier}${flash}">
     <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
     <strong class="mini-slot-name player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
     <span class="mini-slot-meta">${escapeHtml(rosterSlotDescription(player, slotLabel))} | ${player.points} pts</span>
+    ${price !== undefined ? `<span class="mini-slot-price">${price}</span>` : ""}
   </div>`;
+}
+
+// Live-draft catch-up strip: the last few results at a glance, newest first.
+function renderRecentPicks(draft) {
+  const picks = draftHistory(draft).slice(-4).reverse();
+  if (!picks.length) return "";
+  const auction = isAuctionDraft(draft);
+  const items = picks
+    .map(
+      (pick, index) => `<span class="recent-pick tier-${cardRarity(pick.player).key} ${index === 0 ? "newest-pick" : ""}">
+        <strong>${escapeHtml(pick.player.name)}</strong>
+        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
+      </span>`
+    )
+    .join("");
+  return `<div class="recent-picks" aria-label="Most recent picks">${items}</div>`;
+}
+
+// Floating rival boards: every other team pinned to the bottom edge so nobody
+// scrolls mid-auction to see what the room has done.
+function renderRosterDock(draft, viewerId) {
+  const rivals = draft.managers.filter((manager) => manager.id !== viewerId);
+  if (!rivals.length) return "";
+  const collapsed = state.rosterDock === "collapsed";
+  const auction = isAuctionDraft(draft);
+  const prices = auction
+    ? new Map(draftHistory(draft).map((pick) => [pick.player.id, pick.price]))
+    : null;
+  const bars = collapsed ? "" : rivals.map((manager) => renderDockBar(draft, manager, auction, prices)).join("");
+  return `<div class="roster-dock-spacer${collapsed ? " collapsed" : ""}"></div>
+  <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Other team rosters">
+    <button type="button" class="dock-toggle" data-action="toggle-dock">${collapsed ? "Show rival boards &#9650;" : "Hide &#9660;"}</button>
+    ${bars ? `<div class="dock-bars">${bars}</div>` : ""}
+  </aside>`;
+}
+
+function renderDockBar(draft, manager, auction, prices) {
+  const sorted = [...manager.roster].sort((a, b) =>
+    auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points
+  );
+  const chips = sorted
+    .map((player) => {
+      const tier = cardRarity(player).key;
+      const price = auction ? prices.get(player.id) : undefined;
+      return `<span class="dock-chip tier-${tier} player-name-preview" tabindex="0" data-preview-id="dock-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
+    })
+    .join("");
+  const needs = dockNeedsSummary(manager);
+  const budget = auction
+    ? `<span class="dock-budget">${auctionBudget(draft, manager)} left${draft.complete ? "" : ` &middot; max ${auctionMaxBid(draft, manager)}`}</span>`
+    : "";
+  return `<div class="dock-bar">
+    <span class="dock-team">${escapeHtml(manager.name)}</span>
+    ${budget}
+    <div class="dock-chips">${chips || `<span class="dock-empty">no picks yet</span>`}</div>
+    ${needs ? `<span class="dock-needs">needs ${escapeHtml(needs)}</span>` : ""}
+  </div>`;
+}
+
+function dockChipName(player) {
+  const match = player.name.match(/^(\S+)\s+(.+)$/);
+  if (!match) return player.name;
+  return `${match[1][0]}. ${match[2]}`;
+}
+
+function dockNeedsSummary(manager) {
+  const needs = getRosterNeeds(manager.roster);
+  const lineup = lineupStatus(manager.roster);
+  const parts = [...lineup.missingPositions];
+  if (needs.starter) parts.push(`${needs.starter}SP`);
+  if (needs.bullpen) parts.push(`${needs.bullpen}RP`);
+  return parts.join(" ");
 }
 
 function renderDraftFocus(draft, manager) {
