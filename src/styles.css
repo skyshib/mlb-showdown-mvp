@@ -838,6 +838,125 @@ button.roster-slot[draggable="true"]:active {
   border-left-color: inherit;
 }
 
+/* Floating rival boards pinned to the bottom of the draft screen. */
+.roster-dock {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 5;
+  border-top: 1px solid var(--line);
+  padding: 4px 14px 8px;
+  background: rgba(255, 253, 247, 0.97);
+  box-shadow: 0 -6px 18px rgba(28, 37, 33, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.roster-dock.collapsed {
+  padding-bottom: 4px;
+}
+
+.roster-dock-spacer {
+  height: 158px;
+}
+
+.roster-dock-spacer.collapsed {
+  height: 34px;
+}
+
+.dock-toggle {
+  display: block;
+  margin: 0 auto 4px;
+  border: none;
+  background: none;
+  padding: 2px 12px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.dock-bars {
+  display: grid;
+  gap: 5px;
+  max-height: 122px;
+  overflow-y: auto;
+}
+
+.dock-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 26px;
+}
+
+.dock-team {
+  flex: 0 0 74px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-budget {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.dock-chips {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.dock-chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #f8faf7;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.dock-chip em {
+  margin-left: 4px;
+  color: #7c5c12;
+  font-size: 10px;
+  font-weight: 900;
+  font-style: normal;
+}
+
+.dock-chip.tier-bronze { border-left-color: #9c6a3f; }
+.dock-chip.tier-silver { border-left-color: #8fa0a9; background: #f4f7f8; }
+.dock-chip.tier-gold { border-left-color: #e1b64b; background: #fbf6e7; }
+.dock-chip.tier-rainbow { border-left-color: #c27cff; background: #f7effc; }
+
+.dock-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.dock-needs {
+  flex: 0 0 auto;
+  color: #8f3147;
+  font-size: 10px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
 .section-head {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
