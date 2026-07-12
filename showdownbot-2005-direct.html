@@ -6,24 +6,8 @@
   <title>ShowdownBot 2005 Card Prototype</title>
   <style>
     @font-face {
-      font-family: "Showdown Heavy";
-      src: url("./vendor/showdownbot/HelveticaNeueCondensedHeavyOblique.otf") format("opentype");
-      font-style: italic;
-      font-weight: 900;
-      font-display: swap;
-    }
-
-    @font-face {
       font-family: "Showdown Condensed";
       src: url("./vendor/showdownbot/HelveticaNeueCondensedBold.ttf") format("truetype");
-      font-weight: 700;
-      font-display: swap;
-    }
-
-    @font-face {
-      font-family: "Showdown Chart";
-      src: url("./vendor/showdownbot/Zurich-Bold-Italic-BT.ttf") format("truetype");
-      font-style: italic;
       font-weight: 700;
       font-display: swap;
     }
@@ -104,6 +88,7 @@
       width: 100%;
       height: 100%;
       object-fit: fill;
+      transform: translateX(0.45%);
       pointer-events: none;
     }
 
@@ -129,8 +114,9 @@
       align-items: center;
       overflow: hidden;
       color: #fff;
-      font-family: "Showdown Heavy", Impact, sans-serif;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
       font-size: clamp(20px, 5.4vw, 31px);
+      font-style: normal;
       line-height: 1;
       text-transform: uppercase;
       white-space: nowrap;
@@ -155,6 +141,7 @@
       text-transform: uppercase;
       white-space: nowrap;
       text-shadow: 0 1px 2px #000;
+      transform: translateY(-10%);
     }
 
     .ranges {
@@ -168,12 +155,14 @@
       grid-template-columns: repeat(9, minmax(0, 1fr));
       align-items: center;
       color: #fff;
-      font-family: "Showdown Chart", "Showdown Condensed", sans-serif;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
       font-size: clamp(9px, 2.35vw, 14px);
+      font-style: normal;
       line-height: 1;
       text-align: center;
       white-space: nowrap;
       text-shadow: 0 2px 2px #000;
+      transform: translateY(-10%);
     }
 
     .set-year {
