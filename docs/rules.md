@@ -195,6 +195,7 @@ The app now treats this file as the v1 rule contract. The draft and tournament s
 Current implementation details:
 
 - Draft rooms are saved in browser localStorage.
+- Online rooms support both snake and auction drafts. Auction timer settings are stored with the room; the server timestamps bids and records review/bid-clock expirations in the shared action log.
 - A legal MVP roster needs 9 hitters, 2 starters, and 2 bullpen pitchers.
 - Tournament rotation uses both drafted starters across games.
 - Bench and backup players are intentionally not implemented for now.

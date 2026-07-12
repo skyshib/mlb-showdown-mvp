@@ -209,14 +209,14 @@ function stopDraftTimerPolling() {
 function startDraftTimerPolling(draft) {
   stopDraftTimerPolling();
   if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) return;
-  const shouldPoll = auctionReviewRemainingMs(draft, Date.now()) > 0 || pendingAuctionBidManagers(draft).length > 0;
+  const shouldPoll = auctionReviewRemainingMs(draft, draftNow()) > 0 || pendingAuctionBidManagers(draft).length > 0;
   if (!shouldPoll) return;
   draftTimerInterval = setInterval(() => {
     if (!state.draft || state.view === "batch") {
       stopDraftTimerPolling();
       return;
     }
-    const changed = syncAuctionTimer(state.draft, Date.now());
+    const changed = syncAuctionTimer(state.draft, draftNow());
     if (changed) saveState();
     renderDraft();
   }, 1000);
@@ -238,6 +238,9 @@ async function bootOnlineRoom(roomId) {
   state.rosterSize = room.rosterSize;
   state.poolMode = room.poolMode === "real" ? "real" : "random";
   state.realPool = room.realPool === "mariners" ? "mariners" : "stars";
+  state.draftType = room.draftType === "auction" ? "auction" : "snake";
+  state.auctionBudget = normalizeAuctionBudget(room.auctionBudget ?? AUCTION_DEFAULT_BUDGET, state.rosterSize);
+  state.auctionTimer = normalizeAuctionTimerState(room.auctionTimer);
   state.online = {
     roomId,
     managerId: seat?.managerId ?? null,
@@ -247,6 +250,7 @@ async function bootOnlineRoom(roomId) {
     spectator: Boolean(seat?.spectator),
     claimedSeats: room.managers.filter((manager) => manager.claimed).map((manager) => manager.id),
     appliedSeq: 0,
+    serverOffsetMs: Number(room.serverNow) - Date.now() || 0,
     status: ""
   };
   rebuildOnlineDraft(room);
@@ -260,7 +264,11 @@ function rebuildOnlineDraft(room) {
       ? buildMarinersDraftPool(room.seed)
       : buildRealDraftPool(room.seed)
     : buildFictionalDraftPool(room.seed);
-  state.draft = createDraft(state.managers, pool, room.rosterSize, room.seed);
+  state.draft = createDraft(state.managers, pool, room.rosterSize, room.seed, {
+    draftType: room.draftType,
+    budget: room.auctionBudget,
+    timer: room.auctionTimer
+  });
   for (const entry of room.actions) applyDraftAction(state.draft, entry.action);
   state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
   state.selectedTeamName = state.managers[0];
@@ -310,6 +318,7 @@ async function resyncOnlineRoom() {
   if (!online) return;
   try {
     const room = await fetchRoom(online.roomId);
+    online.serverOffsetMs = Number(room.serverNow) - Date.now() || online.serverOffsetMs || 0;
     online.claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
     rebuildOnlineDraft(room);
     online.status = "";
@@ -428,6 +437,10 @@ function onlineCanPickNow(current) {
   return online.host || current.id === online.managerId;
 }
 
+function draftNow() {
+  return Date.now() + (state.online?.serverOffsetMs ?? 0);
+}
+
 function onlineCanUndo(draft) {
   const online = state.online;
   if (!online) return true;
@@ -465,7 +478,7 @@ function renderSetup(setupError = "") {
         </label>
         <label class="pool-option">
           <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
-          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then anyone can bid on it. Highest bid wins the card and pays from that manager's budget. Local rooms only for now.</small></span>
+          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then anyone can bid on it. Highest bid wins the card and pays from that manager's budget.</small></span>
         </label>
         <label class="auction-budget-field">
           Budget per manager
@@ -591,10 +604,21 @@ function renderSetup(setupError = "") {
     const seed = String(form.get("seed")).trim() || "showdown";
     const poolMode = form.get("poolMode") === "real" ? "real" : "random";
     const realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
+    const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
+    const auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), 13);
+    const auctionTimer = normalizeAuctionTimerInput(form);
     button.disabled = true;
     note.textContent = "Creating online room…";
     try {
-      const room = await createRoom({ seed, managers: managers.length >= 2 ? managers : ["Home", "Away"], poolMode, realPool });
+      const room = await createRoom({
+        seed,
+        managers: managers.length >= 2 ? managers : ["Home", "Away"],
+        poolMode,
+        realPool,
+        draftType,
+        auctionBudget,
+        auctionTimer
+      });
       storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
       location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
     } catch (error) {
@@ -606,9 +630,9 @@ function renderSetup(setupError = "") {
 
 function renderDraft() {
   const draft = state.draft;
-  if (syncAuctionTimer(draft, Date.now())) saveState();
+  if (syncAuctionTimer(draft, draftNow())) saveState();
   const auction = isAuctionDraft(draft);
-  const reviewOpen = auction && !auctionReviewComplete(draft, Date.now());
+  const reviewOpen = auction && !auctionReviewComplete(draft, draftNow());
   const lot = auction ? draft.auction.lot : null;
   const current = draft.complete ? null : currentManager(draft);
   const historyTab = state.draftTab === "history";
@@ -631,7 +655,7 @@ function renderDraft() {
     <button data-action="reset">${online ? "Leave room" : "New room"}</button>
     <button data-action="autopick" ${draft.complete || reviewOpen || !onlineCanPickNow(current) ? "disabled" : ""}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot ? "Undo nomination" : "Undo last pick"}</button>
-    ${auction && reviewOpen ? `<button data-action="complete-review">Start auction now</button>` : ""}
+    ${auction && reviewOpen ? `<button data-action="complete-review" ${online && !online.host ? "disabled" : ""}>Start auction now</button>` : ""}
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
   </section>
@@ -659,7 +683,7 @@ function renderDraft() {
         canPick: (player) => {
           if (!current) return { ok: false, reason: "draft complete" };
           if (!onlineCanPickNow(current)) return { ok: false, reason: `${current.name} is ${auction ? "nominating" : "on the clock"}` };
-          if (auction) return canNominatePlayer(draft, current, player);
+          if (auction) return canNominatePlayer(draft, current, player, draftNow());
           return canPickPlayer(draft, current, player);
         }
       })}`}
@@ -683,12 +707,12 @@ function renderAuctionReviewPanel(draft) {
         <h2>Inspect the cards before the auction clock starts</h2>
       </div>
       <div class="lot-bid-state">
-        <span class="lot-bid-amount">${formatClock(auctionReviewRemainingMs(draft, Date.now()))}</span>
+        <span class="lot-bid-amount">${formatClock(auctionReviewRemainingMs(draft, draftNow()))}</span>
         <span class="lot-bid-holder">review remaining</span>
       </div>
     </div>
     <div class="lot-actions">
-      <button data-action="complete-review">Skip review and start auction</button>
+      <button data-action="complete-review" ${state.online && !state.online.host ? "disabled" : ""}>Skip review and start auction</button>
     </div>
   </section>`;
 }
@@ -703,21 +727,21 @@ function renderAuctionLotPanel(draft) {
   const timedLot = Boolean(lot.clock);
   const canActForManager = (manager) => !online || online.host || manager.id === online.managerId;
   const hostOnly = online && !online.host;
-  const saleLegality = canSellLot(draft, Date.now());
+  const saleLegality = canSellLot(draft, draftNow());
 
   const bidderChips = draft.managers
     .map((manager) => {
       const isHigh = manager.id === lot.bidderId;
       const submission = lot.clock?.submissions?.[manager.id] ?? null;
       const pending = lot.clock?.pending?.includes(manager.id);
-      const clock = auctionTimerEnabled(draft) ? formatClock(auctionBidTimeRemainingMs(draft, manager, Date.now())) : null;
+      const clock = auctionTimerEnabled(draft) ? formatClock(auctionBidTimeRemainingMs(draft, manager, draftNow())) : null;
       const seatBlocked = !canActForManager(manager);
       const canSubmitBid = timedLot ? pending : !isHigh;
       const bidValue = auctionBidInputValue(draft, lot, manager);
       const bidAmount = parseAuctionBidAmount(bidValue);
       const legality = bidAmount === null
         ? { ok: false, reason: "enter a bid" }
-        : canBid(draft, manager, bidAmount, Date.now());
+        : canBid(draft, manager, bidAmount, draftNow());
       const disabled = !legality.ok || seatBlocked;
       const reason = seatBlocked ? "not your seat" : legality.reason;
       const status = submission
@@ -824,7 +848,7 @@ function updateAuctionBidControl(input) {
   const seatBlocked = Boolean(online && !online.host && manager.id !== online.managerId);
   const legality = amount === null
     ? { ok: false, reason: "enter a bid" }
-    : canBid(state.draft, manager, amount, Date.now());
+    : canBid(state.draft, manager, amount, draftNow());
   button.disabled = seatBlocked || !legality.ok;
   button.title = seatBlocked ? "not your seat" : legality.reason;
 }
@@ -885,7 +909,11 @@ function bindDraftActions() {
       return;
     }
     if (action === "complete-review") {
-      completeAuctionReview(state.draft, Date.now());
+      if (state.online) {
+        sendOnlineAction({ type: "complete-review" });
+        return;
+      }
+      completeAuctionReview(state.draft, draftNow());
       saveState();
       renderDraft();
       return;
@@ -906,10 +934,10 @@ function bindDraftActions() {
       if (button.disabled) return;
       resetAuctionBidInputs();
       if (state.online) {
-        sendOnlineAction({ type: "nominate", playerId: button.dataset.playerId, at: Date.now() });
+        sendOnlineAction({ type: "nominate", playerId: button.dataset.playerId });
         return;
       }
-      nominatePlayer(state.draft, button.dataset.playerId, Date.now());
+      nominatePlayer(state.draft, button.dataset.playerId, draftNow());
       saveState();
       renderDraft();
     }
@@ -920,20 +948,20 @@ function bindDraftActions() {
       const amount = readAuctionBidAmount(button);
       if (amount === null) return;
       if (state.online) {
-        sendOnlineAction({ type: "bid", managerId: button.dataset.managerId, amount, at: Date.now() });
+        sendOnlineAction({ type: "bid", managerId: button.dataset.managerId, amount });
         return;
       }
-      placeBid(state.draft, button.dataset.managerId, amount, Date.now());
+      placeBid(state.draft, button.dataset.managerId, amount, draftNow());
       saveState();
       renderDraft();
     }
     if (action === "pass-bid") {
       if (button.disabled) return;
       if (state.online) {
-        sendOnlineAction({ type: "pass-bid", managerId: button.dataset.managerId, at: Date.now() });
+        sendOnlineAction({ type: "pass-bid", managerId: button.dataset.managerId });
         return;
       }
-      passBid(state.draft, button.dataset.managerId, Date.now());
+      passBid(state.draft, button.dataset.managerId, draftNow());
       saveState();
       renderDraft();
     }
@@ -941,10 +969,10 @@ function bindDraftActions() {
       if (button.disabled) return;
       resetAuctionBidInputs();
       if (state.online) {
-        sendOnlineAction({ type: "sell", at: Date.now() });
+        sendOnlineAction({ type: "sell" });
         return;
       }
-      sellLot(state.draft, Date.now());
+      sellLot(state.draft, draftNow());
       selectedLineupMove = null;
       invalidateBatch();
       saveState();

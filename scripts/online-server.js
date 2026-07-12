@@ -8,7 +8,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool, maxRealPoolManagers } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
-import { applyDraftAction, createDraft, currentManager, draftHistory } from "../src/rules/draft.js";
+import {
+  applyDraftAction,
+  createDraft,
+  currentManager,
+  draftHistory,
+  isAuctionDraft,
+  syncAuctionTimer
+} from "../src/rules/draft.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_BODY_BYTES = 64 * 1024;
@@ -30,6 +37,8 @@ const MIME_TYPES = {
 export function createOnlineServer(options = {}) {
   const dataDir = options.dataDir ?? process.env.ROOMS_DIR ?? join(root, "data", "rooms");
   const store = { dataDir, rooms: loadRooms(dataDir) };
+
+  for (const room of store.rooms.values()) scheduleRoomTimer(store, room);
 
   const server = createServer(async (request, response) => {
     try {
@@ -85,7 +94,12 @@ function reviveRoom(saved) {
       ? buildMarinersDraftPool(saved.seed)
       : buildRealDraftPool(saved.seed)
     : buildFictionalDraftPool(saved.seed);
-  const draft = createDraft(managerNames, pool, saved.rosterSize, saved.seed);
+  const draftType = saved.draftType === "auction" ? "auction" : "snake";
+  const draft = createDraft(managerNames, pool, saved.rosterSize, saved.seed, {
+    draftType,
+    budget: saved.auctionBudget,
+    timer: saved.auctionTimer
+  });
   const actions = saved.actions ?? [];
   for (const entry of actions) applyDraftAction(draft, entry.action);
   return {
@@ -94,6 +108,9 @@ function reviveRoom(saved) {
     rosterSize: saved.rosterSize,
     poolMode: saved.poolMode === "real" ? "real" : "random",
     realPool,
+    draftType,
+    auctionBudget: draft.auction?.budget ?? null,
+    auctionTimer: draft.auction?.timer ?? null,
     managerNames,
     draft,
     actions,
@@ -113,6 +130,9 @@ function persistRoom(store, room) {
     rosterSize: room.rosterSize,
     poolMode: room.poolMode,
     realPool: room.realPool,
+    draftType: room.draftType,
+    auctionBudget: room.auctionBudget,
+    auctionTimer: room.auctionTimer,
     managerNames: room.managerNames,
     hostToken: room.hostToken,
     seats: Object.fromEntries(room.seats),
@@ -157,6 +177,7 @@ async function createRoom(store, request, response) {
   const rosterSize = 13;
   const poolMode = body.poolMode === "real" ? "real" : "random";
   const realPool = body.realPool === "mariners" ? "mariners" : "stars";
+  const draftType = body.draftType === "auction" ? "auction" : "snake";
 
   // Every pool flavor deals a seeded slice of a deep set; the deal is
   // deterministic in the seed so clients rebuild the identical deck.
@@ -172,23 +193,38 @@ async function createRoom(store, request, response) {
       error: `The ${poolLabel} pool deals position depth for up to ${managerLimit} managers`
     });
   }
-  const draft = createDraft(managers, pool, rosterSize, seed);
+  const draft = createDraft(managers, pool, rosterSize, seed, {
+    draftType,
+    budget: body.auctionBudget,
+    timer: body.auctionTimer
+  });
+  const createdAt = Date.now();
+  const actions = [];
+  if (isAuctionDraft(draft)) {
+    const action = { type: "start-review", at: createdAt };
+    applyDraftAction(draft, action);
+    actions.push({ seq: 1, action });
+  }
   const room = {
     id: newRoomId(store.rooms),
     seed,
     rosterSize,
     poolMode,
     realPool,
+    draftType,
+    auctionBudget: draft.auction?.budget ?? null,
+    auctionTimer: draft.auction?.timer ?? null,
     managerNames: managers,
     draft,
-    actions: [],
+    actions,
     seats: new Map(),
     hostToken: newToken(),
     streams: new Set(),
-    createdAt: Date.now()
+    createdAt
   };
   store.rooms.set(room.id, room);
   persistRoom(store, room);
+  scheduleRoomTimer(store, room);
   sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room) });
 }
 
@@ -208,11 +244,12 @@ async function joinRoom(store, room, request, response) {
 
 async function postAction(store, room, request, response) {
   const body = await readJsonBody(request);
-  const action = body.action;
+  const action = canonicalizeAction(room.draft, body.action);
   const seat = [...room.seats.values()].find((item) => item.token === body.token);
   const isHost = Boolean(seat?.isHost) || (Boolean(body.token) && body.token === room.hostToken);
   if (!seat && !isHost) return sendJson(response, 403, { error: "Join a seat before acting" });
 
+  if (isAuctionDraft(room.draft)) syncRoomTimer(store, room, action?.at);
   const denial = denyAction(room.draft, seat, isHost, action);
   if (denial) return sendJson(response, 409, { error: denial });
 
@@ -222,11 +259,54 @@ async function postAction(store, room, request, response) {
     return sendJson(response, 409, { error: error.message });
   }
 
+  const entry = appendRoomAction(store, room, action);
+  scheduleRoomTimer(store, room);
+  sendJson(response, 200, { seq: entry.seq });
+}
+
+function canonicalizeAction(draft, action) {
+  if (!action || typeof action !== "object") return action;
+  if (!isAuctionDraft(draft)) return { ...action };
+  return { ...action, at: Date.now() };
+}
+
+function appendRoomAction(store, room, action) {
   const entry = { seq: room.actions.length + 1, action };
   room.actions.push(entry);
   persistRoom(store, room);
   broadcast(room, "action", entry);
-  sendJson(response, 200, { seq: entry.seq });
+  return entry;
+}
+
+function syncRoomTimer(store, room, now = Date.now()) {
+  if (!syncAuctionTimer(room.draft, now)) return null;
+  return appendRoomAction(store, room, { type: "sync-timer", at: now });
+}
+
+function scheduleRoomTimer(store, room) {
+  if (room.timer) clearTimeout(room.timer);
+  room.timer = null;
+  const deadline = nextRoomTimerDeadline(room.draft);
+  if (deadline === null) return;
+  const delay = Math.max(1, deadline - Date.now());
+  room.timer = setTimeout(() => {
+    room.timer = null;
+    syncRoomTimer(store, room, Date.now());
+    scheduleRoomTimer(store, room);
+  }, delay);
+  room.timer.unref();
+}
+
+function nextRoomTimerDeadline(draft) {
+  if (!isAuctionDraft(draft) || !draft.auction?.timer?.enabled || draft.complete) return null;
+  const review = draft.auction.review;
+  if (review?.completedAt === null && Number.isFinite(review.endsAt)) return review.endsAt;
+  const clock = draft.auction.lot?.clock;
+  if (!clock?.pending?.length) return null;
+  const deadlines = clock.pending
+    .map((managerId) => clock.startedAt + Math.max(0, Number(draft.auction.clockBanks[managerId]) || 0))
+    .filter(Number.isFinite);
+  return deadlines.length ? Math.min(...deadlines) : null;
 }
 
 // Light turn enforcement: enough to keep a friendly room orderly, not
@@ -234,6 +314,11 @@ async function postAction(store, room, request, response) {
 // always be moved along.
 function denyAction(draft, seat, isHost, action) {
   const type = action?.type;
+  if (type === "lineup") {
+    if (!isHost && action?.managerId !== seat?.managerId) return "You can only edit your own lineup";
+    return null;
+  }
+  if (isAuctionDraft(draft)) return denyAuctionAction(draft, seat, isHost, action);
   if (type === "pick" || type === "autopick") {
     if (draft.complete) return "The draft is already complete";
     if (!isHost && currentManager(draft).id !== seat?.managerId) return "It is not your turn";
@@ -250,11 +335,30 @@ function denyAction(draft, seat, isHost, action) {
     if (!isHost && lastPick?.manager.id !== seat?.managerId) return "Only the host or the last picker can undo";
     return null;
   }
-  if (type === "lineup") {
-    if (!isHost && action?.managerId !== seat?.managerId) return "You can only edit your own lineup";
+  return `Unknown draft action: ${type}`;
+}
+
+function denyAuctionAction(draft, seat, isHost, action) {
+  const type = action?.type;
+  if (type === "nominate" || type === "autopick") {
+    if (draft.complete) return "The draft is already complete";
+    if (!isHost && currentManager(draft).id !== seat?.managerId) return "It is not your nomination";
     return null;
   }
-  return `Unknown draft action: ${type}`;
+  if (type === "bid" || type === "pass-bid") {
+    if (!isHost && action?.managerId !== seat?.managerId) return "You can only bid for your own team";
+    return null;
+  }
+  if (type === "complete-review") {
+    return isHost ? null : "Only the host can end pool review early";
+  }
+  if (type === "sell" || type === "cancel-lot") {
+    return isHost ? null : "Only the host can resolve the current lot";
+  }
+  if (type === "finish" || type === "undo") {
+    return isHost ? null : `Only the host can ${type === "finish" ? "auto-finish" : "undo"} the auction`;
+  }
+  return `Unknown auction action: ${type}`;
 }
 
 function openStream(room, request, response, url) {
@@ -284,13 +388,17 @@ function roomSnapshot(room) {
     rosterSize: room.rosterSize,
     poolMode: room.poolMode,
     realPool: room.realPool ?? "stars",
+    draftType: room.draftType ?? "snake",
+    auctionBudget: room.auctionBudget,
+    auctionTimer: room.auctionTimer,
     managers: room.draft.managers.map((manager) => ({
       id: manager.id,
       name: manager.name,
       claimed: room.seats.has(manager.id)
     })),
     actions: room.actions,
-    complete: room.draft.complete
+    complete: room.draft.complete,
+    serverNow: Date.now()
   };
 }
 

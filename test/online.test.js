@@ -6,8 +6,14 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
-import { generatePlayerPool } from "../src/data/playerGeneration.js";
-import { applyDraftAction, createDraft, currentManager } from "../src/rules/draft.js";
+import { buildFictionalDraftPool, generatePlayerPool } from "../src/data/playerGeneration.js";
+import {
+  applyDraftAction,
+  auctionBudget,
+  createDraft,
+  currentManager,
+  isAuctionDraft
+} from "../src/rules/draft.js";
 
 async function startServer(t, dataDir) {
   const roomsDir = dataDir ?? (await mkdtemp(join(tmpdir(), "showdown-rooms-")));
@@ -27,6 +33,25 @@ async function api(base, method, path, body) {
   });
   const data = await response.json().catch(() => ({}));
   return { status: response.status, data };
+}
+
+function replayRoom(room) {
+  const pool = room.poolMode === "real"
+    ? (() => { throw new Error("replayRoom only supports fictional test rooms"); })()
+    : buildFictionalDraftPool(room.seed);
+  const draft = createDraft(
+    room.managers.map((manager) => manager.name),
+    pool,
+    room.rosterSize,
+    room.seed,
+    {
+      draftType: room.draftType,
+      budget: room.auctionBudget,
+      timer: room.auctionTimer
+    }
+  );
+  for (const entry of room.actions) applyDraftAction(draft, entry.action);
+  return draft;
 }
 
 test("online room lifecycle: create, join, turn enforcement, replay parity", async (t) => {
@@ -105,6 +130,124 @@ test("online room lifecycle: create, join, turn enforcement, replay parity", asy
     replica.managers.map((manager) => manager.roster.map((player) => player.id)),
     await serverRosters(base, roomId)
   );
+});
+
+test("online auction rooms share timer config and enforce auction seats", async (t) => {
+  const base = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "online-auction",
+    managers: ["Alpha", "Beta"],
+    draftType: "auction",
+    auctionBudget: 2000,
+    auctionTimer: { reviewSeconds: 60, bankSeconds: 30, incrementSeconds: 5 }
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.draftType, "auction");
+  assert.equal(created.data.auctionBudget, 2000);
+  assert.deepEqual(created.data.auctionTimer, {
+    enabled: true,
+    reviewMs: 60000,
+    bankMs: 30000,
+    incrementMs: 5000
+  });
+  assert.equal(created.data.actions[0].action.type, "start-review");
+  assert.ok(Number.isFinite(created.data.serverNow));
+
+  const roomId = created.data.roomId;
+  const alpha = await api(base, "POST", `/api/rooms/${roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  const beta = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+
+  const betaSkip = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: beta.data.token,
+    action: { type: "complete-review" }
+  });
+  assert.equal(betaSkip.status, 409);
+
+  const alphaSkip = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: alpha.data.token,
+    action: { type: "complete-review", at: 1 }
+  });
+  assert.equal(alphaSkip.status, 200);
+
+  let room = await api(base, "GET", `/api/rooms/${roomId}`);
+  let replica = replayRoom(room.data);
+  assert.equal(isAuctionDraft(replica), true);
+  const target = replica.pool.find((player) => player.kind === "hitter");
+
+  const wrongNominator = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: beta.data.token,
+    action: { type: "nominate", playerId: target.id }
+  });
+  assert.equal(wrongNominator.status, 409);
+
+  const nomination = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: alpha.data.token,
+    action: { type: "nominate", playerId: target.id, at: 1 }
+  });
+  assert.equal(nomination.status, 200);
+
+  const wrongTeamBid = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: beta.data.token,
+    action: { type: "bid", managerId: "team-1", amount: 100 }
+  });
+  assert.equal(wrongTeamBid.status, 409);
+
+  const betaBid = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: beta.data.token,
+    action: { type: "bid", managerId: "team-2", amount: 100, at: 1 }
+  });
+  assert.equal(betaBid.status, 200);
+
+  const betaSell = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: beta.data.token,
+    action: { type: "sell" }
+  });
+  assert.equal(betaSell.status, 409);
+  const alphaSell = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: alpha.data.token,
+    action: { type: "sell" }
+  });
+  assert.equal(alphaSell.status, 200);
+
+  room = await api(base, "GET", `/api/rooms/${roomId}`);
+  replica = replayRoom(room.data);
+  const bidAction = room.data.actions.find((entry) => entry.action.type === "bid").action;
+  assert.notEqual(bidAction.at, 1);
+  assert.equal(replica.managers[1].roster[0].id, target.id);
+  assert.equal(auctionBudget(replica, replica.managers[1]), 1900);
+});
+
+test("online auction server publishes clock timeouts into the action log", async (t) => {
+  const base = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "online-auction-timeout",
+    managers: ["Alpha", "Beta"],
+    draftType: "auction",
+    auctionTimer: { reviewMs: 0, bankMs: 50, incrementMs: 0 }
+  });
+  const alpha = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  const initial = replayRoom(created.data);
+  const target = initial.pool.find((player) => player.kind === "hitter");
+  const nomination = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
+    token: alpha.data.token,
+    action: { type: "nominate", playerId: target.id }
+  });
+  assert.equal(nomination.status, 200);
+
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
+  const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  assert.ok(room.data.actions.some((entry) => entry.action.type === "sync-timer"));
+
+  const replica = replayRoom(room.data);
+  assert.equal(replica.auction.lot.clock.submissions["team-2"].amount, 0);
+  assert.equal(replica.auction.lot.clock.submissions["team-2"].timedOut, true);
+  assert.equal(replica.auction.clockBanks["team-2"], 0);
 });
 
 // The server does not expose its replica directly; a second replay from the

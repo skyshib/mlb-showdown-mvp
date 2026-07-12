@@ -303,10 +303,10 @@ export function canSellLot(draft, now = Date.now()) {
   return { ok: true, reason: "" };
 }
 
-export function canNominatePlayer(draft, manager, player) {
+export function canNominatePlayer(draft, manager, player, now = Date.now()) {
   if (!isAuctionDraft(draft)) return { ok: false, reason: "not an auction draft" };
   if (draft.complete) return { ok: false, reason: "draft complete" };
-  if (!auctionReviewComplete(draft)) return { ok: false, reason: "review period is still open" };
+  if (!auctionReviewComplete(draft, now)) return { ok: false, reason: "review period is still open" };
   if (draft.auction.lot) return { ok: false, reason: "finish the current lot first" };
   const nominator = currentManager(draft);
   if (manager.id !== nominator.id) {
@@ -324,7 +324,7 @@ export function nominatePlayer(draft, playerId, now = Date.now()) {
   if (!player || draft.pickedIds.has(playerId)) {
     throw new Error("Player is not available");
   }
-  const legality = canNominatePlayer(draft, nominator, player);
+  const legality = canNominatePlayer(draft, nominator, player, now);
   if (!legality.ok) {
     throw new Error(legality.reason);
   }
@@ -624,11 +624,14 @@ export function applyDraftAction(draft, action) {
     case "complete-review":
       completeAuctionReview(draft, action.at);
       return;
+    case "sync-timer":
+      syncAuctionTimer(draft, action.at);
+      return;
     case "autopick":
-      autopick(draft);
+      autopick(draft, action.at);
       return;
     case "finish":
-      while (!draft.complete) autopick(draft);
+      while (!draft.complete) autopick(draft, action.at);
       return;
     case "undo":
       undoLastPick(draft);
@@ -676,8 +679,8 @@ export function draftHistory(draft) {
   return picks;
 }
 
-export function autopick(draft) {
-  if (isAuctionDraft(draft)) return autoRunAuctionLot(draft);
+export function autopick(draft, now = Date.now()) {
+  if (isAuctionDraft(draft)) return autoRunAuctionLot(draft, now);
   const best = bestAutopickTarget(draft, currentManager(draft));
   return pickPlayer(draft, best.id);
 }
@@ -703,11 +706,11 @@ function bestAutopickTarget(draft, manager) {
 // Auto for auctions resolves one full lot: nominate the nominator's best
 // target if nothing is on the block, let every manager proxy-bid up to their
 // willingness, then sell to the standing high bidder.
-function autoRunAuctionLot(draft) {
+function autoRunAuctionLot(draft, now) {
   if (draft.complete) return draft;
   if (!draft.auction.lot) {
     const nominator = currentManager(draft);
-    nominatePlayer(draft, bestAutopickTarget(draft, nominator).id);
+    nominatePlayer(draft, bestAutopickTarget(draft, nominator).id, now);
   }
   autoBidLot(draft);
   sellLot(draft);
