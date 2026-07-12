@@ -2910,7 +2910,8 @@ function renderRoster(manager, draft) {
   const history = draftHistory(draft);
   const slotContext = {
     prices: auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null,
-    lastPickedId: history.at(-1)?.player.id ?? null
+    lastPickedId: history.at(-1)?.player.id ?? null,
+    heatScale: draftHeatScale(draft)
   };
   const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
   const budgetLine = auction
@@ -2955,10 +2956,10 @@ function renderMiniRosterSlot(player, slotLabel, slotContext = {}) {
       <span class="mini-slot-name">open</span>
     </div>`;
   }
-  const tier = cardRarity(player).key;
   const price = slotContext.prices?.get(player.id);
   const flash = player.id === slotContext.lastPickedId ? " just-picked" : "";
-  return `<div class="mini-roster-slot filled-mini-slot tier-${tier}${flash}">
+  const heat = slotContext.heatScale ? heatStyle(heatValue(player, slotContext.heatScale, slotContext.prices), slotContext.heatScale) : "";
+  return `<div class="mini-roster-slot filled-mini-slot heat${flash}" style="${heat}">
     <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
     <strong class="mini-slot-name player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
     <span class="mini-slot-meta">${escapeHtml(rosterSlotDescription(player, slotLabel))} | ${player.points} pts</span>
@@ -2971,9 +2972,10 @@ function renderRecentPicks(draft) {
   const picks = draftHistory(draft).slice(-4).reverse();
   if (!picks.length) return "";
   const auction = isAuctionDraft(draft);
+  const heatScale = draftHeatScale(draft);
   const items = picks
     .map(
-      (pick, index) => `<span class="recent-pick tier-${cardRarity(pick.player).key} ${index === 0 ? "newest-pick" : ""}">
+      (pick, index) => `<span class="recent-pick heat ${index === 0 ? "newest-pick" : ""}" style="${heatStyle(auction ? pick.price : pick.player.points, heatScale)}">
         <strong>${escapeHtml(pick.player.name)}</strong>
         <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
       </span>`
@@ -2999,6 +3001,7 @@ function renderWarRoom() {
   const lotPlayer = lot ? auctionLotPlayer(draft) : null;
   const history = draftHistory(draft);
   const prices = auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null;
+  const heatScale = draftHeatScale(draft);
   const current = draft.complete ? null : currentManager(draft);
   const totalPicks = draft.managers.length * draft.rosterSize;
   const lastPick = history.at(-1);
@@ -3035,7 +3038,7 @@ function renderWarRoom() {
       const chips = sorted
         .map((player) => {
           const price = auction ? prices.get(player.id) : undefined;
-          return `<span class="dock-chip tier-${cardRarity(player).key}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
+          return `<span class="dock-chip heat" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
         })
         .join("");
       const needs = dockNeedsSummary(manager);
@@ -3055,7 +3058,7 @@ function renderWarRoom() {
     .slice(-6)
     .reverse()
     .map(
-      (pick) => `<span class="recent-pick tier-${cardRarity(pick.player).key}">
+      (pick) => `<span class="recent-pick heat" style="${heatStyle(auction ? pick.price : pick.player.points, heatScale)}">
         <strong>${escapeHtml(pick.player.name)}</strong>
         <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
       </span>`
@@ -3066,7 +3069,7 @@ function renderWarRoom() {
     <header class="war-header">
       <span class="war-brand">MLB Showdown &middot; ${escapeHtml(draft.seed ?? "")}</span>
       <h1>${status}</h1>
-      ${renderTierLegend()}
+      ${renderHeatLegend(heatScale)}
       ${state.online ? `<span class="war-live">&#9679; LIVE</span>` : ""}
     </header>
     <div class="war-main">
@@ -3081,6 +3084,56 @@ function renderWarRoom() {
   </div>`;
 }
 
+
+
+// Blue-to-red heat scale over winning bids (card points in snake drafts).
+// Endpoints sit at the 10th/90th percentile once six sales exist, so most
+// bids land inside the gradient and outliers clamp to the ends; before that,
+// a budget-derived prior keeps early sales meaningful.
+function draftHeatScale(draft) {
+  const auction = isAuctionDraft(draft);
+  if (auction) {
+    const prices = draftHistory(draft).map((pick) => pick.price).sort((a, b) => a - b);
+    if (prices.length >= 6) {
+      const lo = quantileOf(prices, 0.1);
+      return { lo, hi: Math.max(quantileOf(prices, 0.9), lo + 10), auction };
+    }
+    const budget = draft.auction.budget ?? AUCTION_DEFAULT_BUDGET;
+    return { lo: Math.round(budget * 0.02), hi: Math.round(budget * 0.16), auction };
+  }
+  const points = draft.pool.map((player) => player.points).sort((a, b) => a - b);
+  const lo = quantileOf(points, 0.1);
+  return { lo, hi: Math.max(quantileOf(points, 0.9), lo + 10), auction };
+}
+
+function quantileOf(sorted, q) {
+  if (!sorted.length) return 0;
+  const index = (sorted.length - 1) * q;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  const weight = index - lower;
+  return Math.round(sorted[lower] * (1 - weight) + sorted[upper] * weight);
+}
+
+// Hue path 215 (cool blue) through purple to 360 (red).
+function heatStyle(value, scale) {
+  if (value === undefined || value === null) return "";
+  const t = Math.max(0, Math.min(1, (value - scale.lo) / Math.max(1, scale.hi - scale.lo)));
+  return `--heat-h:${Math.round(215 + 145 * t)}`;
+}
+
+function heatValue(player, scale, prices) {
+  return scale.auction ? prices?.get(player.id) : player.points;
+}
+
+function renderHeatLegend(scale) {
+  return `<span class="heat-legend" aria-label="Color scale for ${scale.auction ? "winning bids" : "card points"}">
+    <em>${scale.auction ? "bid" : "pts"} &le;${scale.lo}</em>
+    <i class="heat-bar"></i>
+    <em>${scale.hi}+</em>
+  </span>`;
+}
+
 // Floating rival boards: every other team pinned to the bottom edge so nobody
 // scrolls mid-auction to see what the room has done.
 function renderRosterDock(draft, viewerId) {
@@ -3091,18 +3144,19 @@ function renderRosterDock(draft, viewerId) {
   const prices = auction
     ? new Map(draftHistory(draft).map((pick) => [pick.player.id, pick.price]))
     : null;
-  const bars = collapsed ? "" : rivals.map((manager) => renderDockBar(draft, manager, auction, prices)).join("");
+  const heatScale = draftHeatScale(draft);
+  const bars = collapsed ? "" : rivals.map((manager) => renderDockBar(draft, manager, auction, prices, heatScale)).join("");
   return `<div class="roster-dock-spacer${collapsed ? " collapsed" : ""}"></div>
   <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Other team rosters">
     <div class="dock-top">
       <button type="button" class="dock-toggle" data-action="toggle-dock">${collapsed ? "Show rival boards &#9650;" : "Hide &#9660;"}</button>
-      ${collapsed ? "" : renderTierLegend()}
+      ${collapsed ? "" : renderHeatLegend(heatScale)}
     </div>
     ${bars ? `<div class="dock-bars">${bars}</div>` : ""}
   </aside>`;
 }
 
-function renderDockBar(draft, manager, auction, prices) {
+function renderDockBar(draft, manager, auction, prices, heatScale) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
@@ -3110,7 +3164,7 @@ function renderDockBar(draft, manager, auction, prices) {
     (player) => player.role
   ).slots;
   const slots = [...lineupSlots, ...staffSlots]
-    .map((slot) => renderDockSlot(slot.player, slot.label, auction, prices))
+    .map((slot) => renderDockSlot(slot.player, slot.label, auction, prices, heatScale))
     .join("");
   const budget = auction
     ? `<span class="dock-budget">${auctionBudget(draft, manager)} left${draft.complete ? "" : `<br />max ${auctionMaxBid(draft, manager)}`}</span>`
@@ -3122,26 +3176,18 @@ function renderDockBar(draft, manager, auction, prices) {
   </div>`;
 }
 
-function renderDockSlot(player, label, auction, prices) {
+function renderDockSlot(player, label, auction, prices, heatScale) {
   if (!player) {
     return `<span class="dock-slot empty-dock-slot"><small>${escapeHtml(label)}</small><span>open</span></span>`;
   }
   const price = auction ? prices.get(player.id) : undefined;
-  return `<span class="dock-slot tier-${cardRarity(player).key} player-name-preview" tabindex="0" data-preview-id="dockslot-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">
+  return `<span class="dock-slot heat player-name-preview" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}" tabindex="0" data-preview-id="dockslot-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">
     <small>${escapeHtml(label)}${price !== undefined ? ` &middot; ${price}` : ""}</small>
     <span>${escapeHtml(dockChipName(player))}</span>
   </span>`;
 }
 
-// Threshold labels mirror cardRarity() in ui/render.js — keep them in sync.
-function renderTierLegend() {
-  return `<span class="tier-legend" aria-label="Card quality color scale">
-    <span class="tier-swatch tier-bronze">bronze &lt;285</span>
-    <span class="tier-swatch tier-silver">silver 285+</span>
-    <span class="tier-swatch tier-gold">gold 340+</span>
-    <span class="tier-swatch tier-rainbow">rainbow 390+</span>
-  </span>`;
-}
+
 
 function dockChipName(player) {
   const match = player.name.match(/^(\S+)\s+(.+)$/);
