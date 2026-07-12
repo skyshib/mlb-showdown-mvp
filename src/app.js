@@ -155,7 +155,7 @@ let pickClockKey = null;
 let pickClockDeadline = 0;
 let pickClockTimeoutKey = null;
 let chimeContext = null;
-let warRoomSoundEnabled = false;
+let warRoomSoundEnabled = true;
 let warRoomLotKey = null;
 
 setInterval(pickClockTick, 500);
@@ -461,6 +461,19 @@ function updateWarRoomNominationSound(draft, lot, player) {
 
 const onlineRoomParam = new URLSearchParams(location.search).get("room");
 const warRoomMode = new URLSearchParams(location.search).has("board");
+if (warRoomMode) {
+  const unlockWarRoomAudio = async () => {
+    if (!warRoomSoundEnabled) return;
+    try {
+      chimeContext = chimeContext ?? new AudioContext();
+      await chimeContext.resume();
+    } catch {
+      // The board remains usable when audio is unavailable or blocked.
+    }
+  };
+  window.addEventListener("pointerdown", unlockWarRoomAudio, { once: true, capture: true });
+  window.addEventListener("keydown", unlockWarRoomAudio, { once: true, capture: true });
+}
 if (onlineRoomParam) {
   bootOnlineRoom(onlineRoomParam);
 } else {
