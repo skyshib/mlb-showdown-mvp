@@ -81,14 +81,23 @@
       pointer-events: none;
     }
 
-    .command {
+    .onbase-number {
       position: absolute;
-      inset: 0;
-      z-index: 4;
-      width: 100%;
-      height: 100%;
-      object-fit: fill;
-      transform: translateX(0.45%);
+      z-index: 6;
+      left: 10.23%;
+      top: 77.38%;
+      color: #ef3d1b;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(21px, 6.5vw, 29px);
+      font-style: normal;
+      font-weight: 700;
+      line-height: 1;
+      transform: translate(-50%, -50%);
+      text-shadow:
+        -1px -1px 0 #080808,
+        1px -1px 0 #080808,
+        -1px 1px 0 #080808,
+        1px 1px 0 #080808;
       pointer-events: none;
     }
 
@@ -147,22 +156,26 @@
     .ranges {
       position: absolute;
       z-index: 6;
-      left: 3.65%;
-      right: 3.65%;
+      left: 0;
+      right: 0;
       top: 84.72%;
       height: 3.55%;
-      display: grid;
-      grid-template-columns: repeat(9, minmax(0, 1fr));
-      align-items: center;
       color: #fff;
       font-family: "Showdown Condensed", Arial Narrow, sans-serif;
-      font-size: clamp(9px, 2.35vw, 14px);
+      font-size: clamp(10px, 2.7vw, 15px);
       font-style: normal;
       line-height: 1;
       text-align: center;
       white-space: nowrap;
       text-shadow: 0 2px 2px #000;
       transform: translateY(-10%);
+    }
+
+    .ranges span {
+      position: absolute;
+      left: var(--range-x);
+      top: 50%;
+      transform: translate(-50%, -50%);
     }
 
     .set-year {
@@ -211,7 +224,7 @@
       <div class="photo"></div>
 
       <img class="frame" src="./vendor/showdownbot/2004-Hitter-BLUE.png" alt="">
-      <img class="command" src="./vendor/showdownbot/2004-Hitter-10.png" alt="">
+      <div class="onbase-number">10</div>
       <img class="team-logo" src="./vendor/showdownbot/LAD.png" alt="Los Angeles Dodgers">
 
       <div class="player-name">Milton Bradley</div>
@@ -224,22 +237,22 @@
       </div>
 
       <div class="ranges" aria-label="Chart result ranges">
-        <span>1-2</span>
-        <span>3-4</span>
-        <span>5-6</span>
-        <span>7-10</span>
-        <span>11-16</span>
-        <span>17</span>
-        <span>18-19</span>
-        <span>-</span>
-        <span>20+</span>
+        <span style="--range-x: 8.13%">1-2</span>
+        <span style="--range-x: 18.53%">3-4</span>
+        <span style="--range-x: 28.93%">5-6</span>
+        <span style="--range-x: 39.33%">7-10</span>
+        <span style="--range-x: 49.73%">11-16</span>
+        <span style="--range-x: 60.13%">17</span>
+        <span style="--range-x: 70.53%">18-19</span>
+        <span style="--range-x: 80.93%">-</span>
+        <span style="--range-x: 91.33%">20+</span>
       </div>
 
       <div class="set-year">2005</div>
     </article>
 
     <p class="note">
-      This version uses ShowdownBot's actual 2004/2005 frame, command graphic, fonts, logo, and renderer coordinates. The player photo is still the existing unprocessed mockup image.
+      This version uses ShowdownBot's actual 2004/2005 frame, fonts, logo, and renderer coordinates. The player photo is still the existing unprocessed mockup image.
     </p>
   </main>
 </body>
