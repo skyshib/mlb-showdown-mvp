@@ -2895,6 +2895,7 @@ function renderWarRoom() {
     <header class="war-header">
       <span class="war-brand">MLB Showdown &middot; ${escapeHtml(draft.seed ?? "")}</span>
       <h1>${status}</h1>
+      ${renderTierLegend()}
       ${state.online ? `<span class="war-live">&#9679; LIVE</span>` : ""}
     </header>
     <div class="war-main">
@@ -2922,32 +2923,53 @@ function renderRosterDock(draft, viewerId) {
   const bars = collapsed ? "" : rivals.map((manager) => renderDockBar(draft, manager, auction, prices)).join("");
   return `<div class="roster-dock-spacer${collapsed ? " collapsed" : ""}"></div>
   <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Other team rosters">
-    <button type="button" class="dock-toggle" data-action="toggle-dock">${collapsed ? "Show rival boards &#9650;" : "Hide &#9660;"}</button>
+    <div class="dock-top">
+      <button type="button" class="dock-toggle" data-action="toggle-dock">${collapsed ? "Show rival boards &#9650;" : "Hide &#9660;"}</button>
+      ${collapsed ? "" : renderTierLegend()}
+    </div>
     ${bars ? `<div class="dock-bars">${bars}</div>` : ""}
   </aside>`;
 }
 
 function renderDockBar(draft, manager, auction, prices) {
-  const sorted = [...manager.roster].sort((a, b) =>
-    auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points
-  );
-  const chips = sorted
-    .map((player) => {
-      const tier = cardRarity(player).key;
-      const price = auction ? prices.get(player.id) : undefined;
-      return `<span class="dock-chip tier-${tier} player-name-preview" tabindex="0" data-preview-id="dock-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
-    })
+  const lineupSlots = assignHittersToLineupSlots(manager).slots;
+  const staffSlots = assignPlayersToSlots(
+    manager.roster.filter((player) => player.kind === "pitcher"),
+    ["SP", "SP", "RP", "RP"],
+    (player) => player.role
+  ).slots;
+  const slots = [...lineupSlots, ...staffSlots]
+    .map((slot) => renderDockSlot(slot.player, slot.label, auction, prices))
     .join("");
-  const needs = dockNeedsSummary(manager);
   const budget = auction
-    ? `<span class="dock-budget">${auctionBudget(draft, manager)} left${draft.complete ? "" : ` &middot; max ${auctionMaxBid(draft, manager)}`}</span>`
+    ? `<span class="dock-budget">${auctionBudget(draft, manager)} left${draft.complete ? "" : `<br />max ${auctionMaxBid(draft, manager)}`}</span>`
     : "";
   return `<div class="dock-bar">
     <span class="dock-team">${escapeHtml(manager.name)}</span>
     ${budget}
-    <div class="dock-chips">${chips || `<span class="dock-empty">no picks yet</span>`}</div>
-    ${needs ? `<span class="dock-needs">needs ${escapeHtml(needs)}</span>` : ""}
+    <div class="dock-slots">${slots}</div>
   </div>`;
+}
+
+function renderDockSlot(player, label, auction, prices) {
+  if (!player) {
+    return `<span class="dock-slot empty-dock-slot"><small>${escapeHtml(label)}</small><span>open</span></span>`;
+  }
+  const price = auction ? prices.get(player.id) : undefined;
+  return `<span class="dock-slot tier-${cardRarity(player).key} player-name-preview" tabindex="0" data-preview-id="dockslot-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">
+    <small>${escapeHtml(label)}${price !== undefined ? ` &middot; ${price}` : ""}</small>
+    <span>${escapeHtml(dockChipName(player))}</span>
+  </span>`;
+}
+
+// Threshold labels mirror cardRarity() in ui/render.js — keep them in sync.
+function renderTierLegend() {
+  return `<span class="tier-legend" aria-label="Card quality color scale">
+    <span class="tier-swatch tier-bronze">bronze &lt;285</span>
+    <span class="tier-swatch tier-silver">silver 285+</span>
+    <span class="tier-swatch tier-gold">gold 340+</span>
+    <span class="tier-swatch tier-rainbow">rainbow 390+</span>
+  </span>`;
 }
 
 function dockChipName(player) {
