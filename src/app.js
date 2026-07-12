@@ -139,6 +139,7 @@ let liveGame = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
 let onlineStream = null;
+let onlinePollInFlight = false;
 // The bid box that was rejected, and why — one manager's error, not the
 // panel's, now that several boxes can be open at once.
 let lotEntryError = null;
@@ -159,6 +160,7 @@ let warRoomLotKey = null;
 
 setInterval(pickClockTick, 500);
 setInterval(auctionClockTick, 500);
+setInterval(pollOnlineRoom, 2000);
 
 function pickClockTurn() {
   const draft = state.draft;
@@ -675,6 +677,10 @@ function applySharedSim(action, options = {}) {
 function subscribeOnline() {
   onlineStream?.close();
   onlineStream = subscribeRoom(state.online.roomId, state.online.appliedSeq, {
+    onHello: () => {
+      if (!state.online) return;
+      state.online.status = "";
+    },
     onAction: (entry) => {
       const online = state.online;
       if (!online || entry.seq <= online.appliedSeq) return;
@@ -727,11 +733,32 @@ function subscribeOnline() {
   });
 }
 
-async function resyncOnlineRoom() {
+async function pollOnlineRoom() {
+  const online = state.online;
+  if (!online || onlinePollInFlight) return;
+  onlinePollInFlight = true;
+  try {
+    const room = await fetchRoom(online.roomId);
+    if (state.online !== online) return;
+    const latestSeq = room.actions.length ? room.actions.at(-1).seq : 0;
+    const claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
+    const roomChanged = latestSeq !== online.appliedSeq
+      || JSON.stringify(room.lot ?? null) !== JSON.stringify(online.lot ?? null)
+      || JSON.stringify(claimedSeats) !== JSON.stringify(online.claimedSeats);
+    if (roomChanged) await resyncOnlineRoom(room);
+  } catch {
+    // SSE remains the primary connection; its error handler owns the UI state.
+  } finally {
+    onlinePollInFlight = false;
+  }
+}
+
+async function resyncOnlineRoom(snapshot = null) {
   const online = state.online;
   if (!online) return;
   try {
-    const room = await fetchRoom(online.roomId);
+    const room = snapshot ?? await fetchRoom(online.roomId);
+    if (state.online !== online) return;
     online.serverOffsetMs = Number(room.serverNow) - Date.now() || online.serverOffsetMs || 0;
     online.claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
     rebuildOnlineDraft(room);
