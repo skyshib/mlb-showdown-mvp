@@ -191,7 +191,7 @@ export function renderPlayerCard(player) {
   </article>`;
 }
 
-function cardRarity(player) {
+export function cardRarity(player) {
   if (player.points >= 390) return { key: "rainbow", frame: "conic-gradient(from 40deg, #ff6279, #ffd15e, #53d69e, #4f9dff, #c27cff, #ff6279)" };
   if (player.points >= 340) return { key: "gold", frame: "#e1b64b" };
   if (player.points >= 285) return { key: "silver", frame: "#c9d2d8" };
