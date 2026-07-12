@@ -4,7 +4,7 @@ import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { playerIdentity } from "../rules/cards.js";
-import { randomNominationQuotas } from "../rules/draft.js";
+import { poolGroupMatches, randomNominationQuotas } from "../rules/draft.js";
 import { authenticPoints } from "../rules/pricing.js";
 import { PRICE_MODEL } from "./priceModel.js";
 
@@ -329,9 +329,6 @@ const DECK_RARITY_MIX = [
   ["common", 0.4]
 ];
 
-function deckGroup(card) {
-  return card.kind === "pitcher" ? card.role : card.position;
-}
 
 // Fisher-Yates on a copy, driven by the seeded rng.
 function shuffled(cards, rng) {
@@ -371,8 +368,16 @@ function dealGroupCards(cards, quota, rng) {
 function dealDeckToQuotas(quotas, rngKey) {
   const pool = universePool();
   const rng = createRng(rngKey);
-  const dealt = quotas.flatMap(([group, quota]) =>
-    dealGroupCards(pool.filter((card) => deckGroup(card) === group), quota, rng));
+  // Groups deal in order and a card deals once. The position groups are
+  // disjoint anyway, but the DH slot draws on every hitter in the set, so it
+  // has to take from whoever the position groups left behind.
+  const used = new Set();
+  const dealt = quotas.flatMap(([group, quota]) => {
+    const candidates = pool.filter((card) => !used.has(card.id) && poolGroupMatches(card, group));
+    const cards = dealGroupCards(candidates, quota, rng);
+    for (const card of cards) used.add(card.id);
+    return cards;
+  });
   // A two-way player is one card in two halves: if the deal turned up his
   // bat, his arm comes along, and vice versa — otherwise the board would
   // print a combined 2-way face for a card whose other half can't be had.
