@@ -80,7 +80,20 @@
     .rarity-choice[data-rarity="bronze"] { --choice-color: #c9915d; }
     .rarity-choice[data-rarity="silver"] { --choice-color: #e5edf2; }
     .rarity-choice[data-rarity="gold"] { --choice-color: #f0c95e; }
-    .rarity-choice[data-rarity="legendary"] { --choice-color: #ffe987; }
+    .rarity-choice[data-rarity="legendary"] { --choice-color: #c27cff; }
+
+    .rarity-choice[data-rarity="legendary"] span,
+    .rarity-mark.rarity-legendary {
+      background: linear-gradient(90deg, #ff6279, #ffd15e, #53d69e, #4f9dff, #c27cff, #ff6279);
+      background-clip: text;
+      color: transparent;
+      -webkit-background-clip: text;
+    }
+
+    .rarity-mark.rarity-legendary {
+      filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 1px rgba(0, 0, 0, 0.9));
+      text-shadow: none;
+    }
 
     .rarity-choice:hover {
       border-color: #6e7682;
@@ -157,7 +170,6 @@
     .rarity-mark.rarity-bronze { color: #c9915d; }
     .rarity-mark.rarity-silver { color: #e5edf2; }
     .rarity-mark.rarity-gold { color: #f0c95e; }
-    .rarity-mark.rarity-legendary { color: #ffe987; }
 
     .card {
       position: relative;
