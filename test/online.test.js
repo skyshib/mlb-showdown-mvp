@@ -518,3 +518,40 @@ test("a room hands out an invite address other machines can actually reach", asy
     assert.doesNotMatch(origin, /127\.0\.0\.1|localhost/, "the invite address must not be loopback");
   }
 });
+
+test("the host can hand back a seat somebody has lost", async (t) => {
+  const base = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", { seed: "lost-seat", managers: ["Ana", "Bo"] });
+  const roomId = created.data.roomId;
+  const hostToken = created.data.hostToken;
+
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken });
+  assert.equal(ana.status, 200);
+
+  // Ana's browser loses its storage — cleared, or she comes back on a
+  // different address, which is a different localStorage. The seat is still
+  // held server-side, by a token nobody has any more.
+  const stranger = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1" });
+  assert.equal(stranger.status, 409, "and no passer-by may simply take it");
+  assert.match(stranger.data.error, /already claimed/);
+
+  // The host hands it back. A fresh token comes with it.
+  const reseated = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken });
+  assert.equal(reseated.status, 200);
+  assert.equal(reseated.data.reseated, true);
+  assert.notEqual(reseated.data.token, ana.data.token, "a new key, so the lost one is dead");
+
+  // The orphaned token no longer works.
+  const withOldToken = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(withOldToken.status, 403);
+
+  // The new one does.
+  const withNewToken = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: reseated.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(withNewToken.status, 200);
+});

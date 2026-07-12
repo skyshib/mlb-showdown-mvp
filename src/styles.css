@@ -2523,3 +2523,8 @@ button.roster-slot[draggable="true"]:active {
 .bench-slot:active {
   cursor: grabbing;
 }
+
+/* A seat that is held, but that the host may hand back. */
+.seat-option.reseat-option {
+  border-style: dashed;
+}

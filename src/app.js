@@ -842,13 +842,20 @@ function renderOnlineMessage(message, isError = false) {
 function renderSeatSelect() {
   resetAppHandlers();
   const online = state.online;
+  // A seat is held by a token in one browser's storage, which is a fragile
+  // place to keep the only key to your own team. Whoever holds the host token
+  // can hand a seat back — to themselves, or to a manager who lost theirs.
+  const canReseat = Boolean(online.hostToken);
   const seats = state.draft.managers
     .map((manager) => {
       const claimed = online.claimedSeats.includes(manager.id);
-      const blocked = claimed || manager.cpu;
-      return `<button class="seat-option" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}" ${blocked ? "disabled" : ""}>
+      const blocked = manager.cpu || (claimed && !canReseat);
+      const label = manager.cpu ? "Computer"
+        : claimed ? (canReseat ? "Taken &middot; take it back" : "Taken")
+        : "Open seat";
+      return `<button class="seat-option ${claimed && canReseat ? "reseat-option" : ""}" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}" ${blocked ? "disabled" : ""}>
         <strong>${escapeHtml(manager.name)}</strong>
-        <span>${manager.cpu ? "Computer" : claimed ? "Taken" : "Open seat"}</span>
+        <span>${label}</span>
       </button>`;
     })
     .join("");
@@ -856,7 +863,7 @@ function renderSeatSelect() {
     <div>
       <p class="eyebrow">Online room ${escapeHtml(online.roomId)}</p>
       <h1>Choose your seat</h1>
-      <p class="lede">Pick the manager you will draft for.${online.hostToken ? " You created this room, so your seat gets host controls." : ""}</p>
+      <p class="lede">Pick the manager you will draft for.${online.hostToken ? " You created this room, so your seat gets host controls &mdash; and you can take back a seat somebody has lost." : ""}</p>
       <div class="seat-grid">${seats}</div>
       <p><button type="button" class="link-button" data-action="spectate">Watch without a seat</button></p>
       ${online.status ? `<p class="warn">${escapeHtml(online.status)}</p>` : ""}

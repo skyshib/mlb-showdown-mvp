@@ -479,14 +479,22 @@ async function joinRoom(store, room, request, response) {
   const manager = room.draft.managers.find((item) => item.id === body.managerId);
   if (!manager) return sendJson(response, 404, { error: "Unknown manager seat" });
   if (manager.cpu) return sendJson(response, 409, { error: `${manager.name} is a computer manager` });
-  const existing = room.seats.get(manager.id);
-  if (existing) return sendJson(response, 409, { error: `${manager.name} is already claimed` });
   const isHost = Boolean(body.hostToken) && body.hostToken === room.hostToken;
+  const existing = room.seats.get(manager.id);
+  // A seat is held by a token in one browser's storage, and storage is a
+  // fragile place to keep the only key to your own team: clear it, or come
+  // back on a different address (localStorage is per-origin — 127.0.0.1 and
+  // 192.168.1.x are different cupboards), and the room says your seat is taken
+  // by you, for ever. Whoever holds the host token can hand it back. Reseating
+  // mints a fresh token, so the orphaned one stops working.
+  if (existing && !isHost) {
+    return sendJson(response, 409, { error: `${manager.name} is already claimed` });
+  }
   const seat = { managerId: manager.id, token: newToken(), isHost };
   room.seats.set(manager.id, seat);
   persistRoom(store, room);
   broadcast(room, "seats", { seats: claimedSeats(room) });
-  sendJson(response, 200, { token: seat.token, managerId: manager.id, host: isHost });
+  sendJson(response, 200, { token: seat.token, managerId: manager.id, host: isHost, reseated: Boolean(existing) });
 }
 
 async function postAction(store, room, request, response) {
