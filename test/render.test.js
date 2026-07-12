@@ -93,6 +93,8 @@ test("fictional hitters and pitchers use the finalized 2005 card template", () =
 
   assert.ok(pitcherHtml.includes("gq-proto-card gq-proto-pitcher"));
   assert.ok(pitcherHtml.includes("2004-Pitcher-BLUE-NO-FOOTER-NO-RIBBON.png"));
+  assert.ok(pitcherHtml.includes("gq-proto-frame-top"));
+  assert.ok(pitcherHtml.includes("gq-proto-frame-bottom"));
   assert.ok(pitcherHtml.includes("gq-proto-baseball"));
   assert.ok(pitcherHtml.includes('class="gq-proto-control-plus">+</span>'));
   assert.ok(pitcherHtml.includes("CONTROL"));

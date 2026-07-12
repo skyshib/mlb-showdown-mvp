@@ -334,10 +334,8 @@ function fictionalCardHtml(card, count) {
       <span class="gq-proto-initials">${escapeHtml(initials)}</span>
       <img class="gq-proto-portrait" src="https://api.dicebear.com/10.x/micah/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}-${card.position ?? card.role}`)}&clothesVariant=crew" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
     </div>
-    ${pitcher
-      ? `<img class="gq-proto-frame" src="${frame}" alt="">`
-      : `<img class="gq-proto-frame gq-proto-frame-top" src="${frame}" alt="">
-         <img class="gq-proto-frame gq-proto-frame-bottom" src="${frame}" alt="">`}
+    <img class="gq-proto-frame gq-proto-frame-top" src="${frame}" alt="">
+    <img class="gq-proto-frame gq-proto-frame-bottom" src="${frame}" alt="">
     <span class="gq-proto-rarity-mark">${fictionalRarityMark(rarity)}</span>
     ${count !== null ? `<span class="gq-proto-count">x${count}</span>` : ""}
     ${rating}
