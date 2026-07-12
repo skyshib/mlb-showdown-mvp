@@ -48,10 +48,16 @@ export function renderPlayerTable(players, options = {}) {
 
   const rows = players
     .map((player) => {
+      // A card someone already owns keeps its place on the board, greyed out and
+      // out of reach: what is gone is as much a part of the board as what is left.
+      const owner = options.ownerOf ? options.ownerOf(player) : null;
+      const onBlock = Boolean(options.lotPlayerId) && player.id === options.lotPlayerId;
       const legality = options.canPick ? options.canPick(player) : { ok: true, reason: "" };
-      const action = options.action
-        ? `<button class="small" data-action="${options.action}" data-player-id="${player.id}" ${legality.ok ? "" : "disabled"} title="${escapeHtml(legality.reason)}">${legality.ok ? (options.label ?? "Pick") : "Blocked"}</button>`
-        : "";
+      const action = owner
+        ? `<span class="sold-tag" title="${escapeHtml(owner.title ?? "")}">${escapeHtml(owner.label)}</span>`
+        : options.action
+          ? `<button class="small" data-action="${options.action}" data-player-id="${player.id}" ${legality.ok ? "" : "disabled"} title="${escapeHtml(legality.reason)}">${legality.ok ? (options.label ?? "Pick") : "Blocked"}</button>`
+          : "";
       const detailCells = player.kind === "pitcher"
         ? `<td>${escapeHtml(player.role)}</td>
         <td class="num">${player.control}</td>
@@ -61,7 +67,10 @@ export function renderPlayerTable(players, options = {}) {
         <td class="num">${player.onBase}</td>
         <td class="num">${formatSpeed(player.speed)}</td>
         <td class="num">${escapeHtml(fieldingLabel(player))}</td>`;
-      return `<tr class="draft-player-row">
+      const rowClass = ["draft-player-row", owner ? "sold-row" : "", onBlock ? "on-block-row" : ""]
+        .filter(Boolean)
+        .join(" ");
+      return `<tr class="${rowClass}">
         <td>${action}</td>
         <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
         ${detailCells}
@@ -71,7 +80,7 @@ export function renderPlayerTable(players, options = {}) {
     })
     .join("");
 
-  return `<div class="table-scroll"><table class="player-table ${mode}-table">
+  return `<div class="table-scroll${options.scroll ? " table-scroll-tall" : ""}"><table class="player-table ${mode}-table">
     <thead>
       <tr>
         ${headers.map((header, index) => renderHeaderCell(header, mode, index, options)).join("")}
@@ -85,13 +94,17 @@ export function renderDraftHistoryTable(picks) {
   if (!picks.length) {
     return `<p class="empty">No picks made yet.</p>`;
   }
+  // An auction's history is a ledger: what a card cost is the whole story of the
+  // pick, so it gets a column of its own the moment any pick was bought.
+  const auction = picks.some((pick) => Number.isFinite(pick.price));
   const rows = picks
-    .map(({ pickNumber, round, manager, player }) => `<tr class="draft-player-row">
+    .map(({ pickNumber, round, manager, player, price }) => `<tr class="draft-player-row">
         <td class="num">${pickNumber}</td>
         <td class="num">${round}</td>
         <td>${escapeHtml(manager.name)}</td>
         <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
         <td>${escapeHtml(playerPosition(player))}</td>
+        ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? price : "&mdash;"}</td>` : ""}
         <td class="num">${playerPrimary(player)}</td>
         <td class="num">${player.points}</td>
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
@@ -106,6 +119,7 @@ export function renderDraftHistoryTable(picks) {
         <th>Manager</th>
         <th>Player</th>
         <th>Pos</th>
+        ${auction ? `<th class="num">Paid</th>` : ""}
         <th class="num">OB/CT</th>
         <th class="num">Pts</th>
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}

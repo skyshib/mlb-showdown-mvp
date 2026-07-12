@@ -241,6 +241,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
       },
       nominatorIndex: 0,
       lot: null,
+      pausedAt: null,
       history: []
     };
     if (draft.nomination === "random") {
@@ -462,13 +463,76 @@ export function auctionReviewRemainingMs(draft, now = Date.now()) {
   const review = draft.auction.review;
   if (!review || review.completedAt !== null) return 0;
   if (review.startedAt === null) return draft.auction.timer.reviewMs;
+  if (isAuctionPaused(draft)) return Math.max(0, Number(review.pausedRemainingMs) || 0);
   return Math.max(0, review.endsAt - normalizeTimestamp(now));
 }
 
 export function auctionReviewComplete(draft, now = Date.now()) {
   if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft)) return true;
   const review = draft.auction.review;
-  return review?.completedAt !== null || (review?.endsAt !== null && normalizeTimestamp(now) >= review.endsAt);
+  if (review?.completedAt !== null) return true;
+  // A review that was running when the room paused is still running; it just
+  // isn't running out.
+  if (isAuctionPaused(draft)) return false;
+  return review?.endsAt !== null && normalizeTimestamp(now) >= review.endsAt;
+}
+
+// ---- Pause ------------------------------------------------------------------
+//
+// A paused auction is one where no clock runs and nobody may act: the room is
+// waiting for a person, not for a move. Pausing settles the clocks on the spot
+// — every bidder the lot is still owed a bid from is charged the time they have
+// used so far, and the review period's remainder is put in the bank — so that
+// while the draft is paused, wall-clock time is simply not a thing the draft
+// can see. Resuming restarts the clocks from where they stopped.
+//
+// Pause and resume are recorded actions like any other, so a replayed room
+// stops and starts exactly where the live one did.
+export function isAuctionPaused(draft) {
+  return isAuctionDraft(draft) && draft.auction.pausedAt !== null && draft.auction.pausedAt !== undefined;
+}
+
+export function pauseAuction(draft, now = Date.now()) {
+  if (!isAuctionDraft(draft) || draft.complete || isAuctionPaused(draft)) return false;
+  const timestamp = normalizeTimestamp(now);
+  if (auctionTimerEnabled(draft)) {
+    const review = draft.auction.review;
+    if (review.completedAt === null && review.startedAt !== null) {
+      review.pausedRemainingMs = Math.max(0, review.endsAt - timestamp);
+    }
+    const lot = draft.auction.lot;
+    if (lot?.clock) {
+      // Charge the running clocks now, so the banks are already settled and the
+      // pause itself costs nobody anything.
+      for (const managerId of lot.pending) {
+        const manager = draft.managers.find((item) => item.id === managerId);
+        if (!manager) continue;
+        const elapsed = Math.max(0, timestamp - lot.clock.startedAt);
+        const bank = auctionClockBankMs(draft, manager);
+        draft.auction.clockBanks[manager.id] = Math.max(0, bank - Math.min(bank, elapsed));
+      }
+      lot.clock.startedAt = timestamp;
+    }
+  }
+  draft.auction.pausedAt = timestamp;
+  return true;
+}
+
+export function resumeAuction(draft, now = Date.now()) {
+  if (!isAuctionPaused(draft)) return false;
+  const timestamp = normalizeTimestamp(now);
+  if (auctionTimerEnabled(draft)) {
+    const review = draft.auction.review;
+    if (review.completedAt === null && review.startedAt !== null) {
+      const remaining = Math.max(0, Number(review.pausedRemainingMs) || 0);
+      review.endsAt = timestamp + remaining;
+      review.pausedRemainingMs = null;
+    }
+    // The banks were settled at the pause; the lot clock simply starts again.
+    if (draft.auction.lot?.clock) draft.auction.lot.clock.startedAt = timestamp;
+  }
+  draft.auction.pausedAt = null;
+  return true;
 }
 
 export function auctionClockBankMs(draft, manager) {
@@ -477,6 +541,7 @@ export function auctionClockBankMs(draft, manager) {
 
 export function auctionBidTimeRemainingMs(draft, manager, now = Date.now()) {
   const lot = draft.auction?.lot;
+  if (isAuctionPaused(draft)) return auctionClockBankMs(draft, manager);
   if (!lot?.clock || !lot.pending?.includes(manager?.id)) return auctionClockBankMs(draft, manager);
   const elapsed = Math.max(0, normalizeTimestamp(now) - lot.clock.startedAt);
   return Math.max(0, auctionClockBankMs(draft, manager) - elapsed);
@@ -494,6 +559,7 @@ export function timedOutAuctionBidderIds(draft, now = Date.now()) {
 
 export function syncAuctionTimer(draft, now = Date.now()) {
   if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft)) return false;
+  if (isAuctionPaused(draft)) return false;
   const timestamp = normalizeTimestamp(now);
   let changed = false;
   const review = draft.auction.review;
@@ -520,6 +586,7 @@ function normalizeTimestamp(now) {
 export function canNominatePlayer(draft, manager, player, now = Date.now()) {
   if (!isAuctionDraft(draft)) return { ok: false, reason: "not an auction draft" };
   if (draft.complete) return { ok: false, reason: "draft complete" };
+  if (isAuctionPaused(draft)) return { ok: false, reason: "the draft is paused" };
   if (!auctionReviewComplete(draft, now)) return { ok: false, reason: "review period is still open" };
   if (draft.auction.lot) return { ok: false, reason: "finish the current lot first" };
   if (isRandomNomination(draft)) {
@@ -584,6 +651,7 @@ export function nominatePlayer(draft, playerId, now = Date.now()) {
 export function nominateNextQueued(draft, expectedPlayerId = null, now = Date.now()) {
   if (!isRandomNomination(draft)) throw new Error("Not a random-nomination draft");
   if (draft.complete) throw new Error("Draft complete");
+  if (isAuctionPaused(draft)) throw new Error("The draft is paused");
   if (!auctionReviewComplete(draft, now)) throw new Error("Review period is still open");
   if (draft.auction.lot) throw new Error("Finish the current lot first");
   const player = nextQueuedPlayer(draft);
@@ -625,6 +693,7 @@ export function sealedBidder(draft) {
 export function canPlaceSealedBid(draft, manager, amount, now = Date.now()) {
   const lot = draft.auction?.lot;
   if (!lot) return { ok: false, reason: "no card is on the block" };
+  if (isAuctionPaused(draft)) return { ok: false, reason: "the draft is paused" };
   if (!isPendingBidder(draft, manager?.id)) {
     const alreadyIn = manager?.id in lot.bids;
     return { ok: false, reason: alreadyIn ? "your bid is already in" : "you are not bidding on this card" };
@@ -969,6 +1038,12 @@ export function applyDraftAction(draft, action) {
       return;
     case "complete-review":
       completeAuctionReview(draft, action.at);
+      return;
+    case "pause":
+      pauseAuction(draft, action.at);
+      return;
+    case "resume":
+      resumeAuction(draft, action.at);
       return;
     case "autopick":
       autopick(draft, action.at);

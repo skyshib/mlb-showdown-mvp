@@ -20,6 +20,7 @@ import {
   currentManager,
   draftHistory,
   isAuctionDraft,
+  isAuctionPaused,
   auctionStepGuard,
   isPendingBidder,
   isRandomNomination,
@@ -587,6 +588,8 @@ function flushSealedBids(store, room) {
 function syncRoomAuctionTimer(store, room, now = Date.now()) {
   const draft = room.draft;
   if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft)) return false;
+  // Nothing runs out while the room is paused, so nothing needs catching up.
+  if (isAuctionPaused(draft)) return false;
   const timestamp = Number.isFinite(Number(now)) ? Number(now) : Date.now();
   let changed = false;
   const review = draft.auction.review;
@@ -626,6 +629,7 @@ function scheduleRoomTimer(store, room) {
 
 function nextRoomTimerDeadline(draft) {
   if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) return null;
+  if (isAuctionPaused(draft)) return null;
   const review = draft.auction.review;
   if (review?.completedAt === null && Number.isFinite(review.endsAt)) return review.endsAt;
   const lot = draft.auction.lot;
@@ -642,6 +646,9 @@ function nextRoomTimerDeadline(draft) {
 function runCpuAuction(store, room) {
   const draft = room.draft;
   if (!isAuctionDraft(draft)) return;
+  // A pause stops the computer managers too, or the room would come back from
+  // its break to find three lots already sold.
+  if (isAuctionPaused(draft)) return;
   if (!auctionReviewComplete(draft, Date.now())) return;
   const queued = isRandomNomination(draft);
   let guard = auctionStepGuard(draft);
@@ -701,6 +708,20 @@ function broadcastLot(room) {
 // always be moved along.
 function denyAction(draft, seat, isHost, action) {
   const type = action?.type;
+  if (type === "pause" || type === "resume") {
+    if (!isAuctionDraft(draft)) return "This room is not an auction draft";
+    if (!isHost) return `Only the host can ${type} the draft`;
+    if (draft.complete) return "The draft is already complete";
+    if (type === "pause" && isAuctionPaused(draft)) return "The draft is already paused";
+    if (type === "resume" && !isAuctionPaused(draft)) return "The draft is not paused";
+    return null;
+  }
+  // A paused room is a room holding still: the clocks are stopped, so no move
+  // that would spend one may land. Setting a lineup is not a move on the draft,
+  // and stays open — a break is exactly when people tinker with their team.
+  if (isAuctionPaused(draft) && type !== "lineup" && type !== "staff" && !SIM_ACTION_TYPES.has(type)) {
+    return "The draft is paused";
+  }
   if (type === "pick" || type === "autopick") {
     if (draft.complete) return "The draft is already complete";
     // An autopick resolves a whole lot, entering bids for managers who never

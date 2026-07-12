@@ -50,6 +50,7 @@ import {
   getRosterNeeds,
   hasUnlimitedRoster,
   isAuctionDraft,
+  isAuctionPaused,
   isCornerOutfielder,
   isRandomNomination,
   lineupStatus,
@@ -62,8 +63,10 @@ import {
   normalizeAuctionTimerConfig,
   normalizeCardPosition,
   normalizePickTimerSeconds,
+  pauseAuction,
   pickPlayer,
   placeSealedBid,
+  resumeAuction,
   randomNominationCounts,
   randomNominationShortfalls,
   sealedBidder,
@@ -143,7 +146,6 @@ let liveGame = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
 let onlineStream = null;
-let onlinePollInFlight = false;
 // The bid box that was rejected, and why — one manager's error, not the
 // panel's, now that several boxes can be open at once.
 let lotEntryError = null;
@@ -164,7 +166,6 @@ let warRoomLotKey = null;
 
 setInterval(pickClockTick, 500);
 setInterval(auctionClockTick, 500);
-setInterval(pollOnlineRoom, 2000);
 
 function pickClockTurn() {
   const draft = state.draft;
@@ -756,30 +757,17 @@ function subscribeOnline() {
     },
     // The stream went quiet without ever erroring — the room has been moving on
     // without us. Go and fetch what we missed.
+    //
+    // This is what a two-second poll used to do, badly: it refetched the room
+    // forever, whether anything had happened or not, and every resync rebuilt
+    // the board — which tore the card you were hovering out from under your
+    // cursor twice a second. The stream tells us when it dies now (the server
+    // beats every twenty seconds), and an action's own reply tells the client
+    // that sent it what happened. Neither needs a heartbeat of re-renders.
     onSilent: () => {
       resyncOnlineRoom();
     }
   }, state.online.token);
-}
-
-async function pollOnlineRoom() {
-  const online = state.online;
-  if (!online || onlinePollInFlight) return;
-  onlinePollInFlight = true;
-  try {
-    const room = await fetchRoom(online.roomId);
-    if (state.online !== online) return;
-    const latestSeq = room.actions.length ? room.actions.at(-1).seq : 0;
-    const claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
-    const roomChanged = latestSeq !== online.appliedSeq
-      || JSON.stringify(room.lot ?? null) !== JSON.stringify(online.lot ?? null)
-      || JSON.stringify(claimedSeats) !== JSON.stringify(online.claimedSeats);
-    if (roomChanged) await resyncOnlineRoom(room);
-  } catch {
-    // SSE remains the primary connection; its error handler owns the UI state.
-  } finally {
-    onlinePollInFlight = false;
-  }
 }
 
 async function resyncOnlineRoom(snapshot = null) {
@@ -1313,23 +1301,31 @@ function renderDraft() {
   const dockViewerId = state.online?.managerId ?? focusManager?.id;
 
   const online = state.online;
+  const paused = auction && isAuctionPaused(draft);
+  // Pausing is the host's call, and on a hotseat everyone at the table is the
+  // host. It only means anything before the draft is done.
+  const canPause = auction && !draft.complete && (!online || online.host);
   // A queued nomination isn't a move anyone made, so there is nothing to take
   // back while a card sits on the block — only a settled lot can be undone.
-  const canUndo = (queued ? draft.pickNumber > 0 && !lot : auction ? draft.pickNumber > 0 || Boolean(lot) : draft.pickNumber > 0)
+  const canUndo = !paused
+    && (queued ? draft.pickNumber > 0 && !lot : auction ? draft.pickNumber > 0 || Boolean(lot) : draft.pickNumber > 0)
     && (auction ? !online || online.host : onlineCanUndo(draft));
-  const canAdvance = !draft.complete && !reviewOpen && (queued ? !online || online.host : onlineCanPickNow(current));
+  const canAdvance = !draft.complete && !reviewOpen && !paused
+    && (queued ? !online || online.host : onlineCanPickNow(current));
   app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
   <section class="toolbar">
     <button data-action="reset">${online ? "Leave room" : "New room"}</button>
+    ${canPause ? `<button class="pause-button${paused ? " resume" : ""}" data-action="${paused ? "resume-draft" : "pause-draft"}">${paused ? "&#9654; Resume draft" : "&#10073;&#10073; Pause draft"}</button>` : ""}
     <button data-action="autopick" ${canAdvance ? "" : "disabled"}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot && !queued ? "Undo nomination" : "Undo last pick"}</button>
-    ${auction && reviewOpen ? `<button data-action="complete-review" ${online && !online.host ? "disabled" : ""}>Start auction now</button>` : ""}
-    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
+    ${auction && reviewOpen ? `<button data-action="complete-review" ${(online && !online.host) || paused ? "disabled" : ""}>Start auction now</button>` : ""}
+    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
     ${renderPlayGameControl(draft)}
     <span class="pick-clock" data-pick-timer hidden></span>
     <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
   </section>
+  ${paused ? renderPausedPanel(draft) : ""}
   ${renderDraftFocus(draft, focusManager, boardManager)}
   ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
   ${lot ? renderAuctionLotPanel(draft) : ""}
@@ -1743,6 +1739,7 @@ function bindDraftActions() {
   app.ondragstart = (event) => {
     const slot = event.target.closest("[data-lineup-slot][data-player-id]");
     if (!slot) return;
+    hideHoverCard();
     if (!canManageRoster(slot.dataset.managerId)) {
       event.preventDefault();
       return;
@@ -1806,7 +1803,7 @@ function bindHoverCardPreviews(onEscape = null) {
   app.onkeydown = null;
 
   const handlePointerOver = (event) => {
-    const previewTarget = event.target.closest(".player-name-preview");
+    const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget) return;
     hoveredPreviewRow = previewTarget;
     showHoverCard(previewTarget, event.clientX, event.clientY);
@@ -1824,21 +1821,21 @@ function bindHoverCardPreviews(onEscape = null) {
     if (event.target.closest?.("[data-wp-value]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-wp-value]"))) {
       hideChartTip();
     }
-    const previewTarget = event.target.closest(".player-name-preview");
+    const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget || (event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) return;
     hoveredPreviewRow = null;
     hideHoverCard();
   };
 
   const handleFocusIn = (event) => {
-    const previewTarget = event.target.closest(".player-name-preview");
+    const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget) return;
     const rect = previewTarget.getBoundingClientRect();
     showHoverCard(previewTarget, rect.right, rect.top + rect.height / 2);
   };
 
   const handleFocusOut = (event) => {
-    if (event.relatedTarget?.closest?.(".player-name-preview")) return;
+    if (event.relatedTarget?.closest?.("[data-preview-card]")) return;
     hideHoverCard();
   };
 
@@ -3831,6 +3828,8 @@ function renderBenchCard(player, manager) {
     data-slot-label="BENCH"
     ${mine ? "" : "disabled"}
     data-player-id="${escapeHtml(player.id)}"
+    data-preview-id="bench-${escapeHtml(manager.id)}-${escapeHtml(player.id)}"
+    data-preview-card="${escapeHtml(renderPlayerCard(player))}"
     ${mine ? 'draggable="true"' : ""}
   >
     <strong>${escapeHtml(player.kind === "pitcher" ? pitcherRoleOf(player) : playerPosition(player))}</strong>
@@ -3897,11 +3896,12 @@ function renderLineupSlot(player, slotLabel, manager) {
     data-slot-label="${escapeHtml(slotLabel)}"
     ${mine ? "" : "disabled"}
     ${player && mine ? `data-player-id="${escapeHtml(player.id)}" draggable="true"` : player ? `data-player-id="${escapeHtml(player.id)}"` : ""}
+    ${player ? `data-preview-id="slot-${escapeHtml(manager.id)}-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}"` : ""}
     ${isValidTarget ? `aria-label="Move selected player to ${escapeHtml(slotLabel)}"` : ""}
   >
     <strong>${escapeHtml(slotLabel)}</strong>
     <span>${player ? escapeHtml(player.name) : "open"}</span>
-    <em>${escapeHtml(description)}</em>
+    <em>${player ? `${escapeHtml(description)} &middot; ${player.points} pts` : "open"}</em>
   </button>`;
 }
 
