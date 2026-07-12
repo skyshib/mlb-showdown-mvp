@@ -110,6 +110,7 @@ import {
 } from "./ui/render.js?v=20260712-card-backgrounds";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
+const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
 const DEFAULT_UNIVERSE = "classic";
 const app = document.querySelector("#app");
 const cardPreview = document.createElement("div");
@@ -1335,6 +1336,7 @@ function renderDraft() {
     <div class="panel">
       <h2>Rosters</h2>
       ${renderRecentPicks(draft)}
+      ${renderPoolFloor(draft)}
       <div class="rosters">${rosters}</div>
     </div>
   </section>
@@ -3458,15 +3460,6 @@ function renderWarRoom() {
 
   const teams = draft.managers
     .map((manager) => {
-      const sorted = [...manager.roster].sort((a, b) =>
-        auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points
-      );
-      const chips = sorted
-        .map((player) => {
-          const price = auction ? prices.get(player.id) : undefined;
-          return `<span class="dock-chip heat" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
-        })
-        .join("");
       const needs = dockNeedsSummary(manager);
       const points = manager.roster.reduce((sum, player) => sum + player.points, 0);
       return `<section class="war-team">
@@ -3474,7 +3467,7 @@ function renderWarRoom() {
           <h3>${escapeHtml(manager.name)}</h3>
           <span>${auction && !draft.complete ? `${auctionBudget(draft, manager)} left &middot; max ${auctionMaxBid(draft, manager)} &middot; ` : ""}${points} pts</span>
         </header>
-        <div class="war-chips">${chips || `<span class="dock-empty">no picks yet</span>`}</div>
+        ${renderWarTeamPositions(manager, auction, prices, heatScale)}
         ${needs ? `<footer>needs ${escapeHtml(needs)}</footer>` : ""}
       </section>`;
     })
@@ -3507,6 +3500,7 @@ function renderWarRoom() {
       </section>
       <div class="war-teams">${teams}</div>
     </div>
+    ${renderPoolFloor(draft)}
     <footer class="war-ticker">${ticker}</footer>
   </div>`;
   app.onclick = (event) => {
@@ -3515,6 +3509,79 @@ function renderWarRoom() {
 }
 
 
+
+function positionGroupOf(player) {
+  if (player.kind === "pitcher") return player.role === "SP" ? "SP" : "RP";
+  if (isCornerOutfielder(player.position)) return "LF/RF";
+  return BOARD_POSITION_GROUPS.includes(player.position) ? player.position : "DH";
+}
+
+// Grouped, color-coded team view for the TV board: one cell per printed
+// position, every player the team owns there stacked inside it.
+function renderWarTeamPositions(manager, auction, prices, heatScale) {
+  const groups = new Map(BOARD_POSITION_GROUPS.map((group) => [group, []]));
+  for (const player of manager.roster) groups.get(positionGroupOf(player)).push(player);
+  const cells = BOARD_POSITION_GROUPS.map((group) => {
+    const players = groups
+      .get(group)
+      .sort((a, b) => (auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points));
+    const chips = players
+      .map((player) => {
+        const price = auction ? prices.get(player.id) : undefined;
+        return `<span class="war-pos-chip heat" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
+      })
+      .join("");
+    return `<div class="war-pos${players.length ? "" : " war-pos-empty"}">
+      <small>${group}</small>
+      ${chips || `<span class="war-pos-blank">&mdash;</span>`}
+    </div>`;
+  }).join("");
+  return `<div class="war-positions">${cells}</div>`;
+}
+
+// The cheapest card still available at every spot some roster has not filled:
+// the floor you settle for if you wait. Eligibility follows lineup rules, so
+// 1B and DH floors consider every remaining hitter.
+function renderPoolFloor(draft) {
+  const needed = leagueOpenGroups(draft);
+  if (!needed.size) return "";
+  const available = availablePlayers(draft);
+  const items = BOARD_POSITION_GROUPS.filter((group) => needed.has(group))
+    .map((group) => {
+      const eligible = available.filter((player) => poolGroupEligible(player, group));
+      if (!eligible.length) {
+        return `<span class="floor-chip floor-empty"><small>${group}</small><strong>none left</strong></span>`;
+      }
+      const floor = eligible.reduce((low, player) => (player.points < low.points ? player : low));
+      return `<span class="floor-chip"><small>${group} &middot; ${eligible.length} left</small><strong class="player-name-preview" tabindex="0" data-preview-id="floor-${escapeHtml(floor.id)}" data-preview-card="${escapeHtml(renderPlayerCard(floor))}">${escapeHtml(dockChipName(floor))} &middot; ${floor.points}</strong></span>`;
+    })
+    .join("");
+  return `<div class="pool-floor" aria-label="Cheapest remaining at open positions"><small>floor if you wait</small>${items}</div>`;
+}
+
+function poolGroupEligible(player, group) {
+  if (group === "SP" || group === "RP") {
+    return player.kind === "pitcher" && (player.role === "SP") === (group === "SP");
+  }
+  if (player.kind !== "hitter") return false;
+  if (group === "LF/RF") return canPlayerFillLineupSlot(player, "LF");
+  return canPlayerFillLineupSlot(player, group);
+}
+
+function leagueOpenGroups(draft) {
+  const needed = new Set();
+  for (const manager of draft.managers) {
+    const lineup = lineupStatus(manager.roster);
+    for (const position of lineup.missingPositions) {
+      needed.add(isCornerOutfielder(position) ? "LF/RF" : position);
+    }
+    const needs = getRosterNeeds(manager.roster);
+    if (needs.starter) needed.add("SP");
+    if (needs.bullpen) needed.add("RP");
+    if (needs.hitter && !lineup.dhFilled) needed.add("DH");
+  }
+  return needed;
+}
 
 // Blue-to-red heat scale over winning bids (card points in snake drafts).
 // Auction endpoints are fixed: 0 up to 15% of the starting budget, so colors

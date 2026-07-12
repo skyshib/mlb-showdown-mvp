@@ -1238,8 +1238,9 @@ button.roster-slot[draggable="true"]:active {
 
 .war-teams {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-content: start;
 }
 
 .war-team {
@@ -1313,6 +1314,120 @@ button.roster-slot[draggable="true"]:active {
 
 .war-room .recent-pick em {
   color: #93a39b;
+}
+
+.war-positions {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.war-pos {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px dashed #2c3831;
+  border-radius: 6px;
+  padding: 3px 4px;
+}
+
+.war-pos small {
+  color: #7f918a;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.war-pos-blank {
+  color: #4b584f;
+  font-size: 11px;
+}
+
+.war-pos-chip {
+  display: block;
+  overflow: hidden;
+  border-left: 4px solid transparent;
+  border-radius: 5px;
+  padding: 2px 5px;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.war-pos-chip em {
+  margin-left: 4px;
+  color: #ffe9a8;
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.pool-floor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: stretch;
+  margin-bottom: 10px;
+}
+
+.pool-floor > small {
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.floor-chip {
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: #f8faf7;
+}
+
+.floor-chip small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.floor-chip strong {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.floor-chip.floor-empty {
+  border-color: rgba(179, 86, 62, 0.6);
+  background: #fdf1ee;
+}
+
+.floor-chip.floor-empty strong {
+  color: #8f3147;
+}
+
+.war-room .pool-floor {
+  margin: 0 18px 8px;
+}
+
+.war-room .floor-chip {
+  border-color: #2c3831;
+  background: #1d2621;
+}
+
+.war-room .floor-chip strong {
+  color: #e8efe9;
+}
+
+.war-room .pool-floor > small {
+  color: #7f918a;
 }
 
 .war-room .heat {
