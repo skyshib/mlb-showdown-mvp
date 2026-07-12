@@ -154,6 +154,8 @@ let pickClockKey = null;
 let pickClockDeadline = 0;
 let pickClockTimeoutKey = null;
 let chimeContext = null;
+let warRoomSoundEnabled = false;
+let warRoomLotKey = null;
 
 setInterval(pickClockTick, 500);
 setInterval(auctionClockTick, 500);
@@ -388,6 +390,71 @@ function playChime() {
   } catch {
     // No audio support or permission — the visual clock still works.
   }
+}
+
+function playNominationSting() {
+  try {
+    chimeContext = chimeContext ?? new AudioContext();
+    if (chimeContext.state !== "running") return;
+    const start = chimeContext.currentTime + 0.03;
+    const notes = [
+      [392, 0, 0.2],
+      [523.25, 0.11, 0.22],
+      [659.25, 0.22, 0.24],
+      [783.99, 0.36, 0.28],
+      [1046.5, 0.53, 0.7]
+    ];
+    const master = chimeContext.createGain();
+    master.gain.setValueAtTime(0.48, start);
+    master.gain.exponentialRampToValueAtTime(0.0001, start + 1.25);
+    master.connect(chimeContext.destination);
+    for (const [frequency, offset, duration] of notes) {
+      const voice = chimeContext.createOscillator();
+      const shimmer = chimeContext.createOscillator();
+      const gain = chimeContext.createGain();
+      voice.type = "triangle";
+      shimmer.type = "sine";
+      voice.frequency.value = frequency;
+      shimmer.frequency.value = frequency * 2;
+      gain.gain.setValueAtTime(0.0001, start + offset);
+      gain.gain.exponentialRampToValueAtTime(0.2, start + offset + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + duration);
+      voice.connect(gain);
+      shimmer.connect(gain);
+      gain.connect(master);
+      voice.start(start + offset);
+      shimmer.start(start + offset);
+      voice.stop(start + offset + duration + 0.02);
+      shimmer.stop(start + offset + duration + 0.02);
+    }
+  } catch {
+    // A muted or unsupported browser still gets the full visual TV board.
+  }
+}
+
+async function toggleWarRoomSound() {
+  try {
+    chimeContext = chimeContext ?? new AudioContext();
+    if (!warRoomSoundEnabled) {
+      await chimeContext.resume();
+      warRoomSoundEnabled = chimeContext.state === "running";
+      if (warRoomSoundEnabled) playNominationSting();
+    } else {
+      warRoomSoundEnabled = false;
+    }
+  } catch {
+    warRoomSoundEnabled = false;
+  }
+  renderCurrentScreen();
+}
+
+function updateWarRoomNominationSound(draft, lot, player) {
+  if (!lot || !player) return;
+  const lotKey = `${draft.seed}:${draft.auction?.queueIndex ?? 0}:${draft.pickNumber}:${player.id}`;
+  if (warRoomLotKey !== null && lotKey !== warRoomLotKey && warRoomSoundEnabled) {
+    playNominationSting();
+  }
+  warRoomLotKey = lotKey;
 }
 
 const onlineRoomParam = new URLSearchParams(location.search).get("room");
@@ -3280,6 +3347,7 @@ function renderWarRoom() {
   const auction = isAuctionDraft(draft);
   const lot = auction ? draft.auction.lot : null;
   const lotPlayer = lot ? auctionLotPlayer(draft) : null;
+  updateWarRoomNominationSound(draft, lot, lotPlayer);
   const history = draftHistory(draft);
   const prices = auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null;
   const heatScale = draftHeatScale(draft);
@@ -3351,6 +3419,7 @@ function renderWarRoom() {
       <span class="war-brand">MLB Showdown &middot; ${escapeHtml(draft.seed ?? "")}</span>
       <h1>${status}</h1>
       ${renderHeatLegend(heatScale)}
+      <button type="button" class="war-sound-toggle ${warRoomSoundEnabled ? "enabled" : ""}" data-action="toggle-war-sound" aria-pressed="${warRoomSoundEnabled}">${warRoomSoundEnabled ? "&#128266; Sound on" : "&#128264; Enable sound"}</button>
       ${state.online ? `<span class="war-live">&#9679; LIVE</span>` : ""}
     </header>
     <div class="war-main">
@@ -3363,6 +3432,9 @@ function renderWarRoom() {
     </div>
     <footer class="war-ticker">${ticker}</footer>
   </div>`;
+  app.onclick = (event) => {
+    if (event.target.closest("[data-action='toggle-war-sound']")) toggleWarRoomSound();
+  };
 }
 
 
