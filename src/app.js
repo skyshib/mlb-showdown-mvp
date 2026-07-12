@@ -19,6 +19,7 @@ import {
   auctionBudget,
   auctionLotPlayer,
   auctionMaxBid,
+  auctionStepGuard,
   autopick,
   assignLineupSlots,
   availablePlayers,
@@ -36,24 +37,29 @@ import {
   draftHistory,
   SIM_ACTION_TYPES,
   getRosterNeeds,
+  hasUnlimitedRoster,
   isAuctionDraft,
   isCornerOutfielder,
+  isRandomNomination,
   lineupStatus,
   managerValuation,
   maxPoolManagers,
   nominateBestTarget,
   nominatePlayer,
+  nominationQueueRemaining,
   normalizeAuctionBudget,
   normalizeCardPosition,
   normalizePickTimerSeconds,
   pickPlayer,
   placeSealedBid,
+  randomNominationCounts,
+  randomNominationShortfalls,
   sealedBidder,
   staffStatus,
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260711-online-auction";
+} from "./rules/draft.js?v=20260711-random-nomination";
 import {
   createRoom,
   fetchRoom,
@@ -144,18 +150,24 @@ function pickClockTurn() {
   // Computer turns resolve instantly, so the clock only times humans: picks,
   // nominations, and each sealed-bid entry while a lot is on the block.
   const lot = liveLot(draft);
+  // A passed lot leaves pickNumber where it was, so the lot counter — not the
+  // sale counter — is what makes each turn's clock key its own.
+  const lotNumber = isRandomNomination(draft) ? draft.auction.queueIndex : draft.pickNumber;
   if (isAuctionDraft(draft) && lot) {
     const bidder = sealedBidder(liveDraft(draft));
     if (!bidder || bidder.cpu) return null;
     return {
       current: bidder,
       bidTurn: true,
-      key: `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.pickNumber}:bid:${lot.round}:${bidder.id}`
+      key: `${state.online?.roomId ?? "local"}:${draft.seed}:${lotNumber}:bid:${lot.round}:${bidder.id}`
     };
   }
+  // Between lots in a random-nomination room there is nothing for a human to
+  // do — the queue turns the next card over by itself, so nobody is on a clock.
+  if (isRandomNomination(draft)) return null;
   const current = currentManager(draft);
   if (!current || current.cpu) return null;
-  return { current, bidTurn: false, key: `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.pickNumber}:${current.id}` };
+  return { current, bidTurn: false, key: `${state.online?.roomId ?? "local"}:${draft.seed}:${lotNumber}:${current.id}` };
 }
 
 function pickClockTick() {
@@ -218,7 +230,7 @@ function handlePickClockExpiry(turn) {
 function advanceCpuTurns() {
   const draft = state.draft;
   if (!draft || state.online || cpuPaused) return;
-  let guard = draft.managers.length * draft.rosterSize * 4 + 20;
+  let guard = auctionStepGuard(draft);
   while (!draft.complete && guard > 0) {
     guard -= 1;
     if (isAuctionDraft(draft)) {
@@ -226,6 +238,12 @@ function advanceCpuTurns() {
         const next = sealedBidder(draft);
         if (!next?.cpu) return;
         placeSealedBid(draft, next.id, cpuSealedBid(draft, next));
+        continue;
+      }
+      // The queue owes nobody a turn: it deals the next card whether the seat
+      // that bids first is a computer or a human waiting to bid on it.
+      if (isRandomNomination(draft)) {
+        nominateBestTarget(draft);
         continue;
       }
       if (!currentManager(draft).cpu) return;
@@ -340,6 +358,7 @@ function defaultState() {
     cpuManagers: [],
     universe: DEFAULT_UNIVERSE,
     draftType: "snake",
+    nomination: "manual",
     auctionBudget: AUCTION_DEFAULT_BUDGET,
     pickTimerSeconds: 0,
     maskBids: false,
@@ -426,6 +445,7 @@ async function bootOnlineRoom(roomId) {
   state.universe = universeConfig(room.universe)?.key ?? DEFAULT_UNIVERSE;
   state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
   state.draftType = room.draftType === "auction" ? "auction" : "snake";
+  state.nomination = room.nomination === "random" ? "random" : "manual";
   state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, room.rosterSize);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
   state.online = {
@@ -438,7 +458,12 @@ async function bootOnlineRoom(roomId) {
     claimedSeats: room.managers.filter((manager) => manager.claimed).map((manager) => manager.id),
     appliedSeq: 0,
     status: "",
-    lot: null
+    lot: null,
+    // Where the room actually lives on the network, as the server sees itself.
+    // The invite link needs this: a host reading the address off the terminal
+    // is browsing 127.0.0.1, and that link means "your own machine" to everyone
+    // he sends it to.
+    lanOrigin: room.lanOrigin ?? null
   };
   rebuildOnlineDraft(room);
   subscribeOnline();
@@ -446,13 +471,16 @@ async function bootOnlineRoom(roomId) {
 }
 
 function rebuildOnlineDraft(room) {
-  const pool = buildDraftPool(state.universe, room.seed);
+  const pool = buildDraftPool(state.universe, room.seed, {
+    nomination: state.nomination,
+    managerCount: room.managers.length
+  });
   state.draft = createDraft(
     room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
     pool,
     room.rosterSize,
     room.seed,
-    { draftType: state.draftType, budget: state.auctionBudget }
+    { draftType: state.draftType, nomination: state.nomination, budget: state.auctionBudget }
   );
   // The bids on the card currently up are withheld until it sells, so the
   // replayed draft only knows the lot was nominated; the room's lot event
@@ -638,10 +666,21 @@ function renderSeatSelect() {
   };
 }
 
+// 127.0.0.1 and localhost mean "this machine" on whatever machine reads them,
+// so an invite link built from a loopback address sends every guest to their
+// own laptop, where nothing is listening. When the host is browsing loopback,
+// hand out the address the server reports itself at on the network instead.
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+function inviteOrigin(online) {
+  if (!LOOPBACK_HOSTS.has(location.hostname)) return location.origin;
+  return online.lanOrigin ?? location.origin;
+}
+
 function renderOnlineBanner(draft, current) {
   const online = state.online;
   const mySeat = draft.managers.find((manager) => manager.id === online.managerId);
-  const shareUrl = `${location.origin}${location.pathname}?room=${encodeURIComponent(online.roomId)}`;
+  const shareUrl = `${inviteOrigin(online)}${location.pathname}?room=${encodeURIComponent(online.roomId)}`;
   const turnNote = draft.complete
     ? "Draft complete — anyone can sim the tournament locally"
     : current
@@ -735,8 +774,47 @@ function renderUniverseFieldset(key) {
   </fieldset>`;
 }
 
+// The three draft types are two flags underneath: random nomination IS an
+// auction, it just takes the nominating away from the managers.
+function draftModeOf(draftType, nomination) {
+  if (draftType !== "auction") return "snake";
+  return nomination === "random" ? "random" : "auction";
+}
+
+function draftModeFromForm(form) {
+  const mode = String(form.get("draftType") ?? "snake");
+  if (mode === "random") return { draftType: "auction", nomination: "random" };
+  if (mode === "auction") return { draftType: "auction", nomination: "manual" };
+  return { draftType: "snake", nomination: "manual" };
+}
+
+// Whether the chosen card set can actually seat the room, phrased for the
+// setup screen. A standard deck is a fixed 124 cards and the question is how
+// many managers it seats; a random-nomination board is sized to the room, and
+// the question is whether the card set is deep enough to deal it.
+function draftPoolError(pool, universe, managerCount, nomination) {
+  const setName = universeConfig(universe).name;
+  if (nomination === "random") {
+    const shortfalls = randomNominationShortfalls(pool, managerCount);
+    if (!shortfalls.length) return "";
+    const spots = shortfalls.map((short) => `${short.group} (${short.dealt} of ${short.quota})`).join(", ");
+    return `The ${setName} set is too thin to deal a ${managerCount}-manager random-nomination board: ${spots}. Trim the manager list or pick a deeper card set.`;
+  }
+  const managerLimit = maxPoolManagers(pool);
+  if (managerCount <= managerLimit) return "";
+  return `The ${setName} deck deals position depth for up to ${managerLimit} managers. Trim the manager list or pick a different card set.`;
+}
+
+// The headline number: what this many managers actually see on the board, and
+// how much of it comes up for bid.
+function randomNominationBlurb(managerCount) {
+  const { hiddenPerSlot, visiblePerSlot } = randomNominationCounts(Math.max(2, managerCount));
+  return `With ${managerCount} managers the board shows ${visiblePerSlot * 2} starters and ${hiddenPerSlot * 2} of them come up.`;
+}
+
 function renderSetup(setupError = "") {
   resetAppHandlers();
+  const draftMode = draftModeOf(state.draftType, state.nomination);
   app.innerHTML = `<section class="panel setup">
     <div>
       <p class="eyebrow">MLB Showdown-ish MVP</p>
@@ -773,12 +851,16 @@ function renderSetup(setupError = "") {
       <fieldset class="pool-mode draft-type-mode">
         <legend>Draft type</legend>
         <label class="pool-option">
-          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
+          <input type="radio" name="draftType" value="snake" ${draftMode === "snake" ? "checked" : ""} />
           <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
         </label>
         <label class="pool-option">
-          <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
+          <input type="radio" name="draftType" value="auction" ${draftMode === "auction" ? "checked" : ""} />
           <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
+        </label>
+        <label class="pool-option">
+          <input type="radio" name="draftType" value="random" ${draftMode === "random" ? "checked" : ""} />
+          <span><strong>Random nomination</strong><small>${escapeHtml(randomNominationBlurb(state.managers.length))} Nobody nominates: a hidden queue deals the cards out in random order and everyone bids sealed. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
         </label>
         <label class="auction-budget-field">
           Budget per manager
@@ -848,19 +930,23 @@ function renderSetup(setupError = "") {
       return;
     }
     state.universe = universe;
-    state.draftType = form.get("draftType") === "auction" ? "auction" : "snake";
+    const mode = draftModeFromForm(form);
+    state.draftType = mode.draftType;
+    state.nomination = mode.nomination;
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
     state.pickTimerSeconds = normalizePickTimerSeconds(form.get("pickTimer"));
-    const pool = buildDraftPool(state.universe, state.seed);
-    const managerLimit = maxPoolManagers(pool);
-    if (state.managers.length > managerLimit) {
-      renderSetup(
-        `The ${universeConfig(state.universe).name} deck deals position depth for up to ${managerLimit} managers. Trim the manager list or pick a different card set.`
-      );
+    const pool = buildDraftPool(state.universe, state.seed, {
+      nomination: state.nomination,
+      managerCount: state.managers.length
+    });
+    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination);
+    if (poolError) {
+      renderSetup(poolError);
       return;
     }
     state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
       draftType: state.draftType,
+      nomination: state.nomination,
       budget: state.auctionBudget
     });
     state.tournament = null;
@@ -887,7 +973,7 @@ function renderSetup(setupError = "") {
     const seed = String(form.get("seed")).trim() || "showdown";
     const universe = universeFromForm(form);
     const pickTimer = normalizePickTimerSeconds(form.get("pickTimer"));
-    const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
+    const { draftType, nomination } = draftModeFromForm(form);
     const budget = normalizeAuctionBudget(form.get("auctionBudget"), 13);
     const cpuChecked = form.getAll("cpu").map(String);
     if (!universe) {
@@ -904,6 +990,7 @@ function renderSetup(setupError = "") {
         pickTimer,
         cpu: cpuChecked.filter((name) => managers.includes(name)),
         draftType,
+        nomination,
         budget
       });
       storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
@@ -918,6 +1005,7 @@ function renderSetup(setupError = "") {
 function renderDraft() {
   const draft = state.draft;
   const auction = isAuctionDraft(draft);
+  const queued = isRandomNomination(draft);
   const lot = auction ? draft.auction.lot : null;
   const current = draft.complete ? null : currentManager(draft);
   const historyTab = state.draftTab === "history";
@@ -933,13 +1021,16 @@ function renderDraft() {
   const dockViewerId = state.online?.managerId ?? focusManager?.id;
 
   const online = state.online;
-  const canUndo = (auction ? draft.pickNumber > 0 || Boolean(lot) : draft.pickNumber > 0)
+  // A queued nomination isn't a move anyone made, so there is nothing to take
+  // back while a card sits on the block — only a settled lot can be undone.
+  const canUndo = (queued ? draft.pickNumber > 0 && !lot : auction ? draft.pickNumber > 0 || Boolean(lot) : draft.pickNumber > 0)
     && (auction ? !online || online.host : onlineCanUndo(draft));
+  const canAdvance = !draft.complete && (queued ? !online || online.host : onlineCanPickNow(current));
   app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
   <section class="toolbar">
     <button data-action="reset">${online ? "Leave room" : "New room"}</button>
-    <button data-action="autopick" ${draft.complete || !onlineCanPickNow(current) ? "disabled" : ""}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
-    <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot ? "Undo nomination" : "Undo last pick"}</button>
+    <button data-action="autopick" ${canAdvance ? "" : "disabled"}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
+    <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot && !queued ? "Undo nomination" : "Undo last pick"}</button>
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
     ${renderPlayGameControl(draft)}
@@ -964,11 +1055,14 @@ function renderDraft() {
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         action: auction ? "nominate" : "pick",
-        label: auction ? "Nominate" : "Pick",
+        label: queued ? "Queued" : auction ? "Nominate" : "Pick",
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
         canPick: (player) => {
           if (!current) return { ok: false, reason: "draft complete" };
+          // Which of these ever come up is the room's one secret, so the board
+          // says nothing about it: every card reads the same until it is called.
+          if (queued) return { ok: false, reason: "the queue decides what comes up" };
           if (!onlineCanPickNow(current)) return { ok: false, reason: `${current.name} is ${auction ? "nominating" : "on the clock"}` };
           if (auction) return canNominatePlayer(draft, current, player);
           return canPickPlayer(draft, current, player);
@@ -1058,12 +1152,14 @@ function renderAuctionLotPanel(draft) {
 
   const tieNote = lot.round === 2
     ? `<p class="lot-tie-note">Tied at ${lot.tie.amount} — the tied managers rebid sealed. Another tie is a coin flip at that price.</p>`
-    : `<p class="lot-tie-note muted">Bids stay hidden until the card sells; the winner pays the second-highest bid + 1.</p>`;
+    : lot.nominatorId
+      ? `<p class="lot-tie-note muted">Bids stay hidden until the card sells; the winner pays the second-highest bid + 1.</p>`
+      : `<p class="lot-tie-note muted">Nobody nominated this card, so nobody has to open. Bids stay hidden until it sells; the winner pays the second-highest bid + 1. If the whole room passes, the card goes back on the board unsold.</p>`;
 
   return `<section class="panel auction-lot">
     <div class="lot-header">
       <div>
-        <p class="eyebrow">${lot.round === 2 ? "Tie break" : "On the block"} &middot; nominated by ${escapeHtml(nominator?.name ?? "?")}</p>
+        <p class="eyebrow">${lot.round === 2 ? "Tie break" : "On the block"} &middot; ${nominator ? `nominated by ${escapeHtml(nominator.name)}` : "dealt by the queue"}</p>
         <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}
           <span class="lot-player-meta">${escapeHtml(playerPosition(player))} &middot; ${player.points} pts</span></h2>
       </div>
@@ -1086,12 +1182,22 @@ function renderLastSalePanel(draft) {
   const entry = draft.auction.history.at(-1);
   if (!entry?.bids) return "";
   const player = draft.pool.find((item) => item.id === entry.playerId);
-  const winner = draft.managers.find((manager) => manager.id === entry.managerId);
-  if (!player || !winner) return "";
+  if (!player) return "";
   const revealed = draft.managers
     .filter((manager) => manager.id in entry.bids)
     .map((manager) => `${escapeHtml(manager.name)} ${entry.bids[manager.id] > 0 ? entry.bids[manager.id] : "pass"}`)
     .join(" &middot; ");
+
+  // A card the whole room passed on. It stays on the board, and the sweep may
+  // yet hand it to whoever ends the night short.
+  if (entry.passed) {
+    return `<section class="panel last-sale">
+      <p><strong>${escapeHtml(player.name)}</strong> went unsold — the whole room passed. He stays on the board.</p>
+    </section>`;
+  }
+
+  const winner = draft.managers.find((manager) => manager.id === entry.managerId);
+  if (!winner) return "";
   return `<section class="panel last-sale">
     <p><strong>${escapeHtml(player.name)}</strong> sold to <strong>${escapeHtml(winner.name)}</strong> for <strong>${entry.price}</strong> — bids revealed: ${revealed}</p>
   </section>`;
@@ -3206,36 +3312,51 @@ function dockNeedsSummary(manager) {
 
 function renderDraftFocus(draft, manager) {
   const auction = isAuctionDraft(draft);
+  const queued = isRandomNomination(draft);
   const lot = auction ? draft.auction.lot : null;
   const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
   const fieldingSums = lineupFieldingSums(manager);
-  const totalPicks = draft.managers.length * draft.rosterSize;
+  // A random-nomination room runs on the length of the queue, not on a roster
+  // count — the draft ends when the last card has come up, however many cards
+  // anybody has bought by then.
+  const queueTotal = queued ? draft.auction.queue.length : 0;
+  const totalPicks = queued ? queueTotal : draft.managers.length * draft.rosterSize;
+  const lotNumber = queued ? draft.auction.queueIndex + 1 : draft.pickNumber + 1;
   const eyebrow = draft.complete
     ? "Roster view"
     : auction
-      ? `Lot ${draft.pickNumber + 1} of ${totalPicks}`
+      ? `Lot ${Math.min(lotNumber, totalPicks)} of ${totalPicks}`
       : `Round ${draftPickInfo(draft).round}, pick ${draftPickInfo(draft).pickInRound}`;
   const heading = draft.complete
     ? `${escapeHtml(manager.name)} roster`
-    : auction
+    : queued
       ? lot
-        ? `${escapeHtml(manager.name)} has a card on the block`
-        : `${escapeHtml(manager.name)} nominates next`
-      : `${escapeHtml(manager.name)} is on the clock`;
+        ? "A card is on the block"
+        : "The queue deals the next card"
+      : auction
+        ? lot
+          ? `${escapeHtml(manager.name)} has a card on the block`
+          : `${escapeHtml(manager.name)} nominates next`
+        : `${escapeHtml(manager.name)} is on the clock`;
   const nextNames = (auction ? upcomingNominators(draft, 5).slice(1) : upcomingManagers(draft, 4))
     .map((item) => escapeHtml(item.name))
     .join(" · ");
+  const remaining = queued && !draft.complete
+    ? `<p class="next-up">${nominationQueueRemaining(draft)} cards still to come up &middot; anyone short at the buzzer gets filled out free from the board</p>`
+    : "";
   return `<section class="panel draft-focus">
     <div class="draft-focus-main">
       <p class="eyebrow">${eyebrow}</p>
       <h1>${heading}</h1>
       <div class="draft-metrics">
-        <span>${draft.pickNumber}/${totalPicks} ${auction ? "cards sold" : "picks made"}</span>
+        <span>${queued ? `${draft.auction.queueIndex}/${queueTotal} lots called` : `${draft.pickNumber}/${totalPicks} ${auction ? "cards sold" : "picks made"}`}</span>
+        ${queued ? `<span>${manager.roster.length} cards</span>` : ""}
         ${auction ? `<span>${auctionBudget(draft, manager)} budget left</span>` : ""}
         <span>${totalPoints} pts</span>
         <span>IF ${formatSignedNumber(fieldingSums.infield)}</span>
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
       </div>
+      ${remaining}
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
     </div>
     ${renderRosterSlots(manager, draft)}
@@ -3522,7 +3643,8 @@ function assignPlayersToSlots(players, labels, labelForPlayer) {
 }
 
 function canSimulate(draft) {
-  return draft.complete && draft.managers.every((manager) => validateRoster(manager).length === 0);
+  const options = { unlimitedRoster: hasUnlimitedRoster(draft) };
+  return draft.complete && draft.managers.every((manager) => validateRoster(manager, options).length === 0);
 }
 
 function draftVisiblePlayers(draft, manager) {

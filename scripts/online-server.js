@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
+import { networkInterfaces } from "node:os";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
@@ -17,8 +18,11 @@ import {
   currentManager,
   draftHistory,
   isAuctionDraft,
+  auctionStepGuard,
+  isRandomNomination,
   maxPoolManagers,
   nominateBestTarget,
+  randomNominationShortfalls,
   normalizeAuctionBudget,
   normalizePickTimerSeconds,
   sealedBidder,
@@ -103,7 +107,10 @@ function roomPool(room) {
         : buildRealDraftPool(room.seed)
       : buildFictionalDraftPool(room.seed);
   }
-  return buildDraftPool(room.universe, room.seed);
+  return buildDraftPool(room.universe, room.seed, {
+    nomination: room.nomination,
+    managerCount: room.managerCount
+  });
 }
 
 function reviveRoom(saved) {
@@ -111,13 +118,16 @@ function reviveRoom(saved) {
   const cpuNames = Array.isArray(saved.cpuNames) ? saved.cpuNames : [];
   const universe = universeConfig(saved.universe)?.key ?? null;
   const realPool = saved.realPool === "mariners" ? "mariners" : "stars";
+  const draftType = saved.draftType === "auction" ? "auction" : "snake";
+  const nomination = draftType === "auction" && saved.nomination === "random" ? "random" : "manual";
   const pool = roomPool({
     universe,
     seed: saved.seed,
     poolMode: saved.poolMode,
-    realPool
+    realPool,
+    nomination,
+    managerCount: managerNames.length
   });
-  const draftType = saved.draftType === "auction" ? "auction" : "snake";
   const auctionBudget = draftType === "auction"
     ? normalizeAuctionBudget(saved.auctionBudget, saved.rosterSize)
     : null;
@@ -126,7 +136,7 @@ function reviveRoom(saved) {
     pool,
     saved.rosterSize,
     saved.seed,
-    { draftType, budget: auctionBudget }
+    { draftType, nomination, budget: auctionBudget }
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
@@ -145,6 +155,7 @@ function reviveRoom(saved) {
     realPool,
     pickTimer: normalizePickTimerSeconds(saved.pickTimer),
     draftType,
+    nomination,
     auctionBudget,
     cpuNames,
     managerNames,
@@ -170,6 +181,7 @@ function persistRoom(store, room) {
     realPool: room.realPool,
     pickTimer: room.pickTimer,
     draftType: room.draftType,
+    nomination: room.nomination ?? "manual",
     auctionBudget: room.auctionBudget,
     cpuNames: room.cpuNames ?? [],
     managerNames: room.managerNames,
@@ -357,7 +369,7 @@ async function handleApi(store, request, response, url) {
   const room = store.rooms.get(roomId);
   if (!room) return sendJson(response, 404, { error: `Room "${roomId ?? ""}" not found` });
 
-  if (!subroute && request.method === "GET") return sendJson(response, 200, roomSnapshot(room));
+  if (!subroute && request.method === "GET") return sendJson(response, 200, roomSnapshot(room, request.socket.localPort));
   if (subroute === "join" && request.method === "POST") return joinRoom(store, room, request, response);
   if (subroute === "actions" && request.method === "POST") return postAction(store, room, request, response);
   if (subroute === "stream" && request.method === "GET") return openStream(room, request, response, url);
@@ -379,26 +391,40 @@ async function createRoom(store, request, response) {
   if (!universe) return sendJson(response, 400, { error: `Unknown card set "${body.universe}"` });
   const pickTimer = normalizePickTimerSeconds(body.pickTimer);
   const draftType = body.draftType === "auction" ? "auction" : "snake";
+  const nomination = draftType === "auction" && body.nomination === "random" ? "random" : "manual";
   const auctionBudget = draftType === "auction" ? normalizeAuctionBudget(body.budget, rosterSize) : null;
   const cpuNames = Array.isArray(body.cpu)
     ? body.cpu.map((name) => String(name)).filter((name) => managers.includes(name))
     : [];
 
   // Every universe deals a seeded deck out of a deep card set; the deal is
-  // deterministic in the seed so clients rebuild the identical deck.
-  const pool = buildDraftPool(universe, seed);
-  const managerLimit = maxPoolManagers(pool);
-  if (managers.length > managerLimit) {
-    return sendJson(response, 400, {
-      error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers`
-    });
+  // deterministic in the seed so clients rebuild the identical deck. A
+  // random-nomination board is dealt to the size of the ROOM, so how many
+  // managers it seats is not a question — whether the set is deep enough to
+  // deal it is.
+  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length });
+  if (nomination === "random") {
+    const shortfalls = randomNominationShortfalls(pool, managers.length);
+    if (shortfalls.length) {
+      const spots = shortfalls.map((short) => `${short.group} (${short.dealt} of ${short.quota})`).join(", ");
+      return sendJson(response, 400, {
+        error: `The ${universeConfig(universe).name} set is too thin to deal a ${managers.length}-manager random-nomination board: ${spots}`
+      });
+    }
+  } else {
+    const managerLimit = maxPoolManagers(pool);
+    if (managers.length > managerLimit) {
+      return sendJson(response, 400, {
+        error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers`
+      });
+    }
   }
   const draft = createDraft(
     managers.map((name) => ({ name, cpu: cpuNames.includes(name) })),
     pool,
     rosterSize,
     seed,
-    { draftType, budget: auctionBudget }
+    { draftType, nomination, budget: auctionBudget }
   );
   const room = {
     id: newRoomId(store.rooms),
@@ -407,6 +433,7 @@ async function createRoom(store, request, response) {
     universe,
     pickTimer,
     draftType,
+    nomination,
     auctionBudget,
     cpuNames,
     managerNames: managers,
@@ -422,7 +449,7 @@ async function createRoom(store, request, response) {
   // A computer first nominator opens the block before anyone arrives.
   runCpuAuction(store, room);
   persistRoom(store, room);
-  sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room) });
+  sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room, request.socket.localPort) });
 }
 
 async function joinRoom(store, room, request, response) {
@@ -511,7 +538,8 @@ function flushSealedBids(store, room) {
 function runCpuAuction(store, room) {
   const draft = room.draft;
   if (!isAuctionDraft(draft)) return;
-  let guard = draft.managers.length * draft.rosterSize * 4 + 20;
+  const queued = isRandomNomination(draft);
+  let guard = auctionStepGuard(draft);
   while (!draft.complete && guard > 0) {
     guard -= 1;
     if (draft.auction.lot) {
@@ -520,6 +548,13 @@ function runCpuAuction(store, room) {
       const action = { type: "seal-bid", managerId: bidder.id, amount: cpuSealedBid(draft, bidder) };
       applyDraftAction(draft, action);
       recordSealedBid(store, room, action);
+      continue;
+    }
+    // Nobody owns the next card in a random-nomination room, so the server
+    // always turns it over: the queue never waits on a manager to act.
+    if (queued) {
+      applyDraftAction(draft, { type: "auto-nominate" });
+      appendAction(store, room, { type: "auto-nominate" });
       continue;
     }
     if (!currentManager(draft).cpu) return;
@@ -565,6 +600,9 @@ function denyAction(draft, seat, isHost, action) {
     if (draft.complete) return "The draft is already complete";
     if (!isAuctionDraft(draft)) return "This room is not an auction draft";
     if (draft.auction.lot) return "A card is already on the block";
+    // Under random nomination the next card belongs to nobody, so anyone in the
+    // room may turn it over — there is no turn to take out of anyone's hands.
+    if (isRandomNomination(draft)) return null;
     if (!isHost && currentManager(draft).id !== seat?.managerId) return "It is not your nomination";
     return null;
   }
@@ -576,6 +614,7 @@ function denyAction(draft, seat, isHost, action) {
   if (type === "nominate") {
     if (draft.complete) return "The draft is already complete";
     if (!isAuctionDraft(draft)) return "This room is not an auction draft";
+    if (isRandomNomination(draft)) return "The queue nominates in this room";
     if (draft.auction.lot) return "A card is already on the block";
     if (!isHost && currentManager(draft).id !== seat?.managerId) return "It is not your nomination";
     return null;
@@ -592,6 +631,7 @@ function denyAction(draft, seat, isHost, action) {
   }
   if (type === "cancel-lot") {
     if (!isAuctionDraft(draft) || !draft.auction.lot) return "No card is on the block";
+    if (isRandomNomination(draft)) return "Nobody nominated this card, so there is nothing to cancel";
     if (!isHost && draft.auction.lot.nominatorId !== seat?.managerId) {
       return "Only the host or the nominator can cancel";
     }
@@ -599,8 +639,10 @@ function denyAction(draft, seat, isHost, action) {
     return null;
   }
   if (type === "undo") {
-    // An open lot is itself undoable, before any card has been sold.
+    // An open lot is itself undoable, before any card has been sold — unless
+    // the queue dealt it, in which case there is no nomination to take back.
     if (isAuctionDraft(draft) && draft.auction.lot) {
+      if (isRandomNomination(draft)) return "Finish the card on the block first";
       if (!isHost && draft.auction.lot.nominatorId !== seat?.managerId) {
         return "Only the host or the nominator can undo";
       }
@@ -647,8 +689,25 @@ function broadcast(room, event, payload) {
   for (const stream of room.streams) stream.write(message);
 }
 
-function roomSnapshot(room) {
+// The address the OTHER machines on this wifi can reach us at. The host is
+// usually browsing 127.0.0.1 — that is what the startup line prints — and an
+// invite link built from that points every guest at their own laptop, where
+// nothing is listening. So the room tells the client where it really lives,
+// and the client hands that out instead. Null when there is no LAN (a lone
+// machine, or every interface internal), and then the client falls back to
+// whatever address it is already using.
+function lanOrigin(port) {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) return `http://${address.address}:${port}`;
+    }
+  }
+  return null;
+}
+
+function roomSnapshot(room, port = null) {
   return {
+    lanOrigin: port ? lanOrigin(port) : null,
     roomId: room.id,
     seed: room.seed,
     rosterSize: room.rosterSize,
@@ -657,6 +716,7 @@ function roomSnapshot(room) {
     realPool: room.realPool ?? "stars",
     pickTimer: room.pickTimer ?? 0,
     draftType: room.draftType ?? "snake",
+    nomination: room.nomination ?? "manual",
     auctionBudget: room.auctionBudget ?? null,
     managers: room.draft.managers.map((manager) => ({
       id: manager.id,
@@ -742,8 +802,13 @@ if (invokedDirectly) {
   const port = Number(process.env.PORT ?? process.argv[2] ?? 8790);
   const { server, dataDir } = createOnlineServer();
   server.listen(port, () => {
-    console.log(`Online rooms at http://127.0.0.1:${port}/index.html`);
+    const lan = lanOrigin(port);
+    // Lead with the address that works for everybody. The loopback one only
+    // ever works on this machine, and a link built from it is the classic way
+    // to invite four friends to a draft that none of them can reach.
+    if (lan) console.log(`Play here, and share this with the room: ${lan}/index.html`);
+    else console.log("No network address found — nobody else can reach this machine right now.");
+    console.log(`This machine only:                     http://127.0.0.1:${port}/index.html`);
     console.log(`Rooms persist in ${dataDir} and survive restarts.`);
-    console.log("Share your LAN address (e.g. http://<your-ip>:" + port + "/index.html) with other players.");
   });
 }

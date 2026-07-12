@@ -496,3 +496,25 @@ test("the hall of fame API stores runs, dedupes, sanitizes, and survives restart
   const reloaded = await api(base2, "GET", "/api/hall-of-fame");
   assert.equal(reloaded.data.entries.length, 2);
 });
+
+test("a room hands out an invite address other machines can actually reach", async (t) => {
+  const base = await startServer(t);
+
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "wifi-night",
+    managers: ["Ana", "Bo"],
+    universe: "classic"
+  });
+  assert.equal(created.status, 201);
+
+  const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  for (const origin of [created.data.lanOrigin, room.data.lanOrigin]) {
+    // No LAN (a lone machine, every interface internal) is a legitimate answer;
+    // the client falls back to whatever address it is already on. What must
+    // never happen is handing out a loopback address, which means "your own
+    // machine" to every guest it is sent to.
+    if (origin === null) continue;
+    assert.match(origin, /^http:\/\/\d+\.\d+\.\d+\.\d+:\d+$/, `not an address: ${origin}`);
+    assert.doesNotMatch(origin, /127\.0\.0\.1|localhost/, "the invite address must not be loopback");
+  }
+});
