@@ -487,13 +487,19 @@ async function joinRoom(store, room, request, response) {
   // 192.168.1.x are different cupboards), and the room says your seat is taken
   // by you, for ever. Whoever holds the host token can hand it back. Reseating
   // mints a fresh token, so the orphaned one stops working.
-  if (existing && !isHost) {
+  // Somebody is sitting there right now — leave them alone. But a seat whose
+  // holder is gone belongs to whoever comes to sit in it: the token that held
+  // it lived in one browser's storage, and storage is lost all the time.
+  if (existing && !isHost && seatIsLive(room, manager.id)) {
     return sendJson(response, 409, { error: `${manager.name} is already claimed` });
   }
-  const seat = { managerId: manager.id, token: newToken(), isHost };
+  // Claiming counts as sitting down. Otherwise there is a gap between taking a
+  // seat and opening the stream in which the seat looks empty and the next
+  // person through the door can take it out from under you.
+  const seat = { managerId: manager.id, token: newToken(), isHost, lastSeenAt: Date.now() };
   room.seats.set(manager.id, seat);
   persistRoom(store, room);
-  broadcast(room, "seats", { seats: claimedSeats(room) });
+  broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room) });
   sendJson(response, 200, { token: seat.token, managerId: manager.id, host: isHost, reseated: Boolean(existing) });
 }
 
@@ -805,8 +811,45 @@ function openStream(room, request, response, url) {
   if (isAuctionDraft(room.draft)) {
     response.write(`event: lot\ndata: ${JSON.stringify({ lot: lotView(room) })}\n\n`);
   }
+  // The stream is how the server knows somebody is actually sitting in a seat.
+  // A seat with no stream is a seat nobody is in — which is exactly the state a
+  // player lands in when their browser loses the token, and exactly when the
+  // seat should be reclaimable.
+  const seat = seatForToken(room, url.searchParams.get("token"));
+  if (seat) {
+    response.seatManagerId = seat.managerId;
+    seat.lastSeenAt = Date.now();
+  }
   room.streams.add(response);
-  request.on("close", () => room.streams.delete(response));
+  request.on("close", () => {
+    if (seat) seat.lastSeenAt = Date.now();
+    room.streams.delete(response);
+    broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room) });
+  });
+  broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room) });
+}
+
+function seatForToken(room, token) {
+  if (!token) return null;
+  return [...room.seats.values()].find((seat) => seat.token === token) ?? null;
+}
+
+// Somebody is holding this seat open right now. A dropped connection is
+// forgiven for a moment — streams die and come back all the time — so a seat
+// only falls vacant once nobody has been in it for a while.
+const SEAT_GRACE_MS = 30000;
+
+function seatIsLive(room, managerId) {
+  for (const stream of room.streams) {
+    if (stream.seatManagerId === managerId) return true;
+  }
+  const seat = room.seats.get(managerId);
+  if (!seat?.lastSeenAt) return false;
+  return Date.now() - seat.lastSeenAt < SEAT_GRACE_MS;
+}
+
+function liveSeats(room) {
+  return [...room.seats.keys()].filter((managerId) => seatIsLive(room, managerId));
 }
 
 function broadcast(room, event, payload) {
@@ -848,7 +891,10 @@ function roomSnapshot(room, port = null) {
       id: manager.id,
       name: manager.name,
       cpu: Boolean(manager.cpu),
-      claimed: room.seats.has(manager.id)
+      claimed: room.seats.has(manager.id),
+      // Claimed is not the same as occupied: a seat whose holder lost their
+      // token is still claimed, and is exactly the one that needs taking back.
+      live: seatIsLive(room, manager.id)
     })),
     actions: room.actions,
     lot: lotView(room),

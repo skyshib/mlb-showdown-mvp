@@ -626,6 +626,9 @@ function openRoom(roomId, room) {
     hostToken: seat?.hostToken ?? null,
     spectator: Boolean(seat?.spectator) || warRoomMode,
     claimedSeats: room.managers.filter((manager) => manager.claimed).map((manager) => manager.id),
+    // Claimed is not occupied. A seat whose holder lost their token is still
+    // claimed, and is the one somebody needs to be able to sit back down in.
+    liveSeats: room.managers.filter((manager) => manager.live).map((manager) => manager.id),
     appliedSeq: 0,
     serverOffsetMs: Number(room.serverNow) - Date.now() || 0,
     status: "",
@@ -677,7 +680,10 @@ function rebuildOnlineDraft(room) {
     }
   }
   state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
-  state.selectedTeamName = state.managers[0];
+  // Your own team, not the first name in the room. Everybody was landing on
+  // manager one's roster and staring at somebody else's cards.
+  const mySeat = state.draft.managers.find((manager) => manager.id === state.online.managerId);
+  state.selectedTeamName = mySeat?.name ?? state.managers[0];
   if (lastSim) applySharedSim(lastSim, { instant: true });
   driveOnlineCpuTurn();
 }
@@ -735,6 +741,7 @@ function subscribeOnline() {
     onSeats: (payload) => {
       if (!state.online) return;
       state.online.claimedSeats = payload.seats;
+      state.online.liveSeats = payload.live ?? payload.seats;
       renderCurrentScreen();
     },
     onLot: (payload) => {
@@ -752,7 +759,7 @@ function subscribeOnline() {
     onSilent: () => {
       resyncOnlineRoom();
     }
-  });
+  }, state.online.token);
 }
 
 async function pollOnlineRoom() {
@@ -843,17 +850,24 @@ function renderSeatSelect() {
   resetAppHandlers();
   const online = state.online;
   // A seat is held by a token in one browser's storage, which is a fragile
-  // place to keep the only key to your own team. Whoever holds the host token
-  // can hand a seat back — to themselves, or to a manager who lost theirs.
-  const canReseat = Boolean(online.hostToken);
+  // place to keep the only key to your own team: clear it, or come back on a
+  // different address, and the room says your seat is taken — by you, for ever.
+  //
+  // So a seat is only defended while somebody is actually IN it. The stream is
+  // the proof: if a seat has nobody on the other end of it, it is empty, and
+  // whoever comes back to it may sit down. The host can take back any seat at
+  // all, occupied or not.
+  const liveSeats = online.liveSeats ?? online.claimedSeats;
   const seats = state.draft.managers
     .map((manager) => {
       const claimed = online.claimedSeats.includes(manager.id);
-      const blocked = manager.cpu || (claimed && !canReseat);
+      const occupied = liveSeats.includes(manager.id);
+      const canTake = !manager.cpu && (!claimed || !occupied || online.hostToken);
       const label = manager.cpu ? "Computer"
-        : claimed ? (canReseat ? "Taken &middot; take it back" : "Taken")
-        : "Open seat";
-      return `<button class="seat-option ${claimed && canReseat ? "reseat-option" : ""}" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}" ${blocked ? "disabled" : ""}>
+        : !claimed ? "Open seat"
+        : occupied ? (online.hostToken ? "Taken &middot; take it back" : "Taken")
+        : "Nobody there &middot; take it back";
+      return `<button class="seat-option ${claimed && canTake ? "reseat-option" : ""}" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}" ${canTake ? "" : "disabled"}>
         <strong>${escapeHtml(manager.name)}</strong>
         <span>${label}</span>
       </button>`;
@@ -1290,6 +1304,12 @@ function renderDraft() {
   const focusManager = current ?? (state.selectedTeamName
     ? draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0]
     : draft.managers[0]);
+  // Your board is the one you can actually do anything with, so it is the one
+  // you get. Online that means your seat; on a hotseat, whoever's turn it is.
+  const myManager = state.online?.managerId
+    ? draft.managers.find((manager) => manager.id === state.online.managerId)
+    : null;
+  const boardManager = myManager ?? focusManager;
   const dockViewerId = state.online?.managerId ?? focusManager?.id;
 
   const online = state.online;
@@ -1310,7 +1330,7 @@ function renderDraft() {
     <span class="pick-clock" data-pick-timer hidden></span>
     <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
   </section>
-  ${renderDraftFocus(draft, focusManager)}
+  ${renderDraftFocus(draft, focusManager, boardManager)}
   ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
   ${lot ? renderAuctionLotPanel(draft) : ""}
   ${auction && !draft.complete ? renderLastSalePanel(draft) : ""}
@@ -3718,7 +3738,12 @@ function dockNeedsSummary(manager) {
   return parts.join(" ");
 }
 
-function renderDraftFocus(draft, manager) {
+// Two different questions, and they were being answered by the same manager:
+// WHO IS ON THE CLOCK — which belongs to the room — and WHOSE BOARD IS THIS,
+// which belongs to you. Conflating them meant a seated player watched somebody
+// else's roster all draft and could never reach their own.
+function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
+  const manager = boardManager;
   const auction = isAuctionDraft(draft);
   const queued = isRandomNomination(draft);
   const lot = auction ? draft.auction.lot : null;
@@ -3736,16 +3761,16 @@ function renderDraftFocus(draft, manager) {
       ? `Lot ${Math.min(lotNumber, totalPicks)} of ${totalPicks}`
       : `Round ${draftPickInfo(draft).round}, pick ${draftPickInfo(draft).pickInRound}`;
   const heading = draft.complete
-    ? `${escapeHtml(manager.name)} roster`
+    ? `${escapeHtml(boardManager.name)} roster`
     : queued
       ? lot
         ? "A card is on the block"
         : "The queue deals the next card"
       : auction
         ? lot
-          ? `${escapeHtml(manager.name)} has a card on the block`
-          : `${escapeHtml(manager.name)} nominates next`
-        : `${escapeHtml(manager.name)} is on the clock`;
+          ? `${escapeHtml(clockManager.name)} has a card on the block`
+          : `${escapeHtml(clockManager.name)} nominates next`
+        : `${escapeHtml(clockManager.name)} is on the clock`;
   const nextNames = (auction ? upcomingNominators(draft, 5).slice(1) : upcomingManagers(draft, 4))
     .map((item) => escapeHtml(item.name))
     .join(" · ");

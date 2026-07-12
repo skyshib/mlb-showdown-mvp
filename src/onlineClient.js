@@ -37,8 +37,11 @@ export async function sendRoomAction(roomId, token, action) {
 // on without you while your screen sits there looking fine.
 const STREAM_SILENCE_MS = 45000;
 
-export function subscribeRoom(roomId, since, handlers) {
-  const source = new EventSource(`/api/rooms/${encodeURIComponent(roomId)}/stream?since=${since}`);
+// The token goes with the subscription so the server knows which seat this
+// stream is holding open. A seat nobody is streaming is a seat nobody is in.
+export function subscribeRoom(roomId, since, handlers, token = null) {
+  const query = `since=${since}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+  const source = new EventSource(`/api/rooms/${encodeURIComponent(roomId)}/stream?${query}`);
   let lastBeat = Date.now();
   const beat = () => { lastBeat = Date.now(); };
 
