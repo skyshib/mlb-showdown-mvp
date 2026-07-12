@@ -3,25 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ShowdownBot 2005 Direct Asset Card Prototype</title>
+  <title>ShowdownBot 2005 Card Prototype</title>
   <style>
     @font-face {
-      font-family: "ShowdownSetItalic";
+      font-family: "Showdown Heavy";
       src: url("./vendor/showdownbot/HelveticaNeueCondensedHeavyOblique.otf") format("opentype");
-      font-weight: 900;
       font-style: italic;
+      font-weight: 900;
       font-display: swap;
     }
 
-    :root {
-      --ink: #111;
-      --line: rgba(255, 255, 255, 0.75);
-      --card-green: #143423;
-      --card-green-2: #1f5536;
-      --cream: #f4ead1;
-      --red: #e74235;
-      --blue: #183c73;
-      --gold: #d8b15a;
+    @font-face {
+      font-family: "Showdown Condensed";
+      src: url("./vendor/showdownbot/HelveticaNeueCondensedBold.ttf") format("truetype");
+      font-weight: 700;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Showdown Chart";
+      src: url("./vendor/showdownbot/Zurich-Bold-Italic-BT.ttf") format("truetype");
+      font-style: italic;
+      font-weight: 700;
+      font-display: swap;
     }
 
     * {
@@ -33,402 +37,220 @@
       margin: 0;
       display: grid;
       place-items: center;
-      padding: 36px 18px;
-      background:
-        radial-gradient(circle at 25% 10%, rgba(217, 177, 90, 0.35), transparent 28%),
-        linear-gradient(135deg, #182531 0%, #0a0d11 56%, #213527 100%);
-      color: var(--cream);
+      padding: 28px 16px 36px;
+      background: #17191d;
+      color: #f5f7fa;
       font-family: Arial, Helvetica, sans-serif;
     }
 
     .lab {
+      width: min(460px, 100%);
       display: grid;
-      gap: 16px;
+      gap: 14px;
       justify-items: center;
     }
 
-    .label {
-      width: min(440px, 100%);
+    .lab-header {
+      width: 100%;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      color: rgba(244, 234, 209, 0.78);
+      color: #aeb5c0;
       font-size: 12px;
-      letter-spacing: 0.08em;
       text-transform: uppercase;
     }
 
-    .label img {
-      width: 82px;
+    .lab-header img {
+      width: 72px;
       height: auto;
-      object-fit: contain;
     }
 
     .card {
       position: relative;
-      width: min(420px, 94vw);
-      aspect-ratio: 754 / 1040;
+      width: min(430px, 94vw);
+      aspect-ratio: 1500 / 2100;
       overflow: hidden;
-      border-radius: 18px;
-      background: #0c0c0c;
-      border: 5px solid #070707;
-      box-shadow:
-        0 28px 60px rgba(0, 0, 0, 0.55),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+      background: #dfe4e8;
+      border-radius: 9px;
+      box-shadow: 0 24px 54px rgba(0, 0, 0, 0.55);
       isolation: isolate;
-    }
-
-    .card::before {
-      content: "";
-      position: absolute;
-      inset: 5px;
-      z-index: 5;
-      pointer-events: none;
-      border-radius: 12px;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
     }
 
     .photo {
       position: absolute;
-      inset: 0 0 17.8% 0;
+      inset: 0;
       z-index: 0;
       background:
-        linear-gradient(180deg, transparent 0%, transparent 61%, rgba(0, 0, 0, 0.16) 78%, rgba(0, 0, 0, 0.52) 100%),
-        url("./mockup-assets/milton-bradley-2005.jpg") center top / cover no-repeat;
-      filter: saturate(0.96) contrast(1.04);
+        linear-gradient(180deg, transparent 58%, rgba(0, 0, 0, 0.16) 78%, rgba(0, 0, 0, 0.48) 100%),
+        url("./mockup-assets/milton-bradley-2005.jpg") center 16% / cover no-repeat;
+      filter: saturate(0.94) contrast(1.04);
     }
 
-    .photo::after {
-      content: "";
+    .frame {
+      position: absolute;
+      z-index: 3;
+      left: -4.8%;
+      top: -3.43%;
+      width: 109.6%;
+      height: 106.86%;
+      object-fit: fill;
+      pointer-events: none;
+    }
+
+    .command {
       position: absolute;
       inset: 0;
-      background:
-        repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 5px),
-        linear-gradient(90deg, rgba(0,0,0,0.18), transparent 14%, transparent 86%, rgba(0,0,0,0.22));
-      mix-blend-mode: soft-light;
-      opacity: 0.52;
+      z-index: 4;
+      width: 100%;
+      height: 100%;
+      object-fit: fill;
+      pointer-events: none;
     }
 
     .team-logo {
       position: absolute;
-      right: 21px;
-      bottom: 161px;
-      z-index: 3;
-      width: 70px;
-      height: 72px;
-      display: grid;
-      place-items: center;
-      color: white;
-      font-family: Georgia, serif;
-      font-size: 41px;
-      font-weight: 900;
-      line-height: 0.82;
-      letter-spacing: -0.14em;
-      text-shadow:
-        -2px -2px 0 #284a78,
-        2px -2px 0 #284a78,
-        -2px 2px 0 #284a78,
-        2px 2px 0 #284a78,
-        0 4px 5px rgba(0, 0, 0, 0.6);
-    }
-
-    .team-logo span:first-child {
-      transform: translateX(5px);
-    }
-
-    .team-logo span:last-child {
-      transform: translateX(-7px);
-    }
-
-    .nameplate {
-      position: absolute;
-      left: 17px;
-      right: 91px;
-      bottom: 144px;
-      z-index: 3;
-      display: grid;
-      grid-template-columns: 54px minmax(0, 1fr);
-      align-items: end;
-      gap: 9px;
-    }
-
-    .onbase {
-      position: relative;
-      display: grid;
-      place-items: center;
-      width: 58px;
-      height: 57px;
-      color: var(--red);
-      font-family: "ShowdownSetItalic", Impact, sans-serif;
-      font-size: 34px;
-      line-height: 1;
-      text-shadow:
-        -2px -2px 0 white,
-        2px -2px 0 white,
-        -2px 2px 0 white,
-        2px 2px 0 white,
-        0 4px 0 rgba(0, 0, 0, 0.52);
-    }
-
-    .onbase::after {
-      content: "ON-BASE";
-      position: absolute;
-      left: -4px;
-      right: -5px;
-      bottom: -5px;
-      height: 17px;
-      display: grid;
-      place-items: center;
-      border: 2px solid #242424;
-      border-radius: 4px 4px 11px 11px;
-      background: linear-gradient(180deg, #f7f7f7, #f0f0f0 45%, #ca1d27 46%, #8f1119 100%);
-      color: white;
-      font-family: "ShowdownSetItalic", Impact, sans-serif;
-      font-size: 11px;
-      line-height: 1;
-      letter-spacing: 0.02em;
-      text-shadow:
-        -1px -1px 0 #0d0d0d,
-        1px -1px 0 #0d0d0d,
-        -1px 1px 0 #0d0d0d,
-        1px 1px 0 #0d0d0d;
-      transform: rotate(-4deg);
+      z-index: 5;
+      left: 79.33%;
+      top: 70.48%;
+      width: 13.33%;
+      height: 9.52%;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.7));
     }
 
     .player-name {
-      min-width: 0;
-      padding: 0 0 2px;
-      color: white;
-      font-family: "ShowdownSetItalic", Impact, sans-serif;
-      font-size: clamp(25px, 7.1vw, 40px);
-      line-height: 0.88;
-      letter-spacing: 0;
-      white-space: nowrap;
-      text-transform: uppercase;
-      text-shadow:
-        -2px -2px 0 var(--red),
-        2px -2px 0 var(--red),
-        -2px 2px 0 var(--red),
-        2px 2px 0 var(--red),
-        0 4px 0 rgba(0, 0, 0, 0.55);
-    }
-
-    .set-logo {
       position: absolute;
-      right: 21px;
-      bottom: 113px;
-      z-index: 4;
-      width: 78px;
-      filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.55));
-    }
-
-    .stat-band {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 35px;
-      z-index: 2;
-      height: 127px;
-      background:
-        linear-gradient(180deg, rgba(255,255,255,0.18), transparent 17%),
-        linear-gradient(90deg, rgba(0,0,0,0.28), transparent 22%, transparent 78%, rgba(0,0,0,0.35)),
-        linear-gradient(180deg, var(--card-green-2), #132a1f 64%, #0d1d16 100%);
-      border-top: 2px solid rgba(0, 0, 0, 0.75);
-      box-shadow:
-        0 -3px 8px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.26);
-    }
-
-    .meta {
-      height: 38px;
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr;
-      align-items: center;
-      padding: 6px 84px 3px 92px;
-      gap: 7px;
-      color: white;
-      font-family: "ShowdownSetItalic", Impact, sans-serif;
-      font-size: 15px;
-      line-height: 1;
-      text-transform: uppercase;
-      text-align: center;
-      text-shadow: 0 2px 1px rgba(0, 0, 0, 0.8);
-    }
-
-    .chart {
-      display: grid;
-      grid-template-columns: repeat(8, minmax(0, 1fr));
-      border-top: 1px solid rgba(255, 255, 255, 0.56);
-      border-bottom: 1px solid rgba(0, 0, 0, 0.7);
-    }
-
-    .cell {
-      min-width: 0;
-      display: grid;
-      grid-template-rows: 27px 32px;
-      align-items: center;
-      justify-items: center;
-      color: white;
-      font-family: "ShowdownSetItalic", Impact, sans-serif;
-      text-transform: uppercase;
-      text-shadow: 0 2px 1px rgba(0, 0, 0, 0.78);
-      border-left: 1px solid rgba(255, 255, 255, 0.18);
-      box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.26);
-    }
-
-    .cell:first-child {
-      border-left: 0;
-    }
-
-    .range {
-      font-size: 16px;
-      line-height: 1;
-    }
-
-    .outcome {
-      width: 100%;
-      height: 100%;
-      display: grid;
-      place-items: center;
-      font-size: 17px;
-      line-height: 1;
-      background: rgba(255, 255, 255, 0.04);
-    }
-
-    .footer {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 2;
-      height: 35px;
-      display: grid;
-      grid-template-columns: 64px 1fr 70px;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 10px 5px;
-      background:
-        linear-gradient(180deg, rgba(255,255,255,0.08), transparent 50%),
-        linear-gradient(90deg, #172e24, #07100d);
-      color: rgba(255, 255, 255, 0.78);
-      font-size: 8px;
-      line-height: 1.12;
-      text-shadow: 0 1px 0 #000;
-    }
-
-    .mlb-mark {
-      display: grid;
-      place-items: center;
-      justify-self: start;
-      width: 48px;
-      height: 23px;
-      border-radius: 3px;
-      background: linear-gradient(90deg, #1e4e8e 0 48%, white 48% 52%, #ba1e2e 52% 100%);
-      color: white;
-      font-weight: 900;
-      font-size: 8px;
-      letter-spacing: 0.04em;
-    }
-
-    .numbering {
-      justify-self: end;
-      text-align: right;
-      font-family: "ShowdownSetItalic", Impact, sans-serif;
-      font-size: 12px;
-      color: white;
-    }
-
-    .surface-wear {
-      position: absolute;
-      inset: 0;
       z-index: 6;
-      pointer-events: none;
-      border-radius: 13px;
-      background:
-        linear-gradient(100deg, rgba(255,255,255,0.11), transparent 12%, transparent 68%, rgba(255,255,255,0.08)),
-        repeating-linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,0.035) 40px 41px);
-      mix-blend-mode: screen;
-      opacity: 0.42;
+      left: 18.4%;
+      top: 75.57%;
+      width: 59.33%;
+      height: 5%;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      color: #fff;
+      font-family: "Showdown Heavy", Impact, sans-serif;
+      font-size: clamp(20px, 5.4vw, 31px);
+      line-height: 1;
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-shadow: 0 2px 2px rgba(0, 0, 0, 0.88);
+    }
+
+    .metadata {
+      position: absolute;
+      z-index: 6;
+      left: 18.8%;
+      right: 17.4%;
+      top: 81.43%;
+      height: 3.1%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2%;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(10px, 2.55vw, 14px);
+      line-height: 1;
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-shadow: 0 1px 2px #000;
+    }
+
+    .ranges {
+      position: absolute;
+      z-index: 6;
+      left: 3.65%;
+      right: 3.65%;
+      top: 84.72%;
+      height: 3.55%;
+      display: grid;
+      grid-template-columns: repeat(9, minmax(0, 1fr));
+      align-items: center;
+      color: #fff;
+      font-family: "Showdown Chart", "Showdown Condensed", sans-serif;
+      font-size: clamp(9px, 2.35vw, 14px);
+      line-height: 1;
+      text-align: center;
+      white-space: nowrap;
+      text-shadow: 0 2px 2px #000;
+    }
+
+    .set-year {
+      position: absolute;
+      z-index: 6;
+      right: 4.1%;
+      top: 91.05%;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(10px, 2.45vw, 14px);
+      line-height: 1;
+      text-shadow: 0 2px 2px #000;
     }
 
     .note {
-      width: min(440px, 100%);
-      color: rgba(244, 234, 209, 0.7);
+      margin: 0;
+      color: #aeb5c0;
       font-size: 12px;
-      line-height: 1.45;
+      line-height: 1.4;
       text-align: center;
     }
 
-    @media (max-width: 420px) {
-      body {
-        padding: 20px 10px;
+    @media (max-width: 380px) {
+      .player-name {
+        font-size: 21px;
       }
 
-      .meta {
-        padding-left: 82px;
-        padding-right: 77px;
-        font-size: 13px;
+      .metadata {
+        font-size: 9px;
       }
 
-      .range {
-        font-size: 14px;
-      }
-
-      .outcome {
-        font-size: 15px;
+      .ranges {
+        font-size: 8px;
       }
     }
   </style>
 </head>
 <body>
   <main class="lab">
-    <div class="label">
-      <span>Direct asset prototype</span>
-      <img src="./vendor/showdownbot/set-2005-v2.png" alt="ShowdownBot 2005 logo asset">
-    </div>
+    <header class="lab-header">
+      <span>2005 renderer prototype</span>
+      <img src="./vendor/showdownbot/set-2005-v2.png" alt="2005">
+    </header>
 
-    <article class="card" aria-label="Milton Bradley card mockup">
+    <article class="card" aria-label="Milton Bradley 2005 Showdown-style card">
       <div class="photo"></div>
-      <div class="team-logo" aria-hidden="true"><span>L</span><span>A</span></div>
 
-      <section class="nameplate">
-        <div class="onbase">10</div>
-        <div class="player-name">Milton Bradley</div>
-      </section>
+      <img class="frame" src="./vendor/showdownbot/2004-Hitter-BLUE.png" alt="">
+      <img class="command" src="./vendor/showdownbot/2004-Hitter-10.png" alt="">
+      <img class="team-logo" src="./vendor/showdownbot/LAD.png" alt="Los Angeles Dodgers">
 
-      <img class="set-logo" src="./vendor/showdownbot/set-2005-v2.png" alt="">
+      <div class="player-name">Milton Bradley</div>
 
-      <section class="stat-band">
-        <div class="meta">
-          <span>180 PT</span>
-          <span>Speed 15</span>
-          <span>Bats S</span>
-          <span>CF +1</span>
-        </div>
-        <div class="chart" aria-label="Batting chart">
-          <div class="cell"><span class="range">1-2</span><span class="outcome">SO</span></div>
-          <div class="cell"><span class="range">3-4</span><span class="outcome">GB</span></div>
-          <div class="cell"><span class="range">5-6</span><span class="outcome">FB</span></div>
-          <div class="cell"><span class="range">7-10</span><span class="outcome">BB</span></div>
-          <div class="cell"><span class="range">11-16</span><span class="outcome">1B</span></div>
-          <div class="cell"><span class="range">17</span><span class="outcome">1B+</span></div>
-          <div class="cell"><span class="range">18-19</span><span class="outcome">2B</span></div>
-          <div class="cell"><span class="range">20+</span><span class="outcome">HR</span></div>
-        </div>
-      </section>
+      <div class="metadata" aria-label="Player metadata">
+        <span>180 PT</span>
+        <span>Speed 15</span>
+        <span>Bats S</span>
+        <span>CF +1</span>
+      </div>
 
-      <footer class="footer">
-        <div class="mlb-mark">MLB</div>
-        <p>Major League Baseball trademarks and copyrights are used here only as a private visual prototype.</p>
-        <div class="numbering">165<br>'05</div>
-      </footer>
+      <div class="ranges" aria-label="Chart result ranges">
+        <span>1-2</span>
+        <span>3-4</span>
+        <span>5-6</span>
+        <span>7-10</span>
+        <span>11-16</span>
+        <span>17</span>
+        <span>18-19</span>
+        <span>-</span>
+        <span>20+</span>
+      </div>
 
-      <div class="surface-wear"></div>
+      <div class="set-year">2005</div>
     </article>
 
     <p class="note">
-      This file uses the copied ShowdownBot 2005 logo and font from <code>vendor/showdownbot</code>; the card body is still local HTML/CSS.
+      This version uses ShowdownBot's actual 2004/2005 frame, command graphic, fonts, logo, and renderer coordinates. The player photo is still the existing unprocessed mockup image.
     </p>
   </main>
 </body>
