@@ -139,6 +139,7 @@ let liveGame = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
 let onlineStream = null;
+let onlinePollInFlight = false;
 // The bid box that was rejected, and why — one manager's error, not the
 // panel's, now that several boxes can be open at once.
 let lotEntryError = null;
@@ -154,11 +155,12 @@ let pickClockKey = null;
 let pickClockDeadline = 0;
 let pickClockTimeoutKey = null;
 let chimeContext = null;
-let warRoomSoundEnabled = false;
+let warRoomSoundEnabled = true;
 let warRoomLotKey = null;
 
 setInterval(pickClockTick, 500);
 setInterval(auctionClockTick, 500);
+setInterval(pollOnlineRoom, 2000);
 
 function pickClockTurn() {
   const draft = state.draft;
@@ -459,6 +461,19 @@ function updateWarRoomNominationSound(draft, lot, player) {
 
 const onlineRoomParam = new URLSearchParams(location.search).get("room");
 const warRoomMode = new URLSearchParams(location.search).has("board");
+if (warRoomMode) {
+  const unlockWarRoomAudio = async () => {
+    if (!warRoomSoundEnabled) return;
+    try {
+      chimeContext = chimeContext ?? new AudioContext();
+      await chimeContext.resume();
+    } catch {
+      // The board remains usable when audio is unavailable or blocked.
+    }
+  };
+  window.addEventListener("pointerdown", unlockWarRoomAudio, { once: true, capture: true });
+  window.addEventListener("keydown", unlockWarRoomAudio, { once: true, capture: true });
+}
 if (onlineRoomParam) {
   bootOnlineRoom(onlineRoomParam);
 } else {
@@ -675,6 +690,10 @@ function applySharedSim(action, options = {}) {
 function subscribeOnline() {
   onlineStream?.close();
   onlineStream = subscribeRoom(state.online.roomId, state.online.appliedSeq, {
+    onHello: () => {
+      if (!state.online) return;
+      state.online.status = "";
+    },
     onAction: (entry) => {
       const online = state.online;
       if (!online || entry.seq <= online.appliedSeq) return;
@@ -732,11 +751,32 @@ function subscribeOnline() {
   });
 }
 
-async function resyncOnlineRoom() {
+async function pollOnlineRoom() {
+  const online = state.online;
+  if (!online || onlinePollInFlight) return;
+  onlinePollInFlight = true;
+  try {
+    const room = await fetchRoom(online.roomId);
+    if (state.online !== online) return;
+    const latestSeq = room.actions.length ? room.actions.at(-1).seq : 0;
+    const claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
+    const roomChanged = latestSeq !== online.appliedSeq
+      || JSON.stringify(room.lot ?? null) !== JSON.stringify(online.lot ?? null)
+      || JSON.stringify(claimedSeats) !== JSON.stringify(online.claimedSeats);
+    if (roomChanged) await resyncOnlineRoom(room);
+  } catch {
+    // SSE remains the primary connection; its error handler owns the UI state.
+  } finally {
+    onlinePollInFlight = false;
+  }
+}
+
+async function resyncOnlineRoom(snapshot = null) {
   const online = state.online;
   if (!online) return;
   try {
-    const room = await fetchRoom(online.roomId);
+    const room = snapshot ?? await fetchRoom(online.roomId);
+    if (state.online !== online) return;
     online.serverOffsetMs = Number(room.serverNow) - Date.now() || online.serverOffsetMs || 0;
     online.claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
     rebuildOnlineDraft(room);
@@ -3521,17 +3561,26 @@ function renderHeatLegend(scale) {
 // Floating rival boards: every other team pinned to the bottom edge so nobody
 // scrolls mid-auction to see what the room has done.
 function renderRosterDock(draft, viewerId) {
-  const rivals = draft.managers.filter((manager) => manager.id !== viewerId);
-  if (!rivals.length) return "";
+  // Everyone gets a bar, with the viewer's own team pinned to the top row.
+  const ordered = [
+    ...draft.managers.filter((manager) => manager.id === viewerId),
+    ...draft.managers.filter((manager) => manager.id !== viewerId)
+  ];
+  if (!ordered.length) return "";
   const collapsed = state.rosterDock === "collapsed";
   const auction = isAuctionDraft(draft);
   const prices = auction
     ? new Map(draftHistory(draft).map((pick) => [pick.player.id, pick.price]))
     : null;
   const heatScale = draftHeatScale(draft);
-  const bars = collapsed ? "" : rivals.map((manager) => renderDockBar(draft, manager, auction, prices, heatScale)).join("");
+  const ownTag = state.online?.managerId ? "you" : "";
+  const bars = collapsed
+    ? ""
+    : ordered
+        .map((manager) => renderDockBar(draft, manager, auction, prices, heatScale, { own: manager.id === viewerId, ownTag }))
+        .join("");
   return `<div class="roster-dock-spacer${collapsed ? " collapsed" : ""}"></div>
-  <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Other team rosters">
+  <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Team rosters">
     <div class="dock-top">
       <button type="button" class="dock-toggle" data-action="toggle-dock">${collapsed ? "Show rival boards &#9650;" : "Hide &#9660;"}</button>
       ${collapsed ? "" : renderHeatLegend(heatScale)}
@@ -3540,7 +3589,7 @@ function renderRosterDock(draft, viewerId) {
   </aside>`;
 }
 
-function renderDockBar(draft, manager, auction, prices, heatScale) {
+function renderDockBar(draft, manager, auction, prices, heatScale, { own = false, ownTag = "" } = {}) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
@@ -3553,8 +3602,8 @@ function renderDockBar(draft, manager, auction, prices, heatScale) {
   const budget = auction
     ? `<span class="dock-budget">${auctionBudget(draft, manager)} left${draft.complete ? "" : `<br />max ${auctionMaxBid(draft, manager)}`}</span>`
     : "";
-  return `<div class="dock-bar">
-    <span class="dock-team">${escapeHtml(manager.name)}</span>
+  return `<div class="dock-bar${own ? " own-bar" : ""}">
+    <span class="dock-team">${escapeHtml(manager.name)}${own && ownTag ? ` <em class="own-tag">${escapeHtml(ownTag)}</em>` : ""}</span>
     ${budget}
     <div class="dock-slots">${slots}</div>
   </div>`;
