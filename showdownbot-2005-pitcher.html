@@ -276,14 +276,15 @@
 
     .primary-label {
       position: absolute;
-      z-index: 7;
-      left: 4.05%;
-      top: 88.75%;
-      width: 12.4%;
-      height: 2.1%;
+      z-index: 8;
+      left: 3.45%;
+      top: 88.55%;
+      width: 14.6%;
+      height: 2.75%;
       display: grid;
       place-items: center;
-      background: #14283a;
+      clip-path: polygon(0 18%, 9% 0, 91% 0, 100% 18%, 94% 100%, 50% 82%, 6% 100%);
+      background: #ef3d1b;
       color: #fff;
       font-family: "Showdown Condensed", Arial Narrow, sans-serif;
       font-size: clamp(7px, 1.75vw, 10px);
@@ -291,8 +292,22 @@
       line-height: 1;
       text-transform: uppercase;
       text-shadow: 0 1px 1px #000;
-      transform: rotate(-6deg) skewX(-4deg);
+      transform: rotate(-6deg);
       transform-origin: center;
+    }
+
+    .primary-label::before {
+      content: "";
+      position: absolute;
+      inset: 2px;
+      z-index: 0;
+      clip-path: inherit;
+      background: #14283a;
+    }
+
+    .primary-label span {
+      position: relative;
+      z-index: 1;
     }
 
     .player-name {
@@ -463,9 +478,9 @@
         >
       </div>
 
-      <img class="frame" src="./vendor/showdownbot/2004-Hitter-BLUE-NO-FOOTER.png" alt="">
+      <img class="frame" src="./vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER.png" alt="">
       <div class="primary-number">6</div>
-      <div class="primary-label">Control</div>
+      <div class="primary-label"><span>Control</span></div>
 
       <div class="player-name">Asami Ortega</div>
 
