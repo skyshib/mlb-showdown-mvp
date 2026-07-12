@@ -163,11 +163,11 @@ test("a restarted server revives the room to the same rosters", async (t) => {
 
 test("a card set too thin to deal the board is refused at setup", async (t) => {
   const { base } = await startServer(t);
-  // One franchise does not own eight managers' worth of catchers.
+  // The thinnest franchise in the game does not own eight managers' worth of infield.
   const created = await api(base, "POST", "/api/rooms", {
     seed: SEED,
     managers: ["A", "B", "C", "D", "E", "F", "G", "H"],
-    universe: "franchise-SEA",
+    universe: "franchise-ARI",
     draftType: "auction",
     nomination: "random",
     budget: 5000

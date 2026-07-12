@@ -1935,11 +1935,9 @@ button.roster-slot[draggable="true"]:active {
   line-height: 1.4;
 }
 
-.draft-type-mode .auction-budget-field {
-  display: none;
-}
-
-.draft-type-mode:has(input[name="draftType"][value="auction"]:checked) .auction-budget-field {
+/* The budget lives inside the auction's sub-options now, which are hidden
+   wholesale when the auction is not the draft — no need to gate it twice. */
+.auction-budget-field {
   display: grid;
   gap: 4px;
   margin-top: 2px;

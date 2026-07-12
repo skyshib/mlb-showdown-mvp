@@ -774,18 +774,14 @@ function renderUniverseFieldset(key) {
   </fieldset>`;
 }
 
-// The three draft types are two flags underneath: random nomination IS an
-// auction, it just takes the nominating away from the managers.
-function draftModeOf(draftType, nomination) {
-  if (draftType !== "auction") return "snake";
-  return nomination === "random" ? "random" : "auction";
-}
-
+// Random nomination is not a third kind of draft — it IS an auction, one that
+// takes the nominating away from the managers. So the form asks the two
+// questions it really is: what kind of draft, and then, if it's an auction,
+// who puts the cards up. A snake draft has nobody nominating anything.
 function draftModeFromForm(form) {
-  const mode = String(form.get("draftType") ?? "snake");
-  if (mode === "random") return { draftType: "auction", nomination: "random" };
-  if (mode === "auction") return { draftType: "auction", nomination: "manual" };
-  return { draftType: "snake", nomination: "manual" };
+  const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
+  const nomination = draftType === "auction" && form.get("nomination") === "random" ? "random" : "manual";
+  return { draftType, nomination };
 }
 
 // Whether the chosen card set can actually seat the room, phrased for the
@@ -814,7 +810,6 @@ function randomNominationBlurb(managerCount) {
 
 function renderSetup(setupError = "") {
   resetAppHandlers();
-  const draftMode = draftModeOf(state.draftType, state.nomination);
   app.innerHTML = `<section class="panel setup">
     <div>
       <p class="eyebrow">MLB Showdown-ish MVP</p>
@@ -851,22 +846,28 @@ function renderSetup(setupError = "") {
       <fieldset class="pool-mode draft-type-mode">
         <legend>Draft type</legend>
         <label class="pool-option">
-          <input type="radio" name="draftType" value="snake" ${draftMode === "snake" ? "checked" : ""} />
+          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
           <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
         </label>
         <label class="pool-option">
-          <input type="radio" name="draftType" value="auction" ${draftMode === "auction" ? "checked" : ""} />
-          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
+          <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
+          <span><strong>Auction draft</strong><small>Cards go up one at a time and everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
         </label>
-        <label class="pool-option">
-          <input type="radio" name="draftType" value="random" ${draftMode === "random" ? "checked" : ""} />
-          <span><strong>Random nomination</strong><small>${escapeHtml(randomNominationBlurb(state.managers.length))} Nobody nominates: a hidden queue deals the cards out in random order and everyone bids sealed. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
-        </label>
-        <label class="auction-budget-field">
-          Budget per manager
-          <input name="auctionBudget" type="number" min="${13 * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
-          <small>A strong 13-card roster adds up to roughly 5000 card points, so 5000 bids like the classic Showdown cap.</small>
-        </label>
+        <div class="pool-suboptions auction-suboptions" ${state.draftType === "auction" ? "" : "hidden"}>
+          <label class="pool-option">
+            <input type="radio" name="nomination" value="manual" ${state.nomination === "random" ? "" : "checked"} />
+            <span><strong>Managers nominate</strong><small>Each manager takes a turn putting a card of their choosing on the block.</small></span>
+          </label>
+          <label class="pool-option">
+            <input type="radio" name="nomination" value="random" ${state.nomination === "random" ? "checked" : ""} />
+            <span><strong>Random nomination</strong><small>${escapeHtml(randomNominationBlurb(state.managers.length))} Nobody nominates: a hidden queue deals the cards out in random order. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
+          </label>
+          <label class="auction-budget-field">
+            Budget per manager
+            <input name="auctionBudget" type="number" min="${13 * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
+            <small>A strong 13-card roster adds up to roughly 5000 card points, so 5000 bids like the classic Showdown cap.</small>
+          </label>
+        </div>
       </fieldset>
       ${renderUniverseFieldset(state.universe)}
       ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
@@ -890,12 +891,24 @@ function renderSetup(setupError = "") {
     setupForm.querySelector(".decade-checklist").hidden = pick !== "decades";
     setupForm.querySelector(".franchise-field").closest(".pool-suboptions").hidden = pick !== "franchise";
   };
+  // The auction's own sub-options — who nominates, and the budget — belong to
+  // the auction, so they only show when it is chosen; and reaching for one of
+  // them says you want an auction, so it selects it.
+  const syncAuctionOptions = () => {
+    const auction = new FormData(setupForm).get("draftType") === "auction";
+    setupForm.querySelector(".auction-suboptions").hidden = !auction;
+  };
   setupForm.addEventListener("change", (event) => {
     const owner = event.target.name === "decade" ? "decades"
       : event.target.name === "franchise" ? "franchise"
       : null;
     if (owner) setupForm.querySelector(`input[name="universe"][value="${owner}"]`).checked = true;
     if (owner || event.target.name === "universe") syncUniversePickers();
+
+    if (event.target.name === "nomination" || event.target.name === "auctionBudget") {
+      setupForm.querySelector('input[name="draftType"][value="auction"]').checked = true;
+    }
+    if (["draftType", "nomination", "auctionBudget"].includes(event.target.name)) syncAuctionOptions();
   });
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {

@@ -15,6 +15,7 @@ import {
   poolGroup,
   randomNominationCounts,
   randomNominationQuotas,
+  randomNominationShortfalls,
   undoLastPick,
   validateRoster
 } from "../src/rules/draft.js";
@@ -39,6 +40,10 @@ function countGroup(cards, group) {
   return cards.filter((card) => poolGroup(card) === group).length;
 }
 
+function countHitters(cards) {
+  return cards.filter((card) => card.kind === "hitter").length;
+}
+
 test("the roster slot table is the 13-man roster, spelled out", () => {
   const total = ROSTER_SLOTS.reduce((sum, [, slots]) => sum + slots, 0);
   assert.equal(total, 13);
@@ -47,15 +52,23 @@ test("the roster slot table is the 13-man roster, spelled out", () => {
 test("three managers see twelve starters and eight of them come up", () => {
   const { draft, pool } = roomOf(3);
 
+  // The arms deal exactly to quota: nothing else draws on them.
   assert.equal(countGroup(pool, "SP"), 12);
-  assert.equal(countGroup(pool, "C"), 6);
-  assert.equal(countGroup(pool, "LF/RF"), 12);
+  assert.equal(countGroup(pool, "RP"), 12);
+
+  // The bats can run over it. The DH slot takes any hitter, so its cards are
+  // catchers and shortstops and whoever else was left — a position ends up
+  // with its own quota plus however many of those it happened to supply.
+  assert.ok(countGroup(pool, "C") >= 6, `only ${countGroup(pool, "C")} catchers`);
+  assert.ok(countGroup(pool, "LF/RF") >= 12, `only ${countGroup(pool, "LF/RF")} corners`);
+  assert.equal(countHitters(pool), 6 * 9, "nine hitters a manager, six managers' worth of board");
 
   const queued = draft.auction.queue.map((id) => draft.pool.find((card) => card.id === id));
   assert.equal(countGroup(queued, "SP"), 8);
-  assert.equal(countGroup(queued, "C"), 4);
-  assert.equal(countGroup(queued, "LF/RF"), 8);
+  assert.ok(countGroup(queued, "C") >= 4);
+  assert.ok(countGroup(queued, "LF/RF") >= 8);
   assert.equal(draft.auction.queue.length, 13 * 4);
+  assert.equal(new Set(draft.auction.queue).size, draft.auction.queue.length, "a card queues once");
 });
 
 test("the visible board always outlasts a hoarder", () => {
@@ -71,12 +84,30 @@ test("the visible board always outlasts a hoarder", () => {
   }
 });
 
-test("the dealt board matches the quota table at every position", () => {
-  const managerCount = 5;
-  const { pool } = roomOf(managerCount);
-  for (const [group, quota] of randomNominationQuotas(managerCount).visible) {
-    // Two-way partners tag along with their other half, so a group can run over.
-    assert.ok(countGroup(pool, group) >= quota, `${group}: dealt ${countGroup(pool, group)}, wanted ${quota}`);
+test("the dealt board can supply every slot, in every card set", () => {
+  // Not "enough cards printed at DH" — any bat DHs, and the dead-ball sets
+  // print nobody there at all. What must hold is that the board can be dealt
+  // out: give each slot its cards in turn, and nobody comes up short.
+  for (const universe of ["classic", "fictional", "mlb-history", "decade-1910", "franchise-SEA"]) {
+    for (const managerCount of [2, 3, 5, 8]) {
+      const pool = buildDraftPool(universe, "rn-seed", { nomination: "random", managerCount });
+      const shortfalls = randomNominationShortfalls(pool, managerCount);
+      assert.deepEqual(
+        shortfalls,
+        [],
+        `${universe} @ ${managerCount}: ${shortfalls.map((s) => `${s.group} ${s.dealt}/${s.quota}`).join(", ")}`
+      );
+    }
+  }
+});
+
+test("a set with no designated hitters still deals a board", () => {
+  // The 1910s never had the rule, and the fictional league prints nobody at
+  // DH either. Neither is "too thin" — the ninth bat is just another bat.
+  for (const universe of ["fictional", "decade-1910"]) {
+    const pool = buildDraftPool(universe, "rn-seed", { nomination: "random", managerCount: 3 });
+    assert.equal(pool.filter((card) => card.position === "DH").length, 0, `${universe} prints a DH?`);
+    assert.deepEqual(randomNominationShortfalls(pool, 3), [], `${universe} refused a 3-manager board`);
   }
 });
 
