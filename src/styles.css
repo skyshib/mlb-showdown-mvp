@@ -781,24 +781,7 @@ button.roster-slot[draggable="true"]:active {
   border-left-width: 4px;
 }
 
-.mini-roster-slot.tier-bronze {
-  border-left-color: #9c6a3f;
-}
 
-.mini-roster-slot.tier-silver {
-  border-left-color: #8fa0a9;
-  background: #f4f7f8;
-}
-
-.mini-roster-slot.tier-gold {
-  border-left-color: #e1b64b;
-  background: #fbf6e7;
-}
-
-.mini-roster-slot.tier-rainbow {
-  border-left-color: #c27cff;
-  background: linear-gradient(100deg, #f7effc, #eef4fd 65%, #effbf4);
-}
 
 .mini-slot-price {
   position: absolute;
@@ -856,11 +839,6 @@ button.roster-slot[draggable="true"]:active {
   color: var(--muted);
   font-style: normal;
 }
-
-.recent-pick.tier-bronze { border-left-color: #9c6a3f; }
-.recent-pick.tier-silver { border-left-color: #8fa0a9; }
-.recent-pick.tier-gold { border-left-color: #e1b64b; background: #fbf6e7; }
-.recent-pick.tier-rainbow { border-left-color: #c27cff; background: #f7effc; }
 
 .recent-pick.newest-pick {
   border-color: #1c2521;
@@ -960,9 +938,9 @@ button.roster-slot[draggable="true"]:active {
   margin: 0;
 }
 
-.tier-legend {
+.heat-legend {
   display: inline-flex;
-  gap: 6px;
+  gap: 7px;
   align-items: center;
   color: var(--muted);
   font-size: 10px;
@@ -971,19 +949,16 @@ button.roster-slot[draggable="true"]:active {
   text-transform: uppercase;
 }
 
-.tier-swatch {
-  display: inline-flex;
-  align-items: center;
-  border-left: 8px solid transparent;
-  border-radius: 3px;
-  padding: 1px 5px 1px 4px;
-  background: #f1f4f0;
+.heat-legend em {
+  font-style: normal;
 }
 
-.tier-swatch.tier-bronze { border-left-color: #9c6a3f; }
-.tier-swatch.tier-silver { border-left-color: #8fa0a9; }
-.tier-swatch.tier-gold { border-left-color: #e1b64b; }
-.tier-swatch.tier-rainbow { border-left-color: #c27cff; }
+.heat-bar {
+  width: 130px;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, hsl(215 72% 50%), hsl(288 72% 50%), hsl(360 72% 50%));
+}
 
 .dock-slots {
   display: flex;
@@ -1034,10 +1009,12 @@ button.roster-slot[draggable="true"]:active {
   font-weight: 750;
 }
 
-.dock-slot.tier-bronze { border-left-color: #9c6a3f; }
-.dock-slot.tier-silver { border-left-color: #8fa0a9; background: #f4f7f8; }
-.dock-slot.tier-gold { border-left-color: #e1b64b; background: #fbf6e7; }
-.dock-slot.tier-rainbow { border-left-color: #c27cff; background: #f7effc; }
+/* Heat coloring for all draft chips; lives after the base blocks so the
+   gradient background wins the cascade. */
+.heat {
+  border-left-color: hsl(var(--heat-h, 215) 72% 46%);
+  background: hsl(var(--heat-h, 215) 68% 95.5%);
+}
 
 .dock-chip {
   flex: 0 0 auto;
@@ -1059,11 +1036,6 @@ button.roster-slot[draggable="true"]:active {
   font-weight: 900;
   font-style: normal;
 }
-
-.dock-chip.tier-bronze { border-left-color: #9c6a3f; }
-.dock-chip.tier-silver { border-left-color: #8fa0a9; background: #f4f7f8; }
-.dock-chip.tier-gold { border-left-color: #e1b64b; background: #fbf6e7; }
-.dock-chip.tier-rainbow { border-left-color: #c27cff; background: #f7effc; }
 
 .dock-empty {
   color: var(--muted);
@@ -1133,13 +1105,9 @@ button.roster-slot[draggable="true"]:active {
   letter-spacing: 0.02em;
 }
 
-.war-room .tier-legend {
+.war-room .heat-legend {
   margin-left: auto;
   color: #93a39b;
-}
-
-.war-room .tier-swatch {
-  background: #1d2621;
 }
 
 .war-room .war-live {
@@ -1274,9 +1242,7 @@ button.roster-slot[draggable="true"]:active {
   color: #ffd76e;
 }
 
-.war-room .dock-chip.tier-silver { background: #202a2b; }
-.war-room .dock-chip.tier-gold { background: #2a2517; }
-.war-room .dock-chip.tier-rainbow { background: #251d2e; }
+
 
 .war-team footer {
   margin-top: 8px;
@@ -1303,6 +1269,11 @@ button.roster-slot[draggable="true"]:active {
 
 .war-room .recent-pick em {
   color: #93a39b;
+}
+
+.war-room .heat {
+  border-left-color: hsl(var(--heat-h, 215) 62% 54%);
+  background: hsl(var(--heat-h, 215) 34% 15%);
 }
 
 .section-head {
