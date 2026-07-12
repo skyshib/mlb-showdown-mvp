@@ -49,14 +49,40 @@
       height: auto;
     }
 
+    .rarity-frame {
+      --rarity-color: #9c6a3f;
+      --rarity-glow: rgba(156, 106, 63, 0.32);
+      width: min(430px, 94vw);
+      padding: 3px;
+      border-radius: 12px;
+      background: var(--rarity-color);
+      box-shadow:
+        0 24px 54px rgba(0, 0, 0, 0.55),
+        0 0 22px var(--rarity-glow);
+    }
+
+    .rarity-frame.rarity-silver {
+      --rarity-color: #c9d2d8;
+      --rarity-glow: rgba(152, 186, 205, 0.36);
+    }
+
+    .rarity-frame.rarity-gold {
+      --rarity-color: #e1b64b;
+      --rarity-glow: rgba(221, 173, 57, 0.42);
+    }
+
+    .rarity-frame.rarity-rainbow {
+      --rarity-color: conic-gradient(from 40deg, #ff6279, #ffd15e, #53d69e, #4f9dff, #c27cff, #ff6279);
+      --rarity-glow: rgba(120, 180, 255, 0.52);
+    }
+
     .card {
       position: relative;
-      width: min(430px, 94vw);
+      width: 100%;
       aspect-ratio: 1500 / 2100;
       overflow: hidden;
       background: #dfe4e8;
       border-radius: 9px;
-      box-shadow: 0 24px 54px rgba(0, 0, 0, 0.55);
       isolation: isolate;
       --bb-color: #c99127;
       --single-color: #34785d;
@@ -281,6 +307,7 @@
       <span>Fictional card test</span>
     </header>
 
+    <div class="rarity-frame rarity-rainbow" aria-label="Rainbow rarity">
     <article class="card" aria-label="Serena Anwar Showdown-style card">
       <div class="photo">
         <img
@@ -326,6 +353,7 @@
         </div>
       </div>
     </article>
+    </div>
 
     <p class="note">
       Fictional player and club using DiceBear's Micah portrait style.
