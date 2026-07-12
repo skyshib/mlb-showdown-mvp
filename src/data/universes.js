@@ -300,12 +300,14 @@ export function dualPrimaryId(id) {
 // ---- The draft deck ----------------------------------------------------------
 //
 // A draft night sees a DECK, not the whole universe: a seeded slice with
-// fixed position depth, so eight managers can always field a legal roster
-// and the same seed deals the same deck. Ten-thousand-card pools are mostly
-// role players, and a flat random slice of one would be a draft board with
-// no stars on it — so the deal fills each position from the rarity ladder,
-// a couple of legends down through the commons. Draft night gets its Griffey
-// AND its Willie Bloomquist.
+// fixed position depth, so eight managers can always field a legal roster and
+// the same seed deals the same deck.
+//
+// Within a position the draw is straight random. The board is a slice of the
+// league and reads like one: mostly the players a league is mostly made of,
+// with a star on it when the set happens to deal one. Nothing reaches into the
+// top of the ladder to make sure a Griffey turns up — if he does, he was drawn
+// like everybody else.
 const DECK_QUOTAS = [
   ["C", 10],
   ["1B", 10],
@@ -319,17 +321,6 @@ const DECK_QUOTAS = [
   ["RP", 18]
 ];
 
-// The shape of every position's stack, top of the ladder down. A quota of 10
-// deals 1 legend, 2 rares, 3 uncommons and 4 commons; short tiers spill into
-// the next one down, so a thin franchise pool still deals a full deck.
-const DECK_RARITY_MIX = [
-  ["legend", 0.1],
-  ["rare", 0.2],
-  ["uncommon", 0.3],
-  ["common", 0.4]
-];
-
-
 // Fisher-Yates on a copy, driven by the seeded rng.
 function shuffled(cards, rng) {
   const copy = [...cards];
@@ -340,28 +331,12 @@ function shuffled(cards, rng) {
   return copy;
 }
 
-// One position's share of the deck: take the tier mix in order, and when a
-// tier runs short, the shortfall rolls down to the tiers beneath it.
+// One position's share of the deck: drawn at random from everyone who plays
+// there. No thumb on the scale for the good cards — the deck is a slice of the
+// league, so the mix of stars and role players on the board is whatever the
+// mix in the card set is. A position the set is thin at deals what it has.
 function dealGroupCards(cards, quota, rng) {
-  const byTier = new Map(DECK_RARITY_MIX.map(([tier]) =>
-    [tier, shuffled(cards.filter((card) => card.rarity === tier), rng)]));
-  const dealt = [];
-  let owed = 0;
-  DECK_RARITY_MIX.forEach(([tier, share], index) => {
-    const last = index === DECK_RARITY_MIX.length - 1;
-    const want = (last ? quota - dealt.length : Math.round(quota * share) + owed);
-    const stack = byTier.get(tier);
-    const take = stack.splice(0, Math.max(0, want));
-    dealt.push(...take);
-    owed = Math.max(0, want - take.length);
-  });
-  // Still short (a tiny pool, or a position the era barely had): backfill
-  // with whatever the tiers left behind.
-  if (dealt.length < quota) {
-    const held = new Set(dealt.map((card) => card.id));
-    dealt.push(...shuffled(cards.filter((card) => !held.has(card.id)), rng).slice(0, quota - dealt.length));
-  }
-  return dealt;
+  return shuffled(cards, rng).slice(0, quota);
 }
 
 // Deals a deck to a quota table off the ACTIVE universe.

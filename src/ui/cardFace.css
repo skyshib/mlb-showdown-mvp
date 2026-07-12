@@ -59,45 +59,83 @@
   background: #24313c;
 }
 
-/* Fictional cards get a stable, player-specific ballpark. The class is
+/* Fictional cards get a stable, player-specific color field. The class is
    hashed from the card id in cardFace.js, so the pool varies while each
    player's backdrop remains familiar across drafts and reloads. */
 .gq-fictional-backdrop {
-  background-color: #4f7b51;
+  background: #728b98;
 }
 .gq-backdrop-day {
-  background: linear-gradient(180deg, #8ca4bc 0 58%, #173c28 58% 64%, #4f7b51 64% 100%);
+  background: linear-gradient(145deg, #b7d2df, #6f94aa);
 }
 .gq-backdrop-sunset {
-  background: linear-gradient(180deg, #d88b7c 0%, #8c6680 58%, #342d42 58% 64%, #496b47 64% 100%);
+  background: linear-gradient(145deg, #e4a081, #866b98);
 }
 .gq-backdrop-night {
-  background:
-    linear-gradient(90deg, transparent 0 9%, rgba(239, 244, 222, 0.22) 9% 10%, transparent 10% 23%, rgba(239, 244, 222, 0.16) 23% 24%, transparent 24% 100%) 0 49% / 100% 5% no-repeat,
-    linear-gradient(180deg, #111b35 0 58%, #0a2530 58% 64%, #2e6043 64% 100%);
+  background: linear-gradient(145deg, #17233f, #3e536c);
 }
 .gq-backdrop-ivy {
-  background:
-    repeating-linear-gradient(45deg, rgba(182, 209, 160, 0.1) 0 2px, transparent 2px 8px) 0 58% / 100% 16% no-repeat,
-    linear-gradient(180deg, #9baab5 0 58%, #22543b 58% 68%, #507653 68% 100%);
+  background: linear-gradient(145deg, #376b58, #7d9466);
 }
 .gq-backdrop-brick {
-  background:
-    repeating-linear-gradient(0deg, transparent 0 8px, rgba(24, 22, 27, 0.22) 8px 9px) 0 58% / 100% 13% no-repeat,
-    linear-gradient(180deg, #94afc2 0 58%, #8d3d3f 58% 68%, #55734b 68% 100%);
+  background: linear-gradient(145deg, #a95859, #cf8a75);
 }
 .gq-backdrop-dome {
-  background:
-    repeating-linear-gradient(105deg, #c7d0d5 0 10%, #9eabb4 10% 11%, #d9dfe2 11% 21%) 0 0 / 100% 58% no-repeat,
-    linear-gradient(180deg, transparent 0 58%, #245263 58% 65%, #3f765d 65% 100%);
+  background: linear-gradient(145deg, #b9c1ca, #73859a);
 }
-.gq-fictional-backdrop::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  background: linear-gradient(180deg, transparent 58%, rgba(0, 0, 0, 0.08) 74%, rgba(0, 0, 0, 0.38) 100%);
-  pointer-events: none;
+.gq-backdrop-aqua {
+  background: linear-gradient(145deg, #9ed7d7, #4d8e9b);
+}
+.gq-backdrop-violet {
+  background: linear-gradient(145deg, #b9a7d4, #665d98);
+}
+.gq-backdrop-citrus {
+  background: linear-gradient(145deg, #e3cf74, #83a65b);
+}
+.gq-backdrop-lagoon {
+  background: linear-gradient(145deg, #6fc1b4, #306b80);
+}
+.gq-backdrop-plum {
+  background: linear-gradient(145deg, #b67d9e, #664b78);
+}
+.gq-backdrop-denim {
+  background: linear-gradient(145deg, #83a8c5, #486684);
+}
+.gq-backdrop-mint {
+  background: linear-gradient(145deg, #b6d6b6, #5d9278);
+}
+.gq-backdrop-berry {
+  background: linear-gradient(145deg, #c17a91, #713e65);
+}
+.gq-backdrop-amber {
+  background: linear-gradient(145deg, #e4b866, #a2674c);
+}
+.gq-backdrop-teal {
+  background: linear-gradient(145deg, #72aaa5, #315f69);
+}
+.gq-backdrop-orchid {
+  background: linear-gradient(145deg, #c89ac4, #765d9a);
+}
+.gq-backdrop-slate {
+  background: linear-gradient(145deg, #9da8b2, #526473);
+}
+.gq-backdrop-salmon {
+  background: linear-gradient(145deg, #e0a192, #a55f72);
+}
+.gq-backdrop-indigo {
+  background: linear-gradient(145deg, #778bbd, #3f477c);
+}
+.gq-backdrop-jade {
+  background: linear-gradient(145deg, #7eb89a, #3b745f);
+}
+.gq-backdrop-wine {
+  background: linear-gradient(145deg, #a86a78, #593b59);
+}
+.gq-backdrop-ice {
+  background: linear-gradient(145deg, #c4d8dc, #789ca8);
+}
+.gq-backdrop-peach {
+  background: linear-gradient(145deg, #e6b69d, #b47b7d);
 }
 .gq-card-headshot { position: absolute; inset: 0; }
 .gq-card-headshot:empty { visibility: hidden; }
@@ -505,6 +543,7 @@
   display: block;
   object-fit: contain;
   object-position: center bottom;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 80.6%, 20% 80.6%, 20% 79%, 0 79%);
   transform: translateY(-5cqw) scale(1.08);
   transform-origin: center bottom;
 }
@@ -530,6 +569,11 @@
   pointer-events: none;
 }
 
+/* The source hitter frame contains a stray rule in the transparent photo
+   window. Two clipped copies preserve the frame while skipping that row. */
+.gq-proto-frame-top { clip-path: inset(0 0 28.2% 0); }
+.gq-proto-frame-bottom { clip-path: inset(74% 0 0 0); }
+
 .gq-proto-rarity-mark {
   position: absolute;
   z-index: 12;
@@ -552,12 +596,22 @@
 .gq-proto-rarity-bronze .gq-proto-rarity-mark { color: #c9915d; }
 .gq-proto-rarity-gold .gq-proto-rarity-mark { color: #f0c95e; }
 .gq-proto-rarity-legendary .gq-proto-rarity-mark {
-  color: transparent;
-  background: linear-gradient(90deg, #ff667e, #ffd15e, #55d7a0, #56a1ff, #c77dff, #ff667e);
-  background-clip: text;
-  -webkit-background-clip: text;
-  filter: drop-shadow(0 0.35cqw 0.35cqw #000);
+  color: #ffffff;
+  text-shadow: 0 0.35cqw 0.5cqw rgba(0, 0, 0, 0.95);
 }
+.gq-proto-rainbow-word {
+  display: inline-flex;
+  white-space: nowrap;
+}
+.gq-proto-rainbow-word span:nth-child(1),
+.gq-proto-rainbow-word span:nth-child(9) { color: #ff667e; }
+.gq-proto-rainbow-word span:nth-child(2) { color: #ff9f5e; }
+.gq-proto-rainbow-word span:nth-child(3) { color: #ffd15e; }
+.gq-proto-rainbow-word span:nth-child(4) { color: #55d7a0; }
+.gq-proto-rainbow-word span:nth-child(5) { color: #56c8d8; }
+.gq-proto-rainbow-word span:nth-child(6) { color: #56a1ff; }
+.gq-proto-rainbow-word span:nth-child(7) { color: #8d82ff; }
+.gq-proto-rainbow-word span:nth-child(8) { color: #c77dff; }
 
 .gq-proto-count {
   position: absolute;
@@ -599,15 +653,20 @@
   height: 5%;
   display: flex;
   align-items: center;
+  box-sizing: border-box;
   overflow: hidden;
+  padding: 0.25cqw 0.8cqw 0.15cqw;
   color: #fff;
-  font-style: normal;
+  font-style: italic;
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0;
   text-transform: uppercase;
+  transform: translateY(0.4cqw);
   white-space: nowrap;
-  text-shadow: 0 0.5cqw 0.5cqw rgba(0, 0, 0, 0.88);
+  -webkit-text-stroke: 0.3cqw #c7442f;
+  paint-order: stroke fill;
+  text-shadow: 0 0.4cqw 0.45cqw rgba(0, 0, 0, 0.72);
 }
 
 .gq-proto-meta {

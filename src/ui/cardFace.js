@@ -238,7 +238,12 @@ function photoName(name) {
   return stripCardYear(name);
 }
 
-const FICTIONAL_BACKDROPS = ["day", "sunset", "night", "ivy", "brick", "dome"];
+const FICTIONAL_BACKDROPS = [
+  "day", "sunset", "night", "ivy", "brick", "dome",
+  "aqua", "violet", "citrus", "lagoon", "plum", "denim",
+  "mint", "berry", "amber", "teal", "orchid", "slate",
+  "salmon", "indigo", "jade", "wine", "ice", "peach"
+];
 
 function fictionalBackdropClass(card) {
   const key = String(card.id ?? card.name ?? "player");
@@ -258,6 +263,14 @@ function fictionalRarity(card) {
   if (card.rarity === "rare") return { key: "gold", label: "GOLD" };
   if (card.rarity === "uncommon") return { key: "bronze", label: "BRONZE" };
   return { key: "common", label: "COMMON" };
+}
+
+function fictionalRarityMark(rarity) {
+  if (rarity.key !== "legendary") return escapeHtml(rarity.label);
+  const letters = [...rarity.label]
+    .map((letter) => `<span aria-hidden="true">${escapeHtml(letter)}</span>`)
+    .join("");
+  return `<span class="gq-proto-rainbow-word" aria-label="${escapeHtml(rarity.label)}">${letters}</span>`;
 }
 
 function fictionalChartRows(card) {
@@ -319,10 +332,11 @@ function fictionalCardHtml(card, count) {
   return `<div class="${cardShell(card)} gq-proto-card gq-proto-${pitcher ? "pitcher" : "hitter"} gq-proto-rarity-${rarity.key}"><div class="gq-face">
     <div class="gq-proto-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}">
       <span class="gq-proto-initials">${escapeHtml(initials)}</span>
-      <img class="gq-proto-portrait" src="https://api.dicebear.com/9.x/micah/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}-${card.position ?? card.role}`)}&backgroundColor=transparent" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
+      <img class="gq-proto-portrait" src="https://api.dicebear.com/10.x/micah/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}-${card.position ?? card.role}`)}&clothesVariant=crew" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
     </div>
-    <img class="gq-proto-frame" src="${frame}" alt="">
-    <span class="gq-proto-rarity-mark">${rarity.label}</span>
+    <img class="gq-proto-frame gq-proto-frame-top" src="${frame}" alt="">
+    <img class="gq-proto-frame gq-proto-frame-bottom" src="${frame}" alt="">
+    <span class="gq-proto-rarity-mark">${fictionalRarityMark(rarity)}</span>
     ${count !== null ? `<span class="gq-proto-count">x${count}</span>` : ""}
     ${rating}
     <div class="gq-proto-name" style="font-size:${fictionalNameFontSize(card.name)}cqw">${escapeHtml(card.name.toUpperCase())}</div>

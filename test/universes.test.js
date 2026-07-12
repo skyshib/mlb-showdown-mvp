@@ -52,17 +52,23 @@ test("the draft deck deals the same cards from the same seed, and different card
 });
 
 for (const mode of MODES) {
-  test(`the ${mode} deck seats eight managers, with stars in it`, () => {
+  test(`the ${mode} deck seats eight managers and reads like its league`, () => {
     const deck = buildDraftPool(mode, "coefficient-classic");
 
     assert.ok(maxPoolManagers(deck) >= 8, `${mode} only seats ${maxPoolManagers(deck)} managers`);
 
-    // A flat random slice of a ten-thousand-card set would be all role
-    // players. The deal draws down the rarity ladder so draft night has
-    // somebody worth the first pick.
-    const tiers = new Set(deck.map((card) => card.rarity));
+    // The board is a slice of the league, so it is made of what the league is
+    // made of. Nothing guarantees a star on any one board — the draw is
+    // straight random within a position — but a set whose cards are 7% legends
+    // deals boards that are about 7% legends, and mostly role players, because
+    // that is what the set is.
+    const share = (cards, tier) => cards.filter((card) => card.rarity === tier).length / cards.length;
+    const pool = universePool();
     for (const tier of ["legend", "rare", "uncommon", "common"]) {
-      assert.ok(tiers.has(tier), `${mode} deck deals no ${tier}s`);
+      assert.ok(
+        Math.abs(share(deck, tier) - share(pool, tier)) < 0.12,
+        `${mode}: the deck is ${(100 * share(deck, tier)).toFixed(0)}% ${tier} but the set is ${(100 * share(pool, tier)).toFixed(0)}%`
+      );
     }
 
     // Every card is a real, playable card: a d20 chart and a printed price.
