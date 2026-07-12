@@ -64,14 +64,19 @@
       position: absolute;
       inset: 0;
       z-index: 0;
-      background: #39434c;
+      background:
+        linear-gradient(180deg, #8099ae 0 58%, #193725 58% 64%, #49734d 64% 100%);
       filter: saturate(0.94) contrast(1.04);
     }
 
-    .photo svg {
+    .photo img {
       width: 100%;
       height: 100%;
       display: block;
+      object-fit: cover;
+      object-position: center 18%;
+      transform: scale(1.08);
+      transform-origin: center bottom;
     }
 
     .photo::after {
@@ -267,7 +272,13 @@
     </header>
 
     <article class="card" aria-label="Darius Vega 2005 Showdown-style card">
-      <div class="photo"></div>
+      <div class="photo">
+        <img
+          src="https://api.dicebear.com/9.x/adventurer/svg?seed=Darius%20Vega-HITTER-SS&amp;backgroundColor=transparent"
+          alt="Fictional portrait of Darius Vega"
+          referrerpolicy="no-referrer"
+        >
+      </div>
 
       <img class="frame" src="./vendor/showdownbot/2004-Hitter-BLUE.png" alt="">
       <div class="onbase-number">11</div>
@@ -309,13 +320,8 @@
     </article>
 
     <p class="note">
-      Fictional player and club using the app's locally generated baseball artwork. No real card scan or external image generation is used.
+      Fictional player and club using the same DiceBear Adventurer portrait API as the main game.
     </p>
   </main>
-  <script type="module">
-    import { silhouettePhotoSvg } from "./src/adventure/photos.js";
-
-    document.querySelector(".photo").innerHTML = silhouettePhotoSvg("Darius Vega");
-  </script>
 </body>
 </html>
