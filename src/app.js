@@ -59,7 +59,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260711-random-nomination";
+} from "./rules/draft.js?v=20260712-random-nomination-exports";
 import {
   createRoom,
   fetchRoom,
