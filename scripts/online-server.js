@@ -801,11 +801,12 @@ function denyAction(draft, seat, isHost, action) {
     if (!isHost && lastPick?.manager.id !== seat?.managerId) return "Only the host or the last picker can undo";
     return null;
   }
-  if (type === "lineup" || type === "staff") {
+  if (type === "lineup" || type === "staff" || type === "batting-order") {
     // Your team is yours. Nobody else moves your bats around, and you do not
     // move theirs.
     if (!isHost && action?.managerId !== seat?.managerId) {
-      return `You can only edit your own ${type === "staff" ? "staff" : "lineup"}`;
+      const what = type === "staff" ? "staff" : type === "batting-order" ? "batting order" : "lineup";
+      return `You can only edit your own ${what}`;
     }
     return null;
   }

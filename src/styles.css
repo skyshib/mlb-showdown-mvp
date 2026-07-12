@@ -689,6 +689,60 @@ button.roster-slot[draggable="true"]:active {
   overflow-x: auto;
 }
 
+/* The auction board is the whole deck, so it scrolls inside its own panel
+   instead of running off the bottom of the page. It has to end above the roster
+   dock, which is pinned to the bottom of the window: a table that runs under the
+   dock hides its own last row, which is exactly the row you were reading. */
+.table-scroll-tall {
+  max-height: calc(100vh - 330px);
+  min-height: 320px;
+  overflow-y: auto;
+}
+
+.table-scroll-tall thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+/* A card that has already sold: still on the board, out of reach. */
+.player-table tr.sold-row {
+  color: var(--muted);
+  background: #eef0ec;
+}
+
+.player-table tr.sold-row strong,
+.player-table tr.sold-row td {
+  font-weight: 400;
+  opacity: 0.72;
+}
+
+.sold-tag {
+  display: inline-block;
+  max-width: 92px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #dfe3dd;
+  padding: 2px 6px;
+  color: #5c665f;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The card up for bid right now. */
+.player-table tr.on-block-row,
+.player-table tr.on-block-row:hover {
+  background: #fdf0b8;
+  box-shadow: inset 3px 0 0 #d9a406;
+}
+
+.player-table tr.on-block-row td {
+  font-weight: 700;
+}
+
 .rosters {
   display: grid;
   gap: 12px;
@@ -2120,6 +2174,39 @@ button.roster-slot[draggable="true"]:active {
   border-color: var(--accent);
 }
 
+/* The room is stopped, and it should be impossible to miss. */
+.auction-paused {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  border-color: #d9a406;
+  background: #fdf6dd;
+}
+
+.auction-paused .eyebrow {
+  color: #8a6a04;
+}
+
+.pause-button {
+  border-color: #a97f05;
+  background: #d9a406;
+  color: #2a2100;
+}
+
+.pause-button:hover {
+  background: #c39305;
+}
+
+.pause-button.resume {
+  border-color: var(--accent-dark);
+  background: var(--accent);
+  color: white;
+}
+
+.pause-button.resume:hover {
+  background: var(--accent-dark);
+}
+
 .lot-header {
   display: flex;
   justify-content: space-between;
@@ -2527,4 +2614,82 @@ button.roster-slot[draggable="true"]:active {
 /* A seat that is held, but that the host may hand back. */
 .seat-option.reseat-option {
   border-style: dashed;
+}
+
+/* ---- Batting order ---- */
+
+.roster-view {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roster-tabs {
+  justify-self: start;
+}
+
+.batting-order {
+  display: grid;
+  gap: 8px;
+}
+
+.order-hint {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.order-list {
+  display: grid;
+  gap: 6px;
+}
+
+.order-tile {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-areas: "num name" "num meta";
+  gap: 0 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--panel);
+  color: var(--ink);
+  text-align: left;
+  cursor: grab;
+  min-height: 0;
+}
+
+.order-tile:active {
+  cursor: grabbing;
+}
+
+.order-tile > strong {
+  grid-area: num;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  text-align: center;
+}
+
+.order-tile > span {
+  grid-area: name;
+  font-weight: 700;
+}
+
+.order-tile > em {
+  grid-area: meta;
+  font-style: normal;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.order-tile.selected-slot {
+  border-color: var(--accent);
+  background: #e8f1ec;
+}
+
+.order-tile.readonly-slot {
+  cursor: default;
 }

@@ -551,3 +551,31 @@ test("a manager picks which of their cards take the field", () => {
   const chosen = assignStaffSlots(alpha.roster, { SP1: rp3.id });
   assert.notEqual(chosen[0].player.id, rp3.id, "a reliever does not fill a starter's slot");
 });
+
+test("the batting order a manager sets is the order they bat in", () => {
+  const pool = makeDraftPool("order", 40, 24);
+  const draft = makeAuctionDraft(["Alpha"], pool);
+  const [alpha] = draft.managers;
+  alpha.roster = [
+    ...pool.filter((card) => card.kind === "hitter").slice(0, 9),
+    ...pool.filter((card) => card.role === "SP").slice(0, 2),
+    ...pool.filter((card) => card.role === "RP").slice(0, 2)
+  ];
+
+  // Untouched, they bat in the order the lineup slots are listed: the catcher
+  // leads off, which nobody has ever wanted.
+  const byDefault = buildTeam(alpha).lineup.map((player) => player.id);
+  assert.equal(byDefault.length, 9);
+
+  // Bat the last man first and everybody else shuffles down behind him.
+  const chosen = [byDefault.at(-1), ...byDefault.slice(0, -1)];
+  applyDraftAction(draft, { type: "batting-order", managerId: alpha.id, order: chosen });
+  assert.deepEqual(buildTeam(alpha).lineup.map((player) => player.id), chosen);
+
+  // A stale order survives a roster change: anyone it does not name bats last
+  // rather than falling out of the lineup.
+  alpha.battingOrder = [byDefault[4]];
+  const after = buildTeam(alpha).lineup.map((player) => player.id);
+  assert.equal(after[0], byDefault[4], "the one man named leads off");
+  assert.equal(after.length, 9, "and nobody is lost");
+});

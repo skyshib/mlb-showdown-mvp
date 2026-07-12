@@ -1067,6 +1067,12 @@ export function applyDraftAction(draft, action) {
       manager.staffAssignments = { ...(action.assignments ?? {}) };
       return;
     }
+    case "batting-order": {
+      const manager = draft.managers.find((item) => item.id === action.managerId);
+      if (!manager) throw new Error("Unknown manager for batting order action");
+      manager.battingOrder = [...(action.order ?? [])];
+      return;
+    }
     default:
       throw new Error(`Unknown draft action: ${action?.type}`);
   }

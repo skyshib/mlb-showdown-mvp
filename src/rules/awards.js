@@ -3,7 +3,7 @@
 // per nine is displayed as ERA. "WP" is win probability from the model in
 // game.js; per-162 WPA normalizes a player's game-level swings to a familiar pace.
 
-export function computeAwards(summary, pickNumbers = null) {
+export function computeAwards(summary, pickNumbers = null, prices = null) {
   if (!summary?.hitters?.length || !summary?.pitchers?.length) return [];
   if (summary.hitters[0].wpaPerSeason === undefined) return [];
 
@@ -77,25 +77,33 @@ export function computeAwards(summary, pickNumbers = null) {
       `Grounded into ${rallyKiller.gidp} double plays. Someone had to.`));
   }
 
-  if (pickNumbers && Object.keys(pickNumbers).length) {
-    const ranked = [...everyone]
-      .sort((a, b) => b.wpaPerSeason - a.wpaPerSeason)
-      .map((line, index) => ({ line, productionRank: index + 1, pick: pickNumbers[line.id] }))
-      .filter((entry) => Number.isFinite(entry.pick));
+  // What a player was worth, against what he cost. In an auction the cost is
+  // money, and money is the only thing a manager actually chose — the order the
+  // cards happened to come up in was the queue's doing, not theirs. So an
+  // auction is judged on the price paid, and a snake draft on the pick spent.
+  const marketRanks = prices && Object.keys(prices).length
+    ? rankByCost(everyone, prices, (price) => `Paid ${price}`)
+    : pickNumbers && Object.keys(pickNumbers).length
+      ? rankByCost(everyone, pickNumbers, (pick) => `Pick #${pick}`, { ascending: true })
+      : null;
 
-    const steal = maxBy(ranked, (entry) => entry.pick - entry.productionRank);
-    if (steal && steal.pick - steal.productionRank > 0) {
-      awards.push(award("steal", "Steal of the draft", steal.line,
-        `Pick #${steal.pick}, finished #${steal.productionRank} in WPA`,
-        `Late-round pick, front-of-the-draft production.`));
+  if (marketRanks) {
+    const { ranked, label, byMoney } = marketRanks;
+    const steal = maxBy(ranked, (entry) => entry.costRank - entry.productionRank);
+    if (steal && steal.costRank - steal.productionRank > 0) {
+      awards.push(award("steal", byMoney ? "Bargain of the auction" : "Steal of the draft", steal.line,
+        `${label(steal.cost)}, finished #${steal.productionRank} in WPA`,
+        byMoney ? "Nobody else wanted him. Nobody else got him." : "Late-round pick, front-of-the-draft production."));
     }
 
-    const earlyPicks = ranked.filter((entry) => entry.pick <= teamCount * 3);
-    const bust = maxBy(earlyPicks, (entry) => entry.productionRank - entry.pick);
-    if (bust && bust.productionRank - bust.pick > 0) {
-      awards.push(award("bust", "Bust of the draft", bust.line,
-        `Pick #${bust.pick}, finished #${bust.productionRank} in WPA`,
-        `First three rounds. This is a safe space.`));
+    // The cards the room paid up for: the priciest few in an auction, the first
+    // three rounds in a snake draft. Both come to the same handful of players.
+    const premium = ranked.filter((entry) => entry.costRank <= teamCount * 3);
+    const bust = maxBy(premium, (entry) => entry.productionRank - entry.costRank);
+    if (bust && bust.productionRank - bust.costRank > 0) {
+      awards.push(award("bust", byMoney ? "Bust of the auction" : "Bust of the draft", bust.line,
+        `${label(bust.cost)}, finished #${bust.productionRank} in WPA`,
+        byMoney ? "The room bid him up. The room was wrong." : "First three rounds. This is a safe space."));
     }
   }
 
@@ -118,6 +126,27 @@ export function computeAwards(summary, pickNumbers = null) {
 
 function award(key, label, line, stat, note) {
   return { key, label, id: line.id, name: line.name, team: line.team, stat, note };
+}
+
+// Lines up what each player produced against what he cost, so the two can be
+// compared as ranks. A pick number is already a rank — pick 7 is the seventh
+// costliest thing anyone spent — but a price is only a number, so the field has
+// to be sorted by it: the dearest card is cost rank 1.
+function rankByCost(everyone, costs, label, options = {}) {
+  const ranked = [...everyone]
+    .sort((a, b) => b.wpaPerSeason - a.wpaPerSeason)
+    .map((line, index) => ({ line, productionRank: index + 1, cost: Number(costs[line.id]) }))
+    .filter((entry) => Number.isFinite(entry.cost));
+  if (options.ascending) {
+    for (const entry of ranked) entry.costRank = entry.cost;
+    return { ranked, label, byMoney: false };
+  }
+  [...ranked]
+    .sort((a, b) => b.cost - a.cost)
+    .forEach((entry, index) => {
+      entry.costRank = index + 1;
+    });
+  return { ranked, label, byMoney: true };
 }
 
 function maxBy(list, valueOf) {

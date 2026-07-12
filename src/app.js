@@ -21,6 +21,7 @@ import {
   CORNER_OUTFIELD_POSITION,
   SIM_ACTION_TYPES,
   STAFF_SLOT_LABELS,
+  applyBattingOrder,
   applyDraftAction,
   assignLineupSlots,
   assignStaffSlots,
@@ -66,9 +67,9 @@ import {
   pauseAuction,
   pickPlayer,
   placeSealedBid,
-  resumeAuction,
   randomNominationCounts,
   randomNominationShortfalls,
+  resumeAuction,
   sealedBidder,
   staffStatus,
   startAuctionReview,
@@ -76,7 +77,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260712-roster-choice";
+} from "./rules/draft.js?v=20260712-batting-order";
 import {
   createRoom,
   fetchRoom,
@@ -95,7 +96,7 @@ import {
   runBatchChunk,
   summarizeBatch
 } from "./rules/batch.js?v=20260708-mlb-win-prob";
-import { computeAwards } from "./rules/awards.js?v=20260705-wpa-two-decimals";
+import { computeAwards } from "./rules/awards.js?v=20260712-auction-pause";
 import { hitterPositions, playsPosition } from "./rules/cards.js";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
@@ -113,7 +114,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260712-card-backgrounds";
+} from "./ui/render.js?v=20260712-auction-pause";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -139,6 +140,8 @@ let state = loadState() ?? defaultState();
 setUniverse(state.seed, state.universe, { priceNoise: false });
 let selectedLineupMove = null;
 let draggedLineupMove = null;
+let selectedOrderMove = null;
+let draggedOrderMove = null;
 // The open game, if one is being played. A game is a sitting rather than a
 // save: it holds live engine state (the seeded rng included), so it lives in
 // memory only and a reload puts you back on the draft board.
@@ -170,6 +173,9 @@ setInterval(auctionClockTick, 500);
 function pickClockTurn() {
   const draft = state.draft;
   if (!draft || draft.complete) return null;
+  // Paused means paused: an untimed auction's pick clock stops too, so a break
+  // never times anybody out of a nomination they were about to make.
+  if (isAuctionPaused(draft)) return null;
   if (isAuctionDraft(draft) && auctionTimerEnabled(draft)) return null;
   // Computer turns resolve instantly, so the clock only times humans: picks,
   // nominations, and each sealed-bid entry while a lot is on the block.
@@ -303,6 +309,7 @@ function handlePickClockExpiry(turn) {
 function advanceCpuTurns() {
   const draft = state.draft;
   if (!draft || state.online || cpuPaused) return;
+  if (isAuctionPaused(draft)) return;
   if (isAuctionDraft(draft) && !auctionReviewComplete(draft, draftNow())) return;
   let guard = auctionStepGuard(draft);
   while (!draft.complete && guard > 0) {
@@ -522,6 +529,7 @@ function defaultState() {
     rosterSize: 13,
     draft: null,
     draftTab: "available",
+    rosterTab: "roster",
     rosterDock: "open",
     online: null,
     tournament: null,
@@ -1285,7 +1293,7 @@ function renderDraft() {
   const historyTab = state.draftTab === "history";
   const playerRows = historyTab
     ? []
-    : draft.complete
+    : draft.complete && !auction
       ? filteredPlayers(availablePlayers(draft)).sort(comparePlayers).slice(0, 40)
       : draftVisiblePlayers(draft, current);
   const rosters = draft.managers.map((manager) => renderRoster(manager, draft)).join("");
@@ -1348,6 +1356,11 @@ function renderDraft() {
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
+        // The auction board is the whole deck at once, so it scrolls in place
+        // rather than pushing the rosters off the bottom of the screen.
+        scroll: auction,
+        lotPlayerId: lot?.playerId ?? null,
+        ownerOf: auction ? (player) => cardOwnerTag(draft, player) : null,
         canPick: (player) => {
           if (!current) return { ok: false, reason: "draft complete" };
           // Which of these ever come up is the room's one secret, so the board
@@ -1370,6 +1383,37 @@ function renderDraft() {
 
   bindDraftActions();
   pickClockTick();
+}
+
+// Who owns a card, for the greyed-out rows on the auction board. Null while it
+// is still there to be bought.
+function cardOwnerTag(draft, player) {
+  if (!draft.pickedIds.has(player.id)) return null;
+  const owner = draft.managers.find((manager) => manager.roster.some((card) => card.id === player.id));
+  const sale = draft.auction?.history?.find((entry) => entry.playerId === player.id && !entry.passed);
+  if (!owner) return { label: "Gone", title: "" };
+  const price = Number.isFinite(sale?.price) ? sale.price : null;
+  return {
+    label: owner.name,
+    title: price === null
+      ? `${owner.name} has ${player.name}`
+      : `${owner.name} bought ${player.name} for ${price}`
+  };
+}
+
+function renderPausedPanel(draft) {
+  const online = state.online;
+  const host = !online || online.host;
+  return `<section class="panel auction-paused">
+    <div class="lot-header">
+      <div>
+        <p class="eyebrow">Paused</p>
+        <h2>The draft is paused${draft.auction.lot ? " — the card on the block is waiting" : ""}</h2>
+        <p class="muted">Every clock is stopped. Nobody can nominate or bid until the host resumes.</p>
+      </div>
+    </div>
+    ${host ? `<div class="lot-actions"><button data-action="resume-draft">&#9654; Resume draft</button></div>` : ""}
+  </section>`;
 }
 
 function renderAuctionReviewPanel(draft) {
@@ -1461,7 +1505,10 @@ function renderAuctionLotPanel(draft) {
   // stalled seat if you host — gets their own box, and they can be filled in
   // any order. The lot resolves on the last one in, whoever that turns out
   // to be.
-  const mine = draft.managers.filter((manager) => lot.pending.includes(manager.id) && canEnterFor(manager));
+  // A paused room takes no bids, so it offers nobody a box to put one in.
+  const mine = isAuctionPaused(draft)
+    ? []
+    : draft.managers.filter((manager) => lot.pending.includes(manager.id) && canEnterFor(manager));
   const entry = mine
     .map((manager) => {
       const isNominator = lot.round === 1 && manager.id === lot.nominatorId;
@@ -1536,6 +1583,25 @@ function renderLastSalePanel(draft) {
 
 function bindDraftActions() {
   app.onclick = (event) => {
+    const orderTile = event.target.closest("[data-order-tile]");
+    if (orderTile) {
+      const managerId = orderTile.dataset.managerId;
+      if (!canManageRoster(managerId)) return;
+      if (selectedOrderMove && selectedOrderMove.managerId === managerId
+        && selectedOrderMove.playerId !== orderTile.dataset.playerId) {
+        moveBattingOrder(managerId, selectedOrderMove.playerId, Number(orderTile.dataset.orderIndex));
+        selectedOrderMove = null;
+        invalidateBatch();
+        saveState();
+        renderDraft();
+        return;
+      }
+      selectedOrderMove = selectedOrderMove?.playerId === orderTile.dataset.playerId
+        ? null
+        : { managerId, playerId: orderTile.dataset.playerId };
+      renderDraft();
+      return;
+    }
     const lineupSlot = event.target.closest("[data-lineup-slot]");
     if (lineupSlot) {
       handleLineupSlotClick(lineupSlot);
@@ -1595,6 +1661,25 @@ function bindDraftActions() {
       }
       completeAuctionReview(state.draft, draftNow());
       afterLocalDraftAction();
+      return;
+    }
+    if (action === "pause-draft" || action === "resume-draft") {
+      if (button.disabled) return;
+      const pausing = action === "pause-draft";
+      if (state.online) {
+        sendOnlineAction({ type: pausing ? "pause" : "resume" });
+        return;
+      }
+      if (pausing) pauseAuction(state.draft, draftNow());
+      else resumeAuction(state.draft, draftNow());
+      // Not afterLocalDraftAction: pausing must not wake the computer managers
+      // up, and resuming should let them carry on from where they stopped.
+      if (pausing) {
+        saveState();
+        renderDraft();
+      } else {
+        afterLocalDraftAction();
+      }
       return;
     }
     if (action === "pick") {
@@ -1702,6 +1787,14 @@ function bindDraftActions() {
     if (action === "batch") {
       requestBatchRun(DEFAULT_BATCH_RUNS);
     }
+    if (action === "roster-tab") {
+      state.rosterTab = button.dataset.tab === "order" ? "order" : "roster";
+      selectedLineupMove = null;
+      selectedOrderMove = null;
+      saveState();
+      renderDraft();
+      return;
+    }
     if (action === "play-game") {
       startGame(app.querySelector("[data-play-opponent]")?.value);
     }
@@ -1737,6 +1830,19 @@ function bindDraftActions() {
   });
 
   app.ondragstart = (event) => {
+    const tile = event.target.closest("[data-order-tile]");
+    if (tile) {
+      if (!canManageRoster(tile.dataset.managerId)) {
+        event.preventDefault();
+        return;
+      }
+      hideHoverCard();
+      draggedOrderMove = { managerId: tile.dataset.managerId, playerId: tile.dataset.playerId };
+      selectedOrderMove = draggedOrderMove;
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", tile.dataset.playerId);
+      return;
+    }
     const slot = event.target.closest("[data-lineup-slot][data-player-id]");
     if (!slot) return;
     hideHoverCard();
@@ -1757,6 +1863,12 @@ function bindDraftActions() {
   };
 
   app.ondragover = (event) => {
+    const tile = event.target.closest("[data-order-tile]");
+    if (tile && draggedOrderMove && tile.dataset.managerId === draggedOrderMove.managerId) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      return;
+    }
     const slot = event.target.closest("[data-lineup-slot]");
     if (!slot || !draggedLineupMove) return;
     if (slot.dataset.managerId !== draggedLineupMove.managerId) return;
@@ -1766,6 +1878,17 @@ function bindDraftActions() {
   };
 
   app.ondrop = (event) => {
+    const tile = event.target.closest("[data-order-tile]");
+    if (tile && draggedOrderMove && tile.dataset.managerId === draggedOrderMove.managerId) {
+      event.preventDefault();
+      moveBattingOrder(draggedOrderMove.managerId, draggedOrderMove.playerId, Number(tile.dataset.orderIndex));
+      draggedOrderMove = null;
+      selectedOrderMove = null;
+      invalidateBatch();
+      saveState();
+      renderDraft();
+      return;
+    }
     const slot = event.target.closest("[data-lineup-slot]");
     if (!slot || !draggedLineupMove) return;
     if (slot.dataset.managerId !== draggedLineupMove.managerId) return;
@@ -1780,7 +1903,9 @@ function bindDraftActions() {
 
   app.ondragend = () => {
     if (draggedLineupMove) selectedLineupMove = null;
+    if (draggedOrderMove) selectedOrderMove = null;
     draggedLineupMove = null;
+    draggedOrderMove = null;
   };
 }
 
@@ -2099,7 +2224,7 @@ function renderBatch() {
   }
   const { summary, runs } = state.batch;
   const top = summary.teams[0];
-  const awards = computeAwards(summary, buildPickNumberMap(state.draft));
+  const awards = computeAwards(summary, buildPickNumberMap(state.draft), buildPricePaidMap(state.draft));
   const backLabel = "Back to draft";
   const playersById = draftedPlayersById();
   const leagueWoba = tournamentWoba(summary.hitters);
@@ -2632,6 +2757,17 @@ function defaultBatchSortDirection(table, sort) {
   if (["name", "team", "position", "role"].includes(sort)) return "asc";
   if (table === "pitchers" && ["era", "fip", "bb9"].includes(sort)) return "asc";
   return "desc";
+}
+
+// What every card on a roster cost its owner. Empty for a snake draft, where
+// nobody paid anything but a pick.
+function buildPricePaidMap(draft) {
+  if (!isAuctionDraft(draft)) return {};
+  const prices = {};
+  for (const pick of draftHistory(draft)) {
+    if (Number.isFinite(pick.price)) prices[pick.player.id] = pick.price;
+  }
+  return prices;
 }
 
 function buildPickNumberMap(draft) {
@@ -3789,8 +3925,71 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
       ${remaining}
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
     </div>
-    ${renderRosterSlots(manager, draft)}
+    <div class="roster-view">
+      <div class="game-tabs roster-tabs">
+        <button class="game-tab ${state.rosterTab === "order" ? "" : "active"}" data-action="roster-tab" data-tab="roster">Roster</button>
+        <button class="game-tab ${state.rosterTab === "order" ? "active" : ""}" data-action="roster-tab" data-tab="order">Batting order</button>
+      </div>
+      ${state.rosterTab === "order" ? renderBattingOrder(manager) : renderRosterSlots(manager, draft)}
+    </div>
   </section>`;
+}
+
+// The nine who bat, in the order they bat. Default is the order the lineup
+// slots happen to be listed in — catcher first, which nobody has ever wanted —
+// so this is where you fix it. Drag a man up and everyone below him shuffles
+// down; the order rides along into the sim and into a played game.
+function renderBattingOrder(manager) {
+  const lineup = battingLineup(manager);
+  const mine = canManageRoster(manager.id);
+  if (!lineup.length) {
+    return `<p class="empty">Draft nine hitters and they will line up here.</p>`;
+  }
+  const tiles = lineup
+    .map((player, index) => `<button type="button"
+      class="order-tile ${mine ? "" : "readonly-slot"} ${selectedOrderMove?.playerId === player.id ? "selected-slot" : ""}"
+      data-order-tile="true"
+      data-manager-id="${escapeHtml(manager.id)}"
+      data-player-id="${escapeHtml(player.id)}"
+      data-order-index="${index}"
+      ${mine ? 'draggable="true"' : "disabled"}
+      data-preview-id="order-${escapeHtml(manager.id)}-${escapeHtml(player.id)}"
+      data-preview-card="${escapeHtml(renderPlayerCard(player))}"
+    >
+      <strong>${index + 1}</strong>
+      <span>${escapeHtml(player.name)}</span>
+      <em>${escapeHtml(playerPosition(player))} &middot; OB ${player.onBase} &middot; SPD ${player.speed} &middot; ${player.points} pts</em>
+    </button>`)
+    .join("");
+  return `<div class="batting-order" aria-label="${escapeHtml(manager.name)} batting order">
+    <span class="order-hint">${mine ? "Drag a hitter to bat them sooner" : "Batting order"}</span>
+    <div class="order-list">${tiles}</div>
+  </div>`;
+}
+
+// The nine active bats, in the order they will come up.
+function battingLineup(manager) {
+  const lineup = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
+    .filter((slot) => slot.player)
+    .map((slot) => slot.player);
+  return applyBattingOrder(lineup, manager.battingOrder);
+}
+
+// Move a hitter to a spot in the order; everyone in between shuffles along.
+function moveBattingOrder(managerId, playerId, toIndex) {
+  const manager = findDraftManager(managerId);
+  if (!manager || !canManageRoster(managerId)) return false;
+  const order = battingLineup(manager).map((player) => player.id);
+  const from = order.indexOf(playerId);
+  if (from < 0 || toIndex < 0 || toIndex >= order.length || from === toIndex) return false;
+  order.splice(from, 1);
+  order.splice(toIndex, 0, playerId);
+  if (state.online) {
+    sendOnlineAction({ type: "batting-order", managerId, order });
+    return true;
+  }
+  manager.battingOrder = order;
+  return true;
 }
 
 function renderRosterSlots(manager, draft) {
@@ -4167,7 +4366,14 @@ function canSimulate(draft) {
   return draft.complete && draft.managers.every((manager) => validateRoster(manager, options).length === 0);
 }
 
+// A snake board shows what you can still take, best first, and only as much of
+// it as anyone reads. An auction board shows the whole deck — the cards that
+// have sold stay in their place on it, greyed out, because in an auction what
+// is gone (and what it went for) is half of what the board is telling you.
 function draftVisiblePlayers(draft, manager) {
+  if (isAuctionDraft(draft)) {
+    return filteredPlayers(draft.pool).sort(comparePlayers);
+  }
   return filteredPlayers(availablePlayers(draft))
     .map((player) => ({ player, legality: canPickPlayer(draft, manager, player) }))
     .sort(compareDraftRows)
@@ -4335,6 +4541,7 @@ function reviveState(value) {
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
+    rosterTab: value.rosterTab === "order" ? "order" : "roster",
     draft,
     tournament: null,
     view: value.view === "batch" && value.batch ? "batch" : null
@@ -4369,7 +4576,10 @@ function reviveAuction(draft, auction) {
   const review = {
     startedAt: finiteOrNull(savedReview.startedAt),
     endsAt: finiteOrNull(savedReview.endsAt),
-    completedAt: savedReview.completedAt === 0 ? 0 : finiteOrNull(savedReview.completedAt)
+    completedAt: savedReview.completedAt === 0 ? 0 : finiteOrNull(savedReview.completedAt),
+    // What was left on the review clock when the room paused. Lose this and a
+    // paused draft comes back with its break already over.
+    pausedRemainingMs: finiteOrNull(savedReview.pausedRemainingMs)
   };
   if (!timer.enabled && review.completedAt === null) review.completedAt = 0;
   // Lots saved by the old open-bid auction lack a pending list; drop them
@@ -4385,6 +4595,8 @@ function reviveAuction(draft, auction) {
     review,
     nominatorIndex,
     lot,
+    // A draft paused when the tab closed is still paused when it opens again.
+    pausedAt: finiteOrNull(auction?.pausedAt),
     history: Array.isArray(auction?.history) ? auction.history : []
   };
   // The hidden queue and how far it has been dealt ARE the draft's clock in a
