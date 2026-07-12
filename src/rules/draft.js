@@ -44,10 +44,15 @@ const BULLPEN_TARGET = 2;
 const PITCHER_TARGET = STARTER_TARGET + BULLPEN_TARGET;
 const DEFAULT_ROSTER_SIZE = HITTER_TARGET + PITCHER_TARGET;
 
-// The active roster, position by position. 1B and DH have no card that must
-// list them — any glove covers first, any bat DHs — but they are still a slot
-// a manager has to fill, so they carry a quota of one for pool-sizing. The
-// table sums to the 13-man roster on purpose: it IS the roster, spelled out.
+// The designated hitter is a slot, not a position: ANY bat fills it, and
+// whole card sets print nobody at "DH" at all — the dead-ball decades never
+// had the rule. So the DH slot draws on the hitters at large rather than on a
+// DH shelf that may not exist.
+export const ANY_HITTER = "HITTER";
+
+// The active roster, slot by slot. The table sums to the 13-man roster on
+// purpose: it IS the roster, spelled out. Every slot needs a supply of cards
+// that can fill it, which is what sizes a board.
 export const ROSTER_SLOTS = [
   ["C", 1],
   ["1B", 1],
@@ -56,7 +61,9 @@ export const ROSTER_SLOTS = [
   ["SS", 1],
   [CORNER_OUTFIELD_POSITION, 2],
   ["CF", 1],
-  ["DH", 1],
+  // Last of the hitters on purpose: the position groups take their cards
+  // first, and the DH slot draws from whoever is left.
+  [ANY_HITTER, 1],
   ["SP", STARTER_TARGET],
   ["RP", BULLPEN_TARGET]
 ];
@@ -66,6 +73,13 @@ export const ROSTER_SLOTS = [
 // for an arm.
 export function poolGroup(player) {
   return player?.kind === "pitcher" ? pitcherRole(player) : player?.position;
+}
+
+// Can this card fill that slot's supply? Positions want the cards printed
+// there; the DH slot takes any bat in the set.
+export function poolGroupMatches(player, group) {
+  if (group === ANY_HITTER) return player?.kind === "hitter";
+  return poolGroup(player) === group;
 }
 
 // Random-nomination pool sizes, per roster slot, for a room of n managers.
@@ -101,11 +115,17 @@ export function randomNominationQuotas(managerCount) {
 // deep universe returns nothing; a one-franchise set may simply not own enough
 // catchers to seat the room, and the setup screen has to say so rather than
 // deal a board the closing sweep can't finish.
+// A board is too thin when some slot cannot be supplied. The hitter groups are
+// checked against what is LEFT after the position groups take theirs, because
+// one card cannot be two managers' cards: nine hitters per roster means nine
+// hitters' worth of board, however they are labelled.
 export function randomNominationShortfalls(pool, managerCount) {
   const shortfalls = [];
+  const taken = new Set();
   for (const [group, quota] of randomNominationQuotas(managerCount).visible) {
-    const dealt = pool.filter((player) => poolGroup(player) === group).length;
-    if (dealt < quota) shortfalls.push({ group, quota, dealt });
+    const available = pool.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
+    for (const player of available.slice(0, quota)) taken.add(player.id);
+    if (available.length < quota) shortfalls.push({ group, quota, dealt: available.length });
   }
   return shortfalls;
 }
@@ -220,9 +240,16 @@ function buildNominationQueue(draft) {
   const rng = createRng(`${draft.seed}:nomination-queue`);
   const { hidden } = randomNominationQuotas(draft.managers.length);
   const queue = [];
+  const queued = new Set();
   for (const [group, count] of hidden) {
-    const cards = draft.pool.filter((player) => poolGroup(player) === group);
-    queue.push(...shuffleSeeded(cards, rng).slice(0, count));
+    // A card queues once. The DH group draws on every hitter, so it has to
+    // skip the ones the position groups already took, or the same bat would
+    // come up for bid twice.
+    const cards = draft.pool.filter((player) => !queued.has(player.id) && poolGroupMatches(player, group));
+    for (const player of shuffleSeeded(cards, rng).slice(0, count)) {
+      queued.add(player.id);
+      queue.push(player);
+    }
   }
   return shuffleSeeded(queue, rng).map((player) => player.id);
 }
