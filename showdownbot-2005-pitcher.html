@@ -178,11 +178,10 @@
       background: #dfe4e8;
       border-radius: 9px;
       isolation: isolate;
-      --bb-color: #c99127;
-      --single-color: #34785d;
-      --double-color: #286f9b;
-      --triple-color: #735394;
-      --homer-color: #a93443;
+      --pu-color: #735394;
+      --so-color: #a93443;
+      --gb-color: #34785d;
+      --fb-color: #286f9b;
     }
 
     .photo {
@@ -225,9 +224,17 @@
 
     .primary-number {
       position: absolute;
-      z-index: 6;
+      z-index: 7;
       left: 10.23%;
       top: 86.38%;
+      width: 11.5%;
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid #c8bda8;
+      border-radius: 50%;
+      background: #f5eedf;
       color: #ef3d1b;
       font-family: "Showdown Condensed", Arial Narrow, sans-serif;
       font-size: clamp(21px, 6.5vw, 29px);
@@ -243,16 +250,39 @@
       pointer-events: none;
     }
 
+    .primary-number::before,
+    .primary-number::after {
+      content: "";
+      position: absolute;
+      top: 14%;
+      bottom: 14%;
+      width: 31%;
+      border: 2px solid #c84b43;
+      border-top-color: transparent;
+      border-bottom-color: transparent;
+      border-radius: 50%;
+      opacity: 0.92;
+    }
+
+    .primary-number::before {
+      left: 5%;
+      transform: rotate(-12deg);
+    }
+
+    .primary-number::after {
+      right: 5%;
+      transform: rotate(12deg);
+    }
+
     .primary-label {
       position: absolute;
       z-index: 7;
-      left: 3.5%;
-      top: 88.65%;
-      width: 13.5%;
-      height: 2.35%;
+      left: 4.05%;
+      top: 88.75%;
+      width: 12.4%;
+      height: 2.1%;
       display: grid;
       place-items: center;
-      clip-path: polygon(5% 0, 100% 0, 95% 100%, 0 100%);
       background: #14283a;
       color: #fff;
       font-family: "Showdown Condensed", Arial Narrow, sans-serif;
@@ -261,7 +291,7 @@
       line-height: 1;
       text-transform: uppercase;
       text-shadow: 0 1px 1px #000;
-      transform: rotate(-6deg);
+      transform: rotate(-6deg) skewX(-4deg);
       transform-origin: center;
     }
 
@@ -355,14 +385,14 @@
       place-items: center;
     }
 
-    .chart-ranges span:nth-child(5),
-    .chart-outcomes span:nth-child(5) { background: color-mix(in srgb, var(--bb-color) 82%, rgb(9, 41, 64)); }
-    .chart-ranges span:nth-child(6),
-    .chart-outcomes span:nth-child(6) { background: color-mix(in srgb, var(--single-color) 82%, rgb(9, 41, 64)); }
-    .chart-ranges span:nth-child(7),
-    .chart-outcomes span:nth-child(7) { background: color-mix(in srgb, var(--double-color) 82%, rgb(9, 41, 64)); }
-    .chart-ranges span:nth-child(8),
-    .chart-outcomes span:nth-child(8) { background: color-mix(in srgb, var(--homer-color) 82%, rgb(9, 41, 64)); }
+    .chart-ranges span:nth-child(1),
+    .chart-outcomes span:nth-child(1) { background: color-mix(in srgb, var(--pu-color) 82%, rgb(9, 41, 64)); }
+    .chart-ranges span:nth-child(2),
+    .chart-outcomes span:nth-child(2) { background: color-mix(in srgb, var(--so-color) 82%, rgb(9, 41, 64)); }
+    .chart-ranges span:nth-child(3),
+    .chart-outcomes span:nth-child(3) { background: color-mix(in srgb, var(--gb-color) 82%, rgb(9, 41, 64)); }
+    .chart-ranges span:nth-child(4),
+    .chart-outcomes span:nth-child(4) { background: color-mix(in srgb, var(--fb-color) 82%, rgb(9, 41, 64)); }
 
     .note {
       margin: 0;
@@ -441,12 +471,12 @@
 
       <div class="metadata" aria-label="Player metadata">
         <span>323 PT</span>
+        <span>Starter</span>
         <span>IP 6</span>
         <span>Throws L</span>
-        <span>SP</span>
       </div>
 
-      <div class="chart-strip" aria-label="Batting chart">
+      <div class="chart-strip" aria-label="Pitching chart">
         <div class="chart-ranges" aria-label="Chart result ranges">
           <span>1</span>
           <span>2-5</span>
