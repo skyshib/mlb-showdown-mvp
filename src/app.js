@@ -507,6 +507,19 @@ async function bootOnlineRoom(roomId) {
     renderOnlineMessage(error.message, true);
     return;
   }
+  // Fetching the room is the easy half. Rebuilding it — dealing its deck and
+  // replaying every action in its log — is where things actually go wrong, and
+  // an exception thrown in there used to escape into nothing: the screen sat on
+  // "Connecting to room…" forever while the console quietly held the reason.
+  // Say it out loud instead.
+  try {
+    openRoom(roomId, room);
+  } catch (error) {
+    renderOnlineMessage(`Room ${roomId} could not be rebuilt: ${error.message}`, true);
+  }
+}
+
+function openRoom(roomId, room) {
   const seat = loadOnlineSeat(roomId);
   state = defaultState();
   state.seed = room.seed;
@@ -556,7 +569,13 @@ function rebuildOnlineDraft(room) {
       draftType: state.draftType,
       nomination: state.nomination,
       budget: state.auctionBudget,
-      timer: room.auctionTimer
+      // A room that names no clock has no clock — the same default reviveRoom
+      // takes on the server. Left undefined this normalizes to a TIMED auction
+      // (the house rule), which invents a review period the room never had, and
+      // then the room's own log will not replay through it: the nomination that
+      // was legal when it was recorded throws "Review period is still open" and
+      // the room can never be opened again.
+      timer: room.auctionTimer ?? false
     }
   );
   // The bids on the card currently up are withheld until it sells, so the

@@ -6,16 +6,18 @@ import {
   AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS,
   AUCTION_DEFAULT_REVIEW_SECONDS,
   AUCTION_MIN_BID,
-  auctionBudget,
+  applyDraftAction,
   auctionBidTimeRemainingMs,
+  auctionBudget,
   auctionLotPlayer,
   auctionMaxBid,
   auctionReviewRemainingMs,
+  auctionTimerEnabled,
   autopick,
   canNominatePlayer,
   canPlaceSealedBid,
-  completeAuctionReview,
   cancelLot,
+  completeAuctionReview,
   cpuSealedBid,
   createDraft,
   currentManager,
@@ -24,12 +26,13 @@ import {
   nominateBestTarget,
   nominatePlayer,
   normalizeAuctionBudget,
+  normalizeAuctionTimerConfig,
   pickPlayer,
   placeSealedBid,
   sealedBidder,
   startAuctionReview,
-  syncAuctionTimer,
   submitCpuSealedBids,
+  syncAuctionTimer,
   undoLastPick,
   upcomingNominators,
   validateRoster
@@ -478,4 +481,34 @@ test("auto-run resolves one lot and auto-finish builds legal rosters within budg
     assert.equal(auctionBudget(draft, manager), draft.auction.budget - spent);
     assert.ok(auctionBudget(draft, manager) >= 0);
   }
+});
+
+test("a draft rebuilt without a clock replays a log recorded without one", () => {
+  // An auction is timed unless it says otherwise — that is the house rule.
+  assert.equal(normalizeAuctionTimerConfig(undefined).enabled, true);
+  // ...and `false` is how a draft opts out.
+  for (const off of [false, { enabled: false }]) {
+    assert.equal(normalizeAuctionTimerConfig(off).enabled, false);
+  }
+
+  // Which makes the default a trap for anyone REBUILDING a draft: a room that
+  // never had a clock, rebuilt with the timer left undefined, opens a review
+  // period it never had — and then cannot replay its own action log, because
+  // the nomination that was legal when it was recorded now throws "Review
+  // period is still open". That is what hung an online room on "Connecting to
+  // room…". reviveRoom and rebuildOnlineDraft both pass `?? false` for this.
+  const pool = makeDraftPool("replay", 32, 16);
+  const room = { draftType: "auction", nomination: "random" };
+  const log = [{ type: "auto-nominate" }];
+
+  const timed = createDraft(["Alpha", "Beta"], pool, 13, "replay", room);
+  assert.throws(
+    () => log.forEach((action) => applyDraftAction(timed, action)),
+    /Review period is still open/,
+    "a clock invented on rebuild bricks the log"
+  );
+
+  const untimed = createDraft(["Alpha", "Beta"], pool, 13, "replay", { ...room, timer: false });
+  log.forEach((action) => applyDraftAction(untimed, action));
+  assert.ok(untimed.auction.lot, "the log replayed, and the card it recorded is on the block");
 });

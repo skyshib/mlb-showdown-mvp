@@ -158,6 +158,13 @@ export const AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS = 5;
 
 const MS_PER_SECOND = 1000;
 
+// An auction is timed unless it says otherwise — that is the house rule, and
+// `timer: false` is how a draft opts out. Callers rebuilding a draft that was
+// recorded WITHOUT a clock must pass that false explicitly: a draft timed by
+// accident opens with a review period nobody started, and then cannot replay
+// its own action log (the nomination that was legal when it happened throws
+// "Review period is still open"). See reviveRoom and rebuildOnlineDraft, which
+// both default a missing timer to off for exactly that reason.
 export function normalizeAuctionTimerConfig(timer = {}) {
   if (timer === false || timer?.enabled === false) {
     return { enabled: false, reviewMs: 0, bankMs: 0, incrementMs: 0 };
