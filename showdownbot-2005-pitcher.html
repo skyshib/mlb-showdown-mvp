@@ -274,11 +274,19 @@
       stroke-linecap: round;
     }
 
+    .ball-markings {
+      opacity: 0.42;
+    }
+
     .primary-value {
       position: absolute;
       z-index: 10;
       left: 10.23%;
       top: 86.38%;
+      width: 11.5%;
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
       color: #ef3d1b;
       font-family: "Showdown Condensed", Arial Narrow, sans-serif;
       font-size: clamp(23px, 6.9vw, 31px);
@@ -292,6 +300,18 @@
         -1px 1px 0 #080808,
         1px 1px 0 #080808;
       pointer-events: none;
+    }
+
+    .control-number {
+      transform: translateX(8%);
+    }
+
+    .control-plus {
+      position: absolute;
+      left: 12%;
+      top: 52%;
+      font-size: 0.56em;
+      transform: translateY(-50%);
     }
 
     .primary-label {
@@ -491,15 +511,20 @@
       <img class="frame" src="./vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER-NO-RIBBON.png" alt="">
       <svg class="primary-number" viewBox="0 0 100 100" aria-hidden="true">
         <circle class="ball-fill" cx="50" cy="50" r="48"></circle>
-        <path class="ball-seam" d="M 18 7 C 42 22 42 78 18 93"></path>
-        <path class="ball-seam" d="M 82 7 C 58 22 58 78 82 93"></path>
-        <path class="ball-stitches" d="M 23 20 L 33 12 M 29 32 L 39 26 M 31 44 L 43 42 M 31 56 L 43 58 M 29 68 L 39 74 M 23 80 L 33 88"></path>
-        <path class="ball-stitches" d="M 67 12 L 77 20 M 61 26 L 71 32 M 57 42 L 69 44 M 57 58 L 69 56 M 61 74 L 71 68 M 67 88 L 77 80"></path>
+        <g class="ball-markings" transform="rotate(35 50 50)">
+          <path class="ball-seam" d="M 18 7 C 42 22 42 78 18 93"></path>
+          <path class="ball-seam" d="M 82 7 C 58 22 58 78 82 93"></path>
+          <path class="ball-stitches" d="M 23 20 L 33 12 M 29 32 L 39 26 M 31 44 L 43 42 M 31 56 L 43 58 M 29 68 L 39 74 M 23 80 L 33 88"></path>
+          <path class="ball-stitches" d="M 67 12 L 77 20 M 61 26 L 71 32 M 57 42 L 69 44 M 57 58 L 69 56 M 61 74 L 71 68 M 67 88 L 77 80"></path>
+        </g>
       </svg>
       <svg class="primary-ribbon" viewBox="0 0 200 70" aria-hidden="true">
         <path d="M 8 30 Q 100 7 192 30 L 181 64 Q 100 42 19 64 Z"></path>
       </svg>
-      <div class="primary-value">6</div>
+      <div class="primary-value" aria-label="Control plus 6">
+        <span class="control-plus">+</span>
+        <span class="control-number">6</span>
+      </div>
       <svg class="primary-label" viewBox="0 0 200 70" role="img" aria-label="Control">
         <path class="ribbon-curve" id="control-ribbon-curve" d="M 15 52 Q 100 29 185 52"></path>
         <text><textPath href="#control-ribbon-curve" startOffset="50%">CONTROL</textPath></text>
