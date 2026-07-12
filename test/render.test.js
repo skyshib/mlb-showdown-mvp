@@ -66,19 +66,28 @@ test("fictional card backdrops vary by id but remain deterministic", () => {
 
   assert.equal(backdrop(hitter), first);
   const variants = new Set(
-    Array.from({ length: 20 }, (_, index) => backdrop({ ...hitter, id: `fake-${index}` }))
+    Array.from({ length: 200 }, (_, index) => backdrop({ ...hitter, id: `fake-${index}` }))
   );
-  assert.deepEqual(variants, new Set(["day", "sunset", "night", "ivy", "brick", "dome"]));
+  assert.deepEqual(variants, new Set([
+    "day", "sunset", "night", "ivy", "brick", "dome",
+    "aqua", "violet", "citrus", "lagoon", "plum", "denim",
+    "mint", "berry", "amber", "teal", "orchid", "slate",
+    "salmon", "indigo", "jade", "wine", "ice", "peach"
+  ]));
   assert.equal(backdrop({ ...hitter, id: "real-hitter", real: true }), undefined);
 });
 
 test("fictional hitters and pitchers use the finalized 2005 card template", () => {
   const hitterHtml = cardPanelHtml(hitter);
   const pitcherHtml = cardPanelHtml(pitcher);
+  const legendaryHtml = cardPanelHtml({ ...hitter, rarity: "legend" });
 
   assert.ok(hitterHtml.includes("gq-proto-card gq-proto-hitter"));
   assert.ok(hitterHtml.includes("2004-Hitter-BLUE-NO-FOOTER.png"));
-  assert.ok(hitterHtml.includes("api.dicebear.com/9.x/micah/svg"));
+  assert.ok(hitterHtml.includes("api.dicebear.com/10.x/micah/svg"));
+  assert.ok(hitterHtml.includes("clothesVariant=crew"));
+  assert.ok(hitterHtml.includes("gq-proto-frame-top"));
+  assert.ok(hitterHtml.includes("gq-proto-frame-bottom"));
   assert.ok(hitterHtml.includes("gq-proto-onbase"));
   assert.ok(hitterHtml.includes("1B+"));
 
@@ -87,4 +96,7 @@ test("fictional hitters and pitchers use the finalized 2005 card template", () =
   assert.ok(pitcherHtml.includes("gq-proto-baseball"));
   assert.ok(pitcherHtml.includes('class="gq-proto-control-plus">+</span>'));
   assert.ok(pitcherHtml.includes("CONTROL"));
+
+  assert.ok(legendaryHtml.includes('class="gq-proto-rainbow-word"'));
+  assert.ok(legendaryHtml.includes('aria-label="LEGENDARY"'));
 });

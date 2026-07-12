@@ -96,7 +96,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260708-mlb-win-prob";
+} from "./ui/render.js?v=20260712-card-backgrounds";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const DEFAULT_UNIVERSE = "classic";
