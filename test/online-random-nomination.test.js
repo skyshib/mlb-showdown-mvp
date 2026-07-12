@@ -175,3 +175,38 @@ test("a card set too thin to deal the board is refused at setup", async (t) => {
   assert.equal(created.status, 400);
   assert.match(created.data.error, /too thin to deal/);
 });
+
+test("the setup screen's choices all survive the trip to the room", async (t) => {
+  const { base } = await startServer(t);
+
+  // createRoom in onlineClient.js destructures the payload by name, so a field
+  // it forgets never reaches the server and the room opens on the default.
+  // That is how an auto-nominating room came out nominating by hand.
+  const { createRoom } = await import("../src/onlineClient.js");
+  const original = globalThis.fetch;
+  let sent = null;
+  globalThis.fetch = async (url, init) => {
+    sent = JSON.parse(init.body);
+    return original(base + new URL(url, base).pathname, init);
+  };
+  t.after(() => { globalThis.fetch = original; });
+
+  const chose = {
+    seed: SEED,
+    managers: ["A", "B", "C"],
+    universe: "classic",
+    pickTimer: 60,
+    cpu: ["C"],
+    draftType: "auction",
+    nomination: "random",
+    budget: 5000
+  };
+  const room = await createRoom(chose);
+
+  for (const key of Object.keys(chose)) {
+    assert.notEqual(sent[key], undefined, `createRoom dropped "${key}" on the way out`);
+  }
+  assert.equal(sent.nomination, "random");
+  assert.equal(room.nomination, "random", "the room came back a manual auction");
+  assert.equal(room.draftType, "auction");
+});
