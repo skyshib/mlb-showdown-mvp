@@ -1440,9 +1440,19 @@ button.roster-slot[draggable="true"]:active {
   display: grid;
   gap: 1px;
   border: 1px solid var(--line);
+  border-left: 4px solid transparent;
   border-radius: 6px;
   padding: 3px 8px;
   background: #f8faf7;
+}
+
+.floor-chip strong .player-name-preview,
+.floor-chip strong {
+  display: block;
+  overflow: hidden;
+  max-width: 190px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .floor-chip small {
