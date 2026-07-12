@@ -250,6 +250,87 @@ function fictionalBackdropClass(card) {
   return `gq-backdrop-${FICTIONAL_BACKDROPS[hash % FICTIONAL_BACKDROPS.length]}`;
 }
 
+const FICTIONAL_HITTER_CHART = ["SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
+const FICTIONAL_PITCHER_CHART = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
+
+function fictionalRarity(card) {
+  if (card.rarity === "legend") return { key: "legendary", label: "LEGENDARY" };
+  if (card.rarity === "rare") return { key: "gold", label: "GOLD" };
+  if (card.rarity === "uncommon") return { key: "bronze", label: "BRONZE" };
+  return { key: "common", label: "COMMON" };
+}
+
+function fictionalChartRows(card) {
+  const order = card.kind === "pitcher" ? FICTIONAL_PITCHER_CHART : FICTIONAL_HITTER_CHART;
+  const merged = chartRangeCells(card);
+  const ranges = order.map((result) => {
+    const text = merged.filter((entry) => entry.result === result).map(formatRange).join(",");
+    return `<span>${text ? escapeHtml(text) : "&mdash;"}</span>`;
+  }).join("");
+  const outcomes = order.map((result) => `<span>${escapeHtml(result)}</span>`).join("");
+  return `<div class="gq-proto-chart" style="--gq-proto-cols:${order.length}">
+    <div class="gq-proto-chart-ranges">${ranges}</div>
+    <div class="gq-proto-chart-outcomes">${outcomes}</div>
+  </div>`;
+}
+
+function fictionalNameFontSize(name) {
+  const size = 70 / (0.52 * Math.max(1, String(name).length));
+  return Math.max(4.3, Math.min(7.75, size)).toFixed(2);
+}
+
+function fictionalPitcherBadge(card) {
+  return `<svg class="gq-proto-baseball" viewBox="0 0 100 100" aria-hidden="true">
+    <circle class="gq-proto-ball-fill" cx="50" cy="50" r="48"></circle>
+    <g class="gq-proto-ball-markings" transform="rotate(35 50 50)">
+      <path class="gq-proto-ball-seam" d="M 18 7 C 42 22 42 78 18 93"></path>
+      <path class="gq-proto-ball-seam" d="M 82 7 C 58 22 58 78 82 93"></path>
+      <path class="gq-proto-ball-stitches" d="M 23 20 L 33 12 M 29 32 L 39 26 M 31 44 L 43 42 M 31 56 L 43 58 M 29 68 L 39 74 M 23 80 L 33 88"></path>
+      <path class="gq-proto-ball-stitches" d="M 67 12 L 77 20 M 61 26 L 71 32 M 57 42 L 69 44 M 57 58 L 69 56 M 61 74 L 71 68 M 67 88 L 77 80"></path>
+    </g>
+  </svg>
+  <svg class="gq-proto-ribbon" viewBox="0 0 200 70" aria-hidden="true">
+    <path d="M 8 30 Q 100 7 192 30 L 181 64 Q 100 42 19 64 Z"></path>
+  </svg>
+  <div class="gq-proto-control" aria-label="Control plus ${escapeHtml(card.control)}">
+    <span class="gq-proto-control-plus">+</span>
+    <span class="gq-proto-control-number">${escapeHtml(card.control)}</span>
+  </div>
+  <svg class="gq-proto-control-label" viewBox="0 0 200 70" role="img" aria-label="Control">
+    <path id="gq-control-curve-${escapeHtml(card.id)}" d="M 15 52 Q 100 29 185 52"></path>
+    <text><textPath href="#gq-control-curve-${escapeHtml(card.id)}" startOffset="50%">CONTROL</textPath></text>
+  </svg>`;
+}
+
+function fictionalCardHtml(card, count) {
+  const pitcher = card.kind === "pitcher";
+  const rarity = fictionalRarity(card);
+  const frame = pitcher
+    ? "vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER-NO-RIBBON.png"
+    : "vendor/showdownbot/2004-Hitter-BLUE-NO-FOOTER.png";
+  const role = card.role === "SP" ? "STARTER" : "RELIEVER";
+  const stats = pitcher
+    ? [`${card.points} PT`, role, `IP ${card.ip}`, `THROWS ${card.throws}`]
+    : [`${card.points} PT`, `SPEED ${card.speed}`, `BATS ${card.bats}`, positionFieldingLabel(card)];
+  const rating = pitcher
+    ? fictionalPitcherBadge(card)
+    : `<div class="gq-proto-onbase">${escapeHtml(card.onBase)}</div>`;
+  const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
+  return `<div class="${cardShell(card)} gq-proto-card gq-proto-${pitcher ? "pitcher" : "hitter"} gq-proto-rarity-${rarity.key}"><div class="gq-face">
+    <div class="gq-proto-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}">
+      <span class="gq-proto-initials">${escapeHtml(initials)}</span>
+      <img class="gq-proto-portrait" src="https://api.dicebear.com/9.x/micah/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}-${card.position ?? card.role}`)}&backgroundColor=transparent" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
+    </div>
+    <img class="gq-proto-frame" src="${frame}" alt="">
+    <span class="gq-proto-rarity-mark">${rarity.label}</span>
+    ${count !== null ? `<span class="gq-proto-count">x${count}</span>` : ""}
+    ${rating}
+    <div class="gq-proto-name" style="font-size:${fictionalNameFontSize(card.name)}cqw">${escapeHtml(card.name.toUpperCase())}</div>
+    <div class="gq-proto-meta">${stats.map((value) => `<span>${escapeHtml(value)}</span>`).join("")}</div>
+    ${fictionalChartRows(card)}
+  </div></div>`;
+}
+
 export function cardPanelHtml(card, { count = null } = {}) {
   // Classic cards with a real scan ARE the card: the printed scan fills the
   // frame (courtesy of ShowdownCards.com), with just a compact chart tray
@@ -265,6 +346,7 @@ export function cardPanelHtml(card, { count = null } = {}) {
       <div class="gq-scan-tray"><div class="gq-stat-line">${statLineHtml(card, { rating: true })}</div>${chartRows(card)}</div>
     </div></div>`;
   }
+  if (!card.real) return fictionalCardHtml(card, count);
   const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
   const mark = teamMark(card);
   // Years active and clubs float in the photo's top-left corner — the
