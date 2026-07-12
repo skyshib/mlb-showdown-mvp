@@ -3087,19 +3087,13 @@ function renderWarRoom() {
 
 
 // Blue-to-red heat scale over winning bids (card points in snake drafts).
-// Endpoints sit at the 10th/90th percentile once six sales exist, so most
-// bids land inside the gradient and outliers clamp to the ends; before that,
-// a budget-derived prior keeps early sales meaningful.
+// Auction endpoints are fixed: 0 up to 15% of the starting budget, so colors
+// mean the same thing all draft and a max-out bid clamps red.
 function draftHeatScale(draft) {
   const auction = isAuctionDraft(draft);
   if (auction) {
-    const prices = draftHistory(draft).map((pick) => pick.price).sort((a, b) => a - b);
-    if (prices.length >= 6) {
-      const lo = quantileOf(prices, 0.1);
-      return { lo, hi: Math.max(quantileOf(prices, 0.9), lo + 10), auction };
-    }
     const budget = draft.auction.budget ?? AUCTION_DEFAULT_BUDGET;
-    return { lo: Math.round(budget * 0.02), hi: Math.round(budget * 0.16), auction };
+    return { lo: 0, hi: Math.max(1, Math.round(budget * 0.15)), auction };
   }
   const points = draft.pool.map((player) => player.points).sort((a, b) => a - b);
   const lo = quantileOf(points, 0.1);
@@ -3128,7 +3122,7 @@ function heatValue(player, scale, prices) {
 
 function renderHeatLegend(scale) {
   return `<span class="heat-legend" aria-label="Color scale for ${scale.auction ? "winning bids" : "card points"}">
-    <em>${scale.auction ? "bid" : "pts"} &le;${scale.lo}</em>
+    <em>${scale.auction ? "bid" : "pts"} ${scale.lo}</em>
     <i class="heat-bar"></i>
     <em>${scale.hi}+</em>
   </span>`;
