@@ -60,19 +60,6 @@
       isolation: isolate;
     }
 
-    .card::after {
-      content: "";
-      position: absolute;
-      z-index: 5;
-      left: 0;
-      right: 0;
-      top: 84.35%;
-      bottom: 0;
-      background: rgb(9, 41, 64);
-      border-top: 1px solid rgba(0, 0, 0, 0.72);
-      pointer-events: none;
-    }
-
     .photo {
       position: absolute;
       inset: 0;
@@ -201,7 +188,7 @@
       z-index: 6;
       left: 0;
       right: 0;
-      bottom: 0;
+      top: 84.35%;
       height: 6.65%;
       display: grid;
       grid-template-rows: 3.55fr 3.1fr;
@@ -242,12 +229,20 @@
       position: absolute;
       z-index: 6;
       right: 4.1%;
-      bottom: 7.25%;
+      top: 91.05%;
       color: #fff;
       font-family: "Showdown Condensed", Arial Narrow, sans-serif;
       font-size: clamp(10px, 2.45vw, 14px);
       line-height: 1;
       text-shadow: 0 2px 2px #000;
+    }
+
+    .note {
+      margin: 0;
+      color: #aeb5c0;
+      font-size: 12px;
+      line-height: 1.4;
+      text-align: center;
     }
 
     @media (max-width: 380px) {
@@ -324,6 +319,9 @@
       <div class="set-year">2005</div>
     </article>
 
+    <p class="note">
+      Fictional player and club using DiceBear's Micah portrait style.
+    </p>
   </main>
 </body>
 </html>
