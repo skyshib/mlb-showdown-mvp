@@ -295,10 +295,29 @@ function playChime() {
 }
 
 const onlineRoomParam = new URLSearchParams(location.search).get("room");
+const warRoomMode = new URLSearchParams(location.search).has("board");
 if (onlineRoomParam) {
   bootOnlineRoom(onlineRoomParam);
 } else {
   renderCurrentScreen();
+}
+
+// The TV board mirrors a same-browser draft through localStorage: the storage
+// event fires on writes from other tabs, and a slow poll covers same-tab and
+// missed events.
+if (warRoomMode && !onlineRoomParam) {
+  let warRoomSnapshot = localStorage.getItem(STORAGE_KEY);
+  const refreshWarRoom = () => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === warRoomSnapshot) return;
+    warRoomSnapshot = raw;
+    state = loadState() ?? defaultState();
+    renderCurrentScreen();
+  };
+  window.addEventListener("storage", (event) => {
+    if (event.key === STORAGE_KEY) refreshWarRoom();
+  });
+  setInterval(refreshWarRoom, 1500);
 }
 
 function defaultState() {
@@ -341,6 +360,10 @@ function defaultState() {
 }
 
 function renderCurrentScreen() {
+  if (warRoomMode) {
+    renderWarRoom();
+    return;
+  }
   if (state.online && !state.online.managerId && !state.online.spectator) {
     renderSeatSelect();
   } else if (state.view === "batch" && state.batch && state.draft) {
@@ -396,7 +419,7 @@ async function bootOnlineRoom(roomId) {
     token: seat?.token ?? null,
     host: Boolean(seat?.host),
     hostToken: seat?.hostToken ?? null,
-    spectator: Boolean(seat?.spectator),
+    spectator: Boolean(seat?.spectator) || warRoomMode,
     claimedSeats: room.managers.filter((manager) => manager.claimed).map((manager) => manager.id),
     appliedSeq: 0,
     status: ""
@@ -609,6 +632,7 @@ function renderOnlineBanner(draft, current) {
     <span>${mySeat ? `You are ${escapeHtml(mySeat.name)}${online.host ? " (host)" : ""}` : "Spectating"}</span>
     ${turnNote ? `<span>${escapeHtml(turnNote)}</span>` : ""}
     <span class="online-share">Invite link: <code>${escapeHtml(shareUrl)}</code></span>
+    <a class="tv-board-link" href="${escapeHtml(shareUrl)}&board" target="_blank" rel="noopener">&#128250; TV board</a>
     ${online.status ? `<span class="warn">${escapeHtml(online.status)}</span>` : ""}
   </section>`;
 }
@@ -847,6 +871,7 @@ function renderDraft() {
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
     <span class="pick-clock" data-pick-timer hidden></span>
+    <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
   </section>
   ${renderDraftFocus(draft, focusManager)}
   ${lot ? renderAuctionLotPanel(draft) : ""}
@@ -2784,6 +2809,104 @@ function renderRecentPicks(draft) {
     )
     .join("");
   return `<div class="recent-picks" aria-label="Most recent picks">${items}</div>`;
+}
+
+
+// Read-only broadcast layout for a TV: the lot, every board, and the ticker
+// on one dark screen. Opened with ?board (same browser via localStorage) or
+// ?room=CODE&board (live spectator over SSE).
+function renderWarRoom() {
+  resetAppHandlers();
+  document.body.classList.add("war-room-body");
+  const draft = state.draft;
+  if (!draft) {
+    app.innerHTML = `<div class="war-room"><p class="war-standby">Waiting for a draft to start&hellip;</p></div>`;
+    return;
+  }
+  const auction = isAuctionDraft(draft);
+  const lot = auction ? draft.auction.lot : null;
+  const lotPlayer = lot ? auctionLotPlayer(draft) : null;
+  const history = draftHistory(draft);
+  const prices = auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null;
+  const current = draft.complete ? null : currentManager(draft);
+  const totalPicks = draft.managers.length * draft.rosterSize;
+  const lastPick = history.at(-1);
+
+  const status = draft.complete
+    ? "DRAFT COMPLETE"
+    : auction
+      ? lot
+        ? `LOT ${draft.pickNumber + 1} OF ${totalPicks}`
+        : `${escapeHtml(current?.name ?? "")} NOMINATES NEXT`
+      : `PICK ${draft.pickNumber + 1} OF ${totalPicks} &middot; ${escapeHtml(current?.name ?? "")} ON THE CLOCK`;
+
+  const spotlightPlayer = lotPlayer ?? lastPick?.player ?? null;
+  const spotlightLabel = lotPlayer
+    ? `ON THE BLOCK &middot; NOMINATED BY ${escapeHtml(draft.managers.find((m) => m.id === lot.nominatorId)?.name ?? "").toUpperCase()}`
+    : lastPick
+      ? `LAST ${auction ? "SALE" : "PICK"} &middot; ${escapeHtml(lastPick.manager.name).toUpperCase()}${auction ? ` FOR ${lastPick.price}` : ""}`
+      : "WAITING FOR THE FIRST PICK";
+
+  const bidBoard = lot
+    ? `<div class="war-bids">${draft.managers
+        .map((manager) => {
+          const inHand = lot.bids && Object.prototype.hasOwnProperty.call(lot.bids, manager.id);
+          return `<div class="war-bid ${inHand ? "bid-in" : ""}">${escapeHtml(manager.name)}${manager.cpu ? " &middot; CPU" : ""}<em>${inHand ? "bid in" : "thinking&hellip;"}</em></div>`;
+        })
+        .join("")}</div>`
+    : "";
+
+  const teams = draft.managers
+    .map((manager) => {
+      const sorted = [...manager.roster].sort((a, b) =>
+        auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points
+      );
+      const chips = sorted
+        .map((player) => {
+          const price = auction ? prices.get(player.id) : undefined;
+          return `<span class="dock-chip tier-${cardRarity(player).key}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
+        })
+        .join("");
+      const needs = dockNeedsSummary(manager);
+      const points = manager.roster.reduce((sum, player) => sum + player.points, 0);
+      return `<section class="war-team">
+        <header>
+          <h3>${escapeHtml(manager.name)}</h3>
+          <span>${auction && !draft.complete ? `${auctionBudget(draft, manager)} left &middot; max ${auctionMaxBid(draft, manager)} &middot; ` : ""}${points} pts</span>
+        </header>
+        <div class="war-chips">${chips || `<span class="dock-empty">no picks yet</span>`}</div>
+        ${needs ? `<footer>needs ${escapeHtml(needs)}</footer>` : ""}
+      </section>`;
+    })
+    .join("");
+
+  const ticker = history
+    .slice(-6)
+    .reverse()
+    .map(
+      (pick) => `<span class="recent-pick tier-${cardRarity(pick.player).key}">
+        <strong>${escapeHtml(pick.player.name)}</strong>
+        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
+      </span>`
+    )
+    .join("");
+
+  app.innerHTML = `<div class="war-room">
+    <header class="war-header">
+      <span class="war-brand">MLB Showdown &middot; ${escapeHtml(draft.seed ?? "")}</span>
+      <h1>${status}</h1>
+      ${state.online ? `<span class="war-live">&#9679; LIVE</span>` : ""}
+    </header>
+    <div class="war-main">
+      <section class="war-spotlight">
+        <p class="war-spotlight-label">${spotlightLabel}</p>
+        ${spotlightPlayer ? `<div class="war-card">${renderPlayerCard(spotlightPlayer)}</div>` : ""}
+        ${bidBoard}
+      </section>
+      <div class="war-teams">${teams}</div>
+    </div>
+    <footer class="war-ticker">${ticker}</footer>
+  </div>`;
 }
 
 // Floating rival boards: every other team pinned to the bottom edge so nobody

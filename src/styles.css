@@ -957,6 +957,216 @@ button.roster-slot[draggable="true"]:active {
   white-space: nowrap;
 }
 
+.tv-board-link {
+  align-self: center;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 12px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+  background: #f8faf7;
+}
+
+/* TV war room: dark, huge, read-only. */
+.war-room-body {
+  background: #0f1513;
+}
+
+.war-room {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 18px 22px;
+  background: #0f1513;
+  color: #f2efe2;
+}
+
+.war-standby {
+  margin: auto;
+  color: #93a39b;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.war-header {
+  display: flex;
+  gap: 16px;
+  align-items: baseline;
+}
+
+.war-brand {
+  color: #93a39b;
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.war-header h1 {
+  margin: 0;
+  font-size: clamp(22px, 3.2vw, 44px);
+  letter-spacing: 0.02em;
+}
+
+.war-live {
+  margin-left: auto;
+  color: #ff6279;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  animation: war-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes war-live-pulse {
+  50% { opacity: 0.35; }
+}
+
+.war-main {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.war-spotlight {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  border: 1px solid #2b3630;
+  border-radius: 14px;
+  padding: 16px;
+  background: #161e1a;
+}
+
+.war-spotlight-label {
+  margin: 0;
+  color: #e1b64b;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+
+.war-card {
+  zoom: 1.25;
+}
+
+.war-bids {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+
+.war-bid {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid #2b3630;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.war-bid em {
+  color: #93a39b;
+  font-style: normal;
+}
+
+.war-bid.bid-in {
+  border-color: #3f6d52;
+  background: #1b2a21;
+}
+
+.war-bid.bid-in em {
+  color: #6fd9a1;
+}
+
+.war-teams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.war-team {
+  border: 1px solid #2b3630;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #161e1a;
+}
+
+.war-team header {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.war-team h3 {
+  margin: 0;
+  font-size: clamp(18px, 2vw, 26px);
+}
+
+.war-team header span {
+  margin-left: auto;
+  color: #93a39b;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.war-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.war-room .dock-chip {
+  border-color: #2b3630;
+  background: #1d2621;
+  color: #f2efe2;
+  font-size: 13px;
+}
+
+.war-room .dock-chip em {
+  color: #ffd76e;
+}
+
+.war-room .dock-chip.tier-silver { background: #202a2b; }
+.war-room .dock-chip.tier-gold { background: #2a2517; }
+.war-room .dock-chip.tier-rainbow { background: #251d2e; }
+
+.war-team footer {
+  margin-top: 8px;
+  color: #ff8d9f;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+.war-ticker {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  border-top: 1px solid #2b3630;
+  padding-top: 10px;
+}
+
+.war-room .recent-pick {
+  border-color: #2b3630;
+  background: #1d2621;
+  color: #f2efe2;
+  font-size: 13px;
+}
+
+.war-room .recent-pick em {
+  color: #93a39b;
+}
+
 .section-head {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
