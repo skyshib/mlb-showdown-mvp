@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { renderBoxScore } from "../src/ui/render.js";
+import { cardPanelHtml } from "../src/ui/cardFace.js";
 
 const hitter = {
   id: "h-1",
@@ -57,4 +58,33 @@ test("renderBoxScore adds hover previews when player cards can be resolved", () 
   assert.ok(html.includes('data-preview-id="h-2"'));
   assert.ok(html.includes("<th>CS</th>"));
   assert.ok(html.includes("Unknown Pitcher"));
+});
+
+test("fictional card backdrops vary by id but remain deterministic", () => {
+  const backdrop = (card) => /gq-backdrop-([a-z]+)/.exec(cardPanelHtml(card))?.[1];
+  const first = backdrop(hitter);
+
+  assert.equal(backdrop(hitter), first);
+  const variants = new Set(
+    Array.from({ length: 20 }, (_, index) => backdrop({ ...hitter, id: `fake-${index}` }))
+  );
+  assert.deepEqual(variants, new Set(["day", "sunset", "night", "ivy", "brick", "dome"]));
+  assert.equal(backdrop({ ...hitter, id: "real-hitter", real: true }), undefined);
+});
+
+test("fictional hitters and pitchers use the finalized 2005 card template", () => {
+  const hitterHtml = cardPanelHtml(hitter);
+  const pitcherHtml = cardPanelHtml(pitcher);
+
+  assert.ok(hitterHtml.includes("gq-proto-card gq-proto-hitter"));
+  assert.ok(hitterHtml.includes("2004-Hitter-BLUE-NO-FOOTER.png"));
+  assert.ok(hitterHtml.includes("api.dicebear.com/9.x/micah/svg"));
+  assert.ok(hitterHtml.includes("gq-proto-onbase"));
+  assert.ok(hitterHtml.includes("1B+"));
+
+  assert.ok(pitcherHtml.includes("gq-proto-card gq-proto-pitcher"));
+  assert.ok(pitcherHtml.includes("2004-Pitcher-BLUE-NO-FOOTER-NO-RIBBON.png"));
+  assert.ok(pitcherHtml.includes("gq-proto-baseball"));
+  assert.ok(pitcherHtml.includes('class="gq-proto-control-plus">+</span>'));
+  assert.ok(pitcherHtml.includes("CONTROL"));
 });

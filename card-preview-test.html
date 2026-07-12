@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Card restyle preview (temp)</title>
+  <link rel="stylesheet" href="./src/adventure/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,700;0,800;0,900;1,800;1,900&family=Oswald:wght@500;700&family=Anton&family=Archivo+Narrow:ital,wght@0,700;1,700&family=Bebas+Neue&family=Teko:wght@600;700&family=Fjalla+One&family=Saira+Condensed:wght@700;800&family=PT+Sans+Narrow:wght@700&family=League+Gothic&display=swap" rel="stylesheet">
+  <style>
+    body { display: block; padding: 24px; background: #2b2b28; }
+    main { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+    .stage { width: 300px; container-type: inline-size; }
+    .label { color: #ddd; font: 12px monospace; margin: 0 0 6px; }
+    h2 { color: #ddd; font: 700 15px monospace; flex-basis: 100%; margin: 18px 0 0; }
+    /* crop lab */
+    .crop-row { display: flex; gap: 8px; align-items: center; flex-basis: 100%; margin-top: 10px; }
+    .crop-row .row-label { width: 210px; flex: none; color: #ddd; font: 12px monospace; }
+    .cc { position: relative; width: 132px; aspect-ratio: 10 / 11; overflow: hidden; border-radius: 6px; background: #24313c; flex: none; }
+    .cc img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .cc .bg { position: absolute; inset: 0; filter: blur(9px) brightness(0.7); transform: scale(1.12); }
+    .cc .band { position: absolute; left: 0; right: 0; overflow: hidden; }
+    .cc .band img { width: 100%; height: 100%; object-fit: cover; object-position: center 25%; }
+  </style>
+</head>
+<body>
+  <main id="stages"></main>
+  <script type="module">
+    import { setUniverseSeed, adventurePool, cardById } from "./src/adventure/packs.js";
+    import { cardPanelHtml } from "./src/adventure/ui/helpers.js";
+    import { hydratePhotos } from "./src/adventure/photos.js";
+    const stages = document.getElementById("stages");
+    const show = (label, html) => {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = `<p class="label">${label}</p><div class="stage">${html}</div>`;
+      stages.appendChild(wrap);
+    };
+    setUniverseSeed("preview", "classic", { priceNoise: true });
+    const classics = adventurePool();
+    const scanned = classics.find((c) => c.name.includes("Pujols")) ?? classics[40];
+    show("classic scan", cardPanelHtml(scanned, { count: 2 }));
+    setUniverseSeed("preview", "mlb-history", { priceNoise: true });
+    show("MLB hitter (legend)", cardPanelHtml(cardById("mlb-all-bondsba01")));
+    show("MLB pitcher", cardPanelHtml(cardById("mlb-all-johnsra05")));
+    show("two-way (Ohtani)", cardPanelHtml(cardById("mlb-all-ohtansh01-bat"), { count: 1 }));
+    show("multi-position (Zobrist)", cardPanelHtml(cardById("mlb-all-zobribe01")));
+    show("multi-position (Rose)", cardPanelHtml(cardById("mlb-all-rosepe01"), { count: 3 }));
+    setUniverseSeed("preview", "decade-1990", { priceNoise: true });
+    show("old team (Expos)", cardPanelHtml(adventurePool().find((c) => c.id === "mlb-d1990-martipe02")));
+    setUniverseSeed("preview", "fictional", { priceNoise: true });
+    const fictional = adventurePool();
+    show("fictional common", cardPanelHtml(fictional.find((c) => c.rarity === "common" && c.kind === "hitter")));
+
+    // Font lab: the same card in each candidate face.
+    stages.insertAdjacentHTML("beforeend", "<h2>FONT LAB — same card, ten faces</h2>");
+    setUniverseSeed("preview", "mlb-history", { priceNoise: true });
+    const sample = cardById("mlb-all-bondsba01");
+    const FONTS = [
+      ["Barlow Condensed (mock's pick)", "'Barlow Condensed', sans-serif"],
+      ["Oswald", "'Oswald', sans-serif"],
+      ["Anton", "'Anton', sans-serif"],
+      ["Archivo Narrow", "'Archivo Narrow', sans-serif"],
+      ["Bebas Neue", "'Bebas Neue', sans-serif"],
+      ["Teko", "'Teko', sans-serif"],
+      ["Fjalla One", "'Fjalla One', sans-serif"],
+      ["Saira Condensed", "'Saira Condensed', sans-serif"],
+      ["PT Sans Narrow", "'PT Sans Narrow', sans-serif"],
+      ["League Gothic", "'League Gothic', sans-serif"]
+    ];
+    for (const [label, stack] of FONTS) {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = `<p class="label">${label}</p><div class="stage" style="--gq-card-font:${stack}">${cardPanelHtml(sample)}</div>`;
+      stages.appendChild(wrap);
+    }
+    // Crop lab: ten crop strategies across ten players' action heroes.
+    stages.insertAdjacentHTML("beforeend", "<h2>CROP LAB — ten strategies, ten players</h2>");
+    setUniverseSeed("preview", "mlb-history", { priceNoise: true });
+    const PLAYERS = ["ohtansh01", "bondsba01", "griffke02", "jeterde01", "suzukic01",
+                     "pujolal01", "troutmi01", "martipe02", "riverma01", "zobribe01"];
+    const mlbams = PLAYERS.map((pid) => cardById(`mlb-all-${pid}`)?.mlbam ?? cardById(`mlb-all-${pid}-bat`)?.mlbam).filter(Boolean);
+    const hero = (am, transform = "w_426,q_auto:best") =>
+      `https://img.mlbstatic.com/mlb-photos/image/upload/${transform}/v1/people/${am}/action/hero/current`;
+    const urlCell = (am, transform) => `<div class="cc"><img src="${hero(am, transform)}"></div>`;
+    const coverCell = (am, position) => `<div class="cc"><img style="object-position:${position}" src="${hero(am)}"></div>`;
+    const bandCell = (am, height, top) => `<div class="cc"><img class="bg" src="${hero(am)}"><div class="band" style="height:${height};top:${top}"><img src="${hero(am)}"></div></div>`;
+    const STRATEGIES = [
+      ["1. cdn g_auto 4:5 fill", (am) => urlCell(am, "ar_4:5,c_fill,g_auto,w_426,q_auto:best")],
+      ["2. cdn g_face 4:5 fill", (am) => urlCell(am, "ar_4:5,c_fill,g_face,w_426,q_auto:best")],
+      ["3. cdn g_north 4:5 fill", (am) => urlCell(am, "ar_4:5,c_fill,g_north,w_426,q_auto:best")],
+      ["4. cdn thumb g_face z.45", (am) => urlCell(am, "ar_4:5,c_thumb,g_face,z_0.45,w_426,q_auto:best")],
+      ["5. css cover @ 15%", (am) => coverCell(am, "center 15%")],
+      ["6. css cover @ 35%", (am) => coverCell(am, "center 35%")],
+      ["7. band 45% + blur", (am) => bandCell(am, "45%", "16%")],
+      ["8. band 60% + blur", (am) => bandCell(am, "60%", "12%")],
+      ["9. band 75% + blur", (am) => bandCell(am, "75%", "8%")],
+      ["10. full contain (current)", (am) => `<div class="cc"><img class="bg" src="${hero(am)}"><img style="object-fit:contain;position:relative" src="${hero(am)}"></div>`]
+    ];
+    for (const [label, cell] of STRATEGIES) {
+      stages.insertAdjacentHTML("beforeend",
+        `<div class="crop-row"><div class="row-label">${label}</div>${mlbams.map(cell).join("")}</div>`);
+    }
+    hydratePhotos(document);
+  </script>
+</body>
+</html>

@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
 import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
-import { createValuationModel } from "../src/rules/valuation.js";
-import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
+import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
+import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, attemptSteal, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
 const hitter = {
@@ -153,6 +153,29 @@ test("single advances runners one base", () => {
   );
 });
 
+test("1B+ auto-advances the batter to second when it's open", () => {
+  const state = createInitialState(teamA, teamB);
+  state.bases = [null, null, { name: "Runner 3" }];
+  const runs = applySingle(state, hitter, "away", null, null, null, true);
+  assert.equal(runs, 1);
+  assert.equal(state.score.away, 1);
+  assert.deepEqual(
+    state.bases.map((runner) => runner?.name ?? null),
+    [null, "Test Hitter", null]
+  );
+});
+
+test("1B+ plays as a plain single when second base ends up occupied", () => {
+  const state = createInitialState(teamA, teamB);
+  state.bases = [{ name: "Runner 1" }, null, null];
+  const runs = applySingle(state, hitter, "away", null, null, null, true);
+  assert.equal(runs, 0);
+  assert.deepEqual(
+    state.bases.map((runner) => runner?.name ?? null),
+    ["Test Hitter", "Runner 1", null]
+  );
+});
+
 test("double scores runners from second and third", () => {
   const state = createInitialState(teamA, teamB);
   state.bases = [{ name: "Runner 1" }, { name: "Runner 2" }, { name: "Runner 3" }];
@@ -221,7 +244,22 @@ test("failed extra-base attempt after a hit records an out for the pitcher", () 
   assert.equal(event.result, RESULTS.SINGLE);
   assert.equal(event.outsAfter, 3);
   assert.equal(event.playDetails.thrownAttempt.safe, false);
-  assert.equal(state.stats.pitchers.get("wd-p").outs, 1);
+  assert.equal(state.stats.pitchers.get("home:wd-p").outs, 1);
+});
+
+test("1B+ from the chart resolves through the engine as an auto-advance single", () => {
+  const state = createInitialState(teamA, weakDefense);
+  const batter = makeHitter({ id: "plus-h", name: "Plus Hitter", chart: [{ from: 1, to: 20, result: RESULTS.SINGLE_PLUS }] });
+  state.away.lineup[0] = batter;
+
+  const event = playPlateAppearance(state, repeatingRng(1, 5));
+
+  assert.equal(event.result, RESULTS.SINGLE_PLUS);
+  assert.deepEqual(
+    state.bases.map((runner) => runner?.name ?? null),
+    [null, "Plus Hitter", null]
+  );
+  assert.equal(state.stats.hitters.get("away:plus-h").h, 1);
 });
 
 test("runner can steal second before the plate appearance", () => {
@@ -239,23 +277,28 @@ test("runner can steal second before the plate appearance", () => {
   );
   assert.equal(state.lineupIndex.away, 0);
   assert.equal(event.playDetails.stealAttempt.to, "2B");
-  assert.equal(state.stats.hitters.get("a-h-0").sb, 1);
+  assert.equal(state.stats.hitters.get("away:a-h-0").sb, 1);
 });
 
-test("stealing third uses catcher fielding and the steal-third bonus", () => {
+test("stealing third fights the shorter throw: +5 to the catcher, not the runner", () => {
   const state = createInitialState(teamA, strongCatcherDefense);
   state.outs = 1;
   state.bases = [null, { name: "Runner 2", speed: 15 }, null];
 
-  const event = playStealAttempt(state, { d20: () => 16 });
+  // The penalized odds fall below the decision matrix, so the auto-runner
+  // now declines this jump...
+  assert.equal(playStealAttempt(state, { d20: () => 16 }), null);
+
+  // ...but a forced attempt shows the penalized target and pays for it.
+  const event = attemptSteal(state, 1, { d20: () => 16 });
 
   assert.equal(event.result, "CS");
   assert.equal(event.outsAfter, 2);
   assert.deepEqual(state.bases, [null, null, null]);
   assert.equal(event.playDetails.stealAttempt.fielding, 5);
-  assert.equal(event.playDetails.stealAttempt.target, 20);
+  assert.equal(event.playDetails.stealAttempt.target, 10);
   assert.equal(event.playDetails.stealAttempt.total, 21);
-  assert.equal(state.stats.pitchers.get("sc-p").outs, 1);
+  assert.equal(state.stats.pitchers.get("home:sc-p").outs, 1);
 });
 
 test("low-probability steal attempts are skipped by the decision matrix", () => {
@@ -286,7 +329,7 @@ test("caught stealing for the third out advances the half inning without a plate
   assert.deepEqual(state.bases, [null, null, null]);
   assert.equal(state.lineupIndex.away, 0);
   assert.equal(state.away.plateAppearances, 0);
-  assert.equal(state.stats.pitchers.get("wd-p").outs, 1);
+  assert.equal(state.stats.pitchers.get("home:wd-p").outs, 1);
 });
 
 test("home run clears the bases and scores batter", () => {
@@ -296,7 +339,7 @@ test("home run clears the bases and scores batter", () => {
   assert.equal(runs, 3);
   assert.equal(state.score.away, 3);
   assert.deepEqual(state.bases, [null, null, null]);
-  assert.equal(state.stats.hitters.get("h-test").r, 1);
+  assert.equal(state.stats.hitters.get("away:h-test").r, 1);
 });
 
 test("groundout with runner on first can become a double play", () => {
@@ -400,7 +443,9 @@ test("failed flyout tag-up records the extra out and clears the runner", () => {
 test("runner tagging home scores when defense throws out another tag-up for the third out", () => {
   const state = createInitialState(teamA, weakDefense);
   state.outs = 1;
-  state.bases = [null, { name: "Runner 2", speed: 13 }, { name: "Runner 3", speed: 20 }];
+  // SPD 18 clears the tightened two-out bar for third (85%) yet stays the
+  // shakiest runner, so the forced-20 throw cuts him down while home scores.
+  state.bases = [null, { name: "Runner 2", speed: 18 }, { name: "Runner 3", speed: 20 }];
 
   const runs = applyFlyout(state, "away", "home", { d20: () => 20 });
 
@@ -425,6 +470,8 @@ test("starter covers innings not covered by bullpen and gets tired past his IP",
   };
   const state = createInitialState(teamA, tiredStaff);
   state.pitching.home.outsRecorded = 15;
+  // IP 5 covers 20 batters at full strength; the 21st sees the penalty.
+  state.pitching.home.battersFaced = 20;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
 
@@ -467,6 +514,8 @@ test("last bullpen pitcher keeps pitching in extras and becomes tired", () => {
   const state = createInitialState(teamA, orderedStaff);
   state.pitching.home.pitcherIndex = 2;
   state.pitching.home.outsRecorded = 3;
+  // IP 1 covers four batters; the fifth finds him gassed.
+  state.pitching.home.battersFaced = 4;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
 
@@ -491,14 +540,13 @@ test("runs are charged to the pitcher responsible for inherited runners", () => 
   const runs = applyDouble(state, hitter, "away", "home", null, state.home.pitchers[1]);
 
   assert.equal(runs, 1);
-  assert.equal(state.stats.pitchers.get("starter").r, 1);
-  assert.equal(state.home.pitchers[0].chargedRuns, 1);
-  assert.equal(state.stats.pitchers.get("reliever")?.r ?? 0, 0);
+  assert.equal(state.stats.pitchers.get("home:starter").r, 1);
+  assert.equal(state.stats.pitchers.get("home:reliever")?.r ?? 0, 0);
 });
 
-test("charged runs reduce fatigue IP but do not change planned bullpen timing", () => {
+test("fatigue runs on batters faced alone and never forces the bullpen door", () => {
   const staff = {
-    name: "Charged Runs Staff",
+    name: "Workload Staff",
     lineup: teamB.lineup,
     pitchers: [
       makePitcher({ id: "starter", name: "Starter", control: 9, ip: 5, chart: [{ from: 1, to: 20, result: RESULTS.SO }] }),
@@ -508,15 +556,21 @@ test("charged runs reduce fatigue IP but do not change planned bullpen timing", 
     ]
   };
   const state = createInitialState(teamA, staff);
-  state.home.pitchers[0].chargedRuns = 3;
   state.pitching.home.outsRecorded = 12;
+  // 16 batters into an IP 5 tank (20 BF): still fresh, whatever the score.
+  state.pitching.home.battersFaced = 16;
 
-  const event = playPlateAppearance(state, repeatingRng(20, 1));
+  const fresh = playPlateAppearance(state, repeatingRng(20, 1));
+  assert.equal(fresh.pitcher, "Starter");
+  assert.equal(fresh.fatiguePenalty, 0);
+  assert.equal(fresh.effectiveControl, 9);
 
-  assert.equal(event.pitcher, "Starter");
-  assert.equal(event.fatiguePenalty, 1);
-  assert.equal(event.effectiveControl, 8);
-  assert.equal(state.pitching.home.pitcherIndex, 0);
+  // The 21st batter starts the slide — one point per four batters after.
+  state.pitching.home.battersFaced = 20;
+  const tired = playPlateAppearance(state, repeatingRng(20, 1));
+  assert.equal(tired.fatiguePenalty, 1);
+  assert.equal(tired.effectiveControl, 8);
+  assert.equal(state.pitching.home.pitcherIndex, 0, "fatigue never forces the bullpen door");
 });
 
 test("simulation is deterministic for a seed", () => {
@@ -532,6 +586,28 @@ test("simulation returns box score lines", () => {
   assert.equal(result.boxScore.away.hitters.length, 9);
   assert.equal(result.boxScore.home.pitchers.length, 1);
   assert.ok(result.boxScore.away.hitters.some((line) => line.pa > 0));
+});
+
+test("a card on both teams keeps separate home and away box score lines", () => {
+  const mirrorHome = {
+    name: "Mirror",
+    lineup: teamA.lineup.map((player) => ({ ...player })),
+    pitchers: [{ ...pitcher, id: "mirror-p", name: "Mirror Pitcher" }]
+  };
+  const result = simulateGame(teamA, mirrorHome, "mirror-seed");
+
+  assert.equal(result.boxScore.away.hitters.length, 9);
+  assert.equal(result.boxScore.home.hitters.length, 9);
+  for (const awayLine of result.boxScore.away.hitters) {
+    const homeLine = result.boxScore.home.hitters.find((line) => line.id === awayLine.id);
+    assert.ok(homeLine, `${awayLine.id} has a home line too`);
+    assert.notEqual(awayLine, homeLine, "the sides do not share a stat line");
+    assert.equal(awayLine.side, "away");
+    assert.equal(homeLine.side, "home");
+  }
+  const awayPa = result.boxScore.away.hitters.reduce((sum, line) => sum + line.pa, 0);
+  const homePa = result.boxScore.home.hitters.reduce((sum, line) => sum + line.pa, 0);
+  assert.ok(awayPa >= 27 && homePa >= 24, "each side records only its own plate appearances");
 });
 
 test("draft blocks picks that would make pitcher minimum impossible", () => {
@@ -1007,6 +1083,21 @@ test("valuation model prices starter workload above an identical reliever", () =
   }
 });
 
+test("valuation weights stay within the advertised spread of the revealed baseline", () => {
+  for (const seed of ["room-a:valuation:team-1", "room-b:valuation:team-2", "room-c:valuation:team-3"]) {
+    const model = createValuationModel(seed);
+    for (const kind of ["hitter", "pitcher"]) {
+      for (const [key, base] of Object.entries(VALUATION_BASE_WEIGHTS[kind])) {
+        const ratio = model.weights[kind][key] / base;
+        assert.ok(
+          ratio >= 1 - VALUATION_PERTURBATION && ratio <= 1 + VALUATION_PERTURBATION,
+          `${kind}.${key} lean ${ratio} should stay within ±${VALUATION_PERTURBATION} (seed ${seed})`
+        );
+      }
+    }
+  }
+});
+
 test("managerValuation derives distinct stable models from the draft seed", () => {
   const draft = createDraft(["One", "Two"], [], 13, "my-room");
   const modelOne = managerValuation(draft, draft.managers[0]);
@@ -1069,4 +1160,106 @@ test("draftHistory lists picks in snake order with the picking manager", () => {
 
   undoLastPick(draft);
   assert.equal(draftHistory(draft).length, 3);
+});
+
+// ---- Multi-position cards ------------------------------------------------------
+
+// A 13-man roster around one flexible infielder, with `flexPositions` as his
+// eligibility list (primary first) and a pure 2B alongside him.
+function multiPositionRoster(flexPositions) {
+  return {
+    name: "Utility Crew",
+    roster: [
+      makeHitter({ id: "mp-c", position: "C" }),
+      makeHitter({ id: "mp-1b", position: "1B" }),
+      makeHitter({ id: "mp-2b", name: "Pure Second", position: "2B", fielding: 4 }),
+      makeHitter({ id: "mp-3b", position: "3B" }),
+      makeHitter({
+        id: "mp-flex",
+        name: "Utility Man",
+        position: flexPositions[0].pos,
+        fielding: flexPositions[0].fielding,
+        positions: flexPositions
+      }),
+      makeHitter({ id: "mp-cf", position: "CF" }),
+      makeHitter({ id: "mp-lf", position: "LF/RF" }),
+      makeHitter({ id: "mp-rf", position: "LF/RF" }),
+      makeHitter({ id: "mp-dh", position: "C" }),
+      makePitcher({ id: "mp-sp-1", role: "SP" }),
+      makePitcher({ id: "mp-sp-2", role: "SP" }),
+      makePitcher({ id: "mp-rp-1", role: "RP", ip: 1 }),
+      makePitcher({ id: "mp-rp-2", role: "RP", ip: 1 })
+    ]
+  };
+}
+
+test("a multi-position card covers its secondary slot at the listed fielding", () => {
+  const manager = multiPositionRoster([
+    { pos: "2B", fielding: 3 },
+    { pos: "SS", fielding: 2 }
+  ]);
+
+  assert.deepEqual(validateRoster(manager), []);
+
+  const team = buildTeam(manager);
+  const shortstop = team.lineup.find((player) => player.defensivePosition === "SS");
+  const second = team.lineup.find((player) => player.defensivePosition === "2B");
+  // The pure 2B holds his spot; the 2B/SS card slides to short at his
+  // SS rating, not his primary 2B rating.
+  assert.equal(second.id, "mp-2b");
+  assert.equal(shortstop.id, "mp-flex");
+  assert.equal(shortstop.fielding, 2);
+});
+
+test("lineup matching reseats a multi-position card instead of stranding a slot", () => {
+  // The flex card seats at 2B first (his primary, listed before SS), and the
+  // matching must push him to SS when the pure 2B shows up later.
+  const manager = multiPositionRoster([
+    { pos: "2B", fielding: 3 },
+    { pos: "SS", fielding: 2 }
+  ]);
+  manager.roster = [
+    manager.roster.find((player) => player.id === "mp-flex"),
+    ...manager.roster.filter((player) => player.id !== "mp-flex")
+  ];
+
+  assert.deepEqual(validateRoster(manager), []);
+  const slots = assignLineupSlots(manager.roster).slots;
+  assert.equal(slots.find((slot) => slot.label === "SS").player.id, "mp-flex");
+  assert.equal(slots.find((slot) => slot.label === "2B").player.id, "mp-2b");
+});
+
+test("a 1B side-listing plays first base at its printed rating, not minus one", () => {
+  const manager = {
+    name: "Corner Crew",
+    roster: [
+      makeHitter({ id: "corner-c", position: "C" }),
+      makeHitter({
+        id: "corner-3b1b",
+        name: "Corner Man",
+        position: "3B",
+        fielding: 2,
+        positions: [{ pos: "3B", fielding: 2 }, { pos: "1B", fielding: 0 }]
+      }),
+      makeHitter({ id: "corner-2b", position: "2B" }),
+      makeHitter({ id: "corner-3b", position: "3B" }),
+      makeHitter({ id: "corner-ss", position: "SS" }),
+      makeHitter({ id: "corner-cf", position: "CF" }),
+      makeHitter({ id: "corner-lf", position: "LF/RF" }),
+      makeHitter({ id: "corner-rf", position: "LF/RF" }),
+      makeHitter({ id: "corner-dh", position: "C" }),
+      makePitcher({ id: "corner-sp-1", role: "SP" }),
+      makePitcher({ id: "corner-sp-2", role: "SP" }),
+      makePitcher({ id: "corner-rp-1", role: "RP", ip: 1 }),
+      makePitcher({ id: "corner-rp-2", role: "RP", ip: 1 })
+    ]
+  };
+
+  const team = buildTeam(manager);
+  const firstBase = team.lineup.find((player) => player.defensivePosition === "1B");
+  assert.equal(firstBase.id, "corner-3b1b");
+  assert.equal(firstBase.fielding, 0);
+  assert.equal(firstBase.outOfPosition, false);
+  const thirdBase = team.lineup.find((player) => player.defensivePosition === "3B");
+  assert.equal(thirdBase.id, "corner-3b");
 });

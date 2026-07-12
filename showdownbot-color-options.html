@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BB-HR Color Options</title>
+  <style>
+    @font-face {
+      font-family: "Showdown Condensed";
+      src: url("./vendor/showdownbot/HelveticaNeueCondensedBold.ttf") format("truetype");
+      font-weight: 700;
+      font-display: swap;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 28px 16px 36px;
+      background: #17191d;
+      color: #f5f7fa;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .lab {
+      width: min(1160px, 100%);
+      display: grid;
+      gap: 20px;
+      justify-items: center;
+    }
+
+    .lab-header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #aeb5c0;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+
+    .lab-header img {
+      width: 72px;
+      height: auto;
+    }
+
+    .card {
+      position: relative;
+      width: min(340px, 92vw);
+      aspect-ratio: 1500 / 2100;
+      overflow: hidden;
+      background: #dfe4e8;
+      border-radius: 9px;
+      box-shadow: 0 24px 54px rgba(0, 0, 0, 0.55);
+      isolation: isolate;
+    }
+
+    .photo {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      background:
+        linear-gradient(180deg, #8099ae 0 58%, #193725 58% 64%, #49734d 64% 100%);
+      filter: saturate(0.94) contrast(1.04);
+    }
+
+    .photo img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+      object-position: center bottom;
+      transform: scale(1.08);
+      transform-origin: center bottom;
+    }
+
+    .photo::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, transparent 58%, rgba(0, 0, 0, 0.12) 78%, rgba(0, 0, 0, 0.42) 100%);
+      pointer-events: none;
+    }
+
+    .frame {
+      position: absolute;
+      z-index: 3;
+      left: -4.8%;
+      top: -3.43%;
+      width: 109.6%;
+      height: 106.86%;
+      object-fit: fill;
+      pointer-events: none;
+    }
+
+    .onbase-number {
+      position: absolute;
+      z-index: 6;
+      left: 10.23%;
+      top: 77.38%;
+      color: #ef3d1b;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(21px, 6.5vw, 29px);
+      font-style: normal;
+      font-weight: 700;
+      line-height: 1;
+      transform: translate(-50%, -50%);
+      text-shadow:
+        -1px -1px 0 #080808,
+        1px -1px 0 #080808,
+        -1px 1px 0 #080808,
+        1px 1px 0 #080808;
+      pointer-events: none;
+    }
+
+    .team-logo {
+      position: absolute;
+      z-index: 5;
+      left: 79.33%;
+      top: 70.48%;
+      width: 13.33%;
+      height: 9.52%;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.7));
+    }
+
+    .fictional-logo {
+      display: grid;
+      place-items: center;
+      border: 3px solid #fff;
+      border-radius: 50%;
+      background: #b6242c;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(15px, 4vw, 23px);
+      line-height: 1;
+      box-shadow: inset 0 0 0 3px #193d6b;
+    }
+
+    .player-name {
+      position: absolute;
+      z-index: 6;
+      left: 18.4%;
+      top: 75.57%;
+      width: 59.33%;
+      height: 5%;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(20px, 5.4vw, 31px);
+      font-style: normal;
+      line-height: 1;
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-shadow: 0 2px 2px rgba(0, 0, 0, 0.88);
+    }
+
+    .metadata {
+      position: absolute;
+      z-index: 6;
+      left: 18.8%;
+      right: 17.4%;
+      top: 81.43%;
+      height: 3.1%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2%;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(10px, 2.55vw, 14px);
+      line-height: 1;
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-shadow: 0 1px 2px #000;
+      transform: translateY(-10%);
+    }
+
+    .chart-strip {
+      position: absolute;
+      z-index: 6;
+      left: 0;
+      right: 0;
+      top: 84.35%;
+      height: 6.65%;
+      display: grid;
+      grid-template-rows: 3.55fr 3.1fr;
+      background: rgb(9, 41, 64);
+      border-top: 1px solid rgba(0, 0, 0, 0.72);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.72);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .chart-ranges,
+    .chart-outcomes {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      align-items: center;
+      padding: 0 2.45%;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-style: normal;
+      line-height: 1;
+      text-align: center;
+      white-space: nowrap;
+      text-shadow: 0 2px 2px #000;
+    }
+
+    .chart-ranges {
+      font-size: clamp(10px, 2.7vw, 15px);
+      transform: translateY(-1px);
+    }
+
+    .chart-outcomes {
+      border-top: 1px solid rgba(0, 0, 0, 0.7);
+      font-size: clamp(11px, 2.9vw, 16px);
+    }
+
+    .chart-ranges span,
+    .chart-outcomes span {
+      height: 100%;
+      display: grid;
+      place-items: center;
+    }
+
+    .options {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 24px;
+      align-items: start;
+    }
+
+    .option {
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+    }
+
+    .option h2 {
+      margin: 0;
+      color: #d9dee5;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .card {
+      --bb-color: #c99127;
+      --single-color: #34785d;
+      --double-color: #286f9b;
+      --triple-color: #735394;
+      --homer-color: #a93443;
+    }
+
+    .option-full .chart-outcomes span:nth-child(4) { background: var(--bb-color); }
+    .option-full .chart-outcomes span:nth-child(5) { background: var(--single-color); }
+    .option-full .chart-outcomes span:nth-child(6) { background: var(--double-color); }
+    .option-full .chart-outcomes span:nth-child(7) { background: var(--triple-color); }
+    .option-full .chart-outcomes span:nth-child(8) { background: var(--homer-color); }
+
+    .option-rail .chart-outcomes span:nth-child(4) { box-shadow: inset 0 -5px var(--bb-color); }
+    .option-rail .chart-outcomes span:nth-child(5) { box-shadow: inset 0 -5px var(--single-color); }
+    .option-rail .chart-outcomes span:nth-child(6) { box-shadow: inset 0 -5px var(--double-color); }
+    .option-rail .chart-outcomes span:nth-child(7) { box-shadow: inset 0 -5px var(--triple-color); }
+    .option-rail .chart-outcomes span:nth-child(8) { box-shadow: inset 0 -5px var(--homer-color); }
+
+    .option-tint .chart-ranges span:nth-child(4),
+    .option-tint .chart-outcomes span:nth-child(4) { background: color-mix(in srgb, var(--bb-color) 82%, rgb(9, 41, 64)); }
+    .option-tint .chart-ranges span:nth-child(5),
+    .option-tint .chart-outcomes span:nth-child(5) { background: color-mix(in srgb, var(--single-color) 82%, rgb(9, 41, 64)); }
+    .option-tint .chart-ranges span:nth-child(6),
+    .option-tint .chart-outcomes span:nth-child(6) { background: color-mix(in srgb, var(--double-color) 82%, rgb(9, 41, 64)); }
+    .option-tint .chart-ranges span:nth-child(7),
+    .option-tint .chart-outcomes span:nth-child(7) { background: color-mix(in srgb, var(--triple-color) 82%, rgb(9, 41, 64)); }
+    .option-tint .chart-ranges span:nth-child(8),
+    .option-tint .chart-outcomes span:nth-child(8) { background: color-mix(in srgb, var(--homer-color) 82%, rgb(9, 41, 64)); }
+
+    .set-year {
+      position: absolute;
+      z-index: 6;
+      right: 4.1%;
+      top: 91.05%;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(10px, 2.45vw, 14px);
+      line-height: 1;
+      text-shadow: 0 2px 2px #000;
+    }
+
+    .note {
+      margin: 0;
+      color: #aeb5c0;
+      font-size: 12px;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    @media (max-width: 380px) {
+      .player-name {
+        font-size: 21px;
+      }
+
+      .metadata {
+        font-size: 9px;
+      }
+
+      .chart-ranges {
+        font-size: 9px;
+      }
+
+      .chart-outcomes {
+        font-size: 10px;
+      }
+    }
+
+    @media (max-width: 920px) {
+      .options {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="lab">
+    <header class="lab-header">
+      <span>BB-HR color options</span>
+      <img src="./vendor/showdownbot/set-2005-v2.png" alt="2005">
+    </header>
+
+    <div class="options" id="color-options"></div>
+  </main>
+
+  <template id="card-template">
+    <article class="card" aria-label="Darius Vega 2005 Showdown-style card">
+      <div class="photo">
+        <img
+          src="https://api.dicebear.com/9.x/micah/svg?seed=Darius%20Vega-HITTER-SS&amp;backgroundColor=transparent"
+          alt="Fictional portrait of Darius Vega"
+          referrerpolicy="no-referrer"
+        >
+      </div>
+
+      <img class="frame" src="./vendor/showdownbot/2004-Hitter-BLUE.png" alt="">
+      <div class="onbase-number">11</div>
+      <div class="team-logo fictional-logo" aria-label="Austin Comets">AC</div>
+      <div class="player-name">Darius Vega</div>
+
+      <div class="metadata" aria-label="Player metadata">
+        <span>340 PT</span><span>Speed 18</span><span>Bats L</span><span>SS +2</span>
+      </div>
+
+      <div class="chart-strip" aria-label="Batting chart">
+        <div class="chart-ranges" aria-label="Chart result ranges">
+          <span>1</span><span>2-3</span><span>4-5</span><span>6-8</span>
+          <span>9-15</span><span>16-18</span><span>19</span><span>20+</span>
+        </div>
+        <div class="chart-outcomes" aria-label="Chart outcomes">
+          <span>SO</span><span>GB</span><span>FB</span><span>BB</span>
+          <span>1B</span><span>2B</span><span>3B</span><span>HR</span>
+        </div>
+      </div>
+
+      <div class="set-year">2005</div>
+    </article>
+  </template>
+
+  <script>
+    const options = [
+      { title: "A. Full outcome cells", className: "option-full" },
+      { title: "B. Color rails", className: "option-rail" },
+      { title: "C. Vibrant columns", className: "option-tint" }
+    ];
+    const host = document.getElementById("color-options");
+    const template = document.getElementById("card-template");
+
+    for (const option of options) {
+      const section = document.createElement("section");
+      section.className = "option";
+      const heading = document.createElement("h2");
+      heading.textContent = option.title;
+      const fragment = template.content.cloneNode(true);
+      const card = fragment.querySelector(".card");
+      card.classList.add(option.className);
+      card.setAttribute("aria-label", `${option.title}, Darius Vega card`);
+      section.append(heading, fragment);
+      host.append(section);
+    }
+  </script>
+</body>
+</html>

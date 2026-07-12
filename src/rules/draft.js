@@ -1,4 +1,6 @@
+import { createRng } from "./rng.js";
 import { createValuationModel } from "./valuation.js";
+import { personConflict, playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -13,23 +15,139 @@ export function isCornerOutfielder(position) {
   return position === CORNER_OUTFIELD_POSITION || CORNER_OUTFIELD_SLOTS.includes(position);
 }
 
+function cardIsCornerOutfielder(player) {
+  return hitterPositions(player).some((entry) => isCornerOutfielder(entry.pos));
+}
+
 // Rewrites bare "LF"/"RF" card labels to the lumped LF/RF position so every
 // pool source drafts and displays corners as one position.
 export function normalizeCardPosition(player) {
-  if (player?.kind !== "hitter" || !isCornerOutfielder(player.position)) return player;
-  if (player.position === CORNER_OUTFIELD_POSITION) return player;
-  return { ...player, position: CORNER_OUTFIELD_POSITION };
+  if (player?.kind !== "hitter") return player;
+  const lump = (pos) => (isCornerOutfielder(pos) ? CORNER_OUTFIELD_POSITION : pos);
+  const changed = lump(player.position) !== player.position
+    || (Array.isArray(player.positions) && player.positions.some((entry) => lump(entry.pos) !== entry.pos));
+  if (!changed) return player;
+  const next = { ...player, position: lump(player.position) };
+  if (Array.isArray(player.positions)) {
+    next.positions = player.positions.map((entry) => ({ ...entry, pos: lump(entry.pos) }));
+  }
+  return next;
 }
 
-function positionMatchesSlot(position, label) {
-  if (CORNER_OUTFIELD_SLOTS.includes(label)) return isCornerOutfielder(position);
-  return position === label;
+function positionMatchesSlot(player, label) {
+  if (CORNER_OUTFIELD_SLOTS.includes(label)) return cardIsCornerOutfielder(player);
+  return playsPosition(player, label);
 }
 const HITTER_TARGET = 9;
 const STARTER_TARGET = 2;
 const BULLPEN_TARGET = 2;
 const PITCHER_TARGET = STARTER_TARGET + BULLPEN_TARGET;
 const DEFAULT_ROSTER_SIZE = HITTER_TARGET + PITCHER_TARGET;
+
+// The designated hitter is a slot, not a position: ANY bat fills it, and
+// whole card sets print nobody at "DH" at all — the dead-ball decades never
+// had the rule. So the DH slot draws on the hitters at large rather than on a
+// DH shelf that may not exist.
+export const ANY_HITTER = "HITTER";
+
+// The active roster, slot by slot. The table sums to the 13-man roster on
+// purpose: it IS the roster, spelled out. Every slot needs a supply of cards
+// that can fill it, which is what sizes a board.
+export const ROSTER_SLOTS = [
+  ["C", 1],
+  ["1B", 1],
+  ["2B", 1],
+  ["3B", 1],
+  ["SS", 1],
+  [CORNER_OUTFIELD_POSITION, 2],
+  ["CF", 1],
+  // Last of the hitters on purpose: the position groups take their cards
+  // first, and the DH slot draws from whoever is left.
+  [ANY_HITTER, 1],
+  ["SP", STARTER_TARGET],
+  ["RP", BULLPEN_TARGET]
+];
+
+// The pool group a card is dealt and counted under: its PRIMARY position (a
+// 2B/SS card is a second baseman here, whatever else it can cover), or SP/RP
+// for an arm.
+export function poolGroup(player) {
+  return player?.kind === "pitcher" ? pitcherRole(player) : player?.position;
+}
+
+// Can this card fill that slot's supply? Positions want the cards printed
+// there; the DH slot takes any bat in the set.
+export function poolGroupMatches(player, group) {
+  if (group === ANY_HITTER) return player?.kind === "hitter";
+  return poolGroup(player) === group;
+}
+
+// Random-nomination pool sizes, per roster slot, for a room of n managers.
+//
+// HIDDEN is the queue that actually comes up for bid: floor(1.4n) managers'
+// worth, so there is always a little more of every position than the room
+// strictly needs, and never enough to go around comfortably.
+//
+// VISIBLE is the board everyone reads. It has to survive the worst case: one
+// manager hoards every card that comes up at a position, and the leftovers
+// must STILL cover the other n-1 managers in the end-of-draft sweep. That is
+// visible >= hidden + (n - 1) per slot. At three and four managers that lands
+// exactly on 2n (three managers see 12 starters, eight of them come up); past
+// that the hoarding case bites first and the board widens to keep the promise.
+export function randomNominationCounts(managerCount) {
+  const managers = Math.max(1, Math.floor(Number(managerCount) || 0));
+  const hidden = Math.max(1, Math.floor(managers * 1.4));
+  const visible = Math.max(2 * managers, hidden + managers - 1);
+  return { managers, hiddenPerSlot: hidden, visiblePerSlot: visible };
+}
+
+// Per-position card counts for a random-nomination room: the slot quota times
+// the manager multiplier. Returns [[group, count], ...] in ROSTER_SLOTS order.
+export function randomNominationQuotas(managerCount) {
+  const { hiddenPerSlot, visiblePerSlot } = randomNominationCounts(managerCount);
+  return {
+    visible: ROSTER_SLOTS.map(([group, slots]) => [group, visiblePerSlot * slots]),
+    hidden: ROSTER_SLOTS.map(([group, slots]) => [group, hiddenPerSlot * slots])
+  };
+}
+
+// Positions a card set is too thin to fill a random-nomination board at. A
+// deep universe returns nothing; a one-franchise set may simply not own enough
+// catchers to seat the room, and the setup screen has to say so rather than
+// deal a board the closing sweep can't finish.
+// A board is too thin when some slot cannot be supplied. The hitter groups are
+// checked against what is LEFT after the position groups take theirs, because
+// one card cannot be two managers' cards: nine hitters per roster means nine
+// hitters' worth of board, however they are labelled.
+export function randomNominationShortfalls(pool, managerCount) {
+  const shortfalls = [];
+  const taken = new Set();
+  for (const [group, quota] of randomNominationQuotas(managerCount).visible) {
+    const available = pool.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
+    for (const player of available.slice(0, quota)) taken.add(player.id);
+    if (available.length < quota) shortfalls.push({ group, quota, dealt: available.length });
+  }
+  return shortfalls;
+}
+
+// How many managers a pool can seat: every team needs a catcher, a middle
+// infield, a center fielder, two corners, two starters and two relievers —
+// whichever of those runs out first caps the room. Counts read a card's
+// PRIMARY position, so the answer is a floor: a pool that seats eight this
+// way seats eight however the secondary listings fall.
+export function maxPoolManagers(pool) {
+  const hitters = pool.filter((player) => player.kind === "hitter");
+  const pitchers = pool.filter((player) => player.kind === "pitcher");
+  const countPosition = (position) => hitters.filter((player) => player.position === position).length;
+  return Math.min(
+    ...EXACT_REQUIRED_POSITIONS.map(countPosition),
+    Math.floor(countPosition(CORNER_OUTFIELD_POSITION) / 2),
+    Math.floor(hitters.length / HITTER_TARGET),
+    Math.floor(pitchers.filter((player) => player.role === "SP").length / STARTER_TARGET),
+    Math.floor(pitchers.filter((player) => player.role !== "SP").length / BULLPEN_TARGET),
+    Math.floor(pool.length / DEFAULT_ROSTER_SIZE)
+  );
+}
 
 export const AUCTION_MIN_BID = 5;
 export const AUCTION_MIN_RAISE = 5;
@@ -40,19 +158,9 @@ export const AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS = 5;
 
 const MS_PER_SECOND = 1000;
 
-export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE) {
-  const value = Math.round((Number(budget) || AUCTION_DEFAULT_BUDGET) / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
-  return Math.max(rosterSize * AUCTION_MIN_BID, value);
-}
-
 export function normalizeAuctionTimerConfig(timer = {}) {
   if (timer === false || timer?.enabled === false) {
-    return {
-      enabled: false,
-      reviewMs: 0,
-      bankMs: 0,
-      incrementMs: 0
-    };
+    return { enabled: false, reviewMs: 0, bankMs: 0, incrementMs: 0 };
   }
   return {
     enabled: true,
@@ -69,12 +177,31 @@ function normalizeTimerMs(ms, seconds, fallbackSeconds) {
   return Math.max(0, Math.round(value));
 }
 
+// 0 disables the pick clock; anything else is clamped to a sane range so a
+// typo can't create a 1-second or 3-hour draft.
+export function normalizePickTimerSeconds(value) {
+  const seconds = Math.round(Number(value) || 0);
+  if (seconds <= 0) return 0;
+  return Math.min(600, Math.max(15, seconds));
+}
+
+export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE) {
+  const value = Math.round((Number(budget) || AUCTION_DEFAULT_BUDGET) / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
+  return Math.max(rosterSize * AUCTION_MIN_BID, value);
+}
+
+// Managers arrive as plain names or as { name, cpu } descriptors; cpu
+// managers play themselves (instant autopicks and sealed bids).
 export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, seed = "showdown", options = {}) {
-  const cleanManagers = managers.map((name, index) => ({
-    id: `team-${index + 1}`,
-    name: name.trim() || `Manager ${index + 1}`,
-    roster: []
-  }));
+  const cleanManagers = managers.map((entry, index) => {
+    const name = typeof entry === "string" ? entry : String(entry?.name ?? "");
+    return {
+      id: `team-${index + 1}`,
+      name: name.trim() || `Manager ${index + 1}`,
+      cpu: typeof entry === "object" && entry !== null && Boolean(entry.cpu),
+      roster: []
+    };
+  });
 
   const draft = {
     managers: cleanManagers,
@@ -90,6 +217,11 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
   if (draft.draftType === "auction") {
     const budget = normalizeAuctionBudget(options.budget, rosterSize);
     const timer = normalizeAuctionTimerConfig(options.timer ?? options.auctionTimer);
+    // Random nomination is an auction with nobody at the wheel: a hidden queue
+    // deals the cards out, and since no manager has to reserve slots for the
+    // rest of their roster, the 13 active slots stop being a cap at all.
+    draft.nomination = options.nomination === "random" ? "random" : "manual";
+    draft.unlimitedRoster = draft.nomination === "random";
     draft.auction = {
       budget,
       budgets: Object.fromEntries(cleanManagers.map((manager) => [manager.id, budget])),
@@ -104,9 +236,78 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
       lot: null,
       history: []
     };
+    if (draft.nomination === "random") {
+      draft.auction.queue = buildNominationQueue(draft);
+      draft.auction.queueIndex = 0;
+    }
   }
 
   return draft;
+}
+
+export function isRandomNomination(draft) {
+  return isAuctionDraft(draft) && draft.nomination === "random";
+}
+
+export function hasUnlimitedRoster(draft) {
+  return Boolean(draft?.unlimitedRoster);
+}
+
+// Fisher-Yates on a copy, driven by the seeded rng, so every replica of the
+// room deals the same queue in the same order.
+function shuffleSeeded(items, rng) {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = rng.int(0, i);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+// The hidden pool: a seeded subset of the visible board — floor(1.4n) managers'
+// worth at every roster slot — shuffled into the order it will be nominated in.
+// Everything left on the board is a card the room can see and never bid on,
+// until the sweep goes looking for it.
+function buildNominationQueue(draft) {
+  const rng = createRng(`${draft.seed}:nomination-queue`);
+  const { hidden } = randomNominationQuotas(draft.managers.length);
+  const queue = [];
+  const queued = new Set();
+  for (const [group, count] of hidden) {
+    // A card queues once. The DH group draws on every hitter, so it has to
+    // skip the ones the position groups already took, or the same bat would
+    // come up for bid twice.
+    const cards = draft.pool.filter((player) => !queued.has(player.id) && poolGroupMatches(player, group));
+    for (const player of shuffleSeeded(cards, rng).slice(0, count)) {
+      queued.add(player.id);
+      queue.push(player);
+    }
+  }
+  return shuffleSeeded(queue, rng).map((player) => player.id);
+}
+
+// The card the queue puts on the block next, or null once it runs dry.
+export function nextQueuedPlayer(draft) {
+  if (!isRandomNomination(draft)) return null;
+  const playerId = draft.auction.queue[draft.auction.queueIndex];
+  if (!playerId) return null;
+  return draft.pool.find((player) => player.id === playerId) ?? null;
+}
+
+export function nominationQueueRemaining(draft) {
+  if (!isRandomNomination(draft)) return 0;
+  return Math.max(0, draft.auction.queue.length - draft.auction.queueIndex);
+}
+
+// Enough loop steps for a caller to run every remaining lot to a decision: one
+// nomination plus a sealed bid per manager, plus a rebid round, plus slack. A
+// random-nomination room runs as long as its queue, not as long as its rosters.
+export function auctionStepGuard(draft) {
+  if (!isAuctionDraft(draft)) return draft.managers.length * draft.rosterSize + 20;
+  const lots = isRandomNomination(draft)
+    ? nominationQueueRemaining(draft)
+    : draft.managers.length * draft.rosterSize;
+  return lots * (draft.managers.length * 2 + 4) + 20;
 }
 
 export function isAuctionDraft(draft) {
@@ -135,6 +336,17 @@ export function availablePlayers(draft) {
 export function canPickPlayer(draft, manager, player) {
   if (!player || draft.pickedIds.has(player.id)) {
     return { ok: false, reason: "already picked" };
+  }
+  const eraDupe = personConflict(manager.roster, player);
+  if (eraDupe) {
+    return { ok: false, reason: `already has ${eraDupe.name} (${eraDupe.setTag})` };
+  }
+  // With unlimited inactive slots the only thing standing between a manager
+  // and a card is the money: no roster cap, no position cap, and no duty to
+  // leave the rest of the league a catcher — the closing sweep guarantees
+  // everyone a legal nine out of the cards the board never bid on.
+  if (hasUnlimitedRoster(draft)) {
+    return { ok: true, reason: "" };
   }
   if (manager.roster.length >= draft.rosterSize) {
     return { ok: false, reason: "roster full" };
@@ -198,8 +410,13 @@ export function auctionBudget(draft, manager) {
 }
 
 // A bid can never leave a manager unable to pay the minimum bid for each of
-// their remaining open roster slots.
+// their remaining open roster slots — except under random nomination, where
+// the sweep fills a short roster for free. There, a manager may spend the last
+// point they have on one card and take replacement-level scraps at the other
+// twelve slots. That is a real strategy, and it costs exactly what it looks
+// like it costs.
 export function auctionMaxBid(draft, manager) {
+  if (hasUnlimitedRoster(draft)) return auctionBudget(draft, manager);
   const slotsAfterThisPlayer = draft.rosterSize - manager.roster.length - 1;
   return auctionBudget(draft, manager) - Math.max(0, slotsAfterThisPlayer) * AUCTION_MIN_BID;
 }
@@ -229,9 +446,8 @@ export function startAuctionReview(draft, now = Date.now()) {
 export function completeAuctionReview(draft, now = Date.now()) {
   if (!isAuctionDraft(draft)) return null;
   const review = draft.auction.review;
-  if (!review) return null;
-  if (review.completedAt === null) review.completedAt = normalizeTimestamp(now);
-  return review;
+  if (review?.completedAt === null) review.completedAt = normalizeTimestamp(now);
+  return review ?? null;
 }
 
 export function auctionReviewRemainingMs(draft, now = Date.now()) {
@@ -244,20 +460,29 @@ export function auctionReviewRemainingMs(draft, now = Date.now()) {
 
 export function auctionReviewComplete(draft, now = Date.now()) {
   if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft)) return true;
-  syncAuctionTimer(draft, now);
-  return draft.auction.review?.completedAt !== null;
+  const review = draft.auction.review;
+  return review?.completedAt !== null || (review?.endsAt !== null && normalizeTimestamp(now) >= review.endsAt);
 }
 
 export function auctionClockBankMs(draft, manager) {
-  return Math.max(0, Number(draft.auction?.clockBanks?.[manager.id] ?? 0));
+  return Math.max(0, Number(draft.auction?.clockBanks?.[manager?.id] ?? 0));
 }
 
 export function auctionBidTimeRemainingMs(draft, manager, now = Date.now()) {
   const lot = draft.auction?.lot;
-  if (!lot?.clock || lot.clock.submissions?.[manager.id]) return auctionClockBankMs(draft, manager);
-  if (!lot.clock.pending?.includes(manager.id)) return auctionClockBankMs(draft, manager);
+  if (!lot?.clock || !lot.pending?.includes(manager?.id)) return auctionClockBankMs(draft, manager);
   const elapsed = Math.max(0, normalizeTimestamp(now) - lot.clock.startedAt);
   return Math.max(0, auctionClockBankMs(draft, manager) - elapsed);
+}
+
+export function timedOutAuctionBidderIds(draft, now = Date.now()) {
+  const lot = draft.auction?.lot;
+  if (!lot?.clock) return [];
+  const timestamp = normalizeTimestamp(now);
+  return lot.pending.filter((managerId) => {
+    const manager = draft.managers.find((item) => item.id === managerId);
+    return manager && auctionBidTimeRemainingMs(draft, manager, timestamp) <= 0;
+  });
 }
 
 export function syncAuctionTimer(draft, now = Date.now()) {
@@ -265,42 +490,24 @@ export function syncAuctionTimer(draft, now = Date.now()) {
   const timestamp = normalizeTimestamp(now);
   let changed = false;
   const review = draft.auction.review;
-  if (review && review.completedAt === null && review.startedAt !== null && timestamp >= review.endsAt) {
+  if (review?.completedAt === null && review.startedAt !== null && timestamp >= review.endsAt) {
     review.completedAt = review.endsAt;
     changed = true;
   }
-
-  const lot = draft.auction.lot;
-  if (lot?.clock) {
-    for (const managerId of [...lot.clock.pending]) {
-      const manager = draft.managers.find((item) => item.id === managerId);
-      if (!manager) continue;
-      if (auctionBidTimeRemainingMs(draft, manager, timestamp) <= 0) {
-        submitTimedOutBid(draft, manager, timestamp);
-        changed = true;
-      }
-    }
+  let guard = draft.managers.length * 3 + 3;
+  while (draft.auction.lot && guard > 0) {
+    guard -= 1;
+    const expired = timedOutAuctionBidderIds(draft, timestamp);
+    if (!expired.length) break;
+    placeSealedBid(draft, expired[0], 0, timestamp, { timedOut: true });
+    changed = true;
   }
   return changed;
 }
 
-export function pendingAuctionBidManagers(draft) {
-  const lot = draft.auction?.lot;
-  if (!lot?.clock) return [];
-  return lot.clock.pending
-    .map((managerId) => draft.managers.find((manager) => manager.id === managerId))
-    .filter(Boolean);
-}
-
-export function canSellLot(draft, now = Date.now()) {
-  const lot = draft.auction?.lot;
-  if (!lot) return { ok: false, reason: "no card is on the block" };
-  syncAuctionTimer(draft, now);
-  if (lot.clock?.pending?.length) {
-    const names = pendingAuctionBidManagers(draft).map((manager) => manager.name).join(", ");
-    return { ok: false, reason: `waiting for ${names || "bids"}` };
-  }
-  return { ok: true, reason: "" };
+function normalizeTimestamp(now) {
+  const timestamp = Number(now);
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
 }
 
 export function canNominatePlayer(draft, manager, player, now = Date.now()) {
@@ -308,6 +515,9 @@ export function canNominatePlayer(draft, manager, player, now = Date.now()) {
   if (draft.complete) return { ok: false, reason: "draft complete" };
   if (!auctionReviewComplete(draft, now)) return { ok: false, reason: "review period is still open" };
   if (draft.auction.lot) return { ok: false, reason: "finish the current lot first" };
+  if (isRandomNomination(draft)) {
+    return { ok: false, reason: "the queue nominates in this room" };
+  }
   const nominator = currentManager(draft);
   if (manager.id !== nominator.id) {
     return { ok: false, reason: `${nominator.name} nominates next` };
@@ -318,7 +528,27 @@ export function canNominatePlayer(draft, manager, player, now = Date.now()) {
   return canPickPlayer(draft, manager, player);
 }
 
+// Who enters a sealed bid on this lot, in the order they enter it. Seat order
+// from whoever leads the bidding, minus anyone who can't afford the minimum or
+// can't legally roster the card.
+function pendingBidders(draft, player) {
+  const count = draft.managers.length;
+  const pending = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const manager = draft.managers[(draft.auction.nominatorIndex + offset) % count];
+    if (!hasUnlimitedRoster(draft) && manager.roster.length >= draft.rosterSize) continue;
+    if (auctionMaxBid(draft, manager) < AUCTION_MIN_BID) continue;
+    if (!canPickPlayer(draft, manager, player).ok) continue;
+    pending.push(manager.id);
+  }
+  return pending;
+}
+
+// Nominating opens a sealed-bid lot: every eligible manager, starting with
+// the nominator, enters one hidden bid. The nominator must open at the
+// minimum bid or more; everyone else may pass (bid 0).
 export function nominatePlayer(draft, playerId, now = Date.now()) {
+  if (isRandomNomination(draft)) return nominateNextQueued(draft, playerId, now);
   const nominator = currentManager(draft);
   const player = draft.pool.find((item) => item.id === playerId);
   if (!player || draft.pickedIds.has(playerId)) {
@@ -330,203 +560,267 @@ export function nominatePlayer(draft, playerId, now = Date.now()) {
   }
   draft.auction.lot = {
     playerId,
-    bid: AUCTION_MIN_BID,
-    bidderId: nominator.id,
     nominatorId: nominator.id,
-    raises: 0,
-    clock: createLotClock(draft, nominator, player, now)
+    round: 1,
+    bids: {},
+    pending: pendingBidders(draft, player),
+    tie: null,
+    clock: null
   };
+  draft.auction.lot.clock = createLotClock(draft, now, true);
   return draft.auction.lot;
 }
 
-export function canBid(draft, manager, amount, now = Date.now()) {
-  syncAuctionTimer(draft, now);
+// Puts the head of the hidden queue on the block. There is no nominator, so
+// nobody is obliged to open at the minimum — every manager may pass, and a
+// card the whole room passes on goes back to the board unsold.
+export function nominateNextQueued(draft, expectedPlayerId = null, now = Date.now()) {
+  if (!isRandomNomination(draft)) throw new Error("Not a random-nomination draft");
+  if (draft.complete) throw new Error("Draft complete");
+  if (!auctionReviewComplete(draft, now)) throw new Error("Review period is still open");
+  if (draft.auction.lot) throw new Error("Finish the current lot first");
+  const player = nextQueuedPlayer(draft);
+  if (!player) throw new Error("The nomination queue is empty");
+  if (expectedPlayerId && expectedPlayerId !== player.id) {
+    throw new Error("The queue nominates in this room");
+  }
+  draft.auction.lot = {
+    playerId: player.id,
+    nominatorId: null,
+    round: 1,
+    bids: {},
+    pending: pendingBidders(draft, player),
+    tie: null,
+    clock: null
+  };
+  draft.auction.lot.clock = createLotClock(draft, now, true);
+  // Nobody can bid — everyone is broke or blocked. The card passes untouched.
+  if (!draft.auction.lot.pending.length) return passLot(draft);
+  return draft.auction.lot;
+}
+
+// The bids are sealed, so nobody is waiting on anybody: every manager the lot
+// is still owed a bid from may enter it whenever they like, and the lot
+// resolves when the last one is in. `pending` is a set of who still owes,
+// not a queue of whose turn it is.
+export function isPendingBidder(draft, managerId) {
+  return Boolean(draft.auction?.lot?.pending?.includes(managerId));
+}
+
+// Someone the lot is still waiting on. Order is seat order, which is arbitrary
+// but stable — it exists so the computer managers have somebody to play next,
+// not because a human has to wait their turn.
+export function sealedBidder(draft) {
+  const pendingId = draft.auction?.lot?.pending?.[0];
+  return pendingId ? draft.managers.find((manager) => manager.id === pendingId) ?? null : null;
+}
+
+export function canPlaceSealedBid(draft, manager, amount, now = Date.now()) {
   const lot = draft.auction?.lot;
   if (!lot) return { ok: false, reason: "no card is on the block" };
-  if (manager.id === lot.bidderId) return { ok: false, reason: "already the high bidder" };
-  if (lot.clock?.submissions?.[manager.id]) return { ok: false, reason: "bid already submitted" };
-  if (lot.clock && !lot.clock.pending.includes(manager.id)) return { ok: false, reason: "not eligible to bid on this lot" };
+  if (!isPendingBidder(draft, manager?.id)) {
+    const alreadyIn = manager?.id in lot.bids;
+    return { ok: false, reason: alreadyIn ? "your bid is already in" : "you are not bidding on this card" };
+  }
   if (lot.clock && auctionBidTimeRemainingMs(draft, manager, now) <= 0) {
     return { ok: false, reason: "bid clock expired" };
   }
-  const rosterLegality = canPickPlayer(draft, manager, auctionLotPlayer(draft));
-  if (!rosterLegality.ok) return rosterLegality;
-  const maxBid = auctionMaxBid(draft, manager);
-  if (!Number.isFinite(amount)) {
-    return { ok: false, reason: "bid must be a number" };
-  }
-  if (lot.clock) {
-    if (amount < AUCTION_MIN_BID) {
-      return { ok: false, reason: `bid at least ${AUCTION_MIN_BID}, or pass` };
+  const bid = Math.round(Number(amount));
+  if (!Number.isFinite(bid) || bid < 0) return { ok: false, reason: "enter a bid amount" };
+  if (bid === 0) {
+    if (lot.round === 2) return { ok: false, reason: `rebid at least the tied ${lot.tie.amount}` };
+    if (manager.id === lot.nominatorId) {
+      return { ok: false, reason: `the nominator opens at ${AUCTION_MIN_BID} or more` };
     }
-  } else if (amount < lot.bid + AUCTION_MIN_RAISE) {
-    return { ok: false, reason: `must raise to at least ${lot.bid + AUCTION_MIN_RAISE}` };
+    return { ok: true, reason: "" };
   }
-  if (amount > maxBid) {
+  const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
+  if (bid < minBid) {
+    if (lot.round === 2) return { ok: false, reason: `rebid at least the tied ${minBid}` };
+    return {
+      ok: false,
+      reason: manager.id === lot.nominatorId ? `bid at least ${minBid}` : `bid at least ${minBid}, or 0 to pass`
+    };
+  }
+  const maxBid = auctionMaxBid(draft, manager);
+  if (bid > maxBid) {
     return { ok: false, reason: `max bid is ${Math.max(0, maxBid)} (must keep ${AUCTION_MIN_BID} per open slot)` };
   }
   return { ok: true, reason: "" };
 }
 
-export function placeBid(draft, managerId, amount, now = Date.now()) {
+// Records one sealed bid; the last bid in resolves the lot automatically.
+// Returns { sold: false, lot } while bids are still out, { sold: false, tie }
+// when a tie forces a rebid round, or { sold: true, manager, player, price }.
+export function placeSealedBid(draft, managerId, amount, now = Date.now(), options = {}) {
   const manager = draft.managers.find((item) => item.id === managerId);
   if (!manager) throw new Error("Unknown manager");
-  if (submitTimedOutBid(draft, manager, now)) {
-    throw new Error("bid clock expired");
-  }
-  const legality = canBid(draft, manager, amount, now);
-  if (!legality.ok) {
-    throw new Error(legality.reason);
+  const timedOut = Boolean(options.timedOut);
+  if (timedOut) {
+    if (!isPendingBidder(draft, managerId)) throw new Error("bid is no longer pending");
+    amount = 0;
+  } else {
+    const legality = canPlaceSealedBid(draft, manager, amount, now);
+    if (!legality.ok) throw new Error(legality.reason);
   }
   const lot = draft.auction.lot;
-  submitAuctionBidClock(draft, manager, amount, now);
-  if (!lot.clock || submittedBidLeadsLot(lot, managerId, amount)) {
-    lot.bid = amount;
-    lot.bidderId = managerId;
+  submitAuctionClock(draft, manager, now, timedOut);
+  lot.bids[managerId] = Math.round(Number(amount));
+  // Whoever this was, they are done — not necessarily the one at the front.
+  lot.pending = lot.pending.filter((id) => id !== managerId);
+  if (lot.pending.length === 0) return resolveSealedLot(draft, now);
+  return { sold: false, lot };
+}
+
+// Vickrey-style resolution: the high bid wins at the second-highest bid + 1.
+// A tie for the top starts one sealed rebid round among the tied managers
+// (minimum: the tied amount); a second tie is settled by a seeded coin flip
+// at that price, so every replica of the draft agrees on the winner.
+function resolveSealedLot(draft, now = Date.now()) {
+  const lot = draft.auction.lot;
+  const live = Object.entries(lot.bids).filter(([, amount]) => amount > 0);
+  const top = live.reduce((best, [, amount]) => Math.max(best, amount), 0);
+  // Seat order, not the order the bids happened to land in. Bids are sealed
+  // and may be entered in any order, so who typed first must not tilt a
+  // coin flip — the tie is between managers, not between reflexes.
+  const seat = (managerId) => draft.managers.findIndex((manager) => manager.id === managerId);
+  const leaders = live
+    .filter(([, amount]) => amount === top)
+    .map(([managerId]) => managerId)
+    .sort((a, b) => seat(a) - seat(b));
+
+  // Under manual nomination the nominator has to open the bidding, so a lot
+  // always sells. Under random nomination nobody is on the hook for it, and a
+  // card the whole room passes on simply goes back to the board.
+  if (!live.length) return passLot(draft);
+
+  if (leaders.length > 1 && lot.round === 1) {
+    lot.round = 2;
+    lot.tie = { amount: top, managerIds: leaders };
+    lot.pending = [...leaders];
+    lot.clock = createLotClock(draft, now, false);
+    return { sold: false, lot, tie: lot.tie };
   }
-  lot.raises += 1;
-  return lot;
+
+  let winnerId;
+  let price;
+  if (leaders.length === 1) {
+    winnerId = leaders[0];
+    const second = live
+      .filter(([managerId]) => managerId !== winnerId)
+      .reduce((best, [, amount]) => Math.max(best, amount), 0);
+    price = Math.max(AUCTION_MIN_BID, second + 1);
+  } else {
+    const rng = createRng(`${draft.seed}:auction-tie:${draft.pickNumber}:${[...leaders].sort().join(",")}:${top}`);
+    winnerId = leaders[Math.floor(rng.next() * leaders.length)];
+    price = top;
+  }
+  return sellLotTo(draft, winnerId, price);
 }
 
-export function passBid(draft, managerId, now = Date.now()) {
-  const manager = draft.managers.find((item) => item.id === managerId);
-  if (!manager) throw new Error("Unknown manager");
-  const lot = draft.auction?.lot;
-  if (!lot) throw new Error("No card is on the block");
-  if (manager.id === lot.bidderId) throw new Error("High bidder cannot pass");
-  if (lot.clock?.submissions?.[manager.id]) throw new Error("bid already submitted");
-  if (lot.clock && !lot.clock.pending.includes(manager.id)) throw new Error("not eligible to bid on this lot");
-  if (submitTimedOutBid(draft, manager, now)) return lot;
-  submitAuctionBidClock(draft, manager, 0, now);
-  return lot;
+function createLotClock(draft, now, addIncrement) {
+  if (!auctionTimerEnabled(draft)) return null;
+  if (addIncrement) {
+    for (const manager of draft.managers) {
+      if (!hasUnlimitedRoster(draft) && manager.roster.length >= draft.rosterSize) continue;
+      draft.auction.clockBanks[manager.id] = auctionClockBankMs(draft, manager) + draft.auction.timer.incrementMs;
+    }
+  }
+  return { startedAt: normalizeTimestamp(now), timedOut: [] };
 }
 
-export function sellLot(draft, now = Date.now()) {
+function submitAuctionClock(draft, manager, now, timedOut) {
   const lot = draft.auction?.lot;
-  if (!lot) throw new Error("No card is on the block");
-  const saleLegality = canSellLot(draft, now);
-  if (!saleLegality.ok) throw new Error(saleLegality.reason);
-  const winner = draft.managers.find((item) => item.id === lot.bidderId);
+  if (!lot?.clock) return;
+  const timestamp = normalizeTimestamp(now);
+  const elapsed = Math.max(0, timestamp - lot.clock.startedAt);
+  const spent = Math.min(auctionClockBankMs(draft, manager), elapsed);
+  draft.auction.clockBanks[manager.id] = timedOut ? 0 : Math.max(0, auctionClockBankMs(draft, manager) - spent);
+  if (timedOut && !lot.clock.timedOut.includes(manager.id)) lot.clock.timedOut.push(manager.id);
+}
+
+function sellLotTo(draft, winnerId, price) {
+  const lot = draft.auction.lot;
+  const winner = draft.managers.find((item) => item.id === winnerId);
   const player = auctionLotPlayer(draft);
   if (!winner || !player) throw new Error("Lot is invalid");
-  const legality = canPickPlayer(draft, winner, player);
-  if (!legality.ok) {
-    throw new Error(legality.reason);
-  }
 
   winner.roster.push(player);
   draft.pickedIds.add(player.id);
-  draft.auction.budgets[winner.id] -= lot.bid;
+  draft.auction.budgets[winner.id] -= price;
   draft.auction.history.push({
     playerId: player.id,
     managerId: winner.id,
-    price: lot.bid,
+    price,
+    bids: { ...lot.bids },
     nominatorId: lot.nominatorId,
     nominatorIndex: draft.auction.nominatorIndex
   });
   draft.pickNumber += 1;
-  draft.auction.lot = null;
-  draft.auction.nominatorIndex = nextNominatorIndex(draft, draft.auction.nominatorIndex);
-  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
-  return { manager: winner, player, price: lot.bid };
+  closeLot(draft);
+  return { sold: true, manager: winner, player, price };
 }
 
-// Only an untouched nomination can be canceled; once someone raises, resolve
-// the lot with Sold or Undo.
+// A card nobody bid on. It stays on the board — unowned and un-nominated — and
+// the sweep may still hand it to whoever ends the night short at its position.
+function passLot(draft) {
+  const lot = draft.auction.lot;
+  const player = auctionLotPlayer(draft);
+  draft.auction.history.push({
+    playerId: lot.playerId,
+    managerId: null,
+    price: 0,
+    passed: true,
+    bids: { ...lot.bids },
+    nominatorId: lot.nominatorId,
+    nominatorIndex: draft.auction.nominatorIndex
+  });
+  closeLot(draft);
+  return { sold: false, passed: true, player };
+}
+
+// Everything that happens after a lot settles, sold or passed: the block
+// clears, the bidding lead rotates, the queue steps forward, and if that was
+// the last card in the queue the sweep runs and the draft is done.
+function closeLot(draft) {
+  draft.auction.lot = null;
+  draft.auction.nominatorIndex = nextNominatorIndex(draft, draft.auction.nominatorIndex);
+  if (isRandomNomination(draft)) {
+    draft.auction.queueIndex += 1;
+    if (nominationQueueRemaining(draft) === 0) {
+      sweepRosters(draft);
+      draft.complete = true;
+    }
+    return;
+  }
+  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+}
+
+// Only an effectively untouched nomination can be canceled: instant computer
+// bids don't count as touching it, a bid from another human does.
+export function canCancelLot(draft) {
+  const lot = draft.auction?.lot;
+  if (!lot) return false;
+  // Nobody chose this card, so there is no nomination to take back — the only
+  // way past it is to bid on it or pass it.
+  if (isRandomNomination(draft)) return false;
+  return !Object.keys(lot.bids).some((managerId) => {
+    if (managerId === lot.nominatorId) return false;
+    const manager = draft.managers.find((item) => item.id === managerId);
+    return Boolean(manager) && !manager.cpu;
+  });
+}
+
 export function cancelLot(draft) {
   const lot = draft.auction?.lot;
-  if (!lot || lot.raises > 0) return null;
+  if (!lot || !canCancelLot(draft)) return null;
   draft.auction.lot = null;
   return lot;
 }
 
-function createLotClock(draft, nominator, player, now) {
-  if (!auctionTimerEnabled(draft)) return null;
-  const timestamp = normalizeTimestamp(now);
-  const activeManagers = draft.managers.filter((manager) => manager.roster.length < draft.rosterSize);
-  for (const manager of activeManagers) {
-    draft.auction.clockBanks[manager.id] = auctionClockBankMs(draft, manager) + draft.auction.timer.incrementMs;
-  }
-  const pending = activeManagers
-    .filter((manager) => manager.id !== nominator.id)
-    .filter((manager) => auctionClockBankMs(draft, manager) > 0)
-    .filter((manager) => canPickPlayer(draft, manager, player).ok)
-    .map((manager) => manager.id);
-  return {
-    startedAt: timestamp,
-    pending,
-    nextSequence: 1,
-    submissions: {
-      [nominator.id]: {
-        amount: AUCTION_MIN_BID,
-        submittedAt: timestamp,
-        elapsedMs: 0,
-        sequence: 0
-      }
-    },
-    timedOut: []
-  };
-}
-
-function submitAuctionBidClock(draft, manager, amount, now) {
-  const lot = draft.auction?.lot;
-  if (!lot?.clock || lot.clock.submissions[manager.id]) return;
-  const timestamp = normalizeTimestamp(now);
-  const elapsed = Math.max(0, timestamp - lot.clock.startedAt);
-  const spent = Math.min(auctionClockBankMs(draft, manager), elapsed);
-  draft.auction.clockBanks[manager.id] = Math.max(0, auctionClockBankMs(draft, manager) - spent);
-  const sequence = lot.clock.nextSequence ?? Object.keys(lot.clock.submissions).length;
-  lot.clock.nextSequence = sequence + 1;
-  lot.clock.submissions[manager.id] = {
-    amount,
-    submittedAt: timestamp,
-    elapsedMs: spent,
-    sequence
-  };
-  lot.clock.pending = lot.clock.pending.filter((managerId) => managerId !== manager.id);
-}
-
-function submitTimedOutBid(draft, manager, now) {
-  const lot = draft.auction?.lot;
-  if (!lot?.clock || lot.clock.submissions[manager.id]) return false;
-  if (!lot.clock.pending.includes(manager.id)) return false;
-  const timestamp = normalizeTimestamp(now);
-  const elapsed = Math.max(0, timestamp - lot.clock.startedAt);
-  if (elapsed < auctionClockBankMs(draft, manager)) return false;
-  draft.auction.clockBanks[manager.id] = 0;
-  const sequence = lot.clock.nextSequence ?? Object.keys(lot.clock.submissions).length;
-  lot.clock.nextSequence = sequence + 1;
-  lot.clock.submissions[manager.id] = {
-    amount: 0,
-    submittedAt: timestamp,
-    elapsedMs: elapsed,
-    timedOut: true,
-    sequence
-  };
-  lot.clock.pending = lot.clock.pending.filter((managerId) => managerId !== manager.id);
-  if (!lot.clock.timedOut.includes(manager.id)) lot.clock.timedOut.push(manager.id);
-  return true;
-}
-
-function submittedBidLeadsLot(lot, managerId, amount) {
-  if (amount > lot.bid) return true;
-  if (amount < lot.bid) return false;
-  const current = lot.clock?.submissions?.[lot.bidderId];
-  const challenger = lot.clock?.submissions?.[managerId];
-  if (!current || !challenger) return false;
-  if (challenger.submittedAt !== current.submittedAt) {
-    return challenger.submittedAt < current.submittedAt;
-  }
-  return (challenger.sequence ?? Number.POSITIVE_INFINITY) < (current.sequence ?? Number.POSITIVE_INFINITY);
-}
-
-function normalizeTimestamp(value) {
-  const timestamp = Math.round(Number(value));
-  return Number.isFinite(timestamp) ? timestamp : Date.now();
-}
-
 export function upcomingNominators(draft, count) {
   if (!isAuctionDraft(draft) || draft.complete) return [];
+  if (isRandomNomination(draft)) return [];
   const nominators = [];
   let index = draft.auction.nominatorIndex;
   for (let step = 0; step < count; step += 1) {
@@ -540,6 +834,9 @@ export function upcomingNominators(draft, count) {
 
 function nextNominatorIndex(draft, fromIndex) {
   const count = draft.managers.length;
+  // No roster ever fills under random nomination, so there is nobody to skip:
+  // the index is just the seat that leads the sealed bidding, and it rotates.
+  if (hasUnlimitedRoster(draft)) return (fromIndex + 1) % count;
   for (let offset = 1; offset <= count; offset += 1) {
     const index = (fromIndex + offset) % count;
     if (draft.managers[index].roster.length < draft.rosterSize) return index;
@@ -570,11 +867,26 @@ export function undoLastPick(draft) {
 // nomination, a finished lot refunds the sale and hands the nomination back.
 function undoAuctionAction(draft) {
   if (draft.auction.lot) {
+    if (isRandomNomination(draft)) return null;
     draft.auction.lot = null;
     return { canceledLot: true };
   }
+  // The sweep is not a move anyone made, it is the closing bell. Undoing the
+  // last lot means the draft is live again, so the free fill-ins come back off
+  // the board first.
+  revertSweep(draft);
+
   const entry = draft.auction.history.at(-1);
   if (!entry) return null;
+
+  if (entry.passed) {
+    draft.auction.history.pop();
+    draft.auction.nominatorIndex = entry.nominatorIndex;
+    draft.auction.queueIndex -= 1;
+    draft.complete = false;
+    return { passed: true, player: draft.pool.find((item) => item.id === entry.playerId) ?? null };
+  }
+
   const manager = draft.managers.find((item) => item.id === entry.managerId);
   const rosterIndex = manager?.roster.findIndex((player) => player.id === entry.playerId) ?? -1;
   if (!manager || rosterIndex < 0) return null;
@@ -586,6 +898,7 @@ function undoAuctionAction(draft) {
   draft.pickedIds.delete(player.id);
   draft.pickNumber -= 1;
   draft.complete = false;
+  if (isRandomNomination(draft)) draft.auction.queueIndex -= 1;
   if (manager.lineupAssignments) {
     for (const [slot, playerId] of Object.entries(manager.lineupAssignments)) {
       if (playerId === player.id) delete manager.lineupAssignments[slot];
@@ -593,6 +906,33 @@ function undoAuctionAction(draft) {
   }
   return { manager, player };
 }
+
+// Takes every free fill-in the closing sweep handed out back off the rosters.
+function revertSweep(draft) {
+  if (!isRandomNomination(draft)) return;
+  for (;;) {
+    const entry = draft.auction.history.at(-1);
+    if (!entry?.swept) break;
+    draft.auction.history.pop();
+    const manager = draft.managers.find((item) => item.id === entry.managerId);
+    if (manager) {
+      manager.roster = manager.roster.filter((player) => player.id !== entry.playerId);
+      if (manager.lineupAssignments) {
+        for (const [slot, playerId] of Object.entries(manager.lineupAssignments)) {
+          if (playerId === entry.playerId) delete manager.lineupAssignments[slot];
+        }
+      }
+    }
+    draft.pickedIds.delete(entry.playerId);
+    draft.pickNumber -= 1;
+  }
+  draft.complete = false;
+}
+
+// Sim actions live in the shared room log so every player sees the same
+// results, but they never mutate the draft — clients run the seeded sims
+// locally when they see one, and log replays skip them.
+export const SIM_ACTION_TYPES = new Set(["batch"]);
 
 // Single entry point for replaying shared draft actions. Online rooms sync an
 // ordered action log; the server and every client apply actions through this
@@ -606,17 +946,16 @@ export function applyDraftAction(draft, action) {
     case "nominate":
       nominatePlayer(draft, action.playerId, action.at);
       return;
-    case "bid":
-      placeBid(draft, action.managerId, action.amount, action.at);
-      return;
-    case "pass-bid":
-      passBid(draft, action.managerId, action.at);
-      return;
-    case "sell":
-      sellLot(draft, action.at);
+    case "seal-bid":
+      placeSealedBid(draft, action.managerId, action.amount, action.at, { timedOut: action.timedOut });
       return;
     case "cancel-lot":
       cancelLot(draft);
+      return;
+    case "auto-nominate":
+      // Puts the nominator's best target on the block and stops there, so a
+      // stalled nomination never turns into bids nobody entered.
+      nominateBestTarget(draft, action.at);
       return;
     case "start-review":
       startAuctionReview(draft, action.at);
@@ -624,13 +963,11 @@ export function applyDraftAction(draft, action) {
     case "complete-review":
       completeAuctionReview(draft, action.at);
       return;
-    case "sync-timer":
-      syncAuctionTimer(draft, action.at);
-      return;
     case "autopick":
       autopick(draft, action.at);
       return;
     case "finish":
+      completeAuctionReview(draft, action.at);
       while (!draft.complete) autopick(draft, action.at);
       return;
     case "undo":
@@ -703,52 +1040,57 @@ function bestAutopickTarget(draft, manager) {
     .sort((a, b) => b.score - a.score)[0].player;
 }
 
-// Auto for auctions resolves one full lot: nominate the nominator's best
-// target if nothing is on the block, let every manager proxy-bid up to their
-// willingness, then sell to the standing high bidder.
-function autoRunAuctionLot(draft, now) {
-  if (draft.complete) return draft;
-  if (!draft.auction.lot) {
-    const nominator = currentManager(draft);
-    nominatePlayer(draft, bestAutopickTarget(draft, nominator).id, now);
+// Puts the next card on the block: whatever the hidden queue deals in a
+// random-nomination room, or the current nominator's best target in a manual
+// one. Returns the lot, or null if the card passed with nobody able to bid.
+export function nominateBestTarget(draft, now = Date.now()) {
+  if (isRandomNomination(draft)) {
+    nominateNextQueued(draft, null, now);
+    return draft.auction.lot;
   }
-  autoBidLot(draft);
-  sellLot(draft);
-  return draft;
+  const nominator = currentManager(draft);
+  nominatePlayer(draft, bestAutopickTarget(draft, nominator).id, now);
+  return draft.auction.lot;
 }
 
-function autoBidLot(draft) {
-  const lot = draft.auction.lot;
+// A computer's sealed bid is its willingness for the card; in a rebid round
+// it re-enters at least the tied amount, capped by its budget.
+export function cpuSealedBid(draft, manager) {
+  const lot = draft.auction?.lot;
   const player = auctionLotPlayer(draft);
-  const willingness = new Map();
-  for (const manager of draft.managers) {
-    if (manager.roster.length >= draft.rosterSize) continue;
-    if (!canPickPlayer(draft, manager, player).ok) continue;
-    willingness.set(manager.id, auctionWillingness(draft, manager, player));
+  if (!lot || !player) return 0;
+  const willingness = auctionWillingness(draft, manager, player);
+  if (lot.round === 2) {
+    return Math.min(auctionMaxBid(draft, manager), Math.max(lot.tie.amount, willingness));
   }
+  if (manager.id === lot.nominatorId) return Math.max(AUCTION_MIN_BID, willingness);
+  return willingness >= AUCTION_MIN_BID ? willingness : 0;
+}
 
-  if (lot.clock) {
-    for (const manager of pendingAuctionBidManagers(draft).sort((a, b) => willingness.get(b.id) - willingness.get(a.id))) {
-      const amount = willingness.get(manager.id) ?? 0;
-      if (amount >= AUCTION_MIN_BID && canBid(draft, manager, amount, lot.clock.startedAt).ok) {
-        placeBid(draft, manager.id, amount, lot.clock.startedAt);
-      } else {
-        passBid(draft, manager.id, lot.clock.startedAt);
-      }
-    }
-    return;
+// Computer managers bid the moment their turn comes up, so a lot only ever
+// waits on humans. Returns the last placeSealedBid result (or null).
+export function submitCpuSealedBids(draft) {
+  let result = null;
+  for (;;) {
+    const next = sealedBidder(draft);
+    if (!next?.cpu) return result;
+    result = placeSealedBid(draft, next.id, cpuSealedBid(draft, next));
   }
+}
 
-  let guard = Math.ceil(draft.auction.budget / AUCTION_MIN_RAISE) + draft.managers.length + 5;
-  while (guard > 0) {
+// Auto for auctions resolves one full lot: nominate the nominator's best
+// target if nothing is on the block, then sealed-bid every manager's
+// willingness (the rebid round resolves the same way if bids tie).
+function autoRunAuctionLot(draft, now = Date.now()) {
+  if (draft.complete) return draft;
+  if (!draft.auction.lot) nominateBestTarget(draft, now);
+  let guard = draft.managers.length * 4 + 8;
+  while (draft.auction.lot && guard > 0) {
     guard -= 1;
-    const nextBid = lot.bid + AUCTION_MIN_RAISE;
-    const challenger = draft.managers
-      .filter((manager) => manager.id !== lot.bidderId && (willingness.get(manager.id) ?? 0) >= nextBid)
-      .sort((a, b) => willingness.get(b.id) - willingness.get(a.id))[0];
-    if (!challenger) break;
-    placeBid(draft, challenger.id, nextBid);
+    const next = sealedBidder(draft);
+    placeSealedBid(draft, next.id, cpuSealedBid(draft, next), now);
   }
+  return draft;
 }
 
 // Prices scale with the room budget: a manager's willingness for a card is
@@ -758,15 +1100,23 @@ function autoBidLot(draft) {
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
+  const needs = getRosterNeeds(manager.roster);
+  // A computer under random nomination budgets against the holes it still has,
+  // not against a roster cap it no longer has. Once its nine and its staff are
+  // whole it stops bidding: hoarding a bench is a human's idea.
+  const openSlots = hasUnlimitedRoster(draft)
+    ? needs.hitter + needs.starter + needs.bullpen
+    : draft.rosterSize - manager.roster.length;
+  if (hasUnlimitedRoster(draft) && openSlots <= 0) return 0;
   const model = managerValuation(draft, manager);
   const sameKind = availablePlayers(draft).filter((item) => item.kind === player.kind);
   const meanValue = sameKind.reduce((sum, item) => sum + model.value(item), 0) / Math.max(1, sameKind.length);
   const relativeValue = meanValue > 0 ? model.value(player) / meanValue : 1;
-  const fairShare = auctionBudget(draft, manager) / Math.max(1, draft.rosterSize - manager.roster.length);
-  const needPremium = managerNeedsPositionGroup(manager, player, getRosterNeeds(manager.roster)) ? 1.15 : 1;
+  const fairShare = auctionBudget(draft, manager) / Math.max(1, openSlots);
+  const needPremium = managerNeedsPositionGroup(manager, player, needs) ? 1.15 : 1;
   const raw = fairShare * relativeValue * needPremium;
-  const rounded = Math.round(raw / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
-  return Math.max(AUCTION_MIN_BID, Math.min(maxBid, rounded));
+  // Sealed bids are whole points, not raise steps — odd amounts make ties rare.
+  return Math.max(AUCTION_MIN_BID, Math.min(maxBid, Math.round(raw)));
 }
 
 export function managerValuation(draft, manager) {
@@ -782,9 +1132,12 @@ export function managerValuation(draft, manager) {
 const valuationModels = new Map();
 
 export function buildTeam(manager, options = {}) {
-  const lineup = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
-    .filter((slot) => slot.player)
-    .map((slot) => lineupPlayer(slot));
+  const lineup = applyBattingOrder(
+    assignLineupSlots(manager.roster, manager.lineupAssignments).slots
+      .filter((slot) => slot.player)
+      .map((slot) => lineupPlayer(slot)),
+    manager.battingOrder
+  );
   const starters = manager.roster.filter((player) => player.kind === "pitcher" && pitcherRole(player) === "SP");
   const bullpen = manager.roster.filter((player) => player.kind === "pitcher" && pitcherRole(player) === "RP");
   const starterIndex = starters.length ? Number(options.starterIndex ?? 0) % starters.length : 0;
@@ -799,16 +1152,121 @@ export function buildTeam(manager, options = {}) {
   };
 }
 
-export function validateRoster(manager) {
+// Reorder a built lineup to the manager's preferred batting order (a list of
+// player ids). Players missing from the list bat last, in slot order, so a
+// stale order after a roster swap still fields nine.
+export function applyBattingOrder(lineup, battingOrder) {
+  if (!Array.isArray(battingOrder) || !battingOrder.length) return lineup;
+  const rank = new Map(battingOrder.map((id, index) => [id, index]));
+  return [...lineup].sort((a, b) => {
+    const rankA = rank.has(a.id) ? rank.get(a.id) : battingOrder.length + lineup.indexOf(a);
+    const rankB = rank.has(b.id) ? rank.get(b.id) : battingOrder.length + lineup.indexOf(b);
+    return rankA - rankB;
+  });
+}
+
+// One era of a real player per team: 1990s Barry Bonds and 2000s Barry
+// Bonds can't both suit up. Returns one name per offending person.
+export function duplicateEraPeople(roster) {
+  const seen = new Map();
+  const names = [];
+  for (const player of roster) {
+    const identity = playerIdentity(player.id);
+    if (!identity) continue;
+    const prior = seen.get(identity.person);
+    if (prior && prior !== identity.slice) {
+      if (!names.includes(player.name)) names.push(player.name);
+    } else {
+      seen.set(identity.person, identity.slice);
+    }
+  }
+  return names;
+}
+
+// Roster issues that keep a manager from fielding a legal nine. With unlimited
+// inactive slots a surplus hitter is a bench bat, not a problem, so the
+// "too many" complaint only applies to rooms that cap the roster.
+export function validateRoster(manager, options = {}) {
+  const unlimited = Boolean(options.unlimitedRoster);
   const lineup = lineupStatus(manager.roster);
   const staff = staffStatus(manager.roster);
   const issues = [];
+  const eraDupes = duplicateEraPeople(manager.roster);
+  if (eraDupes.length) issues.push(`two eras of ${eraDupes.join("/")}`);
   if (lineup.hitters.length < HITTER_TARGET) issues.push(`needs ${HITTER_TARGET - lineup.hitters.length} more hitter${HITTER_TARGET - lineup.hitters.length === 1 ? "" : "s"}`);
   if (lineup.missingPositions.length) issues.push(`missing ${lineup.missingPositions.join("/")}`);
-  if (lineup.extraDuplicates.length) issues.push(`too many ${lineup.extraDuplicates.join("/")} hitters`);
+  if (!unlimited && lineup.extraDuplicates.length) issues.push(`too many ${lineup.extraDuplicates.join("/")} hitters`);
   if (staff.starters.length < STARTER_TARGET) issues.push(`needs ${STARTER_TARGET - staff.starters.length} more starter${STARTER_TARGET - staff.starters.length === 1 ? "" : "s"}`);
   if (staff.bullpen.length < BULLPEN_TARGET) issues.push(`needs ${BULLPEN_TARGET - staff.bullpen.length} more bullpen pitcher${BULLPEN_TARGET - staff.bullpen.length === 1 ? "" : "s"}`);
   return issues;
+}
+
+// What a manager is still missing to field a legal nine plus a legal staff.
+// 1B and DH never appear here: any glove covers first, any bat DHs, so those
+// two slots are a question of hitter COUNT, not of position.
+function activeRosterGaps(roster) {
+  const needs = getRosterNeeds(roster);
+  const lineup = lineupStatus(roster);
+  return {
+    positions: lineup.missingPositions.filter((position) => position !== "1B"),
+    hitter: needs.hitter,
+    starter: needs.starter,
+    bullpen: needs.bullpen
+  };
+}
+
+function hasRosterGaps(gaps) {
+  return gaps.positions.length > 0 || gaps.hitter > 0 || gaps.starter > 0 || gaps.bullpen > 0;
+}
+
+// The closing sweep. The hidden queue has run dry and some managers are short —
+// outbid all night, or broke, or hoarding nine bats and no arms. Every hole
+// left in an active roster is filled, for free, with the CHEAPEST card still
+// sitting unsold on the visible board.
+//
+// This is the promise the visible pool is sized to keep: the board always
+// holds enough leftovers to finish every roster in the room, so the sweep
+// never has to invent a player. Managers are swept in seat order.
+export function sweepRosters(draft) {
+  const swept = [];
+  for (const manager of draft.managers) {
+    let guard = 0;
+    for (;;) {
+      const gaps = activeRosterGaps(manager.roster);
+      if (!hasRosterGaps(gaps)) break;
+      guard += 1;
+      if (guard > draft.rosterSize * 2) break;
+
+      // Scarce positions first — a catcher is harder to come by than a bat —
+      // then the hitter count, then the staff.
+      const neededPosition = gaps.positions[0] ?? null;
+      const neededKind = neededPosition || gaps.hitter > 0 ? "hitter" : "pitcher";
+      const neededRole = neededKind === "pitcher" ? (gaps.starter > 0 ? "SP" : "RP") : null;
+
+      const replacement = availablePlayers(draft)
+        .filter((player) => player.kind === neededKind)
+        .filter((player) => !personConflict(manager.roster, player))
+        .filter((player) => !neededRole || pitcherRole(player) === neededRole)
+        .filter((player) => !neededPosition || positionMatchesSlot(player, neededPosition))
+        .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0]
+        ?? makeEmergencyReplacement(draft, manager, neededKind, neededRole, neededPosition);
+
+      manager.roster.push(replacement);
+      draft.pickedIds.add(replacement.id);
+      draft.pickNumber += 1;
+      draft.auction.history.push({
+        playerId: replacement.id,
+        managerId: manager.id,
+        price: 0,
+        swept: true,
+        bids: {},
+        nominatorId: null,
+        nominatorIndex: draft.auction.nominatorIndex
+      });
+      swept.push({ managerId: manager.id, playerId: replacement.id });
+    }
+  }
+  return swept;
 }
 
 export function repairDraftRosters(draft) {
@@ -850,7 +1308,7 @@ export function lineupStatus(roster) {
   }
   const missingPositions = assigned.slots.filter((slot) => slot.label !== "DH" && !slot.player).map((slot) => slot.label);
   const duplicatePositions = assigned.slots
-    .filter((slot) => slot.player && !positionMatchesSlot(slot.player.position, slot.label) && slot.label !== "DH")
+    .filter((slot) => slot.player && !positionMatchesSlot(slot.player, slot.label) && slot.label !== "DH")
     .map((slot) => `${slot.player.position}->${slot.label}`);
   const extraDuplicates = assigned.extras.map((player) => player.position);
 
@@ -875,17 +1333,21 @@ export function assignLineupSlots(roster, assignments = {}) {
     if (player && canPlayerFillLineupSlot(player, label)) assignFirst(slots, used, label, player, slotOptions(player, label));
   }
 
-  for (const label of EXACT_REQUIRED_POSITIONS) {
-    assignFirst(slots, used, label, hitters.find((player) => player.position === label && !used.has(player.id)));
+  // The exact slots (1B included, for cards that actually list it) fill as a
+  // MATCHING, not first-fit: with multi-position cards a greedy pass can
+  // strand a slot (the 2B/SS card grabs 2B and the pure 2B ends up at DH
+  // while SS sits empty). Kuhn's augmenting paths over at most 9 hitters x 8
+  // slots; each card tries its primary spot first, so the utility man only
+  // slides over when that seats one more starter.
+  for (const [label, player] of matchExactSlots(slots, hitters, used)) {
+    assignFirst(slots, used, label, player);
   }
 
-  for (const label of CORNER_OUTFIELD_SLOTS) {
-    assignFirst(slots, used, label, hitters.find((player) => isCornerOutfielder(player.position) && !used.has(player.id)));
+  // Nobody lists first base: any glove covers it at a flat -1.
+  if (!slots.find((slot) => slot.label === "1B").player) {
+    const fallbackFirstBase = hitters.find((player) => !used.has(player.id));
+    assignFirst(slots, used, "1B", fallbackFirstBase, { firstBaseOutOfPosition: Boolean(fallbackFirstBase) });
   }
-
-  const exactFirstBase = hitters.find((player) => player.position === "1B" && !used.has(player.id));
-  const fallbackFirstBase = hitters.find((player) => !used.has(player.id));
-  assignFirst(slots, used, "1B", exactFirstBase ?? fallbackFirstBase, { firstBaseOutOfPosition: !exactFirstBase && Boolean(fallbackFirstBase) });
 
   const dh = hitters.find((player) => !used.has(player.id));
   assignFirst(slots, used, "DH", dh);
@@ -896,14 +1358,78 @@ export function assignLineupSlots(roster, assignments = {}) {
   };
 }
 
+// Maximum matching of unassigned hitters onto the open exact slots
+// (C/2B/3B/SS/CF, 1B, and the two corners). Hitters seat in roster order;
+// each tries the slots it plays, primary position first, and may push an
+// earlier card to one of its other spots to make room. Returns a Map of
+// label -> player. 1B only matches cards that actually LIST first base —
+// the anyone-covers-1B rule stays a fallback outside the matching.
+function matchExactSlots(slots, hitters, used) {
+  const openLabels = [...EXACT_REQUIRED_POSITIONS, "1B", ...CORNER_OUTFIELD_SLOTS]
+    .filter((label) => !slots.find((slot) => slot.label === label)?.player);
+  const fits = (player, label) =>
+    CORNER_OUTFIELD_SLOTS.includes(label) ? cardIsCornerOutfielder(player) : playsPosition(player, label);
+  const primaryFirst = (player) => {
+    const primary = (label) =>
+      CORNER_OUTFIELD_SLOTS.includes(label) ? isCornerOutfielder(player.position) : player.position === label;
+    return [...openLabels].sort((a, b) => Number(primary(b)) - Number(primary(a)));
+  };
+  const seated = new Map();
+  const tryPlace = (player, visited) => {
+    const labels = primaryFirst(player).filter((label) => fits(player, label) && !visited.has(label));
+    // A free slot always wins before bumping anyone — two LF/RF cards land
+    // LF then RF in roster order, exactly as the greedy filler used to.
+    for (const label of labels) {
+      if (!seated.get(label)) {
+        seated.set(label, player);
+        return true;
+      }
+    }
+    for (const label of labels) {
+      visited.add(label);
+      if (tryPlace(seated.get(label), visited)) {
+        seated.set(label, player);
+        return true;
+      }
+    }
+    return false;
+  };
+  // Primary-position players seat before secondary-only ones, so a DH bat
+  // with a 3B side-listing never bumps the true third baseman to DH.
+  const primarySlot = (player) =>
+    EXACT_REQUIRED_POSITIONS.includes(player.position) || player.position === "1B" || isCornerOutfielder(player.position);
+  const order = [...hitters.filter(primarySlot), ...hitters.filter((player) => !primarySlot(player))];
+  for (const player of order) {
+    if (!used.has(player.id)) tryPlace(player, new Set());
+  }
+  return seated;
+}
+
 export function canPlayerFillLineupSlot(player, label) {
   if (player?.kind !== "hitter") return false;
   if (label === "DH") return true;
   if (label === "1B") return true;
-  return positionMatchesSlot(player.position, label);
+  return positionMatchesSlot(player, label);
 }
 
 function repairManagerRoster(draft, manager) {
+  // Era duplicates repair by subtraction: keep each person's best era, drop
+  // the rest, then refill the hole like any other shortfall.
+  const byPerson = new Map();
+  for (const player of manager.roster) {
+    const identity = playerIdentity(player.id);
+    if (!identity) continue;
+    byPerson.set(identity.person, [...(byPerson.get(identity.person) ?? []), { player, slice: identity.slice }]);
+  }
+  for (const cards of byPerson.values()) {
+    if (new Set(cards.map((card) => card.slice)).size < 2) continue;
+    const keep = [...cards].sort((a, b) => b.player.points - a.player.points)[0].slice;
+    for (const { player, slice } of cards) {
+      if (slice === keep) continue;
+      manager.roster = manager.roster.filter((item) => item.id !== player.id);
+      draft.pickedIds.delete(player.id);
+    }
+  }
   let guard = 0;
   while (validateRoster(manager).length > 0 && guard < draft.rosterSize * 2) {
     guard += 1;
@@ -914,8 +1440,9 @@ function repairManagerRoster(draft, manager) {
     const neededRole = needs.starter > 0 ? "SP" : needs.bullpen > 0 ? "RP" : null;
     const replacement = availablePlayers(draft)
       .filter((player) => player.kind === neededKind)
+      .filter((player) => !personConflict(manager.roster, player))
       .filter((player) => !neededRole || pitcherRole(player) === neededRole)
-      .filter((player) => !neededPosition || positionMatchesSlot(player.position, neededPosition))
+      .filter((player) => !neededPosition || positionMatchesSlot(player, neededPosition))
       .filter((player) => neededKind !== "hitter" || canAddHitterToLineup(manager.roster, player).ok)
       .sort((a, b) => b.points - a.points)[0] ?? makeEmergencyReplacement(draft, manager, neededKind, neededRole, neededPosition);
 
@@ -991,8 +1518,12 @@ function leagueSupply(players) {
   for (const player of players) {
     if (player.kind === "hitter") {
       hitters += 1;
-      if (EXACT_REQUIRED_POSITIONS.includes(player.position)) positions[player.position] += 1;
-      if (isCornerOutfielder(player.position)) cornerOutfield += 1;
+      // A multi-position card supplies every spot it lists — it can only
+      // fill one at a time, but this check is a loose feasibility bound.
+      for (const entry of hitterPositions(player)) {
+        if (EXACT_REQUIRED_POSITIONS.includes(entry.pos)) positions[entry.pos] += 1;
+      }
+      if (cardIsCornerOutfielder(player)) cornerOutfield += 1;
     } else if (pitcherRole(player) === "SP") {
       starter += 1;
     } else {
@@ -1101,6 +1632,8 @@ function positionDropoffs(players, values) {
 }
 
 function positionGroup(player) {
+  // Dropoff scarcity groups by the PRIMARY position: that's the job the
+  // card usually holds down, and one group per card keeps the math simple.
   if (player.kind === "pitcher") return `pitcher-${pitcherRole(player)}`;
   if (isCornerOutfielder(player.position)) return `hitter-${CORNER_OUTFIELD_POSITION}`;
   return `hitter-${player.position}`;
@@ -1116,10 +1649,10 @@ function managerNeedsPositionGroup(manager, player, needs) {
   if (player.kind === "pitcher") return pitcherNeed(player, needs) > 0;
   if (needs.hitter <= 0) return false;
   const lineup = lineupStatus(manager.roster);
-  if (isCornerOutfielder(player.position)) {
-    return lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF");
-  }
-  return lineup.missingPositions.includes(player.position);
+  return hitterPositions(player).some((entry) =>
+    isCornerOutfielder(entry.pos)
+      ? lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF")
+      : lineup.missingPositions.includes(entry.pos));
 }
 
 function canAddPitcherToStaff(roster, player) {
@@ -1162,8 +1695,11 @@ function canAddHitterToLineup(roster, player) {
 function hitterPositionBonus(roster, player) {
   if (player.kind !== "hitter") return 0;
   const lineup = lineupStatus(roster);
-  if (lineup.missingPositions.includes(player.position)) return 60;
-  if (isCornerOutfielder(player.position) && (lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF"))) return 60;
+  const fillsMissing = hitterPositions(player).some((entry) =>
+    isCornerOutfielder(entry.pos)
+      ? lineup.missingPositions.includes("LF") || lineup.missingPositions.includes("RF")
+      : lineup.missingPositions.includes(entry.pos));
+  if (fillsMissing) return 60;
   if (lineup.missingPositions.includes("1B")) return 20;
   if (!lineup.dhFilled) return 15;
   return 0;
@@ -1175,13 +1711,24 @@ function assignFirst(slots, used, label, player, options = {}) {
   if (!slot || slot.player) return;
   slot.player = player;
   slot.outOfPosition = Boolean(options.firstBaseOutOfPosition);
-  slot.fielding = options.firstBaseOutOfPosition ? -1 : Number(player.fielding) || 0;
+  slot.fielding = options.firstBaseOutOfPosition ? -1 : slotFielding(player, label);
   used.add(player.id);
+}
+
+// The glove a card brings to a specific slot: the listed rating for that
+// position (a 2B+3/SS+2 card fields +2 at short), the corner rating at
+// either LF or RF, and the primary rating everywhere else (DH, out-of-slot).
+function slotFielding(player, label) {
+  if (CORNER_OUTFIELD_SLOTS.includes(label)) {
+    const corner = hitterPositions(player).find((entry) => isCornerOutfielder(entry.pos));
+    if (corner) return Number(corner.fielding) || 0;
+  }
+  return fieldingAt(player, label) ?? (Number(player.fielding) || 0);
 }
 
 function slotOptions(player, label) {
   return {
-    firstBaseOutOfPosition: label === "1B" && player?.position !== "1B"
+    firstBaseOutOfPosition: label === "1B" && !playsPosition(player, "1B")
   };
 }
 

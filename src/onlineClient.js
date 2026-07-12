@@ -1,13 +1,18 @@
 const SEAT_STORAGE_PREFIX = "mlb-showdown-online-seat-";
 
-export async function createRoom({ seed, managers, poolMode, realPool, draftType, auctionBudget, auctionTimer }) {
+// Every field the setup screen chose has to make the trip. A name left out of
+// this list is silently dropped and the room quietly opens on the default —
+// which is how a random-nomination room came out as a manual auction.
+export async function createRoom({ seed, managers, universe, pickTimer, cpu, draftType, nomination, budget, auctionTimer }) {
   return request("POST", "/api/rooms", {
     seed,
     managers,
-    poolMode,
-    realPool,
+    universe,
+    pickTimer,
+    cpu,
     draftType,
-    auctionBudget,
+    nomination,
+    budget,
     auctionTimer
   });
 }
@@ -31,6 +36,9 @@ export function subscribeRoom(roomId, since, handlers) {
   source.addEventListener("action", (event) => handlers.onAction?.(JSON.parse(event.data)));
   source.addEventListener("seats", (event) => handlers.onSeats?.(JSON.parse(event.data)));
   source.addEventListener("hello", (event) => handlers.onHello?.(JSON.parse(event.data)));
+  // A live auction lot: who is up and who has bid, but never the amounts —
+  // those only arrive as actions once the card sells.
+  source.addEventListener("lot", (event) => handlers.onLot?.(JSON.parse(event.data)));
   source.onerror = () => handlers.onError?.();
   return source;
 }
