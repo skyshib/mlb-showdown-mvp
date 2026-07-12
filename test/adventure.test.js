@@ -1565,11 +1565,22 @@ test("simultaneous two-way players bundle: one owned card, both halves", async (
   const { personConflict } = await import("../src/rules/cards.js");
   setUniverseSeed("dual-test", "mlb-history");
   try {
-    // The strict Ohtani-likes merge; converts and part-timers don't.
+    // The strict Ohtani-likes merge; converts and thin overlaps don't.
     assert.ok(MLB_DUAL_PERSONS.includes("ohtansh01"), "Ohtani merges");
     assert.ok(MLB_DUAL_PERSONS.includes("dihigma99"), "Dihigo merges");
+    assert.ok(!MLB_DUAL_PERSONS.includes("dunleja01"), "Dunleavy's window misses the pool's entry bar — two separate cards");
     assert.equal(dualPartnerId("mlb-all-ankieri01"), null, "Ankiel converted sequentially — two separate cards");
-    assert.equal(dualPartnerId("mlb-all-ruthba01"), null, "Ruth's overlap was part-time — two separate cards");
+    assert.equal(dualPartnerId("mlb-all-ruthba01"), null, "Ruth's CAREER printings stay two separate cards");
+
+    // A real simultaneous stretch inside a longer career mints a third
+    // printing: the tw-slice pair, rated on just the two-way window.
+    const twArm = cardById("mlb-tw-ruthba01");
+    const twBat = cardById("mlb-tw-ruthba01-bat");
+    assert.ok(twArm && twBat, "1915-19 Ruth is in the pool, both halves");
+    assert.equal(dualPartnerId(twArm.id), twBat.id, "the tw pair merges by its slice");
+    assert.ok(twBat.points < cardById("mlb-all-ruthba01-bat").points, "the window bat rates below the career bat");
+    // The tw printing is its own era: it can't share a team with career Ruth.
+    assert.ok(personConflict([cardById("mlb-all-ruthba01")], twArm), "one Ruth per roster");
 
     const arm = cardById("mlb-all-ohtansh01");
     const bat = cardById("mlb-all-ohtansh01-bat");

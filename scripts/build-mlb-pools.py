@@ -671,35 +671,85 @@ for fid, fname in sorted(franch_names.items()):
         print(f"  franchise {fid} ({fname}) skipped ({len(pool)})", file=sys.stderr)
 print(f"franchises kept: {len(franchises)}", file=sys.stderr)
 
-# ---- Simultaneous two-way bundles ---------------------------------------------
+# ---- Simultaneous two-way cards -----------------------------------------------
 #
-# The Ohtani rule: a player whose bat and arm value came AT THE SAME TIME
-# merges into one owned card in the app (the halves still roster separately,
-# so playing both roles costs both roster slots). Strict career-level test:
-# seasons with 100+ PA and 45+ IP at once must hold 40%+ of BOTH career PA
-# and career IP. Ohtani and Martin Dihigo pass; Ruth (five overlap seasons
-# of twenty-two) and converts like Ankiel stay two separate cards. The
-# bundle discount (weaker half at 60%) applies at PRICING time in the app —
-# raw points here stay honest so rarity ranks true strength.
-def dual_persons():
-    out = []
+# The Ohtani rule: a dual card rates a player on his SIMULTANEOUS two-way
+# years — seasons with real volume on both sides (100+ PA and 45+ IP at
+# once), where the window as a whole clears the all-time pool's own entry
+# bar (400 PA, 150 IP). Two tiers by how much of the career the window is:
+#   - Career-long duals (40%+ of BOTH career PA and IP inside the window —
+#     Ohtani, Dihigo): the existing bat and arm halves are RE-RATED on the
+#     window years and merge into one owned card in the app (the halves
+#     still roster separately, so playing both roles costs both slots).
+#   - Career-phase converts with a real simultaneous stretch (Ruth 1915-19,
+#     Monte Ward 1878-84): the career pair stays two separate cards, and a
+#     THIRD printing appears — a "tw"-slice pair covering just the window.
+#     The tw slice reads as its own era, so the era rule keeps one Ruth per
+#     roster; tw pairs merge by their slice, not the DUAL_PERSONS list.
+# No qualifying window (Ankiel, and Ruth-scale careers with token overlap)
+# means no dual card at all. The bundle discount (weaker half at 60%)
+# applies at PRICING time in the app — raw points here stay honest so
+# rarity ranks true strength.
+def two_way_windows():
+    out = {}
     for card in history:
         if not card[0].endswith("-bat"):
             continue
         pid = card[0][len("mlb-all-"):-len("-bat")]
         pa = {y: t["AB"] + t["BB"] for y, t in bat_career.get(pid, {}).items()}
         ip = {y: t["IPouts"] for y, t in pit_career.get(pid, {}).items()}
-        overlap = [y for y in set(pa) & set(ip) if pa[y] >= 100 and ip[y] >= 135]
-        tot_pa, tot_ip = sum(pa.values()), sum(ip.values())
-        if not overlap or tot_pa <= 0 or tot_ip <= 0:
+        window = {y for y in set(pa) & set(ip) if pa[y] >= 100 and ip[y] >= 135}
+        wpa, wip = sum(pa[y] for y in window), sum(ip[y] for y in window)
+        if wpa < 400 or wip < 450:
             continue
-        if (sum(pa[y] for y in overlap) / tot_pa >= 0.4
-                and sum(ip[y] for y in overlap) / tot_ip >= 0.4):
-            out.append(pid)
-    return sorted(out)
+        career_long = (wpa / sum(pa.values()) >= 0.4 and wip / sum(ip.values()) >= 0.4)
+        out[pid] = (window, career_long)
+    return out
 
-DUAL_PERSONS = dual_persons()
-print(f"dual two-way persons: {[people[p]['name'] for p in DUAL_PERSONS]}", file=sys.stderr)
+def window_positions(windows):
+    """Games-by-position inside each player's window, so the bat half lists
+    where he actually stood during the two-way years."""
+    games = {pid: defaultdict(int) for pid in windows}
+    for r in rows("Appearances.csv"):
+        pid = r["playerID"]
+        if pid not in windows or num(r, "yearID") not in windows[pid]:
+            continue
+        for col, pos in POS_COLS.items():
+            g = num(r, col)
+            if g:
+                games[pid][pos] += g
+    return games
+
+TWO_WAY = two_way_windows()
+TW_POSITIONS = window_positions({pid: window for pid, (window, _) in TWO_WAY.items()})
+DUAL_PERSONS = []
+history_index = {card[0]: i for i, card in enumerate(history)}
+for pid in sorted(TWO_WAY):
+    window, career_long = TWO_WAY[pid]
+    span = [min(window), max(window)]
+    bt, bL = peak_blend_hitter({y: t for y, t in bat_career[pid].items() if y in window})
+    pt, pL = peak_blend_pitcher({y: t for y, t in pit_career[pid].items() if y in window})
+    bat = build_hitter(pid, bt, position_list(TW_POSITIONS[pid]), bL) if bt else None
+    arm = build_pitcher(pid, pt, pL, span[1]) if pt else None
+    if not bat or not arm:
+        continue
+    tag = "all" if career_long else "tw"
+    scrap = []
+    finish(bat, pid, span, scrap, tag, "bats", id_suffix="-bat")
+    finish(arm, pid, span, scrap, tag, "throws")
+    # The career printing already settled any namesake suffix; reuse its
+    # display name so every printing resolves to the same human on screen.
+    bat[1] = arm[1] = history[history_index[f"mlb-all-{pid}-bat"]][1]
+    if career_long:
+        history[history_index[bat[0]]] = bat
+        history[history_index[arm[0]]] = arm
+        DUAL_PERSONS.append(pid)
+    else:
+        history.extend([bat, arm])
+
+print("two-way windows: " + ", ".join(
+    f"{people[p]['name']} ({'merged pair' if TWO_WAY[p][1] else 'tw card'})"
+    for p in sorted(TWO_WAY)), file=sys.stderr)
 
 header = """// Real-MLB card pools built from the Baseball Databank (Chadwick Baseball
 // Bureau / Sean Lahman, CC BY-SA 3.0 — https://github.com/chadwickbureau/baseballdatabank).
@@ -739,7 +789,8 @@ with open(os.path.join(SP, "mlbPools.js"), "w") as f:
     f.write("export const MLB_FRANCHISE_NAMES = ")
     f.write(json.dumps({fid: franch_names[fid] for fid in sorted(franchises)}, indent=None))
     f.write(";\n")
-    f.write("// Simultaneous two-way players: one owned card per pool, bat and arm together.\n")
+    f.write("// Career-long two-way players: one owned card per pool, bat and arm together.\n")
+    f.write('// Windowed "mlb-tw-" pairs merge by their slice, not this list.\n')
     f.write("export const MLB_DUAL_PERSONS = ")
     f.write(json.dumps(DUAL_PERSONS))
     f.write(";\n")

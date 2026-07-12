@@ -14,11 +14,13 @@ export const RESULTS = {
 };
 
 // MLB pool card ids are mlb-<slice>-<lahmanId>[-bat]: the slice names the
-// pool the card was cut from (a decade, a franchise, all-time) and the
-// lahman id names the human. Multi-decade pools carry one card per player
-// per decade, so the same person can appear several times; playerIdentity
-// is how roster rules recognize him. A two-way player's bat and arm halves
-// share a slice — same person, same era — and are the one legal pairing.
+// era the card was cut from (a decade, a franchise, all-time, or "tw" — a
+// player's simultaneous two-way window) and the lahman id names the human.
+// Multi-decade pools carry one card per player per decade, so the same
+// person can appear several times; playerIdentity is how roster rules
+// recognize him. A two-way player's bat and arm halves share a slice —
+// same person, same era — and are the one legal pairing; his windowed tw
+// printing is a different era, so it conflicts with his career cards.
 export function playerIdentity(id) {
   const match = /^mlb-([^-]+)-([^-]+?)(-bat)?$/.exec(id ?? "");
   return match ? { person: match[2], slice: match[1] } : null;

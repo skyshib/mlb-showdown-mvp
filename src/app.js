@@ -3023,9 +3023,14 @@ function renderRoster(manager, draft) {
   const budgetLine = auction
     ? ` &middot; ${auctionBudget(draft, manager)} left &middot; max bid ${draft.complete ? 0 : auctionMaxBid(draft, manager)}`
     : "";
+  // Nothing to count up to when the roster has no ceiling: a manager owns as
+  // many cards as they bought, thirteen of which take the field.
+  const draftedLine = hasUnlimitedRoster(draft)
+    ? `${manager.roster.length} card${manager.roster.length === 1 ? "" : "s"}`
+    : `${manager.roster.length}/${draft.rosterSize} drafted`;
   return `<article class="roster">
     <h3>${escapeHtml(manager.name)} <span class="roster-points">${totalPoints} pts</span></h3>
-    <p>${manager.roster.length}/${draft.rosterSize} drafted${budgetLine}</p>
+    <p>${draftedLine}${budgetLine}</p>
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
       <span class="${counts.starters >= 2 ? "ok" : "warn"}">${counts.starters}/2 starters</span>
@@ -3779,7 +3784,13 @@ function reviveState(value) {
   if (draft) {
     draft.seed = draft.seed ?? value.seed ?? "showdown";
     draft.draftType = draft.draftType === "auction" ? "auction" : "snake";
-    draft.complete = draft.managers.every((manager) => manager.roster.length >= draft.rosterSize);
+    draft.nomination = draft.draftType === "auction" && draft.nomination === "random" ? "random" : "manual";
+    draft.unlimitedRoster = draft.nomination === "random";
+    // A random-nomination draft ends when the queue runs out, not when the
+    // rosters fill — they never do, there is no cap to fill to.
+    draft.complete = draft.unlimitedRoster
+      ? Boolean(draft.complete)
+      : draft.managers.every((manager) => manager.roster.length >= draft.rosterSize);
     // Rooms saved before corners were lumped still carry bare LF/RF labels.
     draft.pool = draft.pool.map(normalizeCardPosition);
     for (const manager of draft.managers) {
@@ -3826,11 +3837,21 @@ function reviveAuction(draft, auction) {
   const lot = auction?.lot?.playerId && Array.isArray(auction.lot.pending) && !draft.pickedIds.has(auction.lot.playerId)
     ? auction.lot
     : null;
-  return {
+  const revived = {
     budget,
     budgets,
     nominatorIndex,
     lot,
     history: Array.isArray(auction?.history) ? auction.history : []
   };
+  // The hidden queue and how far it has been dealt ARE the draft's clock in a
+  // random-nomination room; drop them and there is no draft left to restore.
+  if (Array.isArray(auction?.queue)) {
+    revived.queue = auction.queue;
+    revived.queueIndex = Math.min(
+      Math.max(0, Math.round(Number(auction.queueIndex) || 0)),
+      auction.queue.length
+    );
+  }
+  return revived;
 }

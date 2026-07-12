@@ -4,6 +4,7 @@ import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { playerIdentity } from "../rules/cards.js";
+import { randomNominationQuotas } from "../rules/draft.js";
 import { authenticPoints } from "../rules/pricing.js";
 import { PRICE_MODEL } from "./priceModel.js";
 
@@ -244,8 +245,7 @@ function calibrateUniverse(pool, seed, { authentic = false } = {}) {
   const byId = new Map(pool.map((card) => [card.id, card]));
   for (const bat of pool) {
     if (!String(bat.id).endsWith("-bat")) continue;
-    const identity = playerIdentity(bat.id);
-    if (!identity || !DUAL_PERSONS.has(identity.person)) continue;
+    if (!dualIdentity(bat.id)) continue;
     const arm = byId.get(String(bat.id).slice(0, -4));
     if (!arm) continue;
     const entry = priced.get((bat.points <= arm.points ? bat : arm).id);
@@ -257,17 +257,26 @@ function calibrateUniverse(pool, seed, { authentic = false } = {}) {
 
 // ---- Simultaneous two-way pairs ----------------------------------------------
 //
-// Ohtani-likes (players whose bat and arm value came at the same time —
-// decided at build time, MLB_DUAL_PERSONS) merge into ONE owned card: the
-// pool still carries a bat half and an arm half, and they still roster
-// separately (playing both roles costs both slots), but acquiring either
-// grants the pair, selling one sells both, and browse screens show a single
-// combined face. A pool bundles only when it holds both halves; sequential
-// converts (Ankiel) and part-time overlaps (Ruth) stay two separate cards.
+// Two kinds of printing merge into ONE owned card: career-long duals
+// (players whose bat and arm value came at the same time — decided at build
+// time, MLB_DUAL_PERSONS) and windowed two-way cards (the "tw" slice, rated
+// on just the simultaneous years — 1915-19 Ruth — which exists only as
+// bat/arm pairs). The pool still carries a bat half and an arm half, and
+// they still roster separately (playing both roles costs both slots), but
+// acquiring either grants the pair, selling one sells both, and browse
+// screens show a single combined face. A pool bundles only when it holds
+// both halves; sequential converts (Ankiel) and the CAREER printings of
+// windowed players (Ruth's separate career bat and arm) stay unmerged.
+
+// The person behind a mergeable printing, or null when the pair stays split.
+function dualIdentity(id) {
+  const identity = playerIdentity(id);
+  if (!identity) return null;
+  return identity.slice === "tw" || DUAL_PERSONS.has(identity.person) ? identity : null;
+}
 
 export function dualPartnerId(id) {
-  const identity = playerIdentity(id);
-  if (!identity || !DUAL_PERSONS.has(identity.person)) return null;
+  if (!dualIdentity(id)) return null;
   const partner = String(id).endsWith("-bat") ? String(id).slice(0, -4) : `${id}-bat`;
   return cardById(partner) ? partner : null;
 }
@@ -358,12 +367,11 @@ function dealGroupCards(cards, quota, rng) {
   return dealt;
 }
 
-// The deck one draft night sees. Deals from the ACTIVE universe, so callers
-// point setUniverse() at the room's league first.
-export function dealDraftDeck(seed) {
+// Deals a deck to a quota table off the ACTIVE universe.
+function dealDeckToQuotas(quotas, rngKey) {
   const pool = universePool();
-  const rng = createRng(`deck-deal:${universeKey()}:${seed}`);
-  const dealt = DECK_QUOTAS.flatMap(([group, quota]) =>
+  const rng = createRng(rngKey);
+  const dealt = quotas.flatMap(([group, quota]) =>
     dealGroupCards(pool.filter((card) => deckGroup(card) === group), quota, rng));
   // A two-way player is one card in two halves: if the deal turned up his
   // bat, his arm comes along, and vice versa — otherwise the board would
@@ -379,11 +387,30 @@ export function dealDraftDeck(seed) {
   return dealt.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
 }
 
+// The deck one draft night sees. Deals from the ACTIVE universe, so callers
+// point setUniverse() at the room's league first.
+export function dealDraftDeck(seed) {
+  return dealDeckToQuotas(DECK_QUOTAS, `deck-deal:${universeKey()}:${seed}`);
+}
+
+// The board a random-nomination room reads. Unlike the standard deck this one
+// is sized to the ROOM: every roster slot gets its visible quota of cards, wide
+// enough that the closing sweep can always finish everybody (see
+// randomNominationCounts). Three managers see twelve starters; eight of them
+// will come up for bid, and the other four sit there all night as insurance.
+export function dealRandomNominationDeck(seed, managerCount) {
+  const { visible } = randomNominationQuotas(managerCount);
+  return dealDeckToQuotas(visible, `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}`);
+}
+
 // Build a room's deck in one call: point the universe at the room's league
 // and seed, then deal. Draft rooms print honest stickers — there is no shop
 // to hunt bargains in, and a card's price is what the auction bids in.
-export function buildDraftPool(mode, seed) {
+export function buildDraftPool(mode, seed, options = {}) {
   setUniverse(seed, mode, { priceNoise: false });
+  if (options.nomination === "random") {
+    return dealRandomNominationDeck(seed, options.managerCount);
+  }
   return dealDraftDeck(seed);
 }
 
