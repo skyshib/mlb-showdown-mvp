@@ -3,7 +3,21 @@ import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
 import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
-import { applyDouble, applyFlyout, applyGroundout, applyHomer, applySingle, applyWalk, attemptSteal, createInitialState, playGameEvent, playPlateAppearance, playStealAttempt, simulateGame } from "../src/rules/game.js";
+import {
+  applyDouble,
+  applyFlyout,
+  applyGroundout,
+  applyHomer,
+  applySingle,
+  applyWalk,
+  attemptSteal,
+  createInitialState,
+  pitcherStatus,
+  playGameEvent,
+  playPlateAppearance,
+  playStealAttempt,
+  simulateGame
+} from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
 const hitter = {
@@ -493,12 +507,50 @@ test("bullpen follows low-control to high-control order after starter target", (
     ]
   };
   const state = createInitialState(teamA, orderedStaff);
-  state.pitching.home.outsRecorded = 18;
+  // The simulator goes to the pen when the arm is TIRED, not when a plan says
+  // so: the IP 5 starter's tank is 20 batters, and he is pulled once he is two
+  // points into fatigue. Outs recorded do not enter into it.
+  state.pitching.home.battersFaced = 24;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
 
   assert.equal(event.pitcher, "Low RP");
   assert.equal(event.fatiguePenalty, 0);
+});
+
+test("a starter is pulled on his own IP, not on a fixed seven innings", () => {
+  // The bug this replaced: the starter was scripted to cover whatever outs the
+  // bullpen's printed IP did not, so with two one-inning arms behind him EVERY
+  // starter threw exactly 7.0 innings — an IP 6 card pushed a full inning past
+  // his tank every game, an IP 8 card taken out with gas still in it.
+  const staffOf = (ip) => ({
+    name: `IP ${ip}`,
+    lineup: teamB.lineup,
+    pitchers: [
+      makePitcher({ id: "sp", name: "Starter", control: 5, ip }),
+      makePitcher({ id: "rp1", name: "RP One", control: 5, ip: 1 }),
+      makePitcher({ id: "rp2", name: "RP Two", control: 5, ip: 1 })
+    ]
+  });
+  // Ask the mound directly at each point, on a fresh state — playing the PAs
+  // out would flip the half-inning and hand back the other team's pitcher.
+  const facedWhenPulled = (ip) => {
+    for (let faced = 0; faced <= 60; faced += 1) {
+      const state = createInitialState(teamA, staffOf(ip));
+      state.pitching.home.battersFaced = faced;
+      if (pitcherStatus(state, "home").pitcher.name !== "Starter") return faced;
+    }
+    return null;
+  };
+
+  const short = facedWhenPulled(5);
+  const long = facedWhenPulled(8);
+  assert.ok(short !== null && long !== null, "both starters come out eventually");
+  assert.ok(long > short, `the IP 8 arm goes deeper (${long} BF) than the IP 5 arm (${short} BF)`);
+  // A card's IP is a tank of four batters an inning, and he is pulled two
+  // points into fatigue — four batters past it.
+  assert.equal(short, 5 * 4 + 4);
+  assert.equal(long, 8 * 4 + 4);
 });
 
 test("last bullpen pitcher keeps pitching in extras and becomes tired", () => {

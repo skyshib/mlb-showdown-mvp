@@ -667,6 +667,20 @@ export function pitcherStatus(state, side) {
   };
 }
 
+// The skipper the simulator runs on: he goes to the pen when the arm on the
+// mound is tired, and not before. This is the same call the adventure's
+// balanced NPC makes (see AI_PROFILES.pullAtFatigue) and the same one the
+// autopilot makes for the player's own pen — one rule, three places.
+//
+// It replaced a pitching PLAN, which scripted the starter to cover whatever
+// outs the bullpen's printed IP did not: two one-inning relievers meant the
+// starter was down for 27 - 6 = 21 outs, so EVERY starter threw exactly 7.0
+// innings whatever his card said. An IP 6 arm was pushed a full inning past
+// his tank, every game, and an IP 8 arm was taken out with gas left in it.
+// The card's IP is the whole point of the card; now it decides when he comes
+// out, the way it decides everything else about him.
+export const AUTO_PULL_AT_FATIGUE = 2;
+
 function currentPitcher(state, side) {
   const runtime = state.pitching[side];
   const team = state[side];
@@ -676,7 +690,7 @@ function currentPitcher(state, side) {
   if (state.manualPitchingFor !== side && state.manualPitchingFor !== "both") {
     while (runtime.pitcherIndex < team.pitchers.length - 1) {
       const pitcher = team.pitchers[runtime.pitcherIndex];
-      if (runtime.outsRecorded < pitcher.plannedOuts) break;
+      if (pitcherFatigue(runtime, pitcher) < AUTO_PULL_AT_FATIGUE) break;
       runtime.pitcherIndex += 1;
       runtime.outsRecorded = 0;
       runtime.battersFaced = 0;

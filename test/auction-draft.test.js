@@ -12,6 +12,7 @@ import {
   auctionBudget,
   auctionLotPlayer,
   auctionMaxBid,
+  auctionReviewComplete,
   auctionReviewRemainingMs,
   auctionTimerEnabled,
   autopick,
@@ -26,12 +27,15 @@ import {
   currentManager,
   draftHistory,
   isAuctionDraft,
+  isAuctionPaused,
   nominateBestTarget,
   nominatePlayer,
   normalizeAuctionBudget,
   normalizeAuctionTimerConfig,
+  pauseAuction,
   pickPlayer,
   placeSealedBid,
+  resumeAuction,
   sealedBidder,
   startAuctionReview,
   submitCpuSealedBids,
@@ -115,6 +119,77 @@ test("default timed auction reviews the pool and spends a chess clock on sealed 
   assert.equal(auctionBidTimeRemainingMs(draft, beta, 5000), incremented - 2000);
   placeSealedBid(draft, beta.id, 50, 8000);
   assert.equal(draft.auction.clockBanks[beta.id], incremented - 5000);
+});
+
+test("a pause stops every clock and nobody can act until it lifts", () => {
+  const draft = createDraft(["Alpha", "Beta"], makeDraftPool(), 13, "paused", {
+    draftType: "auction",
+    timer: { reviewSeconds: 0, bankSeconds: 60, incrementSeconds: 0 }
+  });
+  const [alpha, beta] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id, 1000);
+
+  // Ten seconds into the lot the room stops. Beta is charged those ten seconds
+  // and not a millisecond more, however long the break runs.
+  pauseAuction(draft, 11000);
+  assert.equal(isAuctionPaused(draft), true);
+  assert.equal(auctionBidTimeRemainingMs(draft, beta, 11000), 50000);
+  assert.equal(auctionBidTimeRemainingMs(draft, beta, 500000), 50000, "a paused clock does not run");
+  assert.equal(syncAuctionTimer(draft, 500000), false, "nobody times out during a pause");
+  assert.equal(canPlaceSealedBid(draft, beta, 50, 500000).ok, false);
+  assert.equal(canPlaceSealedBid(draft, beta, 50, 500000).reason, "the draft is paused");
+
+  // And it picks up exactly where it stopped, with the whole break forgiven.
+  resumeAuction(draft, 500000);
+  assert.equal(isAuctionPaused(draft), false);
+  assert.equal(auctionBidTimeRemainingMs(draft, beta, 500000), 50000);
+  assert.equal(auctionBidTimeRemainingMs(draft, beta, 510000), 40000);
+  assert.equal(canPlaceSealedBid(draft, beta, 50, 510000).ok, true);
+  placeSealedBid(draft, alpha.id, 60, 510000);
+  placeSealedBid(draft, beta.id, 50, 510000);
+  assert.equal(draft.managers[0].roster.length, 1, "the lot sells once the room is running again");
+});
+
+test("a pause freezes the review clock instead of running it out", () => {
+  const draft = createDraft(["Alpha", "Beta"], makeDraftPool(), 13, "paused-review", {
+    draftType: "auction",
+    timer: { reviewSeconds: 600, bankSeconds: 60, incrementSeconds: 0 }
+  });
+  const [alpha] = draft.managers;
+  startAuctionReview(draft, 1000);
+  pauseAuction(draft, 61000);
+
+  assert.equal(auctionReviewRemainingMs(draft, 61000), 540000);
+  assert.equal(auctionReviewRemainingMs(draft, 10 ** 9), 540000, "the review does not tick down while paused");
+  assert.equal(auctionReviewComplete(draft, 10 ** 9), false, "and it cannot run out while paused");
+  assert.equal(canNominatePlayer(draft, alpha, draft.pool[0], 10 ** 9).reason, "the draft is paused");
+
+  resumeAuction(draft, 10 ** 9);
+  assert.equal(auctionReviewRemainingMs(draft, 10 ** 9), 540000);
+  assert.equal(auctionReviewComplete(draft, 10 ** 9 + 540001), true);
+});
+
+test("pause and resume replay through the action log like any other move", () => {
+  const build = () => createDraft(["Alpha", "Beta"], makeDraftPool(), 13, "paused-replay", {
+    draftType: "auction",
+    timer: { reviewSeconds: 0, bankSeconds: 60, incrementSeconds: 0 }
+  });
+  const actions = [
+    { type: "nominate", playerId: makeDraftPool()[0].id, at: 1000 },
+    { type: "pause", at: 11000 },
+    { type: "resume", at: 500000 },
+    { type: "seal-bid", managerId: "team-1", amount: 60, at: 510000 },
+    { type: "seal-bid", managerId: "team-2", amount: 50, at: 510000 }
+  ];
+  const replayed = build();
+  for (const action of actions) applyDraftAction(replayed, action);
+
+  assert.equal(isAuctionPaused(replayed), false);
+  assert.equal(replayed.managers[0].roster.length, 1);
+  // The eight-minute break cost the bidders nothing. Beta's 60-second bank is
+  // down only the 10 seconds before the pause and the 10 after the resume — the
+  // clock charges for thinking, not for waiting.
+  assert.equal(replayed.auction.clockBanks[replayed.managers[1].id], 40000);
 });
 
 test("timed-out sealed bidders submit zero without revealing other bids", () => {

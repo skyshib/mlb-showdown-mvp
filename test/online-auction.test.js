@@ -98,6 +98,47 @@ test("an auction room deals budgets, opens a lot, and sells to the high bid at s
   assert.equal(auctionBudget(draft, anaTeam), 4000);
 });
 
+test("the host can pause the room, and nobody can bid until it resumes", async (t) => {
+  const base = await startServer(t);
+  const room = await openAuctionRoom(base);
+  const ana = await api(base, "POST", `/api/rooms/${room.roomId}/join`, {
+    managerId: "team-1",
+    hostToken: room.hostToken
+  });
+  const bo = await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-2" });
+
+  const playerId = firstNominatable(room);
+  assert.equal((await act(base, room.roomId, ana.data.token, { type: "nominate", playerId })).status, 200);
+
+  // A guest cannot stop the room, and cannot start it again either.
+  const guestPause = await act(base, room.roomId, bo.data.token, { type: "pause" });
+  assert.equal(guestPause.status, 409);
+  assert.match(guestPause.data.error, /Only the host can pause/);
+
+  assert.equal((await act(base, room.roomId, ana.data.token, { type: "pause" })).status, 200);
+
+  const bidWhilePaused = await act(base, room.roomId, bo.data.token, {
+    type: "seal-bid",
+    managerId: "team-2",
+    amount: 300
+  });
+  assert.equal(bidWhilePaused.status, 409);
+  assert.equal(bidWhilePaused.data.error, "The draft is paused");
+
+  // The pause is in the shared log, so every replica of the room is paused too.
+  const paused = await api(base, "GET", `/api/rooms/${room.roomId}`);
+  assert.equal(replay(paused.data).auction.pausedAt !== null, true);
+
+  assert.equal((await act(base, room.roomId, ana.data.token, { type: "resume" })).status, 200);
+  assert.equal((await act(base, room.roomId, ana.data.token, { type: "seal-bid", managerId: "team-1", amount: 200 })).status, 200);
+  assert.equal((await act(base, room.roomId, bo.data.token, { type: "seal-bid", managerId: "team-2", amount: 300 })).status, 200);
+
+  const after = await api(base, "GET", `/api/rooms/${room.roomId}`);
+  const draft = replay(after.data);
+  assert.equal(draft.auction.pausedAt, null);
+  assert.equal(draft.managers[1].roster.length, 1, "the lot sold once the room was running again");
+});
+
 test("timed online auctions share review and chess-clock state", async (t) => {
   const base = await startServer(t);
   const room = await openAuctionRoom(base, {

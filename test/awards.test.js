@@ -77,6 +77,23 @@ test("computeAwards crowns the right winners", () => {
   assert.equal(byKey.bust.name, "Dee Pee", "top-3-round pick with the worst WPA rank");
 });
 
+test("an auction is judged on what a card cost, not on when it came up", () => {
+  // Dee Pee is the room's most expensive card and its worst producer; Ronnie
+  // Rounds went for nothing and produced. The pick numbers say the opposite —
+  // Dee Pee was pick 1 and Ronnie pick 20 — so the prices must be what count.
+  const prices = { h1: 300, h2: 250, h3: 120, h4: 5, h5: 900, p1: 400, p2: 200, p3: 60, p4: 500 };
+  const awards = computeAwards(SUMMARY, PICKS, prices);
+  const byKey = Object.fromEntries(awards.map((item) => [item.key, item]));
+
+  assert.equal(byKey.bust.name, "Dee Pee");
+  assert.equal(byKey.bust.label, "Bust of the auction");
+  assert.match(byKey.bust.stat, /^Paid 900,/);
+
+  assert.equal(byKey.steal.name, "Ronnie Rounds");
+  assert.equal(byKey.steal.label, "Bargain of the auction");
+  assert.match(byKey.steal.stat, /^Paid 5,/);
+});
+
 test("computeAwards degrades gracefully without pick numbers or WPA stats", () => {
   const noPicks = computeAwards(SUMMARY, null);
   assert.ok(noPicks.length > 0);
