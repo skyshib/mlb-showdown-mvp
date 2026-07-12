@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ShowdownBot 2005 Card Prototype</title>
+  <title>ShowdownBot Pitcher Card Prototype</title>
   <style>
     @font-face {
       font-family: "Showdown Condensed";
@@ -180,7 +180,6 @@
       isolation: isolate;
       --bb-color: #c99127;
       --single-color: #34785d;
-      --single-plus-color: #2e747c;
       --double-color: #286f9b;
       --triple-color: #735394;
       --homer-color: #a93443;
@@ -224,7 +223,7 @@
       pointer-events: none;
     }
 
-    .onbase-number {
+    .primary-number {
       position: absolute;
       z-index: 6;
       left: 10.23%;
@@ -242,6 +241,28 @@
         -1px 1px 0 #080808,
         1px 1px 0 #080808;
       pointer-events: none;
+    }
+
+    .primary-label {
+      position: absolute;
+      z-index: 7;
+      left: 3.5%;
+      top: 88.65%;
+      width: 13.5%;
+      height: 2.35%;
+      display: grid;
+      place-items: center;
+      clip-path: polygon(5% 0, 100% 0, 95% 100%, 0 100%);
+      background: #14283a;
+      color: #fff;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(7px, 1.75vw, 10px);
+      font-weight: 700;
+      line-height: 1;
+      text-transform: uppercase;
+      text-shadow: 0 1px 1px #000;
+      transform: rotate(-6deg);
+      transform-origin: center;
     }
 
     .player-name {
@@ -305,7 +326,7 @@
     .chart-ranges,
     .chart-outcomes {
       display: grid;
-      grid-template-columns: repeat(9, minmax(0, 1fr));
+      grid-template-columns: repeat(8, minmax(0, 1fr));
       align-items: center;
       padding: 0 2.45%;
       color: #fff;
@@ -334,18 +355,14 @@
       place-items: center;
     }
 
-    .chart-ranges span:nth-child(4),
-    .chart-outcomes span:nth-child(4) { background: color-mix(in srgb, var(--bb-color) 82%, rgb(9, 41, 64)); }
     .chart-ranges span:nth-child(5),
-    .chart-outcomes span:nth-child(5) { background: color-mix(in srgb, var(--single-color) 82%, rgb(9, 41, 64)); }
+    .chart-outcomes span:nth-child(5) { background: color-mix(in srgb, var(--bb-color) 82%, rgb(9, 41, 64)); }
     .chart-ranges span:nth-child(6),
-    .chart-outcomes span:nth-child(6) { background: color-mix(in srgb, var(--single-plus-color) 82%, rgb(9, 41, 64)); }
+    .chart-outcomes span:nth-child(6) { background: color-mix(in srgb, var(--single-color) 82%, rgb(9, 41, 64)); }
     .chart-ranges span:nth-child(7),
     .chart-outcomes span:nth-child(7) { background: color-mix(in srgb, var(--double-color) 82%, rgb(9, 41, 64)); }
     .chart-ranges span:nth-child(8),
-    .chart-outcomes span:nth-child(8) { background: color-mix(in srgb, var(--triple-color) 82%, rgb(9, 41, 64)); }
-    .chart-ranges span:nth-child(9),
-    .chart-outcomes span:nth-child(9) { background: color-mix(in srgb, var(--homer-color) 82%, rgb(9, 41, 64)); }
+    .chart-outcomes span:nth-child(8) { background: color-mix(in srgb, var(--homer-color) 82%, rgb(9, 41, 64)); }
 
     .note {
       margin: 0;
@@ -384,7 +401,7 @@
 <body>
   <main class="lab">
     <header class="lab-header">
-      <span>Fictional card test</span>
+      <span>Fictional pitcher test</span>
     </header>
 
     <div class="rarity-picker" aria-label="Preview rarity">
@@ -394,61 +411,60 @@
       <button class="rarity-choice" type="button" data-rarity="bronze" aria-pressed="false">
         <span>Bronze</span>
       </button>
-      <button class="rarity-choice" type="button" data-rarity="silver" aria-pressed="false">
+      <button class="rarity-choice" type="button" data-rarity="silver" aria-pressed="true">
         <span>Silver</span>
       </button>
       <button class="rarity-choice" type="button" data-rarity="gold" aria-pressed="false">
         <span>Gold</span>
       </button>
-      <button class="rarity-choice" type="button" data-rarity="legendary" aria-pressed="true">
+      <button class="rarity-choice" type="button" data-rarity="legendary" aria-pressed="false">
         <span>Legendary</span>
       </button>
     </div>
 
-    <div class="rarity-frame rarity-legendary" aria-label="Legendary rarity">
-    <article class="card" aria-label="Serena Anwar Showdown-style card">
-      <span class="rarity-mark rarity-legendary" aria-label="Legendary rarity" title="Legendary">Legendary</span>
+    <div class="rarity-frame rarity-silver" aria-label="Silver rarity">
+    <article class="card" aria-label="Asami Ortega Showdown-style pitcher card">
+      <span class="rarity-mark rarity-silver" aria-label="Silver rarity" title="Silver">Silver</span>
       <div class="photo">
         <img
-          src="https://api.dicebear.com/9.x/micah/svg?seed=Serena%20Anwar-hitter-LF%2FRF&amp;backgroundColor=transparent"
-          alt="Fictional portrait of Serena Anwar"
+          src="https://api.dicebear.com/9.x/micah/svg?seed=Asami%20Ortega-pitcher-SP&amp;backgroundColor=transparent"
+          alt="Fictional portrait of Asami Ortega"
           referrerpolicy="no-referrer"
         >
       </div>
 
       <img class="frame" src="./vendor/showdownbot/2004-Hitter-BLUE-NO-FOOTER.png" alt="">
-      <div class="onbase-number">13</div>
+      <div class="primary-number">6</div>
+      <div class="primary-label">Control</div>
 
-      <div class="player-name">Serena Anwar</div>
+      <div class="player-name">Asami Ortega</div>
 
       <div class="metadata" aria-label="Player metadata">
-        <span>412 PT</span>
-        <span>Speed 19</span>
-        <span>Bats L</span>
-        <span>LF/RF +2</span>
+        <span>323 PT</span>
+        <span>IP 6</span>
+        <span>Throws L</span>
+        <span>SP</span>
       </div>
 
       <div class="chart-strip" aria-label="Batting chart">
         <div class="chart-ranges" aria-label="Chart result ranges">
-          <span>1-3</span>
-          <span>4</span>
-          <span>5</span>
-          <span>6-8</span>
-          <span>9-12</span>
-          <span>13</span>
-          <span>14</span>
-          <span>15</span>
-          <span>16-20</span>
+          <span>1</span>
+          <span>2-5</span>
+          <span>6-11</span>
+          <span>12-14</span>
+          <span>15-17</span>
+          <span>18</span>
+          <span>19</span>
+          <span>20</span>
         </div>
         <div class="chart-outcomes" aria-label="Chart outcomes">
+          <span>PU</span>
           <span>SO</span>
           <span>GB</span>
           <span>FB</span>
           <span>BB</span>
           <span>1B</span>
-          <span>1B+</span>
           <span>2B</span>
-          <span>3B</span>
           <span>HR</span>
         </div>
       </div>
@@ -456,7 +472,7 @@
     </div>
 
     <p class="note">
-      Fictional player and club using DiceBear's Micah portrait style.
+      Fictional pitcher using DiceBear's Micah portrait style.
     </p>
   </main>
   <script>
