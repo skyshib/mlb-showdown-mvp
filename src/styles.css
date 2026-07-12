@@ -1114,6 +1114,28 @@ button.roster-slot[draggable="true"]:active {
   margin-left: 0;
 }
 
+.war-sound-toggle {
+  flex: 0 0 auto;
+  border: 1px solid #405047;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: #1d2822;
+  color: #c8d2cc;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.war-sound-toggle:hover {
+  border-color: #6c8175;
+  background: #26352d;
+}
+
+.war-sound-toggle.enabled {
+  border-color: #67c990;
+  background: #173425;
+  color: #8ee4ae;
+}
+
 .war-live {
   margin-left: auto;
   color: #ff6279;

@@ -543,7 +543,6 @@
   display: block;
   object-fit: contain;
   object-position: center bottom;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 80.6%, 20% 80.6%, 20% 79%, 0 79%);
   transform: translateY(-5cqw) scale(1.08);
   transform-origin: center bottom;
 }
