@@ -262,6 +262,7 @@
       border-bottom-color: transparent;
       border-radius: 50%;
       opacity: 0.92;
+      z-index: 1;
     }
 
     .primary-number::before {
@@ -274,40 +275,35 @@
       transform: rotate(12deg);
     }
 
+    .primary-number span {
+      position: relative;
+      z-index: 2;
+    }
+
     .primary-label {
       position: absolute;
       z-index: 8;
-      left: 3.45%;
-      top: 88.55%;
-      width: 14.6%;
-      height: 2.75%;
-      display: grid;
-      place-items: center;
-      clip-path: polygon(0 18%, 9% 0, 91% 0, 100% 18%, 94% 100%, 50% 82%, 6% 100%);
-      background: #ef3d1b;
-      color: #fff;
+      left: 3.2%;
+      top: 89.05%;
+      width: 13.8%;
+      height: 3.25%;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    .primary-label path {
+      fill: none;
+    }
+
+    .primary-label text {
+      fill: #fff;
+      stroke: #080808;
+      stroke-width: 1.4px;
       font-family: "Showdown Condensed", Arial Narrow, sans-serif;
-      font-size: clamp(7px, 1.75vw, 10px);
+      font-size: 42px;
       font-weight: 700;
-      line-height: 1;
-      text-transform: uppercase;
-      text-shadow: 0 1px 1px #000;
-      transform: rotate(-6deg);
-      transform-origin: center;
-    }
-
-    .primary-label::before {
-      content: "";
-      position: absolute;
-      inset: 2px;
-      z-index: 0;
-      clip-path: inherit;
-      background: #14283a;
-    }
-
-    .primary-label span {
-      position: relative;
-      z-index: 1;
+      paint-order: stroke fill;
+      text-anchor: middle;
     }
 
     .player-name {
@@ -478,9 +474,12 @@
         >
       </div>
 
-      <img class="frame" src="./vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER.png" alt="">
-      <div class="primary-number">6</div>
-      <div class="primary-label"><span>Control</span></div>
+      <img class="frame" src="./vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER-v2.png" alt="">
+      <div class="primary-number"><span>6</span></div>
+      <svg class="primary-label" viewBox="0 0 200 70" role="img" aria-label="Control">
+        <path id="control-ribbon-curve" d="M 12 48 Q 100 8 188 48"></path>
+        <text><textPath href="#control-ribbon-curve" startOffset="50%">CONTROL</textPath></text>
+      </svg>
 
       <div class="player-name">Asami Ortega</div>
 
