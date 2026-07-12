@@ -3503,17 +3503,26 @@ function renderHeatLegend(scale) {
 // Floating rival boards: every other team pinned to the bottom edge so nobody
 // scrolls mid-auction to see what the room has done.
 function renderRosterDock(draft, viewerId) {
-  const rivals = draft.managers.filter((manager) => manager.id !== viewerId);
-  if (!rivals.length) return "";
+  // Everyone gets a bar, with the viewer's own team pinned to the top row.
+  const ordered = [
+    ...draft.managers.filter((manager) => manager.id === viewerId),
+    ...draft.managers.filter((manager) => manager.id !== viewerId)
+  ];
+  if (!ordered.length) return "";
   const collapsed = state.rosterDock === "collapsed";
   const auction = isAuctionDraft(draft);
   const prices = auction
     ? new Map(draftHistory(draft).map((pick) => [pick.player.id, pick.price]))
     : null;
   const heatScale = draftHeatScale(draft);
-  const bars = collapsed ? "" : rivals.map((manager) => renderDockBar(draft, manager, auction, prices, heatScale)).join("");
+  const ownTag = state.online?.managerId ? "you" : "";
+  const bars = collapsed
+    ? ""
+    : ordered
+        .map((manager) => renderDockBar(draft, manager, auction, prices, heatScale, { own: manager.id === viewerId, ownTag }))
+        .join("");
   return `<div class="roster-dock-spacer${collapsed ? " collapsed" : ""}"></div>
-  <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Other team rosters">
+  <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Team rosters">
     <div class="dock-top">
       <button type="button" class="dock-toggle" data-action="toggle-dock">${collapsed ? "Show rival boards &#9650;" : "Hide &#9660;"}</button>
       ${collapsed ? "" : renderHeatLegend(heatScale)}
@@ -3522,7 +3531,7 @@ function renderRosterDock(draft, viewerId) {
   </aside>`;
 }
 
-function renderDockBar(draft, manager, auction, prices, heatScale) {
+function renderDockBar(draft, manager, auction, prices, heatScale, { own = false, ownTag = "" } = {}) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
@@ -3535,8 +3544,8 @@ function renderDockBar(draft, manager, auction, prices, heatScale) {
   const budget = auction
     ? `<span class="dock-budget">${auctionBudget(draft, manager)} left${draft.complete ? "" : `<br />max ${auctionMaxBid(draft, manager)}`}</span>`
     : "";
-  return `<div class="dock-bar">
-    <span class="dock-team">${escapeHtml(manager.name)}</span>
+  return `<div class="dock-bar${own ? " own-bar" : ""}">
+    <span class="dock-team">${escapeHtml(manager.name)}${own && ownTag ? ` <em class="own-tag">${escapeHtml(ownTag)}</em>` : ""}</span>
     ${budget}
     <div class="dock-slots">${slots}</div>
   </div>`;

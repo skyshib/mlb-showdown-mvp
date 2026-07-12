@@ -864,7 +864,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .roster-dock-spacer {
-  height: 182px;
+  height: 208px;
 }
 
 .roster-dock-spacer.collapsed {
@@ -888,7 +888,7 @@ button.roster-slot[draggable="true"]:active {
 .dock-bars {
   display: grid;
   gap: 5px;
-  max-height: 142px;
+  max-height: 168px;
   overflow-y: auto;
 }
 
@@ -897,6 +897,28 @@ button.roster-slot[draggable="true"]:active {
   gap: 8px;
   align-items: center;
   min-height: 26px;
+  border-left: 3px solid transparent;
+  border-radius: 6px;
+  padding: 2px 5px;
+}
+
+.dock-bar.own-bar {
+  border-left-color: var(--accent);
+  background: #e9f4ee;
+  box-shadow: inset 0 0 0 1px #bcd8ca;
+}
+
+.dock-bar.own-bar .dock-team {
+  color: var(--accent-dark);
+}
+
+.own-tag {
+  color: var(--accent);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .dock-team {
