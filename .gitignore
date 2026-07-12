@@ -1,12 +1,1 @@
-.DS_Store
-/data/
-scripts/lahman/
-scripts/register/
-scripts/fg-defense-raw.json
-scripts/pages/
-scripts/store-pages/
-scripts/card-images-raw/
-scripts/mlbPools.js
-scripts/mlbTeams.js
-scripts/classic-raw.json
-scripts/classicCards.js
+data/

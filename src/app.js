@@ -1,59 +1,56 @@
-import {
-  DECADES,
-  EARLIEST_DECADE,
-  FRANCHISES,
-  UNIVERSES,
-  buildDraftPool,
-  decadeLabel,
-  setUniverse,
-  universeConfig
-} from "./data/universes.js?v=20260711-shared-universes";
-import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
-import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
+import { buildFictionalDraftPool, buildFictionalUniverse } from "./data/playerGeneration.js?v=20260705-uncapped-speed";
+import { buildRealPlayerPool, buildRealDraftPool, maxRealPoolManagers, REAL_POOL_SEASON } from "./data/realPlayers.js?v=20260704-real-players";
+import { buildMarinersPool, buildMarinersDraftPool, MARINERS_POOL_ERAS } from "./data/marinersPlayers.js?v=20260706-mariners-deal";
 import {
   applyDraftAction,
   AUCTION_DEFAULT_BUDGET,
+  AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
+  AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS,
+  AUCTION_DEFAULT_REVIEW_SECONDS,
   AUCTION_MIN_BID,
   AUCTION_MIN_RAISE,
+  auctionBidTimeRemainingMs,
   auctionBudget,
   auctionLotPlayer,
   auctionMaxBid,
+  auctionReviewComplete,
+  auctionReviewRemainingMs,
+  auctionTimerEnabled,
   autopick,
   assignLineupSlots,
   availablePlayers,
   buildTeam,
+  canBid,
   canNominatePlayer,
-  canCancelLot,
+  canSellLot,
   cancelLot,
-  canPlaceSealedBid,
   canPlayerFillLineupSlot,
   canPickPlayer,
+  completeAuctionReview,
   CORNER_OUTFIELD_POSITION,
-  cpuSealedBid,
   createDraft,
   currentManager,
   draftHistory,
-  SIM_ACTION_TYPES,
   getRosterNeeds,
   isAuctionDraft,
   isCornerOutfielder,
   lineupStatus,
-  managerValuation,
-  maxPoolManagers,
-  nominateBestTarget,
   nominatePlayer,
   normalizeAuctionBudget,
+  normalizeAuctionTimerConfig,
   normalizeCardPosition,
-  normalizePickTimerSeconds,
+  passBid,
   pickPlayer,
-  placeSealedBid,
-  sealedBidder,
+  pendingAuctionBidManagers,
+  placeBid,
+  sellLot,
   staffStatus,
+  startAuctionReview,
+  syncAuctionTimer,
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260711-online-auction";
+} from "./rules/draft.js?v=20260706-auction-draft";
 import {
   createRoom,
   fetchRoom,
@@ -62,23 +59,19 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260711-online-auction";
+} from "./onlineClient.js?v=20260705-online-rooms-4";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
   createBatchState,
   normalizeBatchRuns,
-  replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260708-mlb-win-prob";
+} from "./rules/batch.js?v=20260705-awards-show-batch-team-skills";
 import { computeAwards } from "./rules/awards.js?v=20260705-wpa-two-decimals";
-import { hitterPositions, playsPosition } from "./rules/cards.js";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import {
   basesText,
-  cardRarity,
   escapeHtml,
   playerPosition,
   playerPower,
@@ -88,261 +81,62 @@ import {
   renderDraftHistoryTable,
   renderPlayerCard,
   renderPlayerTable,
-  renderRaceChart,
-  renderWinProbabilityChart
-} from "./ui/render.js?v=20260708-mlb-win-prob";
+  renderRaceChart
+} from "./ui/render.js?v=20260706-auction-draft";
 
-const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
-const DEFAULT_UNIVERSE = "classic";
+const STORAGE_KEY = "mlb-showdown-mvp-state-v2";
+// Every pool flavor keeps a deep set behind the scenes and deals a seeded
+// slice per draft. Deals share a fixed per-position shape, so any probe seed
+// reports the manager limit that every deal of that pool supports.
+const FICTIONAL_POOL_INFO = (() => {
+  const dealt = buildFictionalDraftPool("probe");
+  return { size: buildFictionalUniverse().length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
+})();
+const REAL_POOL_INFO = (() => {
+  const fullSet = buildRealPlayerPool();
+  const dealt = buildRealDraftPool("probe");
+  return { size: fullSet.length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
+})();
+const MARINERS_POOL_INFO = (() => {
+  const fullSet = buildMarinersPool();
+  const dealt = buildMarinersDraftPool("probe");
+  return { size: fullSet.length, dealt: dealt.length, managerLimit: maxRealPoolManagers(dealt) };
+})();
 const app = document.querySelector("#app");
 const cardPreview = document.createElement("div");
 cardPreview.className = "hover-card-preview";
 cardPreview.setAttribute("aria-hidden", "true");
 document.body.append(cardPreview);
-const chartTip = document.createElement("div");
-chartTip.className = "chart-tip";
-chartTip.setAttribute("aria-hidden", "true");
-chartTip.hidden = true;
-const chartTipValue = document.createElement("strong");
-const chartTipPlay = document.createElement("span");
-chartTip.append(chartTipValue, chartTipPlay);
-document.body.append(chartTip);
 
 let state = loadState() ?? defaultState();
-// A restored draft carries its own dealt cards, so it never re-deals — but
-// the card faces still look the rest of the universe up (a two-way player's
-// other half, most of all), so point it at the room's card set on the way in.
-setUniverse(state.seed, state.universe, { priceNoise: false });
 let selectedLineupMove = null;
 let draggedLineupMove = null;
-// The open game, if one is being played. A game is a sitting rather than a
-// save: it holds live engine state (the seeded rng included), so it lives in
-// memory only and a reload puts you back on the draft board.
-let liveGame = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
 let onlineStream = null;
-let lotEntryError = "";
-let cpuPaused = false;
-let cpuDriveKey = null;
-
-// ---- Pick clock and chime ----
-// Each client anchors the clock when it first sees a turn start, so clients
-// agree to within a network hop — good enough for a friendly room. On expiry
-// the on-the-clock player's client auto-picks itself; the host client
-// backstops absent players after a short grace period.
-let pickClockKey = null;
-let pickClockDeadline = 0;
-let pickClockTimeoutKey = null;
-let chimeContext = null;
-
-setInterval(pickClockTick, 500);
-
-function pickClockTurn() {
-  const draft = state.draft;
-  if (!draft || draft.complete) return null;
-  // Computer turns resolve instantly, so the clock only times humans: picks,
-  // nominations, and each sealed-bid entry while a lot is on the block.
-  const lot = liveLot(draft);
-  if (isAuctionDraft(draft) && lot) {
-    const bidder = sealedBidder(liveDraft(draft));
-    if (!bidder || bidder.cpu) return null;
-    return {
-      current: bidder,
-      bidTurn: true,
-      key: `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.pickNumber}:bid:${lot.round}:${bidder.id}`
-    };
-  }
-  const current = currentManager(draft);
-  if (!current || current.cpu) return null;
-  return { current, bidTurn: false, key: `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.pickNumber}:${current.id}` };
-}
-
-function pickClockTick() {
-  const turn = pickClockTurn();
-  if (!turn) {
-    pickClockKey = null;
-    updatePickClockDisplay(null);
-    return;
-  }
-  if (turn.key !== pickClockKey) {
-    pickClockKey = turn.key;
-    pickClockDeadline = Date.now() + state.pickTimerSeconds * 1000;
-    if (shouldChimeForTurn(turn.current)) playChime();
-  }
-  if (!state.pickTimerSeconds) {
-    updatePickClockDisplay(null);
-    return;
-  }
-  const remaining = pickClockDeadline - Date.now();
-  updatePickClockDisplay(remaining);
-  if (remaining <= 0) handlePickClockExpiry(turn);
-}
-
-function handlePickClockExpiry(turn) {
-  if (pickClockTimeoutKey === turn.key) return;
-  const online = state.online;
-  if (!online) {
-    pickClockTimeoutKey = turn.key;
-    // A stalled sealed bid times out into an auto-bid; a stalled pick or
-    // nomination times out into an autopick.
-    if (turn.bidTurn) {
-      placeSealedBid(state.draft, turn.current.id, cpuSealedBid(state.draft, turn.current));
-    } else {
-      autopick(state.draft);
-    }
-    selectedLineupMove = null;
-    invalidateBatch();
-    afterLocalDraftAction();
-    return;
-  }
-  const myTurn = online.managerId === turn.current.id;
-  // Whoever is on the clock times themselves out. The host covers a seat that
-  // has gone quiet, a beat later so the two don't race.
-  if (!myTurn && !online.host) return;
-  if (!myTurn && Date.now() < pickClockDeadline + 2000) return;
-  pickClockTimeoutKey = turn.key;
-  if (turn.bidTurn) {
-    // A stalled bid is entered at that manager's own willingness, exactly as a
-    // local draft would — otherwise one player stepping away freezes the lot.
-    const live = liveDraft(state.draft);
-    sendOnlineAction({ type: "seal-bid", managerId: turn.current.id, amount: cpuSealedBid(live, turn.current) });
-    return;
-  }
-  sendOnlineAction({ type: isAuctionDraft(state.draft) ? "auto-nominate" : "autopick" });
-}
-
-// Everything a computer manager is currently up for happens at once: snake
-// picks, auction nominations, and sealed bids. Local drafts only — online
-// rooms route computer moves through the host client instead.
-function advanceCpuTurns() {
-  const draft = state.draft;
-  if (!draft || state.online || cpuPaused) return;
-  let guard = draft.managers.length * draft.rosterSize * 4 + 20;
-  while (!draft.complete && guard > 0) {
-    guard -= 1;
-    if (isAuctionDraft(draft)) {
-      if (draft.auction.lot) {
-        const next = sealedBidder(draft);
-        if (!next?.cpu) return;
-        placeSealedBid(draft, next.id, cpuSealedBid(draft, next));
-        continue;
-      }
-      if (!currentManager(draft).cpu) return;
-      nominateBestTarget(draft);
-      continue;
-    }
-    if (!currentManager(draft).cpu) return;
-    autopick(draft);
-  }
-}
-
-// Wraps up every human-initiated local draft change: computers respond,
-// state saves, screen re-renders. Human action also lifts the undo pause.
-function afterLocalDraftAction() {
-  cpuPaused = false;
-  advanceCpuTurns();
-  saveState();
-  renderDraft();
-}
-
-// When the host's client sees a computer manager on the clock in an online
-// room, it sends the pick on the computer's behalf (once per turn).
-function driveOnlineCpuTurn() {
-  const online = state.online;
-  const draft = state.draft;
-  if (!online?.host || !draft || draft.complete || isAuctionDraft(draft)) return;
-  if (online.pausedForUndo) return;
-  const current = currentManager(draft);
-  if (!current?.cpu) return;
-  const key = `${online.roomId}:${draft.pickNumber}`;
-  if (cpuDriveKey === key) return;
-  cpuDriveKey = key;
-  sendOnlineAction({ type: "autopick" });
-}
-
-function updatePickClockDisplay(remaining) {
-  const clock = document.querySelector("[data-pick-timer]");
-  if (!clock) return;
-  if (remaining === null || !state.pickTimerSeconds) {
-    clock.hidden = true;
-    return;
-  }
-  clock.hidden = false;
-  clock.textContent = `⏱ ${formatPickClock(remaining)}`;
-  clock.classList.toggle("low", remaining <= 10_000);
-}
-
-function formatPickClock(ms) {
-  const seconds = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-function shouldChimeForTurn(current) {
-  if (state.online) return Boolean(state.online.managerId) && current.id === state.online.managerId;
-  // Hotseat: the chime calls the next manager over to the shared screen, but
-  // only when a timed draft is actually being played.
-  return state.pickTimerSeconds > 0;
-}
-
-function playChime() {
-  try {
-    chimeContext = chimeContext ?? new AudioContext();
-    if (chimeContext.state === "suspended") chimeContext.resume();
-    const start = chimeContext.currentTime;
-    for (const [frequency, offset] of [[880, 0], [1174.66, 0.18]]) {
-      const oscillator = chimeContext.createOscillator();
-      const gain = chimeContext.createGain();
-      oscillator.type = "sine";
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0.0001, start + offset);
-      gain.gain.exponentialRampToValueAtTime(0.18, start + offset + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + 0.55);
-      oscillator.connect(gain).connect(chimeContext.destination);
-      oscillator.start(start + offset);
-      oscillator.stop(start + offset + 0.6);
-    }
-  } catch {
-    // No audio support or permission — the visual clock still works.
-  }
-}
+let auctionBidInputs = {};
+let draftTimerInterval = null;
 
 const onlineRoomParam = new URLSearchParams(location.search).get("room");
-const warRoomMode = new URLSearchParams(location.search).has("board");
 if (onlineRoomParam) {
   bootOnlineRoom(onlineRoomParam);
 } else {
   renderCurrentScreen();
 }
 
-// The TV board mirrors a same-browser draft through localStorage: the storage
-// event fires on writes from other tabs, and a slow poll covers same-tab and
-// missed events.
-if (warRoomMode && !onlineRoomParam) {
-  let warRoomSnapshot = localStorage.getItem(STORAGE_KEY);
-  const refreshWarRoom = () => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === warRoomSnapshot) return;
-    warRoomSnapshot = raw;
-    state = loadState() ?? defaultState();
-    renderCurrentScreen();
-  };
-  window.addEventListener("storage", (event) => {
-    if (event.key === STORAGE_KEY) refreshWarRoom();
-  });
-  setInterval(refreshWarRoom, 1500);
-}
-
 function defaultState() {
   return {
     seed: "coefficient-classic",
     managers: ["Kasey", "Milo", "Nico", "Rafa"],
-    cpuManagers: [],
-    universe: DEFAULT_UNIVERSE,
+    poolMode: "random",
+    realPool: "stars",
     draftType: "snake",
     auctionBudget: AUCTION_DEFAULT_BUDGET,
-    pickTimerSeconds: 0,
-    maskBids: false,
+    auctionTimer: {
+      reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
+      bankSeconds: AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
+      incrementSeconds: AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS
+    },
     rosterSize: 13,
     draft: null,
     draftTab: "available",
@@ -356,8 +150,6 @@ function defaultState() {
       pitchers: { sort: "era", direction: "asc" }
     },
     batchStatsTab: "overview",
-    batchGamePage: 0,
-    batchGameIndex: null,
     view: null,
     selectedGameIndex: 0,
     selectedTeamName: null,
@@ -372,14 +164,8 @@ function defaultState() {
 }
 
 function renderCurrentScreen() {
-  if (warRoomMode) {
-    renderWarRoom();
-    return;
-  }
   if (state.online && !state.online.managerId && !state.online.spectator) {
     renderSeatSelect();
-  } else if (liveGame) {
-    renderLiveGame();
   } else if (state.view === "batch" && state.batch && state.draft) {
     renderBatch();
   } else if (state.draft) {
@@ -391,6 +177,7 @@ function renderCurrentScreen() {
 
 function resetAppHandlers() {
   clearHoverCardPreviewBindings();
+  stopDraftTimerPolling();
   app.onclick = null;
   app.oninput = null;
   app.onchange = null;
@@ -409,6 +196,32 @@ function resetAppHandlers() {
   app.ondragend = null;
 }
 
+function resetAuctionBidInputs() {
+  auctionBidInputs = {};
+}
+
+function stopDraftTimerPolling() {
+  if (!draftTimerInterval) return;
+  clearInterval(draftTimerInterval);
+  draftTimerInterval = null;
+}
+
+function startDraftTimerPolling(draft) {
+  stopDraftTimerPolling();
+  if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) return;
+  const shouldPoll = auctionReviewRemainingMs(draft, Date.now()) > 0 || pendingAuctionBidManagers(draft).length > 0;
+  if (!shouldPoll) return;
+  draftTimerInterval = setInterval(() => {
+    if (!state.draft || state.view === "batch") {
+      stopDraftTimerPolling();
+      return;
+    }
+    const changed = syncAuctionTimer(state.draft, Date.now());
+    if (changed) saveState();
+    renderDraft();
+  }, 1000);
+}
+
 async function bootOnlineRoom(roomId) {
   renderOnlineMessage(`Connecting to room ${roomId}…`);
   let room;
@@ -423,22 +236,18 @@ async function bootOnlineRoom(roomId) {
   state.seed = room.seed;
   state.managers = room.managers.map((manager) => manager.name);
   state.rosterSize = room.rosterSize;
-  state.universe = universeConfig(room.universe)?.key ?? DEFAULT_UNIVERSE;
-  state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
-  state.draftType = room.draftType === "auction" ? "auction" : "snake";
-  state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, room.rosterSize);
-  state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
+  state.poolMode = room.poolMode === "real" ? "real" : "random";
+  state.realPool = room.realPool === "mariners" ? "mariners" : "stars";
   state.online = {
     roomId,
     managerId: seat?.managerId ?? null,
     token: seat?.token ?? null,
     host: Boolean(seat?.host),
     hostToken: seat?.hostToken ?? null,
-    spectator: Boolean(seat?.spectator) || warRoomMode,
+    spectator: Boolean(seat?.spectator),
     claimedSeats: room.managers.filter((manager) => manager.claimed).map((manager) => manager.id),
     appliedSeq: 0,
-    status: "",
-    lot: null
+    status: ""
   };
   rebuildOnlineDraft(room);
   subscribeOnline();
@@ -446,39 +255,15 @@ async function bootOnlineRoom(roomId) {
 }
 
 function rebuildOnlineDraft(room) {
-  const pool = buildDraftPool(state.universe, room.seed);
-  state.draft = createDraft(
-    room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
-    pool,
-    room.rosterSize,
-    room.seed,
-    { draftType: state.draftType, budget: state.auctionBudget }
-  );
-  // The bids on the card currently up are withheld until it sells, so the
-  // replayed draft only knows the lot was nominated; the room's lot event
-  // carries the rest of it.
-  state.online.lot = room.lot ?? null;
-  let lastSim = null;
-  for (const entry of room.actions) {
-    if (SIM_ACTION_TYPES.has(entry.action?.type)) {
-      lastSim = entry.action;
-    } else {
-      applyDraftAction(state.draft, entry.action);
-    }
-  }
+  const pool = room.poolMode === "real"
+    ? room.realPool === "mariners"
+      ? buildMarinersDraftPool(room.seed)
+      : buildRealDraftPool(room.seed)
+    : buildFictionalDraftPool(room.seed);
+  state.draft = createDraft(state.managers, pool, room.rosterSize, room.seed);
+  for (const entry of room.actions) applyDraftAction(state.draft, entry.action);
   state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
   state.selectedTeamName = state.managers[0];
-  if (lastSim) applySharedSim(lastSim, { instant: true });
-  driveOnlineCpuTurn();
-}
-
-// A sim action in the shared log means someone hit "Sim": every client runs
-// the same seeded simulation locally, so results match on all machines.
-function applySharedSim(action, options = {}) {
-  if (!state.draft || !canSimulate(state.draft)) return;
-  if (action.type === "batch") {
-    startBatchRun(action.runs ?? DEFAULT_BATCH_RUNS, { ...options, salt: action.salt });
-  }
 }
 
 function subscribeOnline() {
@@ -491,13 +276,6 @@ function subscribeOnline() {
         resyncOnlineRoom();
         return;
       }
-      if (SIM_ACTION_TYPES.has(entry.action?.type)) {
-        online.appliedSeq = entry.seq;
-        online.status = "";
-        // The batch renders its own race animation; no render call here.
-        applySharedSim(entry.action);
-        return;
-      }
       try {
         applyDraftAction(state.draft, entry.action);
       } catch {
@@ -506,9 +284,6 @@ function subscribeOnline() {
       }
       online.appliedSeq = entry.seq;
       online.status = "";
-      // An undo means someone is rewinding on purpose; hold computer picks
-      // until the next forward action so they don't instantly redo the turn.
-      online.pausedForUndo = entry.action.type === "undo";
       if (entry.action.type !== "lineup") {
         state.tournament = null;
         invalidateBatch();
@@ -516,16 +291,10 @@ function subscribeOnline() {
       selectedLineupMove = null;
       draggedLineupMove = null;
       renderCurrentScreen();
-      driveOnlineCpuTurn();
     },
     onSeats: (payload) => {
       if (!state.online) return;
       state.online.claimedSeats = payload.seats;
-      renderCurrentScreen();
-    },
-    onLot: (payload) => {
-      if (!state.online) return;
-      state.online.lot = payload.lot;
       renderCurrentScreen();
     },
     onError: () => {
@@ -553,12 +322,7 @@ async function resyncOnlineRoom() {
 
 async function sendOnlineAction(action) {
   const online = state.online;
-  if (!online) return;
-  if (!online.token) {
-    online.status = "Spectators can't run room actions — claim a seat first.";
-    renderCurrentScreen();
-    return;
-  }
+  if (!online?.token) return;
   try {
     await sendRoomAction(online.roomId, online.token, action);
   } catch (error) {
@@ -591,10 +355,9 @@ function renderSeatSelect() {
   const seats = state.draft.managers
     .map((manager) => {
       const claimed = online.claimedSeats.includes(manager.id);
-      const blocked = claimed || manager.cpu;
-      return `<button class="seat-option" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}" ${blocked ? "disabled" : ""}>
+      return `<button class="seat-option" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}" ${claimed ? "disabled" : ""}>
         <strong>${escapeHtml(manager.name)}</strong>
-        <span>${manager.cpu ? "Computer" : claimed ? "Taken" : "Open seat"}</span>
+        <span>${claimed ? "Taken" : "Open seat"}</span>
       </button>`;
     })
     .join("");
@@ -654,7 +417,6 @@ function renderOnlineBanner(draft, current) {
     <span>${mySeat ? `You are ${escapeHtml(mySeat.name)}${online.host ? " (host)" : ""}` : "Spectating"}</span>
     ${turnNote ? `<span>${escapeHtml(turnNote)}</span>` : ""}
     <span class="online-share">Invite link: <code>${escapeHtml(shareUrl)}</code></span>
-    <a class="tv-board-link" href="${escapeHtml(shareUrl)}&board" target="_blank" rel="noopener">&#128250; TV board</a>
     ${online.status ? `<span class="warn">${escapeHtml(online.status)}</span>` : ""}
   </section>`;
 }
@@ -674,73 +436,12 @@ function onlineCanUndo(draft) {
   return Boolean(lastPick && lastPick.manager.id === online.managerId);
 }
 
-// The card set the room drafts out of, as the setup form sees it: which of
-// the five choices is selected, plus the sub-picker state each of the two
-// parameterized ones carries. The universe key is the whole truth — the form
-// reads its shape back out rather than keeping a second copy in state.
-function universeChoice(key) {
-  const multi = /^decades-([\d,]+)$/.exec(key ?? "");
-  if (multi) return { pick: "decades", decades: multi[1].split(",").map(Number), franchise: FRANCHISES[0].id };
-  const decade = /^decade-(\d{4})$/.exec(key ?? "");
-  if (decade) return { pick: "decades", decades: [Number(decade[1])], franchise: FRANCHISES[0].id };
-  const franchise = /^franchise-([A-Z]{2,3})$/.exec(key ?? "");
-  if (franchise) return { pick: "franchise", decades: [...DECADES], franchise: franchise[1] };
-  return { pick: UNIVERSES[key] ? key : DEFAULT_UNIVERSE, decades: [...DECADES], franchise: FRANCHISES[0].id };
-}
-
-// The other direction: what the form is showing becomes a universe key.
-function universeFromForm(form) {
-  const pick = String(form.get("universe") ?? DEFAULT_UNIVERSE);
-  if (pick === "decades") {
-    const checked = DECADES.filter((start) => form.getAll("decade").includes(String(start)));
-    return checked.length ? `decades-${checked.join(",")}` : null;
-  }
-  if (pick === "franchise") return `franchise-${String(form.get("franchise"))}`;
-  return UNIVERSES[pick] ? pick : DEFAULT_UNIVERSE;
-}
-
-function renderUniverseFieldset(key) {
-  const choice = universeChoice(key);
-  const option = (value, title, blurb) => `<label class="pool-option">
-    <input type="radio" name="universe" value="${value}" ${choice.pick === value ? "checked" : ""} />
-    <span><strong>${title}</strong><small>${blurb}</small></span>
-  </label>`;
-  return `<fieldset class="pool-mode universe-mode">
-    <legend>Card set</legend>
-    ${option("classic", "Classic Showdown",
-      "Every real MLB Showdown card, 2000&ndash;2005 &mdash; the printed charts, the printed points, and the printed card fronts.")}
-    ${option("mlb-history", "MLB: all time",
-      "A century of real big leaguers rated on their whole careers &mdash; stars, scrubs, and everyone between.")}
-    ${option("decades", "MLB: by decade",
-      "Real players rated on one decade's numbers. Check the decades you want in the pool.")}
-    <div class="pool-suboptions decade-checklist" ${choice.pick === "decades" ? "" : "hidden"}>
-      ${DECADES.map((start) => `<label class="decade-option">
-        <input type="checkbox" name="decade" value="${start}" ${choice.decades.includes(start) ? "checked" : ""} />
-        <span>The ${escapeHtml(decadeLabel(start).toLowerCase())}</span>
-      </label>`).join("")}
-      <small>The ${EARLIEST_DECADE}s bucket folds in the dead-ball era and everything before it. A player who lasted three decades prints three cards &mdash; you may only roster one of them.</small>
-    </div>
-    ${option("franchise", "MLB: by franchise",
-      "One club's all-time roster, every player rated on his years there.")}
-    <div class="pool-suboptions" ${choice.pick === "franchise" ? "" : "hidden"}>
-      <label class="franchise-field">
-        Club
-        <select name="franchise">
-          ${FRANCHISES.map((franchise) => `<option value="${franchise.id}" ${choice.franchise === franchise.id ? "selected" : ""}>${escapeHtml(franchise.name)}</option>`).join("")}
-        </select>
-      </label>
-    </div>
-    ${option("fictional", "Fictional players",
-      "A made-up league, invented fresh from the seed above. Nobody has scouting reports on these guys.")}
-  </fieldset>`;
-}
-
 function renderSetup(setupError = "") {
   resetAppHandlers();
   app.innerHTML = `<section class="panel setup">
     <div>
       <p class="eyebrow">MLB Showdown-ish MVP</p>
-      <h1>Draft a real card set. Play the games.</h1>
+      <h1>Draft fictional or real cards. Sim a tournament.</h1>
       <p class="lede">Private local prototype. It now saves your room in this browser, so reloads should not wipe the draft.</p>
     </div>
     <form id="setup-form" class="setup-grid">
@@ -748,11 +449,6 @@ function renderSetup(setupError = "") {
         Managers
         <textarea name="managers" rows="5">${escapeHtml(state.managers.join("\n"))}</textarea>
       </label>
-      <fieldset class="pool-mode cpu-managers">
-        <legend>Computer managers</legend>
-        <div class="cpu-list" data-cpu-list>${renderCpuChoices(state.managers, state.cpuManagers)}</div>
-        <small class="cpu-note">Checked managers play themselves — instant picks and sealed bids.</small>
-      </fieldset>
       <label>
         Seed
         <input name="seed" value="${escapeHtml(state.seed)}" />
@@ -760,15 +456,6 @@ function renderSetup(setupError = "") {
       <label>
         Roster size
         <input name="rosterSize" type="number" min="13" max="13" value="13" />
-      </label>
-      <label>
-        Pick timer
-        <select name="pickTimer">
-          ${[[0, "Off"], [30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
-            .map(([seconds, label]) => `<option value="${seconds}" ${state.pickTimerSeconds === seconds ? "selected" : ""}>${label}</option>`)
-            .join("")}
-        </select>
-        <small>When the clock hits zero the pick is made automatically.</small>
       </label>
       <fieldset class="pool-mode draft-type-mode">
         <legend>Draft type</legend>
@@ -778,15 +465,50 @@ function renderSetup(setupError = "") {
         </label>
         <label class="pool-option">
           <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
-          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
+          <span><strong>Auction draft</strong><small>Managers take turns nominating a card, then anyone can bid on it. Highest bid wins the card and pays from that manager's budget. Local rooms only for now.</small></span>
         </label>
         <label class="auction-budget-field">
           Budget per manager
           <input name="auctionBudget" type="number" min="${13 * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
           <small>A strong 13-card roster adds up to roughly 5000 card points, so 5000 bids like the classic Showdown cap.</small>
         </label>
+        <label class="auction-budget-field">
+          Pool review
+          <input name="auctionReviewSeconds" type="number" min="0" max="3600" step="30" value="${state.auctionTimer.reviewSeconds}" />
+          <small>Seconds to inspect the dealt pool before clocks start.</small>
+        </label>
+        <label class="auction-budget-field">
+          Bid clock bank
+          <input name="auctionBankSeconds" type="number" min="0" max="3600" step="30" value="${state.auctionTimer.bankSeconds}" />
+          <small>Starting seconds each manager can spend entering bids.</small>
+        </label>
+        <label class="auction-budget-field">
+          Per-card increment
+          <input name="auctionIncrementSeconds" type="number" min="0" max="120" step="1" value="${state.auctionTimer.incrementSeconds}" />
+          <small>Seconds added to every active manager when a card is nominated.</small>
+        </label>
       </fieldset>
-      ${renderUniverseFieldset(state.universe)}
+      <fieldset class="pool-mode">
+        <legend>Player pool</legend>
+        <label class="pool-option">
+          <input type="radio" name="poolMode" value="random" ${state.poolMode === "real" ? "" : "checked"} />
+          <span><strong>Fictional randoms</strong><small>The seed above deals ${FICTIONAL_POOL_INFO.dealt} of a fixed ${FICTIONAL_POOL_INFO.size}-player invented league — the same made-up guys resurface night after night. Up to ${FICTIONAL_POOL_INFO.managerLimit} managers.</small></span>
+        </label>
+        <label class="pool-option">
+          <input type="radio" name="poolMode" value="real" ${state.poolMode === "real" ? "checked" : ""} />
+          <span><strong>Real MLB players</strong><small>Cards built from real stat lines. Pick a pool below.</small></span>
+        </label>
+        <div class="pool-suboptions">
+          <label class="pool-option">
+            <input type="radio" name="realPool" value="stars" ${state.realPool === "mariners" ? "" : "checked"} />
+            <span><strong>All of baseball history</strong><small>The seed above deals ${REAL_POOL_INFO.dealt} of ${REAL_POOL_INFO.size} cards from ${REAL_POOL_SEASON} — legends, today's stars, role players, and cult heroes. Up to ${REAL_POOL_INFO.managerLimit} managers.</small></span>
+          </label>
+          <label class="pool-option">
+            <input type="radio" name="realPool" value="mariners" ${state.realPool === "mariners" ? "checked" : ""} />
+            <span><strong>Mariners, every era</strong><small>The seed above deals ${MARINERS_POOL_INFO.dealt} of ${MARINERS_POOL_INFO.size} M's cards from ${MARINERS_POOL_ERAS} — Junior and Edgar one night, Willie Bloomquist the next. Up to ${MARINERS_POOL_INFO.managerLimit} managers.</small></span>
+          </label>
+        </div>
+      </fieldset>
       ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
       <button type="submit">Start draft</button>
       <div class="online-setup">
@@ -801,32 +523,11 @@ function renderSetup(setupError = "") {
   </section>`;
 
   const setupForm = document.querySelector("#setup-form");
-  // Only the selected card set shows its picker, and touching a picker
-  // selects the set it belongs to — checking a decade means you want decades.
-  const syncUniversePickers = () => {
-    const pick = new FormData(setupForm).get("universe");
-    setupForm.querySelector(".decade-checklist").hidden = pick !== "decades";
-    setupForm.querySelector(".franchise-field").closest(".pool-suboptions").hidden = pick !== "franchise";
-  };
+  // Picking a real-pool flavor implies the real mode; keep the parent radio in sync.
   setupForm.addEventListener("change", (event) => {
-    const owner = event.target.name === "decade" ? "decades"
-      : event.target.name === "franchise" ? "franchise"
-      : null;
-    if (owner) setupForm.querySelector(`input[name="universe"][value="${owner}"]`).checked = true;
-    if (owner || event.target.name === "universe") syncUniversePickers();
-  });
-  // The computer checkboxes track the manager list as it is typed.
-  setupForm.addEventListener("input", (event) => {
-    if (event.target.name !== "managers") return;
-    const form = new FormData(setupForm);
-    const checked = form.getAll("cpu").map(String);
-    const names = dedupeManagerNames(
-      String(form.get("managers"))
-        .split("\n")
-        .map((name) => name.trim())
-        .filter(Boolean)
-    );
-    setupForm.querySelector("[data-cpu-list]").innerHTML = renderCpuChoices(names, checked);
+    if (event.target.name === "realPool") {
+      setupForm.querySelector('input[name="poolMode"][value="real"]').checked = true;
+    }
   });
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -839,37 +540,40 @@ function renderSetup(setupError = "") {
     );
     state.seed = String(form.get("seed")).trim() || "showdown";
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
-    const cpuChecked = new Set(form.getAll("cpu").map(String));
-    state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));
     state.rosterSize = 13;
-    const universe = universeFromForm(form);
-    if (!universe) {
-      renderSetup("Check at least one decade, or pick a different card set.");
-      return;
-    }
-    state.universe = universe;
+    state.poolMode = form.get("poolMode") === "real" ? "real" : "random";
+    state.realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
     state.draftType = form.get("draftType") === "auction" ? "auction" : "snake";
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
-    state.pickTimerSeconds = normalizePickTimerSeconds(form.get("pickTimer"));
-    const pool = buildDraftPool(state.universe, state.seed);
-    const managerLimit = maxPoolManagers(pool);
-    if (state.managers.length > managerLimit) {
+    state.auctionTimer = normalizeAuctionTimerInput(form);
+    const poolInfo = state.poolMode === "real"
+      ? state.realPool === "mariners" ? MARINERS_POOL_INFO : REAL_POOL_INFO
+      : FICTIONAL_POOL_INFO;
+    const poolLabel = state.poolMode === "real"
+      ? state.realPool === "mariners" ? "all-era Mariners" : "real player"
+      : "fictional";
+    if (state.managers.length > poolInfo.managerLimit) {
       renderSetup(
-        `The ${universeConfig(state.universe).name} deck deals position depth for up to ${managerLimit} managers. Trim the manager list or pick a different card set.`
+        `The ${poolLabel} pool deals position depth for up to ${poolInfo.managerLimit} managers. Trim the manager list or pick a different pool.`
       );
       return;
     }
-    state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
+    const pool = state.poolMode === "real"
+      ? state.realPool === "mariners"
+        ? buildMarinersDraftPool(state.seed)
+        : buildRealDraftPool(state.seed)
+      : buildFictionalDraftPool(state.seed);
+    state.draft = createDraft(state.managers, pool, state.rosterSize, state.seed, {
       draftType: state.draftType,
-      budget: state.auctionBudget
+      budget: state.auctionBudget,
+      timer: state.auctionTimer
     });
+    if (isAuctionDraft(state.draft)) startAuctionReview(state.draft, Date.now());
     state.tournament = null;
     state.batch = null;
     state.view = null;
     state.selectedGameIndex = 0;
     state.selectedTeamName = state.managers[0];
-    cpuPaused = false;
-    advanceCpuTurns();
     saveState();
     renderDraft();
   });
@@ -885,27 +589,12 @@ function renderSetup(setupError = "") {
         .filter(Boolean)
     );
     const seed = String(form.get("seed")).trim() || "showdown";
-    const universe = universeFromForm(form);
-    const pickTimer = normalizePickTimerSeconds(form.get("pickTimer"));
-    const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
-    const budget = normalizeAuctionBudget(form.get("auctionBudget"), 13);
-    const cpuChecked = form.getAll("cpu").map(String);
-    if (!universe) {
-      note.textContent = "Check at least one decade, or pick a different card set.";
-      return;
-    }
+    const poolMode = form.get("poolMode") === "real" ? "real" : "random";
+    const realPool = form.get("realPool") === "mariners" ? "mariners" : "stars";
     button.disabled = true;
     note.textContent = "Creating online room…";
     try {
-      const room = await createRoom({
-        seed,
-        managers: managers.length >= 2 ? managers : ["Home", "Away"],
-        universe,
-        pickTimer,
-        cpu: cpuChecked.filter((name) => managers.includes(name)),
-        draftType,
-        budget
-      });
+      const room = await createRoom({ seed, managers: managers.length >= 2 ? managers : ["Home", "Away"], poolMode, realPool });
       storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
       location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
     } catch (error) {
@@ -917,7 +606,9 @@ function renderSetup(setupError = "") {
 
 function renderDraft() {
   const draft = state.draft;
+  if (syncAuctionTimer(draft, Date.now())) saveState();
   const auction = isAuctionDraft(draft);
+  const reviewOpen = auction && !auctionReviewComplete(draft, Date.now());
   const lot = auction ? draft.auction.lot : null;
   const current = draft.complete ? null : currentManager(draft);
   const historyTab = state.draftTab === "history";
@@ -938,17 +629,15 @@ function renderDraft() {
   app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
   <section class="toolbar">
     <button data-action="reset">${online ? "Leave room" : "New room"}</button>
-    <button data-action="autopick" ${draft.complete || !onlineCanPickNow(current) ? "disabled" : ""}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
+    <button data-action="autopick" ${draft.complete || reviewOpen || !onlineCanPickNow(current) ? "disabled" : ""}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot ? "Undo nomination" : "Undo last pick"}</button>
-    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
+    ${auction && reviewOpen ? `<button data-action="complete-review">Start auction now</button>` : ""}
+    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
-    ${renderPlayGameControl(draft)}
-    <span class="pick-clock" data-pick-timer hidden></span>
-    <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
   </section>
   ${renderDraftFocus(draft, focusManager)}
+  ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
   ${lot ? renderAuctionLotPanel(draft) : ""}
-  ${auction && !draft.complete ? renderLastSalePanel(draft) : ""}
   <section class="grid">
     <div class="panel">
       <div class="game-tabs">
@@ -977,124 +666,167 @@ function renderDraft() {
     </div>
     <div class="panel">
       <h2>Rosters</h2>
-      ${renderRecentPicks(draft)}
       <div class="rosters">${rosters}</div>
     </div>
   </section>
   ${renderRosterDock(draft, dockViewerId)}`;
 
   bindDraftActions();
-  pickClockTick();
+  startDraftTimerPolling(draft);
 }
 
-// A live online lot is only half-visible here: the amounts stay on the server
-// until the card sells, so the replayed draft still shows the lot exactly as it
-// was nominated. The room's lot event carries the public half — who is up, who
-// has bid, the round, the tie — and this merges it back over the draft so the
-// panel, the pick clock, and the bid checks see the real lot without ever
-// seeing a number. Local drafts hold the whole lot already.
-function liveLot(draft) {
-  const lot = draft?.auction?.lot;
-  if (!lot) return null;
-  const shared = state.online?.lot;
-  if (!shared || shared.playerId !== lot.playerId) return lot;
-  return {
-    ...lot,
-    round: shared.round,
-    tie: shared.tie,
-    pending: [...shared.pending],
-    // Who has bid is all the room needs; the amounts arrive with the sale.
-    bids: Object.fromEntries(shared.bidsIn.map((managerId) => [managerId, null]))
-  };
-}
-
-// A read-only stand-in for the rules helpers that take a whole draft.
-function liveDraft(draft) {
-  const lot = liveLot(draft);
-  if (!draft?.auction || lot === draft.auction.lot) return draft;
-  return { ...draft, auction: { ...draft.auction, lot } };
+function renderAuctionReviewPanel(draft) {
+  return `<section class="panel auction-lot">
+    <div class="lot-header">
+      <div>
+        <p class="eyebrow">Pool review</p>
+        <h2>Inspect the cards before the auction clock starts</h2>
+      </div>
+      <div class="lot-bid-state">
+        <span class="lot-bid-amount">${formatClock(auctionReviewRemainingMs(draft, Date.now()))}</span>
+        <span class="lot-bid-holder">review remaining</span>
+      </div>
+    </div>
+    <div class="lot-actions">
+      <button data-action="complete-review">Skip review and start auction</button>
+    </div>
+  </section>`;
 }
 
 function renderAuctionLotPanel(draft) {
-  const lot = liveLot(draft);
+  const lot = draft.auction.lot;
   const player = auctionLotPlayer(draft);
-  if (!player || !lot) return "";
+  if (!player) return "";
   const online = state.online;
+  const bidder = draft.managers.find((manager) => manager.id === lot.bidderId);
   const nominator = draft.managers.find((manager) => manager.id === lot.nominatorId);
-  const upNow = sealedBidder(liveDraft(draft));
-  const canEnterFor = (manager) => !online || online.host || manager.id === online.managerId;
-  const participants = draft.managers.filter((manager) =>
-    lot.round === 2 ? lot.tie.managerIds.includes(manager.id) : manager.id in lot.bids || lot.pending.includes(manager.id)
-  );
+  const timedLot = Boolean(lot.clock);
+  const canActForManager = (manager) => !online || online.host || manager.id === online.managerId;
+  const hostOnly = online && !online.host;
+  const saleLegality = canSellLot(draft, Date.now());
 
-  const bidderChips = participants
+  const bidderChips = draft.managers
     .map((manager) => {
-      const waiting = lot.pending.includes(manager.id);
-      const status = waiting ? (manager.id === upNow?.id ? "entering a bid…" : "waiting to bid") : "bid in";
-      return `<div class="lot-bidder ${manager.id === upNow?.id ? "high-bidder" : ""}">
-        <strong>${escapeHtml(manager.name)}${manager.cpu ? ' <span class="cpu-tag">CPU</span>' : ""}</strong>
-        <span>${auctionBudget(draft, manager)} left &middot; max bid ${Math.max(0, auctionMaxBid(draft, manager))}</span>
-        <em>${status}</em>
+      const isHigh = manager.id === lot.bidderId;
+      const submission = lot.clock?.submissions?.[manager.id] ?? null;
+      const pending = lot.clock?.pending?.includes(manager.id);
+      const clock = auctionTimerEnabled(draft) ? formatClock(auctionBidTimeRemainingMs(draft, manager, Date.now())) : null;
+      const seatBlocked = !canActForManager(manager);
+      const canSubmitBid = timedLot ? pending : !isHigh;
+      const bidValue = auctionBidInputValue(draft, lot, manager);
+      const bidAmount = parseAuctionBidAmount(bidValue);
+      const legality = bidAmount === null
+        ? { ok: false, reason: "enter a bid" }
+        : canBid(draft, manager, bidAmount, Date.now());
+      const disabled = !legality.ok || seatBlocked;
+      const reason = seatBlocked ? "not your seat" : legality.reason;
+      const status = submission
+        ? submission.timedOut
+          ? `<em>Timed out (0)</em>`
+          : isHigh
+            ? `<em>High bidder</em>`
+            : submission.amount === 0
+              ? `<em>Passed</em>`
+              : `<em>Bid submitted</em>`
+        : isHigh
+          ? `<em>High bidder</em>`
+          : canSubmitBid
+            ? renderAuctionBidControls(manager, bidValue, disabled, reason, timedLot, seatBlocked)
+            : `<em>No bid needed</em>`;
+      return `<div class="lot-bidder ${isHigh ? "high-bidder" : ""}">
+        <strong>${escapeHtml(manager.name)}</strong>
+        <span>${auctionBudget(draft, manager)} left &middot; max bid ${Math.max(0, auctionMaxBid(draft, manager))}${clock ? ` &middot; clock ${clock}` : ""}</span>
+        ${status}
       </div>`;
     })
     .join("");
 
-  const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
-  const nominatorTurn = lot.round === 1 && upNow?.id === lot.nominatorId;
-  const canPass = lot.round === 1 && !nominatorTurn;
-  const seatBlocked = upNow && !canEnterFor(upNow);
-  const entry = !upNow
-    ? ""
-    : `<div class="lot-entry">
-      <span class="lot-entry-name">${escapeHtml(upNow.name)}, enter your sealed bid${nominatorTurn ? ` (you nominated — minimum ${AUCTION_MIN_BID})` : lot.round === 2 ? ` (rebid at least ${minBid})` : ""}</span>
-      ${state.maskBids
-        ? `<input type="password" data-sealed-bid inputmode="numeric" autocomplete="off" placeholder="${minBid}" ${seatBlocked ? "disabled" : ""} />`
-        : `<input type="number" data-sealed-bid min="${canPass ? 0 : minBid}" max="${Math.max(0, auctionMaxBid(draft, upNow))}" step="1" placeholder="${minBid}" ${seatBlocked ? "disabled" : ""} />`}
-      <button data-action="seal-bid" data-manager-id="${escapeHtml(upNow.id)}" ${seatBlocked ? "disabled" : ""}>Submit bid</button>
-      ${canPass ? `<button data-action="seal-pass" data-manager-id="${escapeHtml(upNow.id)}" ${seatBlocked ? "disabled" : ""}>Pass</button>` : ""}
-      <label class="mask-toggle"><input type="checkbox" data-mask-bids ${state.maskBids ? "checked" : ""} /> Mask bids (shared screen)</label>
-      ${lotEntryError ? `<span class="warn">${escapeHtml(lotEntryError)}</span>` : ""}
-    </div>`;
-
-  const tieNote = lot.round === 2
-    ? `<p class="lot-tie-note">Tied at ${lot.tie.amount} — the tied managers rebid sealed. Another tie is a coin flip at that price.</p>`
-    : `<p class="lot-tie-note muted">Bids stay hidden until the card sells; the winner pays the second-highest bid + 1.</p>`;
-
   return `<section class="panel auction-lot">
     <div class="lot-header">
       <div>
-        <p class="eyebrow">${lot.round === 2 ? "Tie break" : "On the block"} &middot; nominated by ${escapeHtml(nominator?.name ?? "?")}</p>
+        <p class="eyebrow">On the block &middot; nominated by ${escapeHtml(nominator?.name ?? "?")}</p>
         <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}
           <span class="lot-player-meta">${escapeHtml(playerPosition(player))} &middot; ${player.points} pts</span></h2>
       </div>
+      <div class="lot-bid-state">
+        <span class="lot-bid-amount">${lot.bid}</span>
+        <span class="lot-bid-holder">high bid &middot; ${escapeHtml(bidder?.name ?? "?")}</span>
+      </div>
     </div>
-    ${tieNote}
     <div class="lot-bidders">${bidderChips}</div>
-    ${entry}
-    ${allowCancelLot(draft) ? `<div class="lot-actions"><button data-action="cancel-lot" ${online && !online.host ? "disabled" : ""}>Cancel nomination</button></div>` : ""}
+    <div class="lot-actions">
+      <button data-action="sell-lot" ${hostOnly || !saleLegality.ok ? "disabled" : ""} title="${escapeHtml(saleLegality.reason)}">Sell to ${escapeHtml(bidder?.name ?? "?")} for ${lot.bid}</button>
+      ${lot.raises === 0 ? `<button data-action="cancel-lot" ${hostOnly ? "disabled" : ""}>Cancel nomination</button>` : ""}
+    </div>
   </section>`;
 }
 
-// Online, whether a bid has landed is only knowable from the live lot — the
-// replayed draft still shows the nomination as untouched.
-function allowCancelLot(draft) {
-  return canCancelLot(liveDraft(draft));
+function renderAuctionBidControls(manager, bidValue, disabled, reason, timedLot, seatBlocked) {
+  const passButton = timedLot
+    ? `<button class="small" data-action="pass-bid" data-manager-id="${escapeHtml(manager.id)}" ${seatBlocked ? "disabled" : ""} title="${seatBlocked ? "not your seat" : "Pass with a 0 bid"}">Pass</button>`
+    : "";
+  return `<div class="lot-bid-entry">
+    <label class="lot-bid-input">
+      <span>Bid</span>
+      <input
+        type="number"
+        data-bid-amount
+        data-manager-id="${escapeHtml(manager.id)}"
+        min="${AUCTION_MIN_BID}"
+        step="${AUCTION_MIN_RAISE}"
+        value="${escapeHtml(bidValue)}"
+        ${seatBlocked ? "disabled" : ""}
+      />
+    </label>
+    <button class="small" data-action="bid" data-manager-id="${escapeHtml(manager.id)}" ${disabled ? "disabled" : ""} title="${escapeHtml(reason)}">${timedLot ? "Submit bid" : "Bid"}</button>
+    ${passButton}
+  </div>`;
 }
 
-// After a sale the sealed bids get revealed alongside the price paid.
-function renderLastSalePanel(draft) {
-  const entry = draft.auction.history.at(-1);
-  if (!entry?.bids) return "";
-  const player = draft.pool.find((item) => item.id === entry.playerId);
-  const winner = draft.managers.find((manager) => manager.id === entry.managerId);
-  if (!player || !winner) return "";
-  const revealed = draft.managers
-    .filter((manager) => manager.id in entry.bids)
-    .map((manager) => `${escapeHtml(manager.name)} ${entry.bids[manager.id] > 0 ? entry.bids[manager.id] : "pass"}`)
-    .join(" &middot; ");
-  return `<section class="panel last-sale">
-    <p><strong>${escapeHtml(player.name)}</strong> sold to <strong>${escapeHtml(winner.name)}</strong> for <strong>${entry.price}</strong> — bids revealed: ${revealed}</p>
-  </section>`;
+function auctionBidInputValue(draft, lot, manager) {
+  const key = auctionBidInputKey(lot, manager.id);
+  if (Object.prototype.hasOwnProperty.call(auctionBidInputs, key)) {
+    return auctionBidInputs[key];
+  }
+  return String(defaultAuctionBidAmount(draft, lot, manager));
+}
+
+function auctionBidInputKey(lot, managerId) {
+  return `${lot?.playerId ?? "lot"}:${managerId}`;
+}
+
+function defaultAuctionBidAmount(draft, lot, manager) {
+  return lot.clock ? Math.max(AUCTION_MIN_BID, lot.bid) : lot.bid + AUCTION_MIN_RAISE;
+}
+
+function parseAuctionBidAmount(value) {
+  if (String(value ?? "").trim() === "") return null;
+  const amount = Math.round(Number(value));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function readAuctionBidAmount(button) {
+  const input = button.closest(".lot-bid-entry")?.querySelector("[data-bid-amount]");
+  if (!input) return null;
+  const amount = parseAuctionBidAmount(input.value);
+  if (amount === null) input.focus();
+  return amount;
+}
+
+function updateAuctionBidControl(input) {
+  const lot = state.draft?.auction?.lot;
+  const manager = state.draft?.managers?.find((item) => item.id === input.dataset.managerId);
+  const button = input.closest(".lot-bid-entry")?.querySelector("[data-action='bid']");
+  if (!lot || !manager || !button) return;
+  auctionBidInputs[auctionBidInputKey(lot, manager.id)] = input.value;
+  const amount = parseAuctionBidAmount(input.value);
+  const online = state.online;
+  const seatBlocked = Boolean(online && !online.host && manager.id !== online.managerId);
+  const legality = amount === null
+    ? { ok: false, reason: "enter a bid" }
+    : canBid(state.draft, manager, amount, Date.now());
+  button.disabled = seatBlocked || !legality.ok;
+  button.title = seatBlocked ? "not your seat" : legality.reason;
 }
 
 function bindDraftActions() {
@@ -1140,6 +872,7 @@ function bindDraftActions() {
         leaveOnlineRoom();
         return;
       }
+      resetAuctionBidInputs();
       clearSavedState();
       state = defaultState();
       renderSetup();
@@ -1147,6 +880,12 @@ function bindDraftActions() {
     }
     if (action === "draft-tab") {
       state.draftTab = button.dataset.tab === "history" ? "history" : "available";
+      saveState();
+      renderDraft();
+      return;
+    }
+    if (action === "complete-review") {
+      completeAuctionReview(state.draft, Date.now());
       saveState();
       renderDraft();
       return;
@@ -1160,43 +899,60 @@ function bindDraftActions() {
       pickPlayer(state.draft, button.dataset.playerId);
       selectedLineupMove = null;
       invalidateBatch();
-      afterLocalDraftAction();
+      saveState();
+      renderDraft();
     }
     if (action === "nominate") {
       if (button.disabled) return;
-      lotEntryError = "";
+      resetAuctionBidInputs();
       if (state.online) {
-        sendOnlineAction({ type: "nominate", playerId: button.dataset.playerId });
+        sendOnlineAction({ type: "nominate", playerId: button.dataset.playerId, at: Date.now() });
         return;
       }
-      nominatePlayer(state.draft, button.dataset.playerId);
-      afterLocalDraftAction();
+      nominatePlayer(state.draft, button.dataset.playerId, Date.now());
+      saveState();
+      renderDraft();
     }
-    if (action === "seal-bid" || action === "seal-pass") {
+    if (action === "bid") {
       if (button.disabled) return;
-      const managerId = button.dataset.managerId;
-      const manager = state.draft.managers.find((item) => item.id === managerId);
-      const input = app.querySelector("[data-sealed-bid]");
-      const amount = action === "seal-pass" ? 0 : Math.round(Number(input?.value));
-      lotEntryError = "";
-      const legality = canPlaceSealedBid(liveDraft(state.draft), manager, amount);
-      if (!legality.ok) {
-        lotEntryError = legality.reason;
-        renderDraft();
-        return;
-      }
+      const lot = state.draft.auction?.lot;
+      if (!lot) return;
+      const amount = readAuctionBidAmount(button);
+      if (amount === null) return;
       if (state.online) {
-        sendOnlineAction({ type: "seal-bid", managerId, amount });
+        sendOnlineAction({ type: "bid", managerId: button.dataset.managerId, amount, at: Date.now() });
         return;
       }
-      placeSealedBid(state.draft, managerId, amount);
+      placeBid(state.draft, button.dataset.managerId, amount, Date.now());
+      saveState();
+      renderDraft();
+    }
+    if (action === "pass-bid") {
+      if (button.disabled) return;
+      if (state.online) {
+        sendOnlineAction({ type: "pass-bid", managerId: button.dataset.managerId, at: Date.now() });
+        return;
+      }
+      passBid(state.draft, button.dataset.managerId, Date.now());
+      saveState();
+      renderDraft();
+    }
+    if (action === "sell-lot") {
+      if (button.disabled) return;
+      resetAuctionBidInputs();
+      if (state.online) {
+        sendOnlineAction({ type: "sell", at: Date.now() });
+        return;
+      }
+      sellLot(state.draft, Date.now());
       selectedLineupMove = null;
       invalidateBatch();
-      afterLocalDraftAction();
+      saveState();
+      renderDraft();
     }
     if (action === "cancel-lot") {
       if (button.disabled) return;
-      lotEntryError = "";
+      resetAuctionBidInputs();
       if (state.online) {
         sendOnlineAction({ type: "cancel-lot" });
         return;
@@ -1208,16 +964,14 @@ function bindDraftActions() {
     if (action === "autopick") {
       if (button.disabled) return;
       if (state.online) {
-        // Auto in an online auction only puts a card on the block: autopick
-        // would run the whole lot, entering bids for managers who never made
-        // them. Everyone still bids for themselves.
-        sendOnlineAction({ type: isAuctionDraft(state.draft) ? "auto-nominate" : "autopick" });
+        sendOnlineAction({ type: "autopick" });
         return;
       }
       autopick(state.draft);
       selectedLineupMove = null;
       invalidateBatch();
-      afterLocalDraftAction();
+      saveState();
+      renderDraft();
     }
     if (action === "undo-pick") {
       if (button.disabled) return;
@@ -1225,14 +979,8 @@ function bindDraftActions() {
         sendOnlineAction({ type: "undo" });
         return;
       }
-      let undone = undoLastPick(state.draft);
-      if (isAuctionDraft(state.draft)) {
-        // Hold computer moves so the undone lot isn't instantly redone.
-        cpuPaused = true;
-      } else {
-        // Unwind through computer picks so the undo lands on a human's turn.
-        while (undone?.manager?.cpu) undone = undoLastPick(state.draft);
-      }
+      resetAuctionBidInputs();
+      undoLastPick(state.draft);
       state.tournament = null;
       selectedLineupMove = null;
       draggedLineupMove = null;
@@ -1246,29 +994,23 @@ function bindDraftActions() {
         sendOnlineAction({ type: "finish" });
         return;
       }
+      resetAuctionBidInputs();
       while (!state.draft.complete) autopick(state.draft);
       selectedLineupMove = null;
       invalidateBatch();
-      afterLocalDraftAction();
+      saveState();
+      renderDraft();
     }
     if (action === "batch") {
-      requestBatchRun(DEFAULT_BATCH_RUNS);
-    }
-    if (action === "play-game") {
-      startGame(app.querySelector("[data-play-opponent]")?.value);
+      startBatchRun(DEFAULT_BATCH_RUNS);
     }
 
   };
 
   app.oninput = (event) => {
-    // The sealed-bid input only commits via its buttons; typing must not
-    // trigger a re-render that would steal focus.
-    if (event.target.closest("[data-sealed-bid]")) return;
-    const maskToggle = event.target.closest("[data-mask-bids]");
-    if (maskToggle) {
-      state.maskBids = Boolean(maskToggle.checked);
-      saveState();
-      renderDraft();
+    const bidInput = event.target.closest("[data-bid-amount]");
+    if (bidInput) {
+      updateAuctionBidControl(bidInput);
       return;
     }
     const input = event.target.closest("[data-filter]");
@@ -1357,17 +1099,11 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handlePointerMove = (event) => {
-    const chartZone = event.target.closest?.("[data-wp-value]");
-    if (chartZone) showChartTip(chartZone, event.clientX, event.clientY);
-    else hideChartTip();
     if (!hoveredPreviewRow) return;
     showHoverCard(hoveredPreviewRow, event.clientX, event.clientY);
   };
 
   const handlePointerOut = (event) => {
-    if (event.target.closest?.("[data-wp-value]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-wp-value]"))) {
-      hideChartTip();
-    }
     const previewTarget = event.target.closest(".player-name-preview");
     if (!previewTarget || (event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) return;
     hoveredPreviewRow = null;
@@ -1407,51 +1143,11 @@ function clearHoverCardPreviewBindings() {
   hoverPreviewController?.abort();
   hoverPreviewController = null;
   hideHoverCard();
-  hideChartTip();
 }
 
 function invalidateBatch() {
   state.batch = null;
-  state.batchGamePage = 0;
-  state.batchGameIndex = null;
   if (state.view === "batch") state.view = null;
-}
-
-function managerDescriptors(names, cpuNames) {
-  const cpuSet = new Set(cpuNames ?? []);
-  return names.map((name) => ({ name, cpu: cpuSet.has(name) }));
-}
-
-// Once every roster is legal, you can stop simulating and go play one. The
-// team you play is whichever roster the board is focused on; the select picks
-// who you play against.
-function renderPlayGameControl(draft) {
-  if (!canSimulate(draft)) {
-    return `<button data-action="play-game" disabled>Play a game</button>`;
-  }
-  const you = state.selectedTeamName ?? draft.managers[0].name;
-  const opponents = draft.managers.filter((manager) => manager.name !== you);
-  return `<span class="play-game-control">
-    <button data-action="play-game">Play a game as ${escapeHtml(you)}</button>
-    <label>vs
-      <select data-play-opponent>
-        ${opponents.map((manager) => `<option value="${escapeHtml(manager.name)}">${escapeHtml(manager.name)}</option>`).join("")}
-      </select>
-    </label>
-  </span>`;
-}
-
-function renderCpuChoices(names, cpuNames) {
-  const cpuSet = new Set(cpuNames ?? []);
-  if (!names.length) return `<small class="cpu-note">Add managers above first.</small>`;
-  return names
-    .map(
-      (name) => `<label class="cpu-option">
-        <input type="checkbox" name="cpu" value="${escapeHtml(name)}" ${cpuSet.has(name) ? "checked" : ""} />
-        <span>${escapeHtml(name)}</span>
-      </label>`
-    )
-    .join("");
 }
 
 function dedupeManagerNames(names) {
@@ -1463,78 +1159,24 @@ function dedupeManagerNames(names) {
   });
 }
 
-// ---- The interactive game ----------------------------------------------------
-//
-// One game between two drafted rosters, played a plate appearance at a time
-// on the same engine the adventure's battles run on. You are the away team
-// (you're the one who travelled); the opponent's dugout is run by the
-// balanced AI profile, so its arms tire and its runners go under exactly the
-// rules yours do.
-function startGame(opponentName) {
-  const draft = state.draft;
-  if (!draft || !canSimulate(draft)) return;
-  const you = draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0];
-  const them = draft.managers.find((manager) => manager.name === opponentName)
-    ?? draft.managers.find((manager) => manager.id !== you.id);
-  if (!them) return;
-  const battle = createBattle({
-    playerManager: you,
-    npcManager: them,
-    trainer: { name: them.name, aiProfile: "balanced" },
-    seed: `${state.seed}:game:${you.id}-vs-${them.id}:${newBatchSalt()}`
-  });
-  liveGame = createGame({ battle, playerName: you.name, opponentName: them.name });
-  renderCurrentScreen();
-}
-
-function renderLiveGame() {
-  resetAppHandlers();
-  renderGame(app, liveGame, {
-    onExit: () => {
-      liveGame = null;
-      renderCurrentScreen();
-    },
-    onRerender: renderCurrentScreen
-  });
-}
-
-// Every batch run gets a fresh salt so its seeded games differ from the
-// last run's; online rooms carry the salt inside the shared action so every
-// client still simulates the identical games.
-function requestBatchRun(runs) {
-  if (state.online) {
-    sendOnlineAction({ type: "batch", runs: normalizeBatchRuns(runs), salt: newBatchSalt() });
-    return;
-  }
-  startBatchRun(runs, { salt: newBatchSalt() });
-}
-
-function newBatchSalt() {
-  return Date.now().toString(36);
-}
-
-function startBatchRun(runs, options = {}) {
+function startBatchRun(runs) {
   if (!state.draft || !canSimulate(state.draft)) return;
   const count = normalizeBatchRuns(runs);
   const teams = state.draft.managers.map((manager) => buildTeam(manager));
   const teamNames = teams.map((team) => team.name);
   const batchState = createBatchState(teams);
-  const seed = options.salt ? `${state.seed}-batch-${options.salt}` : `${state.seed}-batch`;
+  const seed = `${state.seed}-batch`;
   const token = ++batchRunToken;
   const gamesPerFrame = Math.max(2, Math.round(count / 90));
   const plotStart = Math.max(4, Math.round(count * 0.02));
   const series = [];
   let completed = 0;
-  let skipRequested = Boolean(options.instant);
-  // The race has two speeds and an exit: watch it, fast forward through the
-  // dull middle innings of the season, or skip straight to the table.
-  let fastForwarding = false;
+  let skipRequested = false;
 
   resetAppHandlers();
   hideHoverCard();
   app.onclick = (event) => {
     if (event.target.closest("button[data-action=batch-skip]")) skipRequested = true;
-    if (event.target.closest("button[data-action=batch-fast-forward]")) fastForwarding = true;
   };
 
   const pushFrame = () => {
@@ -1556,8 +1198,6 @@ function startBatchRun(runs, options = {}) {
     };
     state.view = "batch";
     state.batchStatsTab = "overview";
-    state.batchGamePage = 0;
-    state.batchGameIndex = null;
     saveState();
     renderBatch();
   };
@@ -1571,22 +1211,19 @@ function startBatchRun(runs, options = {}) {
       finalize();
       return;
     }
-    // Fast forward runs the same race, just with a longer stride per frame —
-    // the chart still draws, it simply gets where it is going sooner.
-    const perFrame = fastForwarding ? gamesPerFrame * 8 : gamesPerFrame;
-    const size = Math.min(perFrame, count - completed);
+    const size = Math.min(gamesPerFrame, count - completed);
     runBatchChunk(batchState, teams, seed, completed, size);
     completed += size;
     const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
-    renderBatchRace({ snapshot, series, completed, total: count, teamNames, fastForwarding });
+    renderBatchRace({ snapshot, series, completed, total: count, teamNames });
     if (completed >= count) {
-      setTimeout(finalize, fastForwarding ? 250 : 700);
+      setTimeout(finalize, 700);
       return;
     }
-    setTimeout(step, fastForwarding ? 16 : raceFrameDelay(completed / count));
+    setTimeout(step, raceFrameDelay(completed / count));
   };
 
-  renderBatchRace({ snapshot: null, series, completed: 0, total: count, teamNames, fastForwarding });
+  renderBatchRace({ snapshot: null, series, completed: 0, total: count, teamNames });
   setTimeout(step, 250);
 }
 
@@ -1607,7 +1244,7 @@ function downsampleSeries(series, maxPoints = 160) {
   return sampled;
 }
 
-function renderBatchRace({ snapshot, series, completed, total, teamNames, fastForwarding = false }) {
+function renderBatchRace({ snapshot, series, completed, total, teamNames }) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
   const tallies = (snapshot?.rows ?? teamNames.map((name) => ({ team: name, wins: 0, losses: 0, share: 0 })))
     .slice()
@@ -1629,12 +1266,7 @@ function renderBatchRace({ snapshot, series, completed, total, teamNames, fastFo
     <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
     ${renderRaceChart({ teamNames, totalRuns: total, series })}
     <div class="race-chips">${chips}</div>
-    <div class="race-controls">
-      <button data-action="batch-fast-forward" class="small race-fast-forward" ${fastForwarding ? "disabled" : ""}>
-        ${fastForwarding ? "⏩ Fast forwarding" : "⏩ Fast forward"}
-      </button>
-      <button data-action="batch-skip" class="small race-skip">Skip to results</button>
-    </div>
+    <button data-action="batch-skip" class="small race-skip">Skip to results</button>
   </section>`;
 }
 
@@ -1679,12 +1311,12 @@ function renderBatch() {
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.position ?? "")}</td>
-        ${renderPaceCell(line, "paPer162", "pa", teamGamesByName, "PA")}
-        ${renderPaceCell(line, "hrPer162", "hr", teamGamesByName, "HR")}
-        ${renderPaceCell(line, "rPer162", "r", teamGamesByName, "R")}
-        ${renderPaceCell(line, "rbiPer162", "rbi", teamGamesByName, "RBI")}
-        ${renderPaceCell(line, "sbPer162", "sb", teamGamesByName, "SB")}
-        ${renderPaceCell(line, "csPer162", "cs", teamGamesByName, "CS")}
+        <td class="num">${formatSeasonCount(batchPace(line, "paPer162", "pa", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "hrPer162", "hr", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "rPer162", "r", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "rbiPer162", "rbi", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "sbPer162", "sb", teamGamesByName))}</td>
+        <td class="num">${formatSeasonCount(batchPace(line, "csPer162", "cs", teamGamesByName))}</td>
         <td class="num">${formatPercent(line.bb, line.pa, 1)}</td>
         <td class="num">${formatPercent(line.so, line.pa, 1)}</td>
         <td class="num">${formatAverage(totalBases(line) - line.h, line.ab)}</td>
@@ -1695,7 +1327,7 @@ function renderBatch() {
         <td class="num">${formatBattingStat(line.ops)}</td>
         <td class="num">${formatAverage(wobaNumerator(line), line.pa)}</td>
         <td class="num">${wrcPlus(line, leagueWoba)}</td>
-        ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
+        <td class="num">${formatWpaStat(batchPace(line, "wpaPer162", "wpa", teamGamesByName))}</td>
       </tr>`
     )
     .join("");
@@ -1707,12 +1339,12 @@ function renderBatch() {
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.role)}</td>
-        ${renderPaceCell(line, "ipPer162", "ip", teamGamesByName, "IP", (value) => formatDecimal(value, 1), line.outs / 3)}
+        <td class="num">${formatDecimal(batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3), 1)}</td>
         <td class="num">${formatPerNine(line.so, line.outs)}</td>
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
         <td class="num">${formatFip(line, fipConstant)}</td>
-        ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
+        <td class="num">${formatWpaStat(batchPace(line, "wpaPer162", "wpa", teamGamesByName))}</td>
       </tr>`
     )
     .join("");
@@ -1747,8 +1379,7 @@ function renderBatch() {
     ${teamTableSection}
     ${awardsSection}
   </section>
-  ${raceSection}
-  ${renderFormulaRevealSection(summary)}`;
+  ${raceSection}`;
   const hittersSection = `<section class="panel wide">
     <h2>Hitters, 162-game pace</h2>
     <div class="table-scroll">
@@ -1829,24 +1460,11 @@ function renderBatch() {
       </div>
     </div>
   </section>`;
-  const draftRecapSection = `<section class="panel wide draft-recap-panel">
-    <div class="section-title-row">
-      <div>
-        <p class="eyebrow">Draft review</p>
-        <h2>Every pick of the draft</h2>
-      </div>
-      <span>${state.draft.pickNumber} picks</span>
-    </div>
-    ${renderDraftHistoryTable(draftHistory(state.draft))}
-  </section>`;
   const batchSections = {
     overview: overviewSection,
     hitters: hittersSection,
     pitchers: pitchersSection,
-    skills: teamSkillsSection,
-    // Replaying games is cheap but not free; only do it when the tab is open.
-    games: activeBatchTab === "games" ? renderBatchGamesSection() : "",
-    draft: draftRecapSection
+    skills: teamSkillsSection
   };
 
   app.innerHTML = `<section class="toolbar">
@@ -1882,105 +1500,12 @@ function batchStatsTabs() {
     { id: "overview", label: "Overview" },
     { id: "hitters", label: "Hitters" },
     { id: "pitchers", label: "Pitchers" },
-    { id: "skills", label: "Team skills" },
-    { id: "games", label: "Game log" },
-    { id: "draft", label: "Draft recap" }
+    { id: "skills", label: "Team skills" }
   ];
 }
 
 function normalizeBatchStatsTab(value) {
   return batchStatsTabs().some((tab) => tab.id === value) ? value : "overview";
-}
-
-const GAME_LOG_PAGE_SIZE = 50;
-
-// The review log never stores games: every batch game is re-simulated from its
-// deterministic seed on demand, so any of the (up to 20k) games can be
-// reopened play by play — including win probability — at any time.
-function renderBatchGamesSection() {
-  const { runs, seed } = state.batch;
-  const teams = state.draft.managers.map((manager) => buildTeam(manager));
-  if (state.batchGameIndex != null && state.batchGameIndex >= 0 && state.batchGameIndex < runs) {
-    const replay = replayBatchGames(teams, seed, state.batchGameIndex, 1)[0];
-    return renderBatchGameDetail(replay?.game, state.batchGameIndex, runs);
-  }
-
-  const pageCount = Math.max(1, Math.ceil(runs / GAME_LOG_PAGE_SIZE));
-  const page = Math.min(Math.max(state.batchGamePage ?? 0, 0), pageCount - 1);
-  const start = page * GAME_LOG_PAGE_SIZE;
-  const count = Math.min(GAME_LOG_PAGE_SIZE, runs - start);
-  const games = replayBatchGames(teams, seed, start, count);
-
-  const rows = games
-    .map(({ index, game }) => {
-      const homeWon = game.winner === game.home.name;
-      const swing = game.topSwing
-        ? `${escapeHtml(game.topSwing.name)} ${escapeHtml(game.topSwing.result)} (${formatWpaPercent(game.topSwing.wpa)})`
-        : "—";
-      return `<tr class="game-log-row" data-game-open="${index}" title="Open play-by-play">
-        <td class="num">${index + 1}</td>
-        <td>${homeWon ? escapeHtml(game.away.name) : `<strong>${escapeHtml(game.away.name)}</strong>`} @ ${homeWon ? `<strong>${escapeHtml(game.home.name)}</strong>` : escapeHtml(game.home.name)}</td>
-        <td class="num">${game.away.runs}–${game.home.runs}${finalInningLabel(game)}</td>
-        <td>${swing}</td>
-        <td><button class="small" data-game-open="${index}">Replay</button></td>
-      </tr>`;
-    })
-    .join("");
-
-  return `<section class="panel wide game-log-panel">
-    <div class="section-title-row">
-      <div>
-        <p class="eyebrow">Review log</p>
-        <h2>Every game of the sim</h2>
-      </div>
-      <span>Games ${start + 1}–${start + count} of ${runs}</span>
-    </div>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>#</th><th>Matchup</th><th>Final</th><th>Biggest swing</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <div class="game-log-pager">
-      <button class="small" data-game-page="${page - 1}" ${page === 0 ? "disabled" : ""}>Previous</button>
-      <span>Page ${page + 1} of ${pageCount}</span>
-      <button class="small" data-game-page="${page + 1}" ${page >= pageCount - 1 ? "disabled" : ""}>Next</button>
-    </div>
-  </section>`;
-}
-
-function renderBatchGameDetail(game, index, runs) {
-  if (!game) return `<section class="panel wide"><p>Game unavailable.</p></section>`;
-  const homeWon = game.winner === game.home.name;
-  return `<section class="panel wide game-log-panel">
-    <div class="section-title-row">
-      <div>
-        <p class="eyebrow">Game ${index + 1} of ${runs}</p>
-        <h2>${homeWon ? escapeHtml(game.away.name) : `<strong>${escapeHtml(game.away.name)}</strong>`} ${game.away.runs}, ${homeWon ? `<strong>${escapeHtml(game.home.name)}</strong>` : escapeHtml(game.home.name)} ${game.home.runs}${finalInningLabel(game)}</h2>
-      </div>
-      <div class="game-log-pager">
-        <button class="small" data-game-open="${index - 1}" ${index === 0 ? "disabled" : ""}>Prev game</button>
-        <button class="small" data-action="batch-game-back">All games</button>
-        <button class="small" data-game-open="${index + 1}" ${index >= runs - 1 ? "disabled" : ""}>Next game</button>
-      </div>
-    </div>
-    <h3>Win probability — ${escapeHtml(game.home.name)} (home)</h3>
-    ${renderWinProbabilityChart(game)}
-    <h3>Box score</h3>
-    ${renderBoxScore(game, draftedPlayersById())}
-    <h3>Play-by-play</h3>
-    ${renderGameLog(game)}
-  </section>`;
-}
-
-function finalInningLabel(game) {
-  const innings = game.events.length ? game.events[game.events.length - 1].inning : 9;
-  return innings === 9 ? "" : ` (${innings})`;
-}
-
-function formatWpaPercent(value) {
-  const percent = (Number(value) || 0) * 100;
-  return `${percent >= 0 ? "+" : ""}${percent.toFixed(1)}%`;
 }
 
 function renderAwardCard(item, playersById = new Map()) {
@@ -1992,75 +1517,6 @@ function renderAwardCard(item, playersById = new Map()) {
     <em>${escapeHtml(item.team ?? "")}</em>
     ${item.note ? `<span class="award-note">${escapeHtml(item.note)}</span>` : ""}
   </div>`;
-}
-
-// End-of-sim reveal: every manager drafts with a private, draft-seeded twist
-// on the shared valuation formula. Showing the exact weights next to the
-// standings lets players trace which preferences produced which outcomes.
-function renderFormulaRevealSection(summary) {
-  const draft = state.draft;
-  if (!draft?.managers?.length) return "";
-  const outcomes = new Map(summary.teams.map((row, index) => [row.team, { place: index + 1, winPct: row.winPct }]));
-  const cards = [...draft.managers]
-    .sort((a, b) => (outcomes.get(a.name)?.place ?? 99) - (outcomes.get(b.name)?.place ?? 99))
-    .map((manager) => renderFormulaCard(draft, manager, outcomes.get(manager.name)))
-    .join("");
-  const spread = Math.round(VALUATION_PERTURBATION * 100);
-  return `<section class="panel wide formula-reveal-panel">
-    <div class="section-title-row">
-      <div>
-        <p class="eyebrow">The formulas revealed</p>
-        <h2>How each manager's auto-pick brain valued cards</h2>
-      </div>
-    </div>
-    <p class="batch-note">Every manager scores cards with the same baseline formula, but their draft-seeded preferences nudge each weight up to &plusmn;${spread}%. These exact numbers drove their auto-picks and auction bids &mdash; compare the leans against the standings to see which preferences paid off.</p>
-    <div class="formula-grid">${cards}</div>
-    <p class="batch-note">Chart is the card's result chart scored slot by slot (HR +14 &hellip; SO &minus;4 for hitters; SO +10 &hellip; HR &minus;16 for pitchers). IP-load scales pitcher quality by workload: (IP + 4) / 10, so full price for a 6-IP starter and about half for a 1-IP reliever.</p>
-  </section>`;
-}
-
-function renderFormulaCard(draft, manager, outcome) {
-  const weights = managerValuation(draft, manager).weights;
-  const hitter = weights.hitter;
-  const pitcher = weights.pitcher;
-  const terms = [
-    { label: "On-Base", weight: hitter.onBase, base: VALUATION_BASE_WEIGHTS.hitter.onBase },
-    { label: "Fielding", weight: hitter.fielding, base: VALUATION_BASE_WEIGHTS.hitter.fielding },
-    { label: "Speed", weight: hitter.speed, base: VALUATION_BASE_WEIGHTS.hitter.speed },
-    { label: "Hitter chart", weight: hitter.chart, base: VALUATION_BASE_WEIGHTS.hitter.chart },
-    { label: "Control", weight: pitcher.control, base: VALUATION_BASE_WEIGHTS.pitcher.control },
-    { label: "IP", weight: pitcher.ip, base: VALUATION_BASE_WEIGHTS.pitcher.ip },
-    { label: "Pitcher chart", weight: pitcher.chart, base: VALUATION_BASE_WEIGHTS.pitcher.chart }
-  ];
-  const standing = outcome
-    ? `<span class="formula-outcome">#${outcome.place} &middot; ${formatShare(outcome.winPct)} win rate</span>`
-    : `<span class="formula-outcome">did not play</span>`;
-  return `<div class="formula-card">
-    <div class="formula-card-head">
-      <strong>${escapeHtml(manager.name)}</strong>
-      ${standing}
-    </div>
-    <p class="formula-line"><span class="formula-kind">Hitters</span> ${formulaTerm(hitter.onBase, "On-Base")} + ${formulaTerm(hitter.fielding, "Fielding")} + ${formulaTerm(hitter.speed, "(Speed&minus;1)")} + ${formulaTerm(hitter.chart, "Chart")}</p>
-    <p class="formula-line"><span class="formula-kind">Pitchers</span> (${formulaTerm(pitcher.control, "Control")} + ${formulaTerm(pitcher.chart, "Chart")}) &times; IP-load + ${formulaTerm(pitcher.ip, "IP")}</p>
-    <div class="formula-leans">${terms.map((term) => weightLeanChip(term)).join("")}</div>
-  </div>`;
-}
-
-function formulaTerm(weight, label) {
-  return `<strong>${formatWeight(weight)}</strong>&times;${label}`;
-}
-
-// Weights span ~0.9 (chart) to ~44 (control); two significant-ish digits keeps
-// small weights meaningful without cluttering the big ones.
-function formatWeight(weight) {
-  return weight >= 10 ? weight.toFixed(1) : weight.toFixed(2);
-}
-
-function weightLeanChip({ label, weight, base }) {
-  const delta = Math.round((weight / base - 1) * 100);
-  const direction = delta > 0 ? "lean-up" : delta < 0 ? "lean-down" : "";
-  const sign = delta > 0 ? "+" : "";
-  return `<span class="weight-lean ${direction}">${escapeHtml(label)} <strong>${sign}${delta}%</strong></span>`;
 }
 
 function renderBatchPlayerName(line, playersById, tagName = "strong", className = "batch-player-name") {
@@ -2220,31 +1676,9 @@ function bindBatchActions() {
       return;
     }
 
-    const gameOpen = event.target.closest("[data-game-open]");
-    if (gameOpen && !gameOpen.disabled) {
-      state.batchGameIndex = Number(gameOpen.dataset.gameOpen);
-      saveState();
-      renderBatch();
-      return;
-    }
-
-    const gamePage = event.target.closest("button[data-game-page]");
-    if (gamePage && !gamePage.disabled) {
-      state.batchGamePage = Number(gamePage.dataset.gamePage);
-      saveState();
-      renderBatch();
-      return;
-    }
-
     const button = event.target.closest("button[data-action]");
     if (!button) return;
     const action = button.dataset.action;
-    if (action === "batch-game-back") {
-      state.batchGameIndex = null;
-      saveState();
-      renderBatch();
-      return;
-    }
     if (action === "batch-back") {
       state.view = null;
       saveState();
@@ -2252,13 +1686,9 @@ function bindBatchActions() {
     }
     if (action === "batch-run") {
       const select = app.querySelector("[data-batch-runs]");
-      requestBatchRun(select?.value ?? DEFAULT_BATCH_RUNS);
+      startBatchRun(select?.value ?? DEFAULT_BATCH_RUNS);
     }
     if (action === "reset") {
-      if (state.online) {
-        leaveOnlineRoom();
-        return;
-      }
       clearSavedState();
       state = defaultState();
       renderSetup();
@@ -2287,19 +1717,6 @@ function batchPace(line, paceKey, totalKey, teamGamesByName, totalOverride = nul
   const total = totalOverride ?? Number(line[totalKey] ?? 0);
   const games = Number(line.teamGames ?? teamGamesByName.get(line.team) ?? 0);
   return per162(total, games);
-}
-
-function renderPaceCell(line, paceKey, totalKey, teamGamesByName, label, formatter = formatSeasonCount, totalOverride = null) {
-  const value = batchPace(line, paceKey, totalKey, teamGamesByName, totalOverride);
-  const total = totalOverride ?? Number(line?.[totalKey] ?? 0);
-  const games = Number(line?.teamGames ?? teamGamesByName.get(line?.team) ?? 0);
-  const title = `${label}: ${formatAuditNumber(total)} raw / ${formatAuditNumber(games)} team games * 162 = ${formatAuditNumber(value)}`;
-  return `<td class="num stat-audit" title="${escapeHtml(title)}">${formatter(value)}</td>`;
-}
-
-function formatAuditNumber(value) {
-  const number = Number(value) || 0;
-  return Number.isInteger(number) ? String(number) : number.toFixed(2);
 }
 
 function per162(total, games) {
@@ -2331,9 +1748,6 @@ function showHoverCard(row, clientX, clientY) {
   const previewId = row.dataset.previewId ?? cardHtml;
   if (cardPreview.dataset.previewId !== previewId) {
     cardPreview.innerHTML = cardHtml;
-    // The face renders with an empty photo window; the cascade fills it (and
-    // the club logo) from the MLB and Wikipedia image APIs, cached per name.
-    hydratePhotos(cardPreview);
     cardPreview.dataset.previewId = previewId;
   }
   cardPreview.classList.add("active");
@@ -2355,26 +1769,6 @@ function showHoverCard(row, clientX, clientY) {
 function hideHoverCard() {
   cardPreview.classList.remove("active");
   cardPreview.setAttribute("aria-hidden", "true");
-}
-
-function showChartTip(zone, clientX, clientY) {
-  chartTipValue.textContent = zone.dataset.wpValue ?? "";
-  chartTipPlay.textContent = zone.dataset.wpPlay ?? "";
-  chartTip.hidden = false;
-
-  const gap = 14;
-  const rect = chartTip.getBoundingClientRect();
-  let x = clientX - rect.width / 2;
-  let y = clientY - rect.height - gap;
-  if (y < gap) y = clientY + gap;
-  x = Math.max(gap, Math.min(x, window.innerWidth - rect.width - gap));
-
-  chartTip.style.left = `${Math.round(x)}px`;
-  chartTip.style.top = `${Math.round(y)}px`;
-}
-
-function hideChartTip() {
-  chartTip.hidden = true;
 }
 
 function renderGameDetail(game) {
@@ -2817,7 +2211,7 @@ function formatInnings(outs) {
 function renderGameLog(game) {
   const rows = game.events
     .map(
-      (event) => `<tr${Math.abs(event.wpa ?? 0) >= 0.1 ? ' class="wpa-swing"' : ""}>
+      (event) => `<tr>
         <td>${event.inning}${event.half === "top" ? "T" : "B"}</td>
         <td>${renderEventMatchup(event)}</td>
         <td>${renderControlResult(event)}</td>
@@ -2825,32 +2219,16 @@ function renderGameLog(game) {
         <td>${event.outsBefore} to ${event.outsAfter}</td>
         <td>${escapeHtml(basesText(event.basesBefore))} to ${escapeHtml(basesText(event.basesAfter))}</td>
         <td>${event.scoreAfter.away}-${event.scoreAfter.home}</td>
-        ${renderEventWinProbability(event)}
       </tr>`
     )
     .join("");
 
   return `<div class="game-log">
     <table>
-      <thead><tr><th>Inn</th><th>Matchup</th><th>Control</th><th>Result</th><th>Outs</th><th>Bases</th><th>Score</th><th class="num">Home WP</th><th class="num">WPA</th></tr></thead>
+      <thead><tr><th>Inn</th><th>Matchup</th><th>Control</th><th>Result</th><th>Outs</th><th>Bases</th><th>Score</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>`;
-}
-
-// Home team's win probability around the play, plus the play's WPA from the
-// batting side's perspective — the amount credited to the batter (or runner)
-// and debited from the pitcher.
-function renderEventWinProbability(event) {
-  if (event.wpBefore == null || event.wpAfter == null) return `<td></td><td></td>`;
-  const wpa = event.wpa ?? 0;
-  const tone = wpa > 0.0005 ? "wpa-pos" : wpa < -0.0005 ? "wpa-neg" : "";
-  return `<td class="num wp-cell">${formatWinProb(event.wpBefore)} → ${formatWinProb(event.wpAfter)}</td>
-    <td class="num ${tone}">${formatWpaPercent(wpa)}</td>`;
-}
-
-function formatWinProb(value) {
-  return `${Math.round((Number(value) || 0) * 100)}%`;
 }
 
 function renderEventMatchup(event) {
@@ -2906,30 +2284,22 @@ function renderAdvanceAttempts(attempts) {
 
 function renderRoster(manager, draft) {
   const counts = rosterCounts(manager.roster);
-  const auction = isAuctionDraft(draft);
-  const history = draftHistory(draft);
-  const slotContext = {
-    prices: auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null,
-    lastPickedId: history.at(-1)?.player.id ?? null,
-    heatScale: draftHeatScale(draft)
-  };
-  const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
-  const budgetLine = auction
-    ? ` &middot; ${auctionBudget(draft, manager)} left &middot; max bid ${draft.complete ? 0 : auctionMaxBid(draft, manager)}`
+  const budgetLine = isAuctionDraft(draft)
+    ? ` &middot; ${auctionBudget(draft, manager)} budget left`
     : "";
   return `<article class="roster">
-    <h3>${escapeHtml(manager.name)} <span class="roster-points">${totalPoints} pts</span></h3>
+    <h3>${escapeHtml(manager.name)}</h3>
     <p>${manager.roster.length}/${draft.rosterSize} drafted${budgetLine}</p>
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
       <span class="${counts.starters >= 2 ? "ok" : "warn"}">${counts.starters}/2 starters</span>
       <span class="${counts.bullpen >= 2 ? "ok" : "warn"}">${counts.bullpen}/2 bullpen</span>
     </div>
-    ${renderRosterDepthChart(manager, slotContext)}
+    ${renderRosterDepthChart(manager)}
   </article>`;
 }
 
-function renderRosterDepthChart(manager, slotContext = {}) {
+function renderRosterDepthChart(manager) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
@@ -2940,155 +2310,31 @@ function renderRosterDepthChart(manager, slotContext = {}) {
   return `<div class="mini-roster-board">
     <div class="mini-roster-section">
       <span class="mini-roster-heading">Lineup</span>
-      <div class="mini-slot-grid">${lineupSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label, slotContext)).join("")}</div>
+      <div class="mini-slot-grid">${lineupSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label)).join("")}</div>
     </div>
     <div class="mini-roster-section">
       <span class="mini-roster-heading">Staff</span>
-      <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label, slotContext)).join("")}</div>
+      <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label)).join("")}</div>
     </div>
   </div>`;
 }
 
-function renderMiniRosterSlot(player, slotLabel, slotContext = {}) {
+function renderMiniRosterSlot(player, slotLabel) {
   if (!player) {
     return `<div class="mini-roster-slot empty-mini-slot">
       <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
       <span class="mini-slot-name">open</span>
     </div>`;
   }
-  const price = slotContext.prices?.get(player.id);
-  const flash = player.id === slotContext.lastPickedId ? " just-picked" : "";
-  const heat = slotContext.heatScale ? heatStyle(heatValue(player, slotContext.heatScale, slotContext.prices), slotContext.heatScale) : "";
-  return `<div class="mini-roster-slot filled-mini-slot heat${flash}" style="${heat}">
+  return `<div class="mini-roster-slot filled-mini-slot">
     <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
     <strong class="mini-slot-name player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
     <span class="mini-slot-meta">${escapeHtml(rosterSlotDescription(player, slotLabel))} | ${player.points} pts</span>
-    ${price !== undefined ? `<span class="mini-slot-price">${price}</span>` : ""}
   </div>`;
 }
-
-// Live-draft catch-up strip: the last few results at a glance, newest first.
-function renderRecentPicks(draft) {
-  const picks = draftHistory(draft).slice(-4).reverse();
-  if (!picks.length) return "";
-  const auction = isAuctionDraft(draft);
-  const heatScale = draftHeatScale(draft);
-  const items = picks
-    .map(
-      (pick, index) => `<span class="recent-pick heat ${index === 0 ? "newest-pick" : ""}" style="${heatStyle(auction ? pick.price : pick.player.points, heatScale)}">
-        <strong>${escapeHtml(pick.player.name)}</strong>
-        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
-      </span>`
-    )
-    .join("");
-  return `<div class="recent-picks" aria-label="Most recent picks">${items}</div>`;
-}
-
-
-// Read-only broadcast layout for a TV: the lot, every board, and the ticker
-// on one dark screen. Opened with ?board (same browser via localStorage) or
-// ?room=CODE&board (live spectator over SSE).
-function renderWarRoom() {
-  resetAppHandlers();
-  document.body.classList.add("war-room-body");
-  const draft = state.draft;
-  if (!draft) {
-    app.innerHTML = `<div class="war-room"><p class="war-standby">Waiting for a draft to start&hellip;</p></div>`;
-    return;
-  }
-  const auction = isAuctionDraft(draft);
-  const lot = auction ? draft.auction.lot : null;
-  const lotPlayer = lot ? auctionLotPlayer(draft) : null;
-  const history = draftHistory(draft);
-  const prices = auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null;
-  const heatScale = draftHeatScale(draft);
-  const current = draft.complete ? null : currentManager(draft);
-  const totalPicks = draft.managers.length * draft.rosterSize;
-  const lastPick = history.at(-1);
-
-  const status = draft.complete
-    ? "DRAFT COMPLETE"
-    : auction
-      ? lot
-        ? `LOT ${draft.pickNumber + 1} OF ${totalPicks}`
-        : `${escapeHtml(current?.name ?? "")} NOMINATES NEXT`
-      : `PICK ${draft.pickNumber + 1} OF ${totalPicks} &middot; ${escapeHtml(current?.name ?? "")} ON THE CLOCK`;
-
-  const spotlightPlayer = lotPlayer ?? lastPick?.player ?? null;
-  const spotlightLabel = lotPlayer
-    ? `ON THE BLOCK &middot; NOMINATED BY ${escapeHtml(draft.managers.find((m) => m.id === lot.nominatorId)?.name ?? "").toUpperCase()}`
-    : lastPick
-      ? `LAST ${auction ? "SALE" : "PICK"} &middot; ${escapeHtml(lastPick.manager.name).toUpperCase()}${auction ? ` FOR ${lastPick.price}` : ""}`
-      : "WAITING FOR THE FIRST PICK";
-
-  const bidBoard = lot
-    ? `<div class="war-bids">${draft.managers
-        .map((manager) => {
-          const inHand = lot.bids && Object.prototype.hasOwnProperty.call(lot.bids, manager.id);
-          return `<div class="war-bid ${inHand ? "bid-in" : ""}">${escapeHtml(manager.name)}${manager.cpu ? " &middot; CPU" : ""}<em>${inHand ? "bid in" : "thinking&hellip;"}</em></div>`;
-        })
-        .join("")}</div>`
-    : "";
-
-  const teams = draft.managers
-    .map((manager) => {
-      const sorted = [...manager.roster].sort((a, b) =>
-        auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points
-      );
-      const chips = sorted
-        .map((player) => {
-          const price = auction ? prices.get(player.id) : undefined;
-          return `<span class="dock-chip heat" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
-        })
-        .join("");
-      const needs = dockNeedsSummary(manager);
-      const points = manager.roster.reduce((sum, player) => sum + player.points, 0);
-      return `<section class="war-team">
-        <header>
-          <h3>${escapeHtml(manager.name)}</h3>
-          <span>${auction && !draft.complete ? `${auctionBudget(draft, manager)} left &middot; max ${auctionMaxBid(draft, manager)} &middot; ` : ""}${points} pts</span>
-        </header>
-        <div class="war-chips">${chips || `<span class="dock-empty">no picks yet</span>`}</div>
-        ${needs ? `<footer>needs ${escapeHtml(needs)}</footer>` : ""}
-      </section>`;
-    })
-    .join("");
-
-  const ticker = history
-    .slice(-6)
-    .reverse()
-    .map(
-      (pick) => `<span class="recent-pick heat" style="${heatStyle(auction ? pick.price : pick.player.points, heatScale)}">
-        <strong>${escapeHtml(pick.player.name)}</strong>
-        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
-      </span>`
-    )
-    .join("");
-
-  app.innerHTML = `<div class="war-room">
-    <header class="war-header">
-      <span class="war-brand">MLB Showdown &middot; ${escapeHtml(draft.seed ?? "")}</span>
-      <h1>${status}</h1>
-      ${renderHeatLegend(heatScale)}
-      ${state.online ? `<span class="war-live">&#9679; LIVE</span>` : ""}
-    </header>
-    <div class="war-main">
-      <section class="war-spotlight">
-        <p class="war-spotlight-label">${spotlightLabel}</p>
-        ${spotlightPlayer ? `<div class="war-card">${renderPlayerCard(spotlightPlayer)}</div>` : ""}
-        ${bidBoard}
-      </section>
-      <div class="war-teams">${teams}</div>
-    </div>
-    <footer class="war-ticker">${ticker}</footer>
-  </div>`;
-}
-
-
 
 // Blue-to-red heat scale over winning bids (card points in snake drafts).
-// Auction endpoints are fixed: 0 up to 15% of the starting budget, so colors
-// mean the same thing all draft and a max-out bid clamps red.
+// Auction endpoints are fixed so colors mean the same thing all draft.
 function draftHeatScale(draft) {
   const auction = isAuctionDraft(draft);
   if (auction) {
@@ -3109,7 +2355,6 @@ function quantileOf(sorted, q) {
   return Math.round(sorted[lower] * (1 - weight) + sorted[upper] * weight);
 }
 
-// Hue path 215 (cool blue) through purple to 360 (red).
 function heatStyle(value, scale) {
   if (value === undefined || value === null) return "";
   const t = Math.max(0, Math.min(1, (value - scale.lo) / Math.max(1, scale.hi - scale.lo)));
@@ -3128,8 +2373,6 @@ function renderHeatLegend(scale) {
   </span>`;
 }
 
-// Floating rival boards: every other team pinned to the bottom edge so nobody
-// scrolls mid-auction to see what the room has done.
 function renderRosterDock(draft, viewerId) {
   const rivals = draft.managers.filter((manager) => manager.id !== viewerId);
   if (!rivals.length) return "";
@@ -3181,21 +2424,10 @@ function renderDockSlot(player, label, auction, prices, heatScale) {
   </span>`;
 }
 
-
-
 function dockChipName(player) {
   const match = player.name.match(/^(\S+)\s+(.+)$/);
   if (!match) return player.name;
   return `${match[1][0]}. ${match[2]}`;
-}
-
-function dockNeedsSummary(manager) {
-  const needs = getRosterNeeds(manager.roster);
-  const lineup = lineupStatus(manager.roster);
-  const parts = [...lineup.missingPositions];
-  if (needs.starter) parts.push(`${needs.starter}SP`);
-  if (needs.bullpen) parts.push(`${needs.bullpen}RP`);
-  return parts.join(" ");
 }
 
 function renderDraftFocus(draft, manager) {
@@ -3316,7 +2548,7 @@ function renderLineupSlot(player, slotLabel, manager) {
 
 function rosterSlotDescription(player, slotLabel) {
   if (player.kind === "pitcher") return playerPosition(player);
-  if (slotLabel === "1B" && !playsPosition(player, "1B")) return `${player.position} at 1B | Field -1`;
+  if (slotLabel === "1B" && player.position !== "1B") return `${player.position} at 1B | Field -1`;
   return playerPosition(player);
 }
 
@@ -3400,12 +2632,9 @@ function findRosterPlayer(managerId, playerId) {
 }
 
 function renderFilters() {
-  // Pure DHs only exist in card sets that print them — no deck from the
-  // dead-ball decades has one, so the filter doesn't offer an empty shelf.
-  const hasDesignatedHitters = state.draft?.pool.some((player) => player.position === "DH");
   const positions = state.filters.type === "pitcher"
     ? ["all", "SP", "RP"]
-    : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", ...(hasDesignatedHitters ? ["DH"] : [])];
+    : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", ...(state.poolMode === "real" ? ["DH"] : [])];
   const sortOptions = [
     ["points", "Best points"],
     ["primary", "Best OB/CTRL"],
@@ -3486,11 +2715,8 @@ function filteredPlayers(players) {
 }
 
 function matchesPositionFilter(player, filterPosition) {
-  if (player.kind !== "hitter") return playerPosition(player) === filterPosition;
-  if (filterPosition === CORNER_OUTFIELD_POSITION) {
-    return hitterPositions(player).some((entry) => isCornerOutfielder(entry.pos));
-  }
-  return playsPosition(player, filterPosition);
+  if (filterPosition === CORNER_OUTFIELD_POSITION) return isCornerOutfielder(playerPosition(player));
+  return playerPosition(player) === filterPosition;
 }
 
 function assignPlayersToSlots(players, labels, labelForPlayer) {
@@ -3586,6 +2812,26 @@ function defaultSortDirection(sort) {
   return sort === "name" || sort === "position" || sort === "throws" ? "asc" : "desc";
 }
 
+function normalizeAuctionTimerInput(form) {
+  return {
+    reviewSeconds: normalizeTimerSeconds(form.get("auctionReviewSeconds"), AUCTION_DEFAULT_REVIEW_SECONDS),
+    bankSeconds: normalizeTimerSeconds(form.get("auctionBankSeconds"), AUCTION_DEFAULT_CLOCK_BANK_SECONDS),
+    incrementSeconds: normalizeTimerSeconds(form.get("auctionIncrementSeconds"), AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS)
+  };
+}
+
+function normalizeTimerSeconds(value, fallback) {
+  const seconds = Math.round(Number(value));
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : fallback;
+}
+
+function formatClock(ms) {
+  const totalSeconds = Math.max(0, Math.ceil((Number(ms) || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 function speedValue(speed) {
   return Number(speed) || 0;
 }
@@ -3645,6 +2891,7 @@ function serializeState(value) {
 function reviveState(value) {
   const filters = { ...defaultState().filters, ...(value.filters ?? {}) };
   const batchSorts = normalizeBatchSorts(value.batchSorts);
+  const auctionTimer = normalizeAuctionTimerState(value.auctionTimer);
   if (filters.type === "all") filters.type = "hitter";
   filters.sortDirection = filters.sortDirection ?? defaultSortDirection(filters.sort);
   const draft = value.draft
@@ -3671,12 +2918,12 @@ function reviveState(value) {
     ...defaultState(),
     ...value,
     rosterSize: 13,
-    universe: universeConfig(value.universe)?.key ?? DEFAULT_UNIVERSE,
+    poolMode: value.poolMode === "real" ? "real" : "random",
+    realPool: value.realPool === "mariners" ? "mariners" : "stars",
     draftType: value.draftType === "auction" ? "auction" : "snake",
     auctionBudget: normalizeAuctionBudget(value.auctionBudget ?? AUCTION_DEFAULT_BUDGET, 13),
-    pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
-    maskBids: Boolean(value.maskBids),
-    cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
+    auctionTimer,
+    rosterDock: value.rosterDock === "collapsed" ? "collapsed" : "open",
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
@@ -3688,6 +2935,7 @@ function reviveState(value) {
 
 function reviveAuction(draft, auction) {
   const budget = normalizeAuctionBudget(auction?.budget, draft.rosterSize);
+  const timer = normalizeAuctionTimerConfig(auction?.timer ?? { enabled: false });
   const savedBudgets = auction?.budgets ?? {};
   const budgets = Object.fromEntries(
     draft.managers.map((manager) => {
@@ -3695,20 +2943,67 @@ function reviveAuction(draft, auction) {
       return [manager.id, Number.isFinite(saved) ? saved : budget];
     })
   );
+  const savedClockBanks = auction?.clockBanks ?? {};
+  const clockBanks = Object.fromEntries(
+    draft.managers.map((manager) => {
+      const saved = Number(savedClockBanks[manager.id]);
+      return [manager.id, Number.isFinite(saved) ? Math.max(0, saved) : timer.bankMs];
+    })
+  );
+  const savedReview = auction?.review ?? {};
+  const review = {
+    startedAt: finiteNumberOrNull(savedReview.startedAt),
+    endsAt: finiteNumberOrNull(savedReview.endsAt),
+    completedAt: finiteNumberOrNull(savedReview.completedAt) !== null
+      ? finiteNumberOrNull(savedReview.completedAt)
+      : timer.enabled
+        ? null
+        : 0
+  };
   const nominatorIndex = Math.min(
     Math.max(0, Math.round(Number(auction?.nominatorIndex) || 0)),
     draft.managers.length - 1
   );
-  // Lots saved by the old open-bid auction lack a pending list; drop them
-  // rather than revive a shape the sealed-bid flow can't advance.
-  const lot = auction?.lot?.playerId && Array.isArray(auction.lot.pending) && !draft.pickedIds.has(auction.lot.playerId)
-    ? auction.lot
+  const lot = auction?.lot?.playerId && !draft.pickedIds.has(auction.lot.playerId)
+    ? { ...auction.lot, clock: reviveLotClock(auction.lot.clock) }
     : null;
   return {
     budget,
     budgets,
+    timer,
+    clockBanks,
+    review,
     nominatorIndex,
     lot,
     history: Array.isArray(auction?.history) ? auction.history : []
+  };
+}
+
+function reviveLotClock(clock) {
+  if (!clock) return null;
+  return {
+    startedAt: finiteNumberOrNull(clock.startedAt) ?? Date.now(),
+    pending: Array.isArray(clock.pending) ? clock.pending : [],
+    nextSequence: Math.max(
+      0,
+      Math.round(Number(clock.nextSequence) || Object.keys(clock.submissions ?? {}).length)
+    ),
+    submissions: clock.submissions && typeof clock.submissions === "object" ? clock.submissions : {},
+    timedOut: Array.isArray(clock.timedOut) ? clock.timedOut : []
+  };
+}
+
+function finiteNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeAuctionTimerState(value) {
+  const timer = normalizeAuctionTimerConfig(value ?? defaultState().auctionTimer);
+  return {
+    reviewSeconds: Math.round(timer.reviewMs / 1000),
+    bankSeconds: Math.round(timer.bankMs / 1000),
+    incrementSeconds: Math.round(timer.incrementMs / 1000)
   };
 }

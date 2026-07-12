@@ -7,7 +7,6 @@ import {
   createBatchState,
   normalizeBatchRuns,
   runBatchChunk,
-  simulateBatchGame,
   simulateBatch
 } from "../src/rules/batch.js";
 import { RESULTS } from "../src/rules/cards.js";
@@ -87,42 +86,6 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
   for (let index = 1; index < summary.hitters.length; index += 1) {
     assert.ok(summary.hitters[index - 1].ops >= summary.hitters[index].ops, "hitters sorted by OPS");
   }
-});
-
-test("single-game batch hitter totals match the source box score", () => {
-  const teams = draftTeams("batch-box-source", 2);
-  const seed = "batch-box-source";
-  const summary = simulateBatch(teams, { seed, runs: 1 });
-  const game = simulateGame(teams[0], teams[1], `${seed}-game-1-${teams[0].name}-${teams[1].name}`);
-  const boxHitters = [...game.boxScore.away.hitters, ...game.boxScore.home.hitters];
-
-  for (const key of ["r", "sb", "cs", "rbi", "hr"]) {
-    assert.equal(
-      summary.hitters.reduce((sum, line) => sum + line[key], 0),
-      boxHitters.reduce((sum, line) => sum + line[key], 0),
-      `batch ${key} should match one source game`
-    );
-  }
-});
-
-test("simulateBatchGame recreates a numbered batch game", () => {
-  const teams = draftTeams("batch-game-log", 3);
-  const seed = "batch-game-log";
-  const game = simulateBatchGame(teams, seed, 5);
-  const sameGame = simulateBatchGame(teams, seed, 5);
-  const previousGame = simulateBatchGame(teams, seed, 4);
-  const summary = simulateBatch(teams, { seed, runs: 5 });
-
-  assert.ok(game.events.length > 0);
-  assert.deepEqual(game, sameGame);
-  assert.notDeepEqual(game.events, previousGame.events);
-  assert.equal(game.away.name, teams[0].name);
-  assert.equal(game.home.name, teams[2].name);
-  assert.equal(summary.runs, 5);
-  assert.equal(
-    summary.teams.reduce((sum, row) => sum + row.wins.sum, 0),
-    5
-  );
 });
 
 test("batchProgressSnapshot reports running win rates mid-batch", () => {

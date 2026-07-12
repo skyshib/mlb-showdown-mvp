@@ -1,32 +1,37 @@
 import { RESULTS, resolveChart } from "./cards.js";
 import { createRng } from "./rng.js";
-import { winExpectancy } from "../data/winExpectancy.js";
 
-// Go/no-go floors for taking a base, by outs and destination. Second and
-// home loosen as outs mount (with two gone the runner is off on contact and
-// has nothing to lose — 40% sends him), but third TIGHTENS: with nobody out
-// there's a whole inning to cash him from third, and never, ever make the
-// third out there.
 const ADVANCE_DECISION_MATRIX = {
-  0: { second: 0.9, third: 0.65, home: 0.75 },
+  0: { second: 0.9, third: 0.85, home: 0.75 },
   1: { second: 0.8, third: 0.75, home: 0.65 },
-  2: { second: 0.7, third: 0.85, home: 0.4 }
+  2: { second: 0.7, third: 0.65, home: 0.55 }
 };
 
-// Exported so AI layers (the NPC skipper's personality) can bend this same
-// table instead of replacing it with their own thresholds.
-export function advanceDecisionMinimum(outs, destination) {
-  return ADVANCE_DECISION_MATRIX[outs]?.[destination] ?? 1;
-}
+// Win-probability model constants, measured from this engine across the random
+// and real pools (scripts in repo history): runs per half-inning mean/variance.
+const WP_RUNS_PER_HALF = 0.5;
+const WP_VAR_PER_HALF = 1.2;
+// MLB 1993-2010 run-expectancy-by-base/out table, scaled to this engine's run
+// environment. Keys are first/second/third occupancy bits.
+const WP_RE_TABLE = {
+  "000": [0.544, 0.291, 0.112],
+  "100": [0.941, 0.562, 0.245],
+  "010": [1.17, 0.721, 0.348],
+  "001": [1.433, 0.989, 0.385],
+  "110": [1.556, 0.963, 0.471],
+  "101": [1.853, 1.211, 0.53],
+  "011": [2.05, 1.447, 0.626],
+  "111": [2.39, 1.631, 0.814]
+};
+const WP_RE_SCALE = WP_RUNS_PER_HALF / 0.544;
 
-// Probability that the home team wins from the given state, looked up in
-// MLB history (Retrosheet 1903-2025 via Greg Stoll's dataset — see
-// src/data/winExpectancy.js). Terminal states resolve exactly; live states
-// read the table from the batting team's perspective.
+// Approximate probability that the home team wins from the given state,
+// using a normal projection of the final run differential: current lead,
+// plus run expectancy for the half in progress, plus mean runs for each
+// remaining half-inning. Ties resolve to 0.5 via the +/-0.5 continuity band.
 export function winProbabilityHome(state) {
   const diff = state.score.home - state.score.away;
   if (state.walkoff) return 1;
-  if (state.gameOver) return diff > 0 ? 1 : 0;
 
   const view = { inning: state.inning, half: state.half, outs: state.outs, bases: state.bases };
   if (view.outs >= 3) {
@@ -40,21 +45,25 @@ export function winProbabilityHome(state) {
     }
   }
 
-  // A completed bottom of the 9th or later with a lead ends the game. A live
-  // top of an extra inning does not — the home team still gets to bat, so a
-  // mid-half away lead stays a table lookup.
-  if (view.half === "top" && view.inning > 9 && diff !== 0 && state.outs >= 3) return diff > 0 ? 1 : 0;
+  if (view.half === "top" && view.inning > 9 && diff !== 0) return diff > 0 ? 1 : 0;
   if (view.half === "bottom" && view.inning >= 9 && diff > 0) return 1;
 
   const battingHome = view.half === "bottom";
-  const battingWin = winExpectancy({
-    half: view.half,
-    inning: view.inning,
-    outs: view.outs,
-    bases: view.bases,
-    diff: battingHome ? diff : -diff
-  });
-  return battingHome ? battingWin : 1 - battingWin;
+  const baseKey = view.bases.map((runner) => (runner ? "1" : "0")).join("");
+  const currentRe = (WP_RE_TABLE[baseKey]?.[Math.min(2, view.outs)] ?? 0) * WP_RE_SCALE;
+  const awayFuture = Math.max(0, 9 - view.inning);
+  const homeFuture = view.half === "top" ? Math.max(0, 10 - view.inning) : Math.max(0, 9 - view.inning);
+  const expected = diff + (battingHome ? currentRe : -currentRe) + WP_RUNS_PER_HALF * (homeFuture - awayFuture);
+  const sigma = Math.sqrt(WP_VAR_PER_HALF * (homeFuture + awayFuture + 1));
+  return 1 - 0.5 * normalCdf((0.5 - expected) / sigma) - 0.5 * normalCdf((-0.5 - expected) / sigma);
+}
+
+function normalCdf(z) {
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * x);
+  const erf = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x);
+  return 0.5 * (1 + sign * erf);
 }
 
 function trackTopSwing(state, player, wpa, result) {
@@ -87,16 +96,9 @@ export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
     winner: state.score.away > state.score.home ? state.away.name : state.home.name,
     boxScore: buildBoxScore(state),
     events,
-    innings: inningsPlayed(state),
+    innings: state.inning,
     topSwing: state.topSwing
   };
-}
-
-// Innings actually played in a finished game. The final out of a bottom half
-// rolls the state to the top of the NEXT inning before the game-over check,
-// so a terminal "top of the 10th" state was a nine-inning game.
-export function inningsPlayed(state) {
-  return state.half === "top" ? state.inning - 1 : state.inning;
 }
 
 export function playGameEvent(state, rng) {
@@ -124,16 +126,12 @@ export function playPlateAppearance(state, rng) {
   const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, resultRoll);
   state.lastPlayDetails = null;
   const runs = applyResult(state, result, batter, battingSide, pitchingSide, rng, pitcher);
-  if (state.pendingAdvance) state.pendingAdvance.batter = { id: batter.id, name: batter.name };
 
   const outsOnPlay = Math.max(0, state.outs - outsBefore);
   recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay);
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
-  // The at-bat is over: every runner's steal attempt refreshes.
-  state.stealAttemptsThisPA = [];
   state.pitching[pitchingSide].outsRecorded += outsOnPlay;
-  state.pitching[pitchingSide].battersFaced += 1;
 
   const wpAfter = winProbabilityHome(state);
   const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
@@ -172,7 +170,6 @@ export function playPlateAppearance(state, rng) {
 
   if (state.half === "bottom" && state.inning >= 9 && state.score.home > state.score.away) {
     state.walkoff = true;
-    state.pendingAdvance = null;
     return event;
   }
 
@@ -184,61 +181,6 @@ export function playPlateAppearance(state, rng) {
 }
 
 export function playStealAttempt(state, rng) {
-  const pitchingSide = state.half === "top" ? "home" : "away";
-  const stealAttempt = chooseStealAttempt(state, pitchingSide);
-  if (!stealAttempt) return null;
-  return performStealAttempt(state, stealAttempt, rng);
-}
-
-// Every steal opportunity on the current bases, unfiltered by the auto-play
-// decision matrix, so an interactive layer can offer (and force) attempts the
-// auto-runner would decline. Auto play never calls this.
-export function stealCandidates(state) {
-  if (state.outs >= 3 || state.pendingAdvance) return [];
-  const pitchingSide = state.half === "top" ? "home" : "away";
-  const [runnerOnFirst, runnerOnSecond, runnerOnThird] = state.bases;
-  const fielding = totalCatcherFielding(state[pitchingSide]);
-  const candidates = [];
-
-  // Real occupancy decides which bases are open; canStealThisPA only gates
-  // the runner's own eligibility (one attempt per runner per at-bat).
-  if (runnerOnSecond && !runnerOnThird && canStealThisPA(state, runnerOnSecond)) {
-    candidates.push(createAdvanceCandidate({
-      runner: runnerOnSecond,
-      fromIndex: 1,
-      toIndex: 2,
-      outsForDecision: state.outs,
-      fielding,
-      // The throw to third is shorter: +5 to the catcher, not the runner.
-      targetBonus: -5
-    }));
-  }
-  if (runnerOnFirst && !runnerOnSecond && canStealThisPA(state, runnerOnFirst)) {
-    candidates.push(createAdvanceCandidate({
-      runner: runnerOnFirst,
-      fromIndex: 0,
-      toIndex: 1,
-      outsForDecision: state.outs,
-      fielding,
-      targetBonus: 0
-    }));
-  }
-
-  return candidates;
-}
-
-// Force a steal attempt for the runner on the given base index, regardless of
-// the auto-play decision matrix. Returns the steal event, or null when that
-// runner has no open base ahead.
-export function attemptSteal(state, fromIndex, rng) {
-  const candidate = stealCandidates(state).find((item) => item.fromIndex === fromIndex);
-  if (!candidate) return null;
-  return performStealAttempt(state, candidate, rng);
-}
-
-function performStealAttempt(state, stealAttempt, rng) {
-  // Safe or gunned down, this runner's attempt is spent until the next batter.
-  state.stealAttemptsThisPA = [...(state.stealAttemptsThisPA ?? []), stealAttempt.runner.id];
   const battingSide = state.half === "top" ? "away" : "home";
   const pitchingSide = battingSide === "away" ? "home" : "away";
   const battingTeam = state[battingSide];
@@ -248,6 +190,10 @@ function performStealAttempt(state, stealAttempt, rng) {
   const before = snapshotBases(state);
   const outsBefore = state.outs;
   const scoreBefore = { ...state.score };
+  const stealAttempt = chooseStealAttempt(state, pitchingSide);
+
+  if (!stealAttempt) return null;
+
   const wpBefore = winProbabilityHome(state);
   const runner = { id: stealAttempt.runner.id, name: stealAttempt.runner.name };
   const attemptResult = resolveStealAttempt(state, stealAttempt, rng);
@@ -300,279 +246,6 @@ function performStealAttempt(state, stealAttempt, rng) {
   return event;
 }
 
-// Can the batting team drop a sacrifice bunt right now? Needs a runner to
-// move, fewer than two outs, and no play already waiting on a decision.
-// Squeeze plays are disallowed: with a runner on third, the bunt is off.
-export function canBunt(state) {
-  const [first, second, third] = state.bases;
-  return state.outs < 2 && Boolean(first || second) && !third && !state.pendingAdvance;
-}
-
-// Traditional Showdown: the sacrifice always gets down, so the only call is
-// whether the out is worth the bases. Shown as 1 wherever a chance is asked.
-export function buntSuccessChance(state) {
-  return canBunt(state) ? 1 : 0;
-}
-
-// A sacrifice bunt as a full plate appearance, traditional MLB Showdown
-// rules: no roll — the batter is out and every runner moves up, always
-// (never from third: canBunt disallows the squeeze). Auto play never bunts.
-export function attemptBunt(state) {
-  if (!canBunt(state)) return null;
-  const battingSide = state.half === "top" ? "away" : "home";
-  const pitchingSide = battingSide === "away" ? "home" : "away";
-  const battingTeam = state[battingSide];
-  const pitchingTeam = state[pitchingSide];
-  const batter = battingTeam.lineup[state.lineupIndex[battingSide] % battingTeam.lineup.length];
-  const pitcher = currentPitcher(state, pitchingSide);
-
-  const before = snapshotBases(state);
-  const outsBefore = state.outs;
-  const scoreBefore = { ...state.score };
-  const wpBefore = winProbabilityHome(state);
-
-  // canBunt guarantees third is empty — no squeeze plays.
-  const [first, second] = state.bases;
-  const runs = 0;
-
-  state.outs += 1;
-  state.bases = [null, first ?? null, second ?? null];
-  const result = "SAC";
-
-  state.lastPlayDetails = {
-    kind: "bunt",
-    outsBefore,
-    clean: true,
-    leadOut: null
-  };
-
-  const hitterLine = ensureHitterLine(state, batter);
-  const pitcherLine = ensurePitcherLine(state, pitcher);
-  hitterLine.pa += 1;
-  hitterLine.rbi += runs;
-  pitcherLine.bf += 1;
-  const outsOnPlay = state.outs - outsBefore;
-  pitcherLine.outs += outsOnPlay;
-  battingTeam.plateAppearances += 1;
-  state.lineupIndex[battingSide] += 1;
-  // The at-bat is over: every runner's steal attempt refreshes.
-  state.stealAttemptsThisPA = [];
-  state.pitching[pitchingSide].outsRecorded += outsOnPlay;
-  state.pitching[pitchingSide].battersFaced += 1;
-  state[battingSide].runs = state.score[battingSide];
-  state[pitchingSide].runsAllowed = state.score[battingSide];
-
-  const wpAfter = winProbabilityHome(state);
-  const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
-  hitterLine.wpa += battingWpa;
-  pitcherLine.wpa -= battingWpa;
-  trackTopSwing(state, batter, battingWpa, result);
-
-  const event = {
-    type: "bunt",
-    inning: state.inning,
-    half: state.half,
-    battingTeam: battingTeam.name,
-    pitchingTeam: pitchingTeam.name,
-    batter: batter.name,
-    pitcher: pitcher.name,
-    controlRoll: null,
-    pitcherControl: pitcher.control,
-    effectiveControl: pitcher.control,
-    fatiguePenalty: 0,
-    controlTotal: null,
-    onBase: batter.onBase,
-    chartOwner: "bunt",
-    resultRoll: null,
-    result,
-    outsBefore,
-    outsAfter: state.outs,
-    basesBefore: before,
-    basesAfter: snapshotBases(state),
-    scoreBefore,
-    scoreAfter: { ...state.score },
-    runs,
-    wpBefore,
-    wpAfter,
-    wpa: battingWpa,
-    playDetails: state.lastPlayDetails
-  };
-
-  if (state.half === "bottom" && state.inning >= 9 && state.score.home > state.score.away) {
-    state.walkoff = true;
-    return event;
-  }
-  if (state.outs >= 3) advanceHalfInning(state);
-  return event;
-}
-
-// Put the batter on intentionally — no rolls, runners advance only if forced.
-// A defense-side call; auto play never issues one.
-export function intentionalWalk(state) {
-  if (isGameOver(state)) return null;
-  const battingSide = state.half === "top" ? "away" : "home";
-  const pitchingSide = battingSide === "away" ? "home" : "away";
-  const battingTeam = state[battingSide];
-  const pitchingTeam = state[pitchingSide];
-  const batter = battingTeam.lineup[state.lineupIndex[battingSide] % battingTeam.lineup.length];
-  const pitcher = currentPitcher(state, pitchingSide);
-
-  const before = snapshotBases(state);
-  const outsBefore = state.outs;
-  const scoreBefore = { ...state.score };
-  const wpBefore = winProbabilityHome(state);
-
-  const runs = applyWalk(state, batter, battingSide, pitchingSide, pitcher);
-  state.lastPlayDetails = { kind: "ibb", outsBefore };
-
-  const hitterLine = ensureHitterLine(state, batter);
-  const pitcherLine = ensurePitcherLine(state, pitcher);
-  hitterLine.pa += 1;
-  hitterLine.bb += 1;
-  hitterLine.rbi += runs;
-  // No pitches thrown: an intentional pass charges the walk but never counts
-  // as a batter faced — neither in the box score nor against the arm's
-  // fatigue tank.
-  pitcherLine.bb += 1;
-  battingTeam.plateAppearances += 1;
-  state.lineupIndex[battingSide] += 1;
-  // The at-bat is over: every runner's steal attempt refreshes.
-  state.stealAttemptsThisPA = [];
-  state[battingSide].runs = state.score[battingSide];
-  state[pitchingSide].runsAllowed = state.score[battingSide];
-
-  const wpAfter = winProbabilityHome(state);
-  const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
-  hitterLine.wpa += battingWpa;
-  pitcherLine.wpa -= battingWpa;
-  trackTopSwing(state, batter, battingWpa, "IBB");
-
-  const event = {
-    type: "intentional-walk",
-    inning: state.inning,
-    half: state.half,
-    battingTeam: battingTeam.name,
-    pitchingTeam: pitchingTeam.name,
-    batter: batter.name,
-    pitcher: pitcher.name,
-    controlRoll: null,
-    pitcherControl: pitcher.control,
-    effectiveControl: pitcher.control,
-    fatiguePenalty: 0,
-    controlTotal: null,
-    onBase: batter.onBase,
-    chartOwner: "ibb",
-    resultRoll: null,
-    result: "IBB",
-    outsBefore,
-    outsAfter: state.outs,
-    basesBefore: before,
-    basesAfter: snapshotBases(state),
-    scoreBefore,
-    scoreAfter: { ...state.score },
-    runs,
-    wpBefore,
-    wpAfter,
-    wpa: battingWpa,
-    playDetails: state.lastPlayDetails
-  };
-
-  if (state.half === "bottom" && state.inning >= 9 && state.score.home > state.score.away) {
-    state.walkoff = true;
-  }
-  return event;
-}
-
-// The play waiting on a send-the-runners call, if any.
-export function pendingAdvanceDecision(state) {
-  return state.pendingAdvance ?? null;
-}
-
-// Resolve a deferred extra-base decision: send the first `sendCount` runners
-// (lead runner first — a trailing runner can only go if the lead goes), hold
-// the rest. Pass "auto" to fall back to the decision-matrix policy. Returns
-// the advance event, or null when everyone holds. Auto play never defers, so
-// it never calls this.
-export function resolveAdvanceDecision(state, sendCount, rng) {
-  const pending = state.pendingAdvance;
-  if (!pending) return null;
-  state.pendingAdvance = null;
-  const { battingSide, pitchingSide, candidates, kind, batter } = pending;
-  const chosen = sendCount === "auto"
-    ? leadPrefixAttempts(candidates)
-    : candidates.slice(0, Math.max(0, Math.min(sendCount, candidates.length)));
-  if (!chosen.length) return null;
-
-  const before = snapshotBases(state);
-  const outsBefore = state.outs;
-  const scoreBefore = { ...state.score };
-  const wpBefore = winProbabilityHome(state);
-  const pitcher = currentPitcher(state, pitchingSide);
-  const lead = chosen[0].runner;
-
-  const attemptResult = resolveAdvanceAttempts(state, chosen, battingSide, pitchingSide, rng);
-  if (batter?.id && attemptResult.runs > 0) {
-    ensureHitterLine(state, batter).rbi += attemptResult.runs;
-  }
-  const outsOnPlay = state.outs - outsBefore;
-  if (outsOnPlay > 0) {
-    state.pitching[pitchingSide].outsRecorded += outsOnPlay;
-    ensurePitcherLine(state, pitcher).outs += outsOnPlay;
-  }
-  state[battingSide].runs = state.score[battingSide];
-  state[pitchingSide].runsAllowed = state.score[battingSide];
-
-  const wpAfter = winProbabilityHome(state);
-  const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
-  ensureHitterLine(state, { id: lead.id, name: lead.name }).wpa += battingWpa;
-  ensurePitcherLine(state, pitcher).wpa -= battingWpa;
-  trackTopSwing(state, lead, battingWpa, attemptResult.thrownAttempt?.safe === false ? "ADV-OUT" : "ADV");
-
-  state.lastPlayDetails = {
-    kind: kind === "tagup" ? "tagup" : "advance",
-    outsBefore,
-    attempts: attemptResult.attempts,
-    thrownAttempt: attemptResult.thrownAttempt
-  };
-
-  const event = {
-    type: "advance",
-    inning: state.inning,
-    half: state.half,
-    battingTeam: state[battingSide].name,
-    pitchingTeam: state[pitchingSide].name,
-    batter: batter?.name ?? lead.name,
-    pitcher: pitcher.name,
-    controlRoll: null,
-    pitcherControl: pitcher.control,
-    effectiveControl: pitcher.control,
-    fatiguePenalty: 0,
-    controlTotal: null,
-    onBase: null,
-    chartOwner: "advance",
-    resultRoll: null,
-    result: attemptResult.thrownAttempt?.safe === false ? "ADV-OUT" : "ADV",
-    outsBefore,
-    outsAfter: state.outs,
-    basesBefore: before,
-    basesAfter: snapshotBases(state),
-    scoreBefore,
-    scoreAfter: { ...state.score },
-    runs: attemptResult.runs,
-    wpBefore,
-    wpAfter,
-    wpa: battingWpa,
-    playDetails: state.lastPlayDetails
-  };
-
-  if (state.half === "bottom" && state.inning >= 9 && state.score.home > state.score.away) {
-    state.walkoff = true;
-    return event;
-  }
-  if (state.outs >= 3) advanceHalfInning(state);
-  return event;
-}
-
 export function createInitialState(awayTeam, homeTeam) {
   return {
     away: createRuntimeTeam(awayTeam),
@@ -584,8 +257,8 @@ export function createInitialState(awayTeam, homeTeam) {
     score: { away: 0, home: 0 },
     lineupIndex: { away: 0, home: 0 },
     pitching: {
-      away: { pitcherIndex: 0, outsRecorded: 0, battersFaced: 0 },
-      home: { pitcherIndex: 0, outsRecorded: 0, battersFaced: 0 }
+      away: { pitcherIndex: 0, outsRecorded: 0 },
+      home: { pitcherIndex: 0, outsRecorded: 0 }
     },
     stats: {
       hitters: new Map(),
@@ -593,22 +266,8 @@ export function createInitialState(awayTeam, homeTeam) {
     },
     lastPlayDetails: null,
     topSwing: null,
-    walkoff: false,
-    // Interactive-layer flags. Auto play leaves both null: pitching plans run
-    // themselves and extra-base advances resolve by the decision matrix.
-    manualPitchingFor: null,
-    deferAdvancesFor: null,
-    pendingAdvance: null,
-    // Runner ids that already attempted a steal during the current at-bat —
-    // one green light per runner per batter, safe or not.
-    stealAttemptsThisPA: []
+    walkoff: false
   };
-}
-
-// One steal attempt per runner per at-bat: once a runner goes, he doesn't
-// get another until the batter's turn resolves.
-function canStealThisPA(state, runner) {
-  return Boolean(runner) && !(state.stealAttemptsThisPA ?? []).includes(runner.id);
 }
 
 function createRuntimeTeam(team) {
@@ -622,65 +281,19 @@ function createRuntimeTeam(team) {
 
 function shouldContinue(state) {
   if (state.walkoff) return false;
-  if (state.gameOver) return false;
+  if (state.half === "top" && state.inning > 9 && state.score.away !== state.score.home) return false;
   if (state.half === "bottom" && state.inning >= 9 && state.score.home > state.score.away) return false;
   return true;
-}
-
-export function isGameOver(state) {
-  return !shouldContinue(state);
-}
-
-// Manually bring in the next pitcher, ahead of the automatic plan. Returns the
-// new pitcher, or null when the staff is spent. Auto play never calls this.
-export function changePitcher(state, side, targetIndex = null) {
-  const runtime = state.pitching[side];
-  const team = state[side];
-  if (runtime.pitcherIndex >= team.pitchers.length - 1) return null;
-  // Picking a specific arm pulls him to the front of the remaining staff, so
-  // skipped relievers stay available for later.
-  if (targetIndex !== null) {
-    if (targetIndex <= runtime.pitcherIndex || targetIndex >= team.pitchers.length) return null;
-    const [picked] = team.pitchers.splice(targetIndex, 1);
-    team.pitchers.splice(runtime.pitcherIndex + 1, 0, picked);
-  }
-  runtime.pitcherIndex += 1;
-  runtime.outsRecorded = 0;
-  runtime.battersFaced = 0;
-  return team.pitchers[runtime.pitcherIndex];
-}
-
-// Snapshot of the current pitcher for an interactive layer: who is on the
-// mound, how deep into their outing they are, and the live fatigue penalty.
-export function pitcherStatus(state, side) {
-  const pitcher = currentPitcher(state, side);
-  const runtime = state.pitching[side];
-  return {
-    pitcher,
-    outsRecorded: runtime.outsRecorded,
-    plannedOuts: pitcher.plannedOuts,
-    battersFaced: runtime.battersFaced ?? 0,
-    // The card's printed tank (IP x 4) — IP 1 always reads /4.
-    tiredAt: pitcherIpBatters(pitcher),
-    fatiguePenalty: pitcherFatigue(runtime, pitcher),
-    hasReliefAvailable: runtime.pitcherIndex < state[side].pitchers.length - 1
-  };
 }
 
 function currentPitcher(state, side) {
   const runtime = state.pitching[side];
   const team = state[side];
-  // Manual mode: the arm stays in (and tires) until changePitcher is called.
-  // "both" puts every mound under manual control (the adventure's NPC skipper
-  // makes its own calls); a single side string covers just that side.
-  if (state.manualPitchingFor !== side && state.manualPitchingFor !== "both") {
-    while (runtime.pitcherIndex < team.pitchers.length - 1) {
-      const pitcher = team.pitchers[runtime.pitcherIndex];
-      if (runtime.outsRecorded < pitcher.plannedOuts) break;
-      runtime.pitcherIndex += 1;
-      runtime.outsRecorded = 0;
-      runtime.battersFaced = 0;
-    }
+  while (runtime.pitcherIndex < team.pitchers.length - 1) {
+    const pitcher = team.pitchers[runtime.pitcherIndex];
+    if (runtime.outsRecorded < pitcher.plannedOuts) break;
+    runtime.pitcherIndex += 1;
+    runtime.outsRecorded = 0;
   }
   return team.pitchers[runtime.pitcherIndex] ?? team.pitchers[team.pitchers.length - 1];
 }
@@ -692,34 +305,26 @@ function buildPitchingPlan(pitchers) {
   const bullpenOuts = sortedBullpen.reduce((sum, pitcher) => sum + pitcherIpOuts(pitcher), 0);
   const starterTargetOuts = Math.max(0, 27 - bullpenOuts);
   return [
-    { ...starter, plannedOuts: starterTargetOuts },
-    ...sortedBullpen.map((pitcher) => ({ ...pitcher, plannedOuts: pitcherIpOuts(pitcher) }))
+    { ...starter, chargedRuns: 0, plannedOuts: starterTargetOuts },
+    ...sortedBullpen.map((pitcher) => ({ ...pitcher, chargedRuns: 0, plannedOuts: pitcherIpOuts(pitcher) }))
   ];
 }
 
-// Fatigue runs on batters faced alone: every IP of stamina covers four
-// batters, so an IP 6 starter handles 24 batters at full strength and tires
-// on the 25th, sinking another point every four batters after that. Runs
-// allowed are a box-score fact, not a fatigue input.
-const BATTERS_PER_IP = 4;
-
 function pitcherFatigue(runtime, pitcher) {
-  const limit = pitcherIpBatters(pitcher);
-  const faced = runtime.battersFaced ?? 0;
-  if (faced < limit) return 0;
-  return Math.floor((faced - limit) / BATTERS_PER_IP) + 1;
-}
-
-function pitcherIpBatters(pitcher) {
-  const ip = Number(pitcher?.ip ?? 0);
-  if (!Number.isFinite(ip)) return 0;
-  return Math.max(0, Math.round(ip * BATTERS_PER_IP));
+  const ipOuts = fatigueIpOuts(pitcher);
+  if (runtime.outsRecorded < ipOuts) return 0;
+  return Math.floor((runtime.outsRecorded - ipOuts) / 3) + 1;
 }
 
 function pitcherIpOuts(pitcher) {
   const ip = Number(pitcher?.ip ?? 0);
   if (!Number.isFinite(ip)) return 0;
   return Math.max(0, Math.round(ip * 3));
+}
+
+function fatigueIpOuts(pitcher) {
+  const ipPenaltyOuts = Math.floor(Number(pitcher?.chargedRuns ?? 0) / 3) * 3;
+  return Math.max(0, pitcherIpOuts(pitcher) - ipPenaltyOuts);
 }
 
 function applyResult(state, result, batter, battingSide, pitchingSide, rng, pitcher) {
@@ -736,8 +341,6 @@ function applyResult(state, result, batter, battingSide, pitchingSide, rng, pitc
       return applyWalk(state, batter, battingSide, pitchingSide, pitcher);
     case RESULTS.SINGLE:
       return applySingle(state, batter, battingSide, pitchingSide, rng, pitcher);
-    case RESULTS.SINGLE_PLUS:
-      return applySingle(state, batter, battingSide, pitchingSide, rng, pitcher, true);
     case RESULTS.DOUBLE:
       return applyDouble(state, batter, battingSide, pitchingSide, rng, pitcher);
     case RESULTS.TRIPLE:
@@ -753,21 +356,6 @@ export function applyFlyout(state, battingSide, pitchingSide, rng) {
   const outsBefore = state.outs;
   let runs = 0;
   state.outs += 1;
-
-  if (state.deferAdvancesFor === battingSide && state.outs < 3) {
-    const candidates = tagUpCandidates(state, pitchingSide, state.outs);
-    if (candidates.length) {
-      state.pendingAdvance = { kind: "tagup", battingSide, pitchingSide, outsBefore, candidates };
-    }
-    state.lastPlayDetails = {
-      kind: "flyout",
-      outsBefore,
-      tagUpAttempts: [],
-      thrownAttempt: null
-    };
-    return runs;
-  }
-
   const tagUpAttempts = chooseTagUpAttempts(state, pitchingSide, state.outs);
 
   if (tagUpAttempts.length && state.outs < 3) {
@@ -847,7 +435,7 @@ export function applyWalk(state, batter, battingSide, pitchingSide = null, pitch
   return runs;
 }
 
-export function applySingle(state, batter, battingSide, pitchingSide = null, rng = null, pitcher = null, extraBase = false) {
+export function applySingle(state, batter, battingSide, pitchingSide = null, rng = null, pitcher = null) {
   const outsBefore = state.outs;
   let runs = 0;
   const [first, second, third] = state.bases;
@@ -855,12 +443,6 @@ export function applySingle(state, batter, battingSide, pitchingSide = null, rng
   state.bases[2] = second;
   state.bases[1] = first;
   state.bases[0] = runnerFor(batter, pitcher);
-  // 1B+: the real cards' auto-advance — if second is open after the routine
-  // shift above, the batter takes it uncontested, no roll, no decision.
-  if (extraBase && !state.bases[1]) {
-    state.bases[1] = state.bases[0];
-    state.bases[0] = null;
-  }
   runs += resolveHitExtraBaseAttempts({
     state,
     battingSide,
@@ -933,6 +515,7 @@ function chargeRun(state, pitchingSide, pitcherId) {
   if (!pitchingSide || !pitcherId) return;
   const pitcher = state[pitchingSide].pitchers.find((item) => item.id === pitcherId);
   if (!pitcher) return;
+  pitcher.chargedRuns = Number(pitcher.chargedRuns ?? 0) + 1;
   ensurePitcherLine(state, pitcher).r += 1;
 }
 
@@ -945,9 +528,7 @@ function runnerFor(player, responsiblePitcher = null) {
   };
 }
 
-// All tag-up opportunities, lead runner first, unfiltered by the decision
-// matrix — the interactive layer offers every legal send.
-function tagUpCandidates(state, pitchingSide, outsForDecision) {
+function chooseTagUpAttempts(state, pitchingSide, outsForDecision) {
   if (outsForDecision >= 3) return [];
   const candidates = [];
   const runnerOnThird = state.bases[2];
@@ -976,42 +557,25 @@ function tagUpCandidates(state, pitchingSide, outsForDecision) {
     }));
   }
 
-  return candidates;
-}
-
-function chooseTagUpAttempts(state, pitchingSide, outsForDecision) {
-  return leadPrefixAttempts(tagUpCandidates(state, pitchingSide, outsForDecision));
-}
-
-// A trailing runner can only advance if every runner ahead of him goes too —
-// otherwise he'd run into an occupied base. Candidates arrive lead first, so
-// take the prefix that clears the decision matrix.
-function leadPrefixAttempts(candidates) {
-  const attempts = [];
-  for (const candidate of candidates) {
-    if (!shouldAttemptAdvance(candidate)) break;
-    attempts.push(candidate);
-  }
-  return attempts;
+  return candidates
+    .filter((candidate) => shouldAttemptAdvance(candidate))
+    .sort((a, b) => b.safeChance - a.safeChance || b.toIndex - a.toIndex);
 }
 
 function chooseStealAttempt(state, pitchingSide) {
   if (state.outs >= 3) return null;
-  const [first, runnerOnSecond, runnerOnThird] = state.bases;
-  // Auto play honors the same rule: one attempt per runner per at-bat.
-  const runnerOnFirst = canStealThisPA(state, first) ? first : null;
+  const [runnerOnFirst, runnerOnSecond, runnerOnThird] = state.bases;
   const fielding = totalCatcherFielding(state[pitchingSide]);
   const candidates = [];
 
-  if (runnerOnSecond && !runnerOnThird && canStealThisPA(state, runnerOnSecond)) {
+  if (runnerOnSecond && !runnerOnThird) {
     candidates.push(createAdvanceCandidate({
       runner: runnerOnSecond,
       fromIndex: 1,
       toIndex: 2,
       outsForDecision: state.outs,
       fielding,
-      // The throw to third is shorter: +5 to the catcher, not the runner.
-      targetBonus: -5
+      targetBonus: 5
     }));
   } else if (runnerOnFirst && !runnerOnSecond) {
     candidates.push(createAdvanceCandidate({
@@ -1057,7 +621,7 @@ function resolveHitExtraBaseAttempts({ state, battingSide, pitchingSide, rng, ou
   if (!pitchingSide || !rng || state.outs >= 3) return 0;
   const fielding = totalOutfieldFielding(state[pitchingSide]);
   const twoOutBonus = outsBefore >= 2 ? 5 : 0;
-  const allCandidates = candidates
+  const attempts = candidates
     .filter(Boolean)
     .map((candidate) => createAdvanceCandidate({
       ...candidate,
@@ -1065,20 +629,7 @@ function resolveHitExtraBaseAttempts({ state, battingSide, pitchingSide, rng, ou
       fielding,
       targetBonus: (candidate.toIndex >= 3 ? 5 : 0) + twoOutBonus
     }))
-    .sort((a, b) => b.toIndex - a.toIndex);
-
-  if (state.deferAdvancesFor === battingSide && allCandidates.length) {
-    state.pendingAdvance = { kind: "hit", battingSide, pitchingSide, outsBefore, candidates: allCandidates };
-    state.lastPlayDetails = {
-      kind: "hit",
-      outsBefore,
-      extraBaseAttempts: [],
-      thrownAttempt: null
-    };
-    return 0;
-  }
-
-  const attempts = leadPrefixAttempts(allCandidates);
+    .filter((candidate) => shouldAttemptAdvance(candidate));
 
   if (!attempts.length) {
     state.lastPlayDetails = {
@@ -1116,7 +667,8 @@ function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, f
 }
 
 function shouldAttemptAdvance(candidate) {
-  return candidate.safeChance >= advanceDecisionMinimum(candidate.outsForDecision, candidate.destination);
+  const minimum = ADVANCE_DECISION_MATRIX[candidate.outsForDecision]?.[candidate.destination] ?? 1;
+  return candidate.safeChance >= minimum;
 }
 
 function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rng) {
@@ -1256,13 +808,6 @@ function advanceHalfInning(state) {
   if (state.half === "top") {
     state.half = "bottom";
   } else {
-    // Per docs/rules.md, the game only ends on a lead after a COMPLETED
-    // inning (or a walk-off). The flag is needed because a rolled-over
-    // "top of the 11th, away up 1" state is indistinguishable from a live
-    // one where the away team just took the lead and home still bats.
-    if (state.inning >= 9 && state.score.home !== state.score.away) {
-      state.gameOver = true;
-    }
     state.half = "top";
     state.inning += 1;
   }
@@ -1279,7 +824,7 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   pitcherLine.bf += 1;
   hitterLine.rbi += runs;
 
-  if ([RESULTS.SINGLE, RESULTS.SINGLE_PLUS, RESULTS.DOUBLE, RESULTS.TRIPLE, RESULTS.HR].includes(result)) {
+  if ([RESULTS.SINGLE, RESULTS.DOUBLE, RESULTS.TRIPLE, RESULTS.HR].includes(result)) {
     hitterLine.h += 1;
     pitcherLine.h += 1;
   }
@@ -1315,19 +860,12 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   state[pitchingSide].runsAllowed = state.score[battingSide];
 }
 
-// Stat lines are keyed by side as well as card id so the same card appearing
-// in both lineups keeps separate home and away lines. Deriving the side from
-// state.half is safe because every stat records before the half flips (a
-// pending advance decision blocks the flip until it resolves).
 function ensureHitterLine(state, hitter) {
-  const side = state.half === "top" ? "away" : "home";
-  const key = `${side}:${hitter.id}`;
-  if (!state.stats.hitters.has(key)) {
-    state.stats.hitters.set(key, {
+  if (!state.stats.hitters.has(hitter.id)) {
+    state.stats.hitters.set(hitter.id, {
       id: hitter.id,
       name: hitter.name,
-      side,
-      team: state[side].name,
+      team: null,
       pa: 0,
       ab: 0,
       h: 0,
@@ -1344,18 +882,15 @@ function ensureHitterLine(state, hitter) {
       wpa: 0
     });
   }
-  return state.stats.hitters.get(key);
+  return state.stats.hitters.get(hitter.id);
 }
 
 function ensurePitcherLine(state, pitcher) {
-  const side = state.half === "top" ? "home" : "away";
-  const key = `${side}:${pitcher.id}`;
-  if (!state.stats.pitchers.has(key)) {
-    state.stats.pitchers.set(key, {
+  if (!state.stats.pitchers.has(pitcher.id)) {
+    state.stats.pitchers.set(pitcher.id, {
       id: pitcher.id,
       name: pitcher.name,
-      side,
-      team: state[side].name,
+      team: null,
       bf: 0,
       outs: 0,
       h: 0,
@@ -1366,7 +901,7 @@ function ensurePitcherLine(state, pitcher) {
       wpa: 0
     });
   }
-  return state.stats.pitchers.get(key);
+  return state.stats.pitchers.get(pitcher.id);
 }
 
 function summarizeTeam(state, side) {
@@ -1378,8 +913,7 @@ function summarizeTeam(state, side) {
   };
 }
 
-// Exported for interactive layers that need a box score from a live state.
-export function buildBoxScore(state) {
+function buildBoxScore(state) {
   return {
     away: buildTeamBoxScore(state, "away"),
     home: buildTeamBoxScore(state, "home")
@@ -1387,9 +921,11 @@ export function buildBoxScore(state) {
 }
 
 function buildTeamBoxScore(state, side) {
+  const hitterIds = new Set(state[side].lineup.map((player) => player.id));
+  const pitcherIds = new Set(state[side].pitchers.map((player) => player.id));
   return {
     team: state[side].name,
-    hitters: [...state.stats.hitters.values()].filter((line) => line.side === side),
-    pitchers: [...state.stats.pitchers.values()].filter((line) => line.side === side)
+    hitters: [...state.stats.hitters.values()].filter((line) => hitterIds.has(line.id)),
+    pitchers: [...state.stats.pitchers.values()].filter((line) => pitcherIds.has(line.id))
   };
 }

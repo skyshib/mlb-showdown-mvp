@@ -1,5 +1,4 @@
 import { RESULTS } from "../rules/cards.js";
-import { maxPoolManagers } from "../rules/draft.js";
 import {
   chartFromCounts,
   chartPower,
@@ -7,7 +6,7 @@ import {
   pitcherPoints,
   speedPoints,
   toChart
-} from "./playerGeneration.js?v=20260706-version-sync";
+} from "./playerGeneration.js?v=20260704-real-players";
 
 // Real-player pool. Cards are derived from approximate, hand-entered MLB stat
 // lines so each card reflects the player's actual skills: the 2025 season for
@@ -305,11 +304,19 @@ export function buildRealDraftPool(seed) {
   return dealPool(buildRealPlayerPool(), REAL_DEAL_QUOTAS, `stars-deal:${seed}`);
 }
 
-// How deep a pool is, in managers — a draft-legality question, so the math
-// lives with the draft rules now. Kept here under its old name for callers
-// that still ask this pool how many rooms it seats.
 export function maxRealPoolManagers(pool = buildRealPlayerPool()) {
-  return maxPoolManagers(pool);
+  const hitters = pool.filter((player) => player.kind === "hitter");
+  const pitchers = pool.filter((player) => player.kind === "pitcher");
+  const countPosition = (position) => hitters.filter((player) => player.position === position).length;
+  const cornerOutfield = countPosition("LF/RF");
+  return Math.min(
+    ...["C", "2B", "3B", "SS", "CF"].map(countPosition),
+    Math.floor(cornerOutfield / 2),
+    Math.floor(hitters.length / 9),
+    Math.floor(pitchers.filter((player) => player.role === "SP").length / 2),
+    Math.floor(pitchers.filter((player) => player.role !== "SP").length / 2),
+    Math.floor(pool.length / 13)
+  );
 }
 
 // Other pools reuse the card math via options: idPrefix/idSuffix keep ids

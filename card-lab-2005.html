@@ -222,70 +222,56 @@
         transform-origin: left center;
       }
 
-      /* on-base number: white home-plate pentagon with the number in red,
-         overlapping above the name bar */
+      /* red on-base number, overlapping above the name bar */
       .card05 .onbase-num {
         position: absolute;
         left: 12px;
-        top: -10px;
-        z-index: 4;
-        width: 56px;
-        height: 48px;
-        filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.55));
-      }
-
-      .card05 .onbase-num::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        clip-path: polygon(0% 0%, 100% 0%, 100% 52%, 50% 100%, 0% 52%);
-        background: #14161c;
-      }
-
-      .card05 .onbase-num span {
-        position: absolute;
-        inset: 2.5px;
-        clip-path: polygon(0% 0%, 100% 0%, 100% 52%, 50% 100%, 0% 52%);
-        background: linear-gradient(180deg, #ffffff 55%, #e6eaee 100%);
+        top: -9px;
+        z-index: 3;
+        width: 48px;
+        height: 40px;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding-bottom: 13px;
-        color: #cf2318;
-        font-size: 30px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 45%),
+          linear-gradient(180deg, #e03a24, #a91108);
+        border: 2.5px solid #ffffff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+        color: #ffffff;
+        font-size: 33px;
         font-weight: 900;
         font-style: italic;
-        text-shadow: 0 1px 0 rgba(0, 0, 0, 0.15);
+        padding-right: 4px;
+        text-shadow: 0 2px 2px rgba(0, 0, 0, 0.45);
       }
 
-      /* ON-BASE pill: stadium-shaped black tag, level, laid over the
-         plate's point */
       .card05 .onbase-label {
         position: absolute;
         left: 2px;
-        top: 34px;
-        z-index: 5;
-        width: 90px;
-        height: 21px;
+        top: 33px;
+        z-index: 4;
+        width: 70px;
+        height: 18px;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: linear-gradient(180deg, #2c2c2c, #040404);
+        background: linear-gradient(180deg, #2a2a2a, #050505);
         border: 2px solid #ffffff;
-        border-radius: 999px;
-        box-shadow: 0 3px 6px rgba(0, 0, 0, 0.55);
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.55);
+        transform: rotate(-4deg) skewX(-8deg);
         color: #ffffff;
         font-size: 12.5px;
         font-weight: 800;
         font-style: italic;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.05em;
         padding-bottom: 1px;
       }
 
       /* stat line */
       .card05 .stat-line {
         position: absolute;
-        left: 104px;
+        left: 80px;
         right: 12px;
         top: 31px;
         height: 26px;
@@ -551,8 +537,8 @@
             <div class="strip">
               <div class="strip-bg">${stripBackdrop(index)}</div>
               <div class="name-bar"><span class="name">${card.name}</span></div>
-              <div class="onbase-num"><span>${card.onBase}</span></div>
-              <div class="onbase-label"><span>ON-BASE</span></div>
+              <div class="onbase-num">${card.onBase}</div>
+              <div class="onbase-label">ON-BASE</div>
               <div class="stat-line">
                 <span>${card.points} PT.</span>
                 <span>SPEED ${card.speed}</span>

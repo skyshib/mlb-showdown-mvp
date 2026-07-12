@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { renderBoxScore } from "../src/ui/render.js";
-import { cardPanelHtml } from "../src/ui/cardFace.js";
 
 const hitter = {
   id: "h-1",
@@ -58,16 +57,4 @@ test("renderBoxScore adds hover previews when player cards can be resolved", () 
   assert.ok(html.includes('data-preview-id="h-2"'));
   assert.ok(html.includes("<th>CS</th>"));
   assert.ok(html.includes("Unknown Pitcher"));
-});
-
-test("fictional card backdrops vary by id but remain deterministic", () => {
-  const backdrop = (card) => /gq-backdrop-([a-z]+)/.exec(cardPanelHtml(card))?.[1];
-  const first = backdrop(hitter);
-
-  assert.equal(backdrop(hitter), first);
-  const variants = new Set(
-    Array.from({ length: 20 }, (_, index) => backdrop({ ...hitter, id: `fake-${index}` }))
-  );
-  assert.deepEqual(variants, new Set(["day", "sunset", "night", "ivy", "brick", "dome"]));
-  assert.equal(backdrop({ ...hitter, id: "real-hitter", real: true }), undefined);
 });

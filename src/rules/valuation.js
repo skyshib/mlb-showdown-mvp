@@ -1,5 +1,5 @@
 import { createRng } from "./rng.js";
-import { RESULTS } from "./cards.js";
+import { normalizeResult, RESULTS } from "./cards.js";
 
 const HITTER_BASE_WEIGHTS = {
   onBase: 20,
@@ -20,7 +20,6 @@ const HITTER_CHART_VALUES = {
   [RESULTS.FB]: -2,
   [RESULTS.BB]: 4,
   [RESULTS.SINGLE]: 5,
-  [RESULTS.SINGLE_PLUS]: 5,
   [RESULTS.DOUBLE]: 9,
   [RESULTS.TRIPLE]: 11,
   [RESULTS.HR]: 14
@@ -38,14 +37,6 @@ const PITCHER_CHART_VALUES = {
 };
 
 const PERTURBATION = 0.25;
-
-// The UI reveals each manager's perturbed weights after a sim; exposing the
-// baseline and spread lets it show how far every preference leans.
-export const VALUATION_BASE_WEIGHTS = {
-  hitter: HITTER_BASE_WEIGHTS,
-  pitcher: PITCHER_BASE_WEIGHTS
-};
-export const VALUATION_PERTURBATION = PERTURBATION;
 
 export function createValuationModel(seed) {
   const rng = createRng(String(seed));
@@ -95,7 +86,7 @@ function pitcherValue(player, weights) {
 
 function chartValue(chart, values) {
   return (chart ?? []).reduce(
-    (sum, entry) => sum + (entry.to - entry.from + 1) * (values[entry.result] ?? 0),
+    (sum, entry) => sum + (entry.to - entry.from + 1) * (values[normalizeResult(entry.result)] ?? 0),
     0
   );
 }

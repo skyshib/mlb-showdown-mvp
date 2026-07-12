@@ -1,6 +1,6 @@
 import { distribution, rate } from "./stats.js";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260705-batch-team-skills";
-import { simulateGame } from "./game.js?v=20260708-mlb-win-prob";
+import { simulateGame } from "./game.js?v=20260705-awards-show";
 
 export const DEFAULT_BATCH_RUNS = 1000;
 export const MAX_BATCH_RUNS = 20000;
@@ -53,45 +53,15 @@ export function runBatchChunk(state, teams, seed, startIndex, count) {
   const schedule = createSchedule(teams);
   if (!schedule.length) return state;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    foldGame(state, playScheduledGame(schedule[index % schedule.length], state.rotation, seed, index));
+    const matchup = schedule[index % schedule.length];
+    const result = simulateGame(
+      teamForGame(matchup.away, state.rotation),
+      teamForGame(matchup.home, state.rotation),
+      `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`
+    );
+    foldGame(state, result);
   }
   return state;
-}
-
-function playScheduledGame(matchup, rotation, seed, index) {
-  return simulateGame(
-    teamForGame(matchup.away, rotation),
-    teamForGame(matchup.home, rotation),
-    `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`
-  );
-}
-
-// Re-simulates games [startIndex, startIndex + count) of a batch run. Batch
-// games are fully determined by (teams, seed, index), so the review log can
-// page through every game of a finished run without storing any of them —
-// the rotation walk below replays the starter sequence runBatchChunk saw.
-export function replayBatchGames(teams, seed, startIndex, count) {
-  const schedule = createSchedule(teams);
-  if (!schedule.length) return [];
-  const rotation = createRotationTracker(teams);
-  const games = [];
-  for (let index = 0; index < startIndex + count; index += 1) {
-    const matchup = schedule[index % schedule.length];
-    if (index < startIndex) {
-      teamForGame(matchup.away, rotation);
-      teamForGame(matchup.home, rotation);
-      continue;
-    }
-    games.push({ index, game: playScheduledGame(matchup, rotation, seed, index) });
-  }
-  return games;
-}
-
-// One-game convenience over replayBatchGames, numbered from 1 the way the
-// game-log UI counts.
-export function simulateBatchGame(teams, seed, gameNumber) {
-  const targetIndex = Math.max(0, Math.round(Number(gameNumber) || 1) - 1);
-  return replayBatchGames(teams, seed, targetIndex, 1)[0]?.game ?? null;
 }
 
 export function batchProgressSnapshot(state) {
@@ -226,6 +196,9 @@ function foldBoxScore(state, teamBox) {
     row.sb += line.sb ?? 0;
     row.cs += line.cs ?? 0;
     row.rbi += line.rbi;
+    row.r += line.r ?? 0;
+    row.sb += line.sb ?? 0;
+    row.cs += line.cs ?? 0;
     row.gidp += line.gidp ?? 0;
     row.wpa += line.wpa ?? 0;
   }
