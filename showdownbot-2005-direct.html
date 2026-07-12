@@ -71,9 +71,49 @@
       --rarity-glow: rgba(221, 173, 57, 0.42);
     }
 
-    .rarity-frame.rarity-rainbow {
+    .rarity-frame.rarity-rainbow,
+    .rarity-frame.rarity-legendary {
       --rarity-color: conic-gradient(from 40deg, #ff6279, #ffd15e, #53d69e, #4f9dff, #c27cff, #ff6279);
       --rarity-glow: rgba(120, 180, 255, 0.52);
+    }
+
+    .rarity-mark {
+      --mark-ring: #68727d;
+      position: absolute;
+      z-index: 8;
+      top: 2.2%;
+      right: 3.1%;
+      width: 9%;
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle, #17191d 0 58%, transparent 61%),
+        var(--mark-ring);
+      color: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: clamp(14px, 4vw, 20px);
+      font-weight: 700;
+      line-height: 1;
+      text-shadow: 0 1px 2px #000;
+      box-shadow: 0 2px 7px rgba(0, 0, 0, 0.62);
+    }
+
+    .rarity-mark::before { content: "\2022"; }
+    .rarity-mark.rarity-common::before { content: "\2022"; }
+    .rarity-mark.rarity-bronze::before { content: "\25C6"; }
+    .rarity-mark.rarity-silver::before { content: "\2B22"; }
+    .rarity-mark.rarity-gold::before { content: "\2605"; }
+    .rarity-mark.rarity-legendary::before { content: "\2726"; }
+
+    .rarity-mark.rarity-common { --mark-ring: #68727d; }
+    .rarity-mark.rarity-bronze { --mark-ring: #9c6a3f; }
+    .rarity-mark.rarity-silver { --mark-ring: #c9d2d8; }
+    .rarity-mark.rarity-gold { --mark-ring: #e1b64b; }
+    .rarity-mark.rarity-legendary {
+      --mark-ring: conic-gradient(from 40deg, #ff6279, #ffd15e, #53d69e, #4f9dff, #c27cff, #ff6279);
+      color: #ffe987;
     }
 
     .card {
@@ -307,8 +347,9 @@
       <span>Fictional card test</span>
     </header>
 
-    <div class="rarity-frame rarity-rainbow" aria-label="Rainbow rarity">
+    <div class="rarity-frame rarity-legendary" aria-label="Legendary rarity">
     <article class="card" aria-label="Serena Anwar Showdown-style card">
+      <span class="rarity-mark rarity-legendary" aria-label="Legendary rarity" title="Legendary"></span>
       <div class="photo">
         <img
           src="https://api.dicebear.com/9.x/micah/svg?seed=Serena%20Anwar-hitter-LF%2FRF&amp;backgroundColor=transparent"
