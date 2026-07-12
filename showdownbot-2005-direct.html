@@ -180,6 +180,7 @@
       isolation: isolate;
       --bb-color: #c99127;
       --single-color: #34785d;
+      --single-plus-color: #438b68;
       --double-color: #286f9b;
       --triple-color: #735394;
       --homer-color: #a93443;
@@ -328,7 +329,7 @@
     .chart-ranges,
     .chart-outcomes {
       display: grid;
-      grid-template-columns: repeat(8, minmax(0, 1fr));
+      grid-template-columns: repeat(9, minmax(0, 1fr));
       align-items: center;
       padding: 0 2.45%;
       color: #fff;
@@ -362,11 +363,13 @@
     .chart-ranges span:nth-child(5),
     .chart-outcomes span:nth-child(5) { background: color-mix(in srgb, var(--single-color) 82%, rgb(9, 41, 64)); }
     .chart-ranges span:nth-child(6),
-    .chart-outcomes span:nth-child(6) { background: color-mix(in srgb, var(--double-color) 82%, rgb(9, 41, 64)); }
+    .chart-outcomes span:nth-child(6) { background: color-mix(in srgb, var(--single-plus-color) 82%, rgb(9, 41, 64)); }
     .chart-ranges span:nth-child(7),
-    .chart-outcomes span:nth-child(7) { background: color-mix(in srgb, var(--triple-color) 82%, rgb(9, 41, 64)); }
+    .chart-outcomes span:nth-child(7) { background: color-mix(in srgb, var(--double-color) 82%, rgb(9, 41, 64)); }
     .chart-ranges span:nth-child(8),
-    .chart-outcomes span:nth-child(8) { background: color-mix(in srgb, var(--homer-color) 82%, rgb(9, 41, 64)); }
+    .chart-outcomes span:nth-child(8) { background: color-mix(in srgb, var(--triple-color) 82%, rgb(9, 41, 64)); }
+    .chart-ranges span:nth-child(9),
+    .chart-outcomes span:nth-child(9) { background: color-mix(in srgb, var(--homer-color) 82%, rgb(9, 41, 64)); }
 
     .note {
       margin: 0;
@@ -456,7 +459,8 @@
           <span>4</span>
           <span>5</span>
           <span>6-8</span>
-          <span>9-13</span>
+          <span>9-12</span>
+          <span>13</span>
           <span>14</span>
           <span>15</span>
           <span>16-20</span>
@@ -467,6 +471,7 @@
           <span>FB</span>
           <span>BB</span>
           <span>1B</span>
+          <span>1B+</span>
           <span>2B</span>
           <span>3B</span>
           <span>HR</span>
