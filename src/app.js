@@ -12,15 +12,20 @@ import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
 import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
 import {
-  applyDraftAction,
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
   AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS,
   AUCTION_DEFAULT_REVIEW_SECONDS,
   AUCTION_MIN_BID,
   AUCTION_MIN_RAISE,
-  auctionBudget,
+  CORNER_OUTFIELD_POSITION,
+  SIM_ACTION_TYPES,
+  STAFF_SLOT_LABELS,
+  applyDraftAction,
+  assignLineupSlots,
+  assignStaffSlots,
   auctionBidTimeRemainingMs,
+  auctionBudget,
   auctionLotPlayer,
   auctionMaxBid,
   auctionReviewComplete,
@@ -28,22 +33,20 @@ import {
   auctionStepGuard,
   auctionTimerEnabled,
   autopick,
-  assignLineupSlots,
   availablePlayers,
+  benchPlayers,
   buildTeam,
-  canNominatePlayer,
   canCancelLot,
-  cancelLot,
+  canNominatePlayer,
+  canPickPlayer,
   canPlaceSealedBid,
   canPlayerFillLineupSlot,
-  canPickPlayer,
-  CORNER_OUTFIELD_POSITION,
+  cancelLot,
+  completeAuctionReview,
   cpuSealedBid,
   createDraft,
-  completeAuctionReview,
   currentManager,
   draftHistory,
-  SIM_ACTION_TYPES,
   getRosterNeeds,
   hasUnlimitedRoster,
   isAuctionDraft,
@@ -64,13 +67,13 @@ import {
   randomNominationCounts,
   randomNominationShortfalls,
   sealedBidder,
+  staffStatus,
   startAuctionReview,
   syncAuctionTimer,
-  staffStatus,
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260712-random-nomination-exports";
+} from "./rules/draft.js?v=20260712-roster-choice";
 import {
   createRoom,
   fetchRoom,
@@ -1711,8 +1714,12 @@ function bindDraftActions() {
   app.ondragstart = (event) => {
     const slot = event.target.closest("[data-lineup-slot][data-player-id]");
     if (!slot) return;
+    if (!canManageRoster(slot.dataset.managerId)) {
+      event.preventDefault();
+      return;
+    }
     const player = findRosterPlayer(slot.dataset.managerId, slot.dataset.playerId);
-    if (!player || player.kind !== "hitter") return;
+    if (!player) return;
     draggedLineupMove = {
       managerId: slot.dataset.managerId,
       playerId: slot.dataset.playerId,
@@ -3692,11 +3699,11 @@ function renderDraftFocus(draft, manager) {
 
 function renderRosterSlots(manager, draft) {
   const hitterSlots = assignHittersToLineupSlots(manager);
-  const pitcherSlots = assignPlayersToSlots(
-    manager.roster.filter((player) => player.kind === "pitcher"),
-    ["SP", "SP", "RP", "RP"],
-    (player) => player.role
-  );
+  const staffSlots = assignStaffSlots(manager.roster, manager.staffAssignments);
+  // Everything drafted that is not in the thirteen. On a capped roster this is
+  // empty; on an unlimited one it is where the manager chooses their team.
+  const bench = benchPlayers(manager);
+  const mine = canManageRoster(manager.id);
   return `<div class="roster-board" aria-label="${escapeHtml(manager.name)} drafted cards">
     <div class="slot-group">
       <span>Lineup</span>
@@ -3704,9 +3711,37 @@ function renderRosterSlots(manager, draft) {
     </div>
     <div class="slot-group">
       <span>Staff</span>
-      <div class="slot-grid staff-slots">${pitcherSlots.slots.map((slot) => renderRosterSlot(slot.player, slot.label)).join("")}</div>
+      <div class="slot-grid staff-slots">${staffSlots.map((slot) => renderRosterSlot(slot.player, slot.label, manager)).join("")}</div>
     </div>
+    ${bench.length ? `<div class="slot-group bench-group">
+      <span>Bench &middot; ${bench.length} not in the thirteen${mine ? " &mdash; drag one into a slot to play them" : ""}</span>
+      <div class="slot-grid bench-slots">${bench.map((player) => renderBenchCard(player, manager)).join("")}</div>
+    </div>` : ""}
   </div>`;
+}
+
+// A drafted card that is not taking the field. Drag it onto a slot it can fill
+// and it takes that slot; whoever was there goes to the bench in its place.
+function renderBenchCard(player, manager) {
+  const mine = canManageRoster(manager.id);
+  const selected = selectedLineupMove?.playerId === player.id && selectedLineupMove?.managerId === manager.id;
+  return `<button type="button"
+    class="roster-slot bench-slot ${player.kind === "pitcher" ? "pitcher-slot" : "hitter-slot"} ${selected ? "selected-slot" : ""} ${mine ? "" : "readonly-slot"}"
+    data-lineup-slot="true"
+    data-manager-id="${escapeHtml(manager.id)}"
+    data-slot-label="BENCH"
+    ${mine ? "" : "disabled"}
+    data-player-id="${escapeHtml(player.id)}"
+    ${mine ? 'draggable="true"' : ""}
+  >
+    <strong>${escapeHtml(player.kind === "pitcher" ? pitcherRoleOf(player) : playerPosition(player))}</strong>
+    <span>${escapeHtml(player.name)}</span>
+    <em>${player.points} pts</em>
+  </button>`;
+}
+
+function pitcherRoleOf(player) {
+  return player.role === "SP" ? "SP" : "RP";
 }
 
 function assignHittersToLineupSlots(manager) {
@@ -3740,6 +3775,7 @@ function renderRosterSlot(player, slotLabel, manager = null) {
 }
 
 function renderLineupSlot(player, slotLabel, manager) {
+  const mine = canManageRoster(manager.id);
   const selected = selectedLineupMove?.managerId === manager.id;
   const isSelectedPlayer = selected && player?.id === selectedLineupMove.playerId;
   const isValidTarget = selected && canMoveLineupPlayer(manager.id, selectedLineupMove.playerId, slotLabel);
@@ -3749,7 +3785,8 @@ function renderLineupSlot(player, slotLabel, manager) {
     player ? "filled-slot hitter-slot" : "empty-slot",
     isSelectedPlayer ? "selected-slot" : "",
     isValidTarget ? "valid-drop-slot" : "",
-    isInvalidTarget ? "invalid-drop-slot" : ""
+    isInvalidTarget ? "invalid-drop-slot" : "",
+    mine ? "" : "readonly-slot"
   ]
     .filter(Boolean)
     .join(" ");
@@ -3759,7 +3796,8 @@ function renderLineupSlot(player, slotLabel, manager) {
     data-lineup-slot="true"
     data-manager-id="${escapeHtml(manager.id)}"
     data-slot-label="${escapeHtml(slotLabel)}"
-    ${player ? `data-player-id="${escapeHtml(player.id)}" draggable="true"` : ""}
+    ${mine ? "" : "disabled"}
+    ${player && mine ? `data-player-id="${escapeHtml(player.id)}" draggable="true"` : player ? `data-player-id="${escapeHtml(player.id)}"` : ""}
     ${isValidTarget ? `aria-label="Move selected player to ${escapeHtml(slotLabel)}"` : ""}
   >
     <strong>${escapeHtml(slotLabel)}</strong>
@@ -3779,6 +3817,12 @@ function handleLineupSlotClick(slot) {
   const playerId = slot.dataset.playerId;
   const slotLabel = slot.dataset.slotLabel;
 
+  // Not your team, not your call.
+  if (!canManageRoster(managerId)) {
+    selectedLineupMove = null;
+    return;
+  }
+
   if (selectedLineupMove?.managerId === managerId && canMoveLineupPlayer(managerId, selectedLineupMove.playerId, slotLabel)) {
     moveLineupPlayer(managerId, selectedLineupMove.playerId, slotLabel);
     selectedLineupMove = null;
@@ -3789,7 +3833,7 @@ function handleLineupSlotClick(slot) {
   }
 
   const player = playerId ? findRosterPlayer(managerId, playerId) : null;
-  if (player?.kind === "hitter") {
+  if (player) {
     selectedLineupMove = { managerId, playerId, fromSlot: slotLabel };
   } else {
     selectedLineupMove = null;
@@ -3797,33 +3841,83 @@ function handleLineupSlotClick(slot) {
   renderDraft();
 }
 
+// Your team is yours. Online, that means the seat you are sitting in; on a
+// hotseat everybody shares the screen, so everybody may move everything.
+// This gates the AFFORDANCE, not just the move: a card you cannot move must
+// not pick up, must not highlight, must not look for a moment like it went
+// somewhere. The rule was already enforced on the way out — but only after
+// you had dragged another manager's shortstop across his infield.
+function canManageRoster(managerId) {
+  if (!state.online) return true;
+  return managerId === state.online.managerId;
+}
+
+const isStaffSlot = (label) => STAFF_SLOT_LABELS.includes(label);
+
+// Can this card go in that slot? Works for a card already on the field and for
+// one sitting on the bench — the bench is where an unlimited roster keeps the
+// cards it bought and did not start.
 function canMoveLineupPlayer(managerId, playerId, toLabel) {
-  if (state.online && !state.online.host && managerId !== state.online.managerId) return false;
+  if (!canManageRoster(managerId)) return false;
+  if (toLabel === "BENCH") return false;
   const manager = findDraftManager(managerId);
   const player = findRosterPlayer(managerId, playerId);
-  if (!manager || !player || player.kind !== "hitter") return false;
+  if (!manager || !player) return false;
+
+  if (isStaffSlot(toLabel)) {
+    if (player.kind !== "pitcher") return false;
+    const slots = assignStaffSlots(manager.roster, manager.staffAssignments);
+    const target = slots.find((slot) => slot.label === toLabel);
+    if (!target || target.player?.id === playerId) return false;
+    // An arm only fills the kind of slot it is: a closer does not start.
+    return (player.role === "SP" ? "SP" : "RP") === target.role;
+  }
+
+  if (player.kind !== "hitter") return false;
   const slots = assignLineupSlots(manager.roster, manager.lineupAssignments).slots;
   const fromSlot = slots.find((slot) => slot.player?.id === playerId);
   const targetSlot = slots.find((slot) => slot.label === toLabel);
-  if (!fromSlot || !targetSlot || fromSlot.label === toLabel) return false;
+  if (!targetSlot || fromSlot?.label === toLabel) return false;
   if (!canPlayerFillLineupSlot(player, toLabel)) return false;
-  if (targetSlot.player && !canPlayerFillLineupSlot(targetSlot.player, fromSlot.label)) return false;
+  // A swap between two slots has to work both ways. A bench bat displacing a
+  // starter does not — the starter just goes to the bench.
+  if (fromSlot && targetSlot.player && !canPlayerFillLineupSlot(targetSlot.player, fromSlot.label)) return false;
   return true;
 }
 
 function moveLineupPlayer(managerId, playerId, toLabel) {
   const manager = findDraftManager(managerId);
   if (!manager || !canMoveLineupPlayer(managerId, playerId, toLabel)) return false;
+
+  if (isStaffSlot(toLabel)) {
+    const slots = assignStaffSlots(manager.roster, manager.staffAssignments);
+    const fromSlot = slots.find((slot) => slot.player?.id === playerId);
+    const targetSlot = slots.find((slot) => slot.label === toLabel);
+    const assignments = Object.fromEntries(slots.filter((slot) => slot.player).map((slot) => [slot.label, slot.player.id]));
+    assignments[toLabel] = playerId;
+    if (fromSlot) {
+      // Two arms on the field trade places.
+      if (targetSlot.player) assignments[fromSlot.label] = targetSlot.player.id;
+      else delete assignments[fromSlot.label];
+    }
+    // From the bench, the arm he replaced simply sits down.
+    if (state.online) {
+      sendOnlineAction({ type: "staff", managerId, assignments });
+      return true;
+    }
+    manager.staffAssignments = assignments;
+    return true;
+  }
+
   const slots = assignLineupSlots(manager.roster, manager.lineupAssignments).slots;
   const fromSlot = slots.find((slot) => slot.player?.id === playerId);
   const targetSlot = slots.find((slot) => slot.label === toLabel);
   const assignments = Object.fromEntries(slots.filter((slot) => slot.player).map((slot) => [slot.label, slot.player.id]));
 
   assignments[toLabel] = playerId;
-  if (targetSlot.player) {
-    assignments[fromSlot.label] = targetSlot.player.id;
-  } else {
-    delete assignments[fromSlot.label];
+  if (fromSlot) {
+    if (targetSlot.player) assignments[fromSlot.label] = targetSlot.player.id;
+    else delete assignments[fromSlot.label];
   }
 
   const cleaned = cleanLineupAssignments(manager, assignments);

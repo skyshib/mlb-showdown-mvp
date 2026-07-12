@@ -986,6 +986,12 @@ export function applyDraftAction(draft, action) {
       manager.lineupAssignments = { ...(action.assignments ?? {}) };
       return;
     }
+    case "staff": {
+      const manager = draft.managers.find((item) => item.id === action.managerId);
+      if (!manager) throw new Error("Unknown manager for staff action");
+      manager.staffAssignments = { ...(action.assignments ?? {}) };
+      return;
+    }
     default:
       throw new Error(`Unknown draft action: ${action?.type}`);
   }
@@ -1138,6 +1144,58 @@ export function managerValuation(draft, manager) {
 
 const valuationModels = new Map();
 
+// The four staff slots. A capped roster holds exactly these four arms, so the
+// choice makes itself; an unlimited one can hold a dozen, and then WHICH two
+// starters and which two relievers suit up is the manager's call — the same
+// call the lineup slots ask about the bats. staffAssignments answers it.
+export const STAFF_SLOT_LABELS = ["SP1", "SP2", "RP1", "RP2"];
+
+const staffSlotRole = (label) => (label.startsWith("SP") ? "SP" : "RP");
+
+export function assignStaffSlots(roster, assignments = {}) {
+  const pitchers = roster.filter((player) => player.kind === "pitcher");
+  const slots = STAFF_SLOT_LABELS.map((label) => ({ label, role: staffSlotRole(label), player: null }));
+  const used = new Set();
+
+  // What the manager asked for, where it is legal.
+  for (const slot of slots) {
+    const wanted = pitchers.find((player) => player.id === assignments?.[slot.label]
+      && !used.has(player.id)
+      && pitcherRole(player) === slot.role);
+    if (wanted) {
+      slot.player = wanted;
+      used.add(wanted.id);
+    }
+  }
+  // The rest fill in roster order, so a manager who never touched the board
+  // still takes the field with the arms they drafted.
+  for (const slot of slots) {
+    if (slot.player) continue;
+    const next = pitchers.find((player) => !used.has(player.id) && pitcherRole(player) === slot.role);
+    if (!next) continue;
+    slot.player = next;
+    used.add(next.id);
+  }
+  return slots;
+}
+
+// The cards a manager actually takes the field with: nine bats and four arms.
+// Everything else they own is a bench.
+export function activeRoster(manager) {
+  const lineup = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
+    .map((slot) => slot.player)
+    .filter(Boolean);
+  const staff = assignStaffSlots(manager.roster, manager.staffAssignments)
+    .map((slot) => slot.player)
+    .filter(Boolean);
+  return [...lineup, ...staff];
+}
+
+export function benchPlayers(manager) {
+  const active = new Set(activeRoster(manager).map((player) => player.id));
+  return manager.roster.filter((player) => !active.has(player.id));
+}
+
 export function buildTeam(manager, options = {}) {
   const lineup = applyBattingOrder(
     assignLineupSlots(manager.roster, manager.lineupAssignments).slots
@@ -1145,17 +1203,21 @@ export function buildTeam(manager, options = {}) {
       .map((slot) => lineupPlayer(slot)),
     manager.battingOrder
   );
-  const starters = manager.roster.filter((player) => player.kind === "pitcher" && pitcherRole(player) === "SP");
-  const bullpen = manager.roster.filter((player) => player.kind === "pitcher" && pitcherRole(player) === "RP");
+  // The staff is the four arms the manager put in the slots — not simply the
+  // first four in roster order. On an unlimited roster that is the difference
+  // between the two relievers you chose and the two you happened to buy first.
+  const staff = assignStaffSlots(manager.roster, manager.staffAssignments);
+  const starters = staff.filter((slot) => slot.role === "SP" && slot.player).map((slot) => slot.player);
+  const bullpen = staff.filter((slot) => slot.role === "RP" && slot.player).map((slot) => slot.player);
   const starterIndex = starters.length ? Number(options.starterIndex ?? 0) % starters.length : 0;
   const activeStarter = starters[starterIndex];
   return {
     name: manager.name,
     lineup,
     starters,
-    bullpen: bullpen.slice(0, BULLPEN_TARGET),
+    bullpen,
     starterIndex,
-    pitchers: [activeStarter, ...bullpen.slice(0, BULLPEN_TARGET)].filter(Boolean)
+    pitchers: [activeStarter, ...bullpen].filter(Boolean)
   };
 }
 

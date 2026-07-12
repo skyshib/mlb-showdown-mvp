@@ -766,8 +766,12 @@ function denyAction(draft, seat, isHost, action) {
     if (!isHost && lastPick?.manager.id !== seat?.managerId) return "Only the host or the last picker can undo";
     return null;
   }
-  if (type === "lineup") {
-    if (!isHost && action?.managerId !== seat?.managerId) return "You can only edit your own lineup";
+  if (type === "lineup" || type === "staff") {
+    // Your team is yours. Nobody else moves your bats around, and you do not
+    // move theirs.
+    if (!isHost && action?.managerId !== seat?.managerId) {
+      return `You can only edit your own ${type === "staff" ? "staff" : "lineup"}`;
+    }
     return null;
   }
   if (SIM_ACTION_TYPES.has(type)) {

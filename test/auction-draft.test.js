@@ -7,6 +7,7 @@ import {
   AUCTION_DEFAULT_REVIEW_SECONDS,
   AUCTION_MIN_BID,
   applyDraftAction,
+  assignStaffSlots,
   auctionBidTimeRemainingMs,
   auctionBudget,
   auctionLotPlayer,
@@ -14,6 +15,8 @@ import {
   auctionReviewRemainingMs,
   auctionTimerEnabled,
   autopick,
+  benchPlayers,
+  buildTeam,
   canNominatePlayer,
   canPlaceSealedBid,
   cancelLot,
@@ -511,4 +514,40 @@ test("a draft rebuilt without a clock replays a log recorded without one", () =>
   const untimed = createDraft(["Alpha", "Beta"], pool, 13, "replay", { ...room, timer: false });
   log.forEach((action) => applyDraftAction(untimed, action));
   assert.ok(untimed.auction.lot, "the log replayed, and the card it recorded is on the block");
+});
+
+test("a manager picks which of their cards take the field", () => {
+  // An unlimited roster can buy a dozen arms. WHICH two relievers pitch was
+  // decided by roster order — the two you happened to buy first — and the
+  // manager had no say and could not even see the rest.
+  const pool = makeDraftPool("bench", 40, 24);
+  const draft = makeAuctionDraft(["Alpha"], pool, { nomination: "random", unlimitedRoster: true });
+  const [alpha] = draft.managers;
+  alpha.roster = [
+    ...pool.filter((card) => card.kind === "hitter").slice(0, 11),
+    ...pool.filter((card) => card.role === "SP").slice(0, 4),
+    ...pool.filter((card) => card.role === "RP").slice(0, 4)
+  ];
+
+  // Untouched, the staff fills in roster order and the rest is a bench.
+  const [sp1, sp2, sp3] = pool.filter((card) => card.role === "SP");
+  const [rp1, , rp3] = pool.filter((card) => card.role === "RP");
+  assert.deepEqual(
+    assignStaffSlots(alpha.roster).map((slot) => slot.player.id),
+    [sp1.id, sp2.id, rp1.id, pool.filter((c) => c.role === "RP")[1].id]
+  );
+  const bench = benchPlayers(alpha);
+  assert.ok(bench.length > 0, "the cards that are not in the thirteen are a bench");
+  assert.ok(bench.some((card) => card.id === sp3.id), "the third starter is on it");
+
+  // Now the manager chooses. The staff he picked is the staff that pitches.
+  alpha.staffAssignments = { SP1: sp3.id, SP2: sp1.id, RP1: rp3.id, RP2: rp1.id };
+  const team = buildTeam(alpha);
+  assert.deepEqual(team.starters.map((p) => p.id), [sp3.id, sp1.id], "his starters, not the first two he bought");
+  assert.deepEqual(team.bullpen.map((p) => p.id), [rp3.id, rp1.id], "his bullpen too");
+  assert.ok(!benchPlayers(alpha).some((card) => card.id === sp3.id), "and the man he started is off the bench");
+
+  // A closer cannot be handed the ball to start.
+  const chosen = assignStaffSlots(alpha.roster, { SP1: rp3.id });
+  assert.notEqual(chosen[0].player.id, rp3.id, "a reliever does not fill a starter's slot");
 });

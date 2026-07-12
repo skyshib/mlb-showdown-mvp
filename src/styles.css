@@ -2383,3 +2383,28 @@ button.roster-slot[draggable="true"]:active {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- The bench, and other managers' boards ---- */
+
+/* A board you may not touch should not look like one you may. */
+.roster-slot.readonly-slot {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.bench-group > span {
+  color: var(--muted);
+}
+
+.bench-slots {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+}
+
+.bench-slot {
+  cursor: grab;
+  border-style: dashed;
+}
+
+.bench-slot:active {
+  cursor: grabbing;
+}
