@@ -444,3 +444,30 @@ test("everyone bids at once — the room never waits on one manager", async (t) 
   assert.ok(winner, "Ana is still in the room");
   assert.equal(after.data.lot, null, "the lot closed once the last bid was in");
 });
+
+test("an action answers the client that sent it, so a dead stream cannot freeze them", async (t) => {
+  const base = await startServer(t);
+  const room = await openAuctionRoom(base, { managers: ["Ana", "Bo"] });
+  const ana = await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-1" });
+  const bo = await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-2" });
+
+  const playerId = firstNominatable(await api(base, "GET", `/api/rooms/${room.roomId}`).then((r) => r.data));
+  await act(base, room.roomId, ana.data.token, { type: "nominate", playerId });
+
+  // A sealed bid is WITHHELD from the action log until the card sells, so the
+  // bidder cannot learn their own bid landed by watching the log. If the reply
+  // to their request does not tell them, and their stream has quietly died,
+  // they click Submit and watch nothing happen — for ever, until they reload.
+  const bid = await act(base, room.roomId, bo.data.token, {
+    type: "seal-bid",
+    managerId: "team-2",
+    amount: 50
+  });
+  assert.equal(bid.status, 200);
+  assert.ok(bid.data.lot, "the reply carries the lot back to the bidder");
+  assert.ok(
+    bid.data.lot.bidsIn?.includes("team-2") || JSON.stringify(bid.data.lot).includes("team-2"),
+    "and it shows their bid is in"
+  );
+  assert.equal(typeof bid.data.seq, "number", "and where the log has got to");
+});

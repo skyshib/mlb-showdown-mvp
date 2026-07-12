@@ -72,7 +72,11 @@ export function createOnlineServer(options = {}) {
 
   const heartbeat = setInterval(() => {
     for (const room of store.rooms.values()) {
-      for (const stream of room.streams) stream.write(": ping\n\n");
+      // A named event, not an SSE comment. A comment keeps the socket warm but
+      // EventSource fires nothing for it, so a client cannot tell a live stream
+      // from one that died quietly — and a client whose stream has died stops
+      // seeing the room without ever being told. This is the pulse it listens for.
+      for (const stream of room.streams) stream.write("event: ping\ndata: {}\n\n");
     }
   }, HEARTBEAT_MS);
   heartbeat.unref();
@@ -519,7 +523,12 @@ async function postAction(store, room, request, response) {
   runCpuAuction(store, room);
   broadcastLot(room);
   scheduleRoomTimer(store, room);
-  sendJson(response, 200, { seq: room.actions.length });
+  // Hand the result straight back to whoever acted. They will hear it again on
+  // the stream, but a bidder whose stream has quietly died would otherwise
+  // click Submit and watch nothing happen — the bid lands, the room moves on,
+  // and only they cannot see it. The answer to an action should not have to
+  // travel back by a different road than the one the request came in on.
+  sendJson(response, 200, { seq: room.actions.length, lot: lotView(room) });
 }
 
 function canonicalizeAction(draft, action) {

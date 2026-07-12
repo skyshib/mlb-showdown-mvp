@@ -723,6 +723,11 @@ function subscribeOnline() {
       if (!state.online || state.online.status) return;
       state.online.status = "Reconnecting to room server…";
       renderCurrentScreen();
+    },
+    // The stream went quiet without ever erroring — the room has been moving on
+    // without us. Go and fetch what we missed.
+    onSilent: () => {
+      resyncOnlineRoom();
     }
   });
 }
@@ -752,7 +757,20 @@ async function sendOnlineAction(action) {
     return;
   }
   try {
-    await sendRoomAction(online.roomId, online.token, action);
+    const result = await sendRoomAction(online.roomId, online.token, action);
+    // Never wait on the stream to find out what your own click did. The reply
+    // to the request carries the room's answer, so act on it: a bidder whose
+    // stream has quietly died used to press Submit and watch nothing happen —
+    // the bid landed, everybody else saw it, and only they were left staring at
+    // a screen that would not move until they reloaded the page.
+    if (state.online !== online) return;
+    if (result?.lot !== undefined) online.lot = result.lot;
+    if (Number(result?.seq) > online.appliedSeq) {
+      // The log moved and we have not seen it — the stream is behind or gone.
+      await resyncOnlineRoom();
+      return;
+    }
+    renderCurrentScreen();
   } catch (error) {
     online.status = error.message;
     renderCurrentScreen();

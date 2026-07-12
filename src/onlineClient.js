@@ -31,15 +31,41 @@ export async function sendRoomAction(roomId, token, action) {
 
 // SSE stream of room events. On reconnect the browser re-requests the same
 // URL, so the server resends everything after `since`; callers dedupe by seq.
+// The server pulses every 20 seconds. Two missed beats and we call it: a
+// stream can die without EventSource ever firing an error — a laptop sleeps, a
+// router drops the socket, a proxy quietly stops forwarding — and the room goes
+// on without you while your screen sits there looking fine.
+const STREAM_SILENCE_MS = 45000;
+
 export function subscribeRoom(roomId, since, handlers) {
   const source = new EventSource(`/api/rooms/${encodeURIComponent(roomId)}/stream?since=${since}`);
-  source.addEventListener("action", (event) => handlers.onAction?.(JSON.parse(event.data)));
-  source.addEventListener("seats", (event) => handlers.onSeats?.(JSON.parse(event.data)));
-  source.addEventListener("hello", (event) => handlers.onHello?.(JSON.parse(event.data)));
+  let lastBeat = Date.now();
+  const beat = () => { lastBeat = Date.now(); };
+
+  const listen = (name, handler) => source.addEventListener(name, (event) => {
+    beat();
+    handler?.(JSON.parse(event.data));
+  });
+  listen("action", handlers.onAction);
+  listen("seats", handlers.onSeats);
+  listen("hello", handlers.onHello);
   // A live auction lot: who is up and who has bid, but never the amounts —
   // those only arrive as actions once the card sells.
-  source.addEventListener("lot", (event) => handlers.onLot?.(JSON.parse(event.data)));
+  listen("lot", handlers.onLot);
+  listen("ping", () => {});
+
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastBeat < STREAM_SILENCE_MS) return;
+    beat(); // don't fire again while the resync is in flight
+    handlers.onSilent?.();
+  }, 5000);
+
   source.onerror = () => handlers.onError?.();
+  const close = source.close.bind(source);
+  source.close = () => {
+    clearInterval(watchdog);
+    close();
+  };
   return source;
 }
 
