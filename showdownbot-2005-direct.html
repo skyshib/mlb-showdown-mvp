@@ -57,51 +57,41 @@
     }
 
     .rarity-choice {
+      --choice-color: #cbd0d8;
       min-width: 0;
-      height: 45px;
+      height: 38px;
       display: grid;
-      grid-template-columns: 18px minmax(0, 1fr);
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      padding: 0 6px;
+      place-items: center;
+      padding: 0 4px;
       border: 1px solid #3c414a;
       border-radius: 6px;
       background: #22252a;
-      color: #cbd0d8;
-      font: 700 10px/1 Arial, Helvetica, sans-serif;
+      color: var(--choice-color);
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: 11px;
+      font-style: italic;
+      font-weight: 700;
+      line-height: 1;
       text-transform: uppercase;
       cursor: pointer;
     }
 
+    .rarity-choice[data-rarity="common"] { --choice-color: #cbd0d8; }
+    .rarity-choice[data-rarity="bronze"] { --choice-color: #c9915d; }
+    .rarity-choice[data-rarity="silver"] { --choice-color: #e5edf2; }
+    .rarity-choice[data-rarity="gold"] { --choice-color: #f0c95e; }
+    .rarity-choice[data-rarity="legendary"] { --choice-color: #ffe987; }
+
     .rarity-choice:hover {
       border-color: #6e7682;
-      color: #fff;
+      filter: brightness(1.12);
     }
 
     .rarity-choice[aria-pressed="true"] {
-      border-color: #f0f2f5;
+      border-color: var(--choice-color);
       background: #30343b;
-      color: #fff;
-      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--choice-color) 35%, transparent);
     }
-
-    .picker-symbol {
-      display: grid;
-      place-items: center;
-      width: 18px;
-      aspect-ratio: 1;
-      border-radius: 50%;
-      color: var(--picker-color, #68727d);
-      font-size: 15px;
-      line-height: 1;
-    }
-
-    .picker-symbol.rarity-common { --picker-color: #7d8792; }
-    .picker-symbol.rarity-bronze { --picker-color: #bd8250; }
-    .picker-symbol.rarity-silver { --picker-color: #dce4e9; }
-    .picker-symbol.rarity-gold { --picker-color: #f0c95e; }
-    .picker-symbol.rarity-legendary { --picker-color: #ffe987; }
 
     .rarity-frame {
       --rarity-color: #9c6a3f;
@@ -144,55 +134,30 @@
     }
 
     .rarity-mark {
-      --mark-ring: #68727d;
       position: absolute;
       z-index: 8;
-      top: 2.2%;
+      top: 2.5%;
       right: 3.1%;
-      width: 9%;
-      aspect-ratio: 1;
-      display: grid;
-      place-items: center;
-      border-radius: 50%;
-      background:
-        radial-gradient(circle, #17191d 0 58%, transparent 61%),
-        var(--mark-ring);
-      color: #fff;
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: clamp(14px, 4vw, 20px);
+      color: #cbd0d8;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(13px, 3.4vw, 19px);
+      font-style: italic;
       font-weight: 700;
       line-height: 1;
-      text-shadow: 0 1px 2px #000;
-      box-shadow: 0 2px 7px rgba(0, 0, 0, 0.62);
+      text-transform: uppercase;
+      text-shadow:
+        -1px -1px 0 rgba(0, 0, 0, 0.9),
+        1px -1px 0 rgba(0, 0, 0, 0.9),
+        -1px 1px 0 rgba(0, 0, 0, 0.9),
+        1px 1px 0 rgba(0, 0, 0, 0.9),
+        0 2px 5px rgba(0, 0, 0, 0.72);
     }
 
-    .rarity-mark::before,
-    .picker-symbol::before { content: "\2022"; }
-    .rarity-mark.rarity-common::before,
-    .picker-symbol.rarity-common::before { content: "\2022"; }
-    .rarity-mark.rarity-bronze::before,
-    .picker-symbol.rarity-bronze::before {
-      content: "\25C6";
-      transform: translateY(1px);
-    }
-    .rarity-mark.rarity-silver::before,
-    .picker-symbol.rarity-silver::before {
-      content: "\2B22";
-      transform: translateY(1px);
-    }
-    .rarity-mark.rarity-gold::before,
-    .picker-symbol.rarity-gold::before { content: "\2605"; }
-    .rarity-mark.rarity-legendary::before,
-    .picker-symbol.rarity-legendary::before { content: "\2726"; }
-
-    .rarity-mark.rarity-common { --mark-ring: #68727d; }
-    .rarity-mark.rarity-bronze { --mark-ring: #9c6a3f; }
-    .rarity-mark.rarity-silver { --mark-ring: #c9d2d8; }
-    .rarity-mark.rarity-gold { --mark-ring: #e1b64b; }
-    .rarity-mark.rarity-legendary {
-      --mark-ring: conic-gradient(from 40deg, #ff6279, #ffd15e, #53d69e, #4f9dff, #c27cff, #ff6279);
-      color: #ffe987;
-    }
+    .rarity-mark.rarity-common { color: #cbd0d8; }
+    .rarity-mark.rarity-bronze { color: #c9915d; }
+    .rarity-mark.rarity-silver { color: #e5edf2; }
+    .rarity-mark.rarity-gold { color: #f0c95e; }
+    .rarity-mark.rarity-legendary { color: #ffe987; }
 
     .card {
       position: relative;
@@ -402,16 +367,8 @@
 
     @media (max-width: 460px) {
       .rarity-choice {
-        grid-template-columns: 1fr;
-        gap: 2px;
         padding: 0 2px;
-        font-size: 8px;
-      }
-
-      .picker-symbol {
-        width: 15px;
-        margin: 0 auto;
-        font-size: 13px;
+        font-size: 9px;
       }
     }
 
@@ -442,25 +399,25 @@
 
     <div class="rarity-picker" aria-label="Preview rarity">
       <button class="rarity-choice" type="button" data-rarity="common" aria-pressed="false">
-        <span class="picker-symbol rarity-common" aria-hidden="true"></span><span>Common</span>
+        <span>Common</span>
       </button>
       <button class="rarity-choice" type="button" data-rarity="bronze" aria-pressed="false">
-        <span class="picker-symbol rarity-bronze" aria-hidden="true"></span><span>Bronze</span>
+        <span>Bronze</span>
       </button>
       <button class="rarity-choice" type="button" data-rarity="silver" aria-pressed="false">
-        <span class="picker-symbol rarity-silver" aria-hidden="true"></span><span>Silver</span>
+        <span>Silver</span>
       </button>
       <button class="rarity-choice" type="button" data-rarity="gold" aria-pressed="false">
-        <span class="picker-symbol rarity-gold" aria-hidden="true"></span><span>Gold</span>
+        <span>Gold</span>
       </button>
       <button class="rarity-choice" type="button" data-rarity="legendary" aria-pressed="true">
-        <span class="picker-symbol rarity-legendary" aria-hidden="true"></span><span>Legendary</span>
+        <span>Legendary</span>
       </button>
     </div>
 
     <div class="rarity-frame rarity-legendary" aria-label="Legendary rarity">
     <article class="card" aria-label="Serena Anwar Showdown-style card">
-      <span class="rarity-mark rarity-legendary" aria-label="Legendary rarity" title="Legendary"></span>
+      <span class="rarity-mark rarity-legendary" aria-label="Legendary rarity" title="Legendary">Legendary</span>
       <div class="photo">
         <img
           src="https://api.dicebear.com/9.x/micah/svg?seed=Serena%20Anwar-hitter-LF%2FRF&amp;backgroundColor=transparent"
@@ -528,6 +485,7 @@
       rarityFrame.setAttribute("aria-label", `${label} rarity`);
       rarityMark.setAttribute("aria-label", `${label} rarity`);
       rarityMark.title = label;
+      rarityMark.textContent = label;
       rarityChoices.forEach((choice) => {
         choice.setAttribute("aria-pressed", String(choice.dataset.rarity === tier));
       });
