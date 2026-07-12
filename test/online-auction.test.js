@@ -199,18 +199,24 @@ test("an auction room enforces whose nomination and whose bid it is", async (t) 
 
   await act(base, room.roomId, ana.data.token, { type: "nominate", playerId });
 
-  // Bids come in seat order from the nominator, and only for your own seat.
-  const outOfTurn = await act(base, room.roomId, bo.data.token, { type: "seal-bid", managerId: "team-2", amount: 50 });
-  assert.equal(outOfTurn.status, 409);
-  assert.match(outOfTurn.data.error, /bids next/i);
+  // The bids are sealed, so there is no turn to bid out of. Ana nominated, but
+  // Bo does not have to sit and wait for her to type: he bids when he likes.
+  const early = await act(base, room.roomId, bo.data.token, { type: "seal-bid", managerId: "team-2", amount: 50 });
+  assert.equal(early.status, 200);
 
+  // But he bids once...
+  const twice = await act(base, room.roomId, bo.data.token, { type: "seal-bid", managerId: "team-2", amount: 90 });
+  assert.equal(twice.status, 409);
+  assert.match(twice.data.error, /already in/i);
+
+  // ...and only for himself.
   const asSomeoneElse = await act(base, room.roomId, bo.data.token, {
     type: "seal-bid",
     managerId: "team-1",
     amount: 50
   });
   assert.equal(asSomeoneElse.status, 409);
-  assert.match(asSomeoneElse.data.error, /not your bid/i);
+  assert.match(asSomeoneElse.data.error, /another manager/i);
 
   // The nominator may not pass on their own nomination.
   const passed = await act(base, room.roomId, ana.data.token, { type: "seal-bid", managerId: "team-1", amount: 0 });
@@ -340,4 +346,32 @@ test("a room restarted mid-lot keeps the withheld bids and still sells correctly
   const draft = replay(sold.data);
   assert.equal(draft.managers[0].roster[0].id, playerId);
   assert.equal(auctionBudget(draft, draft.managers[0]), 5000 - 101);
+});
+
+test("everyone bids at once — the room never waits on one manager", async (t) => {
+  const base = await startServer(t);
+  const room = await openAuctionRoom(base, { managers: ["Ana", "Bo", "Cyd"] });
+  const seats = await Promise.all([1, 2, 3].map((n) =>
+    api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: `team-${n}` })));
+  const [ana, bo, cyd] = seats;
+
+  const playerId = firstNominatable(await api(base, "GET", `/api/rooms/${room.roomId}`).then((r) => r.data));
+  await act(base, room.roomId, ana.data.token, { type: "nominate", playerId });
+
+  // All three fire their sealed bids simultaneously. Nobody is anybody's
+  // turn, so every one of them lands, and the lot resolves on the last in.
+  const results = await Promise.all([
+    act(base, room.roomId, cyd.data.token, { type: "seal-bid", managerId: "team-3", amount: 60 }),
+    act(base, room.roomId, bo.data.token, { type: "seal-bid", managerId: "team-2", amount: 30 }),
+    act(base, room.roomId, ana.data.token, { type: "seal-bid", managerId: "team-1", amount: 90 })
+  ]);
+  for (const result of results) assert.equal(result.status, 200, result.data.error);
+
+  const after = await api(base, "GET", `/api/rooms/${room.roomId}`);
+  const sale = after.data.actions.find((entry) => entry.action.type === "seal-bid");
+  assert.ok(sale, "the bids reached the log");
+  // Ana's 90 takes it at Cyd's 60 + 1.
+  const winner = after.data.managers.find((manager) => manager.id === "team-1");
+  assert.ok(winner, "Ana is still in the room");
+  assert.equal(after.data.lot, null, "the lot closed once the last bid was in");
 });

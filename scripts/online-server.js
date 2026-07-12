@@ -19,6 +19,7 @@ import {
   draftHistory,
   isAuctionDraft,
   auctionStepGuard,
+  isPendingBidder,
   isRandomNomination,
   maxPoolManagers,
   nominateBestTarget,
@@ -621,12 +622,17 @@ function denyAction(draft, seat, isHost, action) {
   }
   if (type === "seal-bid") {
     if (!isAuctionDraft(draft)) return "This room is not an auction draft";
-    const bidder = sealedBidder(draft);
-    if (!bidder) return "No card is on the block";
-    // The host may bid for a stalled seat, but nobody bids out of turn and
-    // nobody bids as someone else.
-    if (bidder.id !== action.managerId) return `${bidder.name} bids next`;
-    if (!isHost && bidder.id !== seat?.managerId) return "It is not your bid";
+    if (!draft.auction.lot) return "No card is on the block";
+    // Bids are sealed, so there is no turn to bid out of: anyone the lot is
+    // still owed a bid from may enter it, whenever they get to it. What is
+    // still forbidden is bidding twice, and bidding as somebody else — the
+    // host excepted, who may enter for a seat that has stalled.
+    if (!isPendingBidder(draft, action.managerId)) {
+      return action.managerId in draft.auction.lot.bids
+        ? "That bid is already in"
+        : "That manager is not bidding on this card";
+    }
+    if (!isHost && action.managerId !== seat?.managerId) return "You cannot bid for another manager";
     return null;
   }
   if (type === "cancel-lot") {

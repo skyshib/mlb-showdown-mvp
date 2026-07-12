@@ -478,8 +478,17 @@ export function nominateNextQueued(draft, expectedPlayerId = null) {
   return draft.auction.lot;
 }
 
-// The manager whose sealed bid the lot is waiting on (bids come in seat
-// order from the nominator so a hotseat table can pass the keyboard).
+// The bids are sealed, so nobody is waiting on anybody: every manager the lot
+// is still owed a bid from may enter it whenever they like, and the lot
+// resolves when the last one is in. `pending` is a set of who still owes,
+// not a queue of whose turn it is.
+export function isPendingBidder(draft, managerId) {
+  return Boolean(draft.auction?.lot?.pending?.includes(managerId));
+}
+
+// Someone the lot is still waiting on. Order is seat order, which is arbitrary
+// but stable — it exists so the computer managers have somebody to play next,
+// not because a human has to wait their turn.
 export function sealedBidder(draft) {
   const pendingId = draft.auction?.lot?.pending?.[0];
   return pendingId ? draft.managers.find((manager) => manager.id === pendingId) ?? null : null;
@@ -488,9 +497,9 @@ export function sealedBidder(draft) {
 export function canPlaceSealedBid(draft, manager, amount) {
   const lot = draft.auction?.lot;
   if (!lot) return { ok: false, reason: "no card is on the block" };
-  if (lot.pending[0] !== manager?.id) {
-    const next = sealedBidder(draft);
-    return { ok: false, reason: next ? `${next.name} bids next` : "all bids are in" };
+  if (!isPendingBidder(draft, manager?.id)) {
+    const alreadyIn = manager?.id in lot.bids;
+    return { ok: false, reason: alreadyIn ? "your bid is already in" : "you are not bidding on this card" };
   }
   const bid = Math.round(Number(amount));
   if (!Number.isFinite(bid) || bid < 0) return { ok: false, reason: "enter a bid amount" };
@@ -528,7 +537,8 @@ export function placeSealedBid(draft, managerId, amount) {
   }
   const lot = draft.auction.lot;
   lot.bids[managerId] = Math.round(Number(amount));
-  lot.pending.shift();
+  // Whoever this was, they are done — not necessarily the one at the front.
+  lot.pending = lot.pending.filter((id) => id !== managerId);
   if (lot.pending.length === 0) return resolveSealedLot(draft);
   return { sold: false, lot };
 }
@@ -541,7 +551,14 @@ function resolveSealedLot(draft) {
   const lot = draft.auction.lot;
   const live = Object.entries(lot.bids).filter(([, amount]) => amount > 0);
   const top = live.reduce((best, [, amount]) => Math.max(best, amount), 0);
-  const leaders = live.filter(([, amount]) => amount === top).map(([managerId]) => managerId);
+  // Seat order, not the order the bids happened to land in. Bids are sealed
+  // and may be entered in any order, so who typed first must not tilt a
+  // coin flip — the tie is between managers, not between reflexes.
+  const seat = (managerId) => draft.managers.findIndex((manager) => manager.id === managerId);
+  const leaders = live
+    .filter(([, amount]) => amount === top)
+    .map(([managerId]) => managerId)
+    .sort((a, b) => seat(a) - seat(b));
 
   // Under manual nomination the nominator has to open the bidding, so a lot
   // always sells. Under random nomination nobody is on the hook for it, and a

@@ -128,7 +128,9 @@ let liveGame = null;
 let batchRunToken = 0;
 let hoverPreviewController = null;
 let onlineStream = null;
-let lotEntryError = "";
+// The bid box that was rejected, and why — one manager's error, not the
+// panel's, now that several boxes can be open at once.
+let lotEntryError = null;
 let cpuPaused = false;
 let cpuDriveKey = null;
 
@@ -1128,7 +1130,6 @@ function renderAuctionLotPanel(draft) {
   if (!player || !lot) return "";
   const online = state.online;
   const nominator = draft.managers.find((manager) => manager.id === lot.nominatorId);
-  const upNow = sealedBidder(liveDraft(draft));
   const canEnterFor = (manager) => !online || online.host || manager.id === online.managerId;
   const participants = draft.managers.filter((manager) =>
     lot.round === 2 ? lot.tie.managerIds.includes(manager.id) : manager.id in lot.bids || lot.pending.includes(manager.id)
@@ -1137,8 +1138,8 @@ function renderAuctionLotPanel(draft) {
   const bidderChips = participants
     .map((manager) => {
       const waiting = lot.pending.includes(manager.id);
-      const status = waiting ? (manager.id === upNow?.id ? "entering a bid…" : "waiting to bid") : "bid in";
-      return `<div class="lot-bidder ${manager.id === upNow?.id ? "high-bidder" : ""}">
+      const status = waiting ? "still to bid" : "bid in";
+      return `<div class="lot-bidder ${waiting ? "" : "high-bidder"}">
         <strong>${escapeHtml(manager.name)}${manager.cpu ? ' <span class="cpu-tag">CPU</span>' : ""}</strong>
         <span>${auctionBudget(draft, manager)} left &middot; max bid ${Math.max(0, auctionMaxBid(draft, manager))}</span>
         <em>${status}</em>
@@ -1147,21 +1148,30 @@ function renderAuctionLotPanel(draft) {
     .join("");
 
   const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
-  const nominatorTurn = lot.round === 1 && upNow?.id === lot.nominatorId;
-  const canPass = lot.round === 1 && !nominatorTurn;
-  const seatBlocked = upNow && !canEnterFor(upNow);
-  const entry = !upNow
-    ? ""
-    : `<div class="lot-entry">
-      <span class="lot-entry-name">${escapeHtml(upNow.name)}, enter your sealed bid${nominatorTurn ? ` (you nominated — minimum ${AUCTION_MIN_BID})` : lot.round === 2 ? ` (rebid at least ${minBid})` : ""}</span>
+  // The bids are sealed, so nobody waits their turn: every manager this
+  // screen speaks for — your seat online, the whole table on a hotseat, any
+  // stalled seat if you host — gets their own box, and they can be filled in
+  // any order. The lot resolves on the last one in, whoever that turns out
+  // to be.
+  const mine = draft.managers.filter((manager) => lot.pending.includes(manager.id) && canEnterFor(manager));
+  const entry = mine
+    .map((manager) => {
+      const isNominator = lot.round === 1 && manager.id === lot.nominatorId;
+      const canPass = lot.round === 1 && !isNominator;
+      const maxBid = Math.max(0, auctionMaxBid(draft, manager));
+      const error = lotEntryError?.managerId === manager.id ? lotEntryError.message : "";
+      return `<div class="lot-entry">
+      <span class="lot-entry-name">${escapeHtml(manager.name)}, enter your sealed bid${isNominator ? ` (you nominated — minimum ${AUCTION_MIN_BID})` : lot.round === 2 ? ` (rebid at least ${minBid})` : ""}</span>
       ${state.maskBids
-        ? `<input type="password" data-sealed-bid inputmode="numeric" autocomplete="off" placeholder="${minBid}" ${seatBlocked ? "disabled" : ""} />`
-        : `<input type="number" data-sealed-bid min="${canPass ? 0 : minBid}" max="${Math.max(0, auctionMaxBid(draft, upNow))}" step="1" placeholder="${minBid}" ${seatBlocked ? "disabled" : ""} />`}
-      <button data-action="seal-bid" data-manager-id="${escapeHtml(upNow.id)}" ${seatBlocked ? "disabled" : ""}>Submit bid</button>
-      ${canPass ? `<button data-action="seal-pass" data-manager-id="${escapeHtml(upNow.id)}" ${seatBlocked ? "disabled" : ""}>Pass</button>` : ""}
+        ? `<input type="password" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" inputmode="numeric" autocomplete="off" placeholder="${minBid}" />`
+        : `<input type="number" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" min="${canPass ? 0 : minBid}" max="${maxBid}" step="1" placeholder="${minBid}" />`}
+      <button data-action="seal-bid" data-manager-id="${escapeHtml(manager.id)}">Submit bid</button>
+      ${canPass ? `<button data-action="seal-pass" data-manager-id="${escapeHtml(manager.id)}">Pass</button>` : ""}
       <label class="mask-toggle"><input type="checkbox" data-mask-bids ${state.maskBids ? "checked" : ""} /> Mask bids (shared screen)</label>
-      ${lotEntryError ? `<span class="warn">${escapeHtml(lotEntryError)}</span>` : ""}
+      ${error ? `<span class="warn">${escapeHtml(error)}</span>` : ""}
     </div>`;
+    })
+    .join("");
 
   const tieNote = lot.round === 2
     ? `<p class="lot-tie-note">Tied at ${lot.tie.amount} — the tied managers rebid sealed. Another tie is a coin flip at that price.</p>`
@@ -1283,7 +1293,7 @@ function bindDraftActions() {
     }
     if (action === "nominate") {
       if (button.disabled) return;
-      lotEntryError = "";
+      lotEntryError = null;
       if (state.online) {
         sendOnlineAction({ type: "nominate", playerId: button.dataset.playerId });
         return;
@@ -1295,12 +1305,14 @@ function bindDraftActions() {
       if (button.disabled) return;
       const managerId = button.dataset.managerId;
       const manager = state.draft.managers.find((item) => item.id === managerId);
-      const input = app.querySelector("[data-sealed-bid]");
+      // Several bid boxes can be on screen at once, so take the one belonging
+      // to the manager whose button was pressed.
+      const input = app.querySelector(`[data-sealed-bid][data-manager-id="${CSS.escape(managerId)}"]`);
       const amount = action === "seal-pass" ? 0 : Math.round(Number(input?.value));
-      lotEntryError = "";
+      lotEntryError = null;
       const legality = canPlaceSealedBid(liveDraft(state.draft), manager, amount);
       if (!legality.ok) {
-        lotEntryError = legality.reason;
+        lotEntryError = { managerId, message: legality.reason };
         renderDraft();
         return;
       }
@@ -1315,7 +1327,7 @@ function bindDraftActions() {
     }
     if (action === "cancel-lot") {
       if (button.disabled) return;
-      lotEntryError = "";
+      lotEntryError = null;
       if (state.online) {
         sendOnlineAction({ type: "cancel-lot" });
         return;

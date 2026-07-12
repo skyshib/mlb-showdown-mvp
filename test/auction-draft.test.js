@@ -135,21 +135,61 @@ test("nomination opens a sealed lot with bids pending in seat order from the nom
   assert.throws(() => nominatePlayer(draft, draft.pool[1].id));
 });
 
-test("the nominator must open at the minimum; others may pass; turns go in order", () => {
+test("the nominator must open at the minimum, and everyone else may pass", () => {
   const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16));
-  const [alpha, beta, gamma] = draft.managers;
+  const [alpha, beta] = draft.managers;
   nominatePlayer(draft, draft.pool[0].id);
 
   assert.equal(canPlaceSealedBid(draft, alpha, 0).ok, false);
   assert.match(canPlaceSealedBid(draft, alpha, 0).reason, /nominator opens/);
-  assert.equal(canPlaceSealedBid(draft, beta, 50).ok, false);
-  assert.match(canPlaceSealedBid(draft, beta, 50).reason, /Alpha bids next/);
   assert.equal(canPlaceSealedBid(draft, alpha, AUCTION_MIN_BID - 1).ok, false);
+  assert.equal(canPlaceSealedBid(draft, beta, 0).ok, true, "anyone but the nominator may pass");
+});
 
-  placeSealedBid(draft, alpha.id, 40);
-  assert.equal(sealedBidder(draft).id, beta.id);
+test("sealed bids go in in any order — nobody waits their turn", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16));
+  const [alpha, beta, gamma] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id);
+
+  // Alpha nominated, so seat order would have had Alpha bid first. Gamma does
+  // not have to wait for him: the bids are hidden until the card sells, so
+  // there is nothing to wait for.
+  assert.equal(canPlaceSealedBid(draft, gamma, 50).ok, true);
+  placeSealedBid(draft, gamma.id, 50);
+  assert.equal(canPlaceSealedBid(draft, gamma, 60).ok, false, "and nobody bids twice");
+  assert.match(canPlaceSealedBid(draft, gamma, 60).reason, /already in/);
+
+  assert.equal(canPlaceSealedBid(draft, beta, 0).ok, true);
   placeSealedBid(draft, beta.id, 0);
-  assert.equal(sealedBidder(draft).id, gamma.id);
+
+  // The last bid in resolves the lot, whoever it belongs to.
+  const sale = placeSealedBid(draft, alpha.id, 80);
+  assert.equal(sale.sold, true);
+  assert.equal(sale.manager.id, alpha.id);
+  assert.equal(sale.price, 51);
+});
+
+test("a tie is broken by seat, not by who typed first", () => {
+  // Two managers tie, rebid, and tie again: the coin flip decides. Run the
+  // identical bids with the entry order reversed in BOTH rounds — the same
+  // manager has to win, or the flip is really a race to the submit button.
+  const winnerFor = (order) => {
+    const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16));
+    const [alpha, beta, gamma] = draft.managers;
+    const pair = order === "ab" ? [alpha, beta] : [beta, alpha];
+    nominatePlayer(draft, draft.pool[0].id);
+
+    placeSealedBid(draft, gamma.id, 0);
+    placeSealedBid(draft, pair[0].id, 100);
+    const tie = placeSealedBid(draft, pair[1].id, 100);
+    assert.equal(tie.sold, false, "a tied top bid forces a rebid");
+
+    placeSealedBid(draft, pair[0].id, 100);
+    const sale = placeSealedBid(draft, pair[1].id, 100);
+    assert.equal(sale.sold, true);
+    return sale.manager.id;
+  };
+  assert.equal(winnerFor("ab"), winnerFor("ba"));
 });
 
 test("the high bid wins at the second-highest bid plus one", () => {
