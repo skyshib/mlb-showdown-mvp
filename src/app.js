@@ -3570,24 +3570,40 @@ function renderWarTeamPositions(manager, auction, prices, heatScale) {
   return `<div class="war-positions">${cells}</div>`;
 }
 
-// The cheapest card still available at every spot some roster has not filled:
-// the floor you settle for if you wait. Eligibility follows lineup rules, so
-// 1B and DH floors consider every remaining hitter.
+// What is still on the board at every spot some roster has not filled: how
+// many eligible cards remain, the best of them, and the floor you settle for
+// if you wait. Eligibility follows lineup rules, so 1B and DH consider every
+// remaining hitter. The chip edge is heat-tinted by the best card's points,
+// so a red edge means a stud is still out there.
 function renderPoolFloor(draft) {
   const needed = leagueOpenGroups(draft);
   if (!needed.size) return "";
   const available = availablePlayers(draft);
+  const pointsScale = poolPointsScale(draft);
+  const previewChip = (label, player) =>
+    `<strong class="player-name-preview" tabindex="0" data-preview-id="pool-${label}-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${label} ${escapeHtml(dockChipName(player))} &middot; ${player.points}</strong>`;
   const items = BOARD_POSITION_GROUPS.filter((group) => needed.has(group))
     .map((group) => {
       const eligible = available.filter((player) => poolGroupEligible(player, group));
       if (!eligible.length) {
         return `<span class="floor-chip floor-empty"><small>${group}</small><strong>none left</strong></span>`;
       }
+      const best = eligible.reduce((high, player) => (player.points > high.points ? player : high));
       const floor = eligible.reduce((low, player) => (player.points < low.points ? player : low));
-      return `<span class="floor-chip"><small>${group} &middot; ${eligible.length} left</small><strong class="player-name-preview" tabindex="0" data-preview-id="floor-${escapeHtml(floor.id)}" data-preview-card="${escapeHtml(renderPlayerCard(floor))}">${escapeHtml(dockChipName(floor))} &middot; ${floor.points}</strong></span>`;
+      const lines = best === floor
+        ? previewChip("last:", best)
+        : `${previewChip("best", best)}${previewChip("floor", floor)}`;
+      return `<span class="floor-chip heat" style="${heatStyle(best.points, pointsScale)}"><small>${group} &middot; ${eligible.length} left</small>${lines}</span>`;
     })
     .join("");
-  return `<div class="pool-floor" aria-label="Cheapest remaining at open positions"><small>floor if you wait</small>${items}</div>`;
+  return `<div class="pool-floor" aria-label="Strength remaining at open positions"><small>left on the board</small>${items}</div>`;
+}
+
+// Card-points scale for pool-quality tints, independent of the bid scale.
+function poolPointsScale(draft) {
+  const points = draft.pool.map((player) => player.points).sort((a, b) => a - b);
+  const lo = quantileOf(points, 0.1);
+  return { lo, hi: Math.max(quantileOf(points, 0.9), lo + 10), auction: false };
 }
 
 function poolGroupEligible(player, group) {
