@@ -235,18 +235,7 @@
       border: 1px solid #c8bda8;
       border-radius: 50%;
       background: #f5eedf;
-      color: #ef3d1b;
-      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
-      font-size: clamp(21px, 6.5vw, 29px);
-      font-style: normal;
-      font-weight: 700;
-      line-height: 1;
       transform: translate(-50%, -50%);
-      text-shadow:
-        -1px -1px 0 #080808,
-        1px -1px 0 #080808,
-        -1px 1px 0 #080808,
-        1px 1px 0 #080808;
       pointer-events: none;
     }
 
@@ -275,23 +264,45 @@
       transform: rotate(12deg);
     }
 
-    .primary-number span {
-      position: relative;
-      z-index: 2;
+    .primary-value {
+      position: absolute;
+      z-index: 10;
+      left: 10.23%;
+      top: 86.38%;
+      color: #ef3d1b;
+      font-family: "Showdown Condensed", Arial Narrow, sans-serif;
+      font-size: clamp(21px, 6.5vw, 29px);
+      font-style: normal;
+      font-weight: 700;
+      line-height: 1;
+      transform: translate(-50%, -50%);
+      text-shadow:
+        -1px -1px 0 #080808,
+        1px -1px 0 #080808,
+        -1px 1px 0 #080808,
+        1px 1px 0 #080808;
+      pointer-events: none;
     }
 
     .primary-label {
       position: absolute;
-      z-index: 8;
+      z-index: 9;
       left: 3.2%;
-      top: 89.05%;
+      top: 88.7%;
       width: 13.8%;
       height: 3.25%;
       overflow: visible;
       pointer-events: none;
     }
 
-    .primary-label path {
+    .primary-label .ribbon-shape {
+      fill: #091018;
+      stroke: #ef3d1b;
+      stroke-width: 4px;
+      stroke-linejoin: round;
+    }
+
+    .primary-label .ribbon-curve {
       fill: none;
     }
 
@@ -475,9 +486,11 @@
       </div>
 
       <img class="frame" src="./vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER-v2.png" alt="">
-      <div class="primary-number"><span>6</span></div>
+      <div class="primary-number"></div>
+      <div class="primary-value">6</div>
       <svg class="primary-label" viewBox="0 0 200 70" role="img" aria-label="Control">
-        <path id="control-ribbon-curve" d="M 12 48 Q 100 8 188 48"></path>
+        <path class="ribbon-shape" d="M 8 31 Q 100 1 192 31 L 181 67 Q 100 39 19 67 Z"></path>
+        <path class="ribbon-curve" id="control-ribbon-curve" d="M 12 48 Q 100 8 188 48"></path>
         <text><textPath href="#control-ribbon-curve" startOffset="50%">CONTROL</textPath></text>
       </svg>
 

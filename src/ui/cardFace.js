@@ -238,6 +238,18 @@ function photoName(name) {
   return stripCardYear(name);
 }
 
+const FICTIONAL_BACKDROPS = ["day", "sunset", "night", "ivy", "brick", "dome"];
+
+function fictionalBackdropClass(card) {
+  const key = String(card.id ?? card.name ?? "player");
+  let hash = 2166136261;
+  for (const char of key) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return `gq-backdrop-${FICTIONAL_BACKDROPS[hash % FICTIONAL_BACKDROPS.length]}`;
+}
+
 export function cardPanelHtml(card, { count = null } = {}) {
   // Classic cards with a real scan ARE the card: the printed scan fills the
   // frame (courtesy of ShowdownCards.com), with just a compact chart tray
@@ -278,8 +290,9 @@ export function cardPanelHtml(card, { count = null } = {}) {
     ? `<span>${card.points + partner.points} PTS</span><span>SPEED ${bat.speed}</span><span>IP ${arm.ip}</span><span>${escapeHtml(arm.role)}</span>`
     : statLineHtml(card);
   const charts = partner ? comboChartRows(bat, arm) : chartRows(card);
+  const photoClass = card.real ? "gq-photo" : `gq-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}`;
   return `<div class="${cardShell(card, partner ? " gq-card-two-way" : "")}"><div class="gq-face">
-    <div class="gq-photo">${card.real
+    <div class="${photoClass}">${card.real
       ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
       : `<span class="gq-card-initials">${escapeHtml(initials)}</span>
       <img class="gq-fictional-face" src="https://api.dicebear.com/9.x/open-peeps/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}`)}&backgroundColor=transparent" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`}
