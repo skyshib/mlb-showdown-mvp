@@ -6,6 +6,14 @@
 app = "mlb-showdown-mvp"
 primary_region = "sjc"
 
+# The machine sleeps when the last person leaves, so an empty room costs nothing
+# but the volume. Coming back up replays the rooms off the disk, and the browser
+# reconnects its own stream — but Node still gets told first, so a save already
+# in flight lands before the lights go out. Fly's default is SIGINT after 5s,
+# which is not enough of either.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
 [env]
   PORT = "8080"
   ROOMS_DIR = "/data/rooms"
@@ -20,6 +28,16 @@ primary_region = "sjc"
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0
+
+  # A draft is a held-open SSE socket that may go minutes between events, and
+  # Fly decides to stop the machine by looking at load from the outside. Counting
+  # connections means an open stream is load; counting requests risks reading a
+  # room full of people waiting on a pick as an idle machine and stopping it
+  # underneath them. This is the setting that makes scale-to-zero safe here.
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
 
 [[vm]]
   size = "shared-cpu-1x"

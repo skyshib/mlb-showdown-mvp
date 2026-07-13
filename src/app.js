@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-l";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-m";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-l";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-l";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-l";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-l";
+} from "./ui/sounds.js?v=20260713-m";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-m";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-m";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-m";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-l";
+} from "./rules/draft.js?v=20260713-m";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-l";
+} from "./onlineClient.js?v=20260713-m";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-l";
-import { computeAwards } from "./rules/awards.js?v=20260713-l";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-l";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-l";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-l";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-l";
+} from "./rules/batch.js?v=20260713-m";
+import { computeAwards } from "./rules/awards.js?v=20260713-m";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-m";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-m";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-m";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-m";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-l";
+} from "./ui/render.js?v=20260713-m";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -5149,13 +5149,12 @@ function teamComposition(manager, draft) {
   };
 }
 
-// The chart grade is deliberately mute about its own number. A chart OPS is a
-// made-up statistic — useful for ranking, meaningless to read aloud — and
-// printing "1.043" invites an argument about the third decimal place of a thing
-// that was only ever meant to sort. The letter is the whole point.
+// The chart OPS runs high against a real slash line — around 1.5 to 2.5 — because
+// it reads the card alone: the twenty faces with the pitcher taken out of it. It
+// is a number for comparing charts to charts, not to a baseball card's back.
 const COMPOSITION_ROWS = [
   { key: "onBase", label: "On-base", note: "the average bat, against every bat on the board", decimals: 1 },
-  { key: "chart", label: "Chart quality", note: "what the twenty faces do — OPS of the charts, graded but not printed", decimals: null },
+  { key: "chart", label: "Chart quality", note: "OPS off the card alone — the twenty faces with the pitcher taken out", decimals: 3 },
   { key: "speed", label: "Speed", note: "the average bat, against every bat on the board", decimals: 1 },
   { key: "defence", label: "Defence", note: "the average glove, against every glove on the board", decimals: 1 },
   { key: "starters", label: "Starters", note: "average control, against every starter on the board", decimals: 1 },
@@ -5204,7 +5203,7 @@ function recapText(draft) {
   lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(col)).join("")}`);
   for (const row of rows) {
     const cells = row.cells
-      .map((cell) => `${cell.grade}${row.decimals === null ? "" : ` (${cell.value.toFixed(row.decimals)})`}`.padStart(col))
+      .map((cell) => `${cell.grade} (${cell.value.toFixed(row.decimals)})`.padStart(col))
       .join("");
     lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
@@ -5237,7 +5236,7 @@ function renderDraftDone(draft) {
           .map(
             (cell) => `<td class="comp-cell">
               <span class="comp-grade grade-${cell.grade}">${cell.grade}</span>
-              ${row.decimals === null ? "" : `<span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>`}
+              <span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>
             </td>`
           )
           .join("")}

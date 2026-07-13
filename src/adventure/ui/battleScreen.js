@@ -10,15 +10,15 @@ import {
   stripCardYear,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260713-l";
-import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js?v=20260713-l";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260713-l";
-import { cardById } from "../packs.js?v=20260713-l";
-import { buildBoxScore, inningsPlayed } from "../../rules/game.js?v=20260713-l";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260713-l";
-import { gameFeats } from "../feats.js?v=20260713-l";
-import { buildNpcTeam } from "../npcTeams.js?v=20260713-l";
-import { positionsOverlap } from "../../rules/cards.js?v=20260713-l";
+} from "./helpers.js?v=20260713-m";
+import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js?v=20260713-m";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260713-m";
+import { cardById } from "../packs.js?v=20260713-m";
+import { buildBoxScore, inningsPlayed } from "../../rules/game.js?v=20260713-m";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260713-m";
+import { gameFeats } from "../feats.js?v=20260713-m";
+import { buildNpcTeam } from "../npcTeams.js?v=20260713-m";
+import { positionsOverlap } from "../../rules/cards.js?v=20260713-m";
 import {
   persistSave,
   deriveSeed,
@@ -40,7 +40,7 @@ import {
   addTrophies,
   clearSeries,
   LOSS_FEE
-} from "../state.js?v=20260713-l";
+} from "../state.js?v=20260713-m";
 import {
   createBattle,
   battlePhase,
@@ -55,7 +55,7 @@ import {
   runSimSeries,
   isDramaticMoment,
   npcMoundVisit
-} from "../../rules/battle/controller.js?v=20260713-l";
+} from "../../rules/battle/controller.js?v=20260713-m";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;

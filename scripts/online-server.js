@@ -88,7 +88,22 @@ export function createOnlineServer(options = {}) {
   }, HEARTBEAT_MS);
   heartbeat.unref();
 
-  return { server, rooms: store.rooms, dataDir };
+  return { server, rooms: store.rooms, dataDir, store };
+}
+
+// Every room writes through a promise chained on the room itself, so the tail of
+// each chain is every save already queued for it. Waiting on those tails waits
+// for the disk to catch up with the log.
+//
+// This matters because the machine now stops whenever the last person leaves the
+// room, which is often. An action is broadcast to the clients the moment it is
+// applied and written to disk just after, and a machine killed between the two
+// comes back as a room that has forgotten a pick its clients still remember.
+export async function flushSaves(store) {
+  await Promise.allSettled([
+    ...[...store.rooms.values()].map((room) => room.saveChain ?? Promise.resolve()),
+    store.hofSaveChain ?? Promise.resolve()
+  ]);
 }
 
 // Rooms are persisted as one JSON file each: metadata, seats, and the action
@@ -994,6 +1009,20 @@ function sendJson(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
+// The card art is most of what this server ever sends: 86MB across 3500 files,
+// none of which change from one deploy to the next. It used to go out under
+// `no-store`, which re-sent every byte of every card every time somebody opened
+// the page — and once the server is renting its bandwidth, that is the part of
+// the bill that grows with play.
+//
+// So the art and the fonts are held for a day, and the app itself is revalidated
+// instead of held: the entry points carry a ?v= but the modules they import do
+// not, so a cached module would outlive the deploy that replaced it. Revalidating
+// costs a round trip and returns 304 with no body, which is the whole saving
+// anyway — the bytes are what cost money, not the request.
+const HELD_ASSETS = /^\/(assets|vendor)\//;
+const ASSET_MAX_AGE_SECONDS = 86400;
+
 async function serveStatic(request, response, url) {
   try {
     const pathname = decodeURIComponent(url.pathname);
@@ -1005,10 +1034,23 @@ async function serveStatic(request, response, url) {
     }
     const info = await stat(filePath);
     const target = info.isDirectory() ? join(filePath, "index.html") : filePath;
+    const targetInfo = info.isDirectory() ? await stat(target) : info;
+    const cacheControl = HELD_ASSETS.test(pathname)
+      ? `public, max-age=${ASSET_MAX_AGE_SECONDS}`
+      : "no-cache";
+    // Size and mtime, which a rebuilt image restamps — so shipping a new module
+    // invalidates it on its own, without anyone having to remember to bump a query.
+    const etag = `W/"${targetInfo.size.toString(16)}-${Math.floor(targetInfo.mtimeMs).toString(16)}"`;
+    if (request.headers["if-none-match"] === etag) {
+      response.writeHead(304, { ETag: etag, "Cache-Control": cacheControl });
+      response.end();
+      return;
+    }
     const body = await readFile(target);
     response.writeHead(200, {
       "Content-Type": MIME_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream",
-      "Cache-Control": "no-store"
+      "Cache-Control": cacheControl,
+      ETag: etag
     });
     response.end(body);
   } catch {
@@ -1020,7 +1062,29 @@ async function serveStatic(request, response, url) {
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 if (invokedDirectly) {
   const port = Number(process.env.PORT ?? process.argv[2] ?? 8790);
-  const { server, dataDir } = createOnlineServer();
+  const { server, dataDir, store } = createOnlineServer();
+
+  // The host stops this machine when the room empties out and starts it again
+  // when somebody knocks, so this is a normal night's sleep, not a crash: stop
+  // taking new connections, hang up on the streams so the browsers know to
+  // reconnect rather than sit there waiting, and let the disk catch up before
+  // the process goes. Closing a stream is friendlier than being cut off — an
+  // EventSource that gets a clean end reconnects immediately, and the knock is
+  // what wakes the machine back up.
+  let stopping = false;
+  const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
+    server.close();
+    for (const room of store.rooms.values()) {
+      for (const stream of room.streams) stream.end();
+    }
+    await flushSaves(store);
+    process.exit(0);
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+
   server.listen(port, () => {
     const lan = lanOrigin(port);
     // Lead with the address that works for everybody. The loopback one only

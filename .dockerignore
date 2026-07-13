@@ -1,4 +1,31 @@
 .git
-data
 node_modules
 *.log
+.DS_Store
+**/.DS_Store
+
+# Rooms are a mounted volume in production, never baked into the image.
+data
+
+# scripts/ is 172MB, and all but the server is build-time only: the raw Lahman
+# dumps, the scraped card images, the fetched pages. The data the app actually
+# reads was generated from them and is committed under src/data/, so the image
+# only needs the server itself.
+scripts/*
+!scripts/online-server.js
+
+# Never opened by the running server.
+test
+docs
+mockup-assets
+
+# Design prototypes. index.html and adventure.html are the real entry points.
+card-lab.html
+card-lab-2005.html
+card-preview-test.html
+current-card-picture-styles.html
+picture-possibilities.html
+showdownbot-2005-direct.html
+showdownbot-2005-pitcher.html
+showdownbot-background-options.html
+showdownbot-color-options.html
