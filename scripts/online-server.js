@@ -47,6 +47,17 @@ const MIME_TYPES = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  // The card fronts are all jpg — 3543 of them, the bulk of everything served —
+  // and the card face draws in its own fonts. Missing from this table they went
+  // out as application/octet-stream, which a browser will sniff its way through
+  // for an <img> but which no cache along the way can be expected to.
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
   ".ico": "image/x-icon",
   ".md": "text/plain; charset=utf-8",
   ".txt": "text/plain; charset=utf-8"

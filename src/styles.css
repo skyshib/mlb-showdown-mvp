@@ -2119,6 +2119,22 @@ button.roster-slot[draggable="true"]:active {
   font-variant-numeric: tabular-nums;
 }
 
+/* Control and chart are the two halves of one arm, so they sit together: the
+   pair opens with a rule and closes without one. */
+.comp-group-head > * {
+  border-top: 2px solid var(--hairline);
+}
+
+.comp-group-head td,
+.comp-group-head th {
+  border-bottom: 0;
+}
+
+.comp-group-tail td,
+.comp-group-tail th {
+  padding-top: 4px;
+}
+
 .comp-points .comp-label .comp-name {
   color: var(--muted);
 }

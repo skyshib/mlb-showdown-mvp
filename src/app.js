@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-m";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-n";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-m";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-m";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-m";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-m";
+} from "./ui/sounds.js?v=20260713-n";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-n";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-n";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-n";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-m";
+} from "./rules/draft.js?v=20260713-n";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-m";
+} from "./onlineClient.js?v=20260713-n";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-m";
-import { computeAwards } from "./rules/awards.js?v=20260713-m";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-m";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-m";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-m";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-m";
+} from "./rules/batch.js?v=20260713-n";
+import { computeAwards } from "./rules/awards.js?v=20260713-n";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-n";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-n";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-n";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-n";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-m";
+} from "./ui/render.js?v=20260713-n";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -5070,12 +5070,20 @@ const primaryFielding = (card) => (Array.isArray(card.fielding) ? card.fielding[
 // pool of weak arms grades a weak rotation kindly, and it should — that was the
 // board everybody was drafting from.
 const POOL_MEASURES = {
-  onBase: { of: "hitter", read: (card) => Number(card.onBase) || 0 },
-  chart: { of: "hitter", read: chartOps },
-  speed: { of: "hitter", read: (card) => Number(card.speed) || 0 },
-  defence: { of: "hitter", read: primaryFielding },
-  starters: { of: "SP", read: (card) => Number(card.control) || 0 },
-  bullpen: { of: "RP", read: (card) => Number(card.control) || 0 }
+  onBase: { of: "hitter", read: (card) => Number(card.onBase) || 0, better: "high" },
+  chart: { of: "hitter", read: chartOps, better: "high" },
+  speed: { of: "hitter", read: (card) => Number(card.speed) || 0, better: "high" },
+  defence: { of: "hitter", read: primaryFielding, better: "high" },
+  spControl: { of: "SP", read: (card) => Number(card.control) || 0, better: "high" },
+  // An arm's chart is the other half of him, and it runs the other way: the
+  // number is what the hitter does once the swing gets through, so the good ones
+  // are small. Control says how often a batter has to read your chart at all;
+  // the chart says what it costs him when he does. A 5-control starter who gives
+  // up a homer on 18+ is not the same card as a 5-control starter who does not,
+  // and one number was hiding the other.
+  spChart: { of: "SP", read: chartOps, better: "low" },
+  rpControl: { of: "RP", read: (card) => Number(card.control) || 0, better: "high" },
+  rpChart: { of: "RP", read: chartOps, better: "low" }
 };
 
 let poolScaleCache = null;
@@ -5127,38 +5135,45 @@ function teamComposition(manager, draft) {
   const scales = poolScales(draft);
   const bats = manager.roster.filter((card) => card.kind === "hitter");
   const arms = manager.roster.filter((card) => card.kind === "pitcher");
-  const starters = arms.filter((card) => card.role === "SP");
-  const bullpen = arms.filter((card) => card.role !== "SP");
-
-  const mean = (list, read) => (list.length ? list.reduce((sum, card) => sum + read(card), 0) / list.length : 0);
-  const grade = (name, cards) => {
-    const value = mean(cards, POOL_MEASURES[name].read);
-    const share = percentile(scales[name], value);
-    return { value, share, grade: gradeFor(share) };
+  const groups = {
+    hitter: bats,
+    SP: arms.filter((card) => card.role === "SP"),
+    RP: arms.filter((card) => card.role !== "SP")
   };
+
+  const graded = {};
+  for (const [name, measure] of Object.entries(POOL_MEASURES)) {
+    const cards = groups[measure.of];
+    const value = cards.length
+      ? cards.reduce((sum, card) => sum + measure.read(card), 0) / cards.length
+      : 0;
+    const place = percentile(scales[name], value);
+    // A small number is the good one on a pitcher's chart, so the standing is
+    // read from the other end of the board.
+    const share = measure.better === "low" ? 1 - place : place;
+    graded[name] = { value, share, grade: cards.length ? gradeFor(share) : "—" };
+  }
 
   return {
     manager,
-    onBase: grade("onBase", bats),
-    chart: grade("chart", bats),
-    speed: grade("speed", bats),
-    defence: grade("defence", bats),
-    starters: grade("starters", starters),
-    bullpen: grade("bullpen", bullpen),
+    ...graded,
     points: manager.roster.reduce((sum, card) => sum + card.points, 0)
   };
 }
 
-// The chart OPS runs high against a real slash line — around 1.5 to 2.5 — because
-// it reads the card alone: the twenty faces with the pitcher taken out of it. It
-// is a number for comparing charts to charts, not to a baseball card's back.
+// The chart OPS runs high against a real slash line — a hitter around 1.8, where
+// a good season is 0.9 — because it reads the card alone: the twenty faces with
+// the pitcher taken out. It compares charts to charts, not to the back of a
+// baseball card.
 const COMPOSITION_ROWS = [
   { key: "onBase", label: "On-base", note: "the average bat, against every bat on the board", decimals: 1 },
-  { key: "chart", label: "Chart quality", note: "OPS off the card alone — the twenty faces with the pitcher taken out", decimals: 3 },
+  { key: "chart", label: "Chart quality", note: "OPS off the card alone — what the twenty faces do", decimals: 3 },
   { key: "speed", label: "Speed", note: "the average bat, against every bat on the board", decimals: 1 },
   { key: "defence", label: "Defence", note: "the average glove, against every glove on the board", decimals: 1 },
-  { key: "starters", label: "Starters", note: "average control, against every starter on the board", decimals: 1 },
-  { key: "bullpen", label: "Bullpen", note: "average control, against every reliever on the board", decimals: 1 }
+  { key: "spControl", label: "Starters · control", note: "how often the batter has to read their chart", decimals: 1, group: "sp" },
+  { key: "spChart", label: "Starters · chart", note: "opponent OPS when he does — low is the good one", decimals: 3, group: "sp" },
+  { key: "rpControl", label: "Bullpen · control", note: "how often the batter has to read their chart", decimals: 1, group: "rp" },
+  { key: "rpChart", label: "Bullpen · chart", note: "opponent OPS when he does — low is the good one", decimals: 3, group: "rp" }
 ];
 
 function compositionTable(draft) {
@@ -5227,7 +5242,7 @@ function renderDraftDone(draft) {
 
   const body = rows
     .map(
-      (row) => `<tr>
+      (row, index, all) => `<tr class="${row.group ? `comp-grouped${all[index - 1]?.group === row.group ? " comp-group-tail" : " comp-group-head"}` : ""}">
         <th class="comp-label">
           <span class="comp-name">${escapeHtml(row.label)}</span>
           <span class="comp-note">${escapeHtml(row.note)}</span>
