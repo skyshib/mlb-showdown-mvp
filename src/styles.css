@@ -24,6 +24,42 @@
      their gold, deep enough to read as a word, is not gold any more. */
   --accent-bright: var(--accent);
   --accent-ink: var(--sheet);
+
+  /* The whitest surfaces: the cards, the chips, the sticky bars. These were
+     literal `white` in the stylesheet and so were invisible to the palette —
+     which was fine for as long as every palette was a light one. A franchise
+     league is not, and white text on a card that stayed white is white on
+     white. They are tokens now so they can go dark with the rest of the page. */
+  --card: #ffffff;
+  --card-2: #f8faf7;
+  --card-sheer: rgba(255, 253, 247, 0.96);
+
+  /* The TV board is the other room in this house: a dark broadcast panel, not a
+     printed sign, so it has its own ramp rather than the sheet's. These are the
+     exact colors it has always been — the board is unchanged until a club walks
+     in, and then every one of them is re-cut from the club's ink.
+
+     The greens and the reds below are deliberately NOT in here. They are status
+     — a bid is in, a seat is empty, the room is live — and a Cardinals league
+     that paints "live" in Cardinals red has stopped saying anything. Brand goes
+     on the chrome; the signal colors stay signal colors. */
+  --tv-bg: #0f1513;
+  --tv-panel: #161e1a;
+  --tv-panel-2: #1d2621;
+  --tv-panel-3: #26352d;
+  --tv-line: #2b3630;
+  --tv-line-soft: #2c3831;
+  --tv-line-strong: #405047;
+  --tv-line-hover: #6c8175;
+  --tv-faint: #4b584f;
+  --tv-dim-2: #7f918a;
+  --tv-dim: #93a39b;
+  --tv-text-soft: #c8d2cc;
+  --tv-text-strong: #e8efe9;
+  --tv-text: #f2efe2;
+  --tv-accent: #e1b64b;
+  --tv-accent-soft: #ffd76e;
+  --tv-accent-pale: #ffe9a8;
   --warn: #9a2a24;
   --ok: #1b5e46;
 
@@ -697,7 +733,7 @@ td span {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
-  background: rgba(255, 253, 247, 0.95);
+  background: var(--card-sheer);
   backdrop-filter: blur(10px);
 }
 
@@ -755,7 +791,7 @@ td span {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 4px 9px;
-  background: white;
+  background: var(--card);
   font-size: 12px;
   font-weight: 800;
 }
@@ -801,7 +837,7 @@ td span {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 7px;
-  background: white;
+  background: var(--card);
 }
 
 button.roster-slot {
@@ -876,7 +912,7 @@ button.roster-slot[draggable="true"]:active {
 
 .empty-slot {
   border-style: dashed;
-  background: #fafaf6;
+  background: var(--card-2);
 }
 
 .tournament-grid {
@@ -939,7 +975,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
-  background: white;
+  background: var(--card);
 }
 
 .leader-card h3 {
@@ -1121,7 +1157,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 12px;
-  background: white;
+  background: var(--card);
 }
 
 .roster p {
@@ -1158,7 +1194,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 7px;
-  background: #f8faf7;
+  background: var(--card-2);
 }
 
 .empty-mini-slot {
@@ -1249,7 +1285,7 @@ button.roster-slot[draggable="true"]:active {
   border-left-width: 4px;
   border-radius: 999px;
   padding: 3px 10px;
-  background: #f8faf7;
+  background: var(--card-2);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -1277,7 +1313,7 @@ button.roster-slot[draggable="true"]:active {
   z-index: 5;
   border-top: 1px solid var(--line);
   padding: 4px 14px 8px;
-  background: rgba(255, 253, 247, 0.97);
+  background: var(--card-sheer);
   box-shadow: 0 -6px 18px rgba(28, 37, 33, 0.08);
   backdrop-filter: blur(10px);
 }
@@ -1465,7 +1501,7 @@ button.roster-slot[draggable="true"]:active {
   border-left-width: 4px;
   border-radius: 5px;
   padding: 2px 5px;
-  background: #f8faf7;
+  background: var(--card-2);
   line-height: 1.25;
 }
 
@@ -1513,7 +1549,7 @@ button.roster-slot[draggable="true"]:active {
   border-left-width: 4px;
   border-radius: 999px;
   padding: 2px 8px;
-  background: #f8faf7;
+  background: var(--card-2);
   font-size: 11px;
   font-weight: 750;
   white-space: nowrap;
@@ -1551,12 +1587,12 @@ button.roster-slot[draggable="true"]:active {
   font-size: 13px;
   font-weight: 800;
   text-decoration: none;
-  background: #f8faf7;
+  background: var(--card-2);
 }
 
 /* TV war room: dark, huge, read-only. */
 .war-room-body {
-  background: #0f1513;
+  background: var(--tv-bg);
 }
 
 /* The board is the whole screen. The enamel sheet the rest of the app sits on —
@@ -1576,13 +1612,13 @@ button.roster-slot[draggable="true"]:active {
   gap: 14px;
   min-height: 100vh;
   padding: 18px 22px;
-  background: #0f1513;
-  color: #f2efe2;
+  background: var(--tv-bg);
+  color: var(--tv-text);
 }
 
 .war-standby {
   margin: auto;
-  color: #93a39b;
+  color: var(--tv-dim);
   font-size: 28px;
   font-weight: 800;
 }
@@ -1594,7 +1630,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .war-brand {
-  color: #93a39b;
+  color: var(--tv-dim);
   font-size: 13px;
   font-weight: 850;
   letter-spacing: 0.12em;
@@ -1609,7 +1645,7 @@ button.roster-slot[draggable="true"]:active {
 
 .war-room .heat-legend {
   margin-left: auto;
-  color: #93a39b;
+  color: var(--tv-dim);
 }
 
 .war-room .war-live {
@@ -1618,18 +1654,18 @@ button.roster-slot[draggable="true"]:active {
 
 .war-sound-toggle {
   flex: 0 0 auto;
-  border: 1px solid #405047;
+  border: 1px solid var(--tv-line-strong);
   border-radius: 6px;
   padding: 7px 10px;
-  background: #1d2822;
-  color: #c8d2cc;
+  background: var(--tv-panel-2);
+  color: var(--tv-text-soft);
   font-size: 12px;
   font-weight: 850;
 }
 
 .war-sound-toggle:hover {
-  border-color: #6c8175;
-  background: #26352d;
+  border-color: var(--tv-line-hover);
+  background: var(--tv-panel-3);
 }
 
 .war-sound-toggle.enabled {
@@ -1663,15 +1699,15 @@ button.roster-slot[draggable="true"]:active {
   display: grid;
   gap: 12px;
   justify-items: center;
-  border: 1px solid #2b3630;
+  border: 1px solid var(--tv-line);
   border-radius: 14px;
   padding: 16px;
-  background: #161e1a;
+  background: var(--tv-panel);
 }
 
 .war-spotlight-label {
   margin: 0;
-  color: #e1b64b;
+  color: var(--tv-accent);
   font-size: 14px;
   font-weight: 900;
   letter-spacing: 0.1em;
@@ -1695,7 +1731,7 @@ button.roster-slot[draggable="true"]:active {
 .war-bid {
   display: flex;
   justify-content: space-between;
-  border: 1px solid #2b3630;
+  border: 1px solid var(--tv-line);
   border-radius: 8px;
   padding: 7px 12px;
   font-size: 15px;
@@ -1703,7 +1739,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .war-bid em {
-  color: #93a39b;
+  color: var(--tv-dim);
   font-style: normal;
 }
 
@@ -1724,10 +1760,10 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .war-team {
-  border: 1px solid #2b3630;
+  border: 1px solid var(--tv-line);
   border-radius: 14px;
   padding: 12px 14px;
-  background: #161e1a;
+  background: var(--tv-panel);
 }
 
 .war-team header {
@@ -1744,7 +1780,7 @@ button.roster-slot[draggable="true"]:active {
 
 .war-team header span {
   margin-left: auto;
-  color: #93a39b;
+  color: var(--tv-dim);
   font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
@@ -1757,14 +1793,14 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .war-room .dock-chip {
-  border-color: #2b3630;
-  background: #1d2621;
-  color: #f2efe2;
+  border-color: var(--tv-line);
+  background: var(--tv-panel-2);
+  color: var(--tv-text);
   font-size: 13px;
 }
 
 .war-room .dock-chip em {
-  color: #ffd76e;
+  color: var(--tv-accent-soft);
 }
 
 
@@ -1781,19 +1817,19 @@ button.roster-slot[draggable="true"]:active {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  border-top: 1px solid #2b3630;
+  border-top: 1px solid var(--tv-line);
   padding-top: 10px;
 }
 
 .war-room .recent-pick {
-  border-color: #2b3630;
-  background: #1d2621;
-  color: #f2efe2;
+  border-color: var(--tv-line);
+  background: var(--tv-panel-2);
+  color: var(--tv-text);
   font-size: 13px;
 }
 
 .war-room .recent-pick em {
-  color: #93a39b;
+  color: var(--tv-dim);
 }
 
 .war-positions {
@@ -1808,20 +1844,20 @@ button.roster-slot[draggable="true"]:active {
   align-content: start;
   min-width: 0;
   min-height: 42px;
-  border: 1px dashed #2c3831;
+  border: 1px dashed var(--tv-line-soft);
   border-radius: 6px;
   padding: 3px 4px;
 }
 
 .war-pos small {
-  color: #7f918a;
+  color: var(--tv-dim-2);
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.06em;
 }
 
 .war-pos-blank {
-  color: #4b584f;
+  color: var(--tv-faint);
   font-size: 11px;
 }
 
@@ -1839,7 +1875,7 @@ button.roster-slot[draggable="true"]:active {
 
 .war-pos-chip em {
   margin-left: 4px;
-  color: #ffe9a8;
+  color: var(--tv-accent-pale);
   font-size: 9.5px;
   font-style: normal;
   font-weight: 900;
@@ -1869,7 +1905,7 @@ button.roster-slot[draggable="true"]:active {
   border-left: 4px solid transparent;
   border-radius: 6px;
   padding: 3px 8px;
-  background: #f8faf7;
+  background: var(--card-2);
 }
 
 .floor-chip strong .player-name-preview,
@@ -1908,16 +1944,16 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .war-room .floor-chip {
-  border-color: #2c3831;
-  background: #1d2621;
+  border-color: var(--tv-line-soft);
+  background: var(--tv-panel-2);
 }
 
 .war-room .floor-chip strong {
-  color: #e8efe9;
+  color: var(--tv-text-strong);
 }
 
 .war-room .pool-floor > small {
-  color: #7f918a;
+  color: var(--tv-dim-2);
 }
 
 /* On the wall, the colour is the cell. Nobody is reading a board from across a
@@ -1970,7 +2006,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 4px;
-  background: white;
+  background: var(--card);
 }
 
 .type-pill {
@@ -2974,14 +3010,14 @@ button.roster-slot[draggable="true"]:active {
 
 .game-tab {
   border-color: var(--line);
-  background: white;
+  background: var(--card);
   color: var(--ink);
 }
 
 .game-tab.active {
   border-color: var(--accent-dark);
-  background: var(--accent);
-  color: white;
+  background: var(--accent-bright);
+  color: var(--accent-ink);
 }
 
 .batch-stat-tabs {
@@ -3172,7 +3208,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
-  background: white;
+  background: var(--card);
 }
 
 .award-card .award-label {
@@ -3212,7 +3248,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
-  background: white;
+  background: var(--card);
 }
 
 .formula-card-head {
@@ -3445,7 +3481,7 @@ button.roster-slot[draggable="true"]:active {
   border-radius: 999px;
   padding: 4px 12px;
   font-size: 13px;
-  background: white;
+  background: var(--card);
 }
 
 .race-chip i {
@@ -3521,7 +3557,7 @@ button.roster-slot[draggable="true"]:active {
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: white;
+  background: var(--card);
   color: var(--ink);
   text-align: left;
 }
@@ -4161,3 +4197,55 @@ button.roster-slot[draggable="true"]:active {
 .order-tile.readonly-slot {
   cursor: default;
 }
+
+/* ---- a club's league, in the club's colors -------------------------------
+ *
+ * Everything above this line is the house: an enamel sign on cream paper, and it
+ * is untouched. When a franchise league opens, applyFranchisePalette redefines
+ * the tokens and puts `club` on <html>, and the page turns over — black ground,
+ * white text, and the club's own color doing the work the navy rules did.
+ *
+ * The tokens carry most of that on their own. What they cannot carry is the
+ * handful of surfaces that were written as literal light colors, because a
+ * literal is invisible to a palette: a slot tinted #eff8f3 to say "filled" is a
+ * pale green whoever is looking, and on a black page it is a white hole with
+ * white text in it. They are all here, in one place, rather than scattered back
+ * through the sheet as a second value nobody would think to keep in step.
+ *
+ * These stay HUES, not greys — a filled slot is still green and a warning is
+ * still warm — because they are saying something, and the club's colors are not
+ * allowed to eat the things the page needs to say. */
+
+html.club .filled-slot { background: color-mix(in srgb, var(--panel) 78%, #1b5e46); }
+html.club .selected-slot { background: color-mix(in srgb, var(--panel) 70%, #245f73); }
+html.club .valid-drop-slot { background: color-mix(in srgb, var(--panel) 74%, #176b4d); }
+html.club .pitcher-slot { background: color-mix(in srgb, var(--panel) 80%, #b3563e); }
+html.club .empty-mini-slot,
+html.club .dock-slot.empty-dock-slot,
+html.club .target-row span { background: var(--panel); }
+html.club .dock-bar.own-bar { background: color-mix(in srgb, var(--panel) 74%, #1b5e46); }
+html.club .floor-chip.floor-empty { background: color-mix(in srgb, var(--panel) 80%, #b3563e); }
+html.club .auction-paused,
+html.club .player-table tr.on-block-row:hover { background: color-mix(in srgb, var(--panel) 72%, var(--accent-bright)); }
+html.club .leader-bar-track,
+html.club .progress-track,
+html.club .sold-tag { background: var(--hairline); }
+html.club .player-table tr.sold-row { background: color-mix(in srgb, var(--sheet) 80%, #000000); }
+
+/* Icon buttons that borrowed the hairline for their glyph: on cream that was a
+   soft grey mark, and on black it is a mark you cannot see. */
+html.club .star-toggle,
+html.club .compare-pin { color: var(--muted); }
+
+/* The signal colors were mixed to sit on cream, and a red mixed for cream is a
+   red that disappears on black. Same two meanings, lit for a dark room. They are
+   fixed values and not the club's, on purpose: a Cardinals league that paints
+   "empty" in Cardinals red has stopped warning anybody of anything. */
+html.club {
+  --warn: #ff7a6b;
+  --ok: #58d59b;
+}
+
+/* The board is a second screen pointed at a room of people. Nobody is going to
+   click a link on it, and it is the one thing on the page that is not the draft. */
+.war-room-body .quest-door { display: none; }

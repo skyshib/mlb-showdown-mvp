@@ -162,8 +162,173 @@ export function derivePalette({ ink, accent }) {
     // screen and wrong next to a cold Mariners one — a warm shell around a
     // silver screen looks like two different objects.
     shell: mix("#bdb3a0", strongInk, 0.10),
-    shellDark: mix("#948b7a", strongInk, 0.10)
+    shellDark: mix("#948b7a", strongInk, 0.10),
+
+    // The board gets the club's colors as printed, not the sheet's deepened
+    // versions: the sheet had to deepen them so cream could be read on them, and
+    // the board's problem is the opposite one.
+    ...darkRoom(ink, accent, paper),
+    ...bold(ink, accent)
   };
+}
+
+// The club, loud.
+//
+// The enamel sheet was the house style and a club was a tint on it — which is
+// why every league came out some shade of tan with the club's ink on top, and
+// why the Pirates read as "the usual page, in black" rather than as the Pirates.
+// A club is not a tint. Pittsburgh is black and gold, and it is mostly gold.
+//
+// So in a franchise league the sheet goes away. The ground is the club's darker
+// color taken most of the way to black, the text is white on top of it, and the
+// club's brighter color does all the work the navy rules and the red bars used
+// to do: it is the rule, the header, the button, the chip. Same split as the
+// board — the DARKER color grounds and the BRIGHTER one is spent — which is what
+// makes Pittsburgh black-and-gold, Cincinnati black-and-red, Oakland green-and-
+// gold, and the Dodgers blue-and-red without anyone choosing per club.
+function bold(rawInk, rawAccent) {
+  const ground = luminance(rawInk) <= luminance(rawAccent) ? rawInk : rawAccent;
+  const pop = ground === rawInk ? rawAccent : rawInk;
+
+  const base = mix("#0b0b0b", ground, 0.62);
+  const up = (t) => mix(base, "#ffffff", t);
+  const white = "#f7f5f0";
+
+  // The pop has to be legible on its own ground, and the ground is dark, so a
+  // dark club color has to come up to meet it. HSL, not a mix toward white, or
+  // Cincinnati's red arrives pink. A gold is already there and is not touched.
+  const spend = liftUntil(pop, up(0.06), 4.6);
+
+  return {
+    boldBg: base,
+    boldSheet: up(0.05),
+    boldPanel: up(0.09),
+    boldHairline: up(0.18),
+    boldInk: white,
+    boldMuted: up(0.62),
+    // The club's color IS the rule now — the thing the old navy was.
+    boldLine: spend,
+    boldAccent: spend,
+    // A gold button wants black on it, not white. Whichever reads.
+    boldAccentInk: contrast(base, spend) >= contrast(white, spend) ? base : white,
+    boldAccentDark: mix(spend, "#000000", 0.30),
+    // The handheld's case goes dark with the rest of it. A cream plastic shell
+    // around a black screen is the old palette refusing to leave.
+    boldShell: up(0.16),
+    boldShellDark: up(0.08),
+    // The card surfaces. A shade up from the sheet so a card still reads as a
+    // card sitting ON the page rather than a hole cut in it.
+    boldCard: up(0.13),
+    boldCard2: up(0.10)
+  };
+}
+
+// The TV board: a dark panel rather than a printed sheet, so it gets its own
+// ramp cut from the same club.
+//
+// The obvious way to build it is to walk the club's ink toward black — and that
+// is exactly the way that breaks. Six clubs ink in black already (Pittsburgh,
+// the White Sox, the Giants, the Orioles, the Marlins, and the Padres' brown is
+// nearly there); mixing black with black gives black, the panels all land on the
+// same value, and the borders disappear. The board would render as one flat
+// void for a fifth of the league.
+//
+// So the ramp runs the other way: a near-black room, tinted by the club, and
+// every step above it interpolated toward the LIGHT text. That is monotone no
+// matter how dark the ink is, so a black club gets the same readable ladder a
+// navy one does — it is just tinted less, which is correct, because black is
+// what it is.
+// The room takes the club's DARKER color and the highlight takes its brighter
+// one — never both from the same one, which is the trap. Tint the room red for
+// St. Louis and then try to pop Cardinal red against it, and the red has to
+// climb so far to be seen that it arrives as pink: a dusty pink board that is
+// not a color the Cardinals have ever worn. Their ink is red and their accent is
+// navy, so the room goes navy and the red sits on it, which is what a Cardinals
+// broadcast has always looked like. Seattle keeps navy under teal, Pittsburgh
+// black under gold, and Cincinnati — red ink, black accent — gets the black.
+function darkRoom(rawInk, rawAccent, paper) {
+  const ground = luminance(rawInk) <= luminance(rawAccent) ? rawInk : rawAccent;
+  const pop = ground === rawInk ? rawAccent : rawInk;
+  const room = mix("#0d0f0e", ground, 0.35);
+  const up = (t) => mix(room, paper, t);
+  return {
+    tvBg: room,
+    tvPanel: up(0.05),
+    tvPanel2: up(0.08),
+    tvPanel3: up(0.14),
+    tvLine: up(0.15),
+    tvLineSoft: up(0.13),
+    tvLineStrong: up(0.24),
+    tvLineHover: up(0.42),
+    tvFaint: up(0.28),
+    tvDim2: up(0.50),
+    tvDim: up(0.58),
+    tvTextSoft: up(0.76),
+    tvTextStrong: up(0.92),
+    tvText: paper,
+    // The board is dark, so a club color that is itself dark has to come up to
+    // meet it. A gold or an orange is already there and is left exactly alone;
+    // Seattle's teal lifts a little. Three rungs, because the board highlights
+    // in three weights.
+    tvAccent: liftUntil(pop, room, 4.5),
+    tvAccentSoft: lift(liftUntil(pop, room, 4.5), 0.10),
+    tvAccentPale: lift(liftUntil(pop, room, 4.5), 0.18)
+  };
+}
+
+// Lift a color until it can be seen on a dark ground — by raising its LIGHTNESS
+// and leaving its hue and saturation where they are.
+//
+// The obvious way is to mix it toward white, and the obvious way turns every red
+// in the league pink. White is not a lighter red; it is less of a red. Cardinal
+// red mixed pale enough to be seen on a dark board arrives as salmon, which is a
+// color the Cardinals have never worn. Raising lightness in HSL instead keeps the
+// red red — it just turns the lamp up. Golds and oranges are already bright
+// enough to clear the bar and are returned untouched.
+function liftUntil(color, bg, target) {
+  if (contrast(color, bg) >= target) return color;
+  const [h, s, l] = toHsl(color);
+  for (let step = 1; step <= 60; step += 1) {
+    const candidate = fromHsl(h, s, Math.min(1, l + step / 60));
+    if (contrast(candidate, bg) >= target) return candidate;
+  }
+  return "#ffffff";
+}
+
+// A fixed lift, for the board's lighter emphasis weights.
+function lift(color, amount) {
+  const [h, s, l] = toHsl(color);
+  return fromHsl(h, s, Math.min(1, l + amount));
+}
+
+function toHsl(hex) {
+  const [r, g, b] = toRgb(hex).map((v) => v / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (!d) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return [h, s, l];
+}
+
+function fromHsl(h, s, l) {
+  if (!s) return toHex([l * 255, l * 255, l * 255]);
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const channel = (t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return toHex([channel(h + 1 / 3) * 255, channel(h) * 255, channel(h - 1 / 3) * 255]);
 }
 
 export function franchisePalette(universeKey) {
@@ -176,34 +341,90 @@ export function franchisePalette(universeKey) {
 // rather than restyling anything. A universe that is not a franchise clears
 // them, and the stylesheet's own defaults — the enamel sign — come back.
 const TOKENS = [
+  "--bg", "--sheet", "--panel", "--ink", "--muted", "--hairline",
+  "--card", "--card-2", "--card-sheer",
   "--navy", "--navy-deep", "--line", "--accent", "--accent-dark",
   "--accent-bright", "--accent-ink",
   "--gb-darkest", "--gb-dark", "--gb-light", "--gb-lightest", "--room",
-  "--shell", "--shell-dark"
+  "--gq-lead", "--gq-lead-ink", "--shell", "--shell-dark",
+  "--tv-bg", "--tv-panel", "--tv-panel-2", "--tv-panel-3",
+  "--tv-line", "--tv-line-soft", "--tv-line-strong", "--tv-line-hover",
+  "--tv-faint", "--tv-dim-2", "--tv-dim", "--tv-text-soft", "--tv-text-strong",
+  "--tv-text", "--tv-accent", "--tv-accent-soft", "--tv-accent-pale"
 ];
+
+// The board's tokens, paired with the palette keys they take. Spelled out rather
+// than derived from the names so that a token added to one list and forgotten in
+// the other fails loudly here instead of silently rendering black on black.
+const TV_TOKENS = {
+  "--tv-bg": "tvBg",
+  "--tv-panel": "tvPanel",
+  "--tv-panel-2": "tvPanel2",
+  "--tv-panel-3": "tvPanel3",
+  "--tv-line": "tvLine",
+  "--tv-line-soft": "tvLineSoft",
+  "--tv-line-strong": "tvLineStrong",
+  "--tv-line-hover": "tvLineHover",
+  "--tv-faint": "tvFaint",
+  "--tv-dim-2": "tvDim2",
+  "--tv-dim": "tvDim",
+  "--tv-text-soft": "tvTextSoft",
+  "--tv-text-strong": "tvTextStrong",
+  "--tv-text": "tvText",
+  "--tv-accent": "tvAccent",
+  "--tv-accent-soft": "tvAccentSoft",
+  "--tv-accent-pale": "tvAccentPale"
+};
 
 export function applyFranchisePalette(universeKey, root = document.documentElement) {
   const palette = franchisePalette(universeKey);
   if (!palette) {
     for (const token of TOKENS) root.style.removeProperty(token);
+    root.style.removeProperty("color-scheme");
+    root.classList.remove("club");
     return null;
   }
-  // The draft's enamel sign: the club's ink becomes the rule the sheet is
-  // ruled with, and the club's accent becomes the red that was never red.
-  root.style.setProperty("--navy", palette.ink);
-  root.style.setProperty("--navy-deep", palette.inkDeep);
-  root.style.setProperty("--line", palette.ink);
-  root.style.setProperty("--accent", palette.accent);
-  root.style.setProperty("--accent-dark", palette.accentDark);
-  root.style.setProperty("--accent-bright", palette.accentBright);
-  root.style.setProperty("--accent-ink", palette.accentInk);
-  // The handheld's four tones.
-  root.style.setProperty("--gb-darkest", palette.ink);
-  root.style.setProperty("--gb-dark", palette.dim);
-  root.style.setProperty("--gb-light", palette.tint);
-  root.style.setProperty("--gb-lightest", palette.paper);
-  root.style.setProperty("--room", palette.room);
-  root.style.setProperty("--shell", palette.shell);
-  root.style.setProperty("--shell-dark", palette.shellDark);
+  // The `club` block at the foot of styles.css hangs off this: the surfaces that
+  // were written as literal light colors and cannot be reached by a token.
+  root.classList.add("club");
+  // The draft page, in the club's colors — dark ground, white text, and the
+  // club's bright color doing every job the navy rules and red bars used to do.
+  // The form controls have to be told too, or the browser paints its own light
+  // dropdowns onto a black page.
+  root.style.setProperty("color-scheme", "dark");
+  root.style.setProperty("--bg", palette.boldBg);
+  root.style.setProperty("--sheet", palette.boldSheet);
+  root.style.setProperty("--panel", palette.boldPanel);
+  root.style.setProperty("--ink", palette.boldInk);
+  root.style.setProperty("--muted", palette.boldMuted);
+  root.style.setProperty("--hairline", palette.boldHairline);
+  root.style.setProperty("--card", palette.boldCard);
+  root.style.setProperty("--card-2", palette.boldCard2);
+  root.style.setProperty("--card-sheer", palette.boldCard);
+  root.style.setProperty("--navy", palette.boldLine);
+  root.style.setProperty("--navy-deep", palette.boldAccentDark);
+  root.style.setProperty("--line", palette.boldLine);
+  root.style.setProperty("--accent", palette.boldAccent);
+  root.style.setProperty("--accent-dark", palette.boldAccentDark);
+  root.style.setProperty("--accent-bright", palette.boldAccent);
+  root.style.setProperty("--accent-ink", palette.boldAccentInk);
+  // The handheld, inverted: the screen is the club's dark ground, the text on it
+  // is white, and the bars and the selected row are the club's color. The four
+  // tones still hold their four jobs — they are just no longer four greens or
+  // four creams, and the fifth tone is what lets the gold lead without dragging
+  // the body text gold along with it.
+  root.style.setProperty("--gb-lightest", palette.boldSheet);
+  root.style.setProperty("--gb-darkest", palette.boldInk);
+  root.style.setProperty("--gb-dark", palette.boldMuted);
+  root.style.setProperty("--gb-light", palette.boldPanel);
+  root.style.setProperty("--gq-lead", palette.boldAccent);
+  root.style.setProperty("--gq-lead-ink", palette.boldAccentInk);
+  root.style.setProperty("--room", palette.boldBg);
+  root.style.setProperty("--shell", palette.boldShell);
+  root.style.setProperty("--shell-dark", palette.boldShellDark);
+  // The TV board. Same club, other room.
+  for (const [token, key] of Object.entries(TV_TOKENS)) {
+    root.style.setProperty(token, palette[key]);
+  }
   return palette;
 }
