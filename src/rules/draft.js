@@ -151,10 +151,10 @@ export function maxPoolManagers(pool) {
 
 export const AUCTION_MIN_BID = 5;
 export const AUCTION_MIN_RAISE = 5;
-export const AUCTION_DEFAULT_BUDGET = 5000;
+export const AUCTION_DEFAULT_BUDGET = 1000;
 export const AUCTION_DEFAULT_REVIEW_SECONDS = 10 * 60;
 export const AUCTION_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
-export const AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS = 5;
+export const AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS = 30;
 
 const MS_PER_SECOND = 1000;
 

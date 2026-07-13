@@ -1369,7 +1369,6 @@ function renderSetup(setupError = "") {
       <div class="setup-hero-copy">
         <p class="eyebrow">MLB Showdown Draft and Simulator</p>
         <h1>It's draft day</h1>
-        <p class="lede">Private local prototype. It now saves your room in this browser, so reloads should not wipe the draft.</p>
       </div>
       <ul class="setup-features">
         <li class="setup-feature">
@@ -1476,7 +1475,9 @@ function renderSetup(setupError = "") {
           <button type="submit">Start offline draft</button>
           <button type="button" data-action="create-online">Create online room</button>
           <button type="button" data-action="import-save" title="Open a room saved to a file">&#128193; Load a room</button>
-          <p class="online-note" data-online-note>Draft with friends on other machines. Needs the room server: <code>npm run online</code></p>
+          <!-- Empty, but it stays: this is the slot the online-room flow writes
+               its progress and its errors into. -->
+          <p class="online-note" data-online-note></p>
         </div>
         ${setupImportError ? `<p class="form-error">${escapeHtml(setupImportError)}</p>` : ""}
       </div>

@@ -59,6 +59,10 @@ const KEY_MAP = {
   Backspace: "b"
 };
 
+// Setting up a new game belongs to no club: the old save is still loaded until
+// the new league is picked, and these are the screens where you pick it.
+const SETUP_SCREENS = new Set(["intro", "nameEntry", "leagueSelect", "modeSelect"]);
+
 const app = {
   save: loadSave(),
   screen: { name: "title", menuIndex: 0 },
@@ -71,7 +75,13 @@ const app = {
     // A franchise league plays on the club's colors. Every other league — and
     // the title screen, before there is a save to ask — clears the tokens and
     // gets the stylesheet's own enamel back.
-    applyFranchisePalette(this.save?.universe);
+    //
+    // Starting a new game is the exception. The old save is still loaded all the
+    // way through the setup — the new one is not written until the league has
+    // been chosen — so the screens where you choose it would otherwise be dressed
+    // in the colors of the club you are leaving, and you would pick the Mets on a
+    // Mariners page. Setting up a game belongs to no club, so it is shown in none.
+    applyFranchisePalette(SETUP_SCREENS.has(this.screen.name) ? null : this.save?.universe);
     const screen = SCREENS[this.screen.name] ?? titleScreen;
     // The way out of the game is offered where you are not yet in it. Once a
     // save is open the link stands down: a door back to the draft room has no
