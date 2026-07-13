@@ -2,13 +2,12 @@ import { distribution, rate } from "./stats.js";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260705-batch-team-skills";
 import { simulateGame } from "./game.js?v=20260708-mlb-win-prob";
 
-export const DEFAULT_BATCH_RUNS = 1000;
-export const MAX_BATCH_RUNS = 20000;
+export const DEFAULT_BATCH_RUNS = 10000;
 
 export function normalizeBatchRuns(value) {
   const number = Math.round(Number(value));
   if (!Number.isFinite(number) || number < 1) return DEFAULT_BATCH_RUNS;
-  return Math.min(number, MAX_BATCH_RUNS);
+  return number;
 }
 
 export function simulateBatch(teams, options = {}) {

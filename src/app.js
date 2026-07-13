@@ -14,6 +14,18 @@ import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml } from "./ui/cardFace.js?v=20260712-card-backgrounds";
+import {
+  isMuted,
+  playClockWarning,
+  playDraftComplete,
+  playLotteryBall,
+  playNomination,
+  playPick,
+  playSniped,
+  playYourTurn,
+  toggleMuted,
+  unlockSounds
+} from "./ui/sounds.js?v=20260713-sound-kit";
 import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
 import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
@@ -103,7 +115,7 @@ import {
   summarizeBatch
 } from "./rules/batch.js?v=20260708-mlb-win-prob";
 import { computeAwards } from "./rules/awards.js?v=20260712-auction-pause";
-import { hitterPositions, playsPosition } from "./rules/cards.js";
+import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import {
@@ -120,7 +132,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260712-star";
+} from "./ui/render.js?v=20260713-b";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -174,8 +186,7 @@ let cpuDriveKey = null;
 let pickClockKey = null;
 let pickClockDeadline = 0;
 let pickClockTimeoutKey = null;
-let chimeContext = null;
-let warRoomSoundEnabled = true;
+let pickClockWarned = false;
 let warRoomLotKey = null;
 
 setInterval(pickClockTick, 500);
@@ -270,7 +281,13 @@ function pickClockTick() {
   if (turn.key !== pickClockKey) {
     pickClockKey = turn.key;
     pickClockDeadline = Date.now() + state.pickTimerSeconds * 1000;
-    if (shouldChimeForTurn(turn.current)) playChime();
+    pickClockWarned = false;
+    if (shouldChimeForTurn(turn.current)) {
+      playYourTurn();
+      announceTurn(state.draft, turn.current);
+    } else {
+      clearTurnAnnouncement();
+    }
   }
   if (!state.pickTimerSeconds) {
     updatePickClockDisplay(null);
@@ -278,6 +295,11 @@ function pickClockTick() {
   }
   const remaining = pickClockDeadline - Date.now();
   updatePickClockDisplay(remaining);
+  // Ten seconds out, the clock stops being furniture and starts being a threat.
+  if (!pickClockWarned && remaining > 0 && remaining <= 10_000 && shouldChimeForTurn(turn.current)) {
+    pickClockWarned = true;
+    playClockWarning();
+  }
   if (remaining <= 0) handlePickClockExpiry(turn);
 }
 
@@ -291,7 +313,7 @@ function handlePickClockExpiry(turn) {
     if (turn.bidTurn) {
       placeSealedBid(state.draft, turn.current.id, cpuSealedBid(state.draft, turn.current));
     } else {
-      autopick(state.draft);
+      autopickTurn(state.draft);
     }
     selectedLineupMove = null;
     invalidateBatch();
@@ -347,6 +369,41 @@ function advanceCpuTurns() {
   }
 }
 
+// ---- what the room hears ----
+//
+// One watcher, run on every draft render, rather than a sound bolted onto each
+// of the several paths a pick can arrive by: your click, a computer's turn, an
+// expired clock, a snapshot off the room server. They all land here in the end.
+let heardPickNumber = null;
+let heardComplete = false;
+
+function reactToDraftChange(draft) {
+  if (!draft) {
+    heardPickNumber = null;
+    heardComplete = false;
+    return;
+  }
+  const picks = draft.pickNumber ?? 0;
+  const first = heardPickNumber === null;
+  const landed = !first && picks > heardPickNumber;
+
+  if (landed) {
+    // A card off your own board going to somebody else is not a pick, it is a
+    // mugging, and it gets its own sound.
+    const mine = starredIds();
+    const taken = draftHistory(draft)
+      .slice(-(picks - heardPickNumber))
+      .some((entry) => mine.has(entry.player?.id));
+    if (taken) playSniped();
+    else playPick();
+  }
+
+  if (draft.complete && !heardComplete && !first) playDraftComplete();
+
+  heardPickNumber = picks;
+  heardComplete = Boolean(draft.complete);
+}
+
 // Wraps up every human-initiated local draft change: computers respond,
 // state saves, screen re-renders. Human action also lifts the undo pause.
 function afterLocalDraftAction() {
@@ -395,80 +452,12 @@ function shouldChimeForTurn(current) {
   return state.pickTimerSeconds > 0;
 }
 
-function playChime() {
-  try {
-    chimeContext = chimeContext ?? new AudioContext();
-    if (chimeContext.state === "suspended") chimeContext.resume();
-    const start = chimeContext.currentTime;
-    for (const [frequency, offset] of [[880, 0], [1174.66, 0.18]]) {
-      const oscillator = chimeContext.createOscillator();
-      const gain = chimeContext.createGain();
-      oscillator.type = "sine";
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(0.0001, start + offset);
-      gain.gain.exponentialRampToValueAtTime(0.18, start + offset + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + 0.55);
-      oscillator.connect(gain).connect(chimeContext.destination);
-      oscillator.start(start + offset);
-      oscillator.stop(start + offset + 0.6);
-    }
-  } catch {
-    // No audio support or permission — the visual clock still works.
-  }
-}
-
-function playNominationSting() {
-  try {
-    chimeContext = chimeContext ?? new AudioContext();
-    if (chimeContext.state !== "running") return;
-    const start = chimeContext.currentTime + 0.03;
-    const notes = [
-      [392, 0, 0.2],
-      [523.25, 0.11, 0.22],
-      [659.25, 0.22, 0.24],
-      [783.99, 0.36, 0.28],
-      [1046.5, 0.53, 0.7]
-    ];
-    const master = chimeContext.createGain();
-    master.gain.setValueAtTime(0.48, start);
-    master.gain.exponentialRampToValueAtTime(0.0001, start + 1.25);
-    master.connect(chimeContext.destination);
-    for (const [frequency, offset, duration] of notes) {
-      const voice = chimeContext.createOscillator();
-      const shimmer = chimeContext.createOscillator();
-      const gain = chimeContext.createGain();
-      voice.type = "triangle";
-      shimmer.type = "sine";
-      voice.frequency.value = frequency;
-      shimmer.frequency.value = frequency * 2;
-      gain.gain.setValueAtTime(0.0001, start + offset);
-      gain.gain.exponentialRampToValueAtTime(0.2, start + offset + 0.018);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + offset + duration);
-      voice.connect(gain);
-      shimmer.connect(gain);
-      gain.connect(master);
-      voice.start(start + offset);
-      shimmer.start(start + offset);
-      voice.stop(start + offset + duration + 0.02);
-      shimmer.stop(start + offset + duration + 0.02);
-    }
-  } catch {
-    // A muted or unsupported browser still gets the full visual TV board.
-  }
-}
-
-async function toggleWarRoomSound() {
-  try {
-    chimeContext = chimeContext ?? new AudioContext();
-    if (!warRoomSoundEnabled) {
-      await chimeContext.resume();
-      warRoomSoundEnabled = chimeContext.state === "running";
-      if (warRoomSoundEnabled) playNominationSting();
-    } else {
-      warRoomSoundEnabled = false;
-    }
-  } catch {
-    warRoomSoundEnabled = false;
+async function toggleSound() {
+  const nowMuted = toggleMuted();
+  if (!nowMuted) {
+    // Turning sound on is itself the gesture that buys us the right to make it.
+    await unlockSounds();
+    playYourTurn();
   }
   renderCurrentScreen();
 }
@@ -476,26 +465,78 @@ async function toggleWarRoomSound() {
 function updateWarRoomNominationSound(draft, lot, player) {
   if (!lot || !player) return;
   const lotKey = `${draft.seed}:${draft.auction?.queueIndex ?? 0}:${draft.pickNumber}:${player.id}`;
-  if (warRoomLotKey !== null && lotKey !== warRoomLotKey && warRoomSoundEnabled) {
-    playNominationSting();
-  }
+  if (warRoomLotKey !== null && lotKey !== warRoomLotKey) playNomination();
   warRoomLotKey = lotKey;
 }
+
+// ---- your turn, wherever you are ----
+//
+// The chime only ever reached somebody already looking at the tab, which is the
+// one person who did not need telling. A notification and a title badge reach
+// the person who wandered off, which is the whole point of a clock.
+
+let turnNotification = null;
+const baseTitle = document.title;
+
+function setTitleBadge(on) {
+  document.title = on ? `(1) Your pick — ${baseTitle}` : baseTitle;
+}
+
+function askToNotify() {
+  try {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  } catch {
+    // A browser without notifications still has the chime and the badge.
+  }
+}
+
+function announceTurn(draft, current) {
+  setTitleBadge(true);
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    if (document.visibilityState === "visible") return;
+    turnNotification?.close();
+    const round = draft?.round ?? 1;
+    turnNotification = new Notification("You're on the clock", {
+      body: `Round ${round} — ${current?.name ?? "your"} pick is up.`,
+      tag: "showdown-turn",
+      renotify: true
+    });
+    turnNotification.onclick = () => {
+      window.focus();
+      turnNotification?.close();
+    };
+  } catch {
+    // Notification constructors throw on some platforms; the badge still stands.
+  }
+}
+
+function clearTurnAnnouncement() {
+  setTitleBadge(false);
+  turnNotification?.close();
+  turnNotification = null;
+}
+
+// Coming back to the tab is as good as being told.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") clearTurnAnnouncement();
+});
+
+// A browser will not let a page make noise, or ask to notify, until somebody has
+// touched it. The first touch anywhere buys both for the rest of the session.
+const openTheRoom = () => {
+  unlockSounds();
+  askToNotify();
+};
+window.addEventListener("pointerdown", openTheRoom, { once: true, capture: true });
+window.addEventListener("keydown", openTheRoom, { once: true, capture: true });
 
 const onlineRoomParam = new URLSearchParams(location.search).get("room");
 const warRoomMode = new URLSearchParams(location.search).has("board");
 if (warRoomMode) {
-  const unlockWarRoomAudio = async () => {
-    if (!warRoomSoundEnabled) return;
-    try {
-      chimeContext = chimeContext ?? new AudioContext();
-      await chimeContext.resume();
-    } catch {
-      // The board remains usable when audio is unavailable or blocked.
-    }
-  };
-  window.addEventListener("pointerdown", unlockWarRoomAudio, { once: true, capture: true });
-  window.addEventListener("keydown", unlockWarRoomAudio, { once: true, capture: true });
+  window.addEventListener("pointerdown", unlockSounds, { once: true, capture: true });
+  window.addEventListener("keydown", unlockSounds, { once: true, capture: true });
 }
 if (onlineRoomParam) {
   bootOnlineRoom(onlineRoomParam);
@@ -1450,6 +1491,7 @@ function sealedBidCaret(input) {
 
 function renderDraft() {
   const draft = state.draft;
+  reactToDraftChange(draft);
   captureSealedBids();
   if (!state.online && syncAuctionTimer(draft, draftNow())) saveState();
   const auction = isAuctionDraft(draft);
@@ -1458,7 +1500,13 @@ function renderDraft() {
   const lot = auction ? draft.auction.lot : null;
   const current = draft.complete ? null : currentManager(draft);
   const historyTab = state.draftTab === "history";
-  const playerRows = historyTab
+  const boardOwner = watchlistOwner();
+  // A board with nobody to own it (a spectator, a finished draft) has no tab.
+  const boardTab = state.draftTab === "board" && Boolean(boardOwner);
+  const boardCount = boardOwner
+    ? bigBoard(boardOwner, draft).filter((entry) => !entry.gone).length
+    : 0;
+  const playerRows = historyTab || boardTab
     ? []
     : draft.complete && !auction
       ? filteredPlayers(availablePlayers(draft)).sort(comparePlayers).slice(0, 40)
@@ -1497,6 +1545,7 @@ function renderDraft() {
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
     ${renderPlayGameControl(draft)}
+    <button class="sound-toggle${isMuted() ? " muted" : ""}" data-action="toggle-sound" aria-pressed="${!isMuted()}" title="${isMuted() ? "Turn sound on" : "Turn sound off"}">${isMuted() ? "&#128264;" : "&#128266;"}</button>
     <span class="pick-clock" data-pick-timer hidden></span>
     <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
   </section>
@@ -1508,18 +1557,23 @@ function renderDraft() {
   <section class="grid">
     <div class="panel">
       <div class="game-tabs">
-        <button class="game-tab ${historyTab ? "" : "active"}" data-action="draft-tab" data-tab="available">Available cards</button>
+        <button class="game-tab ${state.draftTab === "available" ? "active" : ""}" data-action="draft-tab" data-tab="available">Available cards</button>
+        ${boardOwner ? `<button class="game-tab ${boardTab ? "active" : ""}" data-action="draft-tab" data-tab="board">${escapeHtml(boardOwner.name)}'s board${boardCount ? ` <em>${boardCount}</em>` : ""}</button>` : ""}
         <button class="game-tab ${historyTab ? "active" : ""}" data-action="draft-tab" data-tab="history">Draft history</button>
       </div>
       ${historyTab
         ? renderDraftHistoryTable(draftHistory(draft))
+        : boardTab
+        ? renderBigBoard(boardOwner, draft)
         : `<div class="section-head">
         <h2>Available cards</h2>
         ${renderFilters()}
       </div>
+      ${renderNeedsStrip(boardManager, draft)}
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         starred: watchlistOwner() ? starredIds() : null,
+        fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
         // An empty board under the watchlist filter means the list is empty, not
         // that the deck is — say which.
         emptyMessage: state.filters.starredOnly
@@ -1795,6 +1849,14 @@ function bindDraftActions() {
       return;
     }
 
+    const boardMove = event.target.closest("button[data-action='board-up'], button[data-action='board-down']");
+    if (boardMove) {
+      moveOnBoard(boardMove.dataset.playerId, boardMove.dataset.action === "board-up" ? -1 : 1);
+      saveState();
+      renderDraft();
+      return;
+    }
+
     const starFilter = event.target.closest("button[data-action='toggle-starred-only']");
     if (starFilter) {
       state.filters.starredOnly = !state.filters.starredOnly;
@@ -1844,7 +1906,8 @@ function bindDraftActions() {
       return;
     }
     if (action === "draft-tab") {
-      state.draftTab = button.dataset.tab === "history" ? "history" : "available";
+      const tab = button.dataset.tab;
+      state.draftTab = tab === "history" || tab === "board" ? tab : "available";
       saveState();
       renderDraft();
       return;
@@ -1946,7 +2009,7 @@ function bindDraftActions() {
         sendOnlineAction({ type: isAuctionDraft(state.draft) ? "auto-nominate" : "autopick" });
         return;
       }
-      autopick(state.draft);
+      autopickTurn(state.draft);
       selectedLineupMove = null;
       invalidateBatch();
       afterLocalDraftAction();
@@ -2629,9 +2692,7 @@ function renderBatch() {
   app.innerHTML = `<section class="toolbar">
     <button data-action="batch-back">${backLabel}</button>
     <label class="batch-runs-label">Games
-      <select data-batch-runs>
-        ${[100, 500, 1000, 2500, 5000].map((option) => `<option value="${option}" ${option === runs ? "selected" : ""}>${option}</option>`).join("")}
-      </select>
+      <input data-batch-runs type="number" min="1" step="1" value="${runs}">
     </label>
     <button data-action="batch-run">Run again</button>
     <button data-action="reset">New room</button>
@@ -2672,7 +2733,7 @@ function normalizeBatchStatsTab(value) {
 const GAME_LOG_PAGE_SIZE = 50;
 
 // The review log never stores games: every batch game is re-simulated from its
-// deterministic seed on demand, so any of the (up to 20k) games can be
+// deterministic seed on demand, so any of the batch's games can be
 // reopened play by play — including win probability — at any time.
 function renderBatchGamesSection() {
   const { runs, seed } = state.batch;
@@ -3039,8 +3100,8 @@ function bindBatchActions() {
       renderCurrentScreen();
     }
     if (action === "batch-run") {
-      const select = app.querySelector("[data-batch-runs]");
-      requestBatchRun(select?.value ?? DEFAULT_BATCH_RUNS);
+      const input = app.querySelector("[data-batch-runs]");
+      requestBatchRun(input?.value ?? DEFAULT_BATCH_RUNS);
     }
     if (action === "reset") {
       if (state.online) {
@@ -3855,7 +3916,7 @@ function renderWarRoom() {
       <span class="war-brand">MLB Showdown &middot; ${escapeHtml(draft.seed ?? "")}</span>
       <h1>${status}</h1>
       ${renderHeatLegend(heatScale)}
-      <button type="button" class="war-sound-toggle ${warRoomSoundEnabled ? "enabled" : ""}" data-action="toggle-war-sound" aria-pressed="${warRoomSoundEnabled}">${warRoomSoundEnabled ? "&#128266; Sound on" : "&#128264; Enable sound"}</button>
+      <button type="button" class="war-sound-toggle ${isMuted() ? "" : "enabled"}" data-action="toggle-sound" aria-pressed="${!isMuted()}">${isMuted() ? "&#128264; Sound off" : "&#128266; Sound on"}</button>
       ${state.online ? `<span class="war-live">&#9679; LIVE</span>` : ""}
     </header>
     <div class="war-main">
@@ -3870,7 +3931,7 @@ function renderWarRoom() {
     <footer class="war-ticker">${ticker}</footer>
   </div>`;
   app.onclick = (event) => {
-    if (event.target.closest("[data-action='toggle-war-sound']")) toggleWarRoomSound();
+    if (event.target.closest("[data-action='toggle-sound']")) toggleSound();
   };
 }
 
@@ -4598,11 +4659,172 @@ function starredIds() {
 function toggleStar(playerId) {
   const owner = watchlistOwner();
   if (!owner) return;
-  const list = new Set(state.starred[owner.id] ?? []);
-  if (list.has(playerId)) list.delete(playerId);
-  else list.add(playerId);
-  if (list.size) state.starred[owner.id] = [...list];
+  const list = state.starred[owner.id] ?? [];
+  // A new star joins the bottom of the board. The order is the whole point now,
+  // so a card never jumps the queue just by being clicked.
+  const next = list.includes(playerId)
+    ? list.filter((id) => id !== playerId)
+    : [...list, playerId];
+  if (next.length) state.starred[owner.id] = next;
   else delete state.starred[owner.id];
+}
+
+// ---- the big board ----
+//
+// The watchlist, in the order you actually want them. Its one real job is the
+// clock: when yours runs out, the room takes the top name still standing on your
+// board instead of guessing on your behalf. Stepping away costs you nothing.
+function moveOnBoard(playerId, delta) {
+  const owner = watchlistOwner();
+  if (!owner) return;
+  const list = [...(state.starred[owner.id] ?? [])];
+  const from = list.indexOf(playerId);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= list.length) return;
+  [list[from], list[to]] = [list[to], list[from]];
+  state.starred[owner.id] = list;
+}
+
+// The board in rank order, each card carried along with whether it is still
+// gettable — a drafted card keeps its place (undo brings it back) but is plainly
+// out of reach.
+function bigBoard(manager, draft) {
+  if (!manager || !draft) return [];
+  const byId = new Map(draft.pool.map((player) => [player.id, player]));
+  return (state.starred[manager.id] ?? [])
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map((player) => ({
+      player,
+      gone: draft.pickedIds.has(player.id),
+      legal: canPickPlayer(draft, manager, player).ok
+    }));
+}
+
+// The top card on a manager's board that he could actually take right now.
+function boardPickId(draft, manager) {
+  if (!manager || isAuctionDraft(draft)) return null;
+  return bigBoard(manager, draft).find((entry) => !entry.gone && entry.legal)?.player.id ?? null;
+}
+
+// An expired clock, or a hand-waved "pick for me": consult the manager's board
+// first, and only fall back to the computer's judgement when it has nothing to
+// say. A computer's own seat has no board and never did.
+function autopickTurn(draft) {
+  const manager = draft.complete ? null : currentManager(draft);
+  if (manager && !manager.cpu) {
+    const id = boardPickId(draft, manager);
+    if (id) {
+      pickPlayer(draft, id);
+      return;
+    }
+  }
+  autopick(draft);
+}
+
+// ---- what the roster still wants ----
+//
+// The board sorts by points and wishes you luck. But a fourth outfielder is
+// worth nothing to a manager with no catcher, and the roster panel has always
+// known which slots are still open — it just never said so where you were
+// looking. This says it above the board, and greys the cards that fill none of
+// them.
+//
+// An unlimited roster (the random-nomination auction) has no slots to fill and
+// therefore no needs: everything is legal, and the closing sweep handles the
+// rest.
+function rosterOpenings(manager, draft) {
+  if (!manager || !draft || hasUnlimitedRoster(draft)) return null;
+  if (manager.roster.length >= draft.rosterSize) return null;
+
+  const lineup = lineupStatus(manager.roster);
+  const needs = getRosterNeeds(manager.roster);
+  const bats = [...lineup.missingPositions];
+  if (!lineup.dhFilled && needs.hitter > bats.length) bats.push("DH");
+
+  const slots = [
+    ...bats,
+    ...Array.from({ length: needs.starter }, () => "SP"),
+    ...Array.from({ length: needs.bullpen }, () => "RP")
+  ];
+  if (!slots.length) return null;
+
+  // Anyone can DH, so an open DH slot means every bat is still useful. That is
+  // true, and it is why the greying only bites late, once the shape of the
+  // roster has actually closed in.
+  const fills = (player) => {
+    if (player.kind === "pitcher") {
+      const role = player.role === "SP" ? "SP" : "RP";
+      return role === "SP" ? needs.starter > 0 : needs.bullpen > 0;
+    }
+    return bats.some((slot) => slot === "DH" || playsPosition(player, slot));
+  };
+
+  return { slots, fills };
+}
+
+function renderBigBoard(manager, draft) {
+  if (!manager) return "";
+  const entries = bigBoard(manager, draft);
+  if (!entries.length) {
+    return `<div class="section-head"><h2>${escapeHtml(manager.name)}'s board</h2></div>
+      <p class="empty">Nothing on the board yet. Star a card on the available list and it lands here — then put them in the order you want them.</p>
+      <p class="board-note">When your clock runs out, the room takes the top card still standing on your board. An empty board means the computer picks for you.</p>`;
+  }
+  const live = entries.filter((entry) => !entry.gone);
+  const nextUp = live.find((entry) => entry.legal)?.player ?? null;
+
+  const rows = entries
+    .map((entry, index) => {
+      const player = entry.player;
+      const rating = player.kind === "pitcher" ? `CTRL ${player.control}` : `OB ${player.onBase}`;
+      const spot = player.kind === "pitcher" ? player.role : positionsLabel(player);
+      const status = entry.gone
+        ? `<span class="board-status gone">Drafted</span>`
+        : !entry.legal
+          ? `<span class="board-status blocked">No slot</span>`
+          : player.id === nextUp?.id
+            ? `<span class="board-status next">Next up</span>`
+            : "";
+      return `<li class="board-row${entry.gone ? " gone" : ""}${player.id === nextUp?.id ? " next" : ""}">
+        <span class="board-rank">${index + 1}</span>
+        <span class="board-name">
+          <strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
+          <small>${escapeHtml(spot)} &middot; ${escapeHtml(rating)} &middot; ${player.points} pts</small>
+        </span>
+        ${status}
+        <span class="board-controls">
+          <button class="small" data-action="board-up" data-player-id="${escapeHtml(player.id)}" ${index === 0 ? "disabled" : ""} title="Move up" aria-label="Move ${escapeHtml(player.name)} up">&#9650;</button>
+          <button class="small" data-action="board-down" data-player-id="${escapeHtml(player.id)}" ${index === entries.length - 1 ? "disabled" : ""} title="Move down" aria-label="Move ${escapeHtml(player.name)} down">&#9660;</button>
+          <button class="small board-drop" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" title="Take off the board" aria-label="Take ${escapeHtml(player.name)} off the board">&times;</button>
+        </span>
+      </li>`;
+    })
+    .join("");
+
+  return `<div class="section-head"><h2>${escapeHtml(manager.name)}'s board</h2></div>
+    <p class="board-note">
+      ${nextUp
+        ? `If the clock runs out, <strong>${escapeHtml(nextUp.name)}</strong> is the pick.`
+        : "Nothing on this board can be taken right now — the computer would pick instead."}
+    </p>
+    <ol class="big-board">${rows}</ol>`;
+}
+
+// The slots still open, said plainly, above the board they apply to. Repeats
+// collapse into a count — two open starters is "SP x2", not "SP · SP".
+function renderNeedsStrip(manager, draft) {
+  const openings = rosterOpenings(manager, draft);
+  if (!openings) return "";
+  const counts = new Map();
+  for (const slot of openings.slots) counts.set(slot, (counts.get(slot) ?? 0) + 1);
+  const chips = [...counts.entries()]
+    .map(([slot, count]) => `<span class="need-chip">${escapeHtml(slot)}${count > 1 ? `<em>&times;${count}</em>` : ""}</span>`)
+    .join("");
+  return `<div class="needs-strip">
+    <span class="needs-label">${escapeHtml(manager.name)} still needs</span>
+    <div class="needs-chips">${chips}</div>
+  </div>`;
 }
 
 function filteredPlayers(players) {

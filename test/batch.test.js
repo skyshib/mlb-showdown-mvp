@@ -140,12 +140,12 @@ test("batchProgressSnapshot reports running win rates mid-batch", () => {
   }
 });
 
-test("normalizeBatchRuns clamps bad input to sane run counts", () => {
+test("normalizeBatchRuns falls back to the default on bad input", () => {
   assert.equal(normalizeBatchRuns(1000), 1000);
   assert.equal(normalizeBatchRuns("250"), 250);
   assert.equal(normalizeBatchRuns(0), DEFAULT_BATCH_RUNS);
   assert.equal(normalizeBatchRuns("garbage"), DEFAULT_BATCH_RUNS);
-  assert.equal(normalizeBatchRuns(999999), 20000);
+  assert.equal(normalizeBatchRuns(999999), 999999);
 });
 
 test("hitter box lines track doubles and triples that match the event log", () => {

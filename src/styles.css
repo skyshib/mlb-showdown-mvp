@@ -1886,6 +1886,213 @@ button.roster-slot[draggable="true"]:active {
   color: white;
 }
 
+/* ---- the big board ---- */
+.board-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.board-note strong {
+  color: var(--accent-dark);
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.big-board {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: board;
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 2px solid transparent;
+  background: var(--panel);
+}
+
+.board-row.next {
+  border-color: var(--accent);
+  background: var(--sheet);
+}
+
+.board-row.gone {
+  opacity: 0.5;
+}
+
+.board-rank {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 900;
+  font-style: italic;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.board-name {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.board-name strong {
+  font-size: 15px;
+}
+
+.board-name small {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-row.gone .board-name strong {
+  text-decoration: line-through;
+}
+
+.board-status {
+  padding: 3px 8px 4px;
+  font-family: var(--display);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.board-status.next { background: var(--accent); color: var(--sheet); }
+.board-status.gone { background: var(--hairline); color: var(--ink); }
+.board-status.blocked { border: 1px solid var(--hairline); color: var(--muted); }
+
+.board-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.board-controls button {
+  min-width: 30px;
+  padding: 4px 6px;
+  background: var(--panel);
+  color: var(--navy);
+  font-size: 12px;
+}
+
+.board-controls button:hover:not(:disabled) {
+  background: var(--sheet);
+}
+
+.board-drop:hover:not(:disabled) {
+  background: var(--accent) !important;
+  color: var(--sheet) !important;
+}
+
+/* The tab carries how many are still standing. */
+.game-tab em {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 6px 2px;
+  background: var(--navy);
+  color: var(--sheet);
+  font-size: 11px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-tab.active em {
+  background: var(--sheet);
+  color: var(--accent-dark);
+}
+
+/* ---- what the roster still wants ---- */
+.needs-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 14px 0 4px;
+  padding: 10px 14px;
+  border: 2px solid var(--navy);
+  background: var(--panel);
+}
+
+.needs-label {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+.needs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.need-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 4px 9px 5px;
+  background: var(--accent);
+  color: var(--sheet);
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.need-chip em {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A card that fills nothing the roster is short of: still legal, still there,
+   just no longer shouting. */
+.player-table tr.idle-row td {
+  opacity: 0.45;
+}
+
+.player-table tr.idle-row:hover td {
+  opacity: 1;
+}
+
+/* The sound switch sits at the end of the toolbar, where a switch belongs. */
+.sound-toggle {
+  min-width: 44px;
+  padding: 10px 12px;
+  background: var(--panel);
+  color: var(--navy);
+  font-size: 15px;
+}
+
+.sound-toggle:hover {
+  background: var(--sheet);
+}
+
+.sound-toggle.muted {
+  color: var(--hairline);
+}
+
 /* ---- the watchlist ----
    A star is a manager's private note about a card he is watching. It marks the
    row without shouting: the board is still a board, not a wishlist. */
@@ -2191,8 +2398,8 @@ button.roster-slot[draggable="true"]:active {
   font-size: 13px;
 }
 
-.batch-runs-label select {
-  width: auto;
+.batch-runs-label input {
+  width: 90px;
   min-height: 38px;
   padding: 6px 10px;
 }

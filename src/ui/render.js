@@ -71,11 +71,21 @@ export function renderPlayerTable(players, options = {}) {
         <td class="card-stat num">${player.onBase}</td>
         <td class="card-stat num">${formatSpeed(player.speed)}</td>
         <td class="card-stat num">${escapeHtml(fieldingLabel(player))}</td>`;
+      // A card that fills none of the roster's open slots is still legal, still
+      // pickable, and almost certainly not what you want — so it fades rather
+      // than disappears.
+      const idle = options.fillsNeed && !owner ? !options.fillsNeed(player) : false;
       const isStarred = starred ? starred.has(player.id) : false;
       const starCell = starred
         ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button></td>`
         : "";
-      const rowClass = ["draft-player-row", owner ? "sold-row" : "", onBlock ? "on-block-row" : "", isStarred ? "starred-row" : ""]
+      const rowClass = [
+        "draft-player-row",
+        owner ? "sold-row" : "",
+        onBlock ? "on-block-row" : "",
+        isStarred ? "starred-row" : "",
+        idle ? "idle-row" : ""
+      ]
         .filter(Boolean)
         .join(" ");
       return `<tr class="${rowClass}">
