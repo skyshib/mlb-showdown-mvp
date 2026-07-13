@@ -26,10 +26,12 @@ export function menuHtml(items, selectedIndex, { className = "", offset = 0 } = 
     .join("")}</ul>`;
 }
 
-export function cardLine(card) {
+// `slot` overrides the printed position with the one the man actually fills
+// in the lineup — the DH reads as DH, not as the glove on his card.
+export function cardLine(card, { slot = null } = {}) {
   const stat = card.kind === "pitcher"
     ? `${card.role} CTRL${card.control} IP${card.ip}`
-    : `${escapeHtml(positionsLabel(card))} OB${card.onBase} SPD${card.speed}`;
+    : `${escapeHtml(slot ?? positionsLabel(card))} OB${card.onBase} SPD${card.speed}`;
   return `${escapeHtml(shortName(card.name))} <span class="gq-dim">${stat} ${card.points}PT</span>`;
 }
 

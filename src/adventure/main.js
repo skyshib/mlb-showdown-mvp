@@ -141,7 +141,7 @@ function clickCursorField(screen) {
   if (screen.actionMenu) return "actionIndex";
   if (screen.mode === "team-swap") return "pickIndex";
   if (screen.mode === "pen") return "penIndex";
-  if (screen.mode === "pick" || screen.mode === "dhFlip") return "pickIndex";
+  if (screen.mode === "pick" || screen.mode === "switchPos") return "pickIndex";
   if (screen.mode === "rosters") return "rosterIndex";
   if (screen.mode === "stats") return "statIndex";
   if (screen.mode === "scout") return "scoutIndex";

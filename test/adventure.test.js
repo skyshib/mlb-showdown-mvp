@@ -342,6 +342,47 @@ test("the rival reappears at milestones with a growing budget", () => {
   assert.equal(TRAINERS.some((trainer) => trainer.battleFormat.type === "simSeries"), false, "the sim-series farm boss is gone");
 });
 
+// Cam doesn't get a new binder between bouts — he grows the one he has. Each
+// rematch keeps most of the roster you last saw and trades the rest up.
+test("the rival accrues his roster instead of redrafting it", () => {
+  const ladder = ["rival-1", "rival-2", "rival-3", "rival-4"].map((id) => trainerById(id));
+  let previous = null;
+  for (const trainer of ladder) {
+    const npc = buildNpcTeam(trainer, null);
+    const ids = new Set(npc.roster.map((card) => card.id));
+    if (previous) {
+      const kept = [...previous].filter((id) => ids.has(id)).length;
+      assert.ok(kept >= 7, `${trainer.id} keeps the binder he showed up with (${kept}/${previous.size})`);
+      assert.ok(kept < previous.size, `${trainer.id} still upgrades something (${kept}/${previous.size})`);
+    }
+    previous = ids;
+  }
+
+  // Growth is a trade-up, never a fire sale: the money he added is money he
+  // spent, so every rematch fields a pricier roster than the last.
+  const points = ladder.map((trainer) => buildNpcTeam(trainer, null).points);
+  for (let i = 1; i < points.length; i += 1) {
+    assert.ok(points[i] > points[i - 1], `rival ${i + 1} outspends his younger self (${points[i]} vs ${points[i - 1]})`);
+  }
+
+  // Inheriting a roster must not smuggle in an illegal one, and an heir is
+  // still the same team every time you scout him.
+  const summit = buildNpcTeam(ladder[3], null);
+  assert.equal(validateRoster(summit).length, 0, "the inherited roster stays legal");
+  assert.deepEqual(
+    summit.roster.map((card) => card.id),
+    buildNpcTeam(ladder[3], null).roster.map((card) => card.id),
+    "and deterministic"
+  );
+
+  // Nobody else inherits: the rest of the ladder still drafts from scratch.
+  assert.deepEqual(
+    TRAINERS.filter((trainer) => trainer.inherits).map((trainer) => trainer.id),
+    ["rival-2", "rival-3", "rival-4"],
+    "only the rival carries a binder forward"
+  );
+});
+
 test("rival bouts are one-and-done: a loss removes the bout for good", async () => {
   const { isTrainerAvailable, markAmbushDone, ambushDone } = await import("../src/adventure/region.js");
   const save = testSave();
@@ -1105,8 +1146,9 @@ test("replacement picks default to the outgoing card's position; 'all' widens to
   assert.ok(benchCards(save, starter, "all").some((card) => card.role === "RP"), "'all' shows the whole pen");
 });
 
-test("the team menu swaps the rotation and flips the DH, legally and durably", async () => {
-  const { rotationCards, swapRotation, dhFlipOptions, flipDhWith } = await import("../src/adventure/ui/collectionScreens.js");
+test("the team menu swaps the rotation, and a hitter switches position legally and durably", async () => {
+  const { rotationCards, swapRotation, positionSwitchOptions, switchPositionTo, lineupSlotOf } =
+    await import("../src/adventure/ui/collectionScreens.js");
   const { canPlayerFillLineupSlot, assignLineupSlots } = await import("../src/rules/draft.js");
   const save = testSave();
 
@@ -1119,30 +1161,106 @@ test("the team menu swaps the rotation and flips the DH, legally and durably", a
   assert.deepEqual(rotationCards(save).map((card) => card.id), [sp2.id, sp1.id]);
   assert.equal(buildTeam(managerFor(save), { starterIndex: 1 }).pitchers[0].id, sp1.id, "game 2 goes to the old game-1 arm");
 
-  // DH flips: every offered flip is legal, and applying one moves both men.
-  const flips = dhFlipOptions(save);
-  assert.ok(flips.length >= 1, "the 1B flip at minimum is always on the table");
-  assert.ok(flips.every((flip) => canPlayerFillLineupSlot(flip.dh, flip.label)), "only legal flips are offered");
-  assert.ok(flips.some((flip) => flip.label === "1B"), "anyone can take first");
-  const target = flips[0];
-  const before = buildTeam(managerFor(save)).lineup;
-  assert.equal(before.find((player) => player.assignedPosition === "DH").id, target.dh.id);
-  assert.equal(flipDhWith(save, target.label), true);
+  // The DH is the open case: he fields nothing, so every slot he can play is
+  // on offer, and 1B always is.
+  const dh = rosterCards(save).find((card) => lineupSlotOf(save, card) === "DH");
+  assert.ok(dh, "the lineup seats a DH");
+  const switches = positionSwitchOptions(save, dh);
+  assert.ok(switches.length >= 1, "the 1B switch at minimum is always on the table");
+  assert.ok(switches.every((option) => canPlayerFillLineupSlot(option.card, option.label)), "only legal switches are offered");
+  assert.ok(switches.every((option) => !option.player || canPlayerFillLineupSlot(option.player, option.from)), "and the swap works both ways");
+  assert.ok(switches.some((option) => option.label === "1B"), "anyone can take first");
+
+  // Applying one moves both men.
+  const target = switches[0];
+  assert.equal(switchPositionTo(save, dh, target.label), true);
   const after = buildTeam(managerFor(save)).lineup;
+  assert.equal(after.find((player) => player.assignedPosition === target.label).id, dh.id, "the old DH takes the field");
   assert.equal(after.find((player) => player.assignedPosition === "DH").id, target.player.id, "the fielder now DHs");
-  assert.equal(after.find((player) => player.assignedPosition === target.label).id, target.dh.id, "the old DH takes the field");
+  assert.equal(lineupSlotOf(save, dh), target.label, "and the slot lookup agrees");
 
-  // Illegal flips are refused (any slot the current DH can't play).
-  const nowLegal = new Set(dhFlipOptions(save).map((flip) => flip.label));
+  // Illegal switches are refused (any slot he can't play).
+  const nowLegal = new Set(positionSwitchOptions(save, dh).map((option) => option.label));
   const illegal = ["C", "2B", "3B", "SS", "CF", "LF", "RF"].find((label) => !nowLegal.has(label));
-  if (illegal) assert.equal(flipDhWith(save, illegal), false, `${illegal} flip is refused`);
+  if (illegal) assert.equal(switchPositionTo(save, dh, illegal), false, `${illegal} is refused`);
 
-  // The flip survives a bench swap: assignments keep every surviving id.
+  // The switch survives a bench swap: assignments keep every surviving id.
   const assignmentsBefore = { ...save.roster.lineupAssignments };
   setRoster(save, save.roster.cardIds);
-  assert.deepEqual(save.roster.lineupAssignments, assignmentsBefore, "roster edits keep the flip");
+  assert.deepEqual(save.roster.lineupAssignments, assignmentsBefore, "roster edits keep the switch");
   const slots = assignLineupSlots(rosterCards(save), save.roster.lineupAssignments).slots;
   assert.equal(slots.find((slot) => slot.label === "DH").player.id, target.player.id);
+});
+
+test("the team roster lists the DH as DH, and his swap opens on every spare bat", async () => {
+  const { teamScreen, benchCards, lineupSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const roster = rosterCards(save);
+  const dhIndex = roster.findIndex((card) => lineupSlotOf(save, card) === "DH");
+  assert.ok(dhIndex >= 0, "the lineup seats a DH");
+  const dh = roster[dhIndex];
+
+  const app = { save, screen: { name: "team", index: dhIndex, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  const text = teamScreen.render(app).replace(/<[^>]+>/g, " ");
+  const shown = new RegExp(`${dh.name.split(" ").pop().toUpperCase()}\\s+DH\\s+OB`);
+  assert.match(text, shown, "he reads as DH, not as the glove printed on his card");
+
+  // His replacement pool is every spare bat — the DH fields nothing, so the
+  // glove printed on his card doesn't narrow it.
+  const onPosition = benchCards(save, dh, "position");
+  const everyone = benchCards(save, dh, "all");
+  assert.deepEqual(
+    onPosition.map((card) => card.id).sort(),
+    everyone.map((card) => card.id).sort(),
+    "the DH's position filter is every spare bat"
+  );
+
+  teamScreen.key(app, "a"); // open his action menu
+  teamScreen.key(app, "a"); // SWAP THIS CARD leads it
+  assert.equal(app.screen.mode, "pick");
+  assert.match(teamScreen.render(app), /ANY BAT CAN DH/, "and the header says so");
+});
+
+test("a hitter's swap pool follows the slot he fills, not everything printed on his card", async () => {
+  const { benchCards, positionSwitchOptions, switchPositionTo, lineupSlotOf } =
+    await import("../src/adventure/ui/collectionScreens.js");
+  const { canPlayerFillLineupSlot } = await import("../src/rules/draft.js");
+  const save = testSave();
+
+  // A corner outfielder: playing LF he should be replaced by men who can play
+  // LF, and not by a pure infielder. Seed the collection with one of each.
+  const corner = rosterCards(save).find((card) => lineupSlotOf(save, card) === "LF");
+  assert.ok(corner, "the lineup seats a left fielder");
+  const spare = (predicate) => adventurePool().find((card) =>
+    card.kind === "hitter" && !save.roster.cardIds.includes(card.id) && predicate(card)
+  );
+  const spareCorner = spare((card) => canPlayerFillLineupSlot(card, "LF"));
+  const spareInfielder = spare((card) => !canPlayerFillLineupSlot(card, "LF") && card.position === "2B");
+  assert.ok(spareCorner && spareInfielder, "the pool has both a corner bat and a second baseman");
+  addCardToCollection(save, spareCorner.id);
+  addCardToCollection(save, spareInfielder.id);
+
+  const pool = benchCards(save, corner, "position");
+  assert.ok(
+    pool.every((card) => canPlayerFillLineupSlot(card, "LF")),
+    "every man offered can actually play left"
+  );
+  assert.ok(pool.some((card) => card.id === spareCorner.id), "the spare corner bat is offered");
+  assert.ok(!pool.some((card) => card.id === spareInfielder.id), "the second baseman is not");
+  assert.ok(
+    benchCards(save, corner, "all").some((card) => card.id === spareInfielder.id),
+    "though widening to every bat still reaches him"
+  );
+
+  // Move him to first, and the pool follows him: now anyone can cover it.
+  const toFirst = positionSwitchOptions(save, corner).find((option) => option.label === "1B");
+  if (toFirst) {
+    assert.equal(switchPositionTo(save, corner, "1B"), true);
+    assert.equal(lineupSlotOf(save, corner), "1B");
+    const atFirst = benchCards(save, corner, "position").map((card) => card.id).sort();
+    const everyBat = benchCards(save, corner, "all").map((card) => card.id).sort();
+    assert.deepEqual(atFirst, everyBat, "any glove covers first, so the pool opens up");
+  }
 });
 
 test("the replacement picker ranks the incumbent by points, diamond-marked; picking him keeps him", async () => {
@@ -1202,8 +1320,8 @@ test("the team screen shows the previewed card's season stats", async () => {
   assert.match(withStats.replace(/<[^>]+>/g, " "), /OPS.*1G/, "with the hitter's rates and games");
 });
 
-test("the roster locks mid-series; rotation, DH, and batting order stay live", async () => {
-  const { teamScreen, swapRotation, dhFlipOptions } = await import("../src/adventure/ui/collectionScreens.js");
+test("the roster locks mid-series; rotation, position switches, and batting order stay live", async () => {
+  const { teamScreen, swapRotation, positionSwitchOptions, lineupSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();
   startSeries(save, "gym-garrick", 3);
   const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
@@ -1211,7 +1329,8 @@ test("the roster locks mid-series; rotation, DH, and batting order stay live", a
   assert.notEqual(app.screen.mode, "pick", "no bench swaps mid-series");
   assert.ok(teamScreen.render(app).includes("SERIES IN PROGRESS"), "the lock is explained");
   assert.equal(swapRotation(save), true, "the rotation still swaps");
-  assert.ok(dhFlipOptions(save).length >= 1, "the DH flip stays on the table");
+  const dh = rosterCards(save).find((card) => lineupSlotOf(save, card) === "DH");
+  assert.ok(positionSwitchOptions(save, dh).length >= 1, "position switches stay on the table");
 
   clearSeries(save);
   teamScreen.key(app, "a");
@@ -1465,6 +1584,61 @@ test("the game log lines carry player-perspective WPA", async () => {
   const empty = gameLogLine({ ...swing, outsBefore: 0, basesBefore: [null, null, null] }, "away");
   assert.ok(empty.includes("0o ---"), "empty bases read ---");
   assert.ok(!gameLogLine(swing, "away").includes("o "), "rows without a snapshot stay clean");
+});
+
+test("the game log shows the dice and the running win probability", async () => {
+  const { gameLogLine } = await import("../src/adventure/ui/statsScreens.js");
+  const pa = {
+    inning: 3,
+    half: "top",
+    batter: "Al Smith",
+    pitcher: "Bo Diaz",
+    result: "HR",
+    runs: 2,
+    scoreAfter: { away: 3, home: 1 },
+    wpa: 0.18,
+    controlRoll: 4,
+    effectiveControl: 5,
+    controlTotal: 9,
+    onBase: 11,
+    chartOwner: "hitter",
+    resultRoll: 17,
+    fatiguePenalty: 0,
+    wpAfter: 0.28
+  };
+  const line = gameLogLine(pa, "away");
+  assert.ok(line.includes("PITCH 4+5=9"), "the pitch die shows its roll and the control it adds to");
+  assert.ok(line.includes("VS OB 11"), "and what it was rolling against");
+  assert.ok(line.includes("BATTER"), "losing the control check hands the batter his chart");
+  assert.ok(line.includes("SWING 17"), "the swing die shows too");
+  assert.ok(line.includes("WIN 72%"), "the away player's running odds are the home team's inverted");
+  assert.ok(gameLogLine(pa, "home").includes("WIN 28%"), "the home player reads them straight");
+
+  const tired = gameLogLine({ ...pa, fatiguePenalty: 2, chartOwner: "pitcher" }, "away");
+  assert.ok(tired.includes("TIRED-2"), "a gassed arm says so");
+  assert.ok(tired.includes("PITCHER"), "winning the control check keeps the chart on the mound");
+
+  // A steal throws one die against the runner's speed, and still lands you
+  // somewhere on the win-probability curve.
+  const steal = {
+    type: "steal",
+    inning: 5,
+    half: "bottom",
+    batter: "Al Smith",
+    result: "SB",
+    runs: 0,
+    scoreAfter: { away: 1, home: 1 },
+    wpa: 0.03,
+    wpAfter: 0.6,
+    playDetails: { kind: "steal", stealAttempt: { runner: "Dee Gordon", roll: 13, fielding: 5, total: 18, target: 19, safe: true } }
+  };
+  const stealLine = gameLogLine(steal, "home");
+  assert.ok(stealLine.includes("THROW 13+5=18 VS SPD 19"), "the throw shows its roll, the arm, and the runner's speed");
+  assert.ok(stealLine.includes("WIN 60%"), "and the odds it left you at");
+  assert.ok(!stealLine.includes("PITCH"), "no pitch die was thrown");
+
+  const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
+  assert.ok(!pen.includes("WIN"), "a substitution rolls nothing and moves no odds");
 });
 
 // ---- Real-card leagues -------------------------------------------------------

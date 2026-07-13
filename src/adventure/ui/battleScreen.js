@@ -14,7 +14,7 @@ import {
 import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js?v=20260713-u";
 import { recordCompletedRun } from "../hallOfFame.js?v=20260713-u";
 import { cardById } from "../packs.js?v=20260713-u";
-import { buildBoxScore, inningsPlayed } from "../../rules/game.js?v=20260713-u";
+import { buildBoxScore, inningsPlayed, pitcherStatus } from "../../rules/game.js?v=20260713-u";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260713-u";
 import { gameFeats } from "../feats.js?v=20260713-u";
 import { buildNpcTeam } from "../npcTeams.js?v=20260713-u";
@@ -280,7 +280,7 @@ function renderGameLog(app, battle, trainer) {
     <div class="gq-body"><div class="gq-frame gq-scroll">${
       rows.length ? menuHtml(rows, index) : `<p class="gq-dim">NO PLAYS YET. GO MAKE SOME HISTORY.</p>`
     }</div></div>
-    <div class="gq-textbox"><p class="gq-dim">% IS WPA FOR YOUR SIDE &middot; 10%+ SWINGS BOLD. X to go back.</p></div>
+    <div class="gq-textbox"><p class="gq-dim">TOP % IS THE PLAY'S WPA (10%+ BOLD) &middot; WIN % IS YOUR RUNNING ODDS. X to go back.</p></div>
   </div>`;
 }
 
@@ -547,7 +547,7 @@ function renderRosters(app, battle, trainer) {
     <div class="gq-topbar"><span>ROSTERS &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
     <div class="gq-body"><div class="gq-columns">
       <div class="gq-frame gq-scroll">${listHtml}</div>
-      <div>${selected ? cardPanelHtml(selected.card) : ""}</div>
+      <div class="gq-card-side">${selected ? cardPanelHtml(selected.card) : ""}</div>
     </div></div>
     <div class="gq-textbox"><p class="gq-dim">Hover or move the cursor to read a card. X to go back.</p></div>
   </div>`;
@@ -563,20 +563,15 @@ export const battleScreen = {
     if (app.screen.mode === "drama") return renderDrama(app, trainer);
     const phase = battlePhase(battle);
     const series = app.save.activeSeries;
-    return `<div class="gq-screen">
+    return `<div class="gq-screen gq-battle-screen">
       <div class="gq-topbar">
         <span>VS ${escapeHtml(trainer.name)}</span>
         <span>${series && series.bestOf > 1 ? `G${series.nextGame} (${series.wins}-${series.losses}) &middot; ` : ""}${halfLabel(state)}</span>
       </div>
-      <div class="gq-battle-hud">
-        <div class="gq-hud-team" data-hover-note="${escapeHtml(fieldingNote("YOUR DEFENSE", state[battle.playerSide]))}">YOU${battle.playerSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.playerSide]}</b></div>
-        <div>${diamondHtml(state)}<div class="gq-center gq-mt">${outsHtml(state.outs)}</div></div>
-        <div class="gq-hud-team gq-hud-right" data-hover-note="${escapeHtml(fieldingNote("THEIR DEFENSE", state[battle.npcSide]))}">THEM${battle.npcSide === "home" ? " &#9679;" : ""}<b>${state.score[battle.npcSide]}</b></div>
-      </div>
-      ${renderMatchup(phase)}
+      ${renderHud(battle, phase)}
       <div class="gq-textbox">
-        ${(app.screen.lines ?? []).map((line) => `<p>${line}</p>`).join("")}
-        ${renderBattleMenu(app, phase)}
+        <div class="gq-battle-lines">${(app.screen.lines ?? []).map((line) => `<p>${line}</p>`).join("")}</div>
+        <div class="gq-battle-menu">${renderBattleMenu(app, phase)}</div>
       </div>
     </div>`;
   },
@@ -586,6 +581,9 @@ export const battleScreen = {
   },
   mounted(app) {
     if (app.screen.mode === "drama" && app.screen.drama) mountDrama(app);
+    // The call of the play is the newest line, and it's the one worth reading.
+    const lines = document.querySelector(".gq-battle-lines");
+    if (lines) lines.scrollTop = lines.scrollHeight;
   },
   key(app, key) {
     if (app.screen.mode === "drama") {
@@ -658,54 +656,86 @@ function matchupName(name) {
   return shortName(stripCardYear(name));
 }
 
-function renderMatchup(phase) {
-  if (phase.type === "over") return "";
-  if (phase.type === "advance-decision") {
-    return `<div class="gq-matchup"><div>BALL IN PLAY<br><b>RUNNERS DECIDING...</b></div></div>`;
-  }
-  if (phase.type === "player-batting") {
-    return `<div class="gq-matchup">
-      <div>AT BAT<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase} &middot; SPD ${phase.batter.speed}</span><br>${onDeckLine(phase)}</div>
-      <div class="gq-right">ON MOUND<br><b data-card-id="${escapeHtml(phase.opposingPitcher.id)}">${escapeHtml(matchupName(phase.opposingPitcher.name))}</b><br>
-        ${moundLine(phase.opposingMound)}</div>
-    </div>`;
-  }
-  return `<div class="gq-matchup">
-    <div>THEY SEND UP<br><b data-card-id="${escapeHtml(phase.batter.id)}">#${phase.battingSpot} ${escapeHtml(matchupName(phase.batter.name))}</b><br><span class="gq-dim">OB ${phase.batter.onBase}</span><br>${onDeckLine(phase)}</div>
-    <div class="gq-right">YOUR ARM<br><b data-card-id="${escapeHtml(phase.mound.pitcher.id)}">${escapeHtml(matchupName(phase.mound.pitcher.name))}</b><br>
-      ${moundLine(phase.mound)}</div>
+// Who is actually facing whom right now, whatever the player is being asked.
+// The plate appearance bumps the lineup index before the runners are polled,
+// so on the advance-decision beat the man to show is the one the pending
+// decision names — the fellow who just put the ball in play — not the next
+// hitter up.
+function currentMatchup(battle) {
+  const state = battle.state;
+  const battingSide = state.half === "top" ? "away" : "home";
+  const fieldingSide = battingSide === "away" ? "home" : "away";
+  const lineup = state[battingSide].lineup;
+  const pending = state.pendingAdvance;
+  const spot = state.lineupIndex[battingSide] % lineup.length;
+  const batter = pending
+    ? lineup.find((player) => player.id === pending.batter?.id) ?? lineup[spot]
+    : lineup[spot];
+  const mound = pitcherStatus(state, fieldingSide);
+  return {
+    batter,
+    battingSpot: spot + 1,
+    onDeck: pending ? null : lineup[(spot + 1) % lineup.length],
+    mound,
+    deciding: Boolean(pending),
+    playerIsBatting: battingSide === battle.playerSide
+  };
+}
+
+// The at-bat band: the two men in the duel stand as small cards on the flanks
+// — the room the scoreboard used to leave empty — with the score, the bases,
+// and the outs between them. The OB and CTRL lines this panel used to spell
+// out are printed on the card faces, so they are gone from here.
+function renderHud(battle, phase) {
+  const state = battle.state;
+  const matchup = phase.type === "over" ? null : currentMatchup(battle);
+  const scoreChip = (side, label, right) =>
+    `<span class="gq-hud-team${right ? " gq-hud-right" : ""}" data-hover-note="${escapeHtml(
+      fieldingNote(right ? "THEIR DEFENSE" : "YOUR DEFENSE", state[side])
+    )}">${label}${side === "home" ? " &#9679;" : ""}<b>${state.score[side]}</b></span>`;
+  const batterLabel = matchup?.deciding
+    ? "BALL IN PLAY"
+    : `${matchup?.playerIsBatting ? "AT BAT" : "THEY SEND UP"} &middot; #${matchup?.battingSpot}`;
+  return `<div class="gq-battle-hud">
+    ${matchup ? hudCardHtml(matchup.batter, batterLabel, onDeckLine(matchup)) : `<div></div>`}
+    <div class="gq-hud-center">
+      <div class="gq-hud-scores">
+        ${scoreChip(battle.playerSide, "YOU", false)}
+        ${scoreChip(battle.npcSide, "THEM", true)}
+      </div>
+      ${diamondHtml(state)}
+      <div class="gq-center">${outsHtml(state.outs)}</div>
+    </div>
+    ${matchup
+      ? hudCardHtml(matchup.mound.pitcher, matchup.playerIsBatting ? "ON MOUND" : "YOUR ARM", moundLine(matchup.mound))
+      : `<div></div>`}
+  </div>`;
+}
+
+// A card small enough to flank the diamond, with the state its face can't
+// carry underneath it. Hoverable, so it still floats full size.
+function hudCardHtml(card, label, note) {
+  return `<div class="gq-hud-card">
+    <span class="gq-hud-card-label">${label}</span>
+    <div class="gq-hud-card-face" data-card-id="${escapeHtml(card.id)}">${cardPanelHtml(card)}</div>
+    ${note ? `<span class="gq-hud-card-note gq-dim">${note}</span>` : ""}
   </div>`;
 }
 
 // A peek down the order, hoverable like everyone else in the matchup.
-function onDeckLine(phase) {
-  if (!phase.onDeck) return "";
-  return `<span class="gq-dim">ON DECK <span data-card-id="${escapeHtml(phase.onDeck.id)}">${escapeHtml(matchupName(phase.onDeck.name))}</span></span>`;
+function onDeckLine(matchup) {
+  if (!matchup.onDeck) return "";
+  return `ON DECK <span data-card-id="${escapeHtml(matchup.onDeck.id)}">${escapeHtml(matchupName(matchup.onDeck.name))}</span>`;
 }
 
-// The mound readout: control and the fatigue subtraction, how much of the
-// chart is outs, then the workload tank on its own line.
+// CTRL and the chart are printed on the card. What it cannot show is the
+// workload: how deep this arm is, and whether he has started to tire.
 function moundLine(mound) {
   if (!mound) return "";
   const fatigue = mound.fatiguePenalty ?? 0;
-  const tired = fatigue > 0 ? ` &minus;${fatigue} TIRED` : "";
-  const outs = chartOutCount(mound.pitcher.chart);
-  return `<span class="gq-dim ${fatigue > 0 ? "gq-fatigued" : ""}">CTRL ${mound.pitcher.control}${tired} &middot; ${outs} OUT</span><br><span class="gq-dim">${mound.battersFaced}/${mound.tiredAt} BF</span>`;
-}
-
-// Out slots (PU/SO/GB/FB) on the pitcher's d20 chart — "17 OUT" means 17 of
-// the 20 rolls retire the batter outright.
-const OUT_RESULTS = new Set(["PU", "SO", "GB", "FB"]);
-function chartOutCount(chart) {
-  if (!Array.isArray(chart)) return 0;
-  let outs = 0;
-  for (const entry of chart) {
-    if (!OUT_RESULTS.has(entry.result)) continue;
-    const from = Math.max(1, entry.from);
-    const to = Math.min(20, Number.isFinite(entry.to) ? entry.to : 20);
-    if (to >= from) outs += to - from + 1;
-  }
-  return outs;
+  return `<span class="${fatigue > 0 ? "gq-fatigued" : ""}">${mound.battersFaced}/${mound.tiredAt} BF${
+    fatigue > 0 ? ` &middot; &minus;${fatigue} TIRED` : ""
+  }</span>`;
 }
 
 // Defense menus (the NPC is hitting) read from the other dugout: right-

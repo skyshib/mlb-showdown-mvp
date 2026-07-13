@@ -546,7 +546,7 @@ export const sellScreen = {
         <div class="gq-frame gq-scroll">${
           rows.length ? "" : `<p class="gq-dim">NOTHING SPARE TO SELL.</p>`
         }${menuHtml(items, index)}</div>
-        <div>${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) }) : ""}</div>
+        <div class="gq-card-side">${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) }) : ""}</div>
       </div></div>
       <div class="gq-textbox">${
         confirming
@@ -789,43 +789,59 @@ function lineupSlots(save) {
   return assignLineupSlots(rosterCards(save), save.roster.lineupAssignments).slots;
 }
 
-// Legal DH flips: any occupied slot the current DH could actually field.
-// Anyone can DH, so the other half of the flip is always legal; 1B is open
-// to every glove (at -1 out of position), the rest need the printed
-// position. Exported for tests.
-export function dhFlipOptions(save) {
-  const slots = lineupSlots(save);
-  const dh = slots.find((slot) => slot.label === "DH")?.player;
-  if (!dh) return [];
-  return slots
-    .filter((slot) => slot.label !== "DH" && slot.player && canPlayerFillLineupSlot(dh, slot.label))
-    .map((slot) => ({ label: slot.label, player: slot.player, dh }));
+// The slot a rostered hitter actually fills. Null for an arm, or for a bat
+// the lineup couldn't seat.
+export function lineupSlotOf(save, card) {
+  if (card?.kind !== "hitter") return null;
+  return lineupSlots(save).find((slot) => slot.player?.id === card.id)?.label ?? null;
 }
 
-// Send the DH out to `label` and sit that slot's occupant at DH. Persists as
-// slot assignments, so it holds for every future game.
-export function flipDhWith(save, label) {
-  const option = dhFlipOptions(save).find((item) => item.label === label);
+// Legal position switches for a seated hitter: every other slot he could
+// field, provided the man already there can cover the slot he vacates —
+// a switch trades two men, so it has to work both ways. Anyone can DH and 1B
+// takes any glove (at -1 out of position); the rest need the printed
+// position. Exported for tests.
+export function positionSwitchOptions(save, card) {
+  if (card?.kind !== "hitter") return [];
+  const slots = lineupSlots(save);
+  const from = slots.find((slot) => slot.player?.id === card.id);
+  if (!from) return [];
+  return slots
+    .filter((slot) => slot.label !== from.label)
+    .filter((slot) => canPlayerFillLineupSlot(card, slot.label))
+    .filter((slot) => !slot.player || canPlayerFillLineupSlot(slot.player, from.label))
+    .map((slot) => ({ label: slot.label, player: slot.player, card, from: from.label }));
+}
+
+// Send `card` out to `label` and bring that slot's occupant back to the one he
+// vacates. Both men were pinned at the slots they're leaving (or weren't
+// pinned at all), so writing the two keys can't strand a stale assignment.
+// Persists as slot assignments, so it holds for every future game.
+export function switchPositionTo(save, card, label) {
+  const option = positionSwitchOptions(save, card).find((item) => item.label === label);
   if (!option) return false;
-  save.roster.lineupAssignments = {
-    ...save.roster.lineupAssignments,
-    DH: option.player.id,
-    [label]: option.dh.id
-  };
+  const assignments = { ...save.roster.lineupAssignments, [label]: card.id };
+  if (option.player) assignments[option.from] = option.player.id;
+  else delete assignments[option.from];
+  save.roster.lineupAssignments = assignments;
   return true;
 }
 
-function flipLine(option) {
-  const outOfPosition = option.label === "1B" && !playsPosition(option.dh, "1B");
-  return `${escapeHtml(option.label)} ${escapeHtml(shortName(option.player.name))} &#8644; DH ${escapeHtml(shortName(option.dh.name))}${
-    outOfPosition ? ` <span class="gq-dim">FLD -1 OUT OF POSITION</span>` : ""
+function switchLine(option) {
+  // The note stays terse: the Game Boy column is narrow, and a long line
+  // wraps into the card panel.
+  const outOfPosition = option.label === "1B" && !playsPosition(option.card, "1B");
+  return `${escapeHtml(option.label)}${outOfPosition ? ` <span class="gq-dim">FLD -1</span>` : ""}${
+    option.player
+      ? ` <span class="gq-dim">${escapeHtml(shortName(option.player.name))} TAKES ${escapeHtml(option.from)}</span>`
+      : ""
   }`;
 }
 
-// The Team menu's action rows, after the 13 cards.
+// The Team menu's action rows, after the 13 cards. Position changes are not
+// here — they live on the card itself, under SWITCH POSITION.
 function teamActions(save) {
   const rotation = rotationCards(save);
-  const flips = dhFlipOptions(save);
   return [
     {
       html: rotation.length >= 2
@@ -838,17 +854,6 @@ function teamActions(save) {
         const [first] = rotationCards(a.save);
         addLog(a.save, `${first.name} takes game 1.`);
         persistSave(a.save);
-      }
-    },
-    {
-      html: flips.length
-        ? `&#8644; FLIP THE DH <span class="gq-dim">DH NOW: ${escapeHtml(shortName(flips[0].dh.name))}</span>`
-        : `&#8644; FLIP THE DH <span class="gq-dim">NO LEGAL FLIP</span>`,
-      disabled: !flips.length,
-      preview: flips[0]?.dh ?? null,
-      run: (a) => {
-        a.screen.mode = "dhFlip";
-        a.screen.pickIndex = 0;
       }
     }
   ];
@@ -869,14 +874,24 @@ export function benchCards(save, anchor, filter = "position") {
     .filter((card) => card.kind === anchor.kind && !save.roster.cardIds.includes(card.id))
     .filter((card) => !personConflict(roster, card, anchor.id));
   if (filter === "all") return spares;
-  return spares.filter((card) =>
-    anchor.kind === "pitcher" ? card.role === anchor.role : positionsOverlap(card, anchor)
-  );
+  if (anchor.kind === "pitcher") return spares.filter((card) => card.role === anchor.role);
+  // A hitter's replacement is judged by the slot he actually fills, not by
+  // everything printed on his card: the 1B/LF-RF man playing left is replaced
+  // by someone who can play left. A bat the lineup never seated has no slot to
+  // measure against, so he falls back to his own printed positions.
+  const slot = lineupSlotOf(save, anchor);
+  if (!slot) return spares.filter((card) => positionsOverlap(card, anchor));
+  return spares.filter((card) => canPlayerFillLineupSlot(card, slot));
 }
 
-function benchLabel(anchor, filter) {
-  const slot = anchor.kind === "pitcher" ? anchor.role : anchor.position;
-  return filter === "all" ? `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}` : `SPARE ${slot} ONLY`;
+function benchLabel(save, anchor, filter) {
+  if (filter === "all") return `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}`;
+  if (anchor.kind === "pitcher") return `SPARE ${anchor.role} ONLY`;
+  const slot = lineupSlotOf(save, anchor) ?? anchor.position;
+  // Every bat can DH, and any glove covers first — say so rather than promise
+  // a filter that isn't filtering.
+  if (slot === "DH" || slot === "1B") return `ANY BAT CAN ${slot === "DH" ? "DH" : "PLAY 1B"}`;
+  return `SPARE ${slot} ONLY`;
 }
 
 // The replacement picker's rows: the bench candidates plus the incumbent
@@ -905,11 +920,15 @@ function seasonStatsHtml(save, card) {
 function teamCardActions(app, card) {
   if (!card) return [{ label: "CANCEL", run: () => {} }];
   const save = app.save;
+  const slot = lineupSlotOf(save, card);
   const actions = [
     {
       label: save.activeSeries ? `SWAP THIS CARD <span class="gq-dim">SERIES IN PROGRESS</span>` : "SWAP THIS CARD",
       disabled: Boolean(save.activeSeries),
       run: () => {
+        // "Position" means the slot he actually fills — so the DH opens on
+        // every spare bat, and the LF/RF man playing left opens on the
+        // corner outfielders. benchCards does the reading.
         app.screen.mode = "pick";
         app.screen.pickFilter = "position";
         const opened = pickRowsFor(save, card, "position");
@@ -918,6 +937,17 @@ function teamCardActions(app, card) {
     }
   ];
   if (card.kind === "hitter") {
+    const switches = positionSwitchOptions(save, card);
+    actions.push({
+      label: switches.length
+        ? `SWITCH POSITION <span class="gq-dim">NOW AT ${escapeHtml(slot ?? "&mdash;")}</span>`
+        : `SWITCH POSITION <span class="gq-dim">NO LEGAL SWITCH</span>`,
+      disabled: !switches.length,
+      run: () => {
+        app.screen.mode = "switchPos";
+        app.screen.pickIndex = 0;
+      }
+    });
     actions.push({ label: "BATTING ORDER", run: () => app.go("lineup", { returnTo: "team", index: 0 }) });
   }
   const sell = sellAction(app, card);
@@ -936,43 +966,45 @@ export const teamScreen = {
     const cap = pointCap(save);
     if (points > cap) issues.push(`over cap by ${points - cap}`);
     const picking = app.screen.mode === "pick";
-    const flipping = app.screen.mode === "dhFlip";
+    const switching = app.screen.mode === "switchPos";
     const rosterIndex = clampIndex(app.screen.index ?? 0, roster.length + actions.length);
     const filter = app.screen.pickFilter ?? "position";
-    const flips = flipping ? dhFlipOptions(save) : [];
+    const anchor = roster[rosterIndex] ?? null;
+    const switches = switching ? positionSwitchOptions(save, anchor) : [];
     // The pick list holds the man being replaced too, diamond-marked like
     // the binder and sorted into his rightful spot by points — picking him
     // keeps him.
-    const pickRows = picking ? pickRowsFor(save, roster[rosterIndex], filter) : [];
-    const pickIndex = clampIndex(app.screen.pickIndex ?? 0, (picking ? pickRows.length : flips.length) + 1);
+    const pickRows = picking ? pickRowsFor(save, anchor, filter) : [];
+    const pickIndex = clampIndex(app.screen.pickIndex ?? 0, (picking ? pickRows.length : switches.length) + 1);
     const preview = picking
       ? pickRows[pickIndex] ?? null
-      : flipping
-        ? flips[pickIndex]?.player ?? null
+      : switching
+        ? switches[pickIndex]?.player ?? anchor
         : rosterIndex < roster.length
           ? roster[rosterIndex]
           : actions[rosterIndex - roster.length]?.preview ?? null;
+    const dhId = lineupSlots(save).find((slot) => slot.label === "DH")?.player?.id ?? null;
     let list;
     if (app.screen.actionMenu && rosterIndex < roster.length) {
       list = actionMenuHtml(actionMenuTitle(app, roster[rosterIndex]), menuActions(app, roster[rosterIndex], teamCardActions), app.screen.actionIndex);
     } else if (picking) {
-      const anchorId = roster[rosterIndex]?.id;
-      list = `<h3>${benchLabel(roster[rosterIndex], filter)}</h3>${menuHtml(
+      const anchorId = anchor?.id;
+      list = `<h3>${benchLabel(save, anchor, filter)}</h3>${menuHtml(
         [
           ...pickRows.map((card) => ({ html: `${cardLine(card)}${card.id === anchorId ? " &#9670;" : ""}` })),
           { label: "CANCEL" }
         ],
         pickIndex
       )}`;
-    } else if (flipping) {
-      list = `<h3>FLIP THE DH</h3>${menuHtml(
-        [...flips.map((option) => ({ html: flipLine(option) })), { label: "CANCEL" }],
+    } else if (switching) {
+      list = `<h3>${escapeHtml(shortName(anchor?.name ?? ""))} PLAYS&hellip;</h3>${menuHtml(
+        [...switches.map((option) => ({ html: switchLine(option) })), { label: "CANCEL" }],
         pickIndex
       )}`;
     } else {
       list = menuHtml(
         [
-          ...roster.map((card) => ({ html: cardLine(card) })),
+          ...roster.map((card) => ({ html: cardLine(card, { slot: card.id === dhId ? "DH" : null }) })),
           ...actions.map((action) => ({ html: action.html, disabled: action.disabled }))
         ],
         rosterIndex
@@ -989,11 +1021,11 @@ export const teamScreen = {
         <p class="gq-dim">${
           picking
             ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels."
-            : flipping
-              ? "Z sends the DH out there; the fielder DHs instead. X cancels."
+            : switching
+              ? "Z sends him out there; the man he displaces takes his old spot. X cancels."
               : save.activeSeries
                 ? "SERIES IN PROGRESS — swaps wait until it ends. Everything else in the card menu stays yours."
-                : "Z opens a card's actions — swap, batting order, sell, star. Rotation and DH tools live below the roster. X to leave."
+                : "Z opens a card's actions — swap, switch position, batting order, sell, star. The rotation lives below the roster. X to leave."
         }</p>
       </div>
     </div>`;
@@ -1005,8 +1037,9 @@ export const teamScreen = {
       if (!anchor) return null;
       return pickRowsFor(app.save, anchor, app.screen.pickFilter ?? "position")[index] ?? null;
     }
-    if (app.screen.mode === "dhFlip") {
-      return dhFlipOptions(app.save)[index]?.player ?? null;
+    if (app.screen.mode === "switchPos") {
+      const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
+      return positionSwitchOptions(app.save, anchor)[index]?.player ?? anchor ?? null;
     }
     if (index < roster.length) return roster[index] ?? null;
     return teamActions(app.save)[index - roster.length]?.preview ?? null;
@@ -1043,15 +1076,17 @@ export const teamScreen = {
       } else if (key === "b") {
         app.screen.mode = "roster";
       }
-    } else if (app.screen.mode === "dhFlip") {
-      const flips = dhFlipOptions(save);
+    } else if (app.screen.mode === "switchPos") {
+      const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
+      const switches = positionSwitchOptions(save, anchor);
       if (key === "up" || key === "down") {
-        app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), flips.length + 1);
+        app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), switches.length + 1);
       } else if (key === "a") {
-        const pickIndex = app.screen.pickIndex ?? 0;
-        const option = flips[pickIndex];
-        if (option && flipDhWith(save, option.label)) {
-          addLog(save, `${option.dh.name} takes ${option.label}; ${option.player.name} DHs.`);
+        const option = switches[app.screen.pickIndex ?? 0];
+        if (option && switchPositionTo(save, anchor, option.label)) {
+          addLog(save, option.player
+            ? `${anchor.name} takes ${option.label}; ${option.player.name} moves to ${option.from}.`
+            : `${anchor.name} takes ${option.label}.`);
           persistSave(save);
         }
         app.screen.mode = "roster";
@@ -1104,7 +1139,7 @@ export const lineupScreen = {
           })),
           index
         )}</div>
-        <div>${selected ? cardPanelHtml(selected) : ""}</div>
+        <div class="gq-card-side">${selected ? cardPanelHtml(selected) : ""}</div>
       </div></div>
       <div class="gq-textbox"><p class="gq-dim">${
         grabbed ? "Carry him with the arrows. Z sets him down." : "Z grabs a hitter to move him. X to leave."

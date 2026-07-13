@@ -186,6 +186,11 @@ h1.gq-logo {
 .gq-menu li.gq-disabled { color: var(--gb-dark); opacity: 0.65; }
 .gq-caret { width: 2.4cqw; flex: none; }
 
+/* A game-log row is two lines: the play, then the dice and the running odds
+   under it in a quieter type. The caret still sits on the play's baseline. */
+.gq-log-row { display: block; }
+.gq-log-detail { display: block; font-size: 2.4cqw; letter-spacing: 0.02em; }
+
 .gq-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2cqw; height: 100%; min-height: 0; }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
 /* Screens that want the whole card visible without scrolling (the Team
@@ -201,7 +206,7 @@ h1.gq-logo {
   grid-template-columns: 1fr auto 1fr;
   gap: 1.5cqw;
   align-items: center;
-  padding: 1.5cqw 2cqw;
+  padding: 1cqw 2cqw;
   border-bottom: 0.6cqw solid var(--gb-darkest);
   background: var(--gb-light);
 }
@@ -210,11 +215,48 @@ h1.gq-logo {
 .gq-hud-team b { font-size: 4.6cqw; display: block; }
 .gq-hud-right { text-align: right; }
 
+/* The scoreboard, the bases, and the outs stack down the middle; the batter
+   and the arm take the flanks the scoreboard used to leave empty. */
+.gq-hud-center { display: flex; flex-direction: column; align-items: center; }
+.gq-hud-scores { display: flex; justify-content: space-between; gap: 4cqw; width: 100%; }
+
+/* Every other screen puts a scrolling body above the textbox, which soaks up
+   the slack. The battle screen has none, so the textbox takes it — otherwise
+   the box stops at its 42% cap, the last menu row falls off the bottom, and a
+   dead strip sits under it.
+
+   Inside it, the menu is what the player has to reach, so the menu is what
+   stays put: a long call of the play scrolls in its own right, and never
+   pushes SWING AWAY off the bottom of the screen. */
+.gq-battle-screen .gq-textbox {
+  flex: 1;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.gq-battle-lines { flex: 1; min-height: 0; overflow-y: auto; }
+.gq-battle-menu { flex: none; }
+
+.gq-hud-card { display: flex; flex-direction: column; align-items: center; gap: 0.6cqw; }
+/* The face needs a width of its own: centering the column makes every child
+   shrink to fit, and a card asking for 100% of a shrink-to-fit parent
+   resolves to nothing. The card is its own container, so that width is all it
+   takes to shrink one — every rule on the face is in cqw and scales with it. */
+.gq-hud-card-face { width: 100%; max-width: 21cqw; }
+.gq-hud-card .gq-card { width: 100%; margin-bottom: 0; }
+.gq-hud-card-label { font-size: 2.4cqw; white-space: nowrap; }
+.gq-hud-card-note { font-size: 2.4cqw; text-align: center; }
+.gq-hud-card .gq-fatigued { animation: gq-blink 1s steps(2) infinite; }
+
+/* The 45deg turn swings every corner (12cqw * sqrt2 - 12cqw) / 2 outside the
+   box layout reserved for it. The vertical margin buys that overhang back, so
+   second base stays clear of the top bar and home plate stays off the outs. */
 .gq-diamond {
   position: relative;
   width: 12cqw;
   height: 12cqw;
-  margin: 0 auto;
+  margin: 2.5cqw auto;
   transform: rotate(45deg);
 }
 
@@ -336,10 +378,6 @@ h1.gq-logo {
 }
 
 .gq-outs i.gq-out-on { background: var(--gb-darkest); }
-
-.gq-matchup { display: flex; justify-content: space-between; padding: 1.2cqw 2cqw; font-size: 2.9cqw; gap: 2cqw; }
-.gq-matchup > div { flex: 1; }
-.gq-matchup .gq-fatigued { animation: gq-blink 1s steps(2) infinite; }
 
 /* ---- Map ---- */
 

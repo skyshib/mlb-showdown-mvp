@@ -183,7 +183,7 @@ export const trainerIntroScreen = {
         <div class="gq-topbar"><span>SCOUTING ${escapeHtml(trainer.name)}</span><span>${buildNpcTeam(trainer, app.save).points} PT</span></div>
         <div class="gq-body"><div class="gq-columns">
           <div class="gq-frame gq-scroll">${menuHtml(rows.map((card) => ({ html: cardLine(card) })), index)}</div>
-          <div>${selected ? cardPanelHtml(selected) : ""}</div>
+          <div class="gq-card-side">${selected ? cardPanelHtml(selected) : ""}</div>
         </div></div>
         <div class="gq-textbox"><p class="gq-dim">Hover or move the cursor to read a card. X to go back.</p></div>
       </div>`;
