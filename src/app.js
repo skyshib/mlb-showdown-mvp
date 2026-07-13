@@ -519,7 +519,7 @@ if (warRoomMode && !onlineRoomParam) {
 function defaultState() {
   return {
     seed: "coefficient-classic",
-    managers: ["Kasey", "Milo", "Nico", "Rafa"],
+    managers: ["Skylar", "Kasey", "Scott"],
     cpuManagers: [],
     universe: DEFAULT_UNIVERSE,
     draftType: "snake",
@@ -1068,39 +1068,62 @@ function randomNominationBlurb(managerCount) {
 
 function renderSetup(setupError = "") {
   resetAppHandlers();
-  app.innerHTML = `<section class="panel setup">
-    <div>
-      <p class="eyebrow">MLB Showdown-ish MVP</p>
-      <h1>Draft a real card set. Play the games.</h1>
-      <p class="lede">Private local prototype. It now saves your room in this browser, so reloads should not wipe the draft.</p>
-    </div>
+  app.innerHTML = `<section class="setup">
+    <header class="setup-hero">
+      <div class="setup-hero-copy">
+        <p class="eyebrow">MLB Showdown Draft and Simulator</p>
+        <h1>It's draft day</h1>
+        <p class="lede">Private local prototype. It now saves your room in this browser, so reloads should not wipe the draft.</p>
+      </div>
+      <ul class="setup-features">
+        <li class="setup-feature">
+          <span class="setup-feature-name">Historical cards</span>
+          <span class="setup-feature-note">Every real Showdown card, 2000&ndash;2005 &mdash; the printed charts and points.</span>
+        </li>
+        <li class="setup-feature">
+          <span class="setup-feature-name">Real players</span>
+          <span class="setup-feature-note">A century of big leaguers, rated by career, decade, or club.</span>
+        </li>
+        <li class="setup-feature">
+          <span class="setup-feature-name">Fictional</span>
+          <span class="setup-feature-note">A made-up league, invented fresh from your seed.</span>
+        </li>
+      </ul>
+    </header>
     <form id="setup-form" class="setup-grid">
-      <label>
-        Managers
-        <textarea name="managers" rows="5">${escapeHtml(state.managers.join("\n"))}</textarea>
-      </label>
-      <fieldset class="pool-mode cpu-managers">
-        <legend>Computer managers</legend>
-        <div class="cpu-list" data-cpu-list>${renderCpuChoices(state.managers, state.cpuManagers)}</div>
-        <small class="cpu-note">Checked managers play themselves — instant picks and sealed bids.</small>
-      </fieldset>
-      <label>
-        Seed
-        <input name="seed" value="${escapeHtml(state.seed)}" />
-      </label>
-      <label>
-        Roster size
-        <input name="rosterSize" type="number" min="13" max="13" value="13" />
-      </label>
-      <label>
-        Snake pick timer
-        <select name="pickTimer">
-          ${[[0, "Off"], [30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
-            .map(([seconds, label]) => `<option value="${seconds}" ${state.pickTimerSeconds === seconds ? "selected" : ""}>${label}</option>`)
-            .join("")}
-        </select>
-        <small>When the clock hits zero the pick is made automatically.</small>
-      </label>
+      <div class="setup-col">
+        <h2 class="setup-h2">The table</h2>
+        <label>
+          Managers
+          <textarea name="managers" rows="5">${escapeHtml(state.managers.join("\n"))}</textarea>
+        </label>
+        <fieldset class="pool-mode cpu-managers">
+          <legend>Computer managers</legend>
+          <div class="cpu-list" data-cpu-list>${renderCpuChoices(state.managers, state.cpuManagers)}</div>
+          <small class="cpu-note">Checked managers play themselves — instant picks and sealed bids.</small>
+        </fieldset>
+        <div class="setup-row">
+          <label>
+            Seed
+            <input name="seed" value="${escapeHtml(state.seed)}" />
+          </label>
+          <label>
+            Roster size
+            <input name="rosterSize" type="number" min="13" max="13" value="13" />
+          </label>
+        </div>
+        <label>
+          Snake pick timer
+          <select name="pickTimer">
+            ${[[0, "Off"], [30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
+              .map(([seconds, label]) => `<option value="${seconds}" ${state.pickTimerSeconds === seconds ? "selected" : ""}>${label}</option>`)
+              .join("")}
+          </select>
+          <small>When the clock hits zero the pick is made automatically.</small>
+        </label>
+      </div>
+      <div class="setup-col">
+        <h2 class="setup-h2">The draft</h2>
       <fieldset class="pool-mode draft-type-mode">
         <legend>Draft type</legend>
         <label class="pool-option">
@@ -1143,17 +1166,16 @@ function renderSetup(setupError = "") {
         </div>
       </fieldset>
       ${renderUniverseFieldset(state.universe)}
-      ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
-      <button type="submit">Start draft</button>
-      <div class="online-setup">
-        <button type="button" data-action="create-online">Create online room</button>
-        <p class="online-note" data-online-note>Draft with friends on other machines. Needs the room server: <code>npm run online</code></p>
+      </div>
+      <div class="setup-actions">
+        ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
+        <div class="setup-buttons">
+          <button type="submit">Start offline draft</button>
+          <button type="button" data-action="create-online">Create online room</button>
+          <p class="online-note" data-online-note>Draft with friends on other machines. Needs the room server: <code>npm run online</code></p>
+        </div>
       </div>
     </form>
-  </section>
-  <section class="panel notes">
-    <h2>V1 rules assumption</h2>
-    <p>Control roll is d20 plus pitcher control versus hitter on-base. Higher than on-base uses the pitcher chart; ties go to the hitter. Baserunning is simplified and documented in <code>docs/rules.md</code>.</p>
   </section>`;
 
   const setupForm = document.querySelector("#setup-form");

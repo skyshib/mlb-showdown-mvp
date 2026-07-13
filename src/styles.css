@@ -1,14 +1,28 @@
+/* Enamel sign: the porcelain outfield advertisement, c. 1935. Flat color
+   fields, thick navy rules, hard edges, no gloss. The display face is
+   Archivo Narrow — the same heavy condensed italic the card front wears
+   (its @font-face lives in cardFace.css, loaded ahead of this file). */
 :root {
   color-scheme: light;
-  --bg: #f6f4ee;
-  --ink: #1c2521;
-  --muted: #66736d;
-  --line: #c9d2ca;
-  --panel: #fffdf7;
-  --accent: #0b6b53;
-  --accent-dark: #074534;
-  --warn: #9c3b21;
-  --ok: #146144;
+  --bg: #cfc4ab;
+  --sheet: #f0e7d2;
+  --panel: #f7f1e2;
+  --ink: #221f1c;
+  --muted: #4c463f;
+  --navy: #1b3a63;
+  --navy-deep: #142c4b;
+  --line: #1b3a63;
+  --hairline: #b3a88e;
+  --accent: #b8352e;
+  --accent-dark: #9a2a24;
+  --warn: #9a2a24;
+  --ok: #1b5e46;
+
+  --rule: 3px;
+  --rule-thick: 4px;
+
+  --display: "Archivo Narrow", "Arial Narrow", "Helvetica Neue Condensed", sans-serif;
+
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -24,8 +38,10 @@ body {
 
 main {
   width: min(1440px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 24px 0 40px;
+  margin: 24px auto 40px;
+  border: var(--rule-thick) solid var(--navy);
+  padding: 32px;
+  background: var(--sheet);
 }
 
 h1,
@@ -36,19 +52,34 @@ p {
 }
 
 h1 {
-  max-width: 780px;
-  font-size: 40px;
-  line-height: 1.05;
-  font-weight: 780;
+  max-width: 900px;
+  font-family: var(--display);
+  font-size: 64px;
+  line-height: 0.92;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--navy);
 }
 
 h2 {
   margin-bottom: 14px;
-  font-size: 20px;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--navy);
 }
 
 h3 {
+  font-family: var(--display);
   font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 button,
@@ -59,11 +90,17 @@ textarea {
 
 button {
   min-height: 38px;
-  border: 1px solid var(--accent-dark);
-  border-radius: 6px;
-  padding: 8px 12px;
+  border: var(--rule) solid var(--navy);
+  border-radius: 0;
+  padding: 10px 16px;
   background: var(--accent);
-  color: white;
+  color: var(--sheet);
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -71,36 +108,69 @@ button:hover {
   background: var(--accent-dark);
 }
 
+button:focus-visible {
+  outline: var(--rule) solid var(--navy);
+  outline-offset: 3px;
+}
+
 button:disabled {
-  border-color: #b8c0ba;
-  background: #d5dbd6;
-  color: #6f7871;
+  border-color: var(--hairline);
+  background: var(--bg);
+  color: #7d7362;
   cursor: not-allowed;
 }
 
 button.small {
   min-height: 30px;
-  padding: 4px 8px;
+  padding: 5px 10px;
   font-size: 13px;
+  letter-spacing: 0.06em;
 }
 
 input,
 textarea,
 select {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 10px;
-  background: white;
+  border: 2px solid var(--navy);
+  border-radius: 0;
+  padding: 10px 12px;
+  background: var(--panel);
   color: var(--ink);
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: var(--accent);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: var(--rule) solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--navy);
 }
 
 label {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  font-family: var(--display);
+  color: var(--navy);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+label small {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.5;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 650;
 }
 
 table {
@@ -183,68 +253,248 @@ td span {
 
 .panel {
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: var(--rule) solid var(--navy);
+  border-radius: 0;
   padding: 18px;
   background: var(--panel);
-  box-shadow: 0 1px 0 rgba(28, 37, 33, 0.04);
 }
 
+/* ---- the setup screen: hero across the top, the form in two real columns.
+   The old layout gave the hero a whole 1fr column and squeezed every control
+   into a fixed 420px rail, which left half the screen empty. ---- */
 .setup {
+  display: flex;
+  flex-direction: column;
+  gap: 38px;
+}
+
+.setup-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 40px;
   align-items: start;
+  padding-bottom: 34px;
+  border-bottom: var(--rule) solid var(--navy);
+}
+
+.setup-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* The three features, as flat enamel blocks split by navy rules. */
+.setup-features {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--rule);
+  margin: 0;
+  border: var(--rule) solid var(--navy);
+  padding: 0;
+  background: var(--navy);
+  list-style: none;
+}
+
+.setup-feature {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 14px;
+  background: var(--panel);
+}
+
+/* Two of the three names wrap to a second line, so reserve both lines and the
+   notes below still start on the same baseline. */
+.setup-feature-name {
+  min-height: 2em;
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+.setup-feature-note {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
 }
 
 .setup-grid {
   display: grid;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.setup-col {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  min-width: 0;
+}
+
+/* The red enamel bar that heads each column. */
+.setup-h2 {
+  margin: 0;
+  padding: 12px 16px 11px;
+  background: var(--accent);
+  color: var(--sheet);
+  font-size: 24px;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.setup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
+  gap: 18px;
+  align-items: start;
+}
+
+.setup-actions {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 16px;
+  padding-top: 30px;
+  border-top: var(--rule) solid var(--navy);
+}
+
+.setup-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 18px;
+}
+
+.setup-buttons button {
+  font-size: 18px;
+  padding: 15px 26px 14px;
+}
+
+.setup-buttons button[data-action="create-online"] {
+  background: var(--panel);
+  color: var(--navy);
+}
+
+.setup-buttons button[data-action="create-online"]:hover {
+  background: var(--sheet);
+  color: var(--accent-dark);
 }
 
 .pool-mode {
   display: grid;
-  gap: 10px;
+  gap: 14px;
   margin: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px 14px 14px;
+  border: var(--rule) solid var(--navy);
+  border-radius: 0;
+  padding: 20px 18px 18px;
+  background: var(--panel);
 }
 
+/* The legend rides on the frame as a solid navy tab. */
 .pool-mode legend {
-  padding: 0 4px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--muted);
+  margin-left: -4px;
+  padding: 7px 14px 6px;
+  background: var(--navy);
+  color: var(--sheet);
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.13em;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .pool-option {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: start;
+  border: 2px solid transparent;
+  padding: 12px 14px;
   cursor: pointer;
 }
 
-.pool-option input {
-  margin-top: 3px;
+.pool-option:hover {
+  border-color: var(--hairline);
+}
+
+/* The radio becomes the card's home-plate pentagon: navy outline when off,
+   solid enamel red when chosen. */
+.pool-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 0;
+  background: var(--navy);
+  clip-path: polygon(0% 0%, 100% 0%, 100% 52%, 50% 100%, 0% 52%);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.pool-option input[type="radio"]::after {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--panel);
+  clip-path: polygon(0% 0%, 100% 0%, 100% 52%, 50% 100%, 0% 52%);
+}
+
+.pool-option input[type="radio"]:checked::after {
+  background: var(--accent);
 }
 
 .pool-option span {
   display: grid;
-  gap: 2px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pool-option strong {
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--navy);
 }
 
 .pool-option small {
   color: var(--muted);
-  line-height: 1.35;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.pool-option:has(input:checked) {
+  border-color: var(--navy);
+  background: var(--sheet);
+}
+
+.pool-option:has(input:checked) strong {
+  color: var(--accent-dark);
+}
+
+.pool-option:has(input:checked) small {
+  color: var(--ink);
 }
 
 .pool-suboptions {
   display: grid;
   gap: 8px;
-  margin-left: 27px;
-  padding-left: 12px;
-  border-left: 2px solid var(--line);
+  margin-left: 20px;
+  padding-left: 16px;
+  border-left: var(--rule) solid var(--navy);
 }
 
 /* The two parameterized card sets carry a picker under their radio: a
@@ -282,28 +532,36 @@ td span {
 
 .form-error {
   margin: 0;
-  border: 1px solid rgba(143, 49, 71, 0.45);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: rgba(143, 49, 71, 0.08);
-  color: #8f3147;
+  border: var(--rule) solid var(--accent-dark);
+  border-radius: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  color: var(--accent-dark);
   font-size: 14px;
+  font-weight: 600;
 }
 
 .lede {
-  margin-top: 12px;
-  max-width: 680px;
-  color: var(--muted);
-  font-size: 17px;
-  line-height: 1.45;
+  margin: 0;
+  max-width: 46ch;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.6;
 }
 
+/* The eyebrow is a solid navy plate, like the legend tabs. */
 .eyebrow {
-  margin-bottom: 8px;
-  color: var(--accent);
-  font-size: 12px;
+  margin: 0;
+  align-self: flex-start;
+  padding: 8px 14px 7px;
+  background: var(--navy);
+  color: var(--sheet);
+  font-family: var(--display);
+  font-size: 14px;
   font-weight: 800;
-  letter-spacing: 0;
+  font-style: italic;
+  letter-spacing: 0.14em;
+  line-height: 1;
   text-transform: uppercase;
 }
 
@@ -2317,25 +2575,73 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .cpu-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
 }
 
 .cpu-option {
-  display: inline-flex;
+  display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  min-width: 0;
+  border: 2px solid transparent;
+  padding: 6px 8px;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink);
   cursor: pointer;
 }
 
-.cpu-option input {
-  width: auto;
+.cpu-option:hover {
+  border-color: var(--hairline);
+}
+
+.cpu-option:has(input:checked) {
+  border-color: var(--navy);
+  background: var(--sheet);
+  color: var(--navy);
+}
+
+/* A flat navy box that fills enamel red with a cream tick. */
+.cpu-option input[type="checkbox"] {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  position: relative;
+  margin: 0;
+  border: 2px solid var(--navy);
+  border-radius: 0;
+  background: var(--panel);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.cpu-option input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+.cpu-option input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 5px;
+  height: 10px;
+  border-right: 2px solid var(--sheet);
+  border-bottom: 2px solid var(--sheet);
+  transform: rotate(42deg);
 }
 
 .cpu-note {
   color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 .last-sale {
