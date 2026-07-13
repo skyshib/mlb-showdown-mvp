@@ -104,7 +104,7 @@ function solveMidtone(paper, ink, target) {
   return mix(paper, ink, hi);
 }
 
-export function derivePalette({ ink, accent, flare = null }) {
+export function derivePalette({ ink, accent, extras = [] }) {
   // The paper takes a breath of the club and nothing more. Any more and the
   // cream stops being cream, and the sign stops being the same sign.
   const paper = mix(CREAM, ink, 0.05);
@@ -168,7 +168,7 @@ export function derivePalette({ ink, accent, flare = null }) {
     // versions: the sheet had to deepen them so cream could be read on them, and
     // the board's problem is the opposite one.
     ...darkRoom(ink, accent, paper),
-    ...bold(ink, accent, flare)
+    ...bold(ink, accent, extras)
   };
 }
 
@@ -225,11 +225,18 @@ export function flareSeparates(a, b) {
   const hslB = toHsl(b);
   const gap = Math.abs(hslA[0] - hslB[0]);
   const hueDegrees = Math.min(gap, 1 - gap) * 360;
+  const ratio = contrast(a, b);
   // 30 degrees, not 40: a red and a gold sit 39 apart, and a red button on a
   // gold banner is not a subtle thing. A red and an ORANGE sit 16 apart and are
   // a smudge — the line belongs between those two, not above both.
-  const byHue = hasHue(hslA) && hasHue(hslB) && hueDegrees >= 30;
-  return byHue || contrast(a, b) >= 3;
+  //
+  // And a hue argument still needs SOME light behind it. Minnesota's gold on
+  // its red lands 55 degrees apart at 1.1:1 — all but the same brightness, and
+  // a flash that only changes hue at identical luminance is a flash you have to
+  // look for. 1.8 is the floor; Seattle's red on its teal clears it at 1.9,
+  // which is the case this whole token exists for.
+  const byHue = hasHue(hslA) && hasHue(hslB) && hueDegrees >= 30 && ratio >= 1.8;
+  return byHue || ratio >= 3;
 }
 
 // The flare's ONE job is to be seen on the banner, because the banner is where
@@ -240,7 +247,7 @@ export function flareSeparates(a, b) {
 // two jobs; the board's cursor takes the club's lead instead.
 //
 // Candidates, in order of how much they belong to the club:
-//   its own named third color, if it has one
+//   its own third and fourth colors, novel ones first
 //   the house red
 //   the light tone — white on a red banner is not subtle, which is the job
 //   its OTHER color, the one the lead is not
@@ -249,14 +256,31 @@ export function flareSeparates(a, b) {
 // red is the same hue and the light tone is 1.6:1 against it — both invisible.
 // Their other color is navy, and a blue flash on a red banner is unmistakable.
 // A club always has a second color, and it is always the one the lead is not.
-function flareColor(named, lead, light, other) {
-  for (const candidate of [named, HOUSE_FLARE, light, other].filter(Boolean)) {
+function flareColor(extras, lead, light, other) {
+  for (const candidate of [...extras, HOUSE_FLARE, light, other].filter(Boolean)) {
     if (flareSeparates(candidate, lead)) return candidate;
   }
   return light;
 }
 
-function bold(rawInk, rawAccent, rawFlare) {
+// The club's extra colors, most NOVEL first — furthest from the two it already
+// spends. The Yankees list a blue and a red past their navy and grey, and the
+// blue is very nearly the navy again: it would flare navy-on-grey, which is a
+// club announcing a run in a color it is already wearing. The red is the color
+// that is not yet on the screen, so the red goes first. Same reason Arizona
+// leads with its turquoise rather than its black.
+function byNovelty(extras, ink, accent) {
+  const distance = (a, b) => {
+    const [ra, rb] = [toRgb(a), toRgb(b)];
+    return Math.hypot(...ra.map((v, i) => v - rb[i]));
+  };
+  return [...(extras ?? [])]
+    .map((color) => ({ color, novelty: Math.min(distance(color, ink), distance(color, accent)) }))
+    .sort((a, b) => b.novelty - a.novelty)
+    .map((entry) => entry.color);
+}
+
+function bold(rawInk, rawAccent, extras) {
   const ground = luminance(rawInk) <= luminance(rawAccent) ? rawInk : rawAccent;
   const pop = ground === rawInk ? rawAccent : rawInk;
 
@@ -292,7 +316,7 @@ function bold(rawInk, rawAccent, rawFlare) {
     boldCard2: up(0.10),
     // The color a run is announced in, checked against the banner it flashes on.
     // `ground` is the club's other color — whichever one the lead is not.
-    boldFlare: flareColor(rawFlare, spend, up(0.85), ground)
+    boldFlare: flareColor(byNovelty(extras, rawInk, rawAccent), spend, up(0.85), ground)
   };
 }
 
