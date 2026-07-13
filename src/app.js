@@ -5267,11 +5267,15 @@ function moveOnBoard(playerId, delta) {
 function bigBoard(manager, draft) {
   if (!manager || !draft) return [];
   const byId = new Map(draft.pool.map((player) => [player.id, player]));
+  // An auction has no slot to be blocked out of. You do not take a card, you
+  // BUY one, and what stops you is the money — so the badge that says a card
+  // will not fit never lights, and saying nothing is exactly right.
+  const slots = !isAuctionDraft(draft);
   return (state.starred[manager.id] ?? [])
     .map((id) => byId.get(id))
     .filter(Boolean)
     .map((player) => {
-      const legality = canPickPlayer(draft, manager, player);
+      const legality = slots ? canPickPlayer(draft, manager, player) : { ok: true, reason: "" };
       return {
         player,
         gone: draft.pickedIds.has(player.id),

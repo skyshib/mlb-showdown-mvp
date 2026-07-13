@@ -42,7 +42,8 @@ import {
   syncAuctionTimer,
   undoLastPick,
   upcomingNominators,
-  validateRoster
+  validateRoster,
+  managerValuation
 } from "../src/rules/draft.js";
 
 const hitter = {
@@ -501,14 +502,18 @@ test("computer managers bid instantly when their turn comes up", () => {
   assert.equal(submitCpuSealedBids(draft), null);
   assert.equal(sealedBidder(draft).id, alpha.id);
 
+  // A computer answers the moment it is asked. What it answers is its own
+  // business: a bid, or nothing at all — passing on a card it can replace for
+  // the minimum is a move, not a failure to move. What it must never do is bid
+  // more than it has.
   const robo = draft.managers[1];
   const roboBid = cpuSealedBid(draft, robo);
-  assert.ok(roboBid >= AUCTION_MIN_BID);
-  assert.ok(roboBid <= auctionMaxBid(draft, robo));
+  assert.ok(roboBid === 0 || roboBid >= AUCTION_MIN_BID, "a bid is a real bid, or it is a pass");
+  assert.ok(roboBid <= auctionMaxBid(draft, robo), "and never more than it can pay");
 
   placeSealedBid(draft, alpha.id, 10);
   const result = submitCpuSealedBids(draft);
-  // Both computers bid, which resolved the lot.
+  // Both computers answered, which resolved the lot.
   assert.equal(result.sold, true);
   assert.equal(draft.auction.lot, null);
   assert.equal(draft.pickNumber, 1);
@@ -653,4 +658,145 @@ test("the batting order a manager sets is the order they bat in", () => {
   const after = buildTeam(alpha).lineup.map((player) => player.id);
   assert.equal(after[0], byDefault[4], "the one man named leads off");
   assert.equal(after.length, 9, "and nobody is lost");
+});
+
+// ---- How a computer decides what to pay -------------------------------------
+//
+// The old bidder priced a card against the AVERAGE card of its kind, so the
+// worst catcher on the board still drew a bid proportional to what he was. But
+// the worst catcher is worth nothing: let him go and you get another catcher,
+// and all you lose is the difference between them. That difference is the whole
+// value of a card, and it is what these tests are about.
+
+// The stock test pool clones ONE card, so every catcher on it is the same
+// catcher. That is a fine board for testing the machinery of an auction and a
+// useless one for testing what a card is worth: if the men at a spot are
+// identical, the worst of them IS the best of them, every card is replacement
+// level, and passing on all of them is the right answer. A graded board is what
+// the question needs.
+function makeGradedPool(prefix = "graded", depth = 5) {
+  const cards = [];
+  for (const [index, position] of positions.entries()) {
+    for (let rank = 0; rank < depth; rank += 1) {
+      cards.push(makeHitter({
+        id: `${prefix}-h-${index}-${rank}`,
+        name: `${prefix} ${position} ${rank}`,
+        position,
+        onBase: Math.max(4, 14 - rank),
+        speed: Math.max(6, 18 - rank),
+        fielding: Math.max(0, 5 - rank),
+        points: 400 - rank * 20
+      }));
+    }
+  }
+  for (let index = 0; index < depth * 8; index += 1) {
+    const rank = index % depth;
+    cards.push(makePitcher({
+      id: `${prefix}-p-${index}`,
+      name: `${prefix} P ${index}`,
+      role: index % 2 === 0 ? "SP" : "RP",
+      ip: index % 2 === 0 ? 6 : 1,
+      control: Math.max(1, 7 - rank),
+      points: 300 - rank * 15
+    }));
+  }
+  return cards;
+}
+
+test("a computer passes on the worst man at a spot, because it can still have the next one", () => {
+  // A fresh room per lot: a nomination cannot simply be swapped out from under
+  // a live auction, and a draft with no card on the block bids zero for reasons
+  // that have nothing to do with what the card is worth.
+  const room = () => makeAuctionDraft(
+    [{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }, { name: "Gamma", cpu: true }],
+    makeGradedPool("replacement")
+  );
+  const sample = room();
+  const model = managerValuation(sample, sample.managers[0]);
+  const catchers = sample.pool
+    .filter((player) => player.kind === "hitter" && player.position === "C")
+    .sort((a, b) => model.value(b) - model.value(a));
+  assert.ok(catchers.length >= 3, "the board has catchers to choose between");
+  const best = catchers[0];
+  const worst = catchers[catchers.length - 1];
+  assert.ok(model.value(best) > model.value(worst), "and they are not all the same catcher");
+
+  const onWorst = room();
+  nominatePlayer(onWorst, worst.id);
+  const bidWorst = cpuSealedBid(onWorst, onWorst.managers[1]);
+
+  const onBest = room();
+  nominatePlayer(onBest, best.id);
+  const bidBest = cpuSealedBid(onBest, onBest.managers[1]);
+
+  assert.equal(bidWorst, 0, "the worst catcher on the board is not worth money — take the next one for nothing");
+  assert.ok(bidBest >= AUCTION_MIN_BID, "the best one is worth money");
+  assert.ok(bidBest > bidWorst, "and worth more than the man you can replace for free");
+});
+
+test("the last man at a spot you need is worth paying for, however ordinary he is", () => {
+  const draft = makeAuctionDraft(
+    [{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }],
+    makeGradedPool("scarcity")
+  );
+  const [, beta] = draft.managers;
+  const model = managerValuation(draft, beta);
+  const catchers = draft.pool
+    .filter((player) => player.kind === "hitter" && player.position === "C")
+    .sort((a, b) => model.value(b) - model.value(a));
+  assert.ok(catchers.length >= 3);
+
+  // The WORST catcher on the board goes up, with better ones still to come.
+  const worst = catchers[catchers.length - 1];
+  nominatePlayer(draft, worst.id);
+  const withFallback = cpuSealedBid(draft, beta);
+  assert.equal(withFallback, 0, "with better catchers still to come, this one is worth nothing");
+
+  // The same card, the same lot, the same manager — and now every other catcher
+  // in the room has been bought out from under him while he was thinking. He has
+  // no fallback left. The card has not changed; what it is WORTH has, because
+  // what it is worth was never about the card. It was about the next one.
+  for (const catcher of catchers) {
+    if (catcher.id !== worst.id) draft.pickedIds.add(catcher.id);
+  }
+  const noFallback = cpuSealedBid(draft, beta);
+  assert.ok(noFallback >= AUCTION_MIN_BID, "the last catcher in the room is not something you pass on");
+  assert.ok(noFallback > withFallback, "and he is worth more than he was when he was replaceable");
+});
+
+test("nine managers on the same board do not arrive at the same number", () => {
+  const managers = Array.from({ length: 9 }, (unused, index) => ({ name: `Bot${index}`, cpu: true }));
+  const draft = makeAuctionDraft(managers, makeGradedPool("spread", 14));
+  const model = managerValuation(draft, draft.managers[0]);
+  // Put a card worth having on the block — one everybody wants is the one that
+  // used to produce nine identical bids.
+  const prize = [...draft.pool].sort((a, b) => model.value(b) - model.value(a))[0];
+  nominatePlayer(draft, prize.id);
+
+  const bids = draft.managers.slice(1).map((manager) => cpuSealedBid(draft, manager)).filter((bid) => bid > 0);
+  assert.ok(bids.length >= 3, "several managers want him");
+  const unique = new Set(bids);
+  assert.ok(unique.size > 1, "and they do not all bid the same");
+  const spread = (Math.max(...bids) - Math.min(...bids)) / Math.max(...bids);
+  assert.ok(spread > 0.1, `the room should disagree by more than a rounding error, got ${(spread * 100).toFixed(0)}%`);
+});
+
+test("no computer ever bids money it has not got", () => {
+  const managers = Array.from({ length: 4 }, (unused, index) => ({ name: `Bot${index}`, cpu: true }));
+  const draft = makeAuctionDraft(managers, makeGradedPool("solvency", 8));
+  let guard = 0;
+  while (!draft.complete && guard < 200) {
+    guard += 1;
+    if (!nominateBestTarget(draft)) break;
+    for (const manager of draft.managers) {
+      const bid = cpuSealedBid(draft, manager);
+      assert.ok(bid <= auctionMaxBid(draft, manager), `${manager.name} bid more than it can pay`);
+      assert.ok(bid >= 0);
+    }
+    autopick(draft);
+  }
+  for (const manager of draft.managers) {
+    assert.ok(auctionBudget(draft, manager) >= 0, `${manager.name} went overdrawn`);
+    assert.equal(validateRoster(manager).length, 0, `${manager.name} ended up with an illegal roster`);
+  }
 });

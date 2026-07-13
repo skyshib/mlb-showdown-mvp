@@ -1263,10 +1263,146 @@ function autoRunAuctionLot(draft, now = Date.now()) {
   return draft;
 }
 
-// Prices scale with the room budget: a manager's willingness for a card is
-// their per-slot budget share times how the card's personal valuation compares
-// to the rest of the pool at that kind, with a premium when it fills an open
-// roster need.
+// ---- What a card is worth to a computer, and what it will pay ---------------
+//
+// The old answer was: your budget divided by your open slots, scaled by how the
+// card compares to the AVERAGE card of its kind. Three things were wrong with it.
+//
+// It made everyone bid the same. The budget is the same, the open slots are the
+// same, and the valuations differ only by a little noise — so nine managers
+// arrived at nine near-identical numbers and the auction was a coin toss.
+//
+// It read the personas and then ignored half of them: `thrift` and `scarcity`
+// are declared on every archetype and were never once consulted here.
+//
+// And worst, it bid on EVERYTHING. A card was priced against the average card,
+// so the worst catcher on the board still drew a bid proportional to what he
+// was. But the worst catcher is not worth anything — because if you let him go
+// you get another catcher, and the only thing you lose is the difference
+// between them. That difference is what a card is actually worth, and it is
+// what a manager should be paying for.
+//
+// So: REPLACEMENT LEVEL. What can you still get at this spot if you pass? Bid
+// on the SURPLUS over that man, not on the card. The worst man at a position has
+// no surplus by definition, and a manager who has alternatives simply passes on
+// him — which is right, and which is what makes the rest of the money mean
+// something.
+
+// Who at this table still has a hole, and what plugs it. Read ONCE per market:
+// working it out per group per manager meant running the lineup matcher some
+// eight hundred times a lot, which is the sort of thing that does not show up as
+// a wrong answer, only as a room that has stopped responding.
+function tableNeeds(draft) {
+  return draft.managers.map((manager) => {
+    const needs = getRosterNeeds(manager.roster);
+    // Only pay for the matcher when there are bats still to buy.
+    const missing = needs.hitter > 0 ? lineupStatus(manager.roster).missingPositions : [];
+    return { id: manager.id, needs, missing };
+  });
+}
+
+function needsGroup(entry, group) {
+  if (group === "SP") return entry.needs.starter > 0;
+  if (group === "RP") return entry.needs.bullpen > 0;
+  if (entry.needs.hitter <= 0) return false;
+  // A hole only counts if this group is what actually plugs it. First base and
+  // the DH take anybody, so once those are all that is left, any bat will do.
+  if (!entry.missing.length) return true;
+  return entry.missing.some((slot) => (isCornerOutfielder(slot) ? isCornerOutfielder(group) : slot === group));
+}
+
+// What the next man at each spot is worth, as this manager reads the board. Any
+// card is then priced by what it adds OVER him.
+function auctionMarket(draft, manager) {
+  const model = managerValuation(draft, manager);
+  const table = tableNeeds(draft);
+  const mine = table.find((entry) => entry.id === manager.id);
+  const others = table.filter((entry) => entry.id !== manager.id);
+
+  const byGroup = new Map();
+  for (const player of availablePlayers(draft)) {
+    const group = poolGroup(player);
+    if (!byGroup.has(group)) byGroup.set(group, []);
+    byGroup.get(group).push(model.value(player));
+  }
+  const supply = new Map();
+  const rivalsFor = new Map();
+  for (const [group, values] of byGroup) {
+    values.sort((a, b) => b - a);
+    supply.set(group, values.length);
+    rivalsFor.set(group, others.filter((entry) => needsGroup(entry, group)).length);
+  }
+  const wants = (group) => (mine ? needsGroup(mine, group) : false);
+  return { model, values: byGroup, supply, rivalsFor, wants };
+}
+
+// The man you get INSTEAD of him — which is the whole question, and which means
+// he cannot be his own replacement. Leaving the card on the block in the list it
+// is measured against was a real bug: an unopposed manager compared the best
+// catcher on the board with the best catcher on the board, found no gain in it,
+// and passed on catchers for ever.
+//
+// The rivals take the men above him; the one you are left holding is the next
+// one down from there. If nobody else wants the spot you simply take the next
+// card at your leisure — so the most he can be worth is the step up from it. And
+// if he is the last man at a spot you need, there is nobody to fall back on: his
+// replacement is nothing, his surplus is everything, and you pay.
+function auctionReplacement(market, player) {
+  const group = poolGroup(player);
+  const values = market.values.get(group) ?? [];
+  if (values.length <= 1) return 0;
+  const value = market.model.value(player);
+  let rank = values.findIndex((item) => item <= value);
+  if (rank < 0) rank = values.length - 1;
+  const rivals = market.rivalsFor.get(group) ?? 0;
+  const step = Math.min(rivals, values.length - 2);
+  return step < rank ? values[step] : values[step + 1];
+}
+
+// The surplus of a card over the man this manager could still get instead.
+function auctionSurplus(market, player) {
+  return Math.max(0, market.model.value(player) - auctionReplacement(market, player));
+}
+
+// Two managers with the same budget and the same board should not arrive at the
+// same number. The persona leans it — a bargain hunter keeps his hand in his
+// pocket — and a seeded wobble does the rest, so the room is an auction rather
+// than a tie-break.
+function auctionAggression(draft, manager, player) {
+  const bias = cpuPersonality(manager.persona).bias ?? {};
+  const thrift = 1 - 0.22 * (Number(bias.thrift) || 0);
+  const rng = createRng(`${draft.seed ?? "showdown"}:bid:${manager.id}:${player.id}`);
+  const wobble = 0.86 + rng.next() * 0.28;
+  return thrift * wobble;
+}
+
+// Money left over at the last out is money you never had. A manager that is
+// running ahead of its budget — plenty left, few slots to fill — has nothing
+// else to do with the difference, so it goes into the bid; one that has
+// overspent pulls its horns in and shops the bargain rack. This is the budget
+// management the old bidder had none of: it simply divided what was left by the
+// slots left, every time, and so never knew whether it was rich or poor.
+function auctionPace(draft, manager, openSlots) {
+  const starting = draft.auction?.budget ?? 0;
+  if (!starting || openSlots <= 0) return 1;
+  const parPerSlot = starting / Math.max(1, draft.rosterSize);
+  const nowPerSlot = auctionBudget(draft, manager) / openSlots;
+  if (parPerSlot <= 0) return 1;
+  return Math.max(0.75, Math.min(1.8, nowPerSlot / parPerSlot));
+}
+
+// A spot the room is short of is worth reaching for, and how far you reach is
+// the persona's business: the positional purist reaches hardest.
+function auctionScarcity(manager, market, player) {
+  const group = poolGroup(player);
+  const supply = market.supply.get(group) ?? 0;
+  if (!supply) return 1;
+  const demand = (market.rivalsFor.get(group) ?? 0) + (market.wants(group) ? 1 : 0);
+  const tightness = Math.min(2, demand / supply);
+  const bias = Number(cpuPersonality(manager.persona).bias?.scarcity) || 1;
+  return 1 + 0.3 * bias * tightness;
+}
+
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
@@ -1277,14 +1413,33 @@ function auctionWillingness(draft, manager, player) {
   const openSlots = hasUnlimitedRoster(draft)
     ? needs.hitter + needs.starter + needs.bullpen
     : draft.rosterSize - manager.roster.length;
-  if (hasUnlimitedRoster(draft) && openSlots <= 0) return 0;
-  const model = managerValuation(draft, manager);
-  const sameKind = availablePlayers(draft).filter((item) => item.kind === player.kind);
-  const meanValue = sameKind.reduce((sum, item) => sum + model.value(item), 0) / Math.max(1, sameKind.length);
-  const relativeValue = meanValue > 0 ? model.value(player) / meanValue : 1;
-  const fairShare = auctionBudget(draft, manager) / Math.max(1, openSlots);
-  const needPremium = managerNeedsPositionGroup(manager, player, needs) ? 1.15 : 1;
-  const raw = fairShare * relativeValue * needPremium;
+  if (openSlots <= 0) return 0;
+
+  const market = auctionMarket(draft, manager);
+  const surplus = auctionSurplus(market, player);
+
+  // THE PASS. He is no better than the man you can still have for the minimum,
+  // so let him go and take the man. This is the whole point: it is what stops
+  // a computer paying real money for the worst catcher on the board, and it is
+  // what leaves it the money to win the fights that are worth having.
+  if (surplus <= 0) return 0;
+
+  // What the REST of the roster is going to cost, in surplus: the best cards
+  // still on the board for the slots still open. The budget is shared out over
+  // that, so a manager holds money back for the holes it has not filled yet
+  // instead of spending to its cap on whatever happens to come up first.
+  const plan = availablePlayers(draft)
+    .map((item) => auctionSurplus(market, item))
+    .sort((a, b) => b - a)
+    .slice(0, Math.max(1, openSlots));
+  const planned = plan.reduce((sum, value) => sum + value, 0) || surplus;
+
+  const share = surplus / planned;
+  const raw = maxBid
+    * share
+    * auctionAggression(draft, manager, player)
+    * auctionScarcity(manager, market, player)
+    * auctionPace(draft, manager, openSlots);
   // Sealed bids are whole points, not raise steps — odd amounts make ties rare.
   return Math.max(AUCTION_MIN_BID, Math.min(maxBid, Math.round(raw)));
 }
