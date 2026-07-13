@@ -4249,3 +4249,12 @@ html.club {
 /* The board is a second screen pointed at a room of people. Nobody is going to
    click a link on it, and it is the one thing on the page that is not the draft. */
 .war-room-body .quest-door { display: none; }
+
+/* The heat chips tint a pick by what it cost, and they made that tint by mixing
+   the heat color into WHITE — a pastel, which is the right instinct on cream and
+   the wrong one on black: a pale pink card with white text on it. Same hue, same
+   scale, mixed into the panel it is actually sitting on. */
+html.club .heat {
+  background: color-mix(in srgb, var(--heat-c, #2e68c4) 34%, var(--panel));
+  border-left-color: var(--heat-c, #2e68c4);
+}
