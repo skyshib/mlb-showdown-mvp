@@ -2028,78 +2028,95 @@ button.roster-slot[draggable="true"]:active {
   color: var(--sheet);
 }
 
-.grade-table {
+/* ---- what the table built ----
+   A description, not a verdict: each measure read off the cards, and a bar drawn
+   against the rest of the table, because "who has the most of this" is the only
+   question worth asking of a column. */
+.comp-table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 4px;
 }
 
-.grade-table th,
-.grade-table td {
+.comp-table th,
+.comp-table td {
   border-bottom: 1px solid var(--hairline);
-  padding: 10px 10px;
-  text-align: left;
+  padding: 10px 12px;
   vertical-align: middle;
 }
 
-.grade-table thead th {
+.comp-table thead th {
   border-bottom: var(--rule) solid var(--navy);
   font-family: var(--display);
-  font-size: 12px;
+  font-size: 15px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--navy);
+  text-align: center;
+}
+
+.comp-corner {
+  width: 190px;
+}
+
+.comp-label {
+  text-align: left;
+}
+
+.comp-name {
+  display: block;
+  font-family: var(--display);
+  font-size: 14px;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--navy);
 }
 
-.grade-table .num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.comp-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
 }
 
-.grade-rank {
-  width: 34px;
+.comp-cell {
+  text-align: center;
+}
+
+.comp-value {
+  display: block;
   font-family: var(--display);
   font-size: 20px;
   font-weight: 900;
   font-style: italic;
-  color: var(--hairline);
-  text-align: center;
-}
-
-.grade-winner .grade-rank {
-  color: var(--accent);
-}
-
-.grade-winner {
-  background: var(--sheet);
-}
-
-.grade-name {
-  font-family: var(--display);
-  font-size: 17px;
-  font-weight: 900;
-  font-style: italic;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--navy);
-}
-
-.grade-pct {
-  font-family: var(--display);
-  font-size: 18px;
-  font-weight: 900;
-  font-style: italic;
+  line-height: 1;
   color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
-.grade-winner .grade-pct {
+.comp-bar {
+  display: block;
+  height: 5px;
+  margin-top: 6px;
+  background: var(--bg);
+}
+
+.comp-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--hairline);
+}
+
+.comp-leads .comp-value {
   color: var(--accent-dark);
 }
 
-.grade-notes {
-  color: var(--muted);
-  font-size: 13px;
+.comp-leads .comp-bar > span {
+  background: var(--accent);
 }
 
 .recap-cards {

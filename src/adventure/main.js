@@ -1,13 +1,13 @@
-import { loadSave } from "./state.js?v=20260713-j";
-import { setUniverseSeed, cardById } from "./packs.js?v=20260713-j";
-import { hydratePhotos } from "../ui/photos.js?v=20260713-j";
-import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260713-j";
-import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260713-j";
-import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260713-j";
-import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js?v=20260713-j";
-import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260713-j";
-import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260713-j";
-import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260713-j";
+import { loadSave } from "./state.js?v=20260713-k";
+import { setUniverseSeed, cardById } from "./packs.js?v=20260713-k";
+import { hydratePhotos } from "../ui/photos.js?v=20260713-k";
+import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260713-k";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260713-k";
+import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260713-k";
+import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js?v=20260713-k";
+import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260713-k";
+import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260713-k";
+import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260713-k";
 
 const SCREENS = {
   title: titleScreen,

@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-j";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-k";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-j";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-j";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-j";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-j";
+} from "./ui/sounds.js?v=20260713-k";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-k";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-k";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-k";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-j";
+} from "./rules/draft.js?v=20260713-k";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-j";
+} from "./onlineClient.js?v=20260713-k";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -116,14 +116,13 @@ import {
   normalizeBatchRuns,
   replayBatchGames,
   runBatchChunk,
-  simulateBatch,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-j";
-import { computeAwards } from "./rules/awards.js?v=20260713-j";
-import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-j";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-j";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-j";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-j";
+} from "./rules/batch.js?v=20260713-k";
+import { computeAwards } from "./rules/awards.js?v=20260713-k";
+import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-k";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-k";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-k";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-k";
 import {
   basesText,
   cardRarity,
@@ -138,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-j";
+} from "./ui/render.js?v=20260713-k";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -651,8 +650,6 @@ function defaultState() {
     starred: {},
     // Up to three cards pinned side by side.
     compare: [],
-    // Derived from a finished draft; recomputed rather than trusted.
-    grades: null,
     // When the clock on the current pick runs out — published for the board on
     // the second screen, which cannot see this tab's memory.
     pickDeadline: null,
@@ -1516,6 +1513,7 @@ function renderSetup(setupError = "") {
       timer: state.auctionTimer
     });
     if (isAuctionDraft(state.draft)) startAuctionReview(state.draft, draftNow());
+    state.compare = [];
     state.tournament = null;
     state.batch = null;
     state.view = null;
@@ -5024,76 +5022,82 @@ function autopickTurn(draft) {
 
 // ---- when the last pick lands ----
 //
-// The draft used to just stop. You took your final card and the screen sat
-// there, and the simulator that could have told you whether you had won was one
-// button away that nobody ever pressed at the right moment.
+// Not a verdict. The simulator is the verdict, and it is one button away and
+// nobody's lineup is set yet — a projection taken now would be a projection of a
+// team nobody has finished building.
 //
-// Three hundred games is enough to rank a table and costs about forty
-// milliseconds, so the room plays them the instant the draft is done and says
-// what it found.
-const GRADE_RUNS = 300;
+// This is a description. What did each manager actually walk away with: how fast
+// is it, how well does it field, how much of the ball leaves the yard, and what
+// is the rotation made of. All of it reads straight off the thirteen cards, so
+// it is true the moment the last one lands, and it does not pretend to know who
+// wins.
+function teamComposition(manager) {
+  const bats = manager.roster.filter((card) => card.kind === "hitter");
+  const arms = manager.roster.filter((card) => card.kind === "pitcher");
+  const starters = arms.filter((card) => card.role === "SP");
+  const bullpen = arms.filter((card) => card.role !== "SP");
+  const mean = (list, get) => (list.length ? list.reduce((sum, card) => sum + (Number(get(card)) || 0), 0) / list.length : 0);
 
-function draftGrades(draft) {
-  if (!draft?.complete || !canSimulate(draft)) return null;
-  const key = `${draft.seed}:${draft.pickNumber}:${draft.managers.length}`;
-  if (state.grades?.key === key) return state.grades;
+  // Faces of the die, not chart rows: a hitter who doubles on 15-16 has twice
+  // the extra-base chance of one who doubles on 16, and the rows look the same.
+  const xbhFaces = (card) =>
+    card.chart
+      .filter((entry) => ["2B", "3B", "HR"].includes(entry.result))
+      .reduce((faces, entry) => faces + chartSpan(entry), 0);
+  const homerFaces = (card) =>
+    card.chart.filter((entry) => entry.result === "HR").reduce((faces, entry) => faces + chartSpan(entry), 0);
 
-  const teams = draft.managers.map((manager) => buildTeam(manager));
-  const summary = simulateBatch(teams, { runs: GRADE_RUNS, seed: `${draft.seed}-grade` });
-
-  const byName = new Map(summary.teams.map((row) => [row.team, row]));
-  const rows = draft.managers
-    .map((manager) => {
-      const row = byName.get(manager.name);
-      const bats = manager.roster.filter((card) => card.kind === "hitter");
-      const arms = manager.roster.filter((card) => card.kind === "pitcher");
-      return {
-        manager,
-        winPct: row?.winPct ?? 0,
-        scored: row?.games ? row.runsFor.sum / row.games : 0,
-        allowed: row?.games ? row.runsAgainst.sum / row.games : 0,
-        points: manager.roster.reduce((sum, card) => sum + card.points, 0),
-        glove: bats.reduce((sum, card) => sum + (Number(card.fielding) || 0), 0),
-        control: arms.reduce((sum, card) => sum + (Number(card.control) || 0), 0),
-        power: bats.reduce(
-          (sum, card) =>
-            sum +
-            card.chart
-              .filter((entry) => ["2B", "3B", "HR"].includes(entry.result))
-              .reduce((faces, entry) => faces + chartSpan(entry), 0),
-          0
-        )
-      };
-    })
-    .sort((a, b) => b.winPct - a.winPct);
-
-  // Each team gets the one thing it does better than anybody else at the table,
-  // if there is one. A roster with no superlative is simply not told it has one.
-  const leaders = {
-    power: rows.reduce((best, row) => (row.power > best.power ? row : best), rows[0]),
-    glove: rows.reduce((best, row) => (row.glove > best.glove ? row : best), rows[0]),
-    control: rows.reduce((best, row) => (row.control > best.control ? row : best), rows[0]),
-    thrift: rows.reduce((best, row) => (row.points < best.points ? row : best), rows[0])
+  return {
+    manager,
+    points: manager.roster.reduce((sum, card) => sum + card.points, 0),
+    onBase: mean(bats, (card) => card.onBase),
+    speed: mean(bats, (card) => card.speed),
+    defence: bats.reduce((sum, card) => sum + (Number(card.fielding) || 0), 0),
+    power: bats.reduce((sum, card) => sum + xbhFaces(card), 0),
+    homers: bats.reduce((sum, card) => sum + homerFaces(card), 0),
+    rotation: mean(starters, (card) => card.control),
+    innings: mean(starters, (card) => card.ip),
+    bullpen: mean(bullpen, (card) => card.control)
   };
-  for (const row of rows) {
-    const notes = [];
-    if (leaders.power === row) notes.push("the most power at the table");
-    if (leaders.glove === row) notes.push("the best defence");
-    if (leaders.control === row) notes.push("the best staff");
-    if (leaders.thrift === row && rows.length > 1) notes.push("built for the fewest points");
-    row.notes = notes;
-  }
-
-  state.grades = { key, runs: GRADE_RUNS, rows };
-  return state.grades;
 }
 
-// ---- the recap ----
-//
-// A card's printed points are what the set says it is worth, so a card's rank by
-// points is where the board says it should have gone. The gap between that and
-// where it actually went is the whole argument you have afterwards: who reached,
-// and who had somebody fall into their lap.
+// Each measure, and who leads it. Low points is a virtue, so it is read the
+// other way round — a cheap roster is a thing a manager did on purpose.
+const COMPOSITION_ROWS = [
+  { key: "onBase", label: "On-base", note: "average of the bats", decimals: 1, better: "high" },
+  { key: "power", label: "Extra-base power", note: "faces of the die that go for extra bases", decimals: 0, better: "high" },
+  { key: "homers", label: "Home runs", note: "faces that leave the yard", decimals: 0, better: "high" },
+  { key: "speed", label: "Speed", note: "average of the bats", decimals: 1, better: "high" },
+  { key: "defence", label: "Defence", note: "fielding across the lineup", decimals: 0, better: "high" },
+  { key: "rotation", label: "Rotation", note: "average control of the two starters", decimals: 1, better: "high" },
+  { key: "innings", label: "Starter innings", note: "how deep the starters go", decimals: 1, better: "high" },
+  { key: "bullpen", label: "Bullpen", note: "average control of the pen", decimals: 1, better: "high" },
+  { key: "points", label: "Points spent", note: "what the whole roster cost", decimals: 0, better: "low" }
+];
+
+function compositionTable(draft) {
+  const teams = draft.managers.map((manager) => teamComposition(manager));
+  return COMPOSITION_ROWS.map((row) => {
+    const values = teams.map((team) => team[row.key]);
+    const top = Math.max(...values);
+    const bottom = Math.min(...values);
+    const best = row.better === "low" ? bottom : top;
+    // The bar is drawn against the table, not against nothing: it says who has
+    // the most of this, which is the only question worth asking of a column.
+    const span = top - bottom;
+    return {
+      ...row,
+      cells: teams.map((team, index) => ({
+        manager: team.manager,
+        value: values[index],
+        leads: values[index] === best && span > 0,
+        // A flat column gets flat bars rather than a meaningless winner.
+        share: top > 0 ? values[index] / top : 0
+      }))
+    };
+  });
+}
+
 function draftRecap(draft) {
   if (!draft?.complete) return null;
   const history = draftHistory(draft);
@@ -5116,20 +5120,21 @@ function draftRecap(draft) {
 
 function recapText(draft) {
   const recap = draftRecap(draft);
-  const grades = draftGrades(draft);
   if (!recap) return "";
   const lines = [`MLB Showdown draft — seed "${draft.seed}"`, ""];
-  if (grades) {
-    lines.push(`Projected over ${grades.runs} games:`);
-    grades.rows.forEach((row, index) => {
-      const notes = row.notes.length ? ` — ${row.notes.join(", ")}` : "";
-      lines.push(
-        `  ${index + 1}. ${row.manager.name}  ${(row.winPct * 100).toFixed(1)}%  ` +
-          `(${row.scored.toFixed(1)} scored / ${row.allowed.toFixed(1)} allowed, ${row.points} pts)${notes}`
-      );
-    });
-    lines.push("");
+
+  lines.push("What each manager built:");
+  const rows = compositionTable(draft);
+  const names = draft.managers.map((manager) => manager.name);
+  const width = Math.max(18, ...rows.map((row) => row.label.length + 2));
+  lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(12)).join("")}`);
+  for (const row of rows) {
+    const cells = row.cells
+      .map((cell) => cell.value.toFixed(row.decimals).padStart(12))
+      .join("");
+    lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
+  lines.push("");
   lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} at pick ${recap.steal.pickNumber} (ranked #${recap.steal.rank})`);
   lines.push(`Biggest reach: ${recap.reach.player.name} to ${recap.reach.manager.name} at pick ${recap.reach.pickNumber} (ranked #${recap.reach.rank})`);
   lines.push("", "Every pick:");
@@ -5142,27 +5147,27 @@ function recapText(draft) {
 function renderDraftDone(draft) {
   const recap = draftRecap(draft);
   if (!recap) return "";
-  const grades = draftGrades(draft);
 
-  const table = grades
-    ? `<table class="grade-table">
-        <thead><tr><th></th><th>Manager</th><th class="num">Win %</th><th class="num">Scored</th><th class="num">Allowed</th><th class="num">Points</th><th>What they built</th></tr></thead>
-        <tbody>${grades.rows
+  const rows = compositionTable(draft);
+  const head = draft.managers.map((manager) => `<th>${escapeHtml(manager.name)}</th>`).join("");
+  const body = rows
+    .map(
+      (row) => `<tr>
+        <th class="comp-label">
+          <span class="comp-name">${escapeHtml(row.label)}</span>
+          <span class="comp-note">${escapeHtml(row.note)}</span>
+        </th>
+        ${row.cells
           .map(
-            (row, index) => `<tr class="${index === 0 ? "grade-winner" : ""}">
-              <td class="grade-rank">${index + 1}</td>
-              <td class="grade-name">${escapeHtml(row.manager.name)}</td>
-              <td class="num grade-pct">${(row.winPct * 100).toFixed(1)}</td>
-              <td class="num">${row.scored.toFixed(1)}</td>
-              <td class="num">${row.allowed.toFixed(1)}</td>
-              <td class="num">${row.points}</td>
-              <td class="grade-notes">${row.notes.length ? escapeHtml(row.notes.join(" &middot; ").replace(/&middot;/g, "·")) : "&mdash;"}</td>
-            </tr>`
+            (cell) => `<td class="comp-cell${cell.leads ? " comp-leads" : ""}">
+              <span class="comp-value">${cell.value.toFixed(row.decimals)}</span>
+              <span class="comp-bar"><span style="width:${Math.round(cell.share * 100)}%"></span></span>
+            </td>`
           )
-          .join("")}</tbody>
-      </table>
-      <p class="compare-note">Projected over ${grades.runs} simulated games. Run the full ${DEFAULT_BATCH_RUNS} for a verdict you can lean on.</p>`
-    : `<p class="empty">A roster is still illegal, so the table cannot be graded yet.</p>`;
+          .join("")}
+      </tr>`
+    )
+    .join("");
 
   const card = (label, pick, tone) => `<div class="recap-card ${tone}">
     <p class="eyebrow">${label}</p>
@@ -5182,13 +5187,22 @@ function renderDraftDone(draft) {
 
   return `<section class="panel draft-done">
     <div class="section-head">
-      <h2>The draft is done</h2>
+      <h2>What the table built</h2>
       <div class="done-actions">
         <button class="small" data-action="copy-recap">Copy the recap</button>
         <button class="small" data-action="export-save">Save the room</button>
       </div>
     </div>
-    ${table}
+    <div class="table-scroll">
+      <table class="comp-table">
+        <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <p class="compare-note">
+      Read straight off the thirteen cards, so it is true the moment the last one lands.
+      Who actually wins is a question for the simulator, once everyone has set a lineup.
+    </p>
     <div class="recap-cards">
       ${card("Best value", recap.steal, "steal")}
       ${card("Biggest reach", recap.reach, "reach")}
@@ -5706,7 +5720,6 @@ function reviveState(value) {
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],
-    grades: null,
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
     filters,
     batchSorts,

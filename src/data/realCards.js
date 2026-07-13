@@ -1,4 +1,4 @@
-import { RESULTS } from "../rules/cards.js?v=20260713-j";
+import { RESULTS } from "../rules/cards.js?v=20260713-k";
 
 // Decoder for the compact real-card tuples in classicCards.js / mlbPools.js.
 // Tuple: [id, name, team, year, edition, isPitcher, points, obcOrControl,
