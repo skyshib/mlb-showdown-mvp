@@ -413,7 +413,19 @@ h1.gq-logo {
   border-bottom: 0.6cqw solid var(--gb-darkest);
 }
 /* The frame being played is the one the board is waiting on. */
-.gq-line-live { background: var(--gq-lead-ink); color: var(--gq-lead); }
+/* The frame in progress inverts — but its RULES do not. The borders are drawn in
+   currentColor, and flipping the cell's text to the banner tone would quietly
+   drag its border along with it, leaving the live cell ruled in the banner's own
+   color: a hole in the grid rather than a lit slot in it. So the border is
+   pinned back to the grid's color, which is also this cell's fill. */
+/* Matched on the cell, not the class alone: `.gq-linescore td` sets the border
+   with the shorthand and outranks a bare `.gq-line-live`, so a border-color set
+   there is quietly thrown away. */
+.gq-linescore td.gq-line-live {
+  background: var(--gq-lead-ink);
+  color: var(--gq-lead);
+  border-color: var(--gq-lead-ink);
+}
 
 .gq-hud-card { display: flex; flex-direction: column; align-items: center; gap: 0.6cqw; }
 /* The face needs a width of its own: centering the column makes every child
