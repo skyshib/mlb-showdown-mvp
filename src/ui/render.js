@@ -1,5 +1,5 @@
-import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260713-f";
-import { cardPanelHtml } from "./cardFace.js?v=20260713-f";
+import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260713-g";
+import { cardPanelHtml } from "./cardFace.js?v=20260713-g";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];

@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-f";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-g";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-f";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-f";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-f";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-f";
+} from "./ui/sounds.js?v=20260713-g";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-g";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-g";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-g";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-f";
+} from "./rules/draft.js?v=20260713-g";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-f";
+} from "./onlineClient.js?v=20260713-g";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-f";
-import { computeAwards } from "./rules/awards.js?v=20260713-f";
-import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-f";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-f";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-f";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-f";
+} from "./rules/batch.js?v=20260713-g";
+import { computeAwards } from "./rules/awards.js?v=20260713-g";
+import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-g";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-g";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-g";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-g";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-f";
+} from "./ui/render.js?v=20260713-g";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -181,6 +181,7 @@ let lotEntryError = null;
 // resync. Carry the digits, the focus, and the caret across the repaint.
 let sealedBidStash = null;
 let cpuPaused = false;
+let setupImportError = null;
 let cpuDriveKey = null;
 
 // ---- Pick clock and chime ----
@@ -518,13 +519,21 @@ function askToNotify() {
   }
 }
 
+// The draft carries a pick number, not a round: the round is a thing you work
+// out from how many managers are at the table.
+function draftRound(draft) {
+  const seats = draft?.managers?.length ?? 0;
+  if (!seats) return 1;
+  return Math.floor((draft.pickNumber ?? 0) / seats) + 1;
+}
+
 function announceTurn(draft, current) {
   setTitleBadge(true);
   try {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     if (document.visibilityState === "visible") return;
     turnNotification?.close();
-    const round = draft?.round ?? 1;
+    const round = draftRound(draft);
     turnNotification = new Notification("You're on the clock", {
       body: `Round ${round} — ${current?.name ?? "your"} pick is up.`,
       tag: "showdown-turn",
@@ -1356,8 +1365,10 @@ function renderSetup(setupError = "") {
         <div class="setup-buttons">
           <button type="submit">Start offline draft</button>
           <button type="button" data-action="create-online">Create online room</button>
+          <button type="button" data-action="import-save" title="Open a room saved to a file">&#128193; Load a room</button>
           <p class="online-note" data-online-note>Draft with friends on other machines. Needs the room server: <code>npm run online</code></p>
         </div>
+        ${setupImportError ? `<p class="form-error">${escapeHtml(setupImportError)}</p>` : ""}
       </div>
     </form>
   </section>`;
@@ -1423,6 +1434,10 @@ function renderSetup(setupError = "") {
       runLottery(setupForm);
       return;
     }
+    if (event.target.closest('[data-action="import-save"]')) {
+      pickSaveFile();
+      return;
+    }
     const toggle = event.target.closest('[data-action="toggle-decades"]');
     if (!toggle) return;
     const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
@@ -1441,6 +1456,7 @@ function renderSetup(setupError = "") {
   });
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    setupImportError = null;
     const form = new FormData(event.currentTarget);
     const managers = dedupeManagerNames(
       String(form.get("managers"))
@@ -1648,6 +1664,7 @@ function renderDraft() {
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
     ${renderPlayGameControl(draft)}
+    <button data-action="export-save" title="Save this room to a file you can keep, move, or send">&#128190; Save room</button>
     <button class="sound-toggle${isMuted() ? " muted" : ""}" data-action="toggle-sound" aria-pressed="${!isMuted()}" title="${isMuted() ? "Turn sound on" : "Turn sound off"}">${isMuted() ? "&#128264;" : "&#128266;"}</button>
     <span class="pick-clock" data-pick-timer hidden></span>
     <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
@@ -2030,6 +2047,10 @@ function bindDraftActions() {
       }
       completeAuctionReview(state.draft, draftNow());
       afterLocalDraftAction();
+      return;
+    }
+    if (action === "export-save") {
+      exportSave();
       return;
     }
     if (action === "seat") {
@@ -5133,6 +5154,100 @@ function loadState() {
 
 function clearSavedState() {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+// ---- saves that survive ----
+//
+// A draft lived in one browser's localStorage and nowhere else. Change the port
+// and it was a different save slot; clear your browsing data and a season was
+// gone. A room is a file now: it can be carried to another machine, kept, or
+// sent to somebody who wants to see what you did with the eighth pick.
+//
+// The file is the same shape the browser was already storing, so a save and a
+// reload are the same operation with different paper.
+const SAVE_VERSION = 1;
+
+function saveFileName(draft) {
+  const managers = draft?.managers?.length ?? 0;
+  const round = draft?.complete ? "complete" : `round-${draftRound(draft)}`;
+  const stamp = new Date().toISOString().slice(0, 10);
+  return `showdown-${managers}-managers-${round}-${stamp}.json`;
+}
+
+function exportSave() {
+  const payload = {
+    kind: "mlb-showdown-save",
+    version: SAVE_VERSION,
+    savedAt: new Date().toISOString(),
+    state: serializeState(state)
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = saveFileName(state.draft);
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+// A file from somewhere else is not to be trusted just because it is JSON: it
+// could be any JSON at all. Say what is wrong with it rather than dying on it.
+function readSave(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: "That file isn't a saved room — it isn't even JSON." };
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { error: "That file isn't a saved room." };
+  }
+  if (parsed.kind !== "mlb-showdown-save") {
+    return { error: "That JSON isn't a Showdown save file." };
+  }
+  if (!Number.isFinite(parsed.version) || parsed.version > SAVE_VERSION) {
+    return { error: `That save was written by a newer version (v${parsed.version}). This one reads up to v${SAVE_VERSION}.` };
+  }
+  if (!parsed.state || typeof parsed.state !== "object") {
+    return { error: "That save file has no room in it." };
+  }
+  try {
+    const revived = reviveState(parsed.state);
+    if (!revived.draft) return { error: "That save has no draft in it." };
+    if (!Array.isArray(revived.draft.managers) || revived.draft.managers.length < 2) {
+      return { error: "That save's draft has no managers." };
+    }
+    return { state: revived };
+  } catch (error) {
+    return { error: `That save could not be opened: ${error.message}` };
+  }
+}
+
+async function importSave(file) {
+  const result = readSave(await file.text());
+  if (result.error) {
+    setupImportError = result.error;
+    renderCurrentScreen();
+    return;
+  }
+  setupImportError = null;
+  state = result.state;
+  // An imported room is this browser's room now.
+  state.online = null;
+  saveState();
+  cpuPaused = false;
+  renderCurrentScreen();
+}
+
+function pickSaveFile() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (file) importSave(file);
+  });
+  input.click();
 }
 
 function serializeState(value) {

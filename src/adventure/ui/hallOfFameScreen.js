@@ -1,6 +1,6 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260713-f";
-import { sectionedMenu, statLineHtml } from "./statsScreens.js?v=20260713-f";
-import { universeConfig } from "../packs.js?v=20260713-f";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260713-g";
+import { sectionedMenu, statLineHtml } from "./statsScreens.js?v=20260713-g";
+import { universeConfig } from "../packs.js?v=20260713-g";
 import {
   loadHallOfFame,
   hallOfFameByMode,
@@ -9,7 +9,7 @@ import {
   fetchGlobalEntries,
   submitRun,
   mergeEntries
-} from "../hallOfFame.js?v=20260713-f";
+} from "../hallOfFame.js?v=20260713-g";
 
 // ---- Hall of fame ----------------------------------------------------------
 //
