@@ -208,11 +208,22 @@ h1.gq-logo {
   vertical-align: middle;
   margin: 0 1.4cqw 0 1cqw;
 }
-.gq-diamond-mini .gq-diamond { width: 3.2cqw; height: 3.2cqw; margin: 0; }
+/* display:block is load-bearing. The mini diamond is a <span>, and width and
+   height do not apply to an inline box — so the container collapsed to nothing,
+   every absolutely-positioned bag landed on the same point, and the four of them
+   stacked into a blob. The banner's diamond is a <div>, which is why it was fine.
+   The bags are also a third of the box, not half: that is what leaves the gaps
+   the shape is read from. */
+.gq-diamond-mini .gq-diamond {
+  display: block;
+  width: 3.3cqw;
+  height: 3.3cqw;
+  margin: 0;
+}
 .gq-diamond-mini .gq-base {
-  width: 1.5cqw;
-  height: 1.5cqw;
-  border-width: 0.22cqw;
+  width: 1.1cqw;
+  height: 1.1cqw;
+  border-width: 0.2cqw;
   border-color: var(--gb-dark);
   background: transparent;
 }
@@ -437,10 +448,14 @@ h1.gq-logo {
    workload rides under his name, where a tiring starter is visible on both
    sides at once. */
 .gq-strip-arm { display: block; margin-top: 1.2cqw; }
+/* The workload hangs under the ARM'S NAME, not under his control number: it is
+   a fact about the man, and it reads as one by starting where his name starts.
+   The indent is the spot column ("P") plus the gap after it — 1ch, because the
+   whole screen is monospace. */
 .gq-strip-bf {
   display: block;
-  padding: 0 0.5cqw;
-  text-align: right;
+  padding: 0 0.5cqw 0 calc(0.5cqw + 1ch + 0.7cqw);
+  text-align: left;
   font-size: 1.8cqw;
   color: var(--gb-dark);
 }
@@ -584,12 +599,27 @@ h1.gq-logo {
   background: var(--gb-lightest);
   border-bottom: 0.6cqw solid var(--gb-darkest);
 }
-.gq-wp-chart svg { display: block; width: 100%; height: 14cqw; }
+/* Height follows the width, because the coordinate space scales uniformly and
+   the half-inning labels must not be stretched. */
+.gq-wp-chart svg { display: block; width: 100%; height: auto; }
 .gq-wp-parity {
   stroke: var(--gb-dark);
-  stroke-width: 0.4;
+  stroke-width: 1;
   stroke-dasharray: 2 2;
   vector-effect: non-scaling-stroke;
+}
+/* The half-inning rules: present, but never competing with the line. */
+.gq-wp-inning {
+  stroke: var(--gb-dark);
+  stroke-width: 1;
+  opacity: 0.4;
+  vector-effect: non-scaling-stroke;
+}
+.gq-wp-inning-label {
+  fill: var(--gb-dark);
+  font-family: "Courier New", ui-monospace, monospace;
+  font-size: 3.4px;
+  letter-spacing: -0.1px;
 }
 .gq-wp-line {
   stroke: var(--gb-darkest);

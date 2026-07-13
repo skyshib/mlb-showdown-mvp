@@ -207,17 +207,19 @@ export function finalBoardHtml(app, trainer) {
   const name = { [playerSide]: you, [npcSide]: trainer.name };
   const row = (side) => `
     <tr>
-      <th>${escapeHtml(name[side])}${side === "home" ? " &#9679;" : ""}</th>
+      <th>${escapeHtml(name[side])}</th>
       ${innings.map((inning) => `<td>${lineScore[side][inning - 1] ?? 0}</td>`).join("")}
       <td class="gq-line-total">${app.screen.score[side]}</td>
     </tr>`;
+  // Visitors on top, home underneath. That is the order a board is read in, and
+  // it is what says who is hosting — no dot required.
   return `<div class="gq-final-board">
     <table class="gq-linescore" aria-label="line score">
       <tr class="gq-line-head">
         <th></th>${innings.map((inning) => `<th>${inning}</th>`).join("")}<th class="gq-line-total">R</th>
       </tr>
-      ${row(playerSide)}
-      ${row(npcSide)}
+      ${row("away")}
+      ${row("home")}
     </table>
   </div>`;
 }
