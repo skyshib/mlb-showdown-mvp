@@ -39,6 +39,69 @@ const PITCHER_CHART_VALUES = {
 
 const PERTURBATION = 0.25;
 
+// ---- what a computer manager believes ----
+//
+// One autopicker played every empty seat the same way, with a little noise on
+// its weights to keep three computers from drafting in lockstep. That is not the
+// same as three managers with opinions. These are opinions.
+//
+// `weights` bend what a card is worth to this manager. `bias` bends how he
+// shops: how far he will reach for an arm, whether he cares what a card costs,
+// how much a scarce position moves him. The noise still sits on top, so two
+// sluggers are not the same slugger.
+export const CPU_PERSONALITIES = {
+  balanced: {
+    key: "balanced",
+    name: "Balanced",
+    blurb: "Takes the best card on the board and keeps the roster honest.",
+    weights: { hitter: {}, pitcher: {} },
+    bias: { pitcher: 1, thrift: 0, scarcity: 1 }
+  },
+  slugger: {
+    key: "slugger",
+    name: "Slugger",
+    blurb: "Buys the chart. Wants the ball to leave the yard and will not ask who is catching.",
+    weights: {
+      hitter: { onBase: 17, fielding: 2, speed: 0.6, chart: 1.8 },
+      pitcher: {}
+    },
+    bias: { pitcher: 0.85, thrift: 0, scarcity: 0.8 }
+  },
+  ace: {
+    key: "ace",
+    name: "Ace first",
+    blurb: "Believes pitching wins it, and reaches for arms earlier than anyone thinks wise.",
+    weights: {
+      hitter: {},
+      pitcher: { control: 44, ip: 12, chart: 1.35 }
+    },
+    bias: { pitcher: 1.7, thrift: 0, scarcity: 1 }
+  },
+  bargain: {
+    key: "bargain",
+    name: "Bargain hunter",
+    blurb: "Counts the points. Would rather have two good cards than one great one.",
+    weights: { hitter: {}, pitcher: {} },
+    bias: { pitcher: 1, thrift: 1, scarcity: 1.1 }
+  },
+  purist: {
+    key: "purist",
+    name: "Positional purist",
+    blurb: "Fields a real defence, fills the scarce spots first, and never plays a man out of position.",
+    weights: {
+      hitter: { onBase: 18, fielding: 15, speed: 3, chart: 0.85 },
+      pitcher: {}
+    },
+    bias: { pitcher: 1, thrift: 0, scarcity: 1.8 }
+  }
+};
+
+export const CPU_PERSONALITY_KEYS = Object.keys(CPU_PERSONALITIES);
+
+export function cpuPersonality(key) {
+  return CPU_PERSONALITIES[key] ?? CPU_PERSONALITIES.balanced;
+}
+
 // The UI reveals each manager's perturbed weights after a sim; exposing the
 // baseline and spread lets it show how far every preference leans.
 export const VALUATION_BASE_WEIGHTS = {
@@ -47,15 +110,20 @@ export const VALUATION_BASE_WEIGHTS = {
 };
 export const VALUATION_PERTURBATION = PERTURBATION;
 
-export function createValuationModel(seed) {
+export function createValuationModel(seed, personalityKey = "balanced") {
   const rng = createRng(String(seed));
+  const persona = cpuPersonality(personalityKey);
+  // The archetype states its case; the noise keeps two of the same archetype
+  // from being the same manager.
   const weights = {
-    hitter: perturbWeights(rng, HITTER_BASE_WEIGHTS),
-    pitcher: perturbWeights(rng, PITCHER_BASE_WEIGHTS)
+    hitter: perturbWeights(rng, { ...HITTER_BASE_WEIGHTS, ...persona.weights.hitter }),
+    pitcher: perturbWeights(rng, { ...PITCHER_BASE_WEIGHTS, ...persona.weights.pitcher })
   };
 
   return {
     weights,
+    persona,
+    bias: persona.bias,
     value(player) {
       return player?.kind === "pitcher" ? pitcherValue(player, weights.pitcher) : hitterValue(player, weights.hitter);
     }
@@ -93,9 +161,21 @@ function pitcherValue(player, weights) {
   return quality * ipWorkloadWeight(ip) + ip * weights.ip;
 }
 
+// A card's top range is open-ended — "20+" on the print, `to: Infinity` in the
+// data — because the swing is a d20 and nothing rolls past 20. Counting that
+// range as infinitely wide made the card infinitely valuable, and since
+// `Infinity - Infinity` is NaN, the comparator that sorted the board on these
+// numbers gave up and left the cards in whatever order they arrived. Half the
+// pool priced at Infinity, so half the board was never really ranked at all.
+//
+// The die is the ceiling. Every span is measured against it.
+const MAX_ROLL = 20;
+
 function chartValue(chart, values) {
-  return (chart ?? []).reduce(
-    (sum, entry) => sum + (entry.to - entry.from + 1) * (values[entry.result] ?? 0),
-    0
-  );
+  return (chart ?? []).reduce((sum, entry) => {
+    const from = Number(entry.from) || 1;
+    const to = Number.isFinite(entry.to) ? Number(entry.to) : MAX_ROLL;
+    const span = Math.max(0, Math.min(to, MAX_ROLL) - from + 1);
+    return sum + span * (values[entry.result] ?? 0);
+  }, 0);
 }

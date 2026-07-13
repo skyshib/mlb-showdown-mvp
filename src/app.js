@@ -116,6 +116,7 @@ import {
 } from "./rules/batch.js?v=20260708-mlb-win-prob";
 import { computeAwards } from "./rules/awards.js?v=20260712-auction-pause";
 import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
 import {
@@ -3771,8 +3772,12 @@ function renderRoster(manager, draft) {
   const draftedLine = hasUnlimitedRoster(draft)
     ? `${manager.roster.length} card${manager.roster.length === 1 ? "" : "s"}`
     : `${manager.roster.length}/${draft.rosterSize} drafted`;
+  // A computer manager says what he believes, so a pick that looks mad has a
+  // reason you can read.
+  const persona = manager.cpu ? cpuPersonality(manager.persona) : null;
   return `<article class="roster">
     <h3>${escapeHtml(manager.name)} <span class="roster-points">${totalPoints} pts</span></h3>
+    ${persona ? `<p class="persona" title="${escapeHtml(persona.blurb)}"><span class="persona-tag">${escapeHtml(persona.name)}</span><span class="persona-blurb">${escapeHtml(persona.blurb)}</span></p>` : ""}
     <p>${draftedLine}${budgetLine}</p>
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>

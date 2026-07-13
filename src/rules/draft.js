@@ -1,5 +1,5 @@
 import { createRng } from "./rng.js";
-import { createValuationModel } from "./valuation.js";
+import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js";
 import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
@@ -200,12 +200,20 @@ export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE)
 // Managers arrive as plain names or as { name, cpu } descriptors; cpu
 // managers play themselves (instant autopicks and sealed bids).
 export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, seed = "showdown", options = {}) {
+  // A computer manager gets an opinion, dealt from the seed so the same room
+  // always faces the same table. A human's seat carries none: he has his own.
+  const personaRng = createRng(`${seed}:personas`);
   const cleanManagers = managers.map((entry, index) => {
     const name = typeof entry === "string" ? entry : String(entry?.name ?? "");
+    const cpu = typeof entry === "object" && entry !== null && Boolean(entry.cpu);
+    const chosen = typeof entry === "object" && entry !== null && entry.persona;
     return {
       id: `team-${index + 1}`,
       name: name.trim() || `Manager ${index + 1}`,
-      cpu: typeof entry === "object" && entry !== null && Boolean(entry.cpu),
+      cpu,
+      persona: cpu
+        ? (CPU_PERSONALITIES[chosen] ? chosen : CPU_PERSONALITY_KEYS[Math.floor(personaRng.next() * CPU_PERSONALITY_KEYS.length)])
+        : null,
       roster: []
     };
   });
@@ -1147,7 +1155,7 @@ function bestAutopickTarget(draft, manager) {
   return legal
     .map((player) => ({
       player,
-      score: autopickScore(draft, manager, player, rosterNeeds, values.get(player.id), dropoffs.get(player.id))
+      score: autopickScore(draft, manager, player, rosterNeeds, values.get(player.id), dropoffs.get(player.id), model.bias)
     }))
     .sort((a, b) => b.score - a.score)[0].player;
 }
@@ -1232,10 +1240,11 @@ function auctionWillingness(draft, manager, player) {
 }
 
 export function managerValuation(draft, manager) {
-  const key = `${draft.seed ?? "showdown"}:valuation:${manager.id}`;
+  const persona = manager.persona ?? "balanced";
+  const key = `${draft.seed ?? "showdown"}:valuation:${manager.id}:${persona}`;
   let model = valuationModels.get(key);
   if (!model) {
-    model = createValuationModel(key);
+    model = createValuationModel(key, persona);
     valuationModels.set(key, model);
   }
   return model;
@@ -1818,15 +1827,26 @@ function fabricateReplacement({ id, name, slot, kind }) {
   };
 }
 
-function autopickScore(draft, manager, player, needs, personalValue, dropoff) {
+function autopickScore(draft, manager, player, needs, personalValue, dropoff, bias = null) {
+  const lean = bias ?? cpuPersonality(manager.persona).bias;
   const remainingSlots = draft.rosterSize - manager.roster.length;
   const matchingNeed = player.kind === "pitcher" ? pitcherNeed(player, needs) : needs.hitter;
   const forcedNeed = matchingNeed > 0 && matchingNeed >= remainingSlots;
   const needBonus = matchingNeed > 0 ? 80 + (matchingNeed / Math.max(1, remainingSlots)) * 120 : 0;
   const balanceBonus = player.kind === "pitcher" && pitcherNeed(player, needs) > 0 ? 35 : 0;
   const positionBonus = hitterPositionBonus(manager.roster, player);
-  const scarcityBonus = positionScarcityBonus(manager, player, needs, dropoff);
-  return personalValue + needBonus + balanceBonus + positionBonus + scarcityBonus + (forcedNeed ? 1000 : 0);
+  const scarcityBonus = positionScarcityBonus(manager, player, needs, dropoff) * lean.scarcity;
+  // The ace-first man reaches for arms; the slugger lets them come to him.
+  const armLean = player.kind === "pitcher" ? (lean.pitcher - 1) * 140 : 0;
+  // The bargain hunter is the only one who reads the price tag. He does not want
+  // bad cards — he wants the same card cheaper — so the tag is a discount on the
+  // score, not a prize for being worthless. Reward value-per-point directly and
+  // he fills a roster with ten-point scrubs and calls it shrewd.
+  const thrift = lean.thrift ? -lean.thrift * (player.points ?? 0) * 0.22 : 0;
+  return (
+    personalValue + needBonus + balanceBonus + positionBonus + scarcityBonus + armLean + thrift +
+    (forcedNeed ? 1000 : 0)
+  );
 }
 
 function positionDropoffs(players, values) {
