@@ -453,8 +453,11 @@ h1.gq-logo {
   .gq-tooltip { width: min(82vw, 60vh); }
 
   /* On a phone the console is at the top and the buttons under it, so the link
-     goes to the floor below both rather than standing between them. */
+     goes to the floor below both rather than standing between them — which is
+     where it would land on DOM order alone, since the controls are appended to
+     the body after it. */
   .gq-exit {
+    order: 3;
     align-self: center;
     margin: auto 0 0;
   }
