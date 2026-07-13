@@ -1,5 +1,5 @@
-import { createRng } from "../rules/rng.js?v=20260713-k";
-import { personConflict, playsPosition } from "../rules/cards.js?v=20260713-k";
+import { createRng } from "../rules/rng.js?v=20260713-l";
+import { personConflict, playsPosition } from "../rules/cards.js?v=20260713-l";
 import { RARITY_REFERENCE, setUniverse, universePool } from "../data/universes.js";
 
 // The adventure's economy on top of the shared card universes: what a card

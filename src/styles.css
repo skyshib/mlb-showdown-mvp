@@ -2029,9 +2029,10 @@ button.roster-slot[draggable="true"]:active {
 }
 
 /* ---- what the table built ----
-   A description, not a verdict: each measure read off the cards, and a bar drawn
-   against the rest of the table, because "who has the most of this" is the only
-   question worth asking of a column. */
+   A grade against the board, not against the other two managers: an A means the
+   average card at that spot sits in the top tenth of every card that could have
+   been drafted. The letter carries the row; the number underneath is the
+   evidence for it. */
 .comp-table {
   width: 100%;
   border-collapse: collapse;
@@ -2058,7 +2059,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .comp-corner {
-  width: 190px;
+  width: 230px;
 }
 
 .comp-label {
@@ -2078,6 +2079,7 @@ button.roster-slot[draggable="true"]:active {
 .comp-note {
   display: block;
   margin-top: 2px;
+  max-width: 34ch;
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.35;
@@ -2085,38 +2087,53 @@ button.roster-slot[draggable="true"]:active {
 
 .comp-cell {
   text-align: center;
+  white-space: nowrap;
 }
+
+.comp-grade {
+  display: inline-block;
+  min-width: 38px;
+  padding: 5px 8px 6px;
+  font-family: var(--display);
+  font-size: 24px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--sheet);
+}
+
+/* The bands are not a traffic light. A C is the middle of the board and reads as
+   the middle of the board — unremarkable, not a failure. */
+.grade-A { background: #1b5e46; }
+.grade-B { background: #4a7f52; }
+.grade-C { background: #8a8172; }
+.grade-D { background: #b06a34; }
+.grade-F { background: var(--accent); }
 
 .comp-value {
   display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.comp-points .comp-label .comp-name {
+  color: var(--muted);
+}
+
+.comp-points-value {
   font-family: var(--display);
   font-size: 20px;
   font-weight: 900;
   font-style: italic;
-  line-height: 1;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
 
-.comp-bar {
-  display: block;
-  height: 5px;
-  margin-top: 6px;
-  background: var(--bg);
-}
-
-.comp-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--hairline);
-}
-
-.comp-leads .comp-value {
-  color: var(--accent-dark);
-}
-
-.comp-leads .comp-bar > span {
-  background: var(--accent);
+.comp-points-value.cheapest {
+  color: var(--navy);
 }
 
 .recap-cards {

@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-k";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-l";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-k";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-k";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-k";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-k";
+} from "./ui/sounds.js?v=20260713-l";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-l";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-l";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-l";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-k";
+} from "./rules/draft.js?v=20260713-l";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-k";
+} from "./onlineClient.js?v=20260713-l";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-k";
-import { computeAwards } from "./rules/awards.js?v=20260713-k";
-import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-k";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-k";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-k";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-k";
+} from "./rules/batch.js?v=20260713-l";
+import { computeAwards } from "./rules/awards.js?v=20260713-l";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-l";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-l";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-l";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-l";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-k";
+} from "./ui/render.js?v=20260713-l";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -5031,71 +5031,144 @@ function autopickTurn(draft) {
 // is the rotation made of. All of it reads straight off the thirteen cards, so
 // it is true the moment the last one lands, and it does not pretend to know who
 // wins.
-function teamComposition(manager) {
+// A hitter's chart, read as if it were a season: what the twenty faces do when
+// the swing gets through. Not the on-base roll, not the pitcher — just the card.
+// It is the closest thing a Showdown chart has to a slash line, and it is what
+// separates a 12 on-base who singles from a 12 on-base who does not.
+function chartOps(card) {
+  let walks = 0;
+  let singles = 0;
+  let doubles = 0;
+  let triples = 0;
+  let homers = 0;
+  for (const entry of card.chart ?? []) {
+    const faces = chartSpan(entry);
+    if (entry.result === "BB") walks += faces;
+    else if (entry.result === "1B" || entry.result === "1B+") singles += faces;
+    else if (entry.result === "2B") doubles += faces;
+    else if (entry.result === "3B") triples += faces;
+    else if (entry.result === "HR") homers += faces;
+  }
+  const hits = singles + doubles + triples + homers;
+  const atBats = MAX_ROLL - walks;
+  const obp = (hits + walks) / MAX_ROLL;
+  const slg = atBats > 0 ? (singles + doubles * 2 + triples * 3 + homers * 4) / atBats : 0;
+  return obp + slg;
+}
+
+const primaryFielding = (card) => (Array.isArray(card.fielding) ? card.fielding[0] : card.fielding) || 0;
+
+// ---- grading against the pool ----
+//
+// A grade only means something if it is a grade of something. "Best defence at
+// this table" is a fact about two other people; "your average glove is in the
+// top tenth of every glove you could have drafted" is a fact about the roster.
+// So every measure is placed against the pool the cards actually came out of.
+//
+// The comparison is card-for-card: the manager's average hitter against every
+// hitter he could have had, his starters against every starter on the board. A
+// pool of weak arms grades a weak rotation kindly, and it should — that was the
+// board everybody was drafting from.
+const POOL_MEASURES = {
+  onBase: { of: "hitter", read: (card) => Number(card.onBase) || 0 },
+  chart: { of: "hitter", read: chartOps },
+  speed: { of: "hitter", read: (card) => Number(card.speed) || 0 },
+  defence: { of: "hitter", read: primaryFielding },
+  starters: { of: "SP", read: (card) => Number(card.control) || 0 },
+  bullpen: { of: "RP", read: (card) => Number(card.control) || 0 }
+};
+
+let poolScaleCache = null;
+
+function poolScales(draft) {
+  const key = `${draft.seed}:${draft.pool.length}`;
+  if (poolScaleCache?.key === key) return poolScaleCache.scales;
+
+  const belongs = (card, of) =>
+    of === "hitter" ? card.kind === "hitter" : card.kind === "pitcher" && (of === "SP" ? card.role === "SP" : card.role !== "SP");
+
+  const scales = {};
+  for (const [name, measure] of Object.entries(POOL_MEASURES)) {
+    scales[name] = draft.pool
+      .filter((card) => belongs(card, measure.of))
+      .map(measure.read)
+      .sort((a, b) => a - b);
+  }
+  poolScaleCache = { key, scales };
+  return scales;
+}
+
+// Where a number sits among the cards it could have been. Ties count as half, so
+// a pool where everybody is a 10 puts a 10 in the middle rather than the top.
+function percentile(sorted, value) {
+  if (!sorted.length) return 0.5;
+  let below = 0;
+  let equal = 0;
+  for (const entry of sorted) {
+    if (entry < value) below += 1;
+    else if (entry === value) equal += 1;
+  }
+  return (below + equal / 2) / sorted.length;
+}
+
+const GRADE_BANDS = [
+  [0.9, "A"],
+  [0.7, "B"],
+  [0.4, "C"],
+  [0.18, "D"],
+  [0, "F"]
+];
+
+function gradeFor(share) {
+  return GRADE_BANDS.find(([floor]) => share >= floor)?.[1] ?? "F";
+}
+
+function teamComposition(manager, draft) {
+  const scales = poolScales(draft);
   const bats = manager.roster.filter((card) => card.kind === "hitter");
   const arms = manager.roster.filter((card) => card.kind === "pitcher");
   const starters = arms.filter((card) => card.role === "SP");
   const bullpen = arms.filter((card) => card.role !== "SP");
-  const mean = (list, get) => (list.length ? list.reduce((sum, card) => sum + (Number(get(card)) || 0), 0) / list.length : 0);
 
-  // Faces of the die, not chart rows: a hitter who doubles on 15-16 has twice
-  // the extra-base chance of one who doubles on 16, and the rows look the same.
-  const xbhFaces = (card) =>
-    card.chart
-      .filter((entry) => ["2B", "3B", "HR"].includes(entry.result))
-      .reduce((faces, entry) => faces + chartSpan(entry), 0);
-  const homerFaces = (card) =>
-    card.chart.filter((entry) => entry.result === "HR").reduce((faces, entry) => faces + chartSpan(entry), 0);
+  const mean = (list, read) => (list.length ? list.reduce((sum, card) => sum + read(card), 0) / list.length : 0);
+  const grade = (name, cards) => {
+    const value = mean(cards, POOL_MEASURES[name].read);
+    const share = percentile(scales[name], value);
+    return { value, share, grade: gradeFor(share) };
+  };
 
   return {
     manager,
-    points: manager.roster.reduce((sum, card) => sum + card.points, 0),
-    onBase: mean(bats, (card) => card.onBase),
-    speed: mean(bats, (card) => card.speed),
-    defence: bats.reduce((sum, card) => sum + (Number(card.fielding) || 0), 0),
-    power: bats.reduce((sum, card) => sum + xbhFaces(card), 0),
-    homers: bats.reduce((sum, card) => sum + homerFaces(card), 0),
-    rotation: mean(starters, (card) => card.control),
-    innings: mean(starters, (card) => card.ip),
-    bullpen: mean(bullpen, (card) => card.control)
+    onBase: grade("onBase", bats),
+    chart: grade("chart", bats),
+    speed: grade("speed", bats),
+    defence: grade("defence", bats),
+    starters: grade("starters", starters),
+    bullpen: grade("bullpen", bullpen),
+    points: manager.roster.reduce((sum, card) => sum + card.points, 0)
   };
 }
 
-// Each measure, and who leads it. Low points is a virtue, so it is read the
-// other way round — a cheap roster is a thing a manager did on purpose.
+// The chart grade is deliberately mute about its own number. A chart OPS is a
+// made-up statistic — useful for ranking, meaningless to read aloud — and
+// printing "1.043" invites an argument about the third decimal place of a thing
+// that was only ever meant to sort. The letter is the whole point.
 const COMPOSITION_ROWS = [
-  { key: "onBase", label: "On-base", note: "average of the bats", decimals: 1, better: "high" },
-  { key: "power", label: "Extra-base power", note: "faces of the die that go for extra bases", decimals: 0, better: "high" },
-  { key: "homers", label: "Home runs", note: "faces that leave the yard", decimals: 0, better: "high" },
-  { key: "speed", label: "Speed", note: "average of the bats", decimals: 1, better: "high" },
-  { key: "defence", label: "Defence", note: "fielding across the lineup", decimals: 0, better: "high" },
-  { key: "rotation", label: "Rotation", note: "average control of the two starters", decimals: 1, better: "high" },
-  { key: "innings", label: "Starter innings", note: "how deep the starters go", decimals: 1, better: "high" },
-  { key: "bullpen", label: "Bullpen", note: "average control of the pen", decimals: 1, better: "high" },
-  { key: "points", label: "Points spent", note: "what the whole roster cost", decimals: 0, better: "low" }
+  { key: "onBase", label: "On-base", note: "the average bat, against every bat on the board", decimals: 1 },
+  { key: "chart", label: "Chart quality", note: "what the twenty faces do — OPS of the charts, graded but not printed", decimals: null },
+  { key: "speed", label: "Speed", note: "the average bat, against every bat on the board", decimals: 1 },
+  { key: "defence", label: "Defence", note: "the average glove, against every glove on the board", decimals: 1 },
+  { key: "starters", label: "Starters", note: "average control, against every starter on the board", decimals: 1 },
+  { key: "bullpen", label: "Bullpen", note: "average control, against every reliever on the board", decimals: 1 }
 ];
 
 function compositionTable(draft) {
-  const teams = draft.managers.map((manager) => teamComposition(manager));
-  return COMPOSITION_ROWS.map((row) => {
-    const values = teams.map((team) => team[row.key]);
-    const top = Math.max(...values);
-    const bottom = Math.min(...values);
-    const best = row.better === "low" ? bottom : top;
-    // The bar is drawn against the table, not against nothing: it says who has
-    // the most of this, which is the only question worth asking of a column.
-    const span = top - bottom;
-    return {
-      ...row,
-      cells: teams.map((team, index) => ({
-        manager: team.manager,
-        value: values[index],
-        leads: values[index] === best && span > 0,
-        // A flat column gets flat bars rather than a meaningless winner.
-        share: top > 0 ? values[index] / top : 0
-      }))
-    };
-  });
+  const teams = draft.managers.map((manager) => teamComposition(manager, draft));
+  const rows = COMPOSITION_ROWS.map((row) => ({
+    ...row,
+    cells: teams.map((team) => ({ manager: team.manager, ...team[row.key] }))
+  }));
+  return { teams, rows };
 }
 
 function draftRecap(draft) {
@@ -5121,19 +5194,21 @@ function draftRecap(draft) {
 function recapText(draft) {
   const recap = draftRecap(draft);
   if (!recap) return "";
-  const lines = [`MLB Showdown draft — seed "${draft.seed}"`, ""];
-
-  lines.push("What each manager built:");
-  const rows = compositionTable(draft);
+  const { teams, rows } = compositionTable(draft);
   const names = draft.managers.map((manager) => manager.name);
-  const width = Math.max(18, ...rows.map((row) => row.label.length + 2));
-  lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(12)).join("")}`);
+
+  const lines = [`MLB Showdown draft — seed "${draft.seed}"`, ""];
+  lines.push(`What each manager built, graded against the ${draft.pool.length} cards on the board:`);
+  const width = 16;
+  const col = 14;
+  lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(col)).join("")}`);
   for (const row of rows) {
     const cells = row.cells
-      .map((cell) => cell.value.toFixed(row.decimals).padStart(12))
+      .map((cell) => `${cell.grade}${row.decimals === null ? "" : ` (${cell.value.toFixed(row.decimals)})`}`.padStart(col))
       .join("");
     lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
+  lines.push(`  ${"Points spent".padEnd(width)}${teams.map((team) => String(team.points).padStart(col)).join("")}`);
   lines.push("");
   lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} at pick ${recap.steal.pickNumber} (ranked #${recap.steal.rank})`);
   lines.push(`Biggest reach: ${recap.reach.player.name} to ${recap.reach.manager.name} at pick ${recap.reach.pickNumber} (ranked #${recap.reach.rank})`);
@@ -5148,8 +5223,9 @@ function renderDraftDone(draft) {
   const recap = draftRecap(draft);
   if (!recap) return "";
 
-  const rows = compositionTable(draft);
+  const { teams, rows } = compositionTable(draft);
   const head = draft.managers.map((manager) => `<th>${escapeHtml(manager.name)}</th>`).join("");
+
   const body = rows
     .map(
       (row) => `<tr>
@@ -5159,15 +5235,33 @@ function renderDraftDone(draft) {
         </th>
         ${row.cells
           .map(
-            (cell) => `<td class="comp-cell${cell.leads ? " comp-leads" : ""}">
-              <span class="comp-value">${cell.value.toFixed(row.decimals)}</span>
-              <span class="comp-bar"><span style="width:${Math.round(cell.share * 100)}%"></span></span>
+            (cell) => `<td class="comp-cell">
+              <span class="comp-grade grade-${cell.grade}">${cell.grade}</span>
+              ${row.decimals === null ? "" : `<span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>`}
             </td>`
           )
           .join("")}
       </tr>`
     )
     .join("");
+
+  // Points are not a grade. Spending less is not worse than spending more, and a
+  // roster built cheap is a thing a manager did on purpose — so it is reported,
+  // and left alone.
+  const cheapest = Math.min(...teams.map((team) => team.points));
+  const pointsRow = `<tr class="comp-points">
+    <th class="comp-label">
+      <span class="comp-name">Points spent</span>
+      <span class="comp-note">what the whole roster cost — not a grade</span>
+    </th>
+    ${teams
+      .map(
+        (team) => `<td class="comp-cell">
+          <span class="comp-points-value${team.points === cheapest ? " cheapest" : ""}">${team.points}</span>
+        </td>`
+      )
+      .join("")}
+  </tr>`;
 
   const card = (label, pick, tone) => `<div class="recap-card ${tone}">
     <p class="eyebrow">${label}</p>
@@ -5196,12 +5290,12 @@ function renderDraftDone(draft) {
     <div class="table-scroll">
       <table class="comp-table">
         <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
-        <tbody>${body}</tbody>
+        <tbody>${body}${pointsRow}</tbody>
       </table>
     </div>
     <p class="compare-note">
-      Read straight off the thirteen cards, so it is true the moment the last one lands.
-      Who actually wins is a question for the simulator, once everyone has set a lineup.
+      Graded card-for-card against the ${draft.pool.length} cards on the board, not against each other:
+      an A is a top-tenth roster of what you could have drafted. Who actually wins is a question for the simulator.
     </p>
     <div class="recap-cards">
       ${card("Best value", recap.steal, "steal")}

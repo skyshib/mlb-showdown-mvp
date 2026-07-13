@@ -1,6 +1,6 @@
-import { distribution, rate } from "./stats.js?v=20260713-k";
-import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260713-k";
-import { simulateGame } from "./game.js?v=20260713-k";
+import { distribution, rate } from "./stats.js?v=20260713-l";
+import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260713-l";
+import { simulateGame } from "./game.js?v=20260713-l";
 
 export const DEFAULT_BATCH_RUNS = 10000;
 
