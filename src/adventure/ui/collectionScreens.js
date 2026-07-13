@@ -1,6 +1,6 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260713-u";
-import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260713-u";
-import { packEggs } from "../feats.js?v=20260713-u";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260713-v";
+import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260713-v";
+import { packEggs } from "../feats.js?v=20260713-v";
 import {
   persistSave,
   deriveSeed,
@@ -19,11 +19,11 @@ import {
   setBattingOrder,
   managerFor,
   addLog
-} from "../state.js?v=20260713-u";
-import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-u";
-import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js?v=20260713-u";
-import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-u";
-import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-u";
+} from "../state.js?v=20260713-v";
+import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-v";
+import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js?v=20260713-v";
+import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-v";
+import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-v";
 
 // ---- Two-way pairs -----------------------------------------------------------
 
