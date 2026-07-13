@@ -1073,12 +1073,12 @@ function draftNow() {
   return Date.now() + (state.online?.serverOffsetMs ?? 0);
 }
 
-function onlineCanUndo(draft) {
+// Taking a pick back rewinds the room, so it is the host's button. A manager
+// who could undo their own pick could undo it after seeing what came next, and
+// on a hotseat the whole table shares the one keyboard anyway.
+function onlineCanUndo() {
   const online = state.online;
-  if (!online) return true;
-  if (online.host) return true;
-  const lastPick = draftHistory(draft).at(-1);
-  return Boolean(lastPick && lastPick.manager.id === online.managerId);
+  return !online || Boolean(online.host);
 }
 
 // The card set the room drafts out of, as the setup form sees it: which of
@@ -1204,6 +1204,72 @@ function setupExamples(seed) {
 
 function exampleCardHtml(card) {
   return card ? cardPanelHtml(card) : "";
+}
+
+// ---- are you sure ----
+//
+// The host's board looks exactly like everybody else's, except that every card
+// on it is live on every clock. One stray click and a manager two seats over
+// has a card they never asked for and cannot give back without the host undoing
+// it. So when the host reaches across the table, the table asks first.
+function confirmOverlay({ eyebrow, title, body, confirmLabel, cancelLabel = "Cancel" }) {
+  return new Promise((resolve) => {
+    const stage = document.createElement("div");
+    stage.className = "confirm-stage";
+    stage.innerHTML = `<div class="confirm-card" role="alertdialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+      <p class="eyebrow">${escapeHtml(eyebrow)}</p>
+      <h2>${escapeHtml(title)}</h2>
+      <p class="lede">${body}</p>
+      <div class="confirm-actions">
+        <button type="button" data-confirm="no">${escapeHtml(cancelLabel)}</button>
+        <button type="button" class="confirm-yes" data-confirm="yes">${escapeHtml(confirmLabel)}</button>
+      </div>
+    </div>`;
+
+    const settle = (answer) => {
+      document.removeEventListener("keydown", onKey, true);
+      stage.remove();
+      resolve(answer);
+    };
+    // Escape is how a misclick gets taken back, so it has to beat every other
+    // key handler on the page to the punch.
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      settle(false);
+    };
+
+    stage.onclick = (event) => {
+      const button = event.target.closest("button[data-confirm]");
+      // Clicking the dimmed room behind the card is a way of backing out of it.
+      if (!button) {
+        if (event.target === stage) settle(false);
+        return;
+      }
+      settle(button.dataset.confirm === "yes");
+    };
+    document.addEventListener("keydown", onKey, true);
+    document.body.append(stage);
+    stage.querySelector(".confirm-yes").focus();
+  });
+}
+
+// A host acting on their own clock is just drafting. A host acting on anyone
+// else's clock is drafting for them, and that is the move worth a second look.
+function hostActingForOthers(current) {
+  const online = state.online;
+  return Boolean(online?.host && current && current.id !== online.managerId);
+}
+
+function confirmHostAction(draft, current, playerId, { verb, outcome }) {
+  const player = draft.pool.find((item) => item.id === playerId);
+  return confirmOverlay({
+    eyebrow: "Host controls",
+    title: `${verb} for ${current.name}?`,
+    body: `<strong>${escapeHtml(current.name)}</strong> is on the clock, not you.
+      ${escapeHtml(player?.name ?? "This card")} ${outcome}, and the room will read it as their move.`,
+    confirmLabel: `${verb} for ${current.name}`
+  });
 }
 
 // ---- the lottery ----
@@ -1683,7 +1749,7 @@ function renderDraft() {
   // back while a card sits on the block — only a settled lot can be undone.
   const canUndo = !paused
     && (queued ? draft.pickNumber > 0 && !lot : auction ? draft.pickNumber > 0 || Boolean(lot) : draft.pickNumber > 0)
-    && (auction ? !online || online.host : onlineCanUndo(draft));
+    && onlineCanUndo();
   const canAdvance = !draft.complete && !reviewOpen && !paused
     && (queued ? !online || online.host : onlineCanPickNow(current));
   app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
@@ -1699,7 +1765,11 @@ function renderDraft() {
     <button data-action="export-save" title="Save this room to a file you can keep, move, or send">&#128190; Save room</button>
     <button class="sound-toggle${isMuted() ? " muted" : ""}" data-action="toggle-sound" aria-pressed="${!isMuted()}" title="${isMuted() ? "Turn sound on" : "Turn sound off"}">${isMuted() ? "&#128264;" : "&#128266;"}</button>
     <span class="pick-clock" data-pick-timer hidden></span>
-    <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
+    ${/* A bare ?board reads the draft out of this browser's own storage, which is
+          the whole draft on a hotseat and nothing at all in a room. The room's
+          board hangs off the invite link up in the banner, so online there is
+          only ever the one TV board link, and it is the one that works. */
+      online ? "" : `<a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>`}
   </section>
   ${paused ? renderPausedPanel(draft) : ""}
   ${draft.complete ? renderDraftDone(draft) : ""}
@@ -2167,11 +2237,21 @@ function bindDraftActions() {
     }
     if (action === "pick") {
       if (button.disabled) return;
+      const playerId = button.dataset.playerId;
       if (state.online) {
-        sendOnlineAction({ type: "pick", playerId: button.dataset.playerId });
+        const current = currentManager(state.draft);
+        if (hostActingForOthers(current)) {
+          confirmHostAction(state.draft, current, playerId, { verb: "Pick", outcome: "goes onto their roster" })
+            // The clock does not stop for the dialog. By the time the host says
+            // yes the seat may have timed out or the card may be gone; the room
+            // is the one that rules on that, so send it and let it answer.
+            .then((yes) => { if (yes) sendOnlineAction({ type: "pick", playerId }); });
+          return;
+        }
+        sendOnlineAction({ type: "pick", playerId });
         return;
       }
-      pickPlayer(state.draft, button.dataset.playerId);
+      pickPlayer(state.draft, playerId);
       selectedLineupMove = null;
       invalidateBatch();
       afterLocalDraftAction();
@@ -2179,11 +2259,18 @@ function bindDraftActions() {
     if (action === "nominate") {
       if (button.disabled) return;
       lotEntryError = null;
+      const playerId = button.dataset.playerId;
       if (state.online) {
-        sendOnlineAction({ type: "nominate", playerId: button.dataset.playerId });
+        const current = currentManager(state.draft);
+        if (hostActingForOthers(current)) {
+          confirmHostAction(state.draft, current, playerId, { verb: "Nominate", outcome: "goes on the block" })
+            .then((yes) => { if (yes) sendOnlineAction({ type: "nominate", playerId }); });
+          return;
+        }
+        sendOnlineAction({ type: "nominate", playerId });
         return;
       }
-      nominatePlayer(state.draft, button.dataset.playerId, draftNow());
+      nominatePlayer(state.draft, playerId, draftNow());
       afterLocalDraftAction();
     }
     if (action === "seal-bid" || action === "seal-pass") {

@@ -722,6 +722,16 @@ td span {
   line-height: 1.45;
 }
 
+/* An eyebrow is a plate with a word on it, and the word has to sit on the plate.
+   The results panel writes its eyebrow as a direct child — `<p class="eyebrow">`
+   inside `<div class="panel">` — so the rule above out-specifies .eyebrow and
+   paints it muted grey. On a navy plate that is 1.3:1: the sim results have said
+   "10000 simulated games" in a color nobody could read for as long as the panel
+   has existed. It only got noticed when a club turned the plate gold. */
+.panel > p.eyebrow {
+  color: var(--sheet);
+}
+
 .toolbar {
   position: sticky;
   top: 0;
@@ -2612,6 +2622,54 @@ button.roster-slot[draggable="true"]:active {
   }
 }
 
+/* Are you sure: the one thing on screen, over a room that has gone dim. */
+.confirm-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(20 18 14 / 0.72);
+  animation: lottery-in 140ms ease-out;
+}
+
+.confirm-card {
+  width: min(440px, 100%);
+  padding: 24px 26px 22px;
+  border: var(--rule-thick) solid var(--navy);
+  background: var(--sheet);
+}
+
+.confirm-card h2 {
+  margin-bottom: 10px;
+}
+
+.confirm-card .lede {
+  margin-bottom: 20px;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-actions button:not(.confirm-yes) {
+  background: var(--panel);
+  color: var(--navy);
+}
+
+.confirm-actions button:not(.confirm-yes):hover {
+  background: var(--hairline);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm-stage {
+    animation: none;
+  }
+}
+
 /* The whistle: hand a stalled seat to the computer, or take it back. */
 .seat-button {
   margin-left: auto;
@@ -4258,3 +4316,39 @@ html.club .heat {
   background: color-mix(in srgb, var(--heat-c, #2e68c4) 34%, var(--panel));
   border-left-color: var(--heat-c, #2e68c4);
 }
+
+/* ---- the rest of the sweep -------------------------------------------------
+ *
+ * Everything the tokens could not reach, found by walking the sheet for literals
+ * rather than by walking the screens and hoping to notice.
+ *
+ * The eight race lines first, because they are the results screen. They were
+ * mixed dark to sit on cream, and eight dark lines on a black page is a chart
+ * with nothing in it. Lit in HSL — hue and saturation held, lightness raised —
+ * because mixing eight distinct colors toward white gives you eight greys, and
+ * the whole job of these eight is to be told apart. */
+html.club {
+  --race-0: #109977;
+  --race-1: #cc6b82;
+  --race-2: #5a89c2;
+  --race-3: #be7522;
+  --race-4: #8c82bb;
+  --race-5: #699439;
+  --race-6: #d76343;
+  --race-7: #399494;
+}
+
+/* Text that was mixed dark because it was always going to land on something
+   light. Each of these now lands on a dark panel, where a dark word is no word.
+   They keep their meanings — a loss stays red, a gain stays green — and are only
+   lit enough to be read. */
+html.club .dock-needs,
+html.club .floor-chip.floor-empty strong,
+html.club .wpa-neg { color: #ff7a6b; }
+html.club .dock-slot.empty-dock-slot > span { color: #e08a72; }
+html.club .weight-lean.lean-up strong { color: #58d59b; }
+html.club .weight-lean.lean-down strong { color: #ff7a6b; }
+html.club .dock-chip em,
+html.club .auction-paused .eyebrow { color: var(--accent-bright); }
+html.club .sold-tag { color: var(--muted); }
+html.club button:disabled { color: var(--muted); opacity: 0.75; }

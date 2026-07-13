@@ -18,7 +18,6 @@ import {
   cpuSealedBid,
   createDraft,
   currentManager,
-  draftHistory,
   isAuctionDraft,
   isAuctionPaused,
   auctionStepGuard,
@@ -833,19 +832,19 @@ function denyAction(draft, seat, isHost, action) {
     if (!canCancelLot(draft)) return "A manager has already bid on this card";
     return null;
   }
+  // Rewinding the draft is the host's call and nobody else's. A manager who
+  // could take back their own pick could take it back after seeing what came
+  // next, so the room's history is the one thing no seat may edit from the
+  // inside — it takes the host to move it.
   if (type === "undo") {
+    if (!isHost) return "Only the host can undo";
     // An open lot is itself undoable, before any card has been sold — unless
     // the queue dealt it, in which case there is no nomination to take back.
     if (isAuctionDraft(draft) && draft.auction.lot) {
       if (isRandomNomination(draft)) return "Finish the card on the block first";
-      if (!isHost && draft.auction.lot.nominatorId !== seat?.managerId) {
-        return "Only the host or the nominator can undo";
-      }
       return null;
     }
     if (draft.pickNumber <= 0) return "There is nothing to undo";
-    const lastPick = draftHistory(draft).at(-1);
-    if (!isHost && lastPick?.manager.id !== seat?.managerId) return "Only the host or the last picker can undo";
     return null;
   }
   if (type === "lineup" || type === "staff" || type === "batting-order") {

@@ -219,10 +219,22 @@ export function renderBoxScore(game, playersById = new Map()) {
   </div>`;
 }
 
+// Eight lines on the win-rate race, and eight colors dark enough to read against
+// the cream sheet they were drawn for.
 export const RACE_COLORS = ["#0b6b53", "#8f3147", "#365f91", "#b06c1f", "#5a4f91", "#4f6f2b", "#9c3b21", "#2b6f6f"];
 
+// A franchise league draws the same chart on a black page, where eight dark
+// lines are eight lines nobody can see — and the race chart IS the results
+// screen, so that is the whole screen gone. The stylesheet publishes a lit
+// version of each under `html.club`, and the color is looked up rather than
+// hard-returned so the chart follows whatever page it lands on. Off the browser
+// (the tests) there is no stylesheet to ask, and the printed color stands.
 export function raceColor(index) {
-  return RACE_COLORS[index % RACE_COLORS.length];
+  const slot = index % RACE_COLORS.length;
+  const printed = RACE_COLORS[slot];
+  if (typeof document === "undefined") return printed;
+  const lit = getComputedStyle(document.documentElement).getPropertyValue(`--race-${slot}`).trim();
+  return lit || printed;
 }
 
 export function renderRaceChart(race) {
