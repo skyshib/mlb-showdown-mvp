@@ -14,7 +14,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-t";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-u";
 import {
   isMuted,
   playClockWarning,
@@ -26,10 +26,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-t";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-t";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-t";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-t";
+} from "./ui/sounds.js?v=20260713-u";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-u";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-u";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-u";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -100,7 +100,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-t";
+} from "./rules/draft.js?v=20260713-u";
 import {
   createRoom,
   fetchRoom,
@@ -109,7 +109,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-t";
+} from "./onlineClient.js?v=20260713-u";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -118,12 +118,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-t";
-import { computeAwards } from "./rules/awards.js?v=20260713-t";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-t";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-t";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-t";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-t";
+} from "./rules/batch.js?v=20260713-u";
+import { computeAwards } from "./rules/awards.js?v=20260713-u";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-u";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-u";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-u";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-u";
 import {
   basesText,
   cardRarity,
@@ -138,7 +138,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-t";
+} from "./ui/render.js?v=20260713-u";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -5342,7 +5342,7 @@ function recapText(draft) {
       .join("");
     lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
-  lines.push(`  ${"Points spent".padEnd(width)}${teams.map((team) => String(team.points).padStart(col)).join("")}`);
+  lines.push(`  ${"Total points".padEnd(width)}${teams.map((team) => String(team.points).padStart(col)).join("")}`);
   lines.push("");
   if (recap.auction) {
     const rate = Math.round(recap.rate * 100) / 100;
@@ -5387,12 +5387,12 @@ function renderDraftDone(draft) {
     )
     .join("");
 
-  // Points are not a grade. Spending less is not worse than spending more, and a
-  // roster built cheap is a thing a manager did on purpose — so it is reported,
-  // and left alone.
+  // Not a grade, and not a bill either: nothing is spent in points. It is simply
+  // what the thirteen cards add up to — worth reporting, and worth leaving alone,
+  // because a light roster is a thing a manager chose.
   const cheapest = Math.min(...teams.map((team) => team.points));
   const pointsRow = `<tr class="comp-points">
-    <th class="comp-label"><span class="comp-name">Points spent</span></th>
+    <th class="comp-label"><span class="comp-name">Total points</span></th>
     ${teams
       .map(
         (team) => `<td class="comp-cell">
