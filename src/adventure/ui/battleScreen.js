@@ -79,7 +79,8 @@ export function startTrainerBattle(app, trainer) {
           ? { away: game.playerRuns, home: game.npcRuns }
           : { away: game.npcRuns, home: game.playerRuns },
         innings: game.innings,
-        won: game.playerWon
+        won: game.playerWon,
+        lineScore: game.lineScore
       });
     }
     const outcome = applyOutcome(app, trainer, series.playerWonSeries);
@@ -163,7 +164,7 @@ export function applyOutcome(app, trainer, won) {
 // sim series): feats detected, an almanac page written, trophies framed.
 // Returns the feats so the box-score screen can reuse them. Called after
 // recordGameStats, so the season game count IS the day this game happened.
-export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won }) {
+export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won, lineScore = null }) {
   const feats = gameFeats({ boxScore, playerSide, events, score, innings });
   const day = ensureSeasonStats(save).games;
   recordAlmanacGame(save, {
@@ -175,7 +176,10 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
     playerSide,
     innings,
     feats,
-    boxScore
+    boxScore,
+    // Games played before the board existed have no frames to hang; the box
+    // score simply leaves the wall bare rather than inventing them.
+    lineScore
   });
   addTrophies(save, feats, { day, opponent: trainer.name });
   return feats;
@@ -277,10 +281,46 @@ function renderGameLog(app, battle, trainer) {
   const index = clampIndex(app.screen.logIndex ?? rows.length - 1, rows.length);
   return `<div class="gq-screen">
     <div class="gq-topbar"><span>GAME LOG &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
+    ${winProbChartHtml(battle, index)}
     <div class="gq-body"><div class="gq-frame gq-scroll">${
       rows.length ? menuHtml(rows, index) : `<p class="gq-dim">NO PLAYS YET. GO MAKE SOME HISTORY.</p>`
     }</div></div>
-    <div class="gq-textbox"><p class="gq-dim">TOP % IS THE PLAY'S WPA (10%+ BOLD) &middot; WIN % IS YOUR RUNNING ODDS. X to go back.</p></div>
+    <div class="gq-textbox"><p class="gq-dim">THE LINE IS YOUR WIN ODDS, PLAY BY PLAY &mdash; TOUCH IT TO JUMP TO THE PLAY. X to go back.</p></div>
+  </div>`;
+}
+
+// Your odds of winning, play by play, on the same four tones as everything
+// else. The cursor's play is marked on the line, so the chart and the list are
+// reading the same row; touching the chart moves the list (main.js maps a
+// click's data-log-index onto the cursor).
+function winProbChartHtml(battle, index) {
+  const events = battle.events.filter((event) => typeof event.wpAfter === "number");
+  if (events.length < 2) return "";
+  const width = 100;
+  const height = 26;
+  const playerIsHome = battle.playerSide === "home";
+  // wpAfter is the HOME club's number. Read it from your dugout.
+  const mine = (wp) => (playerIsHome ? wp : 1 - wp);
+  const xFor = (at) => (at / (events.length - 1)) * width;
+  const yFor = (wp) => height - mine(wp) * height;
+  const points = events.map((event, at) => `${xFor(at).toFixed(1)},${yFor(event.wpAfter).toFixed(1)}`);
+  // A coin flip is the line to beat, so it is drawn.
+  const parity = (height / 2).toFixed(1);
+  const cursorAt = Math.min(index, events.length - 1);
+  // Wide invisible bands, so a play can be hit without pixel-hunting.
+  const band = width / events.length;
+  const zones = events.map((event, at) =>
+    `<rect x="${(xFor(at) - band / 2).toFixed(1)}" y="0" width="${band.toFixed(2)}" height="${height}"
+       fill="transparent" class="gq-wp-zone" data-log-index="${at}">
+       <title>${escapeHtml(`${event.half === "top" ? "T" : "B"}${event.inning} ${event.batter} ${event.result} — ${Math.round(mine(event.wpAfter) * 100)}%`)}</title>
+     </rect>`);
+  return `<div class="gq-wp-chart">
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="your win probability, play by play">
+      <line x1="0" y1="${parity}" x2="${width}" y2="${parity}" class="gq-wp-parity" />
+      <polyline points="${points.join(" ")}" class="gq-wp-line" fill="none" />
+      <circle cx="${xFor(cursorAt).toFixed(1)}" cy="${yFor(events[cursorAt].wpAfter).toFixed(1)}" r="1.6" class="gq-wp-now" />
+      ${zones.join("")}
+    </svg>
   </div>`;
 }
 
@@ -477,7 +517,9 @@ function resolveGameEnd(app, phase) {
     events: battle.events,
     score: phase.score,
     innings: inningsPlayed(battle.state),
-    won: phase.playerWon
+    won: phase.playerWon,
+    // So the almanac can hang the board back up when the game is reopened.
+    lineScore: battle.state.lineScore
   });
   const status = recordSeriesGame(save, phase.playerWon);
   persistSave(save);
@@ -498,6 +540,10 @@ function resolveGameEnd(app, phase) {
     feats,
     events: battle.events,
     score: phase.score,
+    // The board the game was played on, so the box score can hang it back up —
+    // both clubs by name, the way it stood at the last out.
+    lineScore: battle.state.lineScore,
+    you: battle.state[battle.playerSide].name,
     playerSide: battle.playerSide,
     index: 0,
     next
@@ -695,10 +741,23 @@ function renderScoreboard(battle, trainer, series) {
 // the frame in progress marked. A club that has batted in an inning and not
 // scored gets its nought; one that hasn't come up yet gets an empty slot —
 // which is the whole point of a board like this, and why blank and 0 differ.
+//
+// How many frames the wall holds. The board and the bases share the banner and
+// the bases are not moving, so this is the count that fits beside them with a
+// gap still showing — measured against the rendered board at its widest (a
+// two-digit frame is wider than a one-digit one, and the longest club name
+// takes the name column to its cap), not guessed.
+const MAX_FRAMES = 10;
+
 function lineScoreHtml(battle) {
   const state = battle.state;
-  const frames = Math.max(9, state.lineScore.away.length, state.lineScore.home.length, state.inning);
-  const innings = Array.from({ length: frames }, (unused, index) => index + 1);
+  const played = Math.max(9, state.lineScore.away.length, state.lineScore.home.length, state.inning);
+  // Extras hang new frames off the end until the board runs out of wall — which
+  // is where the bases are standing. Past that it slides: the oldest frames come
+  // down, the newest stay up, and the run total on the end still counts them all.
+  const last = played;
+  const first = Math.max(1, last - MAX_FRAMES + 1);
+  const innings = Array.from({ length: last - first + 1 }, (unused, index) => first + index);
   // A half is on the board once it has started: the top of the current inning
   // always has, the bottom only once we are in it.
   const batted = (side, inning) =>
@@ -714,9 +773,12 @@ function lineScoreHtml(battle) {
       <th>${escapeHtml(state[side].name)}${side === "home" ? " &#9679;" : ""}</th>
       ${innings.map((inning) => {
         const live = inning === state.inning && side === atBat;
-        return `<td class="${live ? "gq-line-live" : ""}">${
-          batted(side, inning) ? state.lineScore[side][inning - 1] ?? 0 : ""
-        }</td>`;
+        const runs = state.lineScore[side][inning - 1] ?? 0;
+        // A frame still being played has nothing hung in it until a run comes
+        // in: the slot is lit, but empty. A nought is a finished frame's
+        // verdict, and this frame has not finished.
+        const hung = !batted(side, inning) || (live && runs === 0) ? "" : runs;
+        return `<td class="${live ? "gq-line-live" : ""}">${hung}</td>`;
       }).join("")}
       <td class="gq-line-total">${state.score[side]}</td>
     </tr>`;
@@ -735,8 +797,9 @@ function battingSide(state) {
 
 // ---- Motion on the diamond -------------------------------------------------
 
-const BASE_SELECTOR = { 1: ".gq-base-1", 2: ".gq-base-2", 3: ".gq-base-3", 4: ".gq-base-h" };
-const BASE_NUMBER = { "1B": 1, "2B": 2, "3B": 3, home: 4 };
+const HOME = 4;
+const BASE_SELECTOR = { 1: ".gq-base-1", 2: ".gq-base-2", 3: ".gq-base-3", [HOME]: ".gq-base-h" };
+const BASE_NUMBER = { "1B": 1, "2B": 2, "3B": 3, home: HOME };
 // What the batter himself touches on his way. A walk is a trot to first; a
 // homer is the whole lap, which is the reason to trace a path at all rather
 // than just light up where everyone ended.
@@ -770,8 +833,10 @@ export function playMotion(events) {
       if (attempt.safe) touch(base);
       else outs.push(base);
     }
-    // However he got there, a run is a man touching the plate.
-    if (event.runs > 0) touch(4);
+    // However he got there, a run is a man touching the plate — which is why
+    // the plate appearing in the path always means a run, and can always be
+    // lit as one.
+    if (event.runs > 0) touch(HOME);
   }
   return { path, outs };
 }
@@ -787,12 +852,14 @@ function playMotionOnce(app) {
   if (!diamond) return;
   const baseAt = (base) => diamond.querySelector(BASE_SELECTOR[base]);
   // The lap is staggered, so a home run reads as a man rounding the bases
-  // rather than four bases lighting up at once.
+  // rather than four bases lighting up at once. Touching the plate is the one
+  // that means a run, so the plate says so in the sign's red rather than just
+  // swelling like any other bag.
   motion.path.forEach((base, index) => {
     const el = baseAt(base);
     if (!el) return;
     el.style.animationDelay = `${index * 130}ms`;
-    el.classList.add("gq-base-pulse");
+    el.classList.add(base === HOME ? "gq-base-score" : "gq-base-pulse");
   });
   for (const base of motion.outs ?? []) {
     baseAt(base)?.classList.add("gq-base-out");

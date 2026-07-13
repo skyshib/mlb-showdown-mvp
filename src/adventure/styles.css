@@ -79,6 +79,15 @@ html, body {
   color: var(--gb-lightest);
 }
 
+/* Stood down once a save is open — but its room is kept. The console is sized
+   off the height this link takes (see #app), so collapsing it outright would
+   make the handheld jump the moment you pressed CONTINUE. Invisible also means
+   out of the tab order, which is the point: it is not offered mid-game. */
+.gq-exit[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
 body {
   /* The room the handheld is sitting in, dark enough that the screen is the
      only lit thing on the page — but navy now, not soot, so it belongs. In a
@@ -192,6 +201,28 @@ h1.gq-logo {
 .gq-log-row { display: block; }
 .gq-log-detail { display: block; font-size: 2.4cqw; letter-spacing: 0.02em; }
 
+/* The diamond shrunk into a line of text. The rotation overhangs its box, so
+   the wrapper carries the margin that keeps it off the words either side. */
+.gq-diamond-mini {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 1.4cqw 0 1cqw;
+}
+.gq-diamond-mini .gq-diamond { width: 3.2cqw; height: 3.2cqw; margin: 0; }
+.gq-diamond-mini .gq-base {
+  width: 1.5cqw;
+  height: 1.5cqw;
+  border-width: 0.22cqw;
+  border-color: var(--gb-dark);
+  background: transparent;
+}
+.gq-diamond-mini .gq-base-on { background: var(--gb-darkest); border-color: var(--gb-darkest); }
+.gq-menu li.gq-cursor .gq-diamond-mini .gq-base { border-color: var(--gb-light); }
+.gq-menu li.gq-cursor .gq-diamond-mini .gq-base-on {
+  background: var(--gq-lead-ink);
+  border-color: var(--gq-lead-ink);
+}
+
 .gq-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2cqw; height: 100%; min-height: 0; }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
 /* Screens that want the whole card visible without scrolling (the Team
@@ -217,14 +248,15 @@ h1.gq-logo {
 /* On the ink the bases invert: the paper tone draws them, not the navy. The
    margin is on all four sides — the 45deg turn throws the corners out
    sideways as well as up, and sideways is where the outs are standing. */
-.gq-battle-topbar .gq-diamond { width: 6cqw; height: 6cqw; margin: 1.3cqw; }
+.gq-battle-topbar .gq-diamond { width: 7.5cqw; height: 7.5cqw; margin: 1.6cqw; }
 .gq-battle-topbar .gq-base {
-  width: 2.4cqw;
-  height: 2.4cqw;
-  border-width: 0.35cqw;
+  width: 3cqw;
+  height: 3cqw;
+  border-width: 0.4cqw;
   border-color: var(--gq-lead-ink);
   background: transparent;
 }
+.gq-battle-topbar .gq-outs i { width: 2.6cqw; height: 2.6cqw; }
 .gq-battle-topbar .gq-base-on { background: var(--gq-lead-ink); }
 .gq-battle-topbar .gq-outs i { border-color: var(--gq-lead-ink); background: transparent; }
 .gq-battle-topbar .gq-outs i.gq-out-on { background: var(--gq-lead-ink); }
@@ -245,12 +277,31 @@ h1.gq-logo {
   70% { transform: scale(1.3) rotate(8deg); border-color: var(--accent-bright); background: var(--accent-bright); }
   100% { transform: scale(1) rotate(0deg); }
 }
+/* The plate is the one bag that means something when a man touches it, so it
+   does not just swell — it lights the sign's red, and holds it a beat longer
+   than a bag on the basepaths does. */
+@keyframes gq-base-score {
+  0% { transform: scale(1); }
+  30% {
+    transform: scale(2.1);
+    border-color: var(--accent-bright);
+    background: var(--accent-bright);
+  }
+  70% {
+    transform: scale(1.7);
+    border-color: var(--accent-bright);
+    background: var(--accent-bright);
+  }
+  100% { transform: scale(1); }
+}
 .gq-base-pulse { animation: gq-base-pulse 420ms ease-out both; }
 .gq-base-out { animation: gq-base-out 620ms ease-in-out both; }
+.gq-base-score { animation: gq-base-score 700ms ease-out both; }
 
 @media (prefers-reduced-motion: reduce) {
   .gq-base-pulse,
-  .gq-base-out { animation: none; }
+  .gq-base-out,
+  .gq-base-score { animation: none; }
 }
 
 /* Outside in: each club's order on its own edge, the two men in the duel in
@@ -301,16 +352,21 @@ h1.gq-logo {
    end, the frame in progress still open. It stands on the banner's ink, so the
    numerals are the paper tone and the rules are drawn in it — which is how a
    board at a ballpark reads, and the reason it moved up here. */
+/* The board is drawn in whatever ink it is standing on: cream numerals on the
+   banner, navy on the box score's paper. currentColor does the switching. */
 .gq-linescore {
   border-collapse: collapse;
-  font-size: 1.9cqw;
+  font-size: 2.4cqw;
   flex: none;
-  color: var(--gq-lead-ink);
+  color: var(--gb-darkest);
 }
+.gq-battle-topbar .gq-linescore { color: var(--gq-lead-ink); }
 .gq-linescore th,
 .gq-linescore td {
-  border: 0.2cqw solid var(--gq-lead-ink);
-  padding: 0 0.9cqw;
+  border: 0.2cqw solid currentColor;
+  /* Tight across, generous down: the frames have to stay narrow enough that
+     extras can hang a few more before the board runs into the bases. */
+  padding: 0.4cqw 0.55cqw;
   text-align: center;
   min-width: 3.2cqw;
   font-weight: 400;
@@ -318,15 +374,27 @@ h1.gq-logo {
 /* The club's name, not a caption: it gets room, and gives up its tail last. */
 .gq-linescore tr th:first-child {
   text-align: left;
-  max-width: 22cqw;
+  max-width: 30cqw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border-left: 0;
 }
-.gq-line-head th { color: var(--gb-light); border-top: 0; }
+.gq-line-head th { color: var(--gb-dark); border-top: 0; }
+.gq-battle-topbar .gq-line-head th { color: var(--gb-light); }
 .gq-line-head th:first-child { border: 0; }
-.gq-line-total { font-weight: 700; background: rgba(240, 231, 210, 0.16); }
+.gq-line-total { font-weight: 700; background: var(--gb-light); }
+.gq-battle-topbar .gq-line-total { background: rgba(240, 231, 210, 0.16); }
+
+/* The board hung above a finished game's box score. */
+.gq-final-board {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: 1cqw;
+  background: var(--gb-lightest);
+  border-bottom: 0.6cqw solid var(--gb-darkest);
+}
 /* The frame being played is the one the board is waiting on. */
 .gq-line-live { background: var(--gq-lead-ink); color: var(--gq-lead); }
 
@@ -507,6 +575,33 @@ h1.gq-logo {
 }
 
 .gq-outs i.gq-out-on { background: var(--gb-darkest); }
+
+/* Your win odds, play by play. Four tones and a parity line: above it you are
+   winning, below it you are not, and that is the whole reading. */
+.gq-wp-chart {
+  flex: none;
+  padding: 1cqw 2cqw;
+  background: var(--gb-lightest);
+  border-bottom: 0.6cqw solid var(--gb-darkest);
+}
+.gq-wp-chart svg { display: block; width: 100%; height: 14cqw; }
+.gq-wp-parity {
+  stroke: var(--gb-dark);
+  stroke-width: 0.4;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+}
+.gq-wp-line {
+  stroke: var(--gb-darkest);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+/* Where the cursor is standing in the list. */
+.gq-wp-now { fill: var(--accent-bright); }
+.gq-wp-zone { cursor: pointer; }
+.gq-wp-zone:hover { fill: var(--gb-light); fill-opacity: 0.55; }
 
 /* ---- Map ---- */
 

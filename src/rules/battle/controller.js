@@ -285,6 +285,7 @@ export function runSimSeries({ playerManager, npcManager, bestOf, seed }) {
       playerWon,
       topSwing: result.topSwing,
       boxScore: result.boxScore,
+      lineScore: result.lineScore,
       // Feats (slams, comebacks) read the play-by-play; the events ride the
       // transient series result but never land in the save.
       events: result.events

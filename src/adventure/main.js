@@ -73,6 +73,10 @@ const app = {
     // gets the stylesheet's own enamel back.
     applyFranchisePalette(this.save?.universe);
     const screen = SCREENS[this.screen.name] ?? titleScreen;
+    // The way out of the game is offered where you are not yet in it. Once a
+    // save is open the link stands down: a door back to the draft room has no
+    // business hanging over a man at the plate.
+    document.querySelector(".gq-exit")?.toggleAttribute("hidden", this.screen.name !== "title");
     root.innerHTML = screen.render(this);
     screen.mounted?.(this);
     // Real-player cards get their Wikipedia headshots filled in.
@@ -123,6 +127,14 @@ document.addEventListener("keydown", (event) => {
 // Mouse/touch parity: clicking a menu row moves the cursor there; clicking
 // the row that is already selected confirms it.
 document.addEventListener("click", (event) => {
+  // The win-probability chart is the log read sideways: touching a play on the
+  // line snaps the list to that row (and rerender scrolls the cursor into view).
+  const point = event.target.closest("[data-log-index]");
+  if (point) {
+    app.screen.logIndex = Number(point.dataset.logIndex);
+    app.rerender();
+    return;
+  }
   const row = event.target.closest("[data-menu-index]");
   if (!row) return;
   const index = Number(row.dataset.menuIndex);

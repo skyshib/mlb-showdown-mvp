@@ -1405,16 +1405,28 @@ test("the hand-operated board hangs runs by inning, and blank is not nought", as
   const state = battle.state;
   const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
 
-  // Top of the 1st, nobody has batted: the away club's frame is open and the
-  // home club's is blank — the distinction the board exists to make.
+  // Top of the 1st, nobody has batted. The away club's frame is lit but empty —
+  // a nought is a finished frame's verdict, and this one is still being played.
+  // The home club's frame is neither lit nor filled: they have not come up.
   const cells = (html, row) => [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)]
     .map((m) => [...m[1].matchAll(/<td[^>]*>([^<]*)<\/td>/g)].map((c) => c[1]))
     .filter((r) => r.length)[row];
+  const lit = (html, row) => [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)]
+    .map((m) => [...m[1].matchAll(/<td class="([^"]*)"[^>]*>/g)].map((c) => c[1]))
+    .filter((r) => r.length)[row];
   let html = battleScreen.render(app);
-  assert.equal(cells(html, 0)[0], "0", "the away club is up, so its first frame reads nought");
+  assert.equal(cells(html, 0)[0], "", "the frame being played hangs nothing until a run comes in");
+  assert.ok(lit(html, 0)[0].includes("gq-line-live"), "but the slot is lit");
   assert.equal(cells(html, 1)[0], "", "the home club has not come up: its frame stays blank");
+  assert.ok(!lit(html, 1)[0].includes("gq-line-live"), "and is not lit");
 
-  // Runs land in the frame they were scored in, and extras grow the board.
+  // A run lands in the frame being played, and now the slot reads it.
+  state.lineScore.away = [1];
+  state.score.away = 1;
+  assert.equal(cells(battleScreen.render(app), 0)[0], "1", "the run hangs as soon as it scores");
+
+  // Runs land in the frame they were scored in, and a finished scoreless frame
+  // does read nought.
   state.lineScore.away = [2, 0, 1];
   state.lineScore.home = [0, 3];
   state.score.away = 3;
@@ -1429,6 +1441,37 @@ test("the hand-operated board hangs runs by inning, and blank is not nought", as
   assert.equal(away[away.length - 1], "3", "the total hangs on the end");
   assert.equal(home[home.length - 1], "3");
   assert.ok(away.length >= 10, "nine frames and a total, at least");
+});
+
+test("the board hangs extra frames until the wall runs out, then slides", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "extras" });
+  const state = battle.state;
+  const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
+  const frames = () => [...battleScreen.render(app).matchAll(/<tr class="gq-line-head">([\s\S]*?)<\/tr>/g)]
+    .flatMap((m) => [...m[1].matchAll(/<th>(\d+)<\/th>/g)].map((n) => Number(n[1])));
+
+  // Nine innings: the board reads 1 through 9.
+  assert.deepEqual(frames(), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+  // The 10th hangs off the end — there is still wall for it.
+  state.inning = 10;
+  assert.deepEqual(frames(), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "extras hang a new frame");
+
+  // Past that the board slides: the oldest frame comes down, the newest goes up,
+  // and the count of frames on the wall never grows.
+  state.inning = 13;
+  assert.deepEqual(frames(), [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "the 1st through 3rd come down");
+  assert.equal(frames().length, 10, "the wall still holds ten");
+
+  // The run total still counts the frames that came down.
+  state.lineScore.away = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  state.score.away = 3;
+  const html = battleScreen.render(app);
+  assert.ok(!html.includes(">1</th>"), "the 1st is off the board");
+  assert.match(html, /gq-line-total">3</, "but its runs are still in the total");
 });
 
 test("every run reaches the board, in the inning it was scored", async () => {
@@ -1699,13 +1742,24 @@ test("the game log lines carry player-perspective WPA", async () => {
   const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
   assert.ok(pen.includes("PEN"), "pitching changes log without WPA");
 
-  // Rows carry the base-out situation the play happened in: "1o 1-3" reads
-  // one out, runners on first and third.
+  // Both men in the plate appearance are named, and both float their card.
+  const withIds = gameLogLine({ ...swing, batterId: "h-1", pitcherId: "p-9" }, "away");
+  assert.ok(withIds.includes("B.DIAZ"), "the arm is named too, not just the bat");
+  assert.match(withIds, /data-card-id="h-1"/, "the batter hovers");
+  assert.match(withIds, /data-card-id="p-9"/, "and so does the pitcher");
+
+  // Rows carry the base-out situation the play happened in — as the diamond
+  // itself, occupied bags filled, rather than "1-3" to be decoded.
   const situated = gameLogLine({ ...swing, outsBefore: 1, basesBefore: ["A Runner", null, "C Runner"] }, "away");
-  assert.ok(situated.includes("1o 1-3"), "outs and bases show before the actor");
+  assert.ok(situated.includes("1o"), "the outs show before the actor");
+  assert.match(situated, /gq-diamond-mini/, "and the bases show as the diamond");
+  const filled = [...situated.matchAll(/class="gq-base ([^"]*)"/g)].map((m) => m[1]);
+  assert.ok(filled.some((c) => c.includes("gq-base-1") && c.includes("gq-base-on")), "first is occupied");
+  assert.ok(filled.some((c) => c.includes("gq-base-3") && c.includes("gq-base-on")), "third is occupied");
+  assert.ok(!filled.some((c) => c.includes("gq-base-2") && c.includes("gq-base-on")), "second is not");
   const empty = gameLogLine({ ...swing, outsBefore: 0, basesBefore: [null, null, null] }, "away");
-  assert.ok(empty.includes("0o ---"), "empty bases read ---");
-  assert.ok(!gameLogLine(swing, "away").includes("o "), "rows without a snapshot stay clean");
+  assert.ok(!empty.includes("gq-base-on"), "empty bases fill nothing");
+  assert.ok(!gameLogLine(swing, "away").includes("gq-diamond-mini"), "rows without a snapshot stay clean");
 });
 
 test("the game log shows the dice and the running win probability", async () => {
@@ -1728,17 +1782,14 @@ test("the game log shows the dice and the running win probability", async () => 
     fatiguePenalty: 0,
     wpAfter: 0.28
   };
+  // Just the two dice: the arithmetic behind them is on the cards, and the row
+  // is read at a glance, not audited.
   const line = gameLogLine(pa, "away");
-  assert.ok(line.includes("PITCH 4+5=9"), "the pitch die shows its roll and the control it adds to");
-  assert.ok(line.includes("VS OB 11"), "and what it was rolling against");
-  assert.ok(line.includes("BATTER"), "losing the control check hands the batter his chart");
-  assert.ok(line.includes("SWING 17"), "the swing die shows too");
+  assert.ok(line.includes("PITCH: 4 VS SWING: 17"), "the two dice, and nothing else");
+  assert.ok(!line.includes("VS OB"), "the control sum is not spelled out");
+  assert.ok(!line.includes("BATTER"), "nor which chart it landed on");
   assert.ok(line.includes("WIN 72%"), "the away player's running odds are the home team's inverted");
   assert.ok(gameLogLine(pa, "home").includes("WIN 28%"), "the home player reads them straight");
-
-  const tired = gameLogLine({ ...pa, fatiguePenalty: 2, chartOwner: "pitcher" }, "away");
-  assert.ok(tired.includes("TIRED-2"), "a gassed arm says so");
-  assert.ok(tired.includes("PITCHER"), "winning the control check keeps the chart on the mound");
 
   // A steal throws one die against the runner's speed, and still lands you
   // somewhere on the win-probability curve.
@@ -1755,9 +1806,12 @@ test("the game log shows the dice and the running win probability", async () => 
     playDetails: { kind: "steal", stealAttempt: { runner: "Dee Gordon", roll: 13, fielding: 5, total: 18, target: 19, safe: true } }
   };
   const stealLine = gameLogLine(steal, "home");
-  assert.ok(stealLine.includes("THROW 13+5=18 VS SPD 19"), "the throw shows its roll, the arm, and the runner's speed");
+  assert.ok(stealLine.includes("THROW: 13 VS SPD: 19"), "the throw shows its roll against the runner's speed");
   assert.ok(stealLine.includes("WIN 60%"), "and the odds it left you at");
   assert.ok(!stealLine.includes("PITCH"), "no pitch die was thrown");
+  // A steal is the runner's business — the arm on the mound did not beat him.
+  assert.ok(stealLine.includes("D.GORDON"), "the runner is the actor");
+  assert.ok(!stealLine.includes(" v "), "and no pitcher is set against him");
 
   const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
   assert.ok(!pen.includes("WIN"), "a substitution rolls nothing and moves no odds");

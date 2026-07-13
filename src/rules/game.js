@@ -88,7 +88,9 @@ export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
     boxScore: buildBoxScore(state),
     events,
     innings: inningsPlayed(state),
-    topSwing: state.topSwing
+    topSwing: state.topSwing,
+    // The board this game was played on, so a simulated game hangs one too.
+    lineScore: state.lineScore
   };
 }
 
@@ -147,7 +149,9 @@ export function playPlateAppearance(state, rng) {
     battingTeam: battingTeam.name,
     pitchingTeam: pitchingTeam.name,
     batter: batter.name,
+    batterId: batter.id ?? null,
     pitcher: pitcher.name,
+    pitcherId: pitcher.id ?? null,
     controlRoll,
     pitcherControl: pitcher.control,
     effectiveControl,
@@ -267,7 +271,9 @@ function performStealAttempt(state, stealAttempt, rng) {
     battingTeam: battingTeam.name,
     pitchingTeam: pitchingTeam.name,
     batter: batter.name,
+    batterId: batter.id ?? null,
     pitcher: pitcher.name,
+    pitcherId: pitcher.id ?? null,
     controlRoll: null,
     pitcherControl: pitcher.control,
     effectiveControl: pitcher.control,
@@ -375,7 +381,9 @@ export function attemptBunt(state) {
     battingTeam: battingTeam.name,
     pitchingTeam: pitchingTeam.name,
     batter: batter.name,
+    batterId: batter.id ?? null,
     pitcher: pitcher.name,
+    pitcherId: pitcher.id ?? null,
     controlRoll: null,
     pitcherControl: pitcher.control,
     effectiveControl: pitcher.control,
@@ -454,7 +462,9 @@ export function intentionalWalk(state) {
     battingTeam: battingTeam.name,
     pitchingTeam: pitchingTeam.name,
     batter: batter.name,
+    batterId: batter.id ?? null,
     pitcher: pitcher.name,
+    pitcherId: pitcher.id ?? null,
     controlRoll: null,
     pitcherControl: pitcher.control,
     effectiveControl: pitcher.control,
@@ -542,7 +552,9 @@ export function resolveAdvanceDecision(state, sendCount, rng) {
     battingTeam: state[battingSide].name,
     pitchingTeam: state[pitchingSide].name,
     batter: batter?.name ?? lead.name,
+    batterId: batter?.id ?? lead.id ?? null,
     pitcher: pitcher.name,
+    pitcherId: pitcher.id ?? null,
     controlRoll: null,
     pitcherControl: pitcher.control,
     effectiveControl: pitcher.control,

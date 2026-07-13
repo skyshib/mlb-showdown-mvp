@@ -54,6 +54,20 @@ export function diamondHtml(state) {
   </div>`;
 }
 
+// The diamond, shrunk to sit in a line of text — a log row's base-out state.
+// Takes the bare occupancy the events keep (a name, or null), not live runners,
+// so it stays readable in a box score long after the runners have gone home.
+export function miniDiamondHtml(bases) {
+  const [first, second, third] = bases ?? [];
+  const base = (cls, runner) => `<span class="gq-base ${cls} ${runner ? "gq-base-on" : ""}"></span>`;
+  return `<span class="gq-diamond-mini"><span class="gq-diamond">
+    ${base("gq-base-2", second)}
+    ${base("gq-base-3", third)}
+    ${base("gq-base-1", first)}
+    <span class="gq-base gq-base-h"></span>
+  </span></span>`;
+}
+
 // Three dots, filled as they go. No caption — on a scoreboard, next to the
 // bases, three dots next to a diamond are already the count of outs.
 export function outsHtml(outs) {

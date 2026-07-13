@@ -1,4 +1,4 @@
-import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml } from "./helpers.js?v=20260713-v";
+import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml } from "./helpers.js?v=20260713-v";
 import { trainerById } from "../region.js?v=20260713-v";
 import { cardById } from "../packs.js?v=20260713-v";
 import { seasonHitters, seasonPitchers, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260713-v";
@@ -47,10 +47,11 @@ export function wpaHtml(wpa) {
 
 // The scorebook situation a play happened in: outs and occupied bases
 // BEFORE the pitch, compact ("0o 1-3" = nobody out, first and third).
+// The base-out state the play walked into. The bases are the diamond itself,
+// shrunk — "1-3" always had to be decoded, and the shape never does.
 function situationTag(event) {
   if (!Array.isArray(event.basesBefore) || typeof event.outsBefore !== "number") return "";
-  const bases = event.basesBefore.map((runner, at) => (runner ? String(at + 1) : "-")).join("");
-  return `<span class="gq-dim">${event.outsBefore}o ${bases}</span> `;
+  return `<span class="gq-dim">${event.outsBefore}o</span>${miniDiamondHtml(event.basesBefore)} `;
 }
 
 // The dice behind the call, read in the order the tabletop rolls them: the
@@ -59,17 +60,11 @@ function situationTag(event) {
 function rollsTag(event) {
   const steal = event.playDetails?.stealAttempt;
   if (typeof steal?.roll === "number") {
-    return `THROW ${steal.roll}+${steal.fielding}=${steal.total} VS SPD ${steal.target}`;
+    return `THROW: ${steal.roll} VS SPD: ${steal.target}`;
   }
   if (typeof event.resultRoll !== "number") return "";
-  const parts = [];
-  if (typeof event.controlRoll === "number") {
-    const tired = event.fatiguePenalty ? ` TIRED-${event.fatiguePenalty}` : "";
-    const chart = event.chartOwner === "pitcher" ? "PITCHER" : "BATTER";
-    parts.push(`PITCH ${event.controlRoll}+${event.effectiveControl}=${event.controlTotal}${tired} VS OB ${event.onBase} &rarr; ${chart}`);
-  }
-  parts.push(`SWING ${event.resultRoll}`);
-  return parts.join(" &middot; ");
+  if (typeof event.controlRoll !== "number") return `SWING: ${event.resultRoll}`;
+  return `PITCH: ${event.controlRoll} VS SWING: ${event.resultRoll}`;
 }
 
 // The running number: YOUR odds of winning once the play is in the books —
@@ -89,7 +84,8 @@ export function gameLogLine(event, playerSide) {
   if (event.type === "pitching-change") {
     return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.team))} GO TO THE PEN: ${escapeHtml(shortName(event.pitcher))}</span>`;
   }
-  const actor = event.type === "steal"
+  const isSteal = event.type === "steal";
+  const actor = isSteal
     ? event.playDetails?.stealAttempt?.runner ?? event.batter
     : event.batter;
   const battingSide = event.half === "top" ? "away" : "home";
@@ -100,7 +96,16 @@ export function gameLogLine(event, playerSide) {
   const scoreText = event.scoreAfter ? `${event.scoreAfter[playerSide]}-${event.scoreAfter[npcSide]}` : "";
   const score = scoreText ? (event.runs > 0 ? ` <b>${scoreText}</b>` : ` <span class="gq-dim">${scoreText}</span>`) : "";
   const detail = [rollsTag(event), winProbTag(event, playerSide)].filter(Boolean).join(" &middot; ");
-  const play = `${inning} ${situationTag(event)}${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
+  // A plate appearance is two men, not one, so the row names them both — and
+  // both float their card on hover, the way everyone else in the game does.
+  // A steal is the runner's business; the arm is not who beat him.
+  const man = (name, id) =>
+    `<span${id ? ` data-card-id="${escapeHtml(id)}"` : ""}>${escapeHtml(shortName(name))}</span>`;
+  const bat = man(actor, isSteal ? null : event.batterId);
+  const arm = !isSteal && event.pitcher
+    ? ` <span class="gq-dim">v</span> ${man(event.pitcher, event.pitcherId)}`
+    : "";
+  const play = `${inning} ${situationTag(event)}${bat}${arm} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
   if (!detail) return play;
   return `<span class="gq-log-row">${play}<span class="gq-log-detail gq-dim">${detail}</span></span>`;
 }
@@ -187,6 +192,36 @@ function gameLogMenuRows(app) {
   return (app.screen.events ?? []).map((event) => ({ html: gameLogLine(event, app.screen.playerSide) }));
 }
 
+// The board as it stood at the last out, hung above the box score. Games played
+// before the board existed carry no frames, and the wall simply stays bare.
+export function finalBoardHtml(app, trainer) {
+  const lineScore = app.screen.lineScore;
+  if (!lineScore?.away || !lineScore?.home) return "";
+  const playerSide = app.screen.playerSide;
+  const npcSide = playerSide === "home" ? "away" : "home";
+  const frames = Math.max(9, lineScore.away.length, lineScore.home.length);
+  const innings = Array.from({ length: frames }, (unused, index) => index + 1);
+  // The box score already knows what your club is called; the trainer is the
+  // other row. Neither is "YOU" and "THEM" — a board names the clubs.
+  const you = app.screen.you ?? app.screen.boxScore?.[playerSide]?.team ?? "YOU";
+  const name = { [playerSide]: you, [npcSide]: trainer.name };
+  const row = (side) => `
+    <tr>
+      <th>${escapeHtml(name[side])}${side === "home" ? " &#9679;" : ""}</th>
+      ${innings.map((inning) => `<td>${lineScore[side][inning - 1] ?? 0}</td>`).join("")}
+      <td class="gq-line-total">${app.screen.score[side]}</td>
+    </tr>`;
+  return `<div class="gq-final-board">
+    <table class="gq-linescore" aria-label="line score">
+      <tr class="gq-line-head">
+        <th></th>${innings.map((inning) => `<th>${inning}</th>`).join("")}<th class="gq-line-total">R</th>
+      </tr>
+      ${row(playerSide)}
+      ${row(npcSide)}
+    </table>
+  </div>`;
+}
+
 export const gameStatsScreen = {
   render(app) {
     // Almanac reopens can outlive a trainer id; the entry's own opponent
@@ -204,6 +239,7 @@ export const gameStatsScreen = {
     }
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>FINAL ${app.screen.score[app.screen.playerSide]}-${app.screen.score[app.screen.playerSide === "home" ? "away" : "home"]} VS ${escapeHtml(trainer.name)}</span><span>${logView ? "GAME LOG" : "BOX SCORE"}</span></div>
+      ${logView ? "" : finalBoardHtml(app, trainer)}
       <div class="gq-body"><div class="gq-frame gq-scroll gq-map-node">${body}</div></div>
       <div class="gq-textbox"><p class="gq-dim">% IS WPA${logView ? " FOR YOUR SIDE, WIN % YOUR RUNNING ODDS" : " — WIN PROBABILITY ADDED"}. 10%+ SWINGS READ BOLD.${hasLog ? ` &#8592;/&#8594; ${logView ? "BOX SCORE" : "GAME LOG"}.` : ""}</p><p class="gq-blink">Z — CONTINUE</p></div>
     </div>`;
@@ -274,6 +310,10 @@ export const almanacScreen = {
         feats: entry.feats ?? [],
         events: [],
         score: entry.score,
+        // Games filed before the board existed carry none, and the wall stays
+        // bare rather than inventing frames that were never hung.
+        lineScore: entry.lineScore ?? null,
+        you: entry.you ?? null,
         playerSide: entry.playerSide,
         index: 0,
         next: { name: "almanac", data: { index } }
