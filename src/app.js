@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-h";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-i";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-h";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-h";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-h";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-h";
+} from "./ui/sounds.js?v=20260713-i";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-i";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-i";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-i";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-h";
+} from "./rules/draft.js?v=20260713-i";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-h";
+} from "./onlineClient.js?v=20260713-i";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -116,13 +116,14 @@ import {
   normalizeBatchRuns,
   replayBatchGames,
   runBatchChunk,
+  simulateBatch,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-h";
-import { computeAwards } from "./rules/awards.js?v=20260713-h";
-import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-h";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-h";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-h";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-h";
+} from "./rules/batch.js?v=20260713-i";
+import { computeAwards } from "./rules/awards.js?v=20260713-i";
+import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-i";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-i";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-i";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-i";
 import {
   basesText,
   cardRarity,
@@ -137,7 +138,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-h";
+} from "./ui/render.js?v=20260713-i";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -639,6 +640,8 @@ function defaultState() {
     starred: {},
     // Up to three cards pinned side by side.
     compare: [],
+    // Derived from a finished draft; recomputed rather than trusted.
+    grades: null,
     filters: {
       type: "hitter",
       position: "all",
@@ -1672,6 +1675,7 @@ function renderDraft() {
     <a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>
   </section>
   ${paused ? renderPausedPanel(draft) : ""}
+  ${draft.complete ? renderDraftDone(draft) : ""}
   ${renderDraftFocus(draft, focusManager, boardManager)}
   ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
   ${lot ? renderAuctionLotPanel(draft) : ""}
@@ -2070,6 +2074,19 @@ function bindDraftActions() {
     }
     if (action === "export-save") {
       exportSave();
+      return;
+    }
+    if (action === "copy-recap") {
+      const text = recapText(state.draft);
+      navigator.clipboard?.writeText(text).then(
+        () => {
+          button.textContent = "Copied";
+          setTimeout(() => renderDraft(), 1200);
+        },
+        () => {
+          button.textContent = "Couldn't copy";
+        }
+      );
       return;
     }
     if (action === "seat") {
@@ -4908,6 +4925,180 @@ function autopickTurn(draft) {
   autopick(draft);
 }
 
+// ---- when the last pick lands ----
+//
+// The draft used to just stop. You took your final card and the screen sat
+// there, and the simulator that could have told you whether you had won was one
+// button away that nobody ever pressed at the right moment.
+//
+// Three hundred games is enough to rank a table and costs about forty
+// milliseconds, so the room plays them the instant the draft is done and says
+// what it found.
+const GRADE_RUNS = 300;
+
+function draftGrades(draft) {
+  if (!draft?.complete || !canSimulate(draft)) return null;
+  const key = `${draft.seed}:${draft.pickNumber}:${draft.managers.length}`;
+  if (state.grades?.key === key) return state.grades;
+
+  const teams = draft.managers.map((manager) => buildTeam(manager));
+  const summary = simulateBatch(teams, { runs: GRADE_RUNS, seed: `${draft.seed}-grade` });
+
+  const byName = new Map(summary.teams.map((row) => [row.team, row]));
+  const rows = draft.managers
+    .map((manager) => {
+      const row = byName.get(manager.name);
+      const bats = manager.roster.filter((card) => card.kind === "hitter");
+      const arms = manager.roster.filter((card) => card.kind === "pitcher");
+      return {
+        manager,
+        winPct: row?.winPct ?? 0,
+        scored: row?.games ? row.runsFor.sum / row.games : 0,
+        allowed: row?.games ? row.runsAgainst.sum / row.games : 0,
+        points: manager.roster.reduce((sum, card) => sum + card.points, 0),
+        glove: bats.reduce((sum, card) => sum + (Number(card.fielding) || 0), 0),
+        control: arms.reduce((sum, card) => sum + (Number(card.control) || 0), 0),
+        power: bats.reduce(
+          (sum, card) =>
+            sum +
+            card.chart
+              .filter((entry) => ["2B", "3B", "HR"].includes(entry.result))
+              .reduce((faces, entry) => faces + chartSpan(entry), 0),
+          0
+        )
+      };
+    })
+    .sort((a, b) => b.winPct - a.winPct);
+
+  // Each team gets the one thing it does better than anybody else at the table,
+  // if there is one. A roster with no superlative is simply not told it has one.
+  const leaders = {
+    power: rows.reduce((best, row) => (row.power > best.power ? row : best), rows[0]),
+    glove: rows.reduce((best, row) => (row.glove > best.glove ? row : best), rows[0]),
+    control: rows.reduce((best, row) => (row.control > best.control ? row : best), rows[0]),
+    thrift: rows.reduce((best, row) => (row.points < best.points ? row : best), rows[0])
+  };
+  for (const row of rows) {
+    const notes = [];
+    if (leaders.power === row) notes.push("the most power at the table");
+    if (leaders.glove === row) notes.push("the best defence");
+    if (leaders.control === row) notes.push("the best staff");
+    if (leaders.thrift === row && rows.length > 1) notes.push("built for the fewest points");
+    row.notes = notes;
+  }
+
+  state.grades = { key, runs: GRADE_RUNS, rows };
+  return state.grades;
+}
+
+// ---- the recap ----
+//
+// A card's printed points are what the set says it is worth, so a card's rank by
+// points is where the board says it should have gone. The gap between that and
+// where it actually went is the whole argument you have afterwards: who reached,
+// and who had somebody fall into their lap.
+function draftRecap(draft) {
+  if (!draft?.complete) return null;
+  const history = draftHistory(draft);
+  if (!history.length) return null;
+
+  const ranked = [...draft.pool].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+  const rankOf = new Map(ranked.map((card, index) => [card.id, index + 1]));
+
+  const picks = history.map((entry) => {
+    const rank = rankOf.get(entry.player.id) ?? ranked.length;
+    return { ...entry, rank, swing: rank - entry.pickNumber };
+  });
+
+  // A card that fell further than anybody else, and a card taken further ahead
+  // of itself than anybody else.
+  const steal = picks.reduce((best, pick) => (pick.swing < best.swing ? pick : best), picks[0]);
+  const reach = picks.reduce((worst, pick) => (pick.swing > worst.swing ? pick : worst), picks[0]);
+  return { picks, steal, reach };
+}
+
+function recapText(draft) {
+  const recap = draftRecap(draft);
+  const grades = draftGrades(draft);
+  if (!recap) return "";
+  const lines = [`MLB Showdown draft — seed "${draft.seed}"`, ""];
+  if (grades) {
+    lines.push(`Projected over ${grades.runs} games:`);
+    grades.rows.forEach((row, index) => {
+      const notes = row.notes.length ? ` — ${row.notes.join(", ")}` : "";
+      lines.push(
+        `  ${index + 1}. ${row.manager.name}  ${(row.winPct * 100).toFixed(1)}%  ` +
+          `(${row.scored.toFixed(1)} scored / ${row.allowed.toFixed(1)} allowed, ${row.points} pts)${notes}`
+      );
+    });
+    lines.push("");
+  }
+  lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} at pick ${recap.steal.pickNumber} (ranked #${recap.steal.rank})`);
+  lines.push(`Biggest reach: ${recap.reach.player.name} to ${recap.reach.manager.name} at pick ${recap.reach.pickNumber} (ranked #${recap.reach.rank})`);
+  lines.push("", "Every pick:");
+  for (const pick of recap.picks) {
+    lines.push(`  ${String(pick.pickNumber).padStart(3)}. ${pick.manager.name} — ${pick.player.name} (${pick.player.points} pts)`);
+  }
+  return lines.join("\n");
+}
+
+function renderDraftDone(draft) {
+  const recap = draftRecap(draft);
+  if (!recap) return "";
+  const grades = draftGrades(draft);
+
+  const table = grades
+    ? `<table class="grade-table">
+        <thead><tr><th></th><th>Manager</th><th class="num">Win %</th><th class="num">Scored</th><th class="num">Allowed</th><th class="num">Points</th><th>What they built</th></tr></thead>
+        <tbody>${grades.rows
+          .map(
+            (row, index) => `<tr class="${index === 0 ? "grade-winner" : ""}">
+              <td class="grade-rank">${index + 1}</td>
+              <td class="grade-name">${escapeHtml(row.manager.name)}</td>
+              <td class="num grade-pct">${(row.winPct * 100).toFixed(1)}</td>
+              <td class="num">${row.scored.toFixed(1)}</td>
+              <td class="num">${row.allowed.toFixed(1)}</td>
+              <td class="num">${row.points}</td>
+              <td class="grade-notes">${row.notes.length ? escapeHtml(row.notes.join(" &middot; ").replace(/&middot;/g, "·")) : "&mdash;"}</td>
+            </tr>`
+          )
+          .join("")}</tbody>
+      </table>
+      <p class="compare-note">Projected over ${grades.runs} simulated games. Run the full ${DEFAULT_BATCH_RUNS} for a verdict you can lean on.</p>`
+    : `<p class="empty">A roster is still illegal, so the table cannot be graded yet.</p>`;
+
+  const card = (label, pick, tone) => `<div class="recap-card ${tone}">
+    <p class="eyebrow">${label}</p>
+    <h3>${escapeHtml(pick.player.name)}</h3>
+    <p class="recap-line">
+      to <strong>${escapeHtml(pick.manager.name)}</strong> at pick ${pick.pickNumber},
+      and the set ranks him <strong>#${pick.rank}</strong> of ${draft.pool.length} by points.
+    </p>
+    <p class="recap-swing">${
+      pick.swing < 0
+        ? `He fell ${Math.abs(pick.swing)} picks further than his price says he should have.`
+        : pick.swing > 0
+          ? `Taken ${pick.swing} picks ahead of his price.`
+          : `Taken exactly where his price says.`
+    }</p>
+  </div>`;
+
+  return `<section class="panel draft-done">
+    <div class="section-head">
+      <h2>The draft is done</h2>
+      <div class="done-actions">
+        <button class="small" data-action="copy-recap">Copy the recap</button>
+        <button class="small" data-action="export-save">Save the room</button>
+      </div>
+    </div>
+    ${table}
+    <div class="recap-cards">
+      ${card("Best value", recap.steal, "steal")}
+      ${card("Biggest reach", recap.reach, "reach")}
+    </div>
+  </section>`;
+}
+
 // ---- comparing cards ----
 //
 // The whole game turns on the shape of a chart, and the only way to compare two
@@ -5418,6 +5609,7 @@ function reviveState(value) {
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],
+    grades: null,
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),

@@ -1886,6 +1886,157 @@ button.roster-slot[draggable="true"]:active {
   color: white;
 }
 
+/* ---- when the last pick lands ---- */
+.draft-done {
+  margin-bottom: 16px;
+}
+
+.done-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.done-actions button {
+  background: var(--panel);
+  color: var(--navy);
+}
+
+.done-actions button:hover {
+  background: var(--accent);
+  color: var(--sheet);
+}
+
+.grade-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 4px;
+}
+
+.grade-table th,
+.grade-table td {
+  border-bottom: 1px solid var(--hairline);
+  padding: 10px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.grade-table thead th {
+  border-bottom: var(--rule) solid var(--navy);
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+.grade-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.grade-rank {
+  width: 34px;
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 900;
+  font-style: italic;
+  color: var(--hairline);
+  text-align: center;
+}
+
+.grade-winner .grade-rank {
+  color: var(--accent);
+}
+
+.grade-winner {
+  background: var(--sheet);
+}
+
+.grade-name {
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+.grade-pct {
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 900;
+  font-style: italic;
+  color: var(--ink);
+}
+
+.grade-winner .grade-pct {
+  color: var(--accent-dark);
+}
+
+.grade-notes {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.recap-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.recap-card {
+  padding: 16px 18px 18px;
+  border: 2px solid var(--navy);
+  background: var(--panel);
+}
+
+.recap-card.steal {
+  border-color: var(--ok);
+}
+
+.recap-card.reach {
+  border-color: var(--accent);
+}
+
+.recap-card .eyebrow {
+  margin-bottom: 8px;
+}
+
+.recap-card.steal .eyebrow {
+  background: var(--ok);
+}
+
+.recap-card.reach .eyebrow {
+  background: var(--accent);
+}
+
+.recap-card h3 {
+  margin: 0 0 6px;
+  font-size: 19px;
+  color: var(--navy);
+}
+
+.recap-line,
+.recap-swing {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.recap-swing {
+  margin-top: 6px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.recap-line strong {
+  color: var(--ink);
+}
+
 /* ---- side by side ---- */
 .star-cell {
   white-space: nowrap;
