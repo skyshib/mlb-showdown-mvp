@@ -1886,6 +1886,166 @@ button.roster-slot[draggable="true"]:active {
   color: white;
 }
 
+/* ---- side by side ---- */
+.star-cell {
+  white-space: nowrap;
+}
+
+.compare-pin {
+  min-height: 0;
+  width: 22px;
+  padding: 2px 0 3px;
+  margin-left: 1px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--hairline);
+  font-size: 13px;
+  font-style: normal;
+  letter-spacing: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.compare-pin:hover {
+  background: transparent;
+  color: var(--navy);
+}
+
+.compare-pin.pinned {
+  color: var(--navy);
+  background: var(--sheet);
+}
+
+.compare-panel {
+  margin: 14px 0 4px;
+}
+
+.compare-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.compare-table {
+  width: auto;
+  min-width: 0;
+  border-collapse: collapse;
+}
+
+.compare-table th,
+.compare-table td {
+  border-bottom: 1px solid var(--hairline);
+  padding: 8px 12px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.compare-table thead th {
+  border-bottom: var(--rule) solid var(--navy);
+  padding-bottom: 10px;
+}
+
+.compare-corner {
+  width: 62px;
+}
+
+.compare-name {
+  display: block;
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+.compare-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-drop {
+  margin-top: 6px;
+  padding: 2px 8px;
+  background: var(--panel);
+  color: var(--navy);
+  font-size: 11px;
+}
+
+.compare-drop:hover {
+  background: var(--accent);
+  color: var(--sheet);
+}
+
+.compare-outcome {
+  text-align: right;
+}
+
+/* The outcome chips wear the same colours the card's own chart does, so a row
+   here reads as the row it came from. */
+.chart-chip {
+  display: inline-block;
+  min-width: 44px;
+  padding: 4px 8px 5px;
+  border-radius: 3px;
+  font-family: var(--display);
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: #ffffff;
+}
+
+.chart-pu,
+.chart-so,
+.chart-gb,
+.chart-fb { background: #253544; color: #c3d0d6; }
+.chart-bb { background: #16825e; }
+.chart-1b,
+.chart-1b-plus { background: #d7aa36; color: #241a08; }
+.chart-2b { background: #e88334; }
+.chart-3b { background: #d9572d; }
+.chart-hr { background: #e94c5f; }
+
+/* How many faces of the die this outcome takes. The number is the comparison;
+   the printed range is there to be recognised. */
+.compare-faces {
+  display: block;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-range {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The most faces at this outcome — marked, not judged: a pitcher wants the
+   strikeouts and dreads the homers, and the board does not presume to know
+   which row you are reading. */
+.compare-lead {
+  background: var(--sheet);
+}
+
+.compare-lead .compare-faces {
+  color: var(--accent-dark);
+}
+
 /* ---- the lottery ---- */
 .managers-note {
   display: flex;

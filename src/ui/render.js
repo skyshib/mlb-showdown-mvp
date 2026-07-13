@@ -1,5 +1,5 @@
-import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260713-g";
-import { cardPanelHtml } from "./cardFace.js?v=20260713-g";
+import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260713-h";
+import { cardPanelHtml } from "./cardFace.js?v=20260713-h";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
@@ -76,8 +76,12 @@ export function renderPlayerTable(players, options = {}) {
       // than disappears.
       const idle = options.fillsNeed && !owner ? !options.fillsNeed(player) : false;
       const isStarred = starred ? starred.has(player.id) : false;
+      const pinned = options.compared ? options.compared.has(player.id) : false;
+      const compareButton = options.compared
+        ? `<button type="button" class="compare-pin${pinned ? " pinned" : ""}" data-action="compare" data-player-id="${escapeHtml(player.id)}" aria-pressed="${pinned}" title="${pinned ? "Unpin" : "Compare"} ${escapeHtml(player.name)}">&#8646;</button>`
+        : "";
       const starCell = starred
-        ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button></td>`
+        ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button>${compareButton}</td>`
         : "";
       const rowClass = [
         "draft-player-row",

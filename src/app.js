@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-g";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-h";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-g";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-g";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-g";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-g";
+} from "./ui/sounds.js?v=20260713-h";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-h";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-h";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-h";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-g";
+} from "./rules/draft.js?v=20260713-h";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-g";
+} from "./onlineClient.js?v=20260713-h";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-g";
-import { computeAwards } from "./rules/awards.js?v=20260713-g";
-import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-g";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-g";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-g";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-g";
+} from "./rules/batch.js?v=20260713-h";
+import { computeAwards } from "./rules/awards.js?v=20260713-h";
+import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-h";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-h";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-h";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-h";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-g";
+} from "./ui/render.js?v=20260713-h";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -637,6 +637,8 @@ function defaultState() {
     // an eye on. It belongs to whoever is on the clock, so the list follows the
     // draft around the table.
     starred: {},
+    // Up to three cards pinned side by side.
+    compare: [],
     filters: {
       type: "hitter",
       position: "all",
@@ -1690,9 +1692,11 @@ function renderDraft() {
         ${renderFilters()}
       </div>
       ${renderNeedsStrip(boardManager, draft)}
+      ${renderComparePanel(draft)}
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         starred: watchlistOwner() ? starredIds() : null,
+        compared: new Set(state.compare ?? []),
         fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
         // An empty board under the watchlist filter means the list is empty, not
         // that the deck is — say which.
@@ -1972,6 +1976,21 @@ function bindDraftActions() {
     const starButton = event.target.closest("button[data-action='toggle-star']");
     if (starButton) {
       toggleStar(starButton.dataset.playerId);
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const comparePin = event.target.closest("button[data-action='compare']");
+    if (comparePin) {
+      toggleCompare(comparePin.dataset.playerId);
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    if (event.target.closest("button[data-action='compare-clear']")) {
+      state.compare = [];
       saveState();
       renderDraft();
       return;
@@ -4889,6 +4908,99 @@ function autopickTurn(draft) {
   autopick(draft);
 }
 
+// ---- comparing cards ----
+//
+// The whole game turns on the shape of a chart, and the only way to compare two
+// of them was to hover one card, then the other, and hold the difference in your
+// head. Pin them side by side instead, lined up by outcome — and count the faces
+// of the die rather than printing the ranges, because "7-12" and "13-16" tell
+// you nothing until you have worked out that one is six faces and the other is
+// four. That subtraction is the entire comparison, so the board does it.
+const COMPARE_LIMIT = 3;
+const COMPARE_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
+
+function toggleCompare(playerId) {
+  const pinned = state.compare ?? [];
+  if (pinned.includes(playerId)) {
+    state.compare = pinned.filter((id) => id !== playerId);
+    return;
+  }
+  // A fourth card pushes the first one off the bench.
+  state.compare = [...pinned, playerId].slice(-COMPARE_LIMIT);
+}
+
+function comparedCards(draft) {
+  if (!draft) return [];
+  const byId = new Map(draft.pool.map((player) => [player.id, player]));
+  return (state.compare ?? []).map((id) => byId.get(id)).filter(Boolean);
+}
+
+function renderComparePanel(draft) {
+  const cards = comparedCards(draft);
+  if (!cards.length) return "";
+
+  // Only the rows anybody actually rolls: a grid full of empty cells compares
+  // nothing.
+  const rows = COMPARE_OUTCOMES.filter((outcome) =>
+    cards.some((card) => card.chart.some((entry) => entry.result === outcome))
+  );
+
+  const header = cards
+    .map((card) => {
+      const rating = card.kind === "pitcher" ? `CTRL ${card.control}` : `OB ${card.onBase}`;
+      const spot = card.kind === "pitcher" ? card.role : positionsLabel(card);
+      return `<th>
+        <span class="compare-name">${escapeHtml(card.name)}</span>
+        <span class="compare-meta">${escapeHtml(spot)} &middot; ${escapeHtml(rating)} &middot; ${card.points} pts</span>
+        <button class="small compare-drop" data-action="compare" data-player-id="${escapeHtml(card.id)}" title="Unpin ${escapeHtml(card.name)}">&times;</button>
+      </th>`;
+    })
+    .join("");
+
+  const body = rows
+    .map((outcome) => {
+      const faces = cards.map((card) =>
+        card.chart
+          .filter((entry) => entry.result === outcome)
+          .reduce((sum, entry) => sum + chartSpan(entry), 0)
+      );
+      const best = Math.max(...faces);
+      const cells = cards
+        .map((card, index) => {
+          const count = faces[index];
+          const entries = card.chart.filter((entry) => entry.result === outcome);
+          const range = entries.map((entry) => formatRange(entry)).join(", ") || "&mdash;";
+          // "Most" is not "best" — a pitcher wants strikeouts and dreads homers —
+          // so the leader is marked, not judged.
+          const lead = count > 0 && count === best && faces.filter((value) => value === best).length < cards.length;
+          return `<td class="${lead ? "compare-lead" : ""}">
+            <span class="compare-faces">${count}</span>
+            <span class="compare-range">${range}</span>
+          </td>`;
+        })
+        .join("");
+      return `<tr>
+        <th class="compare-outcome"><span class="chart-chip chart-${outcome.toLowerCase().replace("+", "-plus")}">${outcome}</span></th>
+        ${cells}
+      </tr>`;
+    })
+    .join("");
+
+  return `<section class="panel compare-panel">
+    <div class="section-head">
+      <h2>Side by side</h2>
+      <button class="small" data-action="compare-clear">Clear</button>
+    </div>
+    <p class="compare-note">Faces of the d20 each outcome takes, with the printed range beneath.</p>
+    <div class="table-scroll">
+      <table class="compare-table">
+        <thead><tr><th class="compare-corner"></th>${header}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
 // ---- what the roster still wants ----
 //
 // The board sorts by points and wishes you luck. But a fourth outfielder is
@@ -5305,6 +5417,7 @@ function reviveState(value) {
     maskBids: Boolean(value.maskBids),
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
+    compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
