@@ -19,7 +19,12 @@ test("renderRaceChart draws a polyline per team with end labels", () => {
   for (const name of RACE.teamNames) {
     assert.ok(svg.includes(name), `${name} labeled`);
   }
-  assert.ok(svg.includes("even matchup (25%)"));
+});
+
+test("renderRaceChart draws no parity line", () => {
+  const svg = renderRaceChart(RACE);
+  assert.ok(!svg.includes("even matchup"));
+  assert.ok(!svg.includes("race-parity"));
 });
 
 test("renderRaceChart escapes team names", () => {

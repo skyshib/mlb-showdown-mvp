@@ -274,12 +274,6 @@ export function renderRaceChart(race) {
       <text x="${margin.left - 8}" y="${(yPos + 4).toFixed(1)}" text-anchor="end" class="race-axis-text">${Math.round(value * 100)}%</text>`);
   }
 
-  const parityY = yFor(parity);
-  const parityLine = parity <= yMax
-    ? `<line x1="${margin.left}" y1="${parityY.toFixed(1)}" x2="${margin.left + plotWidth}" y2="${parityY.toFixed(1)}" class="race-parity" />
-      <text x="${margin.left + 6}" y="${(parityY - 5).toFixed(1)}" class="race-axis-text race-parity-text">even matchup (${Math.round(parity * 100)}%)</text>`
-    : "";
-
   const xTicks = [xMin, Math.round((xMin + totalRuns) / 2), totalRuns].map((n) => {
     const xPos = xFor(n);
     return `<text x="${xPos.toFixed(1)}" y="${height - 10}" text-anchor="middle" class="race-axis-text">${n}</text>`;
@@ -313,7 +307,6 @@ export function renderRaceChart(race) {
 
   return `<svg viewBox="0 0 ${width} ${height}" class="race-chart" role="img" aria-label="Cumulative win percentage by team as games are simulated">
     ${gridLines.join("")}
-    ${parityLine}
     ${xTicks.join("")}
     ${lines.join("")}
     ${labelTexts.join("")}

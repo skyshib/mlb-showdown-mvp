@@ -78,12 +78,20 @@ test("online room lifecycle: create, join, turn enforcement, replay parity", asy
   assert.equal(boPick.status, 200);
   assert.equal(boPick.data.seq, 2);
 
-  // Only the host or the last picker can undo; snake order means Bo also owns pick 3.
-  const anaUndoAttempt = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+  // Rewinding the room is the host's alone. Bo owns the last pick and still
+  // cannot take it back — only Ana, who holds the host token, can.
+  const boUndoAttempt = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
     token: boJoin.data.token,
     action: { type: "undo" }
   });
-  assert.equal(anaUndoAttempt.status, 200);
+  assert.equal(boUndoAttempt.status, 409);
+  assert.match(boUndoAttempt.data.error, /only the host can undo/i);
+
+  const hostUndo = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: anaJoin.data.token,
+    action: { type: "undo" }
+  });
+  assert.equal(hostUndo.status, 200);
 
   // Host finishes the rest of the draft in one deterministic action.
   const finish = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
