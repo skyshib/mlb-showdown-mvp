@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
   applyDouble,
@@ -941,7 +941,7 @@ test("repairDraftRosters swaps excess hitters for required staff roles", () => {
   assert.equal(draft.managers[0].roster.filter((player) => player.kind === "pitcher" && player.role === "RP").length, 2);
 });
 
-test("repairDraftRosters adds emergency hitter when a required position is exhausted", () => {
+test("repairDraftRosters prints a replacement hitter when a required position is exhausted", () => {
   const roster = [
     makeHitter({ id: "gap-c", position: "C" }),
     makeHitter({ id: "gap-1b", position: "1B" }),
@@ -968,7 +968,114 @@ test("repairDraftRosters adds emergency hitter when a required position is exhau
 
   assert.deepEqual(validateRoster(draft.managers[0]), []);
   assert.equal(draft.complete, true);
-  assert.ok(draft.managers[0].roster.some((player) => player.id.startsWith("emergency-h-") && player.position === "3B"));
+  // No third baseman exists anywhere in this pool, so there is nothing to copy
+  // and the replacement is printed from whole cloth — the last resort.
+  const filler = draft.managers[0].roster.find((player) => player.replacement);
+  assert.ok(filler, "the repair prints a replacement");
+  assert.equal(filler.name, "Replacement 3B");
+  assert.equal(filler.position, "3B");
+  assert.deepEqual(filler.positions, [{ pos: "3B", fielding: 0 }]);
+});
+
+// The sweep is an auction-room closing act: it runs when the nomination queue
+// dries up, and it writes what it hands out to the auction's log.
+const AUCTION_ROOM = { draftType: "auction", nomination: "random", budget: 500, timer: false };
+
+// A legal roster but for the outfield spots named in `holes`: eight bats, four
+// arms, and nothing that can cover what's missing.
+function rosterMissingOutfield(prefix, holes) {
+  const spots = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "1B"].filter((spot) => !holes.includes(spot));
+  const hitters = spots.map((spot, index) => makeHitter({
+    id: `${prefix}-h-${index}`,
+    name: `${prefix} hitter ${index}`,
+    position: spot,
+    positions: [{ pos: spot, fielding: 1 }]
+  }));
+  const arms = [
+    makePitcher({ id: `${prefix}-sp-1`, role: "SP" }),
+    makePitcher({ id: `${prefix}-sp-2`, role: "SP" }),
+    makePitcher({ id: `${prefix}-rp-1`, role: "RP", ip: 1 }),
+    makePitcher({ id: `${prefix}-rp-2`, role: "RP", ip: 1 })
+  ];
+  return [...hitters, ...arms];
+}
+
+test("the sweep hands managers short at a position a copy of the worst card who plays it", () => {
+  // Two center fielders on the board, one manager bought both, and two are
+  // left without. Each gets a copy of the CHEAPER of the two — the same card,
+  // so the same hole costs them the same.
+  const cheap = makeHitter({
+    id: "cf-cheap",
+    name: "Cheap Glove",
+    position: "CF",
+    points: 20,
+    onBase: 7,
+    positions: [{ pos: "CF", fielding: 1 }, { pos: "LF", fielding: 2 }]
+  });
+  const dear = makeHitter({
+    id: "cf-dear",
+    name: "Dear Bat",
+    position: "CF",
+    points: 400,
+    onBase: 12,
+    positions: [{ pos: "CF", fielding: 3 }]
+  });
+  const one = rosterMissingOutfield("one", ["CF"]);
+  const two = rosterMissingOutfield("two", ["CF"]);
+  const hoarder = rosterMissingOutfield("hog", ["CF"]);
+  const pool = [cheap, dear, ...one, ...two, ...hoarder];
+  const draft = createDraft(["One", "Two", "Hoarder"], pool, 13, "replacement-copy", AUCTION_ROOM);
+  draft.managers[0].roster = [...one];
+  draft.managers[1].roster = [...two];
+  draft.managers[2].roster = [...hoarder, cheap, dear];
+  draft.pickedIds = new Set(pool.map((player) => player.id));
+
+  sweepRosters(draft);
+
+  const copies = [draft.managers[0], draft.managers[1]].map((manager) =>
+    manager.roster.find((player) => player.replacement));
+  for (const card of copies) {
+    assert.ok(card, "the sweep prints a center fielder rather than leaving the hole");
+    assert.equal(card.name, "Replacement CF");
+    assert.equal(card.points, 20, "the worst center fielder on the board, not the best");
+    assert.equal(card.onBase, 7, "his numbers come across");
+    assert.equal(card.sourceId, "cf-cheap");
+    assert.deepEqual(card.positions, [{ pos: "CF", fielding: 1 }], "stripped to the one slot he was called up for");
+  }
+  assert.notEqual(copies[0].id, copies[1].id, "two copies, two cards");
+  assert.deepEqual(validateRoster(draft.managers[0]), []);
+  assert.deepEqual(validateRoster(draft.managers[1]), []);
+});
+
+test("two holes at the same slot print numbered replacements", () => {
+  const corner = makeHitter({
+    id: "corner-only",
+    name: "Only Corner",
+    position: "LF",
+    points: 30,
+    positions: [{ pos: "LF", fielding: 2 }]
+  });
+  const short = rosterMissingOutfield("short", ["LF", "RF"]);
+  const hoarder = rosterMissingOutfield("hog", ["LF"]);
+  const pool = [corner, ...short, ...hoarder];
+  const draft = createDraft(["Short", "Hoarder"], pool, 13, "replacement-twins", AUCTION_ROOM);
+  draft.managers[0].roster = [...short];
+  draft.managers[1].roster = [...hoarder, corner];
+  draft.pickedIds = new Set(pool.map((player) => player.id));
+
+  sweepRosters(draft);
+
+  const printed = draft.managers[0].roster.filter((player) => player.replacement);
+  assert.deepEqual(printed.map((player) => player.name), ["Replacement LF/RF", "Replacement LF/RF #2"]);
+  assert.equal(printed[0].sourceId, "corner-only");
+  assert.equal(printed[1].sourceId, "corner-only");
+  assert.deepEqual(validateRoster(draft.managers[0]), []);
+
+  // Undo the sweep and the printed cards stop existing. Left in the pool they
+  // would come back as unowned cards on the auction board, up for bid.
+  undoLastPick(draft);
+  assert.deepEqual(draft.pool.filter((player) => player.replacement), []);
+  assert.deepEqual(draft.managers[0].roster.filter((player) => player.replacement), []);
 });
 
 test("draft blocks picks that would consume another manager's only required position supply", () => {

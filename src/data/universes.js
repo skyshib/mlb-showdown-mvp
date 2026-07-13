@@ -3,8 +3,8 @@ import { createRng } from "../rules/rng.js";
 import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
-import { playerIdentity } from "../rules/cards.js";
-import { poolGroupMatches, randomNominationQuotas } from "../rules/draft.js";
+import { cardPerson, playerIdentity } from "../rules/cards.js";
+import { poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js";
 import { authenticPoints } from "../rules/pricing.js";
 import { PRICE_MODEL } from "./priceModel.js";
 
@@ -335,8 +335,20 @@ function shuffled(cards, rng) {
 // there. No thumb on the scale for the good cards — the deck is a slice of the
 // league, so the mix of stars and role players on the board is whatever the
 // mix in the card set is. A position the set is thin at deals what it has.
-function dealGroupCards(cards, quota, rng) {
-  return shuffled(cards, rng).slice(0, quota);
+//
+// A man deals once, so the draw walks the shuffle and skips anyone already
+// taken — by an earlier group or by this one. Slicing the top of the shuffle
+// instead would deal a set's five printings of one reliever to one bullpen.
+function dealGroupCards(cards, quota, rng, people) {
+  const dealt = [];
+  for (const card of shuffled(cards, rng)) {
+    if (dealt.length >= quota) break;
+    const person = cardPerson(card);
+    if (person && people.has(person)) continue;
+    if (person) people.add(person);
+    dealt.push(card);
+  }
+  return dealt;
 }
 
 // Deals a deck to a quota table off the ACTIVE universe.
@@ -346,12 +358,26 @@ function dealDeckToQuotas(quotas, rngKey) {
   // Groups deal in order and a card deals once. The position groups are
   // disjoint anyway, but the DH slot draws on every hitter in the set, so it
   // has to take from whoever the position groups left behind.
+  //
+  // A PERSON deals once too. The multi-era sets print the same man in three
+  // decades and the Showdown sets print him in five seasons; the board keeps
+  // whichever one the deal turned up first and passes on the rest, so the era
+  // rule lives HERE, at the deal, and nowhere downstream. His two-way half is
+  // the one exception, and it follows him in below.
   const used = new Set();
+  const people = new Set();
   const dealt = quotas.flatMap(([group, quota]) => {
-    const candidates = pool.filter((card) => !used.has(card.id) && poolGroupMatches(card, group));
-    const cards = dealGroupCards(candidates, quota, rng);
+    const candidates = pool.filter((card) =>
+      !used.has(card.id) && !people.has(cardPerson(card)) && poolGroupMatches(card, group));
+    const cards = dealGroupCards(candidates, quota, rng, people);
     for (const card of cards) used.add(card.id);
-    return cards;
+    // Every card remembers the slot it was DEALT to fill, which is not always
+    // the slot it is printed at: the DH group takes its bats from whoever the
+    // position groups left, so a card tagged HITTER may well be a center
+    // fielder. The nomination queue has to read the tag rather than re-derive
+    // the group from the card, or its own DH draw reaches back into the
+    // center-field pile and spends the reserve the board was sized to keep.
+    return cards.map((card) => ({ ...card, slot: group }));
   });
   // A two-way player is one card in two halves: if the deal turned up his
   // bat, his arm comes along, and vice versa — otherwise the board would
@@ -361,7 +387,7 @@ function dealDeckToQuotas(quotas, rngKey) {
     const partner = dualPartnerCard(card.id);
     if (partner && !held.has(partner.id)) {
       held.add(partner.id);
-      dealt.push(partner);
+      dealt.push({ ...partner, slot: poolGroup(partner) });
     }
   }
   return dealt.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
@@ -401,12 +427,26 @@ export function buildDraftPool(mode, seed, options = {}) {
 // board is re-dealt from its seed comes back holding cards it never held, and
 // its own action log then nominates a card that is no longer on it. So a room
 // records the cards it dealt, and those ids outrank the seed for ever after.
-export function deckFromIds(mode, seed, ids) {
+// What a room writes down for one dealt card. The SLOT rides along with the id,
+// because the slot a card was dealt to fill is not always readable off the card
+// — the DH group's bats are whoever the position groups left behind — and the
+// nomination queue draws on the tag, not on the card's printed position. A deck
+// that came back untagged would deal its DH bats out of the center-field
+// reserve, which is the whole thing the tag exists to prevent.
+export function deckEntry(card) {
+  return card.slot ? { id: card.id, slot: card.slot } : card.id;
+}
+
+export function deckFromIds(mode, seed, entries) {
   setUniverse(seed, mode, { priceNoise: false });
-  return ids.map((id) => {
+  // Rooms saved before the tag existed wrote bare ids. They come back untagged
+  // and deal exactly as they always did — an old room's log still replays.
+  return entries.map((entry) => {
+    const id = typeof entry === "string" ? entry : entry?.id;
     const card = cardById(id);
     if (!card) throw new Error(`Deck card ${id} is not in the ${mode} set`);
-    return card;
+    const slot = typeof entry === "string" ? null : entry?.slot ?? null;
+    return slot ? { ...card, slot } : card;
   });
 }
 

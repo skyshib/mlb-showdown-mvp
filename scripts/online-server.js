@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
-import { buildDraftPool, deckFromIds, universeConfig } from "../src/data/universes.js";
+import { buildDraftPool, deckEntry, deckFromIds, universeConfig } from "../src/data/universes.js";
 import {
   applyDraftAction,
   auctionReviewComplete,
@@ -177,7 +177,7 @@ function reviveRoom(saved) {
     // A room saved before decks were written down pins the one it just revived
     // with: that board is the best record of itself that survives, and pinning
     // it now means the next change to the deal cannot orphan this room too.
-    deck: universe ? savedDeck ?? pool.map((card) => card.id) : null,
+    deck: universe ? savedDeck ?? pool.map(deckEntry) : null,
     unpinnedDeck: Boolean(universe) && !savedDeck,
     poolMode: saved.poolMode === "real" ? "real" : "random",
     realPool,
@@ -470,8 +470,9 @@ async function createRoom(store, request, response) {
     seed,
     rosterSize,
     universe,
-    // The board this room dealt, written down on the night it dealt it.
-    deck: pool.map((card) => card.id),
+    // The board this room dealt, written down on the night it dealt it —
+    // each card with the roster slot it was dealt to fill.
+    deck: pool.map(deckEntry),
     pickTimer,
     draftType,
     nomination,

@@ -26,9 +26,25 @@ export function playerIdentity(id) {
   return match ? { person: match[2], slice: match[1] } : null;
 }
 
+// The human behind a card, however his league names him. MLB pools spell the
+// person out in the id; the Showdown sets don't, but they print the season on
+// the face ("Mike Piazza '93"), so the name with the season filed off is the
+// man. A deal uses this to put each person on the board once — and a board
+// that holds one Ken Griffey needs no roster rule about the other three.
+export function cardPerson(card) {
+  const identity = playerIdentity(card?.id);
+  if (identity) return identity.person;
+  const name = String(card?.name ?? "").replace(/\s+'\d{2,4}$/, "").trim();
+  return name ? `name:${name.toLowerCase()}` : null;
+}
+
 // The rostered player that makes `player` illegal to add: the same human
 // from a different era. Pass excludeId when evaluating a swap, so the
 // outgoing card doesn't block its own replacement.
+//
+// This is a COLLECTION rule — adventure packs, NPC teams, roster swaps. Draft
+// rooms don't need it: their board deals each person once (see cardPerson),
+// so a drafting manager cannot reach a second era of a man he already owns.
 export function personConflict(roster, player, excludeId = null) {
   const identity = playerIdentity(player?.id);
   if (!identity) return null;

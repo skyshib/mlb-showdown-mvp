@@ -145,9 +145,9 @@ test("a room of computers drafts itself out and everybody ends up legal", async 
     const issues = validateRoster(manager, { unlimitedRoster: true });
     assert.deepEqual(issues, [], `${manager.name} finished illegal — ${issues.join(", ")}`);
   }
-  // The board was deep enough that nobody had to be handed an invented player.
-  const invented = draft.pool.filter((card) => String(card.id).startsWith("emergency-"));
-  assert.deepEqual(invented, []);
+  // The board was deep enough that nobody had to be handed a printed player.
+  const printed = draft.pool.filter((card) => card.replacement);
+  assert.deepEqual(printed, []);
 });
 
 test("a restarted server revives the room to the same rosters", async (t) => {

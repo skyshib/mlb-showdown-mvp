@@ -130,6 +130,15 @@ export function hydratePhotos(root) {
   // action shot, the wide action hero, the MLB headshot, Wikipedia, and
   // finally the drawn pixel portrait.
   for (const slot of root.querySelectorAll("[data-photo-name]")) {
+    // A replacement card is nobody: it carries a real card's numbers under a
+    // plain name, and it gets the drawn portrait without a lookup. Searching
+    // for him would be worse than useless — "Replacement C" hunts a surname of
+    // "c", which is a substring of half of Wikipedia, and the card would come
+    // back wearing some real catcher's face.
+    if (slot.dataset.photoAnon !== undefined) {
+      drawPortrait(slot);
+      continue;
+    }
     const mlbam = slot.dataset.mlbam;
     if (mlbam && !verticalMisses.has(mlbam)) {
       fill(slot, mlbVerticalUrl(mlbam), () => {

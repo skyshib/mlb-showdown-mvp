@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildDraftPool } from "../src/data/universes.js";
+import { buildDraftPool, deckEntry, deckFromIds } from "../src/data/universes.js";
 import {
   ROSTER_SLOTS,
   applyDraftAction,
@@ -155,9 +155,94 @@ test("every manager finishes with a legal roster, however the bidding went", () 
       assert.ok(manager.roster.length >= 13, `${manager.name} has only ${manager.roster.length} cards`);
     }
 
-    // Nobody was handed an invented player: the board covered the sweep.
-    const invented = draft.pool.filter((card) => String(card.id).startsWith("emergency-"));
-    assert.deepEqual(invented, [], `${managerCount} managers: the sweep had to invent ${invented.length} players`);
+    // Nobody was handed a printed replacement: the board covered the sweep.
+    const printed = draft.pool.filter((card) => card.replacement);
+    assert.deepEqual(printed, [], `${managerCount} managers: the sweep had to print ${printed.length} players`);
+  }
+});
+
+// The room that started all this: one manager bids on every card that comes up
+// and wins the lot of it, and the other n - 1 draft nothing at all. This is the
+// case the board is sized for, and the board has to cover it at EVERY position
+// — the queue must not quietly deepen one pile at the reserve's expense.
+test("a manager who wins every single lot cannot exhaust the board", () => {
+  for (const managerCount of [3, 4, 6]) {
+    const { draft } = roomOf(managerCount, `hoard-${managerCount}`);
+    const hog = draft.managers[0];
+    let guard = 0;
+    while (!draft.complete && guard < 5000) {
+      guard += 1;
+      applyDraftAction(draft, { type: "auto-nominate" });
+      for (const manager of draft.managers) {
+        applyDraftAction(draft, {
+          type: "seal-bid",
+          managerId: manager.id,
+          amount: manager.id === hog.id ? 5 : 0
+        });
+      }
+    }
+
+    assert.ok(draft.complete, `${managerCount} managers: draft never completed`);
+    assert.equal(hog.roster.length, draft.auction.queue.length, "the hoarder won every lot");
+
+    for (const manager of draft.managers) {
+      const issues = validateRoster(manager, { unlimitedRoster: true });
+      assert.deepEqual(issues, [], `${managerCount} managers: ${manager.name} finished illegal — ${issues.join(", ")}`);
+    }
+    const printed = draft.pool.filter((card) => card.replacement);
+    assert.deepEqual(
+      printed.map((card) => card.name),
+      [],
+      `${managerCount} managers: the sweep ran out of real cards`
+    );
+  }
+});
+
+// An online room deals its board once and writes it down; every client, and the
+// room itself on revival, deals from THAT record rather than from the seed. So
+// the record has to carry the slot each card was dealt to fill — a deck that
+// came back untagged would build its queue off the cards' printed positions,
+// which is the very leak the tag exists to close, in exactly the rooms that
+// matter.
+test("a room's written-down deck brings the slot tags back with it", () => {
+  const seed = "pinned-deck";
+  const pool = buildDraftPool(UNIVERSE, seed, { nomination: "random", managerCount: 4 });
+  const revived = deckFromIds(UNIVERSE, seed, pool.map(deckEntry));
+
+  assert.deepEqual(
+    revived.map((card) => [card.id, card.slot]),
+    pool.map((card) => [card.id, card.slot]),
+    "the revived board is the dealt board, tags and all"
+  );
+
+  // And so the revived room nominates the same cards in the same order.
+  const room = (cards) => createDraft(
+    Array.from({ length: 4 }, (_, index) => ({ name: `M${index + 1}`, cpu: true })),
+    cards,
+    13,
+    seed,
+    { draftType: "auction", nomination: "random", budget: 5000, timer: false }
+  );
+  assert.deepEqual(room(revived).auction.queue, room(pool).auction.queue);
+});
+
+// The reserve the board keeps back at every slot, stated as an invariant: the
+// deal puts visiblePerSlot cards in each slot, the queue may take only
+// hiddenPerSlot of them, and the difference — at least n - 1 per slot — is what
+// the sweep spends. A queue that read a card's POSITION instead of the slot it
+// was dealt to would break this at whichever pile its DH bats came from.
+test("every slot keeps n - 1 cards back from the queue, for every manager count", () => {
+  for (let managers = 2; managers <= 8; managers += 1) {
+    const { draft, pool } = roomOf(managers, `reserve-${managers}`);
+    const queued = new Set(draft.auction.queue);
+    for (const [group, slots] of ROSTER_SLOTS) {
+      const dealt = pool.filter((card) => card.slot === group);
+      const held = dealt.filter((card) => !queued.has(card.id));
+      assert.ok(
+        held.length >= (managers - 1) * slots,
+        `${managers} managers: ${group} holds back only ${held.length} of ${dealt.length}, needs ${(managers - 1) * slots}`
+      );
+    }
   }
 });
 

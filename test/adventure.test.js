@@ -1620,8 +1620,9 @@ test("simultaneous two-way players bundle: one owned card, both halves", async (
 });
 
 test("one era of a player per roster: 1990s and 2000s Bonds never share a team", async () => {
-  const { canPickPlayer, createDraft, duplicateEraPeople } = await import("../src/rules/draft.js");
+  const { duplicateEraPeople } = await import("../src/rules/draft.js");
   const { personConflict, playerIdentity } = await import("../src/rules/cards.js");
+  const { dealDraftDeck } = await import("../src/data/universes.js");
   const { benchCards } = await import("../src/adventure/ui/collectionScreens.js");
   setUniverseSeed("era-rule", "decades-1910,1920,1990,2000");
   try {
@@ -1631,15 +1632,18 @@ test("one era of a player per roster: 1990s and 2000s Bonds never share a team",
     assert.ok(bonds90 && bonds00, "both Bonds eras are in the pool");
     assert.equal(playerIdentity(bonds90.id).person, playerIdentity(bonds00.id).person, "same human");
 
-    // The rules layer flags the pair and drafts refuse the second pick.
+    // The rules layer flags the pair: a COLLECTION can turn up both Bondses,
+    // and a roster built out of them is illegal.
     const issues = validateRoster({ roster: [bonds90, bonds00], lineupAssignments: {} });
     assert.ok(issues.some((issue) => issue.includes("two eras of Barry Bonds")), "validateRoster names the clash");
-    const draft = createDraft(["Era"], pool, 13, "era-rule");
-    draft.managers[0].roster.push(bonds90);
-    draft.pickedIds.add(bonds90.id);
-    const refusal = canPickPlayer(draft, draft.managers[0], bonds00);
-    assert.equal(refusal.ok, false, "the draft refuses the second era");
-    assert.match(refusal.reason, /already has Barry Bonds/);
+
+    // A DRAFT settles it at the deal instead of at the pick: the board prints
+    // each man once, so the second era is never on it and no pick has to be
+    // refused for a reason nobody can see coming.
+    const deck = dealDraftDeck("era-rule");
+    assert.deepEqual(duplicateEraPeople(deck), [], "the dealt board holds one era of every man");
+    const bondsCards = deck.filter((card) => playerIdentity(card.id)?.person === "bondsba01");
+    assert.ok(bondsCards.length <= 1, "one Barry Bonds on the board, at most");
 
     // A two-way player's bat and arm halves share a slice: the legal pairing.
     const bat = pool.find((card) => card.id.endsWith("-bat"));

@@ -1,6 +1,6 @@
 import { createRng } from "./rng.js";
 import { createValuationModel } from "./valuation.js";
-import { personConflict, playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js";
+import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -272,20 +272,33 @@ function shuffleSeeded(items, rng) {
   return copy;
 }
 
+// The slot a card was DEALT to fill. A dealt board says so on the card; a pool
+// assembled some other way (a hand-built test pool, a snake deck) doesn't, and
+// falls back to reading the card's own position.
+function dealtInSlot(player, group) {
+  return player?.slot ? player.slot === group : poolGroupMatches(player, group);
+}
+
 // The hidden pool: a seeded subset of the visible board — floor(1.4n) managers'
 // worth at every roster slot — shuffled into the order it will be nominated in.
 // Everything left on the board is a card the room can see and never bid on,
 // until the sweep goes looking for it.
+//
+// The queue draws each slot from the cards the DEAL put in that slot, and that
+// is load-bearing, not bookkeeping. The board's whole promise is that every
+// group keeps n-1 cards back for the closing sweep, and the margin it keeps is
+// exactly n-1 — no slack. So a queue that picked its DH bats off the board at
+// large would take one of them out of, say, center field, put a sixth center
+// fielder up for bid, and leave two CF cards in a reserve that owed three. One
+// manager who hoards center fielders and the sweep has nothing to hand the
+// third man short of one. Read the tag; leave the reserve alone.
 function buildNominationQueue(draft) {
   const rng = createRng(`${draft.seed}:nomination-queue`);
   const { hidden } = randomNominationQuotas(draft.managers.length);
   const queue = [];
   const queued = new Set();
   for (const [group, count] of hidden) {
-    // A card queues once. The DH group draws on every hitter, so it has to
-    // skip the ones the position groups already took, or the same bat would
-    // come up for bid twice.
-    const cards = draft.pool.filter((player) => !queued.has(player.id) && poolGroupMatches(player, group));
+    const cards = draft.pool.filter((player) => !queued.has(player.id) && dealtInSlot(player, group));
     for (const player of shuffleSeeded(cards, rng).slice(0, count)) {
       queued.add(player.id);
       queue.push(player);
@@ -341,13 +354,13 @@ export function availablePlayers(draft) {
   return draft.pool.filter((player) => !draft.pickedIds.has(player.id));
 }
 
+// Nothing here asks whether the manager already owns another era of this man.
+// The BOARD settles that: it deals each person once, so the second Ken Griffey
+// a manager might have tripped over was never printed. A rule that cannot fire
+// is a rule that only ever surprises somebody.
 export function canPickPlayer(draft, manager, player) {
   if (!player || draft.pickedIds.has(player.id)) {
     return { ok: false, reason: "already picked" };
-  }
-  const eraDupe = personConflict(manager.roster, player);
-  if (eraDupe) {
-    return { ok: false, reason: `already has ${eraDupe.name} (${eraDupe.setTag})` };
   }
   // With unlimited inactive slots the only thing standing between a manager
   // and a card is the money: no roster cap, no position cap, and no duty to
@@ -1000,6 +1013,11 @@ function revertSweep(draft) {
       }
     }
     draft.pickedIds.delete(entry.playerId);
+    // A printed replacement exists only because the sweep printed it. Undo the
+    // sweep and it stops existing — left in the pool it would come back as an
+    // unowned card on the auction board, biddable, and the next sweep would
+    // print its twin under the same id.
+    draft.pool = draft.pool.filter((player) => !(player.replacement && player.id === entry.playerId));
     draft.pickNumber -= 1;
   }
   draft.complete = false;
@@ -1317,6 +1335,11 @@ export function applyBattingOrder(lineup, battingOrder) {
 
 // One era of a real player per team: 1990s Barry Bonds and 2000s Barry
 // Bonds can't both suit up. Returns one name per offending person.
+//
+// A COLLECTION rule, not a draft rule. Adventure builds rosters out of packs
+// and trades, where both Bondses can turn up; a draft board deals each person
+// once, so a drafted roster cannot break this and nothing in the draft checks
+// it. See cardPerson.
 export function duplicateEraPeople(roster) {
   const seen = new Map();
   const names = [];
@@ -1369,6 +1392,17 @@ function hasRosterGaps(gaps) {
   return gaps.positions.length > 0 || gaps.hitter > 0 || gaps.starter > 0 || gaps.bullpen > 0;
 }
 
+// The slot whose reserve a hole should be filled out of, best first. A hole at
+// a position spends that position's reserve. A hole that is only a missing BAT
+// spends the two slots the board keeps bats in without a position attached:
+// the DH, and the first baseman activeRosterGaps folds into the hitter count
+// because any glove can cover the bag.
+function reserveSlots(kind, role, position) {
+  if (kind === "pitcher") return [role === "SP" ? "SP" : "RP"];
+  if (!position) return [ANY_HITTER, "1B"];
+  return [CORNER_OUTFIELD_SLOTS.includes(position) ? CORNER_OUTFIELD_POSITION : position];
+}
+
 // The closing sweep. The hidden queue has run dry and some managers are short —
 // outbid all night, or broke, or hoarding nine bats and no arms. Every hole
 // left in an active roster is filled, for free, with the CHEAPEST card still
@@ -1393,13 +1427,25 @@ export function sweepRosters(draft) {
       const neededKind = neededPosition || gaps.hitter > 0 ? "hitter" : "pitcher";
       const neededRole = neededKind === "pitcher" ? (gaps.starter > 0 ? "SP" : "RP") : null;
 
+      // Out of the right pile, then the cheapest in it. The board keeps n - 1
+      // cards back at EVERY slot, which finishes every roster only if each hole
+      // is filled from the reserve kept for it. Take the cheapest card that
+      // merely fits and a center fielder who moonlights at second goes to the
+      // first manager short a second baseman — and the manager swept last, who
+      // actually needed a center fielder, finds the pile empty.
+      const reserve = reserveSlots(neededKind, neededRole, neededPosition);
+      const fromReserve = (player) => {
+        const index = reserve.indexOf(player.slot);
+        return index === -1 ? reserve.length : index;
+      };
+
       const replacement = availablePlayers(draft)
+        .filter((player) => !player.replacement)
         .filter((player) => player.kind === neededKind)
-        .filter((player) => !personConflict(manager.roster, player))
         .filter((player) => !neededRole || pitcherRole(player) === neededRole)
         .filter((player) => !neededPosition || positionMatchesSlot(player, neededPosition))
-        .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0]
-        ?? makeEmergencyReplacement(draft, manager, neededKind, neededRole, neededPosition);
+        .sort((a, b) => fromReserve(a) - fromReserve(b) || a.points - b.points || a.id.localeCompare(b.id))[0]
+        ?? makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition);
 
       manager.roster.push(replacement);
       draft.pickedIds.add(replacement.id);
@@ -1563,23 +1609,6 @@ export function canPlayerFillLineupSlot(player, label) {
 }
 
 function repairManagerRoster(draft, manager) {
-  // Era duplicates repair by subtraction: keep each person's best era, drop
-  // the rest, then refill the hole like any other shortfall.
-  const byPerson = new Map();
-  for (const player of manager.roster) {
-    const identity = playerIdentity(player.id);
-    if (!identity) continue;
-    byPerson.set(identity.person, [...(byPerson.get(identity.person) ?? []), { player, slice: identity.slice }]);
-  }
-  for (const cards of byPerson.values()) {
-    if (new Set(cards.map((card) => card.slice)).size < 2) continue;
-    const keep = [...cards].sort((a, b) => b.player.points - a.player.points)[0].slice;
-    for (const { player, slice } of cards) {
-      if (slice === keep) continue;
-      manager.roster = manager.roster.filter((item) => item.id !== player.id);
-      draft.pickedIds.delete(player.id);
-    }
-  }
   let guard = 0;
   while (validateRoster(manager).length > 0 && guard < draft.rosterSize * 2) {
     guard += 1;
@@ -1590,11 +1619,10 @@ function repairManagerRoster(draft, manager) {
     const neededRole = needs.starter > 0 ? "SP" : needs.bullpen > 0 ? "RP" : null;
     const replacement = availablePlayers(draft)
       .filter((player) => player.kind === neededKind)
-      .filter((player) => !personConflict(manager.roster, player))
       .filter((player) => !neededRole || pitcherRole(player) === neededRole)
       .filter((player) => !neededPosition || positionMatchesSlot(player, neededPosition))
       .filter((player) => neededKind !== "hitter" || canAddHitterToLineup(manager.roster, player).ok)
-      .sort((a, b) => b.points - a.points)[0] ?? makeEmergencyReplacement(draft, manager, neededKind, neededRole, neededPosition);
+      .sort((a, b) => b.points - a.points)[0] ?? makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition);
 
     if (manager.roster.length >= draft.rosterSize) {
       const removableKind = neededKind === "pitcher" ? "hitter" : "pitcher";
@@ -1684,65 +1712,110 @@ function leagueSupply(players) {
   return { positions, cornerOutfield, hitters, starter, bullpen };
 }
 
-function makeEmergencyReplacement(draft, manager, neededKind, neededRole, neededPosition) {
-  const index = draft.pool.length + 1;
-  const teamName = manager.name.split(/[ /]+/)[0] || "Team";
-  const replacement = neededKind === "pitcher"
-    ? makeEmergencyPitcher(index, teamName, neededRole)
-    : makeEmergencyHitter(index, teamName, neededPosition ?? "1B");
+// REPLACEMENT LEVEL. The board is out of cards that can fill a hole, so the
+// manager is handed the worst card on the board that plays the slot — printed
+// under a plain name, stripped to that one position, and copied rather than
+// moved. Copies repeat on purpose: two managers short a center fielder get the
+// same replacement center fielder, and a hole costs every manager the same.
+//
+// The card it copies is the CHEAPEST that plays the slot, owned or not, which
+// is the honest floor. The old fabricated card was a 180-point invention on a
+// board whose worst center fielder went for 20 — being swept was a reward.
+function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition) {
+  const slot = replacementSlot(neededKind, neededRole, neededPosition);
+  const priorAtSlot = manager.roster.filter((player) => player.replacement && player.slot === slot).length;
+  // "Replacement LF/RF", then "Replacement LF/RF #2" — the corner slots are the
+  // only place one roster takes two of the same, but the numbering costs
+  // nothing and a roster that lists the same name twice with no way to tell
+  // them apart is a roster nobody can read.
+  const name = priorAtSlot === 0 ? `Replacement ${slot}` : `Replacement ${slot} #${priorAtSlot + 1}`;
+  const id = `replacement-${manager.id}-${slot.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${priorAtSlot + 1}`;
+  const source = replacementSource(draft, neededKind, neededRole, neededPosition);
+  const replacement = source
+    ? copyAsReplacement(source, { id, name, slot, kind: neededKind })
+    : fabricateReplacement({ id, name, slot, kind: neededKind });
   draft.pool.push(replacement);
   return replacement;
 }
 
-function makeEmergencyHitter(index, teamName, position) {
-  const cardPosition = CORNER_OUTFIELD_SLOTS.includes(position) ? CORNER_OUTFIELD_POSITION : position;
+// The slot a replacement is printed at: the corner slots share one printing,
+// and a manager who is simply a bat short (no position to fill) gets a DH.
+function replacementSlot(kind, role, position) {
+  if (kind === "pitcher") return role === "SP" ? "SP" : "RP";
+  if (!position) return "DH";
+  return CORNER_OUTFIELD_SLOTS.includes(position) ? CORNER_OUTFIELD_POSITION : position;
+}
+
+// The worst card on the board that can do the job. Replacements don't breed:
+// a replacement is never the source for another one.
+function replacementSource(draft, kind, role, position) {
+  return draft.pool
+    .filter((player) => !player.replacement && player.kind === kind)
+    .filter((player) => kind !== "pitcher" || !role || pitcherRole(player) === role)
+    .filter((player) => kind !== "hitter" || !position || positionMatchesSlot(player, position))
+    .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0] ?? null;
+}
+
+// His numbers, not his name: the chart, the on-base, the arm and the price
+// come across; the face, the team and the season don't. He fields the one slot
+// he was called up for and nothing else.
+function copyAsReplacement(source, { id, name, slot, kind }) {
+  const card = {
+    ...source,
+    id,
+    name,
+    slot,
+    replacement: true,
+    sourceId: source.id,
+    team: "FA",
+    setTag: "Replacement",
+    mlbam: null,
+    foil: false
+  };
+  if (kind === "pitcher") return { ...card, role: slot };
+  const fielding = fieldingAt(source, slot) ?? 0;
+  return { ...card, position: slot, positions: [{ pos: slot, fielding }], fielding };
+}
+
+// Only when the board holds nothing at all that plays the slot — a pool too
+// thin to have dealt one, which the setup screen is supposed to refuse.
+function fabricateReplacement({ id, name, slot, kind }) {
+  const shared = { id, name, slot, replacement: true, team: "FA", setTag: "Replacement", points: 10 };
+  if (kind === "pitcher") {
+    return {
+      ...shared,
+      kind: "pitcher",
+      role: slot,
+      throws: "R",
+      control: 1,
+      ip: slot === "SP" ? 5 : 1,
+      chart: [
+        { from: 1, to: 2, result: "PU" },
+        { from: 3, to: 7, result: "SO" },
+        { from: 8, to: 13, result: "GB" },
+        { from: 14, to: 17, result: "FB" },
+        { from: 18, to: 19, result: "BB" },
+        { from: 20, to: 20, result: "1B" }
+      ]
+    };
+  }
   return {
-    id: `emergency-h-${index}`,
+    ...shared,
     kind: "hitter",
-    name: `${teamName} Replacement ${cardPosition}`,
-    position: cardPosition,
+    position: slot,
+    positions: [{ pos: slot, fielding: 0 }],
+    fielding: 0,
     bats: "R",
-    onBase: 8,
-    speed: 8,
-    fielding: emergencyFielding(cardPosition),
-    points: 180,
+    onBase: 7,
+    speed: 10,
     chart: [
-      { from: 1, to: 3, result: "SO" },
-      { from: 4, to: 6, result: "GB" },
-      { from: 7, to: 9, result: "FB" },
-      { from: 10, to: 11, result: "BB" },
-      { from: 12, to: 18, result: "1B" },
-      { from: 19, to: 20, result: "2B" }
+      { from: 1, to: 4, result: "SO" },
+      { from: 5, to: 8, result: "GB" },
+      { from: 9, to: 12, result: "FB" },
+      { from: 13, to: 14, result: "BB" },
+      { from: 15, to: 20, result: "1B" }
     ]
   };
-}
-
-function makeEmergencyPitcher(index, teamName, role) {
-  return {
-    id: `emergency-p-${index}`,
-    kind: "pitcher",
-    name: `${teamName} Replacement ${role === "SP" ? "Starter" : "Bullpen"}`,
-    role: role === "SP" ? "SP" : "RP",
-    throws: "R",
-    control: 1,
-    ip: role === "SP" ? 5 : 1,
-    points: 120,
-    chart: [
-      { from: 1, to: 2, result: "PU" },
-      { from: 3, to: 7, result: "SO" },
-      { from: 8, to: 13, result: "GB" },
-      { from: 14, to: 17, result: "FB" },
-      { from: 18, to: 19, result: "BB" },
-      { from: 20, to: 20, result: "1B" }
-    ]
-  };
-}
-
-function emergencyFielding(position) {
-  if (position === "C") return 4;
-  if (position === "2B" || position === "SS") return 2;
-  if (position === "3B" || position === "CF") return 1;
-  return 0;
 }
 
 function autopickScore(draft, manager, player, needs, personalValue, dropoff) {
