@@ -196,12 +196,12 @@ th {
 .column-sort {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 4px;
   min-height: 0;
   border: 0;
-  border-radius: 4px;
-  padding: 2px 4px;
+  border-radius: 0;
+  padding: 2px 3px;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -210,7 +210,7 @@ th {
 
 .column-sort:hover,
 .column-sort.active {
-  background: #e8f1ec;
+  background: transparent;
   color: var(--accent-dark);
 }
 
@@ -234,7 +234,7 @@ td span {
 
 .player-name-preview:hover,
 .player-name-preview:focus {
-  background: #e8f1ec;
+  background: var(--sheet);
   outline: 2px solid transparent;
 }
 
@@ -245,7 +245,7 @@ td span {
 
 .chart {
   max-width: 420px;
-  color: #37433d;
+  color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.35;
@@ -1925,12 +1925,30 @@ button.roster-slot[draggable="true"]:active {
   overflow-x: auto;
 }
 
+/* The chart runs ten columns wide for a hitter, so the board was pushing its
+   last few outcomes off the right edge. The cells are centred and tightened —
+   and the handedness column is gone — so the whole chart fits. */
 .player-table {
-  min-width: 760px;
+  min-width: 680px;
+  table-layout: auto;
 }
 
 .pitcher-table {
-  min-width: 860px;
+  min-width: 620px;
+}
+
+.player-table th,
+.player-table td {
+  padding: 6px 4px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Numbers right-align everywhere else in the app; on this board they line up
+   under their centred headers instead. */
+.player-table th.num,
+.player-table td.num {
+  text-align: center;
 }
 
 .player-table th {
@@ -1940,30 +1958,34 @@ button.roster-slot[draggable="true"]:active {
   background: var(--panel);
 }
 
-.player-table td {
-  padding: 7px 8px;
-}
-
 .player-table td:nth-child(2) {
-  min-width: 150px;
+  min-width: 130px;
 }
 
-.player-table td:nth-child(3),
-.player-table td:nth-child(4),
-.player-table td:nth-child(5),
-.player-table td:nth-child(7),
+/* The card's own numbers carry the weight: the detail cells and points. The
+   two tables count their columns differently — a hitter carries pos/OB/speed/
+   field, a pitcher role/CTRL/IP — so each names its own. */
+.hitter-table td:nth-child(3),
+.hitter-table td:nth-child(4),
+.hitter-table td:nth-child(5),
+.hitter-table td:nth-child(6),
+.hitter-table td:nth-child(7),
+.pitcher-table td:nth-child(3),
+.pitcher-table td:nth-child(4),
+.pitcher-table td:nth-child(5),
+.pitcher-table td:nth-child(6),
 .player-table .chart-range-cell {
   font-weight: 800;
   white-space: nowrap;
 }
 
 .player-table .chart-range-cell {
-  min-width: 54px;
-  text-align: right;
+  min-width: 46px;
+  text-align: center;
 }
 
 .draft-player-row:hover td {
-  background: #f2f8f4;
+  background: var(--sheet);
 }
 
 .draft-player-row:focus {
@@ -2383,7 +2405,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .race-fast-forward:hover:not(:disabled) {
-  background: #e8f1ec;
+  background: var(--sheet);
 }
 
 .race-results-panel {
@@ -3070,7 +3092,7 @@ button.roster-slot[draggable="true"]:active {
 
 .order-tile.selected-slot {
   border-color: var(--accent);
-  background: #e8f1ec;
+  background: var(--sheet);
 }
 
 .order-tile.readonly-slot {

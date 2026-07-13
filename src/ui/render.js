@@ -30,7 +30,6 @@ export function renderPlayerTable(players, options = {}) {
         { label: "Player", sort: "name" },
         { label: "Role", sort: "position" },
         { label: "CTRL", sort: "primary" },
-        { label: "Throws", sort: "throws" },
         { label: "IP", sort: "ip" },
         { label: "Pts", sort: "points" },
         ...outcomes.map((outcome) => ({ label: outcome, sort: `chart:${outcome}` }))
@@ -61,7 +60,6 @@ export function renderPlayerTable(players, options = {}) {
       const detailCells = player.kind === "pitcher"
         ? `<td>${escapeHtml(player.role)}</td>
         <td class="num">${player.control}</td>
-        <td>${escapeHtml(player.throws)}HP</td>
         <td class="num">${player.ip}</td>`
         : `<td>${escapeHtml(positionsLabel(player))}</td>
         <td class="num">${player.onBase}</td>

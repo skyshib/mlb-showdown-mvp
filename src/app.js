@@ -120,7 +120,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260712-auction-pause";
+} from "./ui/render.js?v=20260712-enamel-4";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -4600,9 +4600,6 @@ function comparePlayersBySort(a, b, sort) {
   if (sort === "fielding") {
     return (a.fielding ?? 0) - (b.fielding ?? 0) || a.points - b.points;
   }
-  if (sort === "throws") {
-    return String(a.throws ?? "").localeCompare(String(b.throws ?? "")) || a.points - b.points;
-  }
   if (sort === "ip") {
     return (a.ip ?? 0) - (b.ip ?? 0) || a.points - b.points;
   }
@@ -4623,7 +4620,7 @@ function updateSort(sort) {
 }
 
 function defaultSortDirection(sort) {
-  return sort === "name" || sort === "position" || sort === "throws" ? "asc" : "desc";
+  return sort === "name" || sort === "position" ? "asc" : "desc";
 }
 
 function speedValue(speed) {
