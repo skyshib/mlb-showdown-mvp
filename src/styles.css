@@ -1886,6 +1886,126 @@ button.roster-slot[draggable="true"]:active {
   color: white;
 }
 
+/* ---- the lottery ---- */
+.managers-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lottery-button {
+  padding: 5px 10px;
+  background: var(--panel);
+  color: var(--navy);
+  font-size: 12px;
+}
+
+.lottery-button:hover {
+  background: var(--accent);
+  color: var(--sheet);
+}
+
+.lottery-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgb(20 18 14 / 0.82);
+  animation: lottery-in 220ms ease-out;
+}
+
+.lottery-stage.closing {
+  opacity: 0;
+  transition: opacity 260ms ease-in;
+}
+
+.lottery-card {
+  width: min(420px, calc(100vw - 40px));
+  padding: 26px 28px 28px;
+  border: var(--rule-thick) solid var(--navy);
+  background: var(--sheet);
+}
+
+.lottery-card h2 {
+  margin-bottom: 18px;
+}
+
+.lottery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lottery-slot {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 2px solid var(--hairline);
+  background: var(--panel);
+  opacity: 0.35;
+}
+
+.lottery-slot.drawn {
+  opacity: 1;
+  border-color: var(--navy);
+  animation: lottery-draw 320ms ease-out;
+}
+
+.lottery-slot.first {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.lottery-slot.first .lottery-pick,
+.lottery-slot.first .lottery-name {
+  color: var(--sheet);
+}
+
+.lottery-pick {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 900;
+  font-style: italic;
+  color: var(--accent-dark);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.lottery-name {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+@keyframes lottery-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes lottery-draw {
+  from { transform: translateX(-10px); opacity: 0.35; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lottery-stage,
+  .lottery-slot.drawn {
+    animation: none;
+  }
+}
+
 /* The whistle: hand a stalled seat to the computer, or take it back. */
 .seat-button {
   margin-left: auto;

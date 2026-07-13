@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-c";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-f";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-c";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-c";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-c";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-c";
+} from "./ui/sounds.js?v=20260713-f";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-f";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-f";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-f";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-c";
+} from "./rules/draft.js?v=20260713-f";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-c";
+} from "./onlineClient.js?v=20260713-f";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-c";
-import { computeAwards } from "./rules/awards.js?v=20260713-c";
-import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-c";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-c";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-c";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-c";
+} from "./rules/batch.js?v=20260713-f";
+import { computeAwards } from "./rules/awards.js?v=20260713-f";
+import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-f";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-f";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-f";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-f";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-c";
+} from "./ui/render.js?v=20260713-f";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -476,12 +476,15 @@ function shouldChimeForTurn(current) {
   return state.pickTimerSeconds > 0;
 }
 
-async function toggleSound() {
+function toggleSound() {
   const nowMuted = toggleMuted();
   if (!nowMuted) {
-    // Turning sound on is itself the gesture that buys us the right to make it.
-    await unlockSounds();
-    playYourTurn();
+    // Turning sound on is itself the gesture that buys the right to make it —
+    // but the switch flips whether or not the browser ever gets round to
+    // agreeing, so the button is never left waiting on the speaker.
+    unlockSounds().then((ok) => {
+      if (ok) playYourTurn();
+    });
   }
   renderCurrentScreen();
 }
@@ -1171,6 +1174,74 @@ function exampleCardHtml(card) {
   return card ? cardPanelHtml(card) : "";
 }
 
+// ---- the lottery ----
+//
+// Draft order was whatever order the names got typed in, which is a strange way
+// to decide who gets the first card in the set. Roll for it — and roll for it
+// properly: the last seat comes out of the hat first, and the room works its way
+// up to the first pick, because that is the only order that has any suspense in
+// it.
+let lotteryRunning = false;
+
+async function runLottery(setupForm) {
+  if (lotteryRunning) return;
+  const textarea = setupForm.querySelector('textarea[name="managers"]');
+  const names = dedupeManagerNames(
+    String(textarea.value)
+      .split("\n")
+      .map((name) => name.trim())
+      .filter(Boolean)
+  );
+  if (names.length < 2) return;
+
+  lotteryRunning = true;
+  // Ask for sound, but never wait on it. A browser that has not yet decided the
+  // page is allowed to make noise leaves `resume()` pending indefinitely, and a
+  // ceremony that waits for permission to be loud is a ceremony that never runs.
+  unlockSounds();
+
+  const order = [...names];
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  const stage = document.createElement("div");
+  stage.className = "lottery-stage";
+  stage.innerHTML = `<div class="lottery-card">
+    <p class="eyebrow">The lottery</p>
+    <h2>Drawing the order</h2>
+    <ol class="lottery-list">${order
+      .map((_, index) => `<li class="lottery-slot" data-slot="${index}"><span class="lottery-pick">${index + 1}</span><span class="lottery-name">&mdash;</span></li>`)
+      .join("")}</ol>
+  </div>`;
+  document.body.append(stage);
+
+  const slots = [...stage.querySelectorAll(".lottery-slot")];
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  await wait(450);
+
+  // Last seat first: the room counts down to who picks first.
+  for (let index = order.length - 1; index >= 0; index -= 1) {
+    const slot = slots[index];
+    slot.classList.add("drawn");
+    slot.querySelector(".lottery-name").textContent = order[index];
+    playLotteryBall(order.length - 1 - index, order.length);
+    if (index === 0) slot.classList.add("first");
+    await wait(index === 0 ? 200 : 620);
+  }
+
+  await wait(1100);
+  stage.classList.add("closing");
+  await wait(280);
+  stage.remove();
+  lotteryRunning = false;
+
+  // The order the room just drew is the order the room drafts in.
+  textarea.value = order.join("\n");
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function renderSetup(setupError = "") {
   resetAppHandlers();
   const examples = setupExamples(state.seed);
@@ -1205,6 +1276,10 @@ function renderSetup(setupError = "") {
         <label>
           Managers
           <textarea name="managers" rows="5">${escapeHtml(state.managers.join("\n"))}</textarea>
+          <small class="managers-note">
+            <span>They pick in the order they are listed.</span>
+            <button type="button" class="small lottery-button" data-action="lottery">&#127922; Roll for order</button>
+          </small>
         </label>
         <fieldset class="pool-mode cpu-managers">
           <legend>Computer managers</legend>
@@ -1344,6 +1419,10 @@ function renderSetup(setupError = "") {
   // whichever move is left. Reaching for it means you want decades, so it
   // selects that set the same way touching any other picker does.
   setupForm.addEventListener("click", (event) => {
+    if (event.target.closest('[data-action="lottery"]')) {
+      runLottery(setupForm);
+      return;
+    }
     const toggle = event.target.closest('[data-action="toggle-decades"]');
     if (!toggle) return;
     const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
