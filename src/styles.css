@@ -284,55 +284,54 @@ td span {
   min-width: 0;
 }
 
-/* The three sets on offer. No frame and no cell rules — they read as a list on
+/* The three sets on offer, each showing a real card it deals — the printed
+   scan, the historical face, the invented one. Three across, so they fill the
+   hero's width instead of stacking into a column and leaving the copy stranded
+   beside a wall of dead space. No frame and no cell rules: a row of cards on
    the sheet, not a table. */
 .setup-features {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto auto auto;
+  gap: 8px 20px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* A printed scan runs taller than the two drawn faces, so the three features
+   share the parent's row tracks: the cards sit on a common baseline and the
+   names below them line up. */
 .setup-feature {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  row-gap: 8px;
+  min-width: 0;
+}
+
+/* The card face is container-relative, so a width is all it needs to scale. */
+.setup-feature-card {
+  width: 100%;
+  min-width: 0;
+  align-self: end;
 }
 
 .setup-feature-name {
   font-family: var(--display);
-  font-size: 19px;
+  font-size: 16px;
   font-weight: 900;
   font-style: italic;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   line-height: 1;
   text-transform: uppercase;
   color: var(--navy);
 }
 
 .setup-feature-note {
-  font-size: 13.5px;
-  line-height: 1.45;
+  font-size: 12.5px;
+  line-height: 1.4;
   color: var(--muted);
-}
-
-/* A real card out of that pool, so the set shows itself instead of describing
-   itself. The red keeps it from reading as more body copy. */
-.setup-feature-example {
-  font-family: var(--display);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  line-height: 1.3;
-  text-transform: uppercase;
-  color: var(--accent-dark);
-  font-variant-numeric: tabular-nums;
-}
-
-.setup-feature-example:empty {
-  display: none;
 }
 
 .setup-grid {

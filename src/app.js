@@ -12,6 +12,8 @@ import {
 import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
+import { decodeCardRows } from "./data/realCards.js";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260712-card-backgrounds";
 import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
 import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
@@ -1071,41 +1073,32 @@ function randomNominationBlurb(managerCount) {
 }
 
 // One real card from each pool, so the hero shows what it is offering instead
-// of describing it. The printed and historical cards are looked up in their own
-// rows, and the fictional one is generated from the seed in the box — change the
-// seed and a different player turns up, which is the whole point of that set.
+// of describing it. These are the same card objects the board deals, drawn by
+// the same cardPanelHtml — so the printed set shows its actual scan, the
+// historical set shows the 2005 face it prints, and the invented one shows the
+// proto frame. The invented card comes off the seed in the box: change the seed
+// and a different player turns up, which is the whole point of that set.
+function exampleCard(rows, name) {
+  const row = rows.filter((tuple) => tuple[1] === name);
+  return row.length ? decodeCardRows(row)[0] : null;
+}
+
 function setupExamples(seed) {
-  const line = (name, position, rating, points) =>
-    `${name} · ${position} · ${rating} · ${points} pts`;
-
-  const printed = CLASSIC_CARD_ROWS.find((row) => row[1] === "Albert Pujols '04");
-  const historical = MLB_HISTORY_ROWS.find((row) => row[1] === "Willie Mays");
-
-  // Tuple: [id, name, team, year, edition, isPitcher, points, obc, ...]
-  const fromRow = (row) => {
-    const position = Array.isArray(row[9]) ? row[9][0] : row[9];
-    return line(row[1], position, `OB ${row[7]}`, row[6]);
-  };
-
-  let invented = "";
+  let invented = null;
   try {
-    const pool = buildFictionalDraftPool(seed);
-    const best = pool.reduce((a, b) => (b.points > a.points ? b : a));
-    invented = line(
-      best.name,
-      best.kind === "pitcher" ? best.role : best.position,
-      best.kind === "pitcher" ? `CTRL ${best.control}` : `OB ${best.onBase}`,
-      best.points
-    );
+    invented = buildFictionalDraftPool(seed).reduce((a, b) => (b.points > a.points ? b : a));
   } catch {
-    invented = "";
+    invented = null;
   }
-
   return {
-    printed: printed ? fromRow(printed) : "",
-    historical: historical ? fromRow(historical) : "",
+    printed: exampleCard(CLASSIC_CARD_ROWS, "Albert Pujols '04"),
+    historical: exampleCard(MLB_HISTORY_ROWS, "Willie Mays"),
     invented
   };
+}
+
+function exampleCardHtml(card) {
+  return card ? cardPanelHtml(card) : "";
 }
 
 function renderSetup(setupError = "") {
@@ -1120,19 +1113,19 @@ function renderSetup(setupError = "") {
       </div>
       <ul class="setup-features">
         <li class="setup-feature">
+          <div class="setup-feature-card">${exampleCardHtml(examples.printed)}</div>
           <span class="setup-feature-name">Historical cards</span>
           <span class="setup-feature-note">Every real Showdown card, 2000&ndash;2005 &mdash; the printed charts and points.</span>
-          <span class="setup-feature-example">${escapeHtml(examples.printed)}</span>
         </li>
         <li class="setup-feature">
+          <div class="setup-feature-card">${exampleCardHtml(examples.historical)}</div>
           <span class="setup-feature-name">Real players</span>
           <span class="setup-feature-note">A century of big leaguers, rated by career, decade, or club.</span>
-          <span class="setup-feature-example">${escapeHtml(examples.historical)}</span>
         </li>
         <li class="setup-feature">
+          <div class="setup-feature-card" data-invented-example>${exampleCardHtml(examples.invented)}</div>
           <span class="setup-feature-name">Fictional</span>
           <span class="setup-feature-note">A made-up league, invented fresh from your seed.</span>
-          <span class="setup-feature-example" data-invented-example>${escapeHtml(examples.invented)}</span>
         </li>
       </ul>
     </header>
@@ -1224,6 +1217,10 @@ function renderSetup(setupError = "") {
     </form>
   </section>`;
 
+  // The historical example wears a real face and club mark, same as it does on
+  // the board; the printed one is already a scan and needs nothing.
+  hydratePhotos(app);
+
   const setupForm = document.querySelector("#setup-form");
   // Only the selected card set shows its picker, and touching a picker
   // selects the set it belongs to — checking a decade means you want decades.
@@ -1291,7 +1288,7 @@ function renderSetup(setupError = "") {
   setupForm.addEventListener("change", (event) => {
     if (event.target.name !== "seed") return;
     const slot = document.querySelector("[data-invented-example]");
-    if (slot) slot.textContent = setupExamples(event.target.value).invented;
+    if (slot) slot.innerHTML = exampleCardHtml(setupExamples(event.target.value).invented);
   });
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
