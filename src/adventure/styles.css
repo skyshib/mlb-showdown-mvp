@@ -40,6 +40,11 @@
      dark end can say that. This is the fifth tone. */
   --gq-lead: var(--gb-darkest);
   --gq-lead-ink: var(--gb-lightest);
+  /* The color an event is announced in — a run home, a man cut down. It is NOT
+     the lead: in a franchise league the lead is the club's pop, and a run scored
+     in the banner's own color is a run you cannot see. franchisePalette.js
+     solves one per club that reads on both the banner and the ground. */
+  --gq-flare: var(--accent);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -196,10 +201,11 @@ h1.gq-logo {
 .gq-caret { width: 2.4cqw; flex: none; }
 .gq-menu-text { min-width: 0; }
 
-/* A game-log row is two lines: the play, then the dice and the running odds
-   under it in a quieter type. The caret still sits on the play's baseline. */
-.gq-log-row { display: block; }
-.gq-log-detail { display: block; font-size: 2.4cqw; letter-spacing: 0.02em; }
+/* A game-log row is ONE line — the whole play, dice and all. It is set smaller
+   than a menu of choices because it is a row of record, not a thing to pick
+   between, and because the line has to hold both men and both their dice. */
+.gq-log-list { font-size: 2.5cqw; letter-spacing: 0.02em; }
+.gq-log-list li { padding: 0.5cqw 0.8cqw; }
 
 /* The diamond shrunk into a line of text. The rotation overhangs its box, so
    the wrapper carries the margin that keeps it off the words either side. */
@@ -283,9 +289,9 @@ h1.gq-logo {
 }
 @keyframes gq-base-out {
   0% { transform: scale(1) rotate(0deg); }
-  20% { transform: scale(1.35) rotate(10deg); border-color: var(--accent-bright); background: var(--accent-bright); }
-  45% { transform: scale(1.2) rotate(-10deg); border-color: var(--accent-bright); background: var(--accent-bright); }
-  70% { transform: scale(1.3) rotate(8deg); border-color: var(--accent-bright); background: var(--accent-bright); }
+  20% { transform: scale(1.35) rotate(10deg); border-color: var(--gq-flare); background: var(--gq-flare); }
+  45% { transform: scale(1.2) rotate(-10deg); border-color: var(--gq-flare); background: var(--gq-flare); }
+  70% { transform: scale(1.3) rotate(8deg); border-color: var(--gq-flare); background: var(--gq-flare); }
   100% { transform: scale(1) rotate(0deg); }
 }
 /* The plate is the one bag that means something when a man touches it, so it
@@ -295,13 +301,13 @@ h1.gq-logo {
   0% { transform: scale(1); }
   30% {
     transform: scale(2.1);
-    border-color: var(--accent-bright);
-    background: var(--accent-bright);
+    border-color: var(--gq-flare);
+    background: var(--gq-flare);
   }
   70% {
     transform: scale(1.7);
-    border-color: var(--accent-bright);
-    background: var(--accent-bright);
+    border-color: var(--gq-flare);
+    background: var(--gq-flare);
   }
   100% { transform: scale(1); }
 }
@@ -629,7 +635,11 @@ h1.gq-logo {
   vector-effect: non-scaling-stroke;
 }
 /* Where the cursor is standing in the list. */
-.gq-wp-now { fill: var(--accent-bright); }
+/* Where the cursor is standing in the list. It sits on the chart's sheet, not on
+   the banner, so it takes the lead — which is solved to read on that sheet. The
+   flare is not for this: it is solved against the BANNER, and a club whose flare
+   is dark (Baltimore's, on its orange) would lose the dot in the board. */
+.gq-wp-now { fill: var(--gq-lead); }
 .gq-wp-zone { cursor: pointer; }
 .gq-wp-zone:hover { fill: var(--gb-light); fill-opacity: 0.55; }
 

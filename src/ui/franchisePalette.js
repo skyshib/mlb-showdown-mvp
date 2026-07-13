@@ -104,7 +104,7 @@ function solveMidtone(paper, ink, target) {
   return mix(paper, ink, hi);
 }
 
-export function derivePalette({ ink, accent }) {
+export function derivePalette({ ink, accent, flare = null }) {
   // The paper takes a breath of the club and nothing more. Any more and the
   // cream stops being cream, and the sign stops being the same sign.
   const paper = mix(CREAM, ink, 0.05);
@@ -168,7 +168,7 @@ export function derivePalette({ ink, accent }) {
     // versions: the sheet had to deepen them so cream could be read on them, and
     // the board's problem is the opposite one.
     ...darkRoom(ink, accent, paper),
-    ...bold(ink, accent)
+    ...bold(ink, accent, flare)
   };
 }
 
@@ -186,7 +186,77 @@ export function derivePalette({ ink, accent }) {
 // board — the DARKER color grounds and the BRIGHTER one is spent — which is what
 // makes Pittsburgh black-and-gold, Cincinnati black-and-red, Oakland green-and-
 // gold, and the Dodgers blue-and-red without anyone choosing per club.
-function bold(rawInk, rawAccent) {
+// The house red, and the color a run scores in when a club has not given us one.
+const HOUSE_FLARE = "#b8352e";
+
+// The FLARE: the color an event is announced in — a run crossing the plate, a
+// man cut down on the bases. It is the one color on the screen that has to be
+// LOUD, and the one that must not be the club's lead.
+//
+// That is the whole reason it exists. --accent-bright was doing this job, and in
+// a franchise league --accent-bright and --gq-lead are set to the same value:
+// the club's pop. So a run scored in Seattle flashed teal on a teal banner and
+// simply vanished. A flare is not the club's lead by definition — it is what
+// interrupts it.
+//
+// A club may name its own (the third color in its palette, if it has one). If it
+// does not, the house red stands in; and where the house red would itself be
+// lost — a club whose lead IS a red — the flare goes to the club's light tone,
+// which reads on anything. It is checked against BOTH the banner it flashes on
+// and the ground it flashes over, because it appears on both.
+// Two colors separate if their HUES separate or their LIGHTNESSES do. Contrast
+// alone is the wrong test here and rejects the obvious answer: the house red on
+// Seattle's teal is 2.5:1, under AA, and about as invisible as a fire engine.
+// WCAG measures luminance, and a red and a teal of the same luminance are the
+// most distinguishable pair on the wheel. So: a wide hue apart, OR bright enough
+// apart. A red on a red fails both, and should.
+// A hue argument only counts if there is a hue to argue with. A near-white with
+// a breath of navy in it reports a saturation of 0.15 in HSL and a hue of 205
+// degrees, and would "separate" from a pink banner on hue alone at 2.1:1 — which
+// is how the Angels nearly got an invisible flare. Pale is not a color: it has
+// to have real chroma, and it has to be neither near-white nor near-black,
+// before its hue is allowed to carry the argument.
+function hasHue([, s, l]) {
+  return s > 0.25 && l > 0.18 && l < 0.82;
+}
+
+export function flareSeparates(a, b) {
+  const hslA = toHsl(a);
+  const hslB = toHsl(b);
+  const gap = Math.abs(hslA[0] - hslB[0]);
+  const hueDegrees = Math.min(gap, 1 - gap) * 360;
+  // 30 degrees, not 40: a red and a gold sit 39 apart, and a red button on a
+  // gold banner is not a subtle thing. A red and an ORANGE sit 16 apart and are
+  // a smudge — the line belongs between those two, not above both.
+  const byHue = hasHue(hslA) && hasHue(hslB) && hueDegrees >= 30;
+  return byHue || contrast(a, b) >= 3;
+}
+
+// The flare's ONE job is to be seen on the banner, because the banner is where
+// it flashes: the bases live in it. It was briefly asked to read on the dark
+// board as well, and that is unsatisfiable — Baltimore's lead is a bright orange,
+// the only thing that separates from a bright orange is something dark, and
+// something dark is exactly what a near-black board swallows. Two backgrounds,
+// two jobs; the board's cursor takes the club's lead instead.
+//
+// Candidates, in order of how much they belong to the club:
+//   its own named third color, if it has one
+//   the house red
+//   the light tone — white on a red banner is not subtle, which is the job
+//   its OTHER color, the one the lead is not
+//
+// The last is what rescues the Angels: their lead is a light red, so the house
+// red is the same hue and the light tone is 1.6:1 against it — both invisible.
+// Their other color is navy, and a blue flash on a red banner is unmistakable.
+// A club always has a second color, and it is always the one the lead is not.
+function flareColor(named, lead, light, other) {
+  for (const candidate of [named, HOUSE_FLARE, light, other].filter(Boolean)) {
+    if (flareSeparates(candidate, lead)) return candidate;
+  }
+  return light;
+}
+
+function bold(rawInk, rawAccent, rawFlare) {
   const ground = luminance(rawInk) <= luminance(rawAccent) ? rawInk : rawAccent;
   const pop = ground === rawInk ? rawAccent : rawInk;
 
@@ -219,7 +289,10 @@ function bold(rawInk, rawAccent) {
     // The card surfaces. A shade up from the sheet so a card still reads as a
     // card sitting ON the page rather than a hole cut in it.
     boldCard: up(0.13),
-    boldCard2: up(0.10)
+    boldCard2: up(0.10),
+    // The color a run is announced in, checked against the banner it flashes on.
+    // `ground` is the club's other color — whichever one the lead is not.
+    boldFlare: flareColor(rawFlare, spend, up(0.85), ground)
   };
 }
 
@@ -346,7 +419,7 @@ const TOKENS = [
   "--navy", "--navy-deep", "--line", "--accent", "--accent-dark",
   "--accent-bright", "--accent-ink",
   "--gb-darkest", "--gb-dark", "--gb-light", "--gb-lightest", "--room",
-  "--gq-lead", "--gq-lead-ink", "--shell", "--shell-dark",
+  "--gq-lead", "--gq-lead-ink", "--gq-flare", "--shell", "--shell-dark",
   "--tv-bg", "--tv-panel", "--tv-panel-2", "--tv-panel-3",
   "--tv-line", "--tv-line-soft", "--tv-line-strong", "--tv-line-hover",
   "--tv-faint", "--tv-dim-2", "--tv-dim", "--tv-text-soft", "--tv-text-strong",
@@ -419,6 +492,10 @@ export function applyFranchisePalette(universeKey, root = document.documentEleme
   root.style.setProperty("--gb-light", palette.boldPanel);
   root.style.setProperty("--gq-lead", palette.boldAccent);
   root.style.setProperty("--gq-lead-ink", palette.boldAccentInk);
+  // The flare cannot be the lead, or a run scores in the banner's own color and
+  // disappears into it. This is the token that used to be --accent-bright, which
+  // in a club league IS the lead.
+  root.style.setProperty("--gq-flare", palette.boldFlare);
   root.style.setProperty("--room", palette.boldBg);
   root.style.setProperty("--shell", palette.boldShell);
   root.style.setProperty("--shell-dark", palette.boldShellDark);

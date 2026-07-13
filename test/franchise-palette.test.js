@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FRANCHISE_COLORS, franchiseCode } from "../src/data/franchiseColors.js";
-import { contrast, derivePalette, franchisePalette, luminance } from "../src/ui/franchisePalette.js";
+import { contrast, derivePalette, flareSeparates, franchisePalette, luminance } from "../src/ui/franchisePalette.js";
 
 // The sheet every club prints on, and the text color that sits on every accent
 // fill in the draft (--sheet).
@@ -98,4 +98,38 @@ test("the golds and the oranges actually come out gold and orange", () => {
     assert.ok(luminance(want) / onButton < 1.6 && onButton / luminance(want) < 1.6,
       `${code}: the button fill (${p.accentBright}) has drifted too far from the club's ${want}`);
   }
+});
+
+// The flare is the color a run scores in. It exists because --accent-bright,
+// which used to do this job, is set to the club's LEAD in a franchise league —
+// so a run in Seattle flashed teal on a teal banner and vanished. A flare that
+// cannot be told from the banner it flashes on is not a flare.
+test("no club scores a run in its own banner color", () => {
+  for (const [code, colors] of Object.entries(FRANCHISE_COLORS)) {
+    const { boldFlare, boldAccent } = derivePalette(colors);
+    // The same predicate the solver picks with, so the two cannot drift apart —
+    // an earlier version of this test used a different saturation formula, said
+    // the Angels were fine, and they were not.
+    assert.ok(
+      flareSeparates(boldFlare, boldAccent),
+      `${code}: the flare cannot be told from the banner it flashes on ` +
+        `(flare ${boldFlare} on lead ${boldAccent}, ${contrast(boldFlare, boldAccent).toFixed(2)}:1)`
+    );
+    assert.notEqual(boldFlare, boldAccent, `${code}: the flare IS the banner`);
+  }
+});
+
+// Seattle is the case that found the bug: teal leads, so the run cannot.
+test("Seattle scores in red, not in teal", () => {
+  const { boldFlare, boldAccent } = derivePalette(FRANCHISE_COLORS.SEA);
+  assert.notEqual(boldFlare, boldAccent);
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(boldFlare.slice(i, i + 2), 16));
+  assert.ok(r > g + 60 && r > b + 60, `Seattle's flare should be red, got ${boldFlare}`);
+});
+
+// A club may name its own flare, and it is taken as given when it reads.
+test("a club's named third color is used when it can be seen", () => {
+  const named = derivePalette({ ink: "#0C2C56", accent: "#005C5C", flare: "#D50032" });
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(named.boldFlare.slice(i, i + 2), 16));
+  assert.ok(r > g + 60 && r > b + 60, "the named red carries through");
 });

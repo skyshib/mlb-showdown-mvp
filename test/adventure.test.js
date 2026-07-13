@@ -1782,17 +1782,21 @@ test("the game log shows the dice and the running win probability", async () => 
     fatiguePenalty: 0,
     wpAfter: 0.28
   };
-  // Just the two dice: the arithmetic behind them is on the cards, and the row
-  // is read at a glance, not audited.
-  const line = gameLogLine(pa, "away");
-  assert.ok(line.includes("PITCH: 4 VS SWING: 17"), "the two dice, and nothing else");
+  // One row, arm first: each man carries the die he threw, right beside his
+  // name. No second line, and no arithmetic — that is what the cards are for.
+  const line = gameLogLine({ ...pa, pitcherId: "p-9", batterId: "h-1" }, "away");
+  const text = line.replace(/<[^>]+>/g, "");
+  assert.match(text, /B\.DIAZ \(4\) v A\.SMITH \(17\)/, "arm and his die, then the bat and his");
+  assert.ok(!line.includes("PITCH:"), "the dice do not queue on a line of their own");
   assert.ok(!line.includes("VS OB"), "the control sum is not spelled out");
-  assert.ok(!line.includes("BATTER"), "nor which chart it landed on");
+  assert.ok(!line.includes("gq-log-detail"), "and there is no second line to put it on");
+  assert.match(line, /data-card-id="p-9"/, "the arm still hovers");
+  assert.match(line, /data-card-id="h-1"/, "and so does the bat");
   assert.ok(line.includes("WIN 72%"), "the away player's running odds are the home team's inverted");
   assert.ok(gameLogLine(pa, "home").includes("WIN 28%"), "the home player reads them straight");
 
-  // A steal throws one die against the runner's speed, and still lands you
-  // somewhere on the win-probability curve.
+  // A steal throws one die, and it belongs to the runner. The arm on the mound
+  // did not beat him, so he is not in the row at all.
   const steal = {
     type: "steal",
     inning: 5,
@@ -1806,12 +1810,10 @@ test("the game log shows the dice and the running win probability", async () => 
     playDetails: { kind: "steal", stealAttempt: { runner: "Dee Gordon", roll: 13, fielding: 5, total: 18, target: 19, safe: true } }
   };
   const stealLine = gameLogLine(steal, "home");
-  assert.ok(stealLine.includes("THROW: 13 VS SPD: 19"), "the throw shows its roll against the runner's speed");
+  const stealText = stealLine.replace(/<[^>]+>/g, "");
+  assert.match(stealText, /D\.GORDON \(13\)/, "the runner carries the throw he beat");
   assert.ok(stealLine.includes("WIN 60%"), "and the odds it left you at");
-  assert.ok(!stealLine.includes("PITCH"), "no pitch die was thrown");
-  // A steal is the runner's business — the arm on the mound did not beat him.
-  assert.ok(stealLine.includes("D.GORDON"), "the runner is the actor");
-  assert.ok(!stealLine.includes(" v "), "and no pitcher is set against him");
+  assert.ok(!stealText.includes(" v "), "no pitcher is set against him");
 
   const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");
   assert.ok(!pen.includes("WIN"), "a substitution rolls nothing and moves no odds");

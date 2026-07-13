@@ -54,40 +54,38 @@ function situationTag(event) {
   return `<span class="gq-dim">${event.outsBefore}o</span>${miniDiamondHtml(event.basesBefore)} `;
 }
 
-// The dice behind the call, read in the order the tabletop rolls them: the
-// PITCH die plus the pitcher's (fatigue-docked) control decides whose chart is
-// live, then the SWING die reads off that chart. A steal throws only the one.
-function rollsTag(event) {
-  const steal = event.playDetails?.stealAttempt;
-  if (typeof steal?.roll === "number") {
-    return `THROW: ${steal.roll} VS SPD: ${steal.target}`;
-  }
-  if (typeof event.resultRoll !== "number") return "";
-  if (typeof event.controlRoll !== "number") return `SWING: ${event.resultRoll}`;
-  return `PITCH: ${event.controlRoll} VS SWING: ${event.resultRoll}`;
-}
-
 // The running number: YOUR odds of winning once the play is in the books —
 // the level, where the WPA beside it is only the step.
 function winProbTag(event, playerSide) {
   if (event.wpAfter == null) return "";
   const mine = playerSide === "home" ? event.wpAfter : 1 - event.wpAfter;
-  return `WIN ${Math.round(mine * 100)}%`;
+  return `<span class="gq-dim">WIN ${Math.round(mine * 100)}%</span>`;
 }
 
-// One play-by-play row: inning, the base-out situation, actor, result, score
-// when it changed, and the play's WPA from the PLAYER'S side (a big opponent
-// rally reads negative). Under it, dim, the dice that decided the play and the
-// win probability they left you at.
+// A man in the duel: his name, hoverable, with the die he threw beside it. The
+// dice ride with the men who rolled them rather than queueing on a second line
+// — a plate appearance is one event, and it reads as one row.
+function manTag(name, id, roll) {
+  const die = typeof roll === "number" ? ` <span class="gq-dim">(${roll})</span>` : "";
+  return `<span${id ? ` data-card-id="${escapeHtml(id)}"` : ""}>${escapeHtml(shortName(name))}</span>${die}`;
+}
+
+// One play-by-play row, and it IS one row: the inning, the base-out state, the
+// two men with the dice they threw, the call, the score, the swing it made, and
+// the odds it left you at. The dice used to queue on a second line under all
+// this, which doubled the height of the log to say what fits beside the names.
+//
+// The arm leads, the way the tabletop plays it: he throws first and his die
+// decides whose chart the swing is read off. A steal is the runner's business —
+// the arm on the mound is not who beat him, so he is not in the row.
 export function gameLogLine(event, playerSide) {
   const inning = `${event.half === "top" ? "T" : "B"}${event.inning}`;
   if (event.type === "pitching-change") {
     return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.team))} GO TO THE PEN: ${escapeHtml(shortName(event.pitcher))}</span>`;
   }
   const isSteal = event.type === "steal";
-  const actor = isSteal
-    ? event.playDetails?.stealAttempt?.runner ?? event.batter
-    : event.batter;
+  const steal = event.playDetails?.stealAttempt;
+  const actor = isSteal ? steal?.runner ?? event.batter : event.batter;
   const battingSide = event.half === "top" ? "away" : "home";
   const wpa = battingSide === playerSide ? event.wpa : -(event.wpa ?? 0);
   // Every row carries the score, read from the player's side; scoring plays
@@ -95,19 +93,14 @@ export function gameLogLine(event, playerSide) {
   const npcSide = playerSide === "home" ? "away" : "home";
   const scoreText = event.scoreAfter ? `${event.scoreAfter[playerSide]}-${event.scoreAfter[npcSide]}` : "";
   const score = scoreText ? (event.runs > 0 ? ` <b>${scoreText}</b>` : ` <span class="gq-dim">${scoreText}</span>`) : "";
-  const detail = [rollsTag(event), winProbTag(event, playerSide)].filter(Boolean).join(" &middot; ");
-  // A plate appearance is two men, not one, so the row names them both — and
-  // both float their card on hover, the way everyone else in the game does.
-  // A steal is the runner's business; the arm is not who beat him.
-  const man = (name, id) =>
-    `<span${id ? ` data-card-id="${escapeHtml(id)}"` : ""}>${escapeHtml(shortName(name))}</span>`;
-  const bat = man(actor, isSteal ? null : event.batterId);
-  const arm = !isSteal && event.pitcher
-    ? ` <span class="gq-dim">v</span> ${man(event.pitcher, event.pitcherId)}`
-    : "";
-  const play = `${inning} ${situationTag(event)}${bat}${arm} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
-  if (!detail) return play;
-  return `<span class="gq-log-row">${play}<span class="gq-log-detail gq-dim">${detail}</span></span>`;
+  const duel = isSteal
+    ? manTag(actor, event.batterId, steal?.roll)
+    : `${manTag(event.pitcher, event.pitcherId, event.controlRoll)} <span class="gq-dim">v</span> ${
+        manTag(actor, event.batterId, event.resultRoll)
+      }`;
+  return `${inning} ${situationTag(event)}${duel} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)} ${
+    winProbTag(event, playerSide)
+  }`;
 }
 
 // ---- Stars of the game -------------------------------------------------------
@@ -234,7 +227,7 @@ export const gameStatsScreen = {
     let body;
     if (logView) {
       const rows = gameLogMenuRows(app);
-      body = menuHtml(rows, clampIndex(app.screen.index ?? 0, rows.length));
+      body = menuHtml(rows, clampIndex(app.screen.index ?? 0, rows.length), { className: "gq-log-list" });
     } else {
       const rows = gameStatRows(app);
       body = sectionedMenu(rows, clampIndex(app.screen.index ?? 0, rows.length));

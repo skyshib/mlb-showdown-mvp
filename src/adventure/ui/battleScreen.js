@@ -283,7 +283,9 @@ function renderGameLog(app, battle, trainer) {
     <div class="gq-topbar"><span>GAME LOG &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
     ${winProbChartHtml(battle, index)}
     <div class="gq-body"><div class="gq-frame gq-scroll">${
-      rows.length ? menuHtml(rows, index) : `<p class="gq-dim">NO PLAYS YET. GO MAKE SOME HISTORY.</p>`
+      rows.length
+        ? menuHtml(rows, index, { className: "gq-log-list" })
+        : `<p class="gq-dim">NO PLAYS YET. GO MAKE SOME HISTORY.</p>`
     }</div></div>
     <div class="gq-textbox"><p class="gq-dim">THE LINE IS YOUR WIN ODDS, PLAY BY PLAY &mdash; TOUCH IT TO JUMP TO THE PLAY. X to go back.</p></div>
   </div>`;
