@@ -1734,6 +1734,12 @@ function renderDraft() {
   // so a palette hung off the dispatcher alone never runs for the screen that
   // most needs it.
   applyFranchisePalette(state.universe);
+  // Typing into the card search re-renders the draft on every keystroke, and a
+  // re-render replaces every node on the page — so the input the letter had just
+  // gone into was thrown away, focus and caret with it, and the next letter had
+  // nowhere to land. That is the whole reason the search only ever took ONE
+  // letter. Remember where the caret was and put it back.
+  const typing = captureTypingFocus();
   const draft = state.draft;
   reactToDraftChange(draft);
   captureSealedBids();
@@ -1862,8 +1868,33 @@ function renderDraft() {
   ${renderRosterDock(draft, dockViewerId)}`;
 
   restoreSealedBids();
+  restoreTypingFocus(typing);
   bindDraftActions();
   pickClockTick();
+}
+
+// The field the caret was in when the page was rebuilt under it, and where in
+// the text it was sitting. Keyed on the filter's name rather than the node,
+// because the node itself does not survive the render.
+function captureTypingFocus() {
+  const active = document.activeElement;
+  const key = active?.dataset?.filter;
+  if (!key) return null;
+  // Only text fields have a caret to keep; a select just wants its focus back.
+  const caret = typeof active.setSelectionRange === "function" && active.selectionStart !== null
+    ? { start: active.selectionStart, end: active.selectionEnd }
+    : null;
+  return { key, caret };
+}
+
+function restoreTypingFocus(typing) {
+  if (!typing) return;
+  const field = document.querySelector(`[data-filter="${typing.key}"]`);
+  if (!field) return;
+  field.focus();
+  if (typing.caret && typeof field.setSelectionRange === "function") {
+    field.setSelectionRange(typing.caret.start, typing.caret.end);
+  }
 }
 
 // Who owns a card, for the greyed-out rows on the auction board. Null while it
@@ -5207,11 +5238,20 @@ function bigBoard(manager, draft) {
   return (state.starred[manager.id] ?? [])
     .map((id) => byId.get(id))
     .filter(Boolean)
-    .map((player) => ({
-      player,
-      gone: draft.pickedIds.has(player.id),
-      legal: canPickPlayer(draft, manager, player).ok
-    }));
+    .map((player) => {
+      const legality = canPickPlayer(draft, manager, player);
+      return {
+        player,
+        gone: draft.pickedIds.has(player.id),
+        legal: legality.ok,
+        // Keep the REASON, not just the verdict. "No slot" was a lie by
+        // omission: a pick is refused for several different reasons — your
+        // lineup is full, you have to keep slots back for pitchers, the league
+        // would run short — and being told the wrong one sends you hunting for
+        // a bug in the rule that is not the rule that stopped you.
+        reason: legality.reason
+      };
+    });
 }
 
 // The top card on a manager's board that he could actually take right now.
@@ -5735,7 +5775,7 @@ function renderBigBoard(manager, draft) {
       const status = entry.gone
         ? `<span class="board-status gone">Drafted</span>`
         : !entry.legal
-          ? `<span class="board-status blocked">No slot</span>`
+          ? `<span class="board-status blocked" title="${escapeHtml(entry.reason)}">${escapeHtml(entry.reason)}</span>`
           : player.id === nextUp?.id
             ? `<span class="board-status next">Next up</span>`
             : "";
