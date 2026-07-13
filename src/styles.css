@@ -1832,10 +1832,30 @@ button.roster-slot[draggable="true"]:active {
   margin-bottom: 12px;
 }
 
+/* The controls sit on one line and wrap when they run out of room. It used to be
+   four fixed columns, which had no seat for the watchlist button and shunted the
+   whole row sideways the moment one appeared. */
 .filters {
-  display: grid;
-  grid-template-columns: 180px 104px 132px minmax(180px, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 10px;
+}
+
+.filters > label {
+  min-width: 0;
+}
+
+.filter-position {
+  flex: 0 0 104px;
+}
+
+.filter-sort {
+  flex: 0 0 150px;
+}
+
+.filter-search {
+  flex: 1 1 180px;
 }
 
 .type-filter {
@@ -1864,6 +1884,107 @@ button.roster-slot[draggable="true"]:active {
 .type-pill.active {
   background: var(--accent);
   color: white;
+}
+
+/* ---- the watchlist ----
+   A star is a manager's private note about a card he is watching. It marks the
+   row without shouting: the board is still a board, not a wishlist. */
+.star-cell {
+  width: 30px;
+  padding-right: 0 !important;
+}
+
+.star-toggle {
+  min-height: 0;
+  width: 26px;
+  padding: 2px 0 3px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--hairline);
+  font-family: var(--display);
+  font-size: 17px;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.star-toggle:hover {
+  background: transparent;
+  color: var(--accent);
+}
+
+.star-toggle.starred {
+  color: var(--accent);
+}
+
+.star-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* A watched card carries a red edge down its left side — enough to catch the
+   eye as the board scrolls, not enough to outrank a card that has sold. */
+.player-table tr.starred-row td {
+  background: rgb(184 53 46 / 0.06);
+}
+
+.player-table tr.starred-row .star-cell {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* The filter names its owner: at a shared screen the list belongs to whoever is
+   on the clock, not to whoever is holding the mouse. */
+.star-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: end;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 2px solid var(--navy);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--navy);
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.star-filter:hover {
+  background: var(--sheet);
+  color: var(--accent-dark);
+}
+
+.star-filter.active {
+  border-color: var(--navy);
+  background: var(--accent);
+  color: var(--sheet);
+}
+
+.star-filter-mark {
+  font-style: normal;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.star-filter-count {
+  padding: 1px 6px 2px;
+  background: var(--navy);
+  color: var(--sheet);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.star-filter.active .star-filter-count {
+  background: var(--sheet);
+  color: var(--accent-dark);
 }
 
 .target-row {
@@ -1958,22 +2079,14 @@ button.roster-slot[draggable="true"]:active {
   background: var(--panel);
 }
 
-.player-table td:nth-child(2) {
+.player-table td.player-cell {
   min-width: 130px;
 }
 
-/* The card's own numbers carry the weight: the detail cells and points. The
-   two tables count their columns differently — a hitter carries pos/OB/speed/
-   field, a pitcher role/CTRL/IP — so each names its own. */
-.hitter-table td:nth-child(3),
-.hitter-table td:nth-child(4),
-.hitter-table td:nth-child(5),
-.hitter-table td:nth-child(6),
-.hitter-table td:nth-child(7),
-.pitcher-table td:nth-child(3),
-.pitcher-table td:nth-child(4),
-.pitcher-table td:nth-child(5),
-.pitcher-table td:nth-child(6),
+/* The card's own numbers carry the weight. These say which cells they are
+   rather than counting columns: the two tables hold different ones, and the
+   star column shifts every index when it appears. */
+.player-table td.card-stat,
 .player-table .chart-range-cell {
   font-weight: 800;
   white-space: nowrap;

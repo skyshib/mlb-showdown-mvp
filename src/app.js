@@ -120,7 +120,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260712-enamel-4";
+} from "./ui/render.js?v=20260712-star";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -556,12 +556,17 @@ function defaultState() {
     view: null,
     selectedGameIndex: 0,
     selectedTeamName: null,
+    // Each manager's watchlist, keyed by manager id: the cards they are keeping
+    // an eye on. It belongs to whoever is on the clock, so the list follows the
+    // draft around the table.
+    starred: {},
     filters: {
       type: "hitter",
       position: "all",
       sort: "points",
       sortDirection: "desc",
-      search: ""
+      search: "",
+      starredOnly: false
     }
   };
 }
@@ -1514,6 +1519,12 @@ function renderDraft() {
       </div>
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
+        starred: watchlistOwner() ? starredIds() : null,
+        // An empty board under the watchlist filter means the list is empty, not
+        // that the deck is — say which.
+        emptyMessage: state.filters.starredOnly
+          ? `${watchlistOwner()?.name ?? "This manager"} hasn't starred any ${state.filters.type === "pitcher" ? "pitchers" : "hitters"} yet. Tap a star to start a list.`
+          : undefined,
         action: auction ? "nominate" : "pick",
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
         sort: state.filters.sort,
@@ -1771,6 +1782,24 @@ function bindDraftActions() {
     const lineupSlot = event.target.closest("[data-lineup-slot]");
     if (lineupSlot) {
       handleLineupSlotClick(lineupSlot);
+      return;
+    }
+
+    // Starring is a note to yourself, not a move in the draft: it changes no
+    // turn, sends nothing to the room, and costs nobody their card.
+    const starButton = event.target.closest("button[data-action='toggle-star']");
+    if (starButton) {
+      toggleStar(starButton.dataset.playerId);
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const starFilter = event.target.closest("button[data-action='toggle-starred-only']");
+    if (starFilter) {
+      state.filters.starredOnly = !state.filters.starredOnly;
+      saveState();
+      renderDraft();
       return;
     }
 
@@ -4452,23 +4481,43 @@ function renderFilters() {
     ["hitter", "Hitters"],
     ["pitcher", "Pitchers"]
   ];
+  // The watchlist button names its owner, because at a shared screen the list on
+  // the board belongs to whoever is on the clock — not to whoever is holding the
+  // mouse. It only appears when there is somebody to own it.
+  // The count is what is still gettable. A card that has been drafted stays on
+  // the manager's list — undo a pick and it comes back — but it is nothing he
+  // can act on, so it does not pad the number on the button.
+  const owner = watchlistOwner();
+  const list = owner ? (state.starred[owner.id] ?? []) : [];
+  const starCount = state.draft
+    ? list.filter((id) => !state.draft.pickedIds.has(id)).length
+    : list.length;
+  const starFilter = owner
+    ? `<button type="button" class="star-filter${state.filters.starredOnly ? " active" : ""}" data-action="toggle-starred-only" aria-pressed="${state.filters.starredOnly}" title="${state.filters.starredOnly ? "Show every card" : `Show only the cards ${owner.name} is watching`}">
+        <span class="star-filter-mark">${starCount ? "★" : "☆"}</span>
+        <span>${escapeHtml(owner.name)}'s list</span>
+        ${starCount ? `<span class="star-filter-count">${starCount}</span>` : ""}
+      </button>`
+    : "";
+
   return `<div class="filters">
     <div class="type-filter" role="group" aria-label="Player type">
       ${typeOptions.map(([value, label]) => `<button type="button" class="type-pill ${state.filters.type === value ? "active" : ""}" data-filter="type" data-filter-value="${value}">${label}</button>`).join("")}
     </div>
-    <label>
+    ${starFilter}
+    <label class="filter-position">
       Position
       <select data-filter="position">
         ${positions.map((position) => `<option value="${position}" ${state.filters.position === position ? "selected" : ""}>${position}</option>`).join("")}
       </select>
     </label>
-    <label>
+    <label class="filter-sort">
       Sort
       <select data-filter="sort">
         ${displayedSortOptions.map(([value, label]) => `<option value="${value}" ${state.filters.sort === value ? "selected" : ""}>${label}</option>`).join("")}
       </select>
     </label>
-    <label>
+    <label class="filter-search">
       Search
       <input data-filter="search" value="${escapeHtml(state.filters.search)}" placeholder="name or position" />
     </label>
@@ -4507,10 +4556,61 @@ function upcomingManagers(draft, count) {
   return managers;
 }
 
+// ---- the watchlist ----
+//
+// A star is a private note a manager makes to himself: the cards he is watching
+// while the board moves. It is not a claim on anything — starring a card does
+// not hold it, and anyone else can still take it.
+//
+// The list belongs to a manager, not to the room, so the board shows whoever's
+// turn it is: online that is the seat you are sitting in, and at a shared screen
+// it is the manager on the clock, which is the person actually looking at it.
+// Nobody's stars are sent to the room server.
+function normalizeStarred(value) {
+  if (!value || typeof value !== "object") return {};
+  const clean = {};
+  for (const [managerId, ids] of Object.entries(value)) {
+    if (!Array.isArray(ids)) continue;
+    const list = ids.filter((id) => typeof id === "string");
+    if (list.length) clean[managerId] = [...new Set(list)];
+  }
+  return clean;
+}
+
+// Whose stars the board is showing, or null when nobody owns them — a spectator
+// online, or a finished draft with nobody left on the clock.
+function watchlistOwner() {
+  const draft = state.draft;
+  if (!draft) return null;
+  if (state.online) {
+    if (!state.online.managerId) return null;
+    return draft.managers.find((manager) => manager.id === state.online.managerId) ?? null;
+  }
+  return currentManager(draft);
+}
+
+function starredIds() {
+  const owner = watchlistOwner();
+  if (!owner) return new Set();
+  return new Set(state.starred[owner.id] ?? []);
+}
+
+function toggleStar(playerId) {
+  const owner = watchlistOwner();
+  if (!owner) return;
+  const list = new Set(state.starred[owner.id] ?? []);
+  if (list.has(playerId)) list.delete(playerId);
+  else list.add(playerId);
+  if (list.size) state.starred[owner.id] = [...list];
+  else delete state.starred[owner.id];
+}
+
 function filteredPlayers(players) {
   const search = state.filters.search.trim().toLowerCase();
+  const starred = state.filters.starredOnly ? starredIds() : null;
   return players.filter((player) => {
     if (player.kind !== state.filters.type) return false;
+    if (starred && !starred.has(player.id)) return false;
     if (state.filters.position !== "all" && !matchesPositionFilter(player, state.filters.position)) return false;
     if (search && !`${player.name} ${player.team ?? ""} ${playerPosition(player)} ${player.kind}`.toLowerCase().includes(search)) return false;
     return true;
@@ -4721,6 +4821,7 @@ function reviveState(value) {
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
     maskBids: Boolean(value.maskBids),
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
+    starred: normalizeStarred(value.starred),
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),

@@ -20,12 +20,17 @@ export function playerPower(player) {
 
 export function renderPlayerTable(players, options = {}) {
   if (!players.length) {
-    return `<p class="empty">No matching players.</p>`;
+    return `<p class="empty">${escapeHtml(options.emptyMessage ?? "No matching players.")}</p>`;
   }
   const mode = options.mode ?? "hitter";
   const outcomes = mode === "pitcher" ? PITCHER_OUTCOMES : HITTER_OUTCOMES;
+  // The watchlist only has an owner when somebody is on the clock, so a
+  // spectator's board simply has no star column to click.
+  const starred = options.starred ?? null;
+  const starHeader = starred ? [{ label: "" }] : [];
   const headers = mode === "pitcher"
     ? [
+        ...starHeader,
         { label: "" },
         { label: "Player", sort: "name" },
         { label: "Role", sort: "position" },
@@ -35,6 +40,7 @@ export function renderPlayerTable(players, options = {}) {
         ...outcomes.map((outcome) => ({ label: outcome, sort: `chart:${outcome}` }))
       ]
     : [
+        ...starHeader,
         { label: "" },
         { label: "Player", sort: "name" },
         { label: "Pos", sort: "position" },
@@ -58,21 +64,26 @@ export function renderPlayerTable(players, options = {}) {
           ? `<button class="small" data-action="${options.action}" data-player-id="${player.id}" ${legality.ok ? "" : "disabled"} title="${escapeHtml(legality.reason)}">${legality.ok ? (options.label ?? "Pick") : "Blocked"}</button>`
           : "";
       const detailCells = player.kind === "pitcher"
-        ? `<td>${escapeHtml(player.role)}</td>
-        <td class="num">${player.control}</td>
-        <td class="num">${player.ip}</td>`
-        : `<td>${escapeHtml(positionsLabel(player))}</td>
-        <td class="num">${player.onBase}</td>
-        <td class="num">${formatSpeed(player.speed)}</td>
-        <td class="num">${escapeHtml(fieldingLabel(player))}</td>`;
-      const rowClass = ["draft-player-row", owner ? "sold-row" : "", onBlock ? "on-block-row" : ""]
+        ? `<td class="card-stat">${escapeHtml(player.role)}</td>
+        <td class="card-stat num">${player.control}</td>
+        <td class="card-stat num">${player.ip}</td>`
+        : `<td class="card-stat">${escapeHtml(positionsLabel(player))}</td>
+        <td class="card-stat num">${player.onBase}</td>
+        <td class="card-stat num">${formatSpeed(player.speed)}</td>
+        <td class="card-stat num">${escapeHtml(fieldingLabel(player))}</td>`;
+      const isStarred = starred ? starred.has(player.id) : false;
+      const starCell = starred
+        ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button></td>`
+        : "";
+      const rowClass = ["draft-player-row", owner ? "sold-row" : "", onBlock ? "on-block-row" : "", isStarred ? "starred-row" : ""]
         .filter(Boolean)
         .join(" ");
       return `<tr class="${rowClass}">
+        ${starCell}
         <td>${action}</td>
-        <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
+        <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
         ${detailCells}
-        <td class="num">${player.points}</td>
+        <td class="card-stat num">${player.points}</td>
         ${renderOutcomeCells(player, outcomes)}
       </tr>`;
     })
