@@ -4,10 +4,11 @@ import {
   FRANCHISES,
   UNIVERSES,
   buildDraftPool,
+  deckFromIds,
   decadeLabel,
   setUniverse,
   universeConfig
-} from "./data/universes.js?v=20260711-shared-universes";
+} from "./data/universes.js?v=20260712-pinned-decks";
 import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
 import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
@@ -659,10 +660,15 @@ function openRoom(roomId, room) {
 }
 
 function rebuildOnlineDraft(room) {
-  const pool = buildDraftPool(state.universe, room.seed, {
-    nomination: state.nomination,
-    managerCount: room.managers.length
-  });
+  // The board is the one the ROOM dealt, not one this browser deals for itself.
+  // Re-dealing from the seed asks every client to reproduce a deal that only
+  // holds while nobody touches the dealing code — and the room outlives that.
+  const pool = room.deck?.length
+    ? deckFromIds(state.universe, room.seed, room.deck)
+    : buildDraftPool(state.universe, room.seed, {
+      nomination: state.nomination,
+      managerCount: room.managers.length
+    });
   state.draft = createDraft(
     room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
     pool,

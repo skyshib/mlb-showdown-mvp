@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
-import { buildDraftPool, universeConfig } from "../src/data/universes.js";
+import { buildDraftPool, deckFromIds, universeConfig } from "../src/data/universes.js";
 import {
   applyDraftAction,
   auctionReviewComplete,
@@ -55,7 +55,13 @@ const MIME_TYPES = {
 export function createOnlineServer(options = {}) {
   const dataDir = options.dataDir ?? process.env.ROOMS_DIR ?? join(root, "data", "rooms");
   const store = { dataDir, rooms: loadRooms(dataDir), hallOfFame: loadHallOfFameFile(dataDir) };
-  for (const room of store.rooms.values()) scheduleRoomTimer(store, room);
+  for (const room of store.rooms.values()) {
+    scheduleRoomTimer(store, room);
+    if (room.unpinnedDeck) {
+      room.unpinnedDeck = false;
+      persistRoom(store, room);
+    }
+  }
 
   const server = createServer(async (request, response) => {
     try {
@@ -118,6 +124,10 @@ function roomPool(room) {
         : buildRealDraftPool(room.seed)
       : buildFictionalDraftPool(room.seed);
   }
+  // A room that wrote down its deck deals from THAT deck, never from the seed
+  // again. Re-dealing trusts the deal to be the same tomorrow as it was the
+  // night the room opened, and it isn't: the deal is code, and code changes.
+  if (room.deck?.length) return deckFromIds(room.universe, room.seed, room.deck);
   return buildDraftPool(room.universe, room.seed, {
     nomination: room.nomination,
     managerCount: room.managerCount
@@ -131,13 +141,15 @@ function reviveRoom(saved) {
   const realPool = saved.realPool === "mariners" ? "mariners" : "stars";
   const draftType = saved.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && saved.nomination === "random" ? "random" : "manual";
+  const savedDeck = Array.isArray(saved.deck) && saved.deck.length ? saved.deck : null;
   const pool = roomPool({
     universe,
     seed: saved.seed,
     poolMode: saved.poolMode,
     realPool,
     nomination,
-    managerCount: managerNames.length
+    managerCount: managerNames.length,
+    deck: savedDeck
   });
   const auctionBudget = draftType === "auction"
     ? normalizeAuctionBudget(saved.auctionBudget, saved.rosterSize)
@@ -162,6 +174,11 @@ function reviveRoom(saved) {
     seed: saved.seed,
     rosterSize: saved.rosterSize,
     universe,
+    // A room saved before decks were written down pins the one it just revived
+    // with: that board is the best record of itself that survives, and pinning
+    // it now means the next change to the deal cannot orphan this room too.
+    deck: universe ? savedDeck ?? pool.map((card) => card.id) : null,
+    unpinnedDeck: Boolean(universe) && !savedDeck,
     poolMode: saved.poolMode === "real" ? "real" : "random",
     realPool,
     pickTimer: normalizePickTimerSeconds(saved.pickTimer),
@@ -189,6 +206,7 @@ function persistRoom(store, room) {
     seed: room.seed,
     rosterSize: room.rosterSize,
     universe: room.universe,
+    deck: room.deck ?? null,
     poolMode: room.poolMode,
     realPool: room.realPool,
     pickTimer: room.pickTimer,
@@ -452,6 +470,8 @@ async function createRoom(store, request, response) {
     seed,
     rosterSize,
     universe,
+    // The board this room dealt, written down on the night it dealt it.
+    deck: pool.map((card) => card.id),
     pickTimer,
     draftType,
     nomination,
@@ -902,6 +922,10 @@ function roomSnapshot(room, port = null) {
     seed: room.seed,
     rosterSize: room.rosterSize,
     universe: room.universe ?? null,
+    // The room deals its board to every client. Left to re-deal from the seed a
+    // client runs whatever deal ITS copy of the code knows, which is not always
+    // the deal the room was opened with.
+    deck: room.deck ?? null,
     poolMode: room.poolMode,
     realPool: room.realPool ?? "stars",
     pickTimer: room.pickTimer ?? 0,

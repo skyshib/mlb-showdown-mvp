@@ -394,6 +394,22 @@ export function buildDraftPool(mode, seed, options = {}) {
   return dealDraftDeck(seed);
 }
 
+// A deck that was already dealt, rebuilt card for card from the ids it dealt.
+// The seed does not remember a board — the CODE that dealt it does, and that
+// code moves: retune a quota, stop the draw favouring the top of the ladder,
+// and the same seed deals a different eighteen dozen cards. A saved room whose
+// board is re-dealt from its seed comes back holding cards it never held, and
+// its own action log then nominates a card that is no longer on it. So a room
+// records the cards it dealt, and those ids outrank the seed for ever after.
+export function deckFromIds(mode, seed, ids) {
+  setUniverse(seed, mode, { priceNoise: false });
+  return ids.map((id) => {
+    const card = cardById(id);
+    if (!card) throw new Error(`Deck card ${id} is not in the ${mode} set`);
+    return card;
+  });
+}
+
 // The deck's shape is a constant of the quota table, so the setup screen can
 // promise a manager limit without dealing a card.
 export const DECK_SIZE = DECK_QUOTAS.reduce((sum, [, quota]) => sum + quota, 0);

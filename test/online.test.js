@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
-import { buildDraftPool } from "../src/data/universes.js";
+import { buildDraftPool, deckFromIds, setUniverse, universePool } from "../src/data/universes.js";
 import { applyDraftAction, createDraft, currentManager } from "../src/rules/draft.js";
 
 async function startServer(t, dataDir) {
@@ -270,6 +270,60 @@ test("online rooms draft any card set, and the client rebuilds the same deck", a
   );
   for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
   assert.equal(replica.managers[0].roster.length, 1);
+});
+
+// Room 69c5c6 died exactly here. It was dealt one evening, and half an hour
+// later the code that deals a board changed; its seed then dealt a deck that
+// did not hold the card its log had nominated, and the room could never be
+// opened again. A room's board is now its own record, not a thing recomputed
+// from the seed by whatever the dealing code happens to be today.
+test("a room deals the deck it recorded, not the deck its seed would deal today", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const first = await startServer(t, dataDir);
+  const created = await api(first, "POST", "/api/rooms", {
+    seed: "pinned-deck",
+    managers: ["Ana", "Bo"],
+    universe: "fictional"
+  });
+  assert.equal(created.status, 201);
+  const roomId = created.data.roomId;
+  // persistRoom writes async; give the chained write a beat to land.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+
+  const file = join(dataDir, `${roomId}.json`);
+  const saved = JSON.parse(await readFile(file, "utf8"));
+  assert.ok(saved.deck?.length, "a new room writes down the board it dealt");
+
+  // A card this seed's deal did NOT put on this board — the stand-in for every
+  // card that a future change to the deal would add to it or drop from it. The
+  // room holds this card for one reason: the room's own file says it does.
+  setUniverse("pinned-deck", "fictional", { priceNoise: false });
+  const dealt = new Set(saved.deck);
+  const stranger = universePool().find((card) => card.kind === "hitter" && !dealt.has(card.id));
+  assert.ok(stranger, "the universe runs deeper than the deck");
+
+  saved.deck = [...saved.deck, stranger.id];
+  saved.actions = [{ seq: 1, action: { type: "pick", playerId: stranger.id } }];
+  await writeFile(file, JSON.stringify(saved));
+
+  // A server that re-deals from the seed cannot replay that pick: the card is
+  // not on the board the seed deals, so the pick throws and the room is skipped
+  // on load — dead, and unopenable, which is precisely what went wrong before.
+  const second = await startServer(t, dataDir);
+  const room = await api(second, "GET", `/api/rooms/${roomId}`);
+  assert.equal(room.status, 200, "the room survives a deal that no longer holds its cards");
+  assert.ok(room.data.deck.includes(stranger.id));
+
+  // And the board the room hands its clients is the same board, so a client
+  // rebuilds the identical draft rather than dealing one of its own.
+  const replica = createDraft(
+    room.data.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
+    deckFromIds(room.data.universe, room.data.seed, room.data.deck),
+    room.data.rosterSize,
+    room.data.seed
+  );
+  for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
+  assert.deepEqual(replica.managers[0].roster.map((card) => card.id), [stranger.id]);
 });
 
 test("rooms survive a server restart with seats and turn state intact", async (t) => {
