@@ -583,11 +583,29 @@ if (warRoomMode) {
   window.addEventListener("pointerdown", unlockSounds, { once: true, capture: true });
   window.addEventListener("keydown", unlockSounds, { once: true, capture: true });
 }
-if (onlineRoomParam) {
-  bootOnlineRoom(onlineRoomParam);
-} else {
-  renderCurrentScreen();
-}
+// The first paint waits for the module to finish being a module.
+//
+// This line used to run here, in the middle of the file, which meant the first
+// render happened while the second half of the module did not exist yet. Every
+// `const` and `let` below this point is still in its temporal dead zone at that
+// moment — twelve of them — and a render that reaches one throws a
+// ReferenceError instead of drawing anything. Restoring a FINISHED draft did
+// exactly that: the results screen wants poolScaleCache, which is declared 4700
+// lines further down, and the page came up blank with "Cannot access
+// 'poolScaleCache' before initialization" and no way out but clearing storage.
+//
+// A microtask is enough. It runs the instant the module is evaluated, before the
+// browser has a chance to paint anything, so nothing is deferred that anyone can
+// see — but it runs AFTER the last declaration in the file, which is the whole
+// point. Moving the one variable would have fixed the one crash and left the
+// other eleven armed.
+queueMicrotask(() => {
+  if (onlineRoomParam) {
+    bootOnlineRoom(onlineRoomParam);
+  } else {
+    renderCurrentScreen();
+  }
+});
 
 // The TV board mirrors a same-browser draft through localStorage: the storage
 // event fires on writes from other tabs, and a slow poll covers same-tab and
