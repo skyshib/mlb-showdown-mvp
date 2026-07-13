@@ -1,5 +1,5 @@
-import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260713-o";
-import { cardPanelHtml } from "./cardFace.js?v=20260713-o";
+import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260713-r";
+import { cardPanelHtml } from "./cardFace.js?v=20260713-r";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
@@ -127,7 +127,7 @@ export function renderDraftHistoryTable(picks) {
         <td>${escapeHtml(manager.name)}</td>
         <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
         <td>${escapeHtml(playerPosition(player))}</td>
-        ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? price : "&mdash;"}</td>` : ""}
+        ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? `$${price.toLocaleString()}` : "&mdash;"}</td>` : ""}
         <td class="num">${playerPrimary(player)}</td>
         <td class="num">${player.points}</td>
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
@@ -142,7 +142,7 @@ export function renderDraftHistoryTable(picks) {
         <th>Manager</th>
         <th>Player</th>
         <th>Pos</th>
-        ${auction ? `<th class="num">Paid</th>` : ""}
+        ${auction ? `<th class="num">Paid ($)</th>` : ""}
         <th class="num">OB/CT</th>
         <th class="num">Pts</th>
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}

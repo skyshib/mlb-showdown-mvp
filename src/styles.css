@@ -44,6 +44,40 @@ main {
   background: var(--sheet);
 }
 
+/* The door to the adventure. It lives above the sheet rather than inside it
+   because the sheet is the draft — everything in there is a roster or a result,
+   and app.js owns all of it. A sibling of main is the one place a link can sit
+   and still be there after the next render.
+
+   Showdown Quest was unreachable from here for its whole life: two pages, no
+   thread between them, and you had to know the URL to find the game. */
+.quest-door {
+  width: min(1440px, calc(100vw - 32px));
+  margin: 16px auto -8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.quest-door a {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--sheet);
+  background: var(--navy);
+  border: var(--rule) solid var(--navy);
+  padding: 6px 14px;
+}
+
+.quest-door a:hover,
+.quest-door a:focus-visible {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 h1,
 h2,
 h3,
@@ -1354,11 +1388,55 @@ button.roster-slot[draggable="true"]:active {
   font-style: normal;
 }
 
+/* The board answers one question at a time and says which. */
+.heat-toggle {
+  display: inline-flex;
+  min-height: 0;
+  margin-right: 8px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  background: transparent;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.heat-toggle span {
+  padding: 3px 7px 4px;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  font-style: normal;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+}
+
+.heat-toggle span.on {
+  background: var(--navy);
+  color: var(--sheet);
+}
+
+.war-room .heat-toggle {
+  border-color: rgb(255 255 255 / 0.28);
+}
+
+.war-room .heat-toggle span {
+  color: rgb(255 255 255 / 0.6);
+}
+
+.war-room .heat-toggle span.on {
+  background: rgb(255 255 255 / 0.9);
+  color: #14161c;
+}
+
 .heat-bar {
   width: 130px;
   height: 8px;
   border-radius: 999px;
-  background: linear-gradient(90deg, hsl(215 72% 50%), hsl(288 72% 50%), hsl(360 72% 50%));
+  /* Cold, through a bright average, to hot — the same ramp the chips run on. */
+  background: linear-gradient(90deg, #2e68c4, #f0ede4 50%, #be2a28);
 }
 
 .dock-slots {
@@ -1412,9 +1490,11 @@ button.roster-slot[draggable="true"]:active {
 
 /* Heat coloring for all draft chips; lives after the base blocks so the
    gradient background wins the cascade. */
+/* On the page, the colour is the edge and a wash of the fill: these chips sit
+   among a great deal of reading, and a wall of saturated blocks would drown it. */
 .heat {
-  border-left-color: hsl(var(--heat-h, 215) 72% 46%);
-  background: hsl(var(--heat-h, 215) 68% 95.5%);
+  border-left-color: var(--heat-c, #2e68c4);
+  background: color-mix(in srgb, var(--heat-c, #2e68c4) 20%, #ffffff);
 }
 
 .dock-chip {
@@ -1830,9 +1910,12 @@ button.roster-slot[draggable="true"]:active {
   color: #7f918a;
 }
 
+/* On the wall, the colour is the cell. Nobody is reading a board from across a
+   room — they are looking for the hot squares, so the squares are hot. */
 .war-room .heat {
-  border-left-color: hsl(var(--heat-h, 215) 62% 54%);
-  background: hsl(var(--heat-h, 215) 34% 15%);
+  border-left-color: color-mix(in srgb, var(--heat-c, #2e68c4) 72%, #000000);
+  background: var(--heat-c, #2e68c4);
+  color: var(--heat-ink, #ffffff);
 }
 
 .section-head {
@@ -1977,6 +2060,8 @@ button.roster-slot[draggable="true"]:active {
   animation: war-clock-pulse 1.6s ease-in-out infinite;
 }
 
+/* The square brings its own ink, so a bone-white cell does not print white on
+   white. The meta line rides the same ink at three-quarters. */
 .war-cell-name {
   display: block;
   font-family: var(--display);
@@ -1985,7 +2070,7 @@ button.roster-slot[draggable="true"]:active {
   font-style: italic;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: #fff;
+  color: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1995,7 +2080,8 @@ button.roster-slot[draggable="true"]:active {
   display: block;
   margin-top: 1px;
   font-size: 10.5px;
-  color: rgb(255 255 255 / 0.6);
+  color: inherit;
+  opacity: 0.72;
   font-variant-numeric: tabular-nums;
 }
 

@@ -1,16 +1,16 @@
-import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260713-o";
-import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260713-o";
-import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js?v=20260713-o";
+import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260713-r";
+import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260713-r";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js?v=20260713-r";
 
 // "1973/3500 PT" under the cap; uncapped saves just count.
 export function pointsLabel(save) {
   const cap = pointCap(save);
   return Number.isFinite(cap) ? `${rosterPoints(save)}/${cap} PT` : `${rosterPoints(save)} PT &middot; UNCAPPED`;
 }
-import { dayWhimsy } from "../feats.js?v=20260713-o";
-import { validateRoster } from "../../rules/draft.js?v=20260713-o";
-import { buildNpcTeam } from "../npcTeams.js?v=20260713-o";
-import { startTrainerBattle } from "./battleScreen.js?v=20260713-o";
+import { dayWhimsy } from "../feats.js?v=20260713-r";
+import { validateRoster } from "../../rules/draft.js?v=20260713-r";
+import { buildNpcTeam } from "../npcTeams.js?v=20260713-r";
+import { startTrainerBattle } from "./battleScreen.js?v=20260713-r";
 
 export function rosterProblems(save) {
   const issues = validateRoster(managerFor(save));

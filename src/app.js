@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-o";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-r";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-o";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-o";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-o";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-o";
+} from "./ui/sounds.js?v=20260713-r";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-r";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-r";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-r";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-o";
+} from "./rules/draft.js?v=20260713-r";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-o";
+} from "./onlineClient.js?v=20260713-r";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-o";
-import { computeAwards } from "./rules/awards.js?v=20260713-o";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-o";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-o";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-o";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-o";
+} from "./rules/batch.js?v=20260713-r";
+import { computeAwards } from "./rules/awards.js?v=20260713-r";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-r";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-r";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-r";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-r";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-o";
+} from "./ui/render.js?v=20260713-r";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -650,6 +650,8 @@ function defaultState() {
     starred: {},
     // Up to three cards pinned side by side.
     compare: [],
+    // Whether an auction board colours by what a card cost or what it is worth.
+    heatBy: "price",
     // When the clock on the current pick runs out — published for the board on
     // the second screen, which cannot see this tab's memory.
     pickDeadline: null,
@@ -1353,9 +1355,9 @@ function renderSetup(setupError = "") {
             <span><strong>Random nomination</strong><small>${escapeHtml(randomNominationBlurb(state.managers.length))} Nobody nominates: a hidden queue deals the cards out in random order. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
           </label>
           <label class="auction-budget-field">
-            Budget per manager
+            Budget per manager ($)
             <input name="auctionBudget" type="number" min="${13 * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
-            <small>A strong 13-card roster adds up to roughly 5000 card points, so 5000 bids like the classic Showdown cap.</small>
+            <small>Dollars, not card points &mdash; a card's printed points are what it is worth, and this is what you have to spend. A strong 13-card roster runs to roughly 5000 points, so $5000 bids like the classic Showdown cap.</small>
           </label>
           <label class="auction-budget-field">
             Pool review
@@ -1766,7 +1768,7 @@ function cardOwnerTag(draft, player) {
     label: owner.name,
     title: price === null
       ? `${owner.name} has ${player.name}`
-      : `${owner.name} bought ${player.name} for ${price}`
+      : `${owner.name} bought ${player.name} for ${money(price)}`
   };
 }
 
@@ -1869,7 +1871,7 @@ function renderAuctionLotPanel(draft) {
         : null;
       return `<div class="lot-bidder ${waiting ? "" : "high-bidder"}">
         <strong>${escapeHtml(manager.name)}${manager.cpu ? ' <span class="cpu-tag">CPU</span>' : ""}</strong>
-        <span>${auctionBudget(draft, manager)} left &middot; max bid ${Math.max(0, auctionMaxBid(draft, manager))}${clock ? ` &middot; clock <span data-auction-clock data-manager-id="${escapeHtml(manager.id)}">${clock}</span>` : ""}</span>
+        <span>${money(auctionBudget(draft, manager))} left &middot; max bid ${money(Math.max(0, auctionMaxBid(draft, manager)))}${clock ? ` &middot; clock <span data-auction-clock data-manager-id="${escapeHtml(manager.id)}">${clock}</span>` : ""}</span>
         <em>${status}</em>
       </div>`;
     })
@@ -1956,7 +1958,7 @@ function renderLastSalePanel(draft) {
   const winner = draft.managers.find((manager) => manager.id === entry.managerId);
   if (!winner) return "";
   return `<section class="panel last-sale">
-    <p><strong>${escapeHtml(player.name)}</strong> sold to <strong>${escapeHtml(winner.name)}</strong> for <strong>${entry.price}</strong> — bids revealed: ${revealed}</p>
+    <p><strong>${escapeHtml(player.name)}</strong> sold to <strong>${escapeHtml(winner.name)}</strong> for <strong>${money(entry.price)}</strong> — bids revealed: ${revealed}</p>
   </section>`;
 }
 
@@ -2082,6 +2084,12 @@ function bindDraftActions() {
       }
       completeAuctionReview(state.draft, draftNow());
       afterLocalDraftAction();
+      return;
+    }
+    if (action === "heat-by") {
+      state.heatBy = button.dataset.heatBy === "points" ? "points" : "price";
+      saveState();
+      renderCurrentScreen();
       return;
     }
     if (action === "export-save") {
@@ -3968,7 +3976,7 @@ function renderRoster(manager, draft) {
   };
   const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
   const budgetLine = auction
-    ? ` &middot; ${auctionBudget(draft, manager)} left &middot; max bid ${draft.complete ? 0 : auctionMaxBid(draft, manager)}`
+    ? ` &middot; ${money(auctionBudget(draft, manager))} left &middot; max bid ${money(draft.complete ? 0 : auctionMaxBid(draft, manager))}`
     : "";
   // Nothing to count up to when the roster has no ceiling: a manager owns as
   // many cards as they bought, thirteen of which take the field.
@@ -4032,7 +4040,7 @@ function renderMiniRosterSlot(player, slotLabel, slotContext = {}) {
     <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
     <strong class="mini-slot-name player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
     <span class="mini-slot-meta">${escapeHtml(rosterSlotDescription(player, slotLabel))} | ${player.points} pts</span>
-    ${price !== undefined ? `<span class="mini-slot-price">${price}</span>` : ""}
+    ${price !== undefined ? `<span class="mini-slot-price">${money(price)}</span>` : ""}
   </div>`;
 }
 
@@ -4042,11 +4050,12 @@ function renderRecentPicks(draft) {
   if (!picks.length) return "";
   const auction = isAuctionDraft(draft);
   const heatScale = draftHeatScale(draft);
+  const prices = auction ? new Map(draftHistory(draft).map((pick) => [pick.player.id, pick.price])) : null;
   const items = picks
     .map(
-      (pick, index) => `<span class="recent-pick heat ${index === 0 ? "newest-pick" : ""}" style="${heatStyle(auction ? pick.price : pick.player.points, heatScale)}">
+      (pick, index) => `<span class="recent-pick heat ${index === 0 ? "newest-pick" : ""}" style="${heatStyle(heatValue(pick.player, heatScale, prices), heatScale)}">
         <strong>${escapeHtml(pick.player.name)}</strong>
-        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
+        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${money(pick.price)}` : ""}</em>
       </span>`
     )
     .join("");
@@ -4067,7 +4076,9 @@ function renderRecentPicks(draft) {
 // An auction has no rounds, so it does not get a grid. It gets its ticker, which
 // is the shape an auction actually has.
 function renderWarGrid(draft, history) {
+  // A snake draft has rounds and no dollars, so the grid is always the points.
   if (isAuctionDraft(draft)) return "";
+  const scale = draftHeatScale(draft);
   const seats = draft.managers;
   const rounds = draft.rosterSize;
   const byRound = new Map();
@@ -4090,7 +4101,7 @@ function renderWarGrid(draft, history) {
         if (!pick) {
           return `<td class="war-cell ${onClock ? "on-clock" : "empty"}">${onClock ? "ON THE CLOCK" : ""}</td>`;
         }
-        return `<td class="war-cell filled heat" style="${heatStyle(pick.player.points, draftHeatScale(draft))}">
+        return `<td class="war-cell filled heat" style="${heatStyle(pick.player.points, scale)}">
           <span class="war-cell-name">${escapeHtml(shortCardName(pick.player.name))}</span>
           <span class="war-cell-meta">${escapeHtml(playerPosition(pick.player))} &middot; ${pick.player.points}</span>
         </td>`;
@@ -4147,7 +4158,7 @@ function renderWarRoom() {
   const spotlightLabel = lotPlayer
     ? `ON THE BLOCK &middot; NOMINATED BY ${escapeHtml(draft.managers.find((m) => m.id === lot.nominatorId)?.name ?? "").toUpperCase()}`
     : lastPick
-      ? `LAST ${auction ? "SALE" : "PICK"} &middot; ${escapeHtml(lastPick.manager.name).toUpperCase()}${auction ? ` FOR ${lastPick.price}` : ""}`
+      ? `LAST ${auction ? "SALE" : "PICK"} &middot; ${escapeHtml(lastPick.manager.name).toUpperCase()}${auction ? ` FOR ${money(lastPick.price)}` : ""}`
       : "WAITING FOR THE FIRST PICK";
 
   const bidBoard = lot
@@ -4166,7 +4177,7 @@ function renderWarRoom() {
       return `<section class="war-team">
         <header>
           <h3>${escapeHtml(manager.name)}</h3>
-          <span>${auction && !draft.complete ? `${auctionBudget(draft, manager)} left &middot; max ${auctionMaxBid(draft, manager)} &middot; ` : ""}${points} pts</span>
+          <span>${auction && !draft.complete ? `${money(auctionBudget(draft, manager))} left &middot; max ${money(auctionMaxBid(draft, manager))} &middot; ` : ""}${points} pts</span>
         </header>
         ${renderWarTeamPositions(manager, auction, prices, heatScale)}
         ${needs ? `<footer>needs ${escapeHtml(needs)}</footer>` : ""}
@@ -4178,9 +4189,9 @@ function renderWarRoom() {
     .slice(-6)
     .reverse()
     .map(
-      (pick) => `<span class="recent-pick heat" style="${heatStyle(auction ? pick.price : pick.player.points, heatScale)}">
+      (pick) => `<span class="recent-pick heat" style="${heatStyle(heatValue(pick.player, heatScale, prices), heatScale)}">
         <strong>${escapeHtml(pick.player.name)}</strong>
-        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${pick.price}` : ""}</em>
+        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${money(pick.price)}` : ""}</em>
       </span>`
     )
     .join("");
@@ -4208,6 +4219,11 @@ function renderWarRoom() {
   </div>`;
   app.onclick = (event) => {
     if (event.target.closest("[data-action='toggle-sound']")) toggleSound();
+    const heat = event.target.closest("[data-action='heat-by']");
+    if (heat) {
+      state.heatBy = heat.dataset.heatBy === "points" ? "points" : "price";
+      renderWarRoom();
+    }
   };
   updateWarClock();
 }
@@ -4252,8 +4268,10 @@ function renderWarTeamPositions(manager, auction, prices, heatScale) {
       .sort((a, b) => (auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points));
     const chips = players
       .map((player) => {
-        const price = auction ? prices.get(player.id) : undefined;
-        return `<span class="war-pos-chip heat" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}">${escapeHtml(dockChipName(player))}${price !== undefined ? `<em>${price}</em>` : ""}</span>`;
+        const tag = auction
+          ? (heatBy() === "points" ? `${player.points}` : money(prices.get(player.id)))
+          : undefined;
+        return `<span class="war-pos-chip heat" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}">${escapeHtml(dockChipName(player))}${tag !== undefined ? `<em>${tag}</em>` : ""}</span>`;
       })
       .join("");
     return `<div class="war-pos${players.length ? "" : " war-pos-empty"}">
@@ -4327,15 +4345,25 @@ function leagueOpenGroups(draft) {
 // Blue-to-red heat scale over winning bids (card points in snake drafts).
 // Auction endpoints are fixed: 0 up to 15% of the starting budget, so colors
 // mean the same thing all draft and a max-out bid clamps red.
+// ---- dollars are not points ----
+//
+// An auction budget and a card's printed points were both bare numbers, and a
+// manager reading "480" on a chip had no way of knowing whether that was what a
+// card is worth or what somebody paid for it. They are different currencies and
+// they now look it: a card costs points, a bid costs dollars.
+function money(amount) {
+  return `$${Number(amount ?? 0).toLocaleString()}`;
+}
+
 function draftHeatScale(draft) {
   const auction = isAuctionDraft(draft);
-  if (auction) {
+  if (auction && heatBy() === "price") {
     const budget = draft.auction.budget ?? AUCTION_DEFAULT_BUDGET;
-    return { lo: 0, hi: Math.max(1, Math.round(budget * 0.15)), auction };
+    return { lo: 0, hi: Math.max(1, Math.round(budget * 0.15)), auction, by: "price" };
   }
   const points = draft.pool.map((player) => player.points).sort((a, b) => a - b);
   const lo = quantileOf(points, 0.1);
-  return { lo, hi: Math.max(quantileOf(points, 0.9), lo + 10), auction };
+  return { lo, hi: Math.max(quantileOf(points, 0.9), lo + 10), auction, by: "points" };
 }
 
 function quantileOf(sorted, q) {
@@ -4348,21 +4376,79 @@ function quantileOf(sorted, q) {
 }
 
 // Hue path 215 (cool blue) through purple to 360 (red).
+// ---- the heat scale ----
+//
+// It used to walk the hue wheel from blue to red, which passes through purple —
+// and a purple at fifteen per cent lightness on a black board is a colour you
+// cannot see, let alone rank. Every middling card came out the same murky
+// aubergine and the scale said nothing.
+//
+// A diverging ramp instead: cold blue, through a bright bone at the average, to
+// a hot red. The middle is the lightest point rather than the muddiest, so the
+// eye reads distance from average, which is the only thing the scale was ever
+// trying to say.
+// The ramp lives inside the function that uses it. A `const` at module scope
+// would sit in the temporal dead zone when the board paints itself on load —
+// this file renders a screen on its way down, long before its tail has run.
+function heatColor(t) {
+  const cold = [46, 104, 196];
+  const mid = [240, 237, 228];
+  const hot = [190, 42, 40];
+  const [from, to, local] = t < 0.5 ? [cold, mid, t / 0.5] : [mid, hot, (t - 0.5) / 0.5];
+  return [0, 1, 2].map((index) => Math.round(from[index] + (to[index] - from[index]) * local));
+}
+
+function heatHex([r, g, b]) {
+  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+// A bone-white cell cannot carry white lettering, and a deep blue one cannot
+// carry black. The colour brings its own ink.
+function readableInk(rgb) {
+  const [r, g, b] = rgb.map((channel) => {
+    const c = channel / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return luminance > 0.42 ? "#181510" : "#ffffff";
+}
+
 function heatStyle(value, scale) {
   if (value === undefined || value === null) return "";
   const t = Math.max(0, Math.min(1, (value - scale.lo) / Math.max(1, scale.hi - scale.lo)));
-  return `--heat-h:${Math.round(215 + 145 * t)}`;
+  const rgb = heatColor(t);
+  return `--heat-c:${heatHex(rgb)};--heat-ink:${readableInk(rgb)}`;
+}
+
+// In an auction a card carries two numbers — what it is worth, and what somebody
+// paid — and they are not the same story. What a manager wants to see depends on
+// what he is asking: "who is holding the good cards" is a question about points,
+// "who blew their budget" is a question about dollars. So the board answers
+// whichever one is asked, and says which it is answering.
+//
+// A snake draft has no dollars, so it has no question and no toggle.
+function heatBy() {
+  return state.heatBy === "points" ? "points" : "price";
 }
 
 function heatValue(player, scale, prices) {
-  return scale.auction ? prices?.get(player.id) : player.points;
+  if (!scale.auction) return player.points;
+  return heatBy() === "points" ? player.points : prices?.get(player.id);
 }
 
 function renderHeatLegend(scale) {
-  return `<span class="heat-legend" aria-label="Color scale for ${scale.auction ? "winning bids" : "card points"}">
-    <em>${scale.auction ? "bid" : "pts"} ${scale.lo}</em>
+  const dollars = scale.by === "price";
+  const show = (value) => (dollars ? money(value) : `${value}`);
+  const toggle = scale.auction
+    ? `<button type="button" class="heat-toggle" data-action="heat-by" data-heat-by="${dollars ? "points" : "price"}" title="Colour the board by ${dollars ? "what the cards are worth" : "what they cost"}">
+        <span class="${dollars ? "on" : ""}">$ paid</span><span class="${dollars ? "" : "on"}">pts</span>
+      </button>`
+    : "";
+  return `<span class="heat-legend" aria-label="Colour scale for ${dollars ? "winning bids" : "card points"}">
+    ${toggle}
+    <em>${dollars ? "" : "pts "}${show(scale.lo)}</em>
     <i class="heat-bar"></i>
-    <em>${scale.hi}+</em>
+    <em>${show(scale.hi)}+</em>
   </span>`;
 }
 
@@ -4408,7 +4494,7 @@ function renderDockBar(draft, manager, auction, prices, heatScale, { own = false
     .map((slot) => renderDockSlot(slot.player, slot.label, auction, prices, heatScale))
     .join("");
   const budget = auction
-    ? `<span class="dock-budget">${auctionBudget(draft, manager)} left${draft.complete ? "" : `<br />max ${auctionMaxBid(draft, manager)}`}</span>`
+    ? `<span class="dock-budget">${money(auctionBudget(draft, manager))} left${draft.complete ? "" : `<br />max ${money(auctionMaxBid(draft, manager))}`}</span>`
     : "";
   return `<div class="dock-bar${own ? " own-bar" : ""}">
     <span class="dock-team">${escapeHtml(manager.name)}${own && ownTag ? ` <em class="own-tag">${escapeHtml(ownTag)}</em>` : ""}</span>
@@ -4421,9 +4507,11 @@ function renderDockSlot(player, label, auction, prices, heatScale) {
   if (!player) {
     return `<span class="dock-slot empty-dock-slot"><small>${escapeHtml(label)}</small><span>open</span></span>`;
   }
-  const price = auction ? prices.get(player.id) : undefined;
+  const tag = auction
+    ? (heatBy() === "points" ? `${player.points} pts` : money(prices.get(player.id)))
+    : undefined;
   return `<span class="dock-slot heat player-name-preview" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}" tabindex="0" data-preview-id="dockslot-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">
-    <small>${escapeHtml(label)}${price !== undefined ? ` &middot; ${price}` : ""}</small>
+    <small>${escapeHtml(label)}${tag !== undefined ? ` &middot; ${tag}` : ""}</small>
     <span>${escapeHtml(dockChipName(player))}</span>
   </span>`;
 }
@@ -4491,7 +4579,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
       <div class="draft-metrics">
         <span>${queued ? `${draft.auction.queueIndex}/${queueTotal} lots called` : `${draft.pickNumber}/${totalPicks} ${auction ? "cards sold" : "picks made"}`}</span>
         ${queued ? `<span>${manager.roster.length} cards</span>` : ""}
-        ${auction ? `<span>${auctionBudget(draft, manager)} budget left</span>` : ""}
+        ${auction ? `<span>${money(auctionBudget(draft, manager))} budget left</span>` : ""}
         <span>${totalPoints} pts</span>
         <span>IF ${formatSignedNumber(fieldingSums.infield)}</span>
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
@@ -5832,6 +5920,7 @@ function reviveState(value) {
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],
+    heatBy: value.heatBy === "points" ? "points" : "price",
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
     filters,
     batchSorts,
