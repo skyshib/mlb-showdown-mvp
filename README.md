@@ -117,6 +117,16 @@ Implemented:
 - Interactive single games with the full decision set (steal, sacrifice bunt, intentional walk, pitching changes, send-or-hold) and a fast-forward autopilot that returns the wheel at the leverage moments.
 - Batch game simulator (`Sim 1000 games`): deterministic balanced matchup streams with win percentage, 162-game pace stats, per-player aggregate stats (AVG/OBP/SLG/OPS, RA/9, K/9, BB/9), and sim awards (MVP, ace, HR king).
 - Duplicate manager names are auto-suffixed so standings and stats never merge two managers.
+- A watchlist and a ranked big board per manager: star cards, put them in order, and an expired clock takes the top one still standing instead of guessing.
+- The board says what the roster still needs and greys the cards that fill none of it.
+- Cards pinned side by side, charts lined up by outcome and counted in faces of the die.
+- Computer managers with archetypes — slugger, ace-first, bargain hunter, positional purist — that visibly draft different teams.
+- A commissioner's whistle: pause a snake draft (the clock keeps its remaining time), and hand a stalled seat to the computer or back.
+- A draft-order lottery, drawn last seat first.
+- Instant draft grades when the last pick lands, and a recap naming the best value and the biggest reach, copyable as text.
+- Export and import a room as a save file.
+- A broadcast board for a second screen: the grid filling round by round, the live clock, and the pick landing with its card face.
+- A synthesised sound kit (your turn, a pick, the ten-second warning, a starred card sniped, the last pick) with a mute switch, plus a browser notification and title badge when the clock comes to you.
 
 Documented in more detail:
 
@@ -131,7 +141,8 @@ Not implemented yet:
 - Pinch hitting (there is no bench concept yet).
 - Official fielding checks beyond the simplified fielding sums currently used.
 - Full official-rule verification by edition.
-- Export/import save files.
+- Trades, in the draft or after it.
+- Keeper leagues carrying rosters from one draft to the next.
 
 Intentionally deprioritized for now:
 
@@ -140,8 +151,10 @@ Intentionally deprioritized for now:
 
 Known rough edges:
 
-- Saved drafts are only in local browser storage.
-- If you change ports, you are effectively using a different save slot.
+- A draft still lives in local browser storage by default; `Save room` writes it
+  to a file you can keep or carry, but there is no server-side save.
+- If you change ports, the browser's own save slot changes with it — the file
+  does not.
 - Generated cards are balanced for playability, not official card distribution accuracy.
 
 ## Project Layout
