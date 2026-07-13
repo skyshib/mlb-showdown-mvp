@@ -65,6 +65,31 @@ function darkenUntil(color, bg, target) {
   return "#000000";
 }
 
+// How far a color has to move, in either direction, before `target` clears —
+// and which way is nearer. Returned as {color, steps}, so the caller can take
+// whichever journey is shorter and keep the club as close to its own color as
+// the contrast will allow.
+function walkUntil(color, toward, ok) {
+  if (ok(color)) return { color, steps: 0 };
+  for (let step = 1; step <= 40; step += 1) {
+    const candidate = mix(color, toward, step / 40);
+    if (ok(candidate)) return { color: candidate, steps: step };
+  }
+  return { color: toward, steps: Infinity };
+}
+
+// What can be read on top of `fill`. Gold takes the ink, navy takes the paper,
+// and nobody has to remember which: whichever wins by contrast, wins.
+//
+// The deep ink earns its place in this list. An orange — Baltimore's, Detroit's,
+// Houston's, the Mets' — is the awkward middle: too light for cream to sit on,
+// and the club's own near-black lands at 4.2:1, just under the bar. Half a shade
+// darker clears it, and that is the whole difference between an orange button
+// and a brown one. Without this candidate every orange in the league falls back.
+function readableOn(fill, candidates) {
+  return candidates.reduce((best, c) => (contrast(c, fill) > contrast(best, fill) ? c : best));
+}
+
 // Find the tone between paper and ink that lands on `target` against paper.
 // Bisection, because contrast is monotone along that line: mixing toward ink
 // only ever darkens, so there is exactly one crossing to find.
@@ -84,17 +109,52 @@ export function derivePalette({ ink, accent }) {
   // cream stops being cream, and the sign stops being the same sign.
   const paper = mix(CREAM, ink, 0.05);
   const strongInk = darkenUntil(ink, paper, 7.0);
+  const readable = darkenUntil(accent, paper, 4.6);
+  const inkDeep = mix(strongInk, "#000000", 0.25);
+  const onButton = [paper, strongInk, inkDeep];
+
+  // The button wears the color the club actually is — but only if something can
+  // be read on top of it. A gold takes the ink and a navy takes the paper; the
+  // trouble is the middle. An orange is too light for cream to sit on and too
+  // dark for black to bite: Baltimore's lands at 4.13:1 under its own near-black,
+  // a rounding short of the bar.
+  //
+  // So the color is allowed to move, and it may move EITHER WAY — because the
+  // way to rescue an orange is not to darken it (that is how you get brown) but
+  // to LIGHTEN it, which makes it more orange, not less, and gives the black on
+  // top of it room to bite. Whichever direction crosses the bar first wins, so
+  // the club ends up as close to its own color as the contrast permits: the
+  // reds deepen a shade, and the oranges brighten one.
+  // 4.6, not 4.5, for the same reason as the accent: the walk stops the moment
+  // it clears, so aiming at exactly AA lands somebody exactly on AA.
+  const canRead = (c) => contrast(readableOn(c, onButton), c) >= 4.6;
+  const lighter = walkUntil(accent, "#ffffff", canRead);
+  const darker = walkUntil(accent, "#000000", canRead);
+  const bright = lighter.steps <= darker.steps ? lighter.color : darker.color;
+
   return {
     paper,
     ink: strongInk,
     dim: solveMidtone(paper, strongInk, 4.7),
     tint: mix(paper, strongInk, 0.22),
-    // 4.6 rather than 4.5: the solver stops the moment it clears the bar, so a
-    // target of exactly AA lands some clubs on exactly AA (the Twins did), and
-    // a color sitting on the line is one rounding away from under it.
-    accent: darkenUntil(accent, paper, 4.6),
-    accentDark: mix(darkenUntil(accent, paper, 4.6), "#000000", 0.35),
-    inkDeep: mix(strongInk, "#000000", 0.25),
+    // Two accents, because one color cannot do both jobs.
+    //
+    // --accent is the club's second color deepened until it can be READ: it is
+    // set as text on the cream sheet in eight places, and a gold light enough
+    // to glow as a button is a gold you cannot read as a word. 4.6 rather than
+    // 4.5 because the solver stops the moment it clears the bar, and a color
+    // sitting exactly on AA (the Twins landed there) is one rounding under it.
+    //
+    // --accent-bright is the color the club actually is, spent on the buttons,
+    // which is where you look. It never has to be legible itself — it is a
+    // fill, it has a dark border around it, and the text on top of it is
+    // --accent-ink, chosen below to suit it. That is what buys Pittsburgh a
+    // gold button instead of a brown one.
+    accent: readable,
+    accentBright: bright,
+    accentInk: readableOn(bright, onButton),
+    accentDark: mix(readable, "#000000", 0.35),
+    inkDeep,
     // The dark room the handheld sits in: the club's ink with the lights off.
     room: mix(strongInk, "#000000", 0.55),
     // The case gets a breath of the club too. Without it the plastic stays the
@@ -117,6 +177,7 @@ export function franchisePalette(universeKey) {
 // them, and the stylesheet's own defaults — the enamel sign — come back.
 const TOKENS = [
   "--navy", "--navy-deep", "--line", "--accent", "--accent-dark",
+  "--accent-bright", "--accent-ink",
   "--gb-darkest", "--gb-dark", "--gb-light", "--gb-lightest", "--room",
   "--shell", "--shell-dark"
 ];
@@ -134,6 +195,8 @@ export function applyFranchisePalette(universeKey, root = document.documentEleme
   root.style.setProperty("--line", palette.ink);
   root.style.setProperty("--accent", palette.accent);
   root.style.setProperty("--accent-dark", palette.accentDark);
+  root.style.setProperty("--accent-bright", palette.accentBright);
+  root.style.setProperty("--accent-ink", palette.accentInk);
   // The handheld's four tones.
   root.style.setProperty("--gb-darkest", palette.ink);
   root.style.setProperty("--gb-dark", palette.dim);

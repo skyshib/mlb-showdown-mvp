@@ -25,6 +25,11 @@
   --gb-lightest: #f0e7d2; /* cream — the screen itself, and text on top of ink */
   --accent: #b8352e;      /* the sign's red, spent only on the A/B buttons */
   --accent-dark: #7d221d;
+  /* The A/B buttons are a fill inside a dark rule, so they can wear the color a
+     club actually is rather than a version of it deepened until it could pass
+     as text. For the house red the two are the same and nothing moves. */
+  --accent-bright: var(--accent);
+  --accent-ink: var(--gb-lightest);
   --room: #101f33;        /* the dark room the handheld is sitting in */
   --shell: #bdb3a0;
   --shell-dark: #948b7a;
@@ -431,9 +436,11 @@ h1.gq-logo {
   max-height: 5.5rem;
   border-radius: 50%;
   font-size: 6vw;
-  /* The only red on the handheld, and the same red as the sign. A and B are
-     where a red button has always gone, so it costs nothing to spend it here. */
-  background: var(--accent);
+  /* The only color on the handheld that is not the ink or the paper. A and B are
+     where a colored button has always gone, so it costs nothing to spend it
+     here — and in a franchise league it is the club's own, at full strength. */
+  background: var(--accent-bright);
+  color: var(--accent-ink);
   border-color: var(--accent-dark);
   box-shadow: 0 0.3rem 0 var(--accent-dark);
 }

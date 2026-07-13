@@ -15,6 +15,15 @@
   --hairline: #b3a88e;
   --accent: #b8352e;
   --accent-dark: #9a2a24;
+  /* The accent twice over. --accent has to be READ — it is text on the sheet in
+     eight places — so it can never be brighter than cream can bear. The buttons
+     do not have that problem: they are a fill inside a dark rule, so they can
+     take the color a club actually is, with whatever text suits it on top.
+     The house red is legible either way, so here the two are the same color and
+     nothing about this page changes. It is the Pirates who need the second one:
+     their gold, deep enough to read as a word, is not gold any more. */
+  --accent-bright: var(--accent);
+  --accent-ink: var(--sheet);
   --warn: #9a2a24;
   --ok: #1b5e46;
 
@@ -74,8 +83,9 @@ main {
 
 .quest-door a:hover,
 .quest-door a:focus-visible {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-bright);
+  border-color: var(--accent-dark);
+  color: var(--accent-ink);
 }
 
 h1,
@@ -127,8 +137,8 @@ button {
   border: var(--rule) solid var(--navy);
   border-radius: 0;
   padding: 10px 16px;
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
   font-family: var(--display);
   font-size: 16px;
   font-weight: 900;
@@ -386,8 +396,8 @@ td span {
 .setup-h2 {
   margin: 0;
   padding: 12px 16px 11px;
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
   font-size: 24px;
   letter-spacing: 0.06em;
   line-height: 1;
@@ -1976,8 +1986,8 @@ button.roster-slot[draggable="true"]:active {
 
 .type-pill:hover,
 .type-pill.active {
-  background: var(--accent);
-  color: white;
+  background: var(--accent-bright);
+  color: var(--accent-ink);
 }
 
 /* ---- the broadcast board ---- */
@@ -2110,8 +2120,8 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .done-actions button:hover {
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
 }
 
 /* ---- what the table built ----
@@ -2379,8 +2389,8 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .compare-drop:hover {
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
 }
 
 .compare-outcome {
@@ -2463,8 +2473,8 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .lottery-button:hover {
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
 }
 
 .lottery-stage {
@@ -2577,8 +2587,8 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .seat-button:hover {
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
 }
 
 .roster h3 {
@@ -2706,7 +2716,7 @@ button.roster-slot[draggable="true"]:active {
   white-space: nowrap;
 }
 
-.board-status.next { background: var(--accent); color: var(--sheet); }
+.board-status.next { background: var(--accent-bright); color: var(--accent-ink); }
 .board-status.gone { background: var(--hairline); color: var(--ink); }
 .board-status.blocked { border: 1px solid var(--hairline); color: var(--muted); }
 
@@ -2781,8 +2791,8 @@ button.roster-slot[draggable="true"]:active {
   align-items: baseline;
   gap: 3px;
   padding: 4px 9px 5px;
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
   font-family: var(--display);
   font-size: 13px;
   font-weight: 900;
@@ -2904,8 +2914,8 @@ button.roster-slot[draggable="true"]:active {
 
 .star-filter.active {
   border-color: var(--navy);
-  background: var(--accent);
-  color: var(--sheet);
+  background: var(--accent-bright);
+  color: var(--accent-ink);
 }
 
 .star-filter-mark {

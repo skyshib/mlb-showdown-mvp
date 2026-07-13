@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FRANCHISE_COLORS, franchiseCode } from "../src/data/franchiseColors.js";
-import { contrast, derivePalette, franchisePalette } from "../src/ui/franchisePalette.js";
+import { contrast, derivePalette, franchisePalette, luminance } from "../src/ui/franchisePalette.js";
 
 // The sheet every club prints on, and the text color that sits on every accent
 // fill in the draft (--sheet).
@@ -66,5 +66,36 @@ test("clubs whose famous color is too light keep it as the accent, not the ink",
     const p = derivePalette(FRANCHISE_COLORS[code]);
     assert.ok(contrast(p.ink, p.paper) >= 7, `${code}: ink must still carry text`);
     assert.ok(contrast(CREAM, p.accent) >= AA, `${code}: accent must still hold cream text`);
+  }
+});
+
+// The button is the one place a club gets to be the color it actually is, so
+// whatever ends up on it has to be readable — that is the price of the brightness.
+test("every club's button can be read", () => {
+  for (const [code, colors] of Object.entries(FRANCHISE_COLORS)) {
+    const p = derivePalette(colors);
+    const ratio = contrast(p.accentInk, p.accentBright);
+    assert.ok(ratio >= AA, `${code}: button text is ${ratio.toFixed(2)}:1 on the fill, under AA`);
+  }
+});
+
+// The whole point of the exercise. Pittsburgh is a gold team; a Pittsburgh that
+// renders brown is a bug, however legible the brown is. The button fill must
+// stay recognisably the club's color — near it in hue, and nowhere near as dark
+// as the text-safe accent it used to be forced into.
+test("the golds and the oranges actually come out gold and orange", () => {
+  const vivid = { PIT: "#FDB827", OAK: "#EFB21E", SDP: "#FFC425", MIL: "#FFC52F", BAL: "#DF4601", SFG: "#FD5A1E" };
+  for (const [code, want] of Object.entries(vivid)) {
+    const p = derivePalette(FRANCHISE_COLORS[code]);
+    // Luminance is the tell: the deepened accent is dark enough to read as text
+    // on cream, so anything that bright is a fill that never got flattened.
+    const flattened = luminance(p.accent);
+    const onButton = luminance(p.accentBright);
+    assert.ok(
+      onButton > flattened * 2,
+      `${code}: the button fill (${p.accentBright}) is no brighter than the text-safe accent (${p.accent}) — the club lost its color`
+    );
+    assert.ok(luminance(want) / onButton < 1.6 && onButton / luminance(want) < 1.6,
+      `${code}: the button fill (${p.accentBright}) has drifted too far from the club's ${want}`);
   }
 });
