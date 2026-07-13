@@ -157,3 +157,40 @@ test("the same game seed replays the same game", () => {
   };
   assert.deepEqual(finalOf(), finalOf());
 });
+
+// The board used to be a fixed 124 cards no matter how many managers sat down,
+// which quietly capped a draft at nine — and no card set could lift it, because
+// the deck never grew: ten thousand cards still dealt a 124-card board. The
+// board is dealt to the ROOM now.
+test("the deck grows with the room, so a big draft is not capped by the board", () => {
+  for (const managerCount of [9, 10, 12, 16, 20]) {
+    const deck = buildDraftPool("classic", "big-room", { managerCount });
+    assert.ok(
+      maxPoolManagers(deck) >= managerCount,
+      `a ${managerCount}-manager room is dealt a board that only seats ${maxPoolManagers(deck)}`
+    );
+  }
+});
+
+// It grows only. A thinner board is a board with less choice on it, and a small
+// room should not be punished for being small — it keeps the deep board it has
+// always had, card for card. This is also what keeps every saved room's deal
+// intact: a room of eight deals exactly what it dealt before the deck took a
+// manager count at all.
+test("a small room keeps the deep board, unchanged card for card", () => {
+  const eight = buildDraftPool("classic", "night-a", { managerCount: 8 });
+  for (const managerCount of [1, 2, 3, 5, 8]) {
+    const deck = buildDraftPool("classic", "night-a", { managerCount });
+    assert.deepEqual(
+      deck.map((card) => card.id),
+      eight.map((card) => card.id),
+      `a ${managerCount}-manager room was dealt a different board`
+    );
+  }
+  // And the deal with no manager count at all — what every old caller did — is
+  // that same board.
+  assert.deepEqual(
+    buildDraftPool("classic", "night-a").map((card) => card.id),
+    eight.map((card) => card.id)
+  );
+});

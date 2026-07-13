@@ -1171,10 +1171,18 @@ function draftModeFromForm(form) {
   return { draftType, nomination };
 }
 
-// Whether the chosen card set can actually seat the room, phrased for the
-// setup screen. A standard deck is a fixed 124 cards and the question is how
-// many managers it seats; a random-nomination board is sized to the room, and
-// the question is whether the card set is deep enough to deal it.
+// Whether the chosen card set can actually seat the room, phrased for the setup
+// screen. BOTH boards are dealt to the room now, so in both cases the question
+// is the same one: is the card set deep enough to deal the board this room
+// needs? It stopped being "how many managers does the deck seat", because the
+// deck no longer has an opinion — it grows.
+//
+// The old message here said the deck seated nine and told you to pick a
+// different card set. The first half was true and the second was not: the deck
+// was a fixed 124 cards whatever the set, so no set could lift the number, and
+// the advice sent people looking for a bigger set that would not have helped.
+// The advice is real now — a single club's set runs dry where the whole of
+// Showdown does not.
 function draftPoolError(pool, universe, managerCount, nomination) {
   const setName = universeConfig(universe).name;
   if (nomination === "random") {
@@ -1185,7 +1193,7 @@ function draftPoolError(pool, universe, managerCount, nomination) {
   }
   const managerLimit = maxPoolManagers(pool);
   if (managerCount <= managerLimit) return "";
-  return `The ${setName} deck deals position depth for up to ${managerLimit} managers. Trim the manager list or pick a different card set.`;
+  return `The ${setName} set runs out of position depth at ${managerLimit} managers — it cannot deal a board deep enough for ${managerCount}. Trim the manager list or pick a deeper card set.`;
 }
 
 // The headline number: what this many managers actually see on the board, and

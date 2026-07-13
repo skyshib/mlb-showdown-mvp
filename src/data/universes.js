@@ -300,14 +300,19 @@ export function dualPrimaryId(id) {
 // ---- The draft deck ----------------------------------------------------------
 //
 // A draft night sees a DECK, not the whole universe: a seeded slice with
-// fixed position depth, so eight managers can always field a legal roster and
-// the same seed deals the same deck.
+// position depth to spare, so every manager can field a legal roster and the
+// same seed deals the same deck.
 //
 // Within a position the draw is straight random. The board is a slice of the
 // league and reads like one: mostly the players a league is mostly made of,
 // with a star on it when the set happens to deal one. Nothing reaches into the
 // top of the ladder to make sure a Griffey turns up — if he does, he was drawn
 // like everybody else.
+//
+// These are the quotas for a room of eight, and they are a quarter deeper than
+// eight rosters need: eight catchers are wanted and ten are dealt, so the last
+// manager picking still has a choice rather than a leftover.
+const DECK_BASELINE_MANAGERS = 8;
 const DECK_QUOTAS = [
   ["C", 10],
   ["1B", 10],
@@ -316,10 +321,30 @@ const DECK_QUOTAS = [
   ["SS", 10],
   ["LF/RF", 20],
   ["CF", 10],
+  // Thinner than one per manager on purpose: the DH group is whoever the
+  // position groups left behind, and every roster's spare bat can take the spot.
   ["DH", 6],
   ["SP", 20],
   ["RP", 18]
 ];
+
+// The board is dealt TO THE ROOM. The quotas above were a fixed 124 cards no
+// matter how many managers sat down, which quietly capped a draft at nine — and
+// no card set could lift it, because the deck never grew: ten thousand cards
+// still dealt a 124-card board. So the quotas scale with the room.
+//
+// They scale UP only. A board thinner than today's is a board with less choice
+// on it, and a three-manager night should not be punished for being small: it
+// keeps the same deep board it has always had. Rooms of eight or fewer deal
+// exactly the cards they dealt before, down to the card.
+function deckQuotas(managerCount) {
+  const managers = Math.max(1, Math.round(Number(managerCount) || DECK_BASELINE_MANAGERS));
+  if (managers <= DECK_BASELINE_MANAGERS) return DECK_QUOTAS;
+  return DECK_QUOTAS.map(([group, quota]) => [
+    group,
+    Math.ceil((quota * managers) / DECK_BASELINE_MANAGERS)
+  ]);
+}
 
 // Fisher-Yates on a copy, driven by the seeded rng.
 function shuffled(cards, rng) {
@@ -395,8 +420,14 @@ function dealDeckToQuotas(quotas, rngKey) {
 
 // The deck one draft night sees. Deals from the ACTIVE universe, so callers
 // point setUniverse() at the room's league first.
-export function dealDraftDeck(seed) {
-  return dealDeckToQuotas(DECK_QUOTAS, `deck-deal:${universeKey()}:${seed}`);
+//
+// The room's size is salted into the deal ONLY when it changes the quotas. A
+// room of eight or fewer deals the very same cards it dealt before this took a
+// manager count at all — same seed, same salt, same board.
+export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS) {
+  const quotas = deckQuotas(managerCount);
+  const salt = quotas === DECK_QUOTAS ? "" : `:m${Math.round(managerCount)}`;
+  return dealDeckToQuotas(quotas, `deck-deal:${universeKey()}:${seed}${salt}`);
 }
 
 // The board a random-nomination room reads. Unlike the standard deck this one
@@ -417,7 +448,7 @@ export function buildDraftPool(mode, seed, options = {}) {
   if (options.nomination === "random") {
     return dealRandomNominationDeck(seed, options.managerCount);
   }
-  return dealDraftDeck(seed);
+  return dealDraftDeck(seed, options.managerCount);
 }
 
 // A deck that was already dealt, rebuilt card for card from the ids it dealt.
