@@ -643,6 +643,9 @@ function defaultState() {
       incrementSeconds: AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS
     },
     pickTimerSeconds: 0,
+    // Which seat is yours. Kept outside `online`, which is cleared when the
+    // room ends — see viewerManager().
+    myManagerId: null,
     maskBids: false,
     rosterSize: 13,
     draft: null,
@@ -1034,6 +1037,10 @@ function renderSeatSelect() {
       state.online.managerId = result.managerId;
       state.online.token = result.token;
       state.online.host = Boolean(result.host);
+      // Remembered OUTSIDE the online block, which is cleared when the room
+      // ends: the seat is who you are, and you are still that when the draft is
+      // over and the room has gone.
+      state.myManagerId = result.managerId;
       storeOnlineSeat(state.online.roomId, {
         managerId: result.managerId,
         token: result.token,
@@ -1766,12 +1773,10 @@ function renderDraft() {
     ? draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0]
     : draft.managers[0]);
   // Your board is the one you can actually do anything with, so it is the one
-  // you get. Online that means your seat; on a hotseat, whoever's turn it is.
-  const myManager = state.online?.managerId
-    ? draft.managers.find((manager) => manager.id === state.online.managerId)
-    : null;
+  // you get.
+  const myManager = viewerManager(draft);
   const boardManager = myManager ?? focusManager;
-  const dockViewerId = state.online?.managerId ?? focusManager?.id;
+  const dockViewerId = myManager?.id ?? focusManager?.id;
 
   const online = state.online;
   const paused = isDraftPaused(draft);
@@ -4625,7 +4630,9 @@ function renderRosterDock(draft, viewerId) {
     ? new Map(draftHistory(draft).map((pick) => [pick.player.id, pick.price]))
     : null;
   const heatScale = draftHeatScale(draft);
-  const ownTag = state.online?.managerId ? "you" : "";
+  // The "you" tag hangs off the same answer the rest of the screen uses, so it
+  // cannot end up pinned to a manager the app no longer thinks is you.
+  const ownTag = viewerManager(draft) ? "you" : "";
   const bars = collapsed
     ? ""
     : ordered
@@ -4965,6 +4972,31 @@ function handleLineupSlotClick(slot) {
 // not pick up, must not highlight, must not look for a moment like it went
 // somewhere. The rule was already enforced on the way out — but only after
 // you had dragged another manager's shortstop across his infield.
+// Which manager is YOU — and it has to outlive the online session.
+//
+// When a room ends, the online block is cleared, and "you" used to fall back to
+// whoever was on the clock. For a FINISHED draft that is manager one. So a room
+// of one human and eight computers decided, the moment the last pick was made,
+// that you were the computer sitting in seat one — and handed you his lineup to
+// set. Manager ids are positional (team-1, team-2), so the seat you held is not
+// something the draft itself remembers about you: it has to be remembered here.
+//
+// Three answers, in order of how much they know:
+//   the seat you are sitting in right now, if the room is still live
+//   the seat you sat in, remembered from when you claimed it
+//   the only human at the table, which a nine-seat room with eight computers
+//     in it can always answer
+function viewerManager(draft) {
+  if (!draft?.managers?.length) return null;
+  const byId = (id) => (id ? draft.managers.find((manager) => manager.id === id) : null);
+  const seated = byId(state.online?.managerId);
+  if (seated) return seated;
+  const remembered = byId(state.myManagerId);
+  if (remembered) return remembered;
+  const humans = draft.managers.filter((manager) => !manager.cpu);
+  return humans.length === 1 ? humans[0] : null;
+}
+
 function canManageRoster(managerId) {
   if (!state.online) return true;
   return managerId === state.online.managerId;
@@ -6134,6 +6166,7 @@ function reviveState(value) {
     compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],
     heatBy: value.heatBy === "points" ? "points" : "price",
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
+    myManagerId: typeof value.myManagerId === "string" ? value.myManagerId : null,
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
