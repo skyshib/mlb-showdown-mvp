@@ -409,6 +409,9 @@ function afterAction(app, events, presetLines = null) {
   // itself here, before the player picks an action against the new arm.
   const visit = npcMoundVisit(app.screen.battle);
   if (visit) lines.push(...describeEvent(visit, playerSide));
+  // Every play comes through here, so this is where the diamond learns what to
+  // act out. The id is what stops a cursor keypress from replaying it.
+  app.screen.motion = { id: (app.screen.motion?.id ?? 0) + 1, ...playMotion(events) };
   app.screen.lines = lines.length ? lines : app.screen.lines;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
@@ -564,14 +567,11 @@ export const battleScreen = {
     const phase = battlePhase(battle);
     const series = app.save.activeSeries;
     return `<div class="gq-screen gq-battle-screen">
-      <div class="gq-topbar">
-        <span>VS ${escapeHtml(trainer.name)}</span>
-        <span>${series && series.bestOf > 1 ? `G${series.nextGame} (${series.wins}-${series.losses}) &middot; ` : ""}${halfLabel(state)}</span>
-      </div>
+      ${renderScoreboard(battle, trainer, series)}
       ${renderHud(battle, phase)}
-      <div class="gq-textbox">
-        <div class="gq-battle-lines">${(app.screen.lines ?? []).map((line) => `<p>${line}</p>`).join("")}</div>
+      <div class="gq-textbox${phase.type === "player-pitching" ? " gq-textbox-fielding" : ""}">
         <div class="gq-battle-menu">${renderBattleMenu(app, phase)}</div>
+        <div class="gq-battle-lines">${(app.screen.lines ?? []).map((line) => `<p>${line}</p>`).join("")}</div>
       </div>
     </div>`;
   },
@@ -584,6 +584,7 @@ export const battleScreen = {
     // The call of the play is the newest line, and it's the one worth reading.
     const lines = document.querySelector(".gq-battle-lines");
     if (lines) lines.scrollTop = lines.scrollHeight;
+    playMotionOnce(app);
   },
   key(app, key) {
     if (app.screen.mode === "drama") {
@@ -649,13 +650,6 @@ function fieldingNote(title, team) {
   return `${title}\nCATCHER ${signed(total(["C", "CA"]))}\nINFIELD ${signed(total(["1B", "2B", "3B", "SS"]))}\nOUTFIELD ${signed(total(["LF", "CF", "RF"]))}`;
 }
 
-// The matchup panel drops classic cards' year suffix ("B.AUSMUS '01" reads
-// "B.AUSMUS") — it's cramped in there, and the full card is a hover away.
-// The play-by-play does the same; roster and box-score views keep the year.
-function matchupName(name) {
-  return shortName(stripCardYear(name));
-}
-
 // Who is actually facing whom right now, whatever the player is being asked.
 // The plate appearance bumps the lineup index before the runners are polled,
 // so on the advance-decision beat the man to show is the one the pending
@@ -674,42 +668,205 @@ function currentMatchup(battle) {
   const mound = pitcherStatus(state, fieldingSide);
   return {
     batter,
-    battingSpot: spot + 1,
-    onDeck: pending ? null : lineup[(spot + 1) % lineup.length],
     mound,
     deciding: Boolean(pending),
+    battingSide,
     playerIsBatting: battingSide === battle.playerSide
   };
 }
 
-// The at-bat band: the two men in the duel stand as small cards on the flanks
-// — the room the scoreboard used to leave empty — with the score, the bases,
-// and the outs between them. The OB and CTRL lines this panel used to spell
-// out are printed on the card faces, so they are gone from here.
+// The board IS the banner: the two clubs by name, the runs hung frame by frame,
+// the bases and the outs beside them. No caption saying who you are playing —
+// the board has both clubs on it, which is what a board is for.
+function renderScoreboard(battle, trainer, series) {
+  const state = battle.state;
+  return `<div class="gq-topbar gq-battle-topbar">
+    ${lineScoreHtml(battle)}
+    <span class="gq-board-bases">
+      ${diamondHtml(state)}${outsHtml(state.outs)}
+      ${series && series.bestOf > 1
+        ? `<span class="gq-board-series">G${series.nextGame} <span class="gq-dim">(${series.wins}-${series.losses})</span></span>`
+        : ""}
+    </span>
+  </div>`;
+}
+
+// The hand-operated board: a slot per inning, hung as the runs come in, with
+// the frame in progress marked. A club that has batted in an inning and not
+// scored gets its nought; one that hasn't come up yet gets an empty slot —
+// which is the whole point of a board like this, and why blank and 0 differ.
+function lineScoreHtml(battle) {
+  const state = battle.state;
+  const frames = Math.max(9, state.lineScore.away.length, state.lineScore.home.length, state.inning);
+  const innings = Array.from({ length: frames }, (unused, index) => index + 1);
+  // A half is on the board once it has started: the top of the current inning
+  // always has, the bottom only once we are in it.
+  const batted = (side, inning) =>
+    inning < state.inning || (inning === state.inning && (side === "away" || state.half === "bottom"));
+  const atBat = battingSide(state);
+  // The clubs stand by name, the way they would on a real board. The defense
+  // summaries the old YOU/THEM chips carried come with them: each club's row
+  // still tells you what its glove adds up to.
+  const row = (side) => `
+    <tr data-hover-note="${escapeHtml(
+      fieldingNote(side === battle.playerSide ? "YOUR DEFENSE" : "THEIR DEFENSE", state[side])
+    )}">
+      <th>${escapeHtml(state[side].name)}${side === "home" ? " &#9679;" : ""}</th>
+      ${innings.map((inning) => {
+        const live = inning === state.inning && side === atBat;
+        return `<td class="${live ? "gq-line-live" : ""}">${
+          batted(side, inning) ? state.lineScore[side][inning - 1] ?? 0 : ""
+        }</td>`;
+      }).join("")}
+      <td class="gq-line-total">${state.score[side]}</td>
+    </tr>`;
+  return `<table class="gq-linescore" aria-label="line score">
+    <tr class="gq-line-head">
+      <th></th>${innings.map((inning) => `<th>${inning}</th>`).join("")}<th class="gq-line-total">R</th>
+    </tr>
+    ${row(battle.playerSide)}
+    ${row(battle.npcSide)}
+  </table>`;
+}
+
+function battingSide(state) {
+  return state.half === "top" ? "away" : "home";
+}
+
+// ---- Motion on the diamond -------------------------------------------------
+
+const BASE_SELECTOR = { 1: ".gq-base-1", 2: ".gq-base-2", 3: ".gq-base-3", 4: ".gq-base-h" };
+const BASE_NUMBER = { "1B": 1, "2B": 2, "3B": 3, home: 4 };
+// What the batter himself touches on his way. A walk is a trot to first; a
+// homer is the whole lap, which is the reason to trace a path at all rather
+// than just light up where everyone ended.
+const BATTER_PATH = {
+  HR: [1, 2, 3, 4],
+  "3B": [1, 2, 3],
+  "2B": [1, 2],
+  "1B": [1],
+  "1B+": [1],
+  BB: [1],
+  IBB: [1],
+  HBP: [1]
+};
+
+// The play as the diamond sees it: bases touched, in the order they were
+// touched, and the bases a man was cut down on. Runners other than the batter
+// come through the attempt records — a steal carries one, a hit or a fly ball
+// can carry several. Exported for tests.
+export function playMotion(events) {
+  const path = [];
+  const outs = [];
+  const touch = (base) => {
+    if (base && !path.includes(base)) path.push(base);
+  };
+  for (const event of (events ?? []).filter(Boolean)) {
+    for (const base of BATTER_PATH[event.result] ?? []) touch(base);
+    const details = event.playDetails ?? {};
+    for (const attempt of [details.stealAttempt, ...(details.attempts ?? [])].filter(Boolean)) {
+      const base = BASE_NUMBER[attempt.to];
+      if (!base) continue;
+      if (attempt.safe) touch(base);
+      else outs.push(base);
+    }
+    // However he got there, a run is a man touching the plate.
+    if (event.runs > 0) touch(4);
+  }
+  return { path, outs };
+}
+
+// The diamond only moves when something happened: a rerender for a cursor
+// keypress must not replay the last hit, so each play's motion carries an id
+// and is acted out exactly once.
+function playMotionOnce(app) {
+  const motion = app.screen.motion;
+  if (!motion || app.screen.motionPlayed === motion.id) return;
+  app.screen.motionPlayed = motion.id;
+  const diamond = document.querySelector(".gq-battle-topbar .gq-diamond");
+  if (!diamond) return;
+  const baseAt = (base) => diamond.querySelector(BASE_SELECTOR[base]);
+  // The lap is staggered, so a home run reads as a man rounding the bases
+  // rather than four bases lighting up at once.
+  motion.path.forEach((base, index) => {
+    const el = baseAt(base);
+    if (!el) return;
+    el.style.animationDelay = `${index * 130}ms`;
+    el.classList.add("gq-base-pulse");
+  });
+  for (const base of motion.outs ?? []) {
+    baseAt(base)?.classList.add("gq-base-out");
+  }
+}
+
+// The at-bat band, outside in: each club's order down its own edge, and the two
+// men in the duel as cards in the middle. The OB and CTRL lines this panel used
+// to spell out are printed on the card faces; the whole order stands where ON
+// DECK used to name one man; and the scoreboard has gone up into the banner.
 function renderHud(battle, phase) {
   const state = battle.state;
   const matchup = phase.type === "over" ? null : currentMatchup(battle);
-  const scoreChip = (side, label, right) =>
-    `<span class="gq-hud-team${right ? " gq-hud-right" : ""}" data-hover-note="${escapeHtml(
-      fieldingNote(right ? "THEIR DEFENSE" : "YOUR DEFENSE", state[side])
-    )}">${label}${side === "home" ? " &#9679;" : ""}<b>${state.score[side]}</b></span>`;
-  const batterLabel = matchup?.deciding
-    ? "BALL IN PLAY"
-    : `${matchup?.playerIsBatting ? "AT BAT" : "THEY SEND UP"} &middot; #${matchup?.battingSpot}`;
+  // The club at bat lights up the man in the box. The club in the field lights
+  // up, more quietly, whoever leads off when they get their turn — that's who
+  // the lineup index is already pointing at over there.
+  const strip = (side) => {
+    const batting = matchup && matchup.battingSide === side;
+    const lineup = state[side].lineup;
+    return lineupStripHtml(state[side], {
+      litId: batting ? matchup.batter.id : null,
+      nextId: batting || !matchup ? null : lineup[state.lineupIndex[side] % lineup.length].id,
+      mound: pitcherStatus(state, side)
+    });
+  };
+  // Your men stand on your side of the screen and theirs on theirs, whichever
+  // half it is — the cards swap roles, not places. What each man is doing is
+  // written above him, so the side never has to move to say it.
+  const batting = matchup?.deciding ? "BALL IN PLAY" : "NOW BATTING";
+  const card = (mine) => {
+    if (!matchup) return `<div></div>`;
+    const isBatter = matchup.playerIsBatting === mine;
+    return isBatter
+      ? hudCardHtml(matchup.batter, batting, "")
+      : hudCardHtml(matchup.mound.pitcher, "NOW PITCHING", "");
+  };
   return `<div class="gq-battle-hud">
-    ${matchup ? hudCardHtml(matchup.batter, batterLabel, onDeckLine(matchup)) : `<div></div>`}
-    <div class="gq-hud-center">
-      <div class="gq-hud-scores">
-        ${scoreChip(battle.playerSide, "YOU", false)}
-        ${scoreChip(battle.npcSide, "THEM", true)}
-      </div>
-      ${diamondHtml(state)}
-      <div class="gq-center">${outsHtml(state.outs)}</div>
-    </div>
-    ${matchup
-      ? hudCardHtml(matchup.mound.pitcher, matchup.playerIsBatting ? "ON MOUND" : "YOUR ARM", moundLine(matchup.mound))
-      : `<div></div>`}
+    ${strip(battle.playerSide)}
+    ${card(true)}
+    ${card(false)}
+    ${strip(battle.npcSide)}
   </div>`;
+}
+
+// One club's card, top to bottom: the order nine deep — spot, surname, on-base
+// — then the arm behind them, set off by a gap and marked P, reading his
+// control where the hitters read their on-base, with his workload under his
+// name. Every row carries its card id, so the whole club is hoverable.
+function lineupStripHtml(team, { litId, nextId, mound }) {
+  const line = (spot, player, value) => `
+      <span class="gq-strip-spot">${spot}</span>
+      <span class="gq-strip-name">${escapeHtml(surname(player.name))}</span>
+      <span class="gq-strip-ob">${value}</span>`;
+  const mark = (player) =>
+    player.id === litId ? " gq-strip-now" : player.id === nextId ? " gq-strip-next" : "";
+  const bats = team.lineup.map((player, index) =>
+    `<li class="gq-strip-bat${mark(player)}" data-card-id="${escapeHtml(player.id)}">${
+      line(index + 1, player, player.onBase)
+    }</li>`).join("");
+  const pitcher = mound?.pitcher;
+  const arm = pitcher
+    ? `<li class="gq-strip-arm" data-card-id="${escapeHtml(pitcher.id)}">
+        <span class="gq-strip-line">${line("P", pitcher, pitcher.control)}</span>
+        <span class="gq-strip-bf${(mound.fatiguePenalty ?? 0) > 0 ? " gq-fatigued" : ""}">${moundLine(mound)}</span>
+      </li>`
+    : "";
+  return `<ul class="gq-hud-strip">${bats}${arm}</ul>`;
+}
+
+// The strip is too narrow for "A.J. PIERZYNSKI '03" — the year comes off and
+// the surname stands alone. Hyphenated names survive intact.
+function surname(name) {
+  const words = stripCardYear(name).trim().split(/\s+/);
+  return (words[words.length - 1] ?? name).toUpperCase();
 }
 
 // A card small enough to flank the diamond, with the state its face can't
@@ -722,20 +879,13 @@ function hudCardHtml(card, label, note) {
   </div>`;
 }
 
-// A peek down the order, hoverable like everyone else in the matchup.
-function onDeckLine(matchup) {
-  if (!matchup.onDeck) return "";
-  return `ON DECK <span data-card-id="${escapeHtml(matchup.onDeck.id)}">${escapeHtml(matchupName(matchup.onDeck.name))}</span>`;
-}
-
 // CTRL and the chart are printed on the card. What it cannot show is the
-// workload: how deep this arm is, and whether he has started to tire.
+// workload: how deep this arm is, and whether he has started to tire. It rides
+// under his name in the club's strip, where both arms can be read at once.
 function moundLine(mound) {
   if (!mound) return "";
   const fatigue = mound.fatiguePenalty ?? 0;
-  return `<span class="${fatigue > 0 ? "gq-fatigued" : ""}">${mound.battersFaced}/${mound.tiredAt} BF${
-    fatigue > 0 ? ` &middot; &minus;${fatigue} TIRED` : ""
-  }</span>`;
+  return `${mound.battersFaced}/${mound.tiredAt} BF${fatigue > 0 ? ` &middot; &minus;${fatigue} TIRED` : ""}`;
 }
 
 // Defense menus (the NPC is hitting) read from the other dugout: right-

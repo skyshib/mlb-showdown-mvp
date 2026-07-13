@@ -185,6 +185,7 @@ h1.gq-logo {
 .gq-menu li.gq-cursor .gq-dim { color: var(--gb-light); }
 .gq-menu li.gq-disabled { color: var(--gb-dark); opacity: 0.65; }
 .gq-caret { width: 2.4cqw; flex: none; }
+.gq-menu-text { min-width: 0; }
 
 /* A game-log row is two lines: the play, then the dice and the running odds
    under it in a quieter type. The caret still sits on the play's baseline. */
@@ -201,53 +202,181 @@ h1.gq-logo {
 
 /* ---- Battle screen ---- */
 
+/* The banner IS the board: both clubs by name, their runs hung frame by frame,
+   the bases and the outs beside them. It runs taller than a plain topbar
+   because a board and a diamond stand in it. */
+.gq-battle-topbar {
+  align-items: center;
+  justify-content: space-between;
+  gap: 2cqw;
+  padding: 0.8cqw 1.5cqw;
+}
+.gq-board-bases { display: flex; align-items: center; gap: 1.5cqw; flex: none; }
+.gq-board-series { font-size: 2.2cqw; white-space: nowrap; }
+
+/* On the ink the bases invert: the paper tone draws them, not the navy. The
+   margin is on all four sides — the 45deg turn throws the corners out
+   sideways as well as up, and sideways is where the outs are standing. */
+.gq-battle-topbar .gq-diamond { width: 6cqw; height: 6cqw; margin: 1.3cqw; }
+.gq-battle-topbar .gq-base {
+  width: 2.4cqw;
+  height: 2.4cqw;
+  border-width: 0.35cqw;
+  border-color: var(--gq-lead-ink);
+  background: transparent;
+}
+.gq-battle-topbar .gq-base-on { background: var(--gq-lead-ink); }
+.gq-battle-topbar .gq-outs i { border-color: var(--gq-lead-ink); background: transparent; }
+.gq-battle-topbar .gq-outs i.gq-out-on { background: var(--gq-lead-ink); }
+
+/* A man reaching a base swells it, briefly. The bases are staggered along the
+   path he ran, so a home run reads as a lap rather than four lamps coming on
+   together. Being thrown out shakes the bag and turns it the sign's red — the
+   one place in the game that colour means anything but a button. */
+@keyframes gq-base-pulse {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.9); }
+  100% { transform: scale(1); }
+}
+@keyframes gq-base-out {
+  0% { transform: scale(1) rotate(0deg); }
+  20% { transform: scale(1.35) rotate(10deg); border-color: var(--accent-bright); background: var(--accent-bright); }
+  45% { transform: scale(1.2) rotate(-10deg); border-color: var(--accent-bright); background: var(--accent-bright); }
+  70% { transform: scale(1.3) rotate(8deg); border-color: var(--accent-bright); background: var(--accent-bright); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.gq-base-pulse { animation: gq-base-pulse 420ms ease-out both; }
+.gq-base-out { animation: gq-base-out 620ms ease-in-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gq-base-pulse,
+  .gq-base-out { animation: none; }
+}
+
+/* Outside in: each club's order on its own edge, the two men in the duel in
+   the middle. The cards are sized by their content and the two orders split
+   whatever is left, so the strips give way before the cards do. */
 .gq-battle-hud {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 1.5cqw;
-  align-items: center;
-  padding: 1cqw 2cqw;
+  grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
+  gap: 2cqw;
+  /* Hang everything from the top: the arm's workload line makes his column
+     taller than the batter's, and centred columns would set the two cards at
+     different heights. */
+  align-items: start;
+  padding: 1cqw 1.5cqw;
   border-bottom: 0.6cqw solid var(--gb-darkest);
   background: var(--gb-light);
 }
 
-.gq-hud-team { font-size: 3cqw; }
-.gq-hud-team b { font-size: 4.6cqw; display: block; }
-.gq-hud-right { text-align: right; }
-
-/* The scoreboard, the bases, and the outs stack down the middle; the batter
-   and the arm take the flanks the scoreboard used to leave empty. */
-.gq-hud-center { display: flex; flex-direction: column; align-items: center; }
-.gq-hud-scores { display: flex; justify-content: space-between; gap: 4cqw; width: 100%; }
-
 /* Every other screen puts a scrolling body above the textbox, which soaks up
    the slack. The battle screen has none, so the textbox takes it — otherwise
-   the box stops at its 42% cap, the last menu row falls off the bottom, and a
-   dead strip sits under it.
+   the box stops at its 42% cap and a dead strip sits under it.
 
-   Inside it, the menu is what the player has to reach, so the menu is what
-   stays put: a long call of the play scrolls in its own right, and never
-   pushes SWING AWAY off the bottom of the screen. */
+   The call of the play and the choices stand side by side rather than stacked:
+   stacked, the description pushed the menu down the screen for no reason. The
+   menu sits on the side the player is playing from — his own dugout, left when
+   he is hitting — and the description takes the other half. */
 .gq-battle-screen .gq-textbox {
   flex: 1;
   max-height: none;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 2cqw;
   overflow: hidden;
+  /* Smaller than the storytelling screens: two columns of it, and the menu has
+     to stand whole without the player scrolling for SWING AWAY. */
+  font-size: 2.6cqw;
 }
-.gq-battle-lines { flex: 1; min-height: 0; overflow-y: auto; }
-.gq-battle-menu { flex: none; }
+/* The choices get the wider half — a steal option names a runner and his odds,
+   and it should not wrap to read it. */
+.gq-battle-menu { flex: 1.35; min-width: 0; max-height: 100%; overflow-y: auto; }
+.gq-battle-lines { flex: 1; min-width: 0; max-height: 100%; overflow-y: auto; }
+/* Fielding: the menu crosses to the other dugout, and the call follows it. */
+.gq-textbox-fielding .gq-battle-menu { order: 2; }
+.gq-textbox-fielding .gq-battle-lines { order: 1; text-align: right; }
+
+/* The hand-operated board: runs hung a frame at a time, the club totals on the
+   end, the frame in progress still open. It stands on the banner's ink, so the
+   numerals are the paper tone and the rules are drawn in it — which is how a
+   board at a ballpark reads, and the reason it moved up here. */
+.gq-linescore {
+  border-collapse: collapse;
+  font-size: 1.9cqw;
+  flex: none;
+  color: var(--gq-lead-ink);
+}
+.gq-linescore th,
+.gq-linescore td {
+  border: 0.2cqw solid var(--gq-lead-ink);
+  padding: 0 0.9cqw;
+  text-align: center;
+  min-width: 3.2cqw;
+  font-weight: 400;
+}
+/* The club's name, not a caption: it gets room, and gives up its tail last. */
+.gq-linescore tr th:first-child {
+  text-align: left;
+  max-width: 22cqw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 0;
+}
+.gq-line-head th { color: var(--gb-light); border-top: 0; }
+.gq-line-head th:first-child { border: 0; }
+.gq-line-total { font-weight: 700; background: rgba(240, 231, 210, 0.16); }
+/* The frame being played is the one the board is waiting on. */
+.gq-line-live { background: var(--gq-lead-ink); color: var(--gq-lead); }
 
 .gq-hud-card { display: flex; flex-direction: column; align-items: center; gap: 0.6cqw; }
 /* The face needs a width of its own: centering the column makes every child
    shrink to fit, and a card asking for 100% of a shrink-to-fit parent
    resolves to nothing. The card is its own container, so that width is all it
    takes to shrink one — every rule on the face is in cqw and scales with it. */
-.gq-hud-card-face { width: 100%; max-width: 21cqw; }
+.gq-hud-card-face { width: 19cqw; }
 .gq-hud-card .gq-card { width: 100%; margin-bottom: 0; }
 .gq-hud-card-label { font-size: 2.4cqw; white-space: nowrap; }
 .gq-hud-card-note { font-size: 2.4cqw; text-align: center; }
 .gq-hud-card .gq-fatigued { animation: gq-blink 1s steps(2) infinite; }
+
+/* The batting orders. Nine rows of spot / surname / on-base, and the man at
+   the plate wears the cursor's fill so the eye finds him without a caption.
+   A long surname gives up its tail rather than widening the column. */
+.gq-hud-strip { list-style: none; font-size: 2cqw; line-height: 1.5; }
+.gq-strip-bat,
+.gq-strip-line {
+  display: flex;
+  gap: 0.7cqw;
+  align-items: baseline;
+  padding: 0 0.5cqw;
+}
+.gq-hud-strip li { cursor: help; }
+.gq-strip-spot { flex: none; color: var(--gb-dark); }
+.gq-strip-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gq-strip-ob { flex: none; color: var(--gb-dark); }
+
+/* The man in the box wears the cursor's fill. The club in the field gets the
+   quieter mark on whoever leads off when they come up — a lift off the tan,
+   not the full ink, so it reads as "next" and not as "now". */
+.gq-strip-now { background: var(--gq-lead); color: var(--gq-lead-ink); }
+.gq-strip-now .gq-strip-spot,
+.gq-strip-now .gq-strip-ob { color: var(--gb-light); }
+.gq-strip-next { background: var(--gb-lightest); }
+
+/* The arm is not in the order, so he does not sit flush against it — and his
+   workload rides under his name, where a tiring starter is visible on both
+   sides at once. */
+.gq-strip-arm { display: block; margin-top: 1.2cqw; }
+.gq-strip-bf {
+  display: block;
+  padding: 0 0.5cqw;
+  text-align: right;
+  font-size: 1.8cqw;
+  color: var(--gb-dark);
+}
+.gq-strip-bf.gq-fatigued { animation: gq-blink 1s steps(2) infinite; }
 
 /* The 45deg turn swings every corner (12cqw * sqrt2 - 12cqw) / 2 outside the
    box layout reserved for it. The vertical margin buys that overhang back, so

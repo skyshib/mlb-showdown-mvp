@@ -591,6 +591,8 @@ export function createInitialState(awayTeam, homeTeam) {
       hitters: new Map(),
       pitchers: new Map()
     },
+    // Runs by inning, for the hand-operated board. Grows into extras.
+    lineScore: { away: [], home: [] },
     lastPlayDetails: null,
     topSwing: null,
     walkoff: false,
@@ -932,9 +934,20 @@ export function applyHomer(state, batter, battingSide, pitchingSide = null, pitc
 
 function scoreRunner(state, battingSide, pitchingSide, runner, fallbackPitcher = null) {
   state.score[battingSide] += 1;
+  creditInning(state, battingSide);
   recordRunnerStat(state, runner, "r");
   chargeRun(state, pitchingSide, runner?.responsiblePitcherId ?? fallbackPitcher?.id);
   return 1;
+}
+
+// Runs by inning, the way a hand-operated board keeps them: one slot per frame,
+// hung as the runs come in. Extras just add slots off the end. Every run in the
+// game passes through scoreRunner, so this is the only place that has to count.
+function creditInning(state, side) {
+  const frames = state.lineScore[side];
+  const index = state.inning - 1;
+  while (frames.length <= index) frames.push(0);
+  frames[index] += 1;
 }
 
 function recordRunnerStat(state, runner, stat) {

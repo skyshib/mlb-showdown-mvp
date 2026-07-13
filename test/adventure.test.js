@@ -1349,11 +1349,39 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
   assert.ok(html.includes(`data-card-id="${phase.batter.id}"`), "batter is hoverable");
   assert.ok(html.includes(`data-card-id="${phase.opposingPitcher.id}"`), "pitcher is hoverable");
   assert.ok(html.includes('data-card-id="runner-card-id"'), "occupied base is hoverable");
-  // The on-deck batter shows (and hovers) too — always the next spot in order.
-  const lineup = battle.state[battle.playerSide].lineup;
-  assert.equal(phase.onDeck.id, lineup[(battle.state.lineupIndex[battle.playerSide] + 1) % lineup.length].id);
-  assert.ok(html.includes("ON DECK"), "the on-deck line shows");
-  assert.ok(html.includes(`data-card-id="${phase.onDeck.id}"`), "and the on-deck man is hoverable");
+
+  // Both clubs' orders run down the outside edges: surname and on-base, nine
+  // deep, every man hoverable. ON DECK is gone — the whole order is right there.
+  assert.ok(!html.includes("ON DECK"), "the on-deck line is retired");
+  const strips = [...html.matchAll(/<ul class="gq-hud-strip">([\s\S]*?)<\/ul>/g)].map((m) => m[1]);
+  assert.equal(strips.length, 2, "one strip per club");
+  for (const [index, side] of [battle.playerSide, battle.npcSide].entries()) {
+    const lineup = battle.state[side].lineup;
+    for (const player of lineup) {
+      const last = player.name.split(" ").pop().toUpperCase();
+      assert.ok(strips[index].includes(last), `${last} stands in his club's order`);
+      assert.ok(strips[index].includes(`data-card-id="${player.id}"`), `${last} is hoverable`);
+    }
+    assert.ok(strips[index].includes(`>${lineup[0].onBase}<`), "on-base values ride along");
+    // A tenth row, set apart: the arm behind them, marked P, reading his control.
+    const { pitcher } = pitcherStatus(battle.state, side);
+    const armLast = pitcher.name.split(" ").pop().toUpperCase();
+    assert.match(strips[index], /class="gq-strip-arm[^"]*"/, "the club's arm gets his own row");
+    assert.ok(strips[index].includes(`>${armLast}<`), "and it names him");
+    assert.ok(strips[index].includes(`>${pitcher.control}<`), "reading his control");
+    assert.ok(strips[index].includes(`data-card-id="${pitcher.id}"`), "hoverable like the rest");
+  }
+  // Only the club at bat lights a man up, and it's the man at the plate. The
+  // club in the field marks its leadoff man for next inning, more quietly.
+  const lit = [...html.matchAll(/<li class="[^"]*gq-strip-now[^"]*" data-card-id="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(lit, [phase.batter.id], "exactly one hitter is highlighted: the batter");
+  const next = [...html.matchAll(/<li class="[^"]*gq-strip-next[^"]*" data-card-id="([^"]+)"/g)].map((m) => m[1]);
+  const fielding = battle.state[battle.npcSide].lineup;
+  assert.deepEqual(
+    next,
+    [fielding[battle.state.lineupIndex[battle.npcSide] % fielding.length].id],
+    "and the fielding club marks whoever leads off when they bat"
+  );
   // YOU/THEM carry defense summaries: catcher arm, infield, outfield sums.
   const notes = [...html.matchAll(/data-hover-note="([^"]+)"/g)].map((m) => m[1]);
   assert.equal(notes.length, 2, "both HUD sides carry a defense note");
@@ -1367,6 +1395,100 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
     .filter((p) => ["1B", "2B", "3B", "SS"].includes(p.assignedPosition ?? p.position))
     .reduce((sum, p) => sum + (Number(p.fielding) || 0), 0);
   assert.ok(notes[0].includes(`INFIELD ${infield >= 0 ? "+" : ""}${infield}`), "infield total matches the lineup");
+});
+
+test("the hand-operated board hangs runs by inning, and blank is not nought", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "line-score" });
+  const state = battle.state;
+  const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] } };
+
+  // Top of the 1st, nobody has batted: the away club's frame is open and the
+  // home club's is blank — the distinction the board exists to make.
+  const cells = (html, row) => [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)]
+    .map((m) => [...m[1].matchAll(/<td[^>]*>([^<]*)<\/td>/g)].map((c) => c[1]))
+    .filter((r) => r.length)[row];
+  let html = battleScreen.render(app);
+  assert.equal(cells(html, 0)[0], "0", "the away club is up, so its first frame reads nought");
+  assert.equal(cells(html, 1)[0], "", "the home club has not come up: its frame stays blank");
+
+  // Runs land in the frame they were scored in, and extras grow the board.
+  state.lineScore.away = [2, 0, 1];
+  state.lineScore.home = [0, 3];
+  state.score.away = 3;
+  state.score.home = 3;
+  state.inning = 3;
+  state.half = "top";
+  html = battleScreen.render(app);
+  const away = cells(html, 0);
+  const home = cells(html, 1);
+  assert.deepEqual(away.slice(0, 3), ["2", "0", "1"], "the away club's frames read across");
+  assert.deepEqual(home.slice(0, 3), ["0", "3", ""], "and the home club has not batted in the 3rd yet");
+  assert.equal(away[away.length - 1], "3", "the total hangs on the end");
+  assert.equal(home[home.length - 1], "3");
+  assert.ok(away.length >= 10, "nine frames and a total, at least");
+});
+
+test("every run reaches the board, in the inning it was scored", async () => {
+  const { fastForward } = await import("../src/rules/battle/controller.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "line-score-live" });
+  // fastForward stops at every leverage moment; keep waving it on to the end.
+  for (let guard = 0; guard < 300 && battlePhase(battle).type !== "over"; guard += 1) fastForward(battle);
+  const state = battle.state;
+  const total = (side) => state.lineScore[side].reduce((sum, runs) => sum + runs, 0);
+  assert.ok(state.score.away + state.score.home > 0, "the game actually scored");
+  assert.equal(total("away"), state.score.away, "the away board adds up to the away score");
+  assert.equal(total("home"), state.score.home, "and the home board to the home score");
+  // Nothing hung in a frame that was never played.
+  assert.ok(state.lineScore.away.length <= state.inning, "no runs land past the last inning");
+  assert.ok(state.lineScore.home.length <= state.inning);
+});
+
+test("the diamond acts out the play: a lap for a homer, a shake for a man cut down", async () => {
+  const { playMotion } = await import("../src/adventure/ui/battleScreen.js");
+
+  // A home run touches all four, in order — that's the lap.
+  assert.deepEqual(playMotion([{ result: "HR", runs: 1 }]), { path: [1, 2, 3, 4], outs: [] });
+  assert.deepEqual(playMotion([{ result: "2B", runs: 0 }]).path, [1, 2], "a double runs through first");
+  assert.deepEqual(playMotion([{ result: "BB", runs: 0 }]).path, [1], "a walk is a trot to first");
+
+  // A single that brings a man home lights first and the plate, and nothing between.
+  assert.deepEqual(playMotion([{ result: "1B", runs: 1 }]).path, [1, 4]);
+
+  // A runner cut down stealing shakes the bag he was going for, and does not
+  // pulse it — he never got there.
+  const caught = playMotion([
+    { result: "CS", runs: 0, playDetails: { kind: "steal", stealAttempt: { to: "2B", safe: false } } }
+  ]);
+  assert.deepEqual(caught, { path: [], outs: [2] });
+
+  // A steal that works pulses the base instead.
+  const stolen = playMotion([
+    { result: "SB", runs: 0, playDetails: { kind: "steal", stealAttempt: { to: "2B", safe: true } } }
+  ]);
+  assert.deepEqual(stolen, { path: [2], outs: [] });
+
+  // A hit with runners going: the safe ones light up, the thrown-out one shakes.
+  const mixed = playMotion([
+    {
+      result: "1B",
+      runs: 1,
+      playDetails: {
+        kind: "hit",
+        attempts: [{ to: "home", safe: true }, { to: "3B", safe: false }]
+      }
+    }
+  ]);
+  assert.deepEqual(mixed.path, [1, 4], "the batter to first, the runner home");
+  assert.deepEqual(mixed.outs, [3], "and the man thrown out at third");
+
+  // Nothing happened on the bases: nothing moves.
+  assert.deepEqual(playMotion([{ result: "SO", runs: 0 }]), { path: [], outs: [] });
+  assert.deepEqual(playMotion([]), { path: [], outs: [] });
 });
 
 test("the menu right-aligns when the opponent is hitting", async () => {
