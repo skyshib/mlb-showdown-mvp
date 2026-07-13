@@ -1,5 +1,5 @@
-import { chartSpan } from "./cards.js?v=20260713-n";
-import { hitterPositions } from "./cards.js?v=20260713-n";
+import { chartSpan } from "./cards.js?v=20260713-o";
+import { hitterPositions } from "./cards.js?v=20260713-o";
 
 // ---- Authentic-scale pricing -------------------------------------------------
 //

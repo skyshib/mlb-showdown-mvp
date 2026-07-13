@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-n";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-o";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-n";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-n";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-n";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-n";
+} from "./ui/sounds.js?v=20260713-o";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-o";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-o";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-o";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-n";
+} from "./rules/draft.js?v=20260713-o";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-n";
+} from "./onlineClient.js?v=20260713-o";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-n";
-import { computeAwards } from "./rules/awards.js?v=20260713-n";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-n";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-n";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-n";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-n";
+} from "./rules/batch.js?v=20260713-o";
+import { computeAwards } from "./rules/awards.js?v=20260713-o";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-o";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-o";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-o";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-o";
 import {
   basesText,
   cardRarity,
@@ -137,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-n";
+} from "./ui/render.js?v=20260713-o";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -5161,19 +5161,23 @@ function teamComposition(manager, draft) {
   };
 }
 
-// The chart OPS runs high against a real slash line — a hitter around 1.8, where
-// a good season is 0.9 — because it reads the card alone: the twenty faces with
-// the pitcher taken out. It compares charts to charts, not to the back of a
-// baseball card.
+// A chart is graded and not priced. The OPS behind it reads nothing like a real
+// slash line — a hitter comes out around 1.8 where a good season is 0.9, because
+// it reads the card alone, with the pitcher taken out of it — so the figure is
+// good for ranking charts against charts and good for nothing else. Printing it
+// only invites an argument about a decimal place that was never meant to be read
+// aloud. The letter is the answer; the number was only ever how it got there.
+//
+// `decimals: null` is a row that shows its grade and keeps its arithmetic.
 const COMPOSITION_ROWS = [
   { key: "onBase", label: "On-base", note: "the average bat, against every bat on the board", decimals: 1 },
-  { key: "chart", label: "Chart quality", note: "OPS off the card alone — what the twenty faces do", decimals: 3 },
+  { key: "chart", label: "Chart quality", note: "what the twenty faces do, against every bat on the board", decimals: null },
   { key: "speed", label: "Speed", note: "the average bat, against every bat on the board", decimals: 1 },
   { key: "defence", label: "Defence", note: "the average glove, against every glove on the board", decimals: 1 },
   { key: "spControl", label: "Starters · control", note: "how often the batter has to read their chart", decimals: 1, group: "sp" },
-  { key: "spChart", label: "Starters · chart", note: "opponent OPS when he does — low is the good one", decimals: 3, group: "sp" },
+  { key: "spChart", label: "Starters · chart", note: "and what it costs him when he does", decimals: null, group: "sp" },
   { key: "rpControl", label: "Bullpen · control", note: "how often the batter has to read their chart", decimals: 1, group: "rp" },
-  { key: "rpChart", label: "Bullpen · chart", note: "opponent OPS when he does — low is the good one", decimals: 3, group: "rp" }
+  { key: "rpChart", label: "Bullpen · chart", note: "and what it costs him when he does", decimals: null, group: "rp" }
 ];
 
 function compositionTable(draft) {
@@ -5218,7 +5222,7 @@ function recapText(draft) {
   lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(col)).join("")}`);
   for (const row of rows) {
     const cells = row.cells
-      .map((cell) => `${cell.grade} (${cell.value.toFixed(row.decimals)})`.padStart(col))
+      .map((cell) => `${cell.grade}${row.decimals === null ? "" : ` (${cell.value.toFixed(row.decimals)})`}`.padStart(col))
       .join("");
     lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
@@ -5251,7 +5255,7 @@ function renderDraftDone(draft) {
           .map(
             (cell) => `<td class="comp-cell">
               <span class="comp-grade grade-${cell.grade}">${cell.grade}</span>
-              <span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>
+              ${row.decimals === null ? "" : `<span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>`}
             </td>`
           )
           .join("")}
