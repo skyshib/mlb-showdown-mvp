@@ -1,6 +1,6 @@
 import { chartSpan } from "../rules/cards.js?v=20260713-u";
 import { adventurePool } from "./packs.js?v=20260713-u";
-import { npcBudget } from "./region.js?v=20260713-u";
+import { npcBudget, trainerById } from "./region.js?v=20260713-u";
 import { createRng } from "../rules/rng.js?v=20260713-u";
 import { personConflict, playsPosition } from "../rules/cards.js?v=20260713-u";
 
@@ -34,26 +34,100 @@ function slotMatches(slot, card) {
   return card.kind === "hitter" && playsPosition(card, slot);
 }
 
-// Greedy under budget: fill slots one at a time, always leaving enough budget
-// to cover the remaining slots with the cheapest unused fits, and spend most of
-// the room on the best archetype fit. Early slots see the most room, so the
-// fill ORDER is shuffled per trainer — which position lands the star is part of
-// the trainer's identity, not always the catcher. Ace staffs still shop for
-// pitching first so the budget lands on the mound.
 // Pass the save so mode scaling applies (uncapped bosses shop richer);
 // without one the printed budget stands. Team identity (seeded slot order,
 // weights, picks) only shifts when the budget itself does.
 export function buildNpcTeam(trainer, save = null) {
+  const { roster, spent } = assembleRoster(trainer, save);
+
+  // Present (and bat) the squad best-first: hitters by printed points, then
+  // pitchers by printed points, so the top starter also opens game 1.
+  const byPoints = (a, b) => b.points - a.points || a.name.localeCompare(b.name);
+  const hitters = roster.filter((card) => card.kind === "hitter").sort(byPoints);
+  const pitchers = roster.filter((card) => card.kind === "pitcher").sort(byPoints);
+
+  return {
+    id: trainer.id,
+    name: trainer.name,
+    roster: [...hitters, ...pitchers],
+    lineupAssignments: {},
+    battingOrder: hitters.map((card) => card.id),
+    points: spent
+  };
+}
+
+// The roster in fill order, alongside the slot each card was bought for — an
+// heir needs that pairing to keep shopping where his predecessor stopped.
+function assembleRoster(trainer, save) {
   const pool = adventurePool();
   const pointBudget = npcBudget(save, trainer);
   const score = ARCHETYPES[trainer.archetype] ?? ARCHETYPES.balanced;
-  const rng = createRng(`npc-team:${trainer.teamSeed}`);
-  const slots = trainer.archetype === "ace"
+  // A trainer who INHERITS doesn't hold a draft: he keeps the binder he already
+  // owns and spends the season's new money on it. Everything he can't afford to
+  // improve, he keeps — so the rival you meet at the summit is the rival from
+  // Route 1, three trades later, not a stranger wearing his sprite.
+  const heirloom = trainer.inherits ? assembleRoster(trainerById(trainer.inherits), save) : null;
+  // One stream feeds the slot order, the weights, and the picks, in that order.
+  const rng = heirloom ? null : createRng(`npc-team:${trainer.teamSeed}`);
+  const slots = heirloom ? heirloom.slots : draftSlots(trainer, rng);
+  const roster = heirloom ? [...heirloom.roster] : [];
+  const used = new Set(roster.map((card) => card.id));
+  let spent = roster.reduce((total, card) => total + card.points, 0);
+
+  if (!heirloom) ({ spent } = greedyFill({ pool, pointBudget, score, slots, roster, used, rng, trainer }));
+
+  // Upgrade pass: roll unspent budget into the roster instead of leaving it
+  // on the table. Keep taking the single best swap — same slot, unused card,
+  // better archetype fit — until the leftover can't buy one. Every swap must
+  // spend MORE (this is budget-filling, not sidegrade-shopping), so the loop
+  // is bounded by the leftover and the team lands close to the limit. For an
+  // heir this pass IS the build: his whole roster is the leftover's shopping
+  // list, and the budget he grew by is what he trades up with.
+  let swapped = true;
+  while (swapped) {
+    swapped = false;
+    let best = null;
+    for (let index = 0; index < roster.length; index += 1) {
+      const current = roster[index];
+      const ceiling = pointBudget - spent + current.points;
+      for (const card of pool) {
+        if (used.has(card.id) || card.points > ceiling || card.points <= current.points) continue;
+        if (!slotMatches(slots[index], card)) continue;
+        if (personConflict(roster, card, current.id)) continue;
+        const gain = score(card) - score(current);
+        if (gain <= 0) continue;
+        if (!best || gain > best.gain || (gain === best.gain && card.points < best.card.points)) {
+          best = { index, card, gain };
+        }
+      }
+    }
+    if (best) {
+      const outgoing = roster[best.index];
+      used.delete(outgoing.id);
+      used.add(best.card.id);
+      roster[best.index] = best.card;
+      spent += best.card.points - outgoing.points;
+      swapped = true;
+    }
+  }
+
+  return { roster, slots, spent };
+}
+
+// Early slots see the most room, so the fill ORDER is shuffled per trainer —
+// which position lands the star is part of the trainer's identity, not always
+// the catcher. Ace staffs still shop for pitching first so the budget lands on
+// the mound.
+function draftSlots(trainer, rng) {
+  return trainer.archetype === "ace"
     ? [...shuffled(PITCHER_SLOTS, rng), ...shuffled(HITTER_SLOTS, rng)]
     : shuffled([...HITTER_SLOTS, ...PITCHER_SLOTS], rng);
+}
 
-  const used = new Set();
-  const roster = [];
+// Greedy under budget: fill slots one at a time, always leaving enough budget
+// to cover the remaining slots with the cheapest unused fits, and spend most of
+// the room on the best archetype fit.
+function greedyFill({ pool, pointBudget, score, slots, roster, used, rng, trainer }) {
   let spent = 0;
 
   // One era of a player per team: a slot never fills with a second decade
@@ -105,53 +179,7 @@ export function buildNpcTeam(trainer, save = null) {
     carry = allocation - pick.points;
   }
 
-  // Upgrade pass: roll unspent budget into the roster instead of leaving it
-  // on the table. Keep taking the single best swap — same slot, unused card,
-  // better archetype fit — until the leftover can't buy one. Every swap must
-  // spend MORE (this is budget-filling, not sidegrade-shopping), so the loop
-  // is bounded by the leftover and the team lands close to the limit.
-  let swapped = true;
-  while (swapped) {
-    swapped = false;
-    let best = null;
-    for (let index = 0; index < roster.length; index += 1) {
-      const current = roster[index];
-      const ceiling = pointBudget - spent + current.points;
-      for (const card of pool) {
-        if (used.has(card.id) || card.points > ceiling || card.points <= current.points) continue;
-        if (!slotMatches(slots[index], card)) continue;
-        if (personConflict(roster, card, current.id)) continue;
-        const gain = score(card) - score(current);
-        if (gain <= 0) continue;
-        if (!best || gain > best.gain || (gain === best.gain && card.points < best.card.points)) {
-          best = { index, card, gain };
-        }
-      }
-    }
-    if (best) {
-      const outgoing = roster[best.index];
-      used.delete(outgoing.id);
-      used.add(best.card.id);
-      roster[best.index] = best.card;
-      spent += best.card.points - outgoing.points;
-      swapped = true;
-    }
-  }
-
-  // Present (and bat) the squad best-first: hitters by printed points, then
-  // pitchers by printed points, so the top starter also opens game 1.
-  const byPoints = (a, b) => b.points - a.points || a.name.localeCompare(b.name);
-  const hitters = roster.filter((card) => card.kind === "hitter").sort(byPoints);
-  const pitchers = roster.filter((card) => card.kind === "pitcher").sort(byPoints);
-
-  return {
-    id: trainer.id,
-    name: trainer.name,
-    roster: [...hitters, ...pitchers],
-    lineupAssignments: {},
-    battingOrder: hitters.map((card) => card.id),
-    points: spent
-  };
+  return { spent };
 }
 
 function shuffled(slots, rng) {

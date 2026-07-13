@@ -53,9 +53,37 @@ function situationTag(event) {
   return `<span class="gq-dim">${event.outsBefore}o ${bases}</span> `;
 }
 
+// The dice behind the call, read in the order the tabletop rolls them: the
+// PITCH die plus the pitcher's (fatigue-docked) control decides whose chart is
+// live, then the SWING die reads off that chart. A steal throws only the one.
+function rollsTag(event) {
+  const steal = event.playDetails?.stealAttempt;
+  if (typeof steal?.roll === "number") {
+    return `THROW ${steal.roll}+${steal.fielding}=${steal.total} VS SPD ${steal.target}`;
+  }
+  if (typeof event.resultRoll !== "number") return "";
+  const parts = [];
+  if (typeof event.controlRoll === "number") {
+    const tired = event.fatiguePenalty ? ` TIRED-${event.fatiguePenalty}` : "";
+    const chart = event.chartOwner === "pitcher" ? "PITCHER" : "BATTER";
+    parts.push(`PITCH ${event.controlRoll}+${event.effectiveControl}=${event.controlTotal}${tired} VS OB ${event.onBase} &rarr; ${chart}`);
+  }
+  parts.push(`SWING ${event.resultRoll}`);
+  return parts.join(" &middot; ");
+}
+
+// The running number: YOUR odds of winning once the play is in the books —
+// the level, where the WPA beside it is only the step.
+function winProbTag(event, playerSide) {
+  if (event.wpAfter == null) return "";
+  const mine = playerSide === "home" ? event.wpAfter : 1 - event.wpAfter;
+  return `WIN ${Math.round(mine * 100)}%`;
+}
+
 // One play-by-play row: inning, the base-out situation, actor, result, score
 // when it changed, and the play's WPA from the PLAYER'S side (a big opponent
-// rally reads negative).
+// rally reads negative). Under it, dim, the dice that decided the play and the
+// win probability they left you at.
 export function gameLogLine(event, playerSide) {
   const inning = `${event.half === "top" ? "T" : "B"}${event.inning}`;
   if (event.type === "pitching-change") {
@@ -71,7 +99,10 @@ export function gameLogLine(event, playerSide) {
   const npcSide = playerSide === "home" ? "away" : "home";
   const scoreText = event.scoreAfter ? `${event.scoreAfter[playerSide]}-${event.scoreAfter[npcSide]}` : "";
   const score = scoreText ? (event.runs > 0 ? ` <b>${scoreText}</b>` : ` <span class="gq-dim">${scoreText}</span>`) : "";
-  return `${inning} ${situationTag(event)}${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
+  const detail = [rollsTag(event), winProbTag(event, playerSide)].filter(Boolean).join(" &middot; ");
+  const play = `${inning} ${situationTag(event)}${escapeHtml(shortName(actor))} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)}`;
+  if (!detail) return play;
+  return `<span class="gq-log-row">${play}<span class="gq-log-detail gq-dim">${detail}</span></span>`;
 }
 
 // ---- Stars of the game -------------------------------------------------------
@@ -174,7 +205,7 @@ export const gameStatsScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>FINAL ${app.screen.score[app.screen.playerSide]}-${app.screen.score[app.screen.playerSide === "home" ? "away" : "home"]} VS ${escapeHtml(trainer.name)}</span><span>${logView ? "GAME LOG" : "BOX SCORE"}</span></div>
       <div class="gq-body"><div class="gq-frame gq-scroll gq-map-node">${body}</div></div>
-      <div class="gq-textbox"><p class="gq-dim">% IS WPA${logView ? " FOR YOUR SIDE" : " — WIN PROBABILITY ADDED"}. 10%+ SWINGS READ BOLD.${hasLog ? ` &#8592;/&#8594; ${logView ? "BOX SCORE" : "GAME LOG"}.` : ""}</p><p class="gq-blink">Z — CONTINUE</p></div>
+      <div class="gq-textbox"><p class="gq-dim">% IS WPA${logView ? " FOR YOUR SIDE, WIN % YOUR RUNNING ODDS" : " — WIN PROBABILITY ADDED"}. 10%+ SWINGS READ BOLD.${hasLog ? ` &#8592;/&#8594; ${logView ? "BOX SCORE" : "GAME LOG"}.` : ""}</p><p class="gq-blink">Z — CONTINUE</p></div>
     </div>`;
   },
   hoverCard(app, index) {
