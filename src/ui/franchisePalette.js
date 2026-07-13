@@ -96,7 +96,13 @@ export function derivePalette({ ink, accent }) {
     accentDark: mix(darkenUntil(accent, paper, 4.6), "#000000", 0.35),
     inkDeep: mix(strongInk, "#000000", 0.25),
     // The dark room the handheld sits in: the club's ink with the lights off.
-    room: mix(strongInk, "#000000", 0.55)
+    room: mix(strongInk, "#000000", 0.55),
+    // The case gets a breath of the club too. Without it the plastic stays the
+    // same warm grey for all thirty, which reads fine next to a brown Padres
+    // screen and wrong next to a cold Mariners one — a warm shell around a
+    // silver screen looks like two different objects.
+    shell: mix("#bdb3a0", strongInk, 0.10),
+    shellDark: mix("#948b7a", strongInk, 0.10)
   };
 }
 
@@ -111,7 +117,8 @@ export function franchisePalette(universeKey) {
 // them, and the stylesheet's own defaults — the enamel sign — come back.
 const TOKENS = [
   "--navy", "--navy-deep", "--line", "--accent", "--accent-dark",
-  "--gb-darkest", "--gb-dark", "--gb-light", "--gb-lightest", "--room"
+  "--gb-darkest", "--gb-dark", "--gb-light", "--gb-lightest", "--room",
+  "--shell", "--shell-dark"
 ];
 
 export function applyFranchisePalette(universeKey, root = document.documentElement) {
@@ -133,5 +140,7 @@ export function applyFranchisePalette(universeKey, root = document.documentEleme
   root.style.setProperty("--gb-light", palette.tint);
   root.style.setProperty("--gb-lightest", palette.paper);
   root.style.setProperty("--room", palette.room);
+  root.style.setProperty("--shell", palette.shell);
+  root.style.setProperty("--shell-dark", palette.shellDark);
   return palette;
 }

@@ -1275,6 +1275,9 @@ async function runLottery(setupForm) {
 }
 
 function renderSetup(setupError = "") {
+  // Backing out of a club's room puts the house colors back on the way in, not
+  // on the way out — nothing clears state.universe when a draft is abandoned.
+  applyFranchisePalette(null);
   resetAppHandlers();
   const examples = setupExamples(state.seed);
   app.innerHTML = `<section class="setup">
@@ -1633,6 +1636,11 @@ function sealedBidCaret(input) {
 }
 
 function renderDraft() {
+  // Here and not only in renderCurrentScreen: renderDraft is called directly
+  // from a dozen places — the moment a room opens, and again on every pick —
+  // so a palette hung off the dispatcher alone never runs for the screen that
+  // most needs it.
+  applyFranchisePalette(state.universe);
   const draft = state.draft;
   reactToDraftChange(draft);
   captureSealedBids();
