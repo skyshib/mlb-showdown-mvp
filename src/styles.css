@@ -1469,6 +1469,17 @@ button.roster-slot[draggable="true"]:active {
   background: #0f1513;
 }
 
+/* The board is the whole screen. The enamel sheet the rest of the app sits on —
+   its cream ground, its navy rule, its margins — is furniture for a page you
+   read, not for a wall you glance at from across the room. */
+.war-room-body main {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
 .war-room {
   display: flex;
   flex-direction: column;
@@ -1884,6 +1895,117 @@ button.roster-slot[draggable="true"]:active {
 .type-pill.active {
   background: var(--accent);
   color: white;
+}
+
+/* ---- the broadcast board ---- */
+.war-clock {
+  padding: 6px 14px 7px;
+  border: 2px solid rgb(255 255 255 / 0.35);
+  font-family: var(--display);
+  font-size: 24px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.war-clock.urgent {
+  border-color: #e94c5f;
+  background: #e94c5f;
+  color: #fff;
+}
+
+.war-grid-wrap {
+  margin-top: 18px;
+  overflow-x: auto;
+}
+
+.war-grid {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.war-grid th,
+.war-grid td {
+  border: 1px solid rgb(255 255 255 / 0.14);
+  padding: 6px 8px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.war-grid thead th {
+  padding-bottom: 8px;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.war-round {
+  width: 34px;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 900;
+  font-style: italic;
+  color: rgb(255 255 255 / 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.war-cell {
+  height: 42px;
+}
+
+.war-cell.empty {
+  background: rgb(255 255 255 / 0.03);
+}
+
+/* The square whose turn it is, pulsing gently on a wall across the room. */
+.war-cell.on-clock {
+  background: rgb(233 76 95 / 0.18);
+  border-color: #e94c5f;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #ffb3bd;
+  animation: war-clock-pulse 1.6s ease-in-out infinite;
+}
+
+.war-cell-name {
+  display: block;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.war-cell-meta {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: rgb(255 255 255 / 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes war-clock-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .war-cell.on-clock { animation: none; }
 }
 
 /* ---- when the last pick lands ---- */

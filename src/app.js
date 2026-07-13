@@ -13,7 +13,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-i";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-j";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-i";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-i";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-i";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-i";
+} from "./ui/sounds.js?v=20260713-j";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-j";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-j";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-j";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +99,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-i";
+} from "./rules/draft.js?v=20260713-j";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-i";
+} from "./onlineClient.js?v=20260713-j";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -118,12 +118,12 @@ import {
   runBatchChunk,
   simulateBatch,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-i";
-import { computeAwards } from "./rules/awards.js?v=20260713-i";
-import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-i";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-i";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-i";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-i";
+} from "./rules/batch.js?v=20260713-j";
+import { computeAwards } from "./rules/awards.js?v=20260713-j";
+import { chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-j";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-j";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-j";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-j";
 import {
   basesText,
   cardRarity,
@@ -138,7 +138,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-i";
+} from "./ui/render.js?v=20260713-j";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -308,6 +308,13 @@ function pickClockTick() {
     pickClockKey = turn.key;
     pickClockDeadline = Date.now() + state.pickTimerSeconds * 1000;
     pickClockWarned = false;
+    // The deadline lives in this tab's memory, which the broadcast board on the
+    // second screen cannot see. Publish it once a turn — not once a tick — so
+    // the board can run the same clock without this one writing constantly.
+    if (state.pickTimerSeconds > 0) {
+      state.pickDeadline = pickClockDeadline;
+      saveState();
+    }
     if (shouldChimeForTurn(turn.current)) {
       playYourTurn();
       announceTurn(state.draft, turn.current);
@@ -403,7 +410,7 @@ function advanceCpuTurns() {
 let heardPickNumber = null;
 let heardComplete = false;
 
-function reactToDraftChange(draft) {
+function reactToDraftChange(draft, { spectator = false } = {}) {
   if (!draft) {
     heardPickNumber = null;
     heardComplete = false;
@@ -415,8 +422,9 @@ function reactToDraftChange(draft) {
 
   if (landed) {
     // A card off your own board going to somebody else is not a pick, it is a
-    // mugging, and it gets its own sound.
-    const mine = starredIds();
+    // mugging, and it gets its own sound. A wall has no board and cannot be
+    // mugged: every pick sounds the same on the broadcast.
+    const mine = spectator ? new Set() : starredIds();
     const taken = draftHistory(draft)
       .slice(-(picks - heardPickNumber))
       .some((entry) => mine.has(entry.player?.id));
@@ -597,6 +605,9 @@ if (warRoomMode && !onlineRoomParam) {
     if (event.key === STORAGE_KEY) refreshWarRoom();
   });
   setInterval(refreshWarRoom, 1500);
+  // The whole board only needs repainting when the room moves; the clock needs
+  // repainting every second, and it is one span.
+  setInterval(updateWarClock, 500);
 }
 
 function defaultState() {
@@ -642,6 +653,9 @@ function defaultState() {
     compare: [],
     // Derived from a finished draft; recomputed rather than trusted.
     grades: null,
+    // When the clock on the current pick runs out — published for the board on
+    // the second screen, which cannot see this tab's memory.
+    pickDeadline: null,
     filters: {
       type: "hitter",
       position: "all",
@@ -4045,6 +4059,64 @@ function renderRecentPicks(draft) {
 // Read-only broadcast layout for a TV: the lot, every board, and the ticker
 // on one dark screen. Opened with ?board (same browser via localStorage) or
 // ?room=CODE&board (live spectator over SSE).
+// ---- the broadcast board ----
+//
+// The grid is the thing every draft room in the world has on the wall: rounds
+// down the side, managers across the top, and the squares filling in one at a
+// time. A snake draft is exactly that shape — one pick per manager per round —
+// so it is exactly that grid, and it reverses the way the picking does.
+//
+// An auction has no rounds, so it does not get a grid. It gets its ticker, which
+// is the shape an auction actually has.
+function renderWarGrid(draft, history) {
+  if (isAuctionDraft(draft)) return "";
+  const seats = draft.managers;
+  const rounds = draft.rosterSize;
+  const byRound = new Map();
+  for (const pick of history) {
+    byRound.set(`${pick.round}:${pick.manager.id}`, pick);
+  }
+
+  const nextPick = draft.complete ? null : draft.pickNumber + 1;
+  const head = seats.map((manager) => `<th>${escapeHtml(manager.name)}</th>`).join("");
+  const rows = Array.from({ length: rounds }, (_, index) => {
+    const round = index + 1;
+    // The snake turns at the end of every round, and the board turns with it.
+    const order = round % 2 === 0 ? [...seats].reverse() : seats;
+    const cells = seats
+      .map((manager) => {
+        const pick = byRound.get(`${round}:${manager.id}`);
+        const seat = order.indexOf(manager);
+        const pickNumber = (round - 1) * seats.length + seat + 1;
+        const onClock = pickNumber === nextPick;
+        if (!pick) {
+          return `<td class="war-cell ${onClock ? "on-clock" : "empty"}">${onClock ? "ON THE CLOCK" : ""}</td>`;
+        }
+        return `<td class="war-cell filled heat" style="${heatStyle(pick.player.points, draftHeatScale(draft))}">
+          <span class="war-cell-name">${escapeHtml(shortCardName(pick.player.name))}</span>
+          <span class="war-cell-meta">${escapeHtml(playerPosition(pick.player))} &middot; ${pick.player.points}</span>
+        </td>`;
+      })
+      .join("");
+    return `<tr><th class="war-round">${round}</th>${cells}</tr>`;
+  }).join("");
+
+  return `<section class="war-grid-wrap">
+    <table class="war-grid">
+      <thead><tr><th class="war-round"></th>${head}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </section>`;
+}
+
+// A card's name, short enough for a square on a wall.
+function shortCardName(name) {
+  const trimmed = String(name).replace(/\s+'\d{2}$/, "");
+  const parts = trimmed.split(" ");
+  if (parts.length < 2) return trimmed;
+  return `${parts[0][0]}. ${parts.slice(1).join(" ")}`;
+}
+
 function renderWarRoom() {
   resetAppHandlers();
   document.body.classList.add("war-room-body");
@@ -4053,6 +4125,7 @@ function renderWarRoom() {
     app.innerHTML = `<div class="war-room"><p class="war-standby">Waiting for a draft to start&hellip;</p></div>`;
     return;
   }
+  reactToDraftChange(draft, { spectator: true });
   const auction = isAuctionDraft(draft);
   const lot = auction ? draft.auction.lot : null;
   const lotPlayer = lot ? auctionLotPlayer(draft) : null;
@@ -4118,6 +4191,7 @@ function renderWarRoom() {
     <header class="war-header">
       <span class="war-brand">MLB Showdown &middot; ${escapeHtml(draft.seed ?? "")}</span>
       <h1>${status}</h1>
+      <span class="war-clock" data-war-clock hidden></span>
       ${renderHeatLegend(heatScale)}
       <button type="button" class="war-sound-toggle ${isMuted() ? "" : "enabled"}" data-action="toggle-sound" aria-pressed="${!isMuted()}">${isMuted() ? "&#128264; Sound off" : "&#128266; Sound on"}</button>
       ${state.online ? `<span class="war-live">&#9679; LIVE</span>` : ""}
@@ -4130,12 +4204,35 @@ function renderWarRoom() {
       </section>
       <div class="war-teams">${teams}</div>
     </div>
+    ${renderWarGrid(draft, history)}
     ${renderPoolFloor(draft)}
     <footer class="war-ticker">${ticker}</footer>
   </div>`;
   app.onclick = (event) => {
     if (event.target.closest("[data-action='toggle-sound']")) toggleSound();
   };
+  updateWarClock();
+}
+
+// The board runs the clock the drafting tab published, so the room on the second
+// screen counts down with the room at the table.
+function updateWarClock() {
+  const slot = document.querySelector("[data-war-clock]");
+  if (!slot) return;
+  const draft = state.draft;
+  const deadline = state.pickDeadline;
+  if (!draft || draft.complete || isDraftPaused(draft) || !Number.isFinite(deadline)) {
+    slot.hidden = true;
+    return;
+  }
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    slot.hidden = true;
+    return;
+  }
+  slot.hidden = false;
+  slot.textContent = formatPickClock(remaining);
+  slot.classList.toggle("urgent", remaining <= 10_000);
 }
 
 
@@ -5610,6 +5707,7 @@ function reviveState(value) {
     starred: normalizeStarred(value.starred),
     compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],
     grades: null,
+    pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),

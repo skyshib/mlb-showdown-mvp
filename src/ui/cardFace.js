@@ -1,4 +1,4 @@
-import { formatRange, positionFieldingLabel } from "../rules/cards.js?v=20260713-i";
+import { formatRange, positionFieldingLabel } from "../rules/cards.js?v=20260713-j";
 import { dualPartnerCard } from "../data/universes.js";
 import { CARD_IMAGE_FILES } from "../data/cardImages.js";
 import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS, MLB_TEAM_CLUB_NAMES } from "../data/mlbTeams.js";
