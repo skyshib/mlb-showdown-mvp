@@ -284,30 +284,24 @@ td span {
   min-width: 0;
 }
 
-/* The three features, as flat enamel blocks split by navy rules. */
+/* The three sets on offer. No frame and no cell rules — they read as a list on
+   the sheet, not a table. */
 .setup-features {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
   margin: 0;
-  border: var(--rule) solid var(--navy);
   padding: 0;
-  background: var(--navy);
   list-style: none;
 }
 
 .setup-feature {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px 14px;
-  background: var(--panel);
+  gap: 4px;
 }
 
-/* Two of the three names wrap to a second line, so reserve both lines and the
-   notes below still start on the same baseline. */
 .setup-feature-name {
-  min-height: 2em;
   font-family: var(--display);
   font-size: 19px;
   font-weight: 900;
@@ -319,9 +313,26 @@ td span {
 }
 
 .setup-feature-note {
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.45;
   color: var(--muted);
+}
+
+/* A real card out of that pool, so the set shows itself instead of describing
+   itself. The red keeps it from reading as more body copy. */
+.setup-feature-example {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  color: var(--accent-dark);
+  font-variant-numeric: tabular-nums;
+}
+
+.setup-feature-example:empty {
+  display: none;
 }
 
 .setup-grid {
@@ -503,23 +514,80 @@ td span {
   display: none;
 }
 
+/* One column, so the decades read as a single list you run down rather than a
+   grid you hunt around in. */
 .decade-checklist {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 6px 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
 }
 
 .decade-checklist small {
-  grid-column: 1 / -1;
+  margin-top: 8px;
   color: var(--muted);
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.decade-toggle {
+  justify-self: start;
+  margin-bottom: 6px;
 }
 
 .decade-option {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
+  min-width: 0;
+  border: 2px solid transparent;
+  padding: 6px 8px;
   cursor: pointer;
-  font-size: 14px;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.decade-option:hover {
+  border-color: var(--hairline);
+}
+
+.decade-option:has(input:checked) {
+  border-color: var(--navy);
+  background: var(--sheet);
+  color: var(--navy);
+}
+
+/* Same flat navy box the computer-manager checks wear. */
+.decade-option input[type="checkbox"] {
+  flex: none;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border: 2px solid var(--navy);
+  border-radius: 0;
+  background: var(--panel);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.decade-option input[type="checkbox"]:checked {
+  background: var(--accent);
+}
+
+.decade-option input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  width: 5px;
+  height: 10px;
+  border-right: 2px solid var(--sheet);
+  border-bottom: 2px solid var(--sheet);
+  transform: rotate(42deg);
 }
 
 .franchise-field {

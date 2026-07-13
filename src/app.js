@@ -9,6 +9,9 @@ import {
   setUniverse,
   universeConfig
 } from "./data/universes.js?v=20260712-pinned-decks";
+import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
+import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
+import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
 import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
@@ -1011,6 +1014,7 @@ function renderUniverseFieldset(key) {
     ${option("decades", "MLB: by decade",
       "Real players rated on one decade's numbers. Check the decades you want in the pool.")}
     <div class="pool-suboptions decade-checklist" ${choice.pick === "decades" ? "" : "hidden"}>
+      <button type="button" class="small decade-toggle" data-action="toggle-decades">${choice.decades.length === DECADES.length ? "Uncheck all" : "Check all"}</button>
       ${DECADES.map((start) => `<label class="decade-option">
         <input type="checkbox" name="decade" value="${start}" ${choice.decades.includes(start) ? "checked" : ""} />
         <span>The ${escapeHtml(decadeLabel(start).toLowerCase())}</span>
@@ -1066,8 +1070,47 @@ function randomNominationBlurb(managerCount) {
   return `With ${managerCount} managers the board shows ${visiblePerSlot * 2} starters and ${hiddenPerSlot * 2} of them come up.`;
 }
 
+// One real card from each pool, so the hero shows what it is offering instead
+// of describing it. The printed and historical cards are looked up in their own
+// rows, and the fictional one is generated from the seed in the box — change the
+// seed and a different player turns up, which is the whole point of that set.
+function setupExamples(seed) {
+  const line = (name, position, rating, points) =>
+    `${name} · ${position} · ${rating} · ${points} pts`;
+
+  const printed = CLASSIC_CARD_ROWS.find((row) => row[1] === "Albert Pujols '04");
+  const historical = MLB_HISTORY_ROWS.find((row) => row[1] === "Willie Mays");
+
+  // Tuple: [id, name, team, year, edition, isPitcher, points, obc, ...]
+  const fromRow = (row) => {
+    const position = Array.isArray(row[9]) ? row[9][0] : row[9];
+    return line(row[1], position, `OB ${row[7]}`, row[6]);
+  };
+
+  let invented = "";
+  try {
+    const pool = buildFictionalDraftPool(seed);
+    const best = pool.reduce((a, b) => (b.points > a.points ? b : a));
+    invented = line(
+      best.name,
+      best.kind === "pitcher" ? best.role : best.position,
+      best.kind === "pitcher" ? `CTRL ${best.control}` : `OB ${best.onBase}`,
+      best.points
+    );
+  } catch {
+    invented = "";
+  }
+
+  return {
+    printed: printed ? fromRow(printed) : "",
+    historical: historical ? fromRow(historical) : "",
+    invented
+  };
+}
+
 function renderSetup(setupError = "") {
   resetAppHandlers();
+  const examples = setupExamples(state.seed);
   app.innerHTML = `<section class="setup">
     <header class="setup-hero">
       <div class="setup-hero-copy">
@@ -1079,14 +1122,17 @@ function renderSetup(setupError = "") {
         <li class="setup-feature">
           <span class="setup-feature-name">Historical cards</span>
           <span class="setup-feature-note">Every real Showdown card, 2000&ndash;2005 &mdash; the printed charts and points.</span>
+          <span class="setup-feature-example">${escapeHtml(examples.printed)}</span>
         </li>
         <li class="setup-feature">
           <span class="setup-feature-name">Real players</span>
           <span class="setup-feature-note">A century of big leaguers, rated by career, decade, or club.</span>
+          <span class="setup-feature-example">${escapeHtml(examples.historical)}</span>
         </li>
         <li class="setup-feature">
           <span class="setup-feature-name">Fictional</span>
           <span class="setup-feature-note">A made-up league, invented fresh from your seed.</span>
+          <span class="setup-feature-example" data-invented-example>${escapeHtml(examples.invented)}</span>
         </li>
       </ul>
     </header>
@@ -1193,12 +1239,21 @@ function renderSetup(setupError = "") {
     const auction = new FormData(setupForm).get("draftType") === "auction";
     setupForm.querySelector(".auction-suboptions").hidden = !auction;
   };
+  // The one button offers whichever move is left: check them all, or clear them.
+  const syncDecadeToggle = () => {
+    const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
+    const toggle = setupForm.querySelector('[data-action="toggle-decades"]');
+    if (!toggle || !boxes.length) return;
+    toggle.textContent = boxes.every((box) => box.checked) ? "Uncheck all" : "Check all";
+  };
   setupForm.addEventListener("change", (event) => {
     const owner = event.target.name === "decade" ? "decades"
       : event.target.name === "franchise" ? "franchise"
       : null;
     if (owner) setupForm.querySelector(`input[name="universe"][value="${owner}"]`).checked = true;
     if (owner || event.target.name === "universe") syncUniversePickers();
+    // Ticking the last box off by hand turns the button back into "Check all".
+    if (event.target.name === "decade") syncDecadeToggle();
 
     if (["nomination", "auctionBudget", "auctionReviewSeconds", "auctionBankSeconds", "auctionIncrementSeconds"].includes(event.target.name)) {
       setupForm.querySelector('input[name="draftType"][value="auction"]').checked = true;
@@ -1217,6 +1272,26 @@ function renderSetup(setupError = "") {
         .filter(Boolean)
     );
     setupForm.querySelector("[data-cpu-list]").innerHTML = renderCpuChoices(names, checked);
+  });
+  // Check all / uncheck all for the decade list: one button that flips to
+  // whichever move is left. Reaching for it means you want decades, so it
+  // selects that set the same way touching any other picker does.
+  setupForm.addEventListener("click", (event) => {
+    const toggle = event.target.closest('[data-action="toggle-decades"]');
+    if (!toggle) return;
+    const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
+    const checkAll = !boxes.every((box) => box.checked);
+    for (const box of boxes) box.checked = checkAll;
+    syncDecadeToggle();
+    setupForm.querySelector('input[name="universe"][value="decades"]').checked = true;
+    syncUniversePickers();
+  });
+  // The invented example is dealt from the seed in the box, so it follows the
+  // seed: type a new one and a different player turns up.
+  setupForm.addEventListener("change", (event) => {
+    if (event.target.name !== "seed") return;
+    const slot = document.querySelector("[data-invented-example]");
+    if (slot) slot.textContent = setupExamples(event.target.value).invented;
   });
   setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
