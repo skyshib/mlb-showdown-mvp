@@ -25,6 +25,7 @@
   --gb-lightest: #f0e7d2; /* cream — the screen itself, and text on top of ink */
   --accent: #b8352e;      /* the sign's red, spent only on the A/B buttons */
   --accent-dark: #7d221d;
+  --room: #101f33;        /* the dark room the handheld is sitting in */
   --shell: #bdb3a0;
   --shell-dark: #948b7a;
 }
@@ -68,8 +69,9 @@ html, body {
 
 body {
   /* The room the handheld is sitting in, dark enough that the screen is the
-     only lit thing on the page — but navy now, not soot, so it belongs. */
-  background: #101f33;
+     only lit thing on the page — but navy now, not soot, so it belongs. In a
+     franchise league it goes to the club's ink with the lights off. */
+  background: var(--room);
   display: flex;
   flex-direction: column;
   align-items: center;

@@ -1,13 +1,14 @@
-import { loadSave } from "./state.js?v=20260713-r";
-import { setUniverseSeed, cardById } from "./packs.js?v=20260713-r";
-import { hydratePhotos } from "../ui/photos.js?v=20260713-r";
-import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260713-r";
-import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260713-r";
-import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260713-r";
-import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js?v=20260713-r";
-import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260713-r";
-import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260713-r";
-import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260713-r";
+import { loadSave } from "./state.js?v=20260713-t";
+import { setUniverseSeed, cardById } from "./packs.js?v=20260713-t";
+import { hydratePhotos } from "../ui/photos.js?v=20260713-t";
+import { applyFranchisePalette } from "../ui/franchisePalette.js?v=20260713-t";
+import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260713-t";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260713-t";
+import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260713-t";
+import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js?v=20260713-t";
+import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260713-t";
+import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260713-t";
+import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260713-t";
 
 const SCREENS = {
   title: titleScreen,
@@ -67,6 +68,10 @@ const app = {
   },
   rerender() {
     const root = document.getElementById("app");
+    // A franchise league plays on the club's colors. Every other league — and
+    // the title screen, before there is a save to ask — clears the tokens and
+    // gets the stylesheet's own enamel back.
+    applyFranchisePalette(this.save?.universe);
     const screen = SCREENS[this.screen.name] ?? titleScreen;
     root.innerHTML = screen.render(this);
     screen.mounted?.(this);

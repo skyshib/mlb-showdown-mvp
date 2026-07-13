@@ -19,6 +19,7 @@ import {
   loadSave,
   exportSaveCode,
   importSaveCode,
+  saveFileName,
   addCardToCollection,
   removeCardFromCollection,
   collectionCards,
@@ -442,7 +443,8 @@ test("the title menu offers save backup, and import screens explain themselves",
   const freshHtml = titleScreen.render(fresh);
   assert.ok(!freshHtml.includes("EXPORT SAVE"), "nothing to export without a save");
   assert.ok(freshHtml.includes("IMPORT SAVE"), "import is always there for a new device");
-  assert.ok(exportSaveScreen.render(withSave).includes("SAVE CODE"), "export shows the code box");
+  assert.ok(exportSaveScreen.render(withSave).includes("showdown-quest-test.sav"), "export names the file it downloads");
+  assert.ok(importSaveScreen.render(withSave).includes("CHOOSE A SAVE FILE"), "import takes the downloaded file");
   assert.ok(importSaveScreen.render(withSave).includes("REPLACES YOUR CURRENT SAVE"), "import warns before overwriting");
   assert.ok(!importSaveScreen.render(fresh).includes("REPLACES"), "no warning when there's nothing to lose");
 });
@@ -457,6 +459,11 @@ test("saves round-trip through storage and export codes", () => {
   const imported = importSaveCode(exportSaveCode(save));
   assert.deepEqual(imported, save);
   assert.equal(importSaveCode("not a save"), null);
+});
+
+test("a save file is named after the manager, whatever they typed", () => {
+  assert.equal(saveFileName(createSave({ name: "Casey Jones Jr.", saveSeed: "s" })), "showdown-quest-casey-jones-jr.sav");
+  assert.equal(saveFileName(createSave({ name: "???", saveSeed: "s" })), "showdown-quest-manager.sav");
 });
 
 test("sell-all clears every duplicate at the pawn rate, keeping first copies", async () => {

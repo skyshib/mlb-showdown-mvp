@@ -1,5 +1,5 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260713-r";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260713-r";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260713-t";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260713-t";
 import {
   createSave,
   persistSave,
@@ -10,8 +10,9 @@ import {
   grantCoins,
   addLog,
   exportSaveCode,
-  importSaveCode
-} from "../state.js?v=20260713-r";
+  importSaveCode,
+  saveFileName
+} from "../state.js?v=20260713-t";
 
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],
@@ -71,42 +72,61 @@ function titleItems(app) {
 
 // ---- Save backup -----------------------------------------------------------------
 
-// The whole save as one base64 code: auto-copied to the clipboard where the
-// browser allows, and left selected in the box for a manual copy either way.
+// The whole save is one base64 code, but nobody should have to shepherd that
+// much text around: it downloads as a small file instead, and IMPORT SAVE
+// reads the file straight back.
+function downloadSave(save) {
+  const blob = new Blob([exportSaveCode(save)], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = saveFileName(save);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const exportSaveScreen = {
-  render() {
+  render(app) {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>EXPORT SAVE</span><span>BACKUP</span></div>
       <div class="gq-body gq-center">
         <div class="gq-frame" style="text-align:left">
-          <p>YOUR SAVE CODE:</p>
-          <p class="gq-mt"><input id="gq-save-code" readonly spellcheck="false"
-            style="font:inherit;background:var(--gb-light);border:0.5cqw solid var(--gb-darkest);padding:0.5cqw 1cqw;width:100%"></p>
-          <p class="gq-dim gq-mt" id="gq-copy-note">SELECT AND COPY IT SOMEWHERE SAFE.</p>
+          <p>YOUR SAVE FILE:</p>
+          <p class="gq-mt"><b>${escapeHtml(saveFileName(app.save))}</b></p>
+          <p class="gq-dim gq-mt">${app.screen.downloaded ? "SAVED TO YOUR DOWNLOADS." : "STARTING THE DOWNLOAD&hellip;"}</p>
         </div>
       </div>
-      <div class="gq-textbox"><p>Paste it into IMPORT SAVE on any device to pick the season back up. Z/X to go back.</p></div>
+      <div class="gq-textbox"><p>Keep it somewhere safe, then feed it to IMPORT SAVE on any device to pick the season back up. Z downloads it again &middot; X goes back.</p></div>
     </div>`;
   },
   mounted(app) {
-    const input = document.getElementById("gq-save-code");
-    if (!input) return;
-    input.value = exportSaveCode(app.save);
-    input.focus();
-    input.select();
-    navigator.clipboard?.writeText(input.value).then(
-      () => {
-        const note = document.getElementById("gq-copy-note");
-        if (note) note.textContent = "COPIED TO YOUR CLIPBOARD.";
-      },
-      () => {}
-    );
+    if (app.screen.downloaded) return;
+    downloadSave(app.save);
+    app.screen.downloaded = true;
+    app.rerender();
   },
   key(app, key) {
-    if (key === "a" || key === "b") app.go("title", { menuIndex: 0 });
+    if (key === "a") downloadSave(app.save);
+    else if (key === "b") return app.go("title", { menuIndex: 0 });
     app.rerender();
   }
 };
+
+// A save file is the code as text, so the same reader takes either one: the
+// downloaded .sav, or a code pasted from an older backup.
+function restoreSave(app, code) {
+  const save = importSaveCode(code ?? "");
+  if (!save) {
+    app.screen.error = true;
+    app.rerender();
+    return;
+  }
+  app.save = persistSave(save);
+  setUniverseSeed(save.saveSeed, save.universe ?? "fictional", { priceNoise: save.mode !== "uncapped" });
+  app.go("map");
+}
 
 export const importSaveScreen = {
   render(app) {
@@ -114,33 +134,43 @@ export const importSaveScreen = {
       <div class="gq-topbar"><span>IMPORT SAVE</span><span>RESTORE</span></div>
       <div class="gq-body gq-center">
         <div class="gq-frame" style="text-align:left">
-          <p>PASTE A SAVE CODE:</p>
+          <p>CHOOSE A SAVE FILE:</p>
+          <p class="gq-mt"><input type="file" id="gq-import-file" accept=".sav,.txt,text/plain"
+            style="font:inherit;width:100%"></p>
+          <p class="gq-dim gq-mt">OR PASTE A SAVE CODE:</p>
           <p class="gq-mt"><input id="gq-import-code" autocomplete="off" spellcheck="false"
             style="font:inherit;background:var(--gb-light);border:0.5cqw solid var(--gb-darkest);padding:0.5cqw 1cqw;width:100%"></p>
-          ${app.screen.error ? `<p class="gq-mt"><b>THAT CODE DIDN'T TAKE. CHECK THE PASTE AND TRY AGAIN.</b></p>` : ""}
+          ${app.screen.error ? `<p class="gq-mt"><b>THAT SAVE DIDN'T TAKE. CHECK THE FILE AND TRY AGAIN.</b></p>` : ""}
         </div>
       </div>
-      <div class="gq-textbox"><p>${app.save ? "! THIS REPLACES YOUR CURRENT SAVE. " : ""}ENTER imports &middot; ESC backs out.</p></div>
+      <div class="gq-textbox"><p>${app.save ? "! THIS REPLACES YOUR CURRENT SAVE. " : ""}A save file imports the moment you pick it &middot; ENTER imports a pasted code &middot; ESC backs out.</p></div>
     </div>`;
   },
-  mounted() {
+  mounted(app) {
+    const file = document.getElementById("gq-import-file");
+    if (file) {
+      file.addEventListener("change", () => {
+        const chosen = file.files?.[0];
+        if (!chosen) return;
+        chosen.text().then(
+          (text) => restoreSave(app, text.trim()),
+          () => {
+            app.screen.error = true;
+            app.rerender();
+          }
+        );
+      });
+    }
     document.getElementById("gq-import-code")?.focus();
   },
   key(app, key) {
     if (key === "a") {
-      const code = document.getElementById("gq-import-code")?.value.trim() ?? "";
-      const save = importSaveCode(code);
-      if (!save) {
-        app.screen.error = true;
-      } else {
-        app.save = persistSave(save);
-        setUniverseSeed(save.saveSeed, save.universe ?? "fictional", { priceNoise: save.mode !== "uncapped" });
-        return app.go("map");
-      }
+      restoreSave(app, document.getElementById("gq-import-code")?.value.trim());
     } else if (key === "b") {
       return app.go("title", { menuIndex: 0 });
+    } else {
+      app.rerender();
     }
-    app.rerender();
   }
 };
 

@@ -2145,7 +2145,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .comp-corner {
-  width: 230px;
+  width: 175px;
 }
 
 .comp-label {
@@ -2160,15 +2160,6 @@ button.roster-slot[draggable="true"]:active {
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--navy);
-}
-
-.comp-note {
-  display: block;
-  margin-top: 2px;
-  max-width: 34ch;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 1.35;
 }
 
 .comp-cell {

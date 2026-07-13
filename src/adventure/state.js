@@ -1,4 +1,4 @@
-import { cardById, dualPartnerId, budgetCap } from "./packs.js?v=20260713-r";
+import { cardById, dualPartnerId, budgetCap } from "./packs.js?v=20260713-t";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
@@ -82,6 +82,16 @@ export function exportSaveCode(save) {
   const json = JSON.stringify(save);
   if (typeof btoa === "function") return btoa(unescape(encodeURIComponent(json)));
   return Buffer.from(json, "utf8").toString("base64");
+}
+
+// The name a backup downloads under: the manager's, so several saves don't
+// land in a Downloads folder as file (1), file (2), file (3).
+export function saveFileName(save) {
+  const name = (save?.player?.name ?? "manager")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `showdown-quest-${name || "manager"}.sav`;
 }
 
 export function importSaveCode(code) {

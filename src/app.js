@@ -9,11 +9,12 @@ import {
   setUniverse,
   universeConfig
 } from "./data/universes.js";
+import { applyFranchisePalette } from "./ui/franchisePalette.js";
 import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-r";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-t";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +26,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-r";
-import { hydratePhotos } from "./ui/photos.js?v=20260713-r";
-import { createBattle } from "./rules/battle/controller.js?v=20260713-r";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-r";
+} from "./ui/sounds.js?v=20260713-t";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-t";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-t";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-t";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -99,7 +100,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260713-r";
+} from "./rules/draft.js?v=20260713-t";
 import {
   createRoom,
   fetchRoom,
@@ -108,7 +109,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260713-r";
+} from "./onlineClient.js?v=20260713-t";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -117,12 +118,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260713-r";
-import { computeAwards } from "./rules/awards.js?v=20260713-r";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-r";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-r";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-r";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-r";
+} from "./rules/batch.js?v=20260713-t";
+import { computeAwards } from "./rules/awards.js?v=20260713-t";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-t";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-t";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-t";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-t";
 import {
   basesText,
   cardRarity,
@@ -137,7 +138,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-r";
+} from "./ui/render.js?v=20260713-t";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -667,6 +668,10 @@ function defaultState() {
 }
 
 function renderCurrentScreen() {
+  // The sheet is ruled in the club's ink once a franchise room is open. The
+  // setup screen is not in a league yet, so it keeps the house colors — and
+  // walking back out to it puts them back.
+  applyFranchisePalette(state.draft ? state.universe : null);
   if (warRoomMode) {
     renderWarRoom();
     return;
@@ -5258,14 +5263,14 @@ function teamComposition(manager, draft) {
 //
 // `decimals: null` is a row that shows its grade and keeps its arithmetic.
 const COMPOSITION_ROWS = [
-  { key: "onBase", label: "On-base", note: "the average bat, against every bat on the board", decimals: 1 },
-  { key: "chart", label: "Chart quality", note: "what the twenty faces do, against every bat on the board", decimals: null },
-  { key: "speed", label: "Speed", note: "the average bat, against every bat on the board", decimals: 1 },
-  { key: "defence", label: "Defence", note: "the average glove, against every glove on the board", decimals: 1 },
-  { key: "spControl", label: "Starters · control", note: "how often the batter has to read their chart", decimals: 1, group: "sp" },
-  { key: "spChart", label: "Starters · chart", note: "and what it costs him when he does", decimals: null, group: "sp" },
-  { key: "rpControl", label: "Bullpen · control", note: "how often the batter has to read their chart", decimals: 1, group: "rp" },
-  { key: "rpChart", label: "Bullpen · chart", note: "and what it costs him when he does", decimals: null, group: "rp" }
+  { key: "onBase", label: "On-base", decimals: 1 },
+  { key: "chart", label: "Chart quality", decimals: null },
+  { key: "speed", label: "Speed", decimals: 1 },
+  { key: "defence", label: "Defense", decimals: 1 },
+  { key: "spControl", label: "Starters · control", decimals: 1, group: "sp" },
+  { key: "spChart", label: "Starters · chart", decimals: null, group: "sp" },
+  { key: "rpControl", label: "Bullpen · control", decimals: 1, group: "rp" },
+  { key: "rpChart", label: "Bullpen · chart", decimals: null, group: "rp" }
 ];
 
 function compositionTable(draft) {
@@ -5282,6 +5287,31 @@ function draftRecap(draft) {
   const history = draftHistory(draft);
   if (!history.length) return null;
 
+  // An auction is not a queue, and a lot number is not a draft position: the
+  // cards come up in whatever order the room called them, so "he went too early"
+  // is not a sentence that means anything. What means something is the money. A
+  // card is worth its printed points, and this room decided what a point costs —
+  // total spent over total points bought. Every lot can then be read against the
+  // rate the room itself set: who bought points cheap, and who paid over the odds.
+  if (isAuctionDraft(draft)) {
+    const paid = history.reduce((sum, entry) => sum + (entry.price ?? 0), 0);
+    const bought = history.reduce((sum, entry) => sum + entry.player.points, 0);
+    const rate = bought > 0 ? paid / bought : 0;
+
+    const picks = history.map((entry) => {
+      const worth = entry.player.points * rate;
+      // Positive is a bargain: worth more than it cost.
+      return { ...entry, worth, swing: worth - (entry.price ?? 0) };
+    });
+
+    const steal = picks.reduce((best, pick) => (pick.swing > best.swing ? pick : best), picks[0]);
+    const reach = picks.reduce((worst, pick) => (pick.swing < worst.swing ? pick : worst), picks[0]);
+    return { picks, steal, reach, auction: true, rate };
+  }
+
+  // A snake draft is a queue, so its argument is about position: a card's rank by
+  // printed points is where the board says it should have gone, and the gap
+  // between that and where it actually went is who reached and who got lucky.
   const ranked = [...draft.pool].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
   const rankOf = new Map(ranked.map((card, index) => [card.id, index + 1]));
 
@@ -5290,11 +5320,9 @@ function draftRecap(draft) {
     return { ...entry, rank, swing: rank - entry.pickNumber };
   });
 
-  // A card that fell further than anybody else, and a card taken further ahead
-  // of itself than anybody else.
   const steal = picks.reduce((best, pick) => (pick.swing < best.swing ? pick : best), picks[0]);
   const reach = picks.reduce((worst, pick) => (pick.swing > worst.swing ? pick : worst), picks[0]);
-  return { picks, steal, reach };
+  return { picks, steal, reach, auction: false };
 }
 
 function recapText(draft) {
@@ -5316,11 +5344,22 @@ function recapText(draft) {
   }
   lines.push(`  ${"Points spent".padEnd(width)}${teams.map((team) => String(team.points).padStart(col)).join("")}`);
   lines.push("");
-  lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} at pick ${recap.steal.pickNumber} (ranked #${recap.steal.rank})`);
-  lines.push(`Biggest reach: ${recap.reach.player.name} to ${recap.reach.manager.name} at pick ${recap.reach.pickNumber} (ranked #${recap.reach.rank})`);
-  lines.push("", "Every pick:");
-  for (const pick of recap.picks) {
-    lines.push(`  ${String(pick.pickNumber).padStart(3)}. ${pick.manager.name} — ${pick.player.name} (${pick.player.points} pts)`);
+  if (recap.auction) {
+    const rate = Math.round(recap.rate * 100) / 100;
+    lines.push(`The room paid ${money(rate)} a point.`);
+    lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} for ${money(recap.steal.price)} — ${recap.steal.player.points} pts, ${money(Math.round(recap.steal.swing))} under the rate`);
+    lines.push(`Biggest overpay: ${recap.reach.player.name} to ${recap.reach.manager.name} for ${money(recap.reach.price)} — ${recap.reach.player.points} pts, ${money(Math.round(-recap.reach.swing))} over the rate`);
+    lines.push("", "Every lot:");
+    for (const pick of recap.picks) {
+      lines.push(`  ${pick.manager.name.padEnd(12)} ${money(pick.price).padStart(7)}  ${pick.player.name} (${pick.player.points} pts)`);
+    }
+  } else {
+    lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} at pick ${recap.steal.pickNumber} (ranked #${recap.steal.rank})`);
+    lines.push(`Biggest reach: ${recap.reach.player.name} to ${recap.reach.manager.name} at pick ${recap.reach.pickNumber} (ranked #${recap.reach.rank})`);
+    lines.push("", "Every pick:");
+    for (const pick of recap.picks) {
+      lines.push(`  ${String(pick.pickNumber).padStart(3)}. ${pick.manager.name} — ${pick.player.name} (${pick.player.points} pts)`);
+    }
   }
   return lines.join("\n");
 }
@@ -5335,10 +5374,7 @@ function renderDraftDone(draft) {
   const body = rows
     .map(
       (row, index, all) => `<tr class="${row.group ? `comp-grouped${all[index - 1]?.group === row.group ? " comp-group-tail" : " comp-group-head"}` : ""}">
-        <th class="comp-label">
-          <span class="comp-name">${escapeHtml(row.label)}</span>
-          <span class="comp-note">${escapeHtml(row.note)}</span>
-        </th>
+        <th class="comp-label"><span class="comp-name">${escapeHtml(row.label)}</span></th>
         ${row.cells
           .map(
             (cell) => `<td class="comp-cell">
@@ -5356,10 +5392,7 @@ function renderDraftDone(draft) {
   // and left alone.
   const cheapest = Math.min(...teams.map((team) => team.points));
   const pointsRow = `<tr class="comp-points">
-    <th class="comp-label">
-      <span class="comp-name">Points spent</span>
-      <span class="comp-note">what the whole roster cost — not a grade</span>
-    </th>
+    <th class="comp-label"><span class="comp-name">Points spent</span></th>
     ${teams
       .map(
         (team) => `<td class="comp-cell">
@@ -5369,21 +5402,38 @@ function renderDraftDone(draft) {
       .join("")}
   </tr>`;
 
-  const card = (label, pick, tone) => `<div class="recap-card ${tone}">
-    <p class="eyebrow">${label}</p>
-    <h3>${escapeHtml(pick.player.name)}</h3>
-    <p class="recap-line">
-      to <strong>${escapeHtml(pick.manager.name)}</strong> at pick ${pick.pickNumber},
-      and the set ranks him <strong>#${pick.rank}</strong> of ${draft.pool.length} by points.
-    </p>
-    <p class="recap-swing">${
-      pick.swing < 0
-        ? `He fell ${Math.abs(pick.swing)} picks further than his price says he should have.`
-        : pick.swing > 0
-          ? `Taken ${pick.swing} picks ahead of his price.`
-          : `Taken exactly where his price says.`
-    }</p>
-  </div>`;
+  const card = (label, pick, tone) => {
+    const line = recap.auction
+      ? `<p class="recap-line">
+          to <strong>${escapeHtml(pick.manager.name)}</strong> for <strong>${money(pick.price)}</strong>.
+          He is worth <strong>${pick.player.points}</strong> points, and this room paid
+          ${money(Math.round(recap.rate * 100) / 100)} a point &mdash; so he ought to have gone for about
+          <strong>${money(Math.round(pick.worth))}</strong>.
+        </p>
+        <p class="recap-swing">${
+          pick.swing > 0
+            ? `Bought ${money(Math.round(pick.swing))} under the going rate.`
+            : pick.swing < 0
+              ? `Paid ${money(Math.round(-pick.swing))} over the going rate.`
+              : "Bought at exactly the going rate."
+        }</p>`
+      : `<p class="recap-line">
+          to <strong>${escapeHtml(pick.manager.name)}</strong> at pick ${pick.pickNumber},
+          and the set ranks him <strong>#${pick.rank}</strong> of ${draft.pool.length} by points.
+        </p>
+        <p class="recap-swing">${
+          pick.swing < 0
+            ? `He fell ${Math.abs(pick.swing)} picks further than his price says he should have.`
+            : pick.swing > 0
+              ? `Taken ${pick.swing} picks ahead of his price.`
+              : "Taken exactly where his price says."
+        }</p>`;
+    return `<div class="recap-card ${tone}">
+      <p class="eyebrow">${label}</p>
+      <h3>${escapeHtml(pick.player.name)}</h3>
+      ${line}
+    </div>`;
+  };
 
   return `<section class="panel draft-done">
     <div class="section-head">
@@ -5405,7 +5455,7 @@ function renderDraftDone(draft) {
     </p>
     <div class="recap-cards">
       ${card("Best value", recap.steal, "steal")}
-      ${card("Biggest reach", recap.reach, "reach")}
+      ${card(recap.auction ? "Biggest overpay" : "Biggest reach", recap.reach, "reach")}
     </div>
   </section>`;
 }
