@@ -152,6 +152,11 @@ let onlineStream = null;
 // The bid box that was rejected, and why — one manager's error, not the
 // panel's, now that several boxes can be open at once.
 let lotEntryError = null;
+// A sealed bid you have typed but not submitted lives nowhere but in the box,
+// and the board throws every box away each time it repaints — which it does on
+// anybody's news: another manager's bid landing, a seat changing hands, a
+// resync. Carry the digits, the focus, and the caret across the repaint.
+let sealedBidStash = null;
 let cpuPaused = false;
 let cpuDriveKey = null;
 
@@ -1282,8 +1287,65 @@ function renderSetup(setupError = "") {
   });
 }
 
+function sealedBidLotKey(lot) {
+  return `${lot.playerId}:${lot.round}`;
+}
+
+// Read the boxes as they stand before the board is torn down. The key rides on
+// each box rather than being read off the draft, because by the time we repaint
+// the draft has usually already moved on — and a bid typed for one card must
+// never be handed to the next.
+function captureSealedBids() {
+  sealedBidStash = null;
+  const inputs = app.querySelectorAll("[data-sealed-bid][data-manager-id]");
+  if (!inputs.length) return;
+  const active = document.activeElement;
+  const values = new Map();
+  let focused = null;
+  for (const input of inputs) {
+    if (input.value !== "") values.set(input.dataset.managerId, { value: input.value, lotKey: input.dataset.lotKey });
+    if (input === active) focused = { managerId: input.dataset.managerId, lotKey: input.dataset.lotKey, caret: sealedBidCaret(input) };
+  }
+  if (!values.size && !focused) return;
+  sealedBidStash = { values, focused };
+}
+
+function restoreSealedBids() {
+  const stash = sealedBidStash;
+  sealedBidStash = null;
+  if (!stash) return;
+  for (const input of app.querySelectorAll("[data-sealed-bid][data-manager-id]")) {
+    const entry = stash.values.get(input.dataset.managerId);
+    if (entry && entry.lotKey === input.dataset.lotKey) input.value = entry.value;
+  }
+  const focused = stash.focused;
+  if (!focused) return;
+  const input = app.querySelector(`[data-sealed-bid][data-manager-id="${CSS.escape(focused.managerId)}"]`);
+  if (!input || input.dataset.lotKey !== focused.lotKey) return;
+  input.focus();
+  if (focused.caret !== null) {
+    try {
+      input.setSelectionRange(focused.caret, focused.caret);
+    } catch {
+      // A number box has no selection to set; focus alone leaves the caret at
+      // the end of what was already typed, which is where it was.
+    }
+  }
+}
+
+// Only the masked box can say where the caret is: asking a number input for its
+// selection throws rather than answering.
+function sealedBidCaret(input) {
+  try {
+    return input.selectionStart;
+  } catch {
+    return null;
+  }
+}
+
 function renderDraft() {
   const draft = state.draft;
+  captureSealedBids();
   if (!state.online && syncAuctionTimer(draft, draftNow())) saveState();
   const auction = isAuctionDraft(draft);
   const reviewOpen = auction && !auctionReviewComplete(draft, draftNow());
@@ -1381,6 +1443,7 @@ function renderDraft() {
   </section>
   ${renderRosterDock(draft, dockViewerId)}`;
 
+  restoreSealedBids();
   bindDraftActions();
   pickClockTick();
 }
@@ -1500,6 +1563,9 @@ function renderAuctionLotPanel(draft) {
     .join("");
 
   const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
+  // Which lot a box was filled in for. A half-typed bid survives a repaint, but
+  // only onto the same card in the same round — never onto the next one.
+  const lotKey = sealedBidLotKey(lot);
   // The bids are sealed, so nobody waits their turn: every manager this
   // screen speaks for — your seat online, the whole table on a hotseat, any
   // stalled seat if you host — gets their own box, and they can be filled in
@@ -1518,8 +1584,8 @@ function renderAuctionLotPanel(draft) {
       return `<div class="lot-entry">
       <span class="lot-entry-name">${escapeHtml(manager.name)}, enter your sealed bid${isNominator ? ` (you nominated — minimum ${AUCTION_MIN_BID})` : lot.round === 2 ? ` (rebid at least ${minBid})` : ""}</span>
       ${state.maskBids
-        ? `<input type="password" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" inputmode="numeric" autocomplete="off" placeholder="${minBid}" />`
-        : `<input type="number" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" min="${canPass ? 0 : minBid}" max="${maxBid}" step="1" placeholder="${minBid}" />`}
+        ? `<input type="password" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" inputmode="numeric" autocomplete="off" placeholder="${minBid}" />`
+        : `<input type="number" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" min="${canPass ? 0 : minBid}" max="${maxBid}" step="1" placeholder="${minBid}" />`}
       <button data-action="seal-bid" data-manager-id="${escapeHtml(manager.id)}">Submit bid</button>
       ${canPass ? `<button data-action="seal-pass" data-manager-id="${escapeHtml(manager.id)}">Pass</button>` : ""}
       <label class="mask-toggle"><input type="checkbox" data-mask-bids ${state.maskBids ? "checked" : ""} /> Mask bids (shared screen)</label>
@@ -1710,6 +1776,10 @@ function bindDraftActions() {
       // Several bid boxes can be on screen at once, so take the one belonging
       // to the manager whose button was pressed.
       const input = app.querySelector(`[data-sealed-bid][data-manager-id="${CSS.escape(managerId)}"]`);
+      // An empty box is not a bid of zero. Submitting nothing used to pass the
+      // card — the one button that spends your budget quietly gave the card
+      // away instead. Passing is what the Pass button is for.
+      if (action === "seal-bid" && !input?.value.trim()) return;
       const amount = action === "seal-pass" ? 0 : Math.round(Number(input?.value));
       lotEntryError = null;
       const legality = canPlaceSealedBid(liveDraft(state.draft), manager, amount, draftNow());
