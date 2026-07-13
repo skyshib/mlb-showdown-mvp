@@ -3,10 +3,29 @@ import test from "node:test";
 
 import { CLASSIC_CARD_ROWS } from "../src/data/classicCards.js";
 import { decodeCardRows } from "../src/data/realCards.js";
+import { chartSpan } from "../src/rules/cards.js";
 import { autopick, createDraft } from "../src/rules/draft.js";
+import { playerPower } from "../src/ui/render.js";
 import { CPU_PERSONALITY_KEYS, createValuationModel } from "../src/rules/valuation.js";
 
 const pool = decodeCardRows(CLASSIC_CARD_ROWS).slice(0, 900);
+
+// The die is the ceiling. Everything that weighs a chart has to agree on it —
+// three places worked it out for themselves and two of them forgot.
+test("a chart row is worth the faces it can actually land on", () => {
+  assert.equal(chartSpan({ from: 1, to: 4 }), 4);
+  assert.equal(chartSpan({ from: 20, to: 20 }), 1);
+  // "20+" — open-ended on the print, Infinity in the data, one face on the die.
+  assert.equal(chartSpan({ from: 20, to: Infinity }), 1);
+  assert.equal(chartSpan({ from: 18, to: Infinity }), 3);
+  // A row that begins past the die never lands at all.
+  assert.equal(chartSpan({ from: 21, to: Infinity }), 0);
+});
+
+test("the board's chart sort prices every card finitely", () => {
+  const broken = pool.filter((card) => !Number.isFinite(playerPower(card)));
+  assert.equal(broken.length, 0, `${broken.length} cards sorted as Infinity`);
+});
 
 // A card's top range is open-ended on the print — "20+" — and `to: Infinity` in
 // the data. Measuring that range as infinitely wide priced the card at Infinity,

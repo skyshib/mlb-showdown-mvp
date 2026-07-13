@@ -133,3 +133,19 @@ export function formatRange(entry) {
   if (!Number.isFinite(entry.to)) return `${entry.from}+`;
   return entry.from === entry.to ? String(entry.from) : `${entry.from}-${entry.to}`;
 }
+
+// The swing is a d20, so the die is the ceiling: a card's open top row ("20+",
+// stored as `to: Infinity`) is worth the faces it can actually land on, and a
+// row that starts past 20 is worth nothing at all.
+//
+// Everything that weighs a chart has to agree on this. Three places worked it
+// out for themselves and two of them forgot — and an infinitely wide row makes
+// a card infinitely valuable, which quietly poisons every comparison it touches.
+// One helper now, so it can only be got right.
+export const MAX_ROLL = 20;
+
+export function chartSpan(entry) {
+  const from = Math.max(1, Number(entry.from) || 1);
+  const to = Math.min(MAX_ROLL, Number.isFinite(entry.to) ? Number(entry.to) : MAX_ROLL);
+  return Math.max(0, to - from + 1);
+}

@@ -1,13 +1,13 @@
-import { loadSave } from "./state.js";
-import { setUniverseSeed, cardById } from "./packs.js";
-import { hydratePhotos } from "../ui/photos.js";
-import { cardPanelHtml, escapeHtml } from "./ui/helpers.js";
-import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js";
-import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js";
-import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js";
-import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js";
-import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js";
-import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js";
+import { loadSave } from "./state.js?v=20260713-c";
+import { setUniverseSeed, cardById } from "./packs.js?v=20260713-c";
+import { hydratePhotos } from "../ui/photos.js?v=20260713-c";
+import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260713-c";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260713-c";
+import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260713-c";
+import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js?v=20260713-c";
+import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260713-c";
+import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260713-c";
+import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260713-c";
 
 const SCREENS = {
   title: titleScreen,

@@ -1,4 +1,5 @@
-import { hitterPositions } from "./cards.js";
+import { chartSpan } from "./cards.js?v=20260713-c";
+import { hitterPositions } from "./cards.js?v=20260713-c";
 
 // ---- Authentic-scale pricing -------------------------------------------------
 //
@@ -16,10 +17,9 @@ import { hitterPositions } from "./cards.js";
 export function chartSlots(card) {
   const slots = {};
   for (const entry of card.chart) {
-    const from = Math.max(1, entry.from);
-    const to = Math.min(20, entry.to);
-    if (to < from) continue;
-    slots[entry.result] = (slots[entry.result] ?? 0) + (to - from + 1);
+    const span = chartSpan(entry);
+    if (!span) continue;
+    slots[entry.result] = (slots[entry.result] ?? 0) + span;
   }
   return slots;
 }

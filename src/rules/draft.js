@@ -1,6 +1,6 @@
-import { createRng } from "./rng.js";
-import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js";
-import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js";
+import { createRng } from "./rng.js?v=20260713-c";
+import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js?v=20260713-c";
+import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260713-c";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -511,6 +511,51 @@ export function auctionReviewComplete(draft, now = Date.now()) {
 // stops and starts exactly where the live one did.
 export function isAuctionPaused(draft) {
   return isAuctionDraft(draft) && draft.auction.pausedAt !== null && draft.auction.pausedAt !== undefined;
+}
+
+// ---- the commissioner's whistle ----
+//
+// An auction could always be stopped, because its clocks spend a manager's own
+// bank and somebody had to be able to protect that. A snake draft could not, and
+// it is the one with a doorbell going in it: a clock ticking down on a manager
+// who has walked away from the table is the most ordinary thing in a draft, and
+// there was nothing to do about it but watch.
+//
+// The snake's clock lives on the client, so the pause carries the time that was
+// left on it. Everyone comes back to the same clock they left.
+export function isSnakePaused(draft) {
+  return !isAuctionDraft(draft) && draft?.pausedAt !== null && draft?.pausedAt !== undefined;
+}
+
+export function isDraftPaused(draft) {
+  return isAuctionPaused(draft) || isSnakePaused(draft);
+}
+
+export function pauseSnake(draft, remainingMs = null, now = Date.now()) {
+  if (isAuctionDraft(draft) || draft.complete || isSnakePaused(draft)) return false;
+  draft.pausedAt = normalizeTimestamp(now);
+  draft.pausedRemainingMs = Number.isFinite(remainingMs) ? Math.max(0, remainingMs) : null;
+  return true;
+}
+
+export function resumeSnake(draft) {
+  if (isAuctionDraft(draft) || !isSnakePaused(draft)) return false;
+  draft.pausedAt = null;
+  return true;
+}
+
+// A seat nobody is sitting in. Handing it to the computer keeps the room moving;
+// handing it back is the same move in reverse, and neither touches the roster
+// that seat has already built.
+export function setManagerCpu(draft, managerId, cpu) {
+  const manager = draft.managers.find((entry) => entry.id === managerId);
+  if (!manager) return false;
+  manager.cpu = Boolean(cpu);
+  if (manager.cpu && !manager.persona) {
+    const rng = createRng(`${draft.seed}:persona:${manager.id}`);
+    manager.persona = CPU_PERSONALITY_KEYS[Math.floor(rng.next() * CPU_PERSONALITY_KEYS.length)];
+  }
+  return true;
 }
 
 export function pauseAuction(draft, now = Date.now()) {
@@ -1066,10 +1111,15 @@ export function applyDraftAction(draft, action) {
       completeAuctionReview(draft, action.at);
       return;
     case "pause":
-      pauseAuction(draft, action.at);
+      if (isAuctionDraft(draft)) pauseAuction(draft, action.at);
+      else pauseSnake(draft, action.remainingMs ?? null, action.at);
       return;
     case "resume":
-      resumeAuction(draft, action.at);
+      if (isAuctionDraft(draft)) resumeAuction(draft, action.at);
+      else resumeSnake(draft);
+      return;
+    case "seat":
+      setManagerCpu(draft, action.managerId, action.cpu);
       return;
     case "autopick":
       autopick(draft, action.at);

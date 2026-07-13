@@ -5,7 +5,7 @@ import {
   rosterPoints,
   seasonHitters,
   seasonPitchers
-} from "./state.js";
+} from "./state.js?v=20260713-c";
 
 // The hall of fame outlives any single save: it keeps its own storage key, so
 // deleting or replacing a campaign never erases the plaques it earned.

@@ -1,5 +1,5 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260713-c";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260713-c";
 import {
   createSave,
   persistSave,
@@ -11,7 +11,7 @@ import {
   addLog,
   exportSaveCode,
   importSaveCode
-} from "../state.js";
+} from "../state.js?v=20260713-c";
 
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],

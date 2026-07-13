@@ -1886,6 +1886,27 @@ button.roster-slot[draggable="true"]:active {
   color: white;
 }
 
+/* The whistle: hand a stalled seat to the computer, or take it back. */
+.seat-button {
+  margin-left: auto;
+  padding: 3px 8px;
+  background: var(--panel);
+  color: var(--navy);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.seat-button:hover {
+  background: var(--accent);
+  color: var(--sheet);
+}
+
+.roster h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* A computer manager's stated belief, so a strange pick reads as a philosophy
    rather than a bug. */
 .persona {

@@ -1,5 +1,5 @@
-import { LEAGUE, makeRealHitter, makeRealPitcher, REAL_DEAL_QUOTAS } from "./realPlayers.js?v=20260706-version-sync";
-import { dealPool } from "./playerGeneration.js?v=20260706-version-sync";
+import { LEAGUE, makeRealHitter, makeRealPitcher, REAL_DEAL_QUOTAS } from "./realPlayers.js";
+import { dealPool } from "./playerGeneration.js";
 
 // Mariners-only card set spanning the whole franchise, 1977-2025. Rows follow
 // the realPlayers.js convention: approximate season stat lines, hand-entered

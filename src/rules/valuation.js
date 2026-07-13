@@ -1,5 +1,5 @@
-import { createRng } from "./rng.js";
-import { RESULTS } from "./cards.js";
+import { createRng } from "./rng.js?v=20260713-c";
+import { RESULTS, chartSpan } from "./cards.js?v=20260713-c";
 
 const HITTER_BASE_WEIGHTS = {
   onBase: 20,
@@ -161,21 +161,9 @@ function pitcherValue(player, weights) {
   return quality * ipWorkloadWeight(ip) + ip * weights.ip;
 }
 
-// A card's top range is open-ended — "20+" on the print, `to: Infinity` in the
-// data — because the swing is a d20 and nothing rolls past 20. Counting that
-// range as infinitely wide made the card infinitely valuable, and since
-// `Infinity - Infinity` is NaN, the comparator that sorted the board on these
-// numbers gave up and left the cards in whatever order they arrived. Half the
-// pool priced at Infinity, so half the board was never really ranked at all.
-//
-// The die is the ceiling. Every span is measured against it.
-const MAX_ROLL = 20;
-
 function chartValue(chart, values) {
-  return (chart ?? []).reduce((sum, entry) => {
-    const from = Number(entry.from) || 1;
-    const to = Number.isFinite(entry.to) ? Number(entry.to) : MAX_ROLL;
-    const span = Math.max(0, Math.min(to, MAX_ROLL) - from + 1);
-    return sum + span * (values[entry.result] ?? 0);
-  }, 0);
+  return (chart ?? []).reduce(
+    (sum, entry) => sum + chartSpan(entry) * (values[entry.result] ?? 0),
+    0
+  );
 }

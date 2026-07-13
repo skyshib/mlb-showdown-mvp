@@ -1,5 +1,5 @@
-import { formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js";
-import { cardPanelHtml } from "./cardFace.js?v=20260712-card-backgrounds";
+import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260713-c";
+import { cardPanelHtml } from "./cardFace.js?v=20260713-c";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
@@ -15,7 +15,7 @@ export function playerPrimary(player) {
 
 export function playerPower(player) {
   const weights = { BB: 1, "1B": 2, "1B+": 2, "2B": 4, "3B": 5, HR: 6 };
-  return player.chart.reduce((sum, entry) => sum + (entry.to - entry.from + 1) * (weights[entry.result] ?? 0), 0);
+  return player.chart.reduce((sum, entry) => sum + chartSpan(entry) * (weights[entry.result] ?? 0), 0);
 }
 
 export function renderPlayerTable(players, options = {}) {

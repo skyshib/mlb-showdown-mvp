@@ -8,12 +8,12 @@ import {
   decadeLabel,
   setUniverse,
   universeConfig
-} from "./data/universes.js?v=20260712-pinned-decks";
+} from "./data/universes.js";
 import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260712-card-backgrounds";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260713-c";
 import {
   isMuted,
   playClockWarning,
@@ -25,10 +25,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260713-sound-kit";
-import { hydratePhotos } from "./ui/photos.js?v=20260711-shared-card-face";
-import { createBattle } from "./rules/battle/controller.js?v=20260711-interactive-game";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260711-interactive-game";
+} from "./ui/sounds.js?v=20260713-c";
+import { hydratePhotos } from "./ui/photos.js?v=20260713-c";
+import { createBattle } from "./rules/battle/controller.js?v=20260713-c";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260713-c";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -70,6 +70,7 @@ import {
   hasUnlimitedRoster,
   isAuctionDraft,
   isAuctionPaused,
+  isDraftPaused,
   isCornerOutfielder,
   isRandomNomination,
   lineupStatus,
@@ -83,19 +84,22 @@ import {
   normalizeCardPosition,
   normalizePickTimerSeconds,
   pauseAuction,
+  pauseSnake,
   pickPlayer,
   placeSealedBid,
   randomNominationCounts,
   randomNominationShortfalls,
   resumeAuction,
+  resumeSnake,
   sealedBidder,
+  setManagerCpu,
   staffStatus,
   startAuctionReview,
   syncAuctionTimer,
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260712-batting-order";
+} from "./rules/draft.js?v=20260713-c";
 import {
   createRoom,
   fetchRoom,
@@ -104,7 +108,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260711-online-auction";
+} from "./onlineClient.js?v=20260713-c";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -113,12 +117,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260708-mlb-win-prob";
-import { computeAwards } from "./rules/awards.js?v=20260712-auction-pause";
-import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260705-batch-team-skills";
+} from "./rules/batch.js?v=20260713-c";
+import { computeAwards } from "./rules/awards.js?v=20260713-c";
+import { hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260713-c";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260713-c";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260713-c";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260713-c";
 import {
   basesText,
   cardRarity,
@@ -133,7 +137,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260713-b";
+} from "./ui/render.js?v=20260713-c";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -193,12 +197,31 @@ let warRoomLotKey = null;
 setInterval(pickClockTick, 500);
 setInterval(auctionClockTick, 500);
 
+// Coming back from a break, the clock picks up where it stopped rather than
+// handing the manager a fresh minute he did not earn.
+function restartPickClock(draft) {
+  const left = draft?.pausedRemainingMs;
+  pickClockKey = null;
+  pickClockTimeoutKey = null;
+  pickClockWarned = false;
+  if (Number.isFinite(left) && left > 0) {
+    // pickClockTick sets the deadline when it sees a new turn key; pre-load the
+    // one it is about to see so the remaining time survives the break.
+    const turn = pickClockTurn();
+    if (turn) {
+      pickClockKey = turn.key;
+      pickClockDeadline = Date.now() + left;
+    }
+  }
+  if (draft) draft.pausedRemainingMs = null;
+}
+
 function pickClockTurn() {
   const draft = state.draft;
   if (!draft || draft.complete) return null;
   // Paused means paused: an untimed auction's pick clock stops too, so a break
   // never times anybody out of a nomination they were about to make.
-  if (isAuctionPaused(draft)) return null;
+  if (isDraftPaused(draft)) return null;
   if (isAuctionDraft(draft) && auctionTimerEnabled(draft)) return null;
   // Computer turns resolve instantly, so the clock only times humans: picks,
   // nominations, and each sealed-bid entry while a lot is on the block.
@@ -343,7 +366,7 @@ function handlePickClockExpiry(turn) {
 function advanceCpuTurns() {
   const draft = state.draft;
   if (!draft || state.online || cpuPaused) return;
-  if (isAuctionPaused(draft)) return;
+  if (isDraftPaused(draft)) return;
   if (isAuctionDraft(draft) && !auctionReviewComplete(draft, draftNow())) return;
   let guard = auctionStepGuard(draft);
   while (!draft.complete && guard > 0) {
@@ -1525,10 +1548,10 @@ function renderDraft() {
   const dockViewerId = state.online?.managerId ?? focusManager?.id;
 
   const online = state.online;
-  const paused = auction && isAuctionPaused(draft);
+  const paused = isDraftPaused(draft);
   // Pausing is the host's call, and on a hotseat everyone at the table is the
   // host. It only means anything before the draft is done.
-  const canPause = auction && !draft.complete && (!online || online.host);
+  const canPause = !draft.complete && (!online || online.host);
   // A queued nomination isn't a move anyone made, so there is nothing to take
   // back while a card sits on the block — only a settled lot can be undone.
   const canUndo = !paused
@@ -1591,6 +1614,7 @@ function renderDraft() {
         ownerOf: auction ? (player) => cardOwnerTag(draft, player) : null,
         canPick: (player) => {
           if (!current) return { ok: false, reason: "draft complete" };
+          if (paused) return { ok: false, reason: "the draft is paused" };
           // Which of these ever come up is the room's one secret, so the board
           // says nothing about it: every card reads the same until it is called.
           if (queued) return { ok: false, reason: "the queue decides what comes up" };
@@ -1633,12 +1657,19 @@ function cardOwnerTag(draft, player) {
 function renderPausedPanel(draft) {
   const online = state.online;
   const host = !online || online.host;
+  const auction = isAuctionDraft(draft);
+  const left = draft.pausedRemainingMs;
+  const clockLine = Number.isFinite(left) && left > 0
+    ? ` The clock stopped at ${formatPickClock(left)} and will start again there.`
+    : "";
   return `<section class="panel auction-paused">
     <div class="lot-header">
       <div>
         <p class="eyebrow">Paused</p>
-        <h2>The draft is paused${draft.auction.lot ? " — the card on the block is waiting" : ""}</h2>
-        <p class="muted">Every clock is stopped. Nobody can nominate or bid until the host resumes.</p>
+        <h2>The draft is paused${auction && draft.auction.lot ? " — the card on the block is waiting" : ""}</h2>
+        <p class="muted">${auction
+          ? "Every clock is stopped. Nobody can nominate or bid until the host resumes."
+          : `Every clock is stopped. Nobody picks until the host resumes.${clockLine}`}</p>
       </div>
     </div>
     ${host ? `<div class="lot-actions"><button data-action="resume-draft">&#9654; Resume draft</button></div>` : ""}
@@ -1922,15 +1953,39 @@ function bindDraftActions() {
       afterLocalDraftAction();
       return;
     }
+    if (action === "seat") {
+      const managerId = button.dataset.managerId;
+      const cpu = button.dataset.cpu === "1";
+      if (state.online) {
+        sendOnlineAction({ type: "seat", managerId, cpu });
+        return;
+      }
+      setManagerCpu(state.draft, managerId, cpu);
+      // Handing a seat over should make the computer take its turn if the clock
+      // is already sitting on it.
+      afterLocalDraftAction();
+      return;
+    }
     if (action === "pause-draft" || action === "resume-draft") {
       if (button.disabled) return;
       const pausing = action === "pause-draft";
+      const snake = !isAuctionDraft(state.draft);
+      const left = snake && pausing && state.pickTimerSeconds
+        ? Math.max(0, pickClockDeadline - Date.now())
+        : null;
       if (state.online) {
-        sendOnlineAction({ type: pausing ? "pause" : "resume" });
+        sendOnlineAction({ type: pausing ? "pause" : "resume", remainingMs: left });
         return;
       }
-      if (pausing) pauseAuction(state.draft, draftNow());
-      else resumeAuction(state.draft, draftNow());
+      if (pausing) {
+        if (snake) pauseSnake(state.draft, left, draftNow());
+        else pauseAuction(state.draft, draftNow());
+      } else if (snake) {
+        resumeSnake(state.draft);
+        restartPickClock(state.draft);
+      } else {
+        resumeAuction(state.draft, draftNow());
+      }
       // Not afterLocalDraftAction: pausing must not wake the computer managers
       // up, and resuming should let them carry on from where they stopped.
       if (pausing) {
@@ -3775,8 +3830,15 @@ function renderRoster(manager, draft) {
   // A computer manager says what he believes, so a pick that looks mad has a
   // reason you can read.
   const persona = manager.cpu ? cpuPersonality(manager.persona) : null;
+  // The whistle: a seat nobody is sitting in can be handed to the computer so
+  // the room keeps moving, and handed back the moment its manager returns.
+  const online = state.online;
+  const canSeat = !draft.complete && (!online || online.host);
+  const seatButton = canSeat
+    ? `<button class="small seat-button" data-action="seat" data-manager-id="${escapeHtml(manager.id)}" data-cpu="${manager.cpu ? "0" : "1"}">${manager.cpu ? "Hand back" : "Hand to CPU"}</button>`
+    : "";
   return `<article class="roster">
-    <h3>${escapeHtml(manager.name)} <span class="roster-points">${totalPoints} pts</span></h3>
+    <h3>${escapeHtml(manager.name)} <span class="roster-points">${totalPoints} pts</span>${seatButton}</h3>
     ${persona ? `<p class="persona" title="${escapeHtml(persona.blurb)}"><span class="persona-tag">${escapeHtml(persona.name)}</span><span class="persona-blurb">${escapeHtml(persona.blurb)}</span></p>` : ""}
     <p>${draftedLine}${budgetLine}</p>
     <div class="target-row">

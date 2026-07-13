@@ -1,7 +1,8 @@
-import { adventurePool } from "./packs.js";
-import { npcBudget } from "./region.js";
-import { createRng } from "../rules/rng.js";
-import { personConflict, playsPosition } from "../rules/cards.js";
+import { chartSpan } from "../rules/cards.js?v=20260713-c";
+import { adventurePool } from "./packs.js?v=20260713-c";
+import { npcBudget } from "./region.js?v=20260713-c";
+import { createRng } from "../rules/rng.js?v=20260713-c";
+import { personConflict, playsPosition } from "../rules/cards.js?v=20260713-c";
 
 // One roster slot per required lineup spot plus the four-man staff. "HITTER"
 // is the DH: any bat qualifies.
@@ -24,7 +25,7 @@ function worth(card) {
 }
 
 function chartSlots(card, result) {
-  return card.chart.reduce((sum, row) => sum + (row.result === result ? row.to - row.from + 1 : 0), 0);
+  return card.chart.reduce((sum, row) => sum + (row.result === result ? chartSpan(row) : 0), 0);
 }
 
 function slotMatches(slot, card) {
