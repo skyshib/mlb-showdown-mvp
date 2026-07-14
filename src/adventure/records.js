@@ -1,5 +1,5 @@
-import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260714-i";
-import { loadHallOfFame } from "./hallOfFame.js?v=20260714-i";
+import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260714-j";
+import { loadHallOfFame } from "./hallOfFame.js?v=20260714-j";
 
 // The record book, and it is the whole league's, not yours.
 //
@@ -134,14 +134,27 @@ export const RECORDS = [
     unit: "wins",
     read: (save) => longestWinStreak(save)
   },
+  // Two boards, not one. A pennant bought with an uncapped chequebook and a
+  // pennant built inside the budget are not the same feat, and the clock does not
+  // know the difference — so ranking them against each other only ever tells you
+  // which manager was allowed to spend more. One book each; they are not rivals.
   {
-    key: "fastest-title",
+    key: "fastest-title-budget",
     page: "manager",
     group: "THE LONG HAUL",
-    title: "FASTEST CHAMPIONSHIP",
+    title: "FASTEST CHAMPIONSHIP (BUDGET)",
     better: "min",
     unit: "days",
-    read: (save) => fastestTitle(save)
+    read: () => fastestTitle("budget")
+  },
+  {
+    key: "fastest-title-uncapped",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: "FASTEST CHAMPIONSHIP (UNCAPPED)",
+    better: "min",
+    unit: "days",
+    read: () => fastestTitle("uncapped")
   },
 
   // The other half. Every one of these is a campaign total for ONE man, and the
@@ -274,10 +287,14 @@ function longestWinStreak(save) {
 }
 
 // The one record that does not live in the almanac: a finished run, and how many
-// days it took. The hall of fame already keeps them.
-function fastestTitle(save) {
+// days it took. The hall of fame already keeps them, and it keeps the mode each
+// was won in — so each board only ever counts the runs that were actually playing
+// its game. A run predating the field is a budget run, which is what the league
+// was before the cheques were uncapped.
+function fastestTitle(mode) {
   let best = null;
   for (const run of loadHallOfFame()) {
+    if ((run.mode ?? "budget") !== mode) continue;
     const days = Number(run.days);
     if (!Number.isFinite(days) || days <= 0) continue;
     if (!best || days < best.value) best = { value: days, day: days, opponent: run.name };

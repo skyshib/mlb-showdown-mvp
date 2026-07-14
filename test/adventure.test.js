@@ -3919,6 +3919,31 @@ test("the record book ranks each record the right way round, and folds you in", 
   assert.equal(untouched.you, null, "never having done it is not the same as having done it badly");
 });
 
+test("the fastest championship is two boards, and a run only competes in the league it was won in", async () => {
+  const { RECORDS } = await import("../src/adventure/records.js");
+  const HOF_KEY = "showdown-quest-hall-of-fame";
+  localStorage.setItem(HOF_KEY, JSON.stringify([
+    { saveSeed: "sq-a", name: "ANA", mode: "budget", days: 61 },
+    { saveSeed: "sq-b", name: "BO", mode: "uncapped", days: 44 },
+    { saveSeed: "sq-c", name: "CY", mode: "budget", days: 55 },
+    { saveSeed: "sq-d", name: "DEE", days: 70 } // predates the field, so: budget
+  ]));
+
+  const budget = RECORDS.find((row) => row.key === "fastest-title-budget");
+  const uncapped = RECORDS.find((row) => row.key === "fastest-title-uncapped");
+
+  assert.equal(budget.read().value, 55, "the quickest of the budget runs, and not BO's 44");
+  assert.equal(budget.read().opponent, "CY");
+  assert.equal(uncapped.read().value, 44, "and the uncapped board keeps its own");
+  assert.equal(uncapped.read().opponent, "BO");
+
+  // A league nobody has taken a pennant in has no record, which is not a nought.
+  localStorage.setItem(HOF_KEY, JSON.stringify([{ saveSeed: "sq-b", name: "BO", mode: "uncapped", days: 44 }]));
+  assert.equal(budget.read(), null);
+
+  localStorage.removeItem(HOF_KEY);
+});
+
 // A campaign in the hands of two bats and two arms: MAYA slugs, JOJO runs, OKABE
 // gives up a run a game and PIP gives up none at all. `games` of them, so the
 // qualifiers (40 PA, 15 IP) are actually cleared.

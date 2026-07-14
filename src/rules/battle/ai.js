@@ -1,4 +1,4 @@
-import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, autoRelieve, AUTO_PULL_MARGIN } from "../game.js?v=20260714-i";
+import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, autoRelieve, AUTO_PULL_MARGIN } from "../game.js?v=20260714-j";
 
 // Profiles bend the two NPC decisions: stealBias shifts the league's
 // advance-decision matrix (negative = greener lights) rather than replacing it,

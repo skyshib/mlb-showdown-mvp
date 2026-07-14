@@ -535,7 +535,8 @@ const RECORD_DIRECTIONS = {
   "hits-allowed-win": "min",
   "hit-streak": "max",
   "win-streak": "max",
-  "fastest-title": "min",
+  "fastest-title-budget": "min",
+  "fastest-title-uncapped": "min",
   "player-homers": "max",
   "player-hits": "max",
   "player-rbi": "max",
@@ -549,10 +550,27 @@ function loadRecordsFile(dataDir) {
   mkdirSync(dataDir, { recursive: true });
   try {
     const book = JSON.parse(readFileSync(join(dataDir, RECORDS_FILE), "utf8"));
-    return book && typeof book === "object" && !Array.isArray(book) ? book : {};
+    if (!book || typeof book !== "object" || Array.isArray(book)) return {};
+    return splitFastestTitle(book);
   } catch {
     return {};
   }
+}
+
+// The fastest championship used to be one board with both leagues on it. It is
+// two now, and the marks already filed have to go somewhere: every row was stamped
+// with the mode of the save that sent it, so each goes to the board it was won in.
+// The tag is the only evidence there is, and dropping three men off the wall
+// because the shape of the wall changed is the worse of the two mistakes.
+function splitFastestTitle(book) {
+  const filed = book["fastest-title"];
+  if (!Array.isArray(filed)) return book;
+  delete book["fastest-title"];
+  const store = { records: book };
+  for (const row of filed) {
+    fileRecord(store, row.mode === "uncapped" ? "fastest-title-uncapped" : "fastest-title-budget", row);
+  }
+  return book;
 }
 
 function persistRecords(store) {

@@ -11,18 +11,18 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260714-i";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-i";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260714-i";
-import { longestHitStreak } from "../records.js?v=20260714-i";
-import { compactGame } from "../gameLog.js?v=20260714-i";
-import { cardById } from "../packs.js?v=20260714-i";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-i";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-i";
-import { gameFeats } from "../feats.js?v=20260714-i";
-import { buildNpcTeam } from "../npcTeams.js?v=20260714-i";
-import { positionsOverlap } from "../../rules/cards.js?v=20260714-i";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-i";
+} from "./helpers.js?v=20260714-j";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-j";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260714-j";
+import { longestHitStreak } from "../records.js?v=20260714-j";
+import { compactGame } from "../gameLog.js?v=20260714-j";
+import { cardById } from "../packs.js?v=20260714-j";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-j";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-j";
+import { gameFeats } from "../feats.js?v=20260714-j";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-j";
+import { positionsOverlap } from "../../rules/cards.js?v=20260714-j";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-j";
 import {
   persistSave,
   deriveSeed,
@@ -44,7 +44,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260714-i";
+} from "../state.js?v=20260714-j";
 import {
   createBattle,
   battlePhase,
@@ -62,7 +62,7 @@ import {
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260714-i";
+} from "../../rules/battle/controller.js?v=20260714-j";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
