@@ -523,6 +523,41 @@ test("the pen sends its BEST arm, not the next man along the bench", () => {
   assert.equal(event.fatiguePenalty, 0);
 });
 
+test("the hook gets quicker as the outs run out — the same gap rides in the first and pulls in the eighth", () => {
+  // The bug this pins: a starting pitcher pulled after 0.1 innings. The gap the
+  // hook measures does not depend on the inning — fatigue is its only moving
+  // part, and fatigue only pushes it up — so against a flat bar a pull that is
+  // ever going to happen happens on the FIRST BATTER, for a gap that has nothing
+  // to do with anything the man has done. A bad starter with a good pen behind
+  // him could not throw a pitch.
+  //
+  // A control 3 starter with a control 6 arm in the pen: a real upgrade, and one
+  // that is just as true before the first pitch as it is in the eighth. What has
+  // to change between those two moments is not the gap. It is what his remaining
+  // outs are WORTH — everything early, when a two-inning pen cannot cover a game
+  // without him, and nothing at all once there is no game left to cover.
+  const staff = {
+    name: "Bad Starter, Good Pen",
+    lineup: teamB.lineup,
+    pitchers: [
+      makePitcher({ id: "sp", name: "Weak Starter", control: 3, ip: 5 }),
+      makePitcher({ id: "rp1", name: "Ace Reliever", control: 6, ip: 1 }),
+      makePitcher({ id: "rp2", name: "Other Reliever", control: 5, ip: 1 })
+    ]
+  };
+  const moundIn = (inning) => {
+    const state = createInitialState(teamA, staff);
+    state.inning = inning;
+    return pitcherStatus(state, "home").pitcher.name;
+  };
+
+  // Fresh, first batter of the game, nothing has happened yet.
+  assert.equal(moundIn(1), "Weak Starter", "he is not pulled before he has thrown a pitch");
+  assert.equal(moundIn(2), "Weak Starter", "nor in the second");
+  // Same staff, same gap, same fatigue — but now his outs are worth nothing.
+  assert.equal(moundIn(8), "Ace Reliever", "and in the eighth the pen is worth going to get");
+});
+
 test("a starter is pulled on his own IP, not on a fixed seven innings", () => {
   // The bug this replaced: the starter was scripted to cover whatever outs the
   // bullpen's printed IP did not, so with two one-inning arms behind him EVERY

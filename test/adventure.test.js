@@ -1097,6 +1097,12 @@ test("manual pitching keeps every arm in until pulled — yours by hand, theirs 
   const npcStarter = pitcherStatus(state, "home").pitcher;
   state.pitching.home.outsRecorded = npcStarter.plannedOuts;
   state.pitching.home.battersFaced = npcStarter.ip * 4 + 1;
+  // Put the game where an arm that deep actually IS. The bar the pen has to
+  // clear slides with the outs left to get, so a starter who has thrown his
+  // planned outs has to be standing in the eighth, not the first — and a state
+  // that says otherwise is asking the skipper a question about a game nobody is
+  // playing.
+  state.inning = Math.floor(npcStarter.plannedOuts / 3) + 1;
   assert.equal(pitcherStatus(state, "home").pitcher.id, npcStarter.id, "NPC arm stays until the AI pulls it");
   assert.ok(pitcherStatus(state, "home").fatiguePenalty >= 1, "and shows real fatigue while he waits");
   const { npcMaybePullPitcher, AI_PROFILES } = await import("../src/rules/battle/ai.js");

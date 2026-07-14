@@ -1,10 +1,9 @@
-import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, autoRelieve, AUTO_PULL_MARGIN } from "../game.js?v=20260714-k";
+import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, autoRelieve, AUTO_PULL_BIAS } from "../game.js?v=20260714-k";
 
 // Profiles bend the two NPC decisions: stealBias shifts the league's
 // advance-decision matrix (negative = greener lights) rather than replacing it,
-// and pullMargin is how much BETTER the pen has to be before the skipper walks
-// out there — measured in runs per plate appearance, the currency reliefDecision
-// thinks in.
+// and pullBias shifts the bar the pen has to clear before the skipper walks out
+// there — in control points, the currency reliefDecision thinks in.
 //
 // It used to be pullAtFatigue, a tiredness threshold, and a temperament
 // expressed that way could only ever choose between two wrong answers. This one
@@ -12,10 +11,15 @@ import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, a
 // sure he has to be that the other guy is better. The aggressive skipper trusts
 // his starter and wants a real upgrade before he moves; the conservative one has
 // a quick hook and takes any upgrade going.
+//
+// It is a BIAS and not a bar because the bar itself now moves with the game —
+// every skipper gets quicker with the hook as the outs run out (see pullMargin).
+// What separates them is how much patience they bring to that slide, which is
+// the thing that stays true about a man from the first inning to the ninth.
 export const AI_PROFILES = {
-  balanced: { stealBias: 0, pullMargin: AUTO_PULL_MARGIN },
-  aggressive: { stealBias: -0.12, pullMargin: 3 },
-  conservative: { stealBias: 0.1, pullMargin: 1 }
+  balanced: { stealBias: 0, pullBias: AUTO_PULL_BIAS },
+  aggressive: { stealBias: -0.12, pullBias: 1 },
+  conservative: { stealBias: 0.1, pullBias: -1 }
 };
 
 export function profileFor(name) {
@@ -41,5 +45,5 @@ export function npcMaybeSteal(state, rng, profile) {
 export function npcMaybePullPitcher(state, npcSide, profile) {
   const status = pitcherStatus(state, npcSide);
   if (!status.hasReliefAvailable) return null;
-  return autoRelieve(state, npcSide, profile.pullMargin ?? AUTO_PULL_MARGIN);
+  return autoRelieve(state, npcSide, profile.pullBias ?? AUTO_PULL_BIAS);
 }

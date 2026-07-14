@@ -742,14 +742,19 @@ export function pitcherStatus(state, side) {
 // ace out and handed the ball to a man two runs an inning worse. Tired is a
 // reason to be WORSE. It was never the reason to leave.
 //
-// How hard the balanced skipper has to be beaten before he moves, in CONTROL
-// POINTS. Not zero, and not small: a hook costs you the arm for the night, and
-// the pen behind him is three innings deep. Tuned against the balance simulator
-// along with the rest of the rule — see MARGIN in pitching.js.
-export const AUTO_PULL_MARGIN = 2;
+// How hard the balanced skipper has to be beaten before he moves is not a
+// number any more — it slides with the outs left to get (see pullMargin). What a
+// skipper has instead is a TEMPERAMENT, in control points, added to that bar:
+// positive rides his starter, negative is a quick hook. The balanced one has
+// none.
+export const AUTO_PULL_BIAS = 0;
 
 // The outs still to be recorded in a regulation game. What is left to cover is
 // what decides whether the pen can afford to be spent now.
+//
+// The floor of 3 is a lie the rule knows about: past the ninth this reads "one
+// inning left" forever, however long the game actually runs. That is why the
+// sliding bar keeps a floor of its own — see MARGIN_LATE.
 function outsRemainingToPitch(state) {
   const recorded = (state.inning - 1) * 3 + state.outs;
   return Math.max(3, 27 - recorded);
@@ -757,7 +762,7 @@ function outsRemainingToPitch(state) {
 
 // Go to the pen if the pen is better. Returns the new pitcher, or null. Exported
 // so the NPC skipper and the autopilot run the identical decision.
-export function autoRelieve(state, side, margin = AUTO_PULL_MARGIN) {
+export function autoRelieve(state, side, bias = AUTO_PULL_BIAS) {
   const runtime = state.pitching[side];
   const team = state[side];
   if (runtime.pitcherIndex >= team.pitchers.length - 1) return null;
@@ -768,7 +773,7 @@ export function autoRelieve(state, side, margin = AUTO_PULL_MARGIN) {
     bullpen: team.pitchers.slice(runtime.pitcherIndex + 1),
     batters: lineupProfile(state[side === "home" ? "away" : "home"].lineup),
     outsRemaining: outsRemainingToPitch(state),
-    margin
+    bias
   });
   if (!decision.pull) return null;
   // Bring in THAT arm — the best one out there — not merely the next man along

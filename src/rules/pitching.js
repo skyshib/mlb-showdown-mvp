@@ -108,32 +108,52 @@ function runsPerControlPoint(pitcher, batters) {
   return Math.max(swing, 1e-6);
 }
 
-// Both numbers are TUNED, by sweeping them through the balance simulator (four
-// drafted teams, a hundred tournaments) and reading runs per game off the other
-// end. Lower is better: both dugouts run the same skipper, so the only thing the
-// number can be measuring is how well the staffs are being used.
+// The bar the pen has to clear, in control points — and it FALLS as the game
+// gets shorter.
 //
-//   never go to the pen at all ... 15.30   (so the pen is worth going to)
-//   the old "pull at fatigue 2" .. 12.07
-//   margin 2, desperation 4 ...... 11.85   <- here
+// A flat bar was the last thing wrong with this rule. The gap it is compared
+// against does not depend on the inning, the score, or a single thing the man
+// on the mound has actually done; fatigue is its only moving part, and fatigue
+// only ever pushes it UP. So a flat bar is a decision that, once it is true, was
+// already true before the first pitch — which is exactly what it looked like: a
+// starter pulled after one batter, for a gap that had nothing to do with the
+// batter.
 //
-// It is a real interior optimum, not a slide toward never pulling: widen the
-// margin past 3 and the runs climb again. And it holds on seeds it was not tuned
-// on — 12.38 -> 12.24, 12.38 -> 11.57, 12.59 -> 12.02, 12.49 -> 12.01 — which is
-// what says this is a better skipper rather than a luckier one.
+// What a starter really has, early, is OUTS, and they are worth something
+// precisely because the pen cannot cover the game without them. That worth
+// decays: by the seventh there is nothing left to protect and the pen should be
+// spending whatever it has. So the bar to walk out there is the option value of
+// his remaining tank, and it slides down with the outs left to get.
 //
-// The surface is flat around the peak (1.5-2 x 4-5 all land within 0.1 runs), so
-// these are round numbers off a plateau, not a knife edge. Do not read precision
-// into them that isn't there.
-const MARGIN = 2;
+// The floor is a HEDGE and it is deliberate. `outsRemaining` bottoms out at 3
+// (see outsRemainingToPitch), so extra innings look to this rule like a game
+// that is permanently one inning from over — and the arms it burns on that
+// belief still have to pitch the twelfth. A pen is also short of what it thinks:
+// an inning is four batters only if nobody reaches. Keep a real point of control
+// between the two men before spending an arm you cannot get back.
+const MARGIN_EARLY = 5.5;
+const MARGIN_LATE = 1.5;
+const REGULATION_OUTS = 27;
+
+// The bar, at this point in the game. `bias` is the skipper's temperament in
+// control points: positive rides his starter, negative is a quick hook.
+export function pullMargin(outsRemaining = REGULATION_OUTS, bias = 0) {
+  const outs = Number(outsRemaining);
+  const share = Math.max(0, Math.min(1, (Number.isFinite(outs) ? outs : REGULATION_OUTS) / REGULATION_OUTS));
+  return Math.max(0, MARGIN_LATE + (MARGIN_EARLY - MARGIN_LATE) * share + bias);
+}
+
+// The bar when the pen CANNOT cover what is left, which is flat and higher. Late
+// in a game a short pen is the last thing between you and extra innings, so the
+// sliding bar is not allowed to talk you into emptying it for a small upgrade.
 const DESPERATION_GAP = 4;
 
 // The hook, as one decision.
 //
-// `margin` is the skipper's temperament, in control points: how much better the
-// pen has to be before he'll actually walk out there. Zero is a quick hook —
-// take any upgrade going. A wide margin rides his starter and moves only for a
-// real one.
+// The bar the pen must clear is `margin`, which slides with the outs left to get
+// (see pullMargin) and is nudged by the skipper's temperament (`bias`). Early it
+// is high, because the starter's tank is holding the game up. Late it is low,
+// because there is nothing left to hold up.
 //
 // The coverage clause is what keeps this honest. Pulling a man is FINAL — he
 // does not come back — and a staff is three or four arms deep, not eight. The
@@ -151,14 +171,16 @@ const DESPERATION_GAP = 4;
 // tiredness is priced already: it is in his control, which is in the gap. It
 // does not need a second vote.
 //
-// The numbers below are tuned, not chosen. See MARGIN and DESPERATION_GAP.
+// `margin` stays overridable so a caller can ask the question at a bar of its
+// own choosing; leave it alone and the sliding one answers.
 export function reliefDecision({
   current,
   currentFatigue = 0,
   bullpen = [],
   batters,
   outsRemaining = 27,
-  margin = MARGIN,
+  bias = 0,
+  margin = pullMargin(outsRemaining, bias),
   desperationGap = DESPERATION_GAP
 }) {
   const stay = (reason) => ({ pull: false, index: null, reliever: null, reason });
@@ -174,7 +196,11 @@ export function reliefDecision({
   const best = rated[0];
 
   // The gap, said in control points, so the thresholds mean the same thing in
-  // every league.
+  // every league. Read it as an EXCHANGE RATE, not a difference of ratings: how
+  // many points of control you would have to hand the man on the mound to make
+  // him the man in the pen. It is not bounded by the 0-6 the cards are printed
+  // on, because chart quality is bought with the same currency — two control-4
+  // arms can be four points apart on their charts alone.
   const perPoint = runsPerControlPoint(current, facing);
   const gap = (currentRpa - best.rpa) / perPoint;
   const decision = { currentRpa, bestRpa: best.rpa, gap };
