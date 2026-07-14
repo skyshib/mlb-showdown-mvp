@@ -691,15 +691,14 @@ h1.gq-logo {
    and clipped to one side: on top of the head it was a red ring straight across
    his skull, which is a halo, not a hat. */
 .gq-back-brim {
-  fill: var(--gq-flare);
+  fill: var(--gq-lead);
   stroke: var(--gb-darkest);
   stroke-width: 1.2;
 }
 .gq-back-cap { fill: var(--accent-bright); }
-/* The closure tab on the back of the crown, where a cap is adjusted. It sits ON
-   the bottom edge of the cap — half on the crown, half on the head — because
-   that is where the band is, and it carries a rule so it reads as a piece of the
-   hat rather than a hole in it. */
+/* The closure tab on the back of the crown, where a cap is adjusted: flush with
+   the bottom of the cap, sitting IN the band rather than hanging off it. It
+   carries a rule so it reads as a piece of the hat rather than a hole in it. */
 .gq-back-strap {
   fill: var(--gq-lead);
   stroke: var(--gb-darkest);

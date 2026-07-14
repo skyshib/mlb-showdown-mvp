@@ -251,6 +251,16 @@ export function recordGameStats(save, teamBox) {
 
 // Season lines with the rate stats the batch sim reports: AVG/OBP/SLG/OPS for
 // bats, RA9 and K/9 for arms. Sorted the same way, too.
+// A season here is however many games you have played, and a man who arrived in
+// the pack you opened this morning has played one of them. Summed WPA ranks that
+// man last no matter what he did, and ranks the man who has been on the roster
+// since day one first no matter how little he has done — it is a counting stat
+// being read as a rating. Per 162 is the rate: what he is WORTH, not how long he
+// has been here.
+function per162(wpa, games) {
+  return games > 0 ? (wpa * 162) / games : 0;
+}
+
 export function seasonHitters(save) {
   return Object.values(ensureSeasonStats(save).hitters)
     .map((line) => {
@@ -258,7 +268,14 @@ export function seasonHitters(save) {
       const totalBases = singles + line.d * 2 + line.t * 3 + line.hr * 4;
       const obp = line.pa ? (line.h + line.bb) / line.pa : 0;
       const slg = line.ab ? totalBases / line.ab : 0;
-      return { ...line, avg: line.ab ? line.h / line.ab : 0, obp, slg, ops: obp + slg };
+      return {
+        ...line,
+        avg: line.ab ? line.h / line.ab : 0,
+        obp,
+        slg,
+        ops: obp + slg,
+        wpa162: per162(line.wpa, line.games)
+      };
     })
     .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
 }
@@ -268,7 +285,8 @@ export function seasonPitchers(save) {
     .map((line) => ({
       ...line,
       runsPerNine: line.outs ? (line.r * 27) / line.outs : 0,
-      strikeoutsPerNine: line.outs ? (line.so * 27) / line.outs : 0
+      strikeoutsPerNine: line.outs ? (line.so * 27) / line.outs : 0,
+      wpa162: per162(line.wpa, line.games)
     }))
     .sort((a, b) => (a.outs === 0) - (b.outs === 0) || a.runsPerNine - b.runsPerNine || b.outs - a.outs);
 }

@@ -37,6 +37,23 @@ export function wpaText(wpa) {
   return `${percent >= 0 ? "+" : ""}${percent}%`;
 }
 
+// A season's worth of WPA is not a percentage. One play's swing is: a home run
+// that took your odds from 40% to 75% added 35 POINTS of win probability, and
+// "+35%" is what it is. Add up a year of them and the unit stops being a
+// percentage and starts being WINS — 3.6 wins per 162, not 361%, which is what
+// the play formatter turned it into and which means nothing at all.
+//
+// Two wins a season is a good regular; five is a star; the bold starts at three.
+export function wpa162Text(value) {
+  const wins = Number(value) || 0;
+  return `${wins >= 0 ? "+" : "\u2212"}${Math.abs(wins).toFixed(1)}`;
+}
+
+export function wpa162Html(value) {
+  const text = `${wpa162Text(value)} <span class="gq-dim">W/162</span>`;
+  return Math.abs(Number(value) || 0) >= 3 ? `<b>${text}</b>` : `<span class="gq-dim">${text}</span>`;
+}
+
 // Big swings (|WPA| >= 10%) read bold; the rest stay quiet.
 export function wpaHtml(wpa) {
   const text = wpaText(wpa);
@@ -550,7 +567,7 @@ function championshipRows(save) {
 // same number again flips the direction. RA9 defaults ascending (lower is
 // better); everything else descending.
 const HITTER_SORTS = [
-  { key: "wpa", label: "WPA" },
+  { key: "wpa162", label: "WPA/162" },
   { key: "avg", label: "AVG" },
   { key: "ops", label: "OPS" },
   { key: "hr", label: "HR" },
@@ -559,7 +576,7 @@ const HITTER_SORTS = [
   { key: "games", label: "G" }
 ];
 const PITCHER_SORTS = [
-  { key: "wpa", label: "WPA" },
+  { key: "wpa162", label: "WPA/162" },
   { key: "runsPerNine", label: "RA9" },
   { key: "so", label: "K" },
   { key: "outs", label: "IP" },
@@ -584,11 +601,15 @@ export function seasonLines(app) {
   return { view, sorts, sort, dir, lines };
 }
 
-export function statLineHtml(line, view) {
+// A box score and a series page are asking what a man DID, and summed WPA is the
+// honest answer to that. The season page is asking what he is WORTH, which is a
+// rate — so it asks for one.
+export function statLineHtml(line, view, { per162 = false } = {}) {
+  const swing = per162 ? wpa162Html(line.wpa162 ?? 0) : wpaHtml(line.wpa);
   if (view === "pitchers") {
-    return `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`;
+    return `${escapeHtml(shortName(line.name))} ${swing} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`;
   }
-  return `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G</span>`;
+  return `${escapeHtml(shortName(line.name))} ${swing} <span class="gq-dim">${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G</span>`;
 }
 
 // Just this series' numbers: the active series' games are the newest almanac
@@ -625,13 +646,13 @@ export const seasonStatsScreen = {
         <p class="gq-dim">SORT: ${sortBar}</p>
         <div class="gq-frame gq-scroll">${
           lines.length
-            ? menuHtml(lines.map((line) => ({ html: statLineHtml(line, view) })), index)
+            ? menuHtml(lines.map((line) => ({ html: statLineHtml(line, view, { per162: true }) })), index)
             : `<p class="gq-dim">${app.screen.query ? `NOBODY NAMED "${escapeHtml(app.screen.query)}" HERE.` : "NO GAMES ON RECORD YET. GO PLAY SOMEBODY."}</p>`
         }</div>
       </div>
       <div class="gq-textbox">${
         app.screen.query ? `<p>SEARCH: <b>${escapeHtml(app.screen.query)}</b>_ <span class="gq-dim">X CLEARS</span></p>` : ""
-      }<p class="gq-dim">&#8592;/&#8594; ROSTER &middot; EVERYONE. Z BATS/ARMS. Type a name to search &middot; 1-${sorts.length} sorts (again flips). X to leave.</p></div>
+      }<p class="gq-dim">W/162 IS WINS ADDED PER 162 GAMES &mdash; WHAT HE IS WORTH, NOT HOW LONG HE HAS BEEN HERE. &#8592;/&#8594; ROSTER &middot; EVERYONE. Z BATS/ARMS. Type a name to search &middot; 1-${sorts.length} sorts (again flips). X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {

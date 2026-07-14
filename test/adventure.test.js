@@ -1271,6 +1271,53 @@ test("game box scores fold into rolling season stats with batch-style rates", as
   assert.ok(stars.every((star) => star.summary.length > 0));
 });
 
+test("the season page rates a man per 162, not by how long he has been here", async () => {
+  const { seasonStatsScreen, seasonLines, statLineHtml } = await import("../src/adventure/ui/statsScreens.js");
+  const { seasonHitters } = await import("../src/adventure/state.js");
+  const save = testSave();
+  const { player, npc } = hookTeams();
+  // Two games in the book, so games played can differ from man to man.
+  for (const seed of ["per162-a", "per162-b"]) {
+    const result = simulateGame(buildTeam(player), buildTeam(npc), seed);
+    recordGameStats(save, result.boxScore.away);
+  }
+
+  const bats = seasonHitters(save);
+  assert.ok(bats.length, "somebody batted");
+  for (const line of bats) {
+    assert.equal(
+      Number(line.wpa162.toFixed(6)),
+      Number(((line.wpa * 162) / line.games).toFixed(6)),
+      `${line.name} is rated per 162`
+    );
+  }
+
+  // A man who played one game and swung it is worth MORE than a man who played
+  // two and did nothing — summed WPA says the opposite, which is a counting stat
+  // being read as a rating.
+  const oneGame = { name: "Cup Of Coffee", wpa: 0.4, games: 1, wpa162: (0.4 * 162) / 1 };
+  const twoGames = { name: "Been Here", wpa: 0.5, games: 2, wpa162: (0.5 * 162) / 2 };
+  assert.ok(oneGame.wpa < twoGames.wpa, "the total says the veteran");
+  assert.ok(oneGame.wpa162 > twoGames.wpa162, "the rate says the new man");
+
+  // The season page shows the rate; a box score still shows what a man DID.
+  const app = { save, screen: { name: "seasonStats", view: "hitters", index: 0 }, rerender() {} };
+  const html = seasonStatsScreen.render(app);
+  assert.match(html, /WPA\/162/, "the column says so");
+  assert.match(html, /W\/162 IS WINS ADDED PER 162 GAMES/, "and the footer says what the unit is");
+  // A season of WPA is WINS, not a percentage: 3.6 wins per 162, never "+361%".
+  assert.ok(!/\+\d{3}%/.test(html), "no play-sized percentages on a season page");
+  assert.match(html, /[+\u2212]\d+\.\d <span class="gq-dim">W\/162<\/span>/, "it reads as wins");
+  assert.equal(seasonLines(app).sorts[0].key, "wpa162", "and the sort follows the number on the screen");
+
+  const line = { ...bats[0] };
+  assert.notEqual(
+    statLineHtml(line, "hitters", { per162: true }),
+    statLineHtml(line, "hitters"),
+    "the box score's summed WPA is left alone"
+  );
+});
+
 test("season stats scope to the roster, search by name, and sort by column", async () => {
   const { seasonStatsScreen, seasonLines } = await import("../src/adventure/ui/statsScreens.js");
   const save = testSave();
