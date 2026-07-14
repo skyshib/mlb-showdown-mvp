@@ -1640,3 +1640,25 @@ test("a free base is still half the runner's", () => {
   const arm = state.stats.pitchers.get("home:wd-p");
   assert.ok(Math.abs(arm.wpa + event.wpa) < 1e-9, "and the pitcher wears all of it");
 });
+
+// CERTAIN means a hundred percent, and nothing else means it.
+test("only a 100% runner takes the base unasked; 95% is still a gamble, and it is yours", async () => {
+  const { certainSafe, freeAdvanceCount, fieldingCheckNeeds } = await import("../src/rules/game.js");
+
+  assert.equal(certainSafe({ safeChance: 1 }), true, "he cannot be thrown out");
+  assert.equal(certainSafe({ safeChance: 0.95 }), false, "one face of the die still gets him — so it is a decision");
+  assert.equal(certainSafe({ safeChance: 0.999 }), false, "and near-certain is not certain");
+  assert.equal(certainSafe({}), false, "an unrated candidate is not a free base");
+
+  // The trap this guards. "The defense needs a 21" is a PROXY for a hundred
+  // percent, and it stops being the same thing the moment a number in it isn't
+  // whole: here the proxy says he cannot be caught, while a 20 on the die still
+  // catches him. Believe the odds, not the proxy.
+  const halfPoint = { target: 19.5, fielding: 0, safeChance: 19.5 / 20 };
+  assert.equal(fieldingCheckNeeds(halfPoint).impossible, true, "the old proxy calls this uncatchable");
+  assert.equal(certainSafe(halfPoint), false, "but a 20 guns him down, so the player is still asked");
+
+  // Only the leading run of genuinely free men is taken without asking.
+  assert.equal(freeAdvanceCount([{ safeChance: 1 }, { safeChance: 1 }, { safeChance: 0.9 }]), 2);
+  assert.equal(freeAdvanceCount([{ safeChance: 0.95 }, { safeChance: 1 }]), 0, "the lead man is the one who has to be free");
+});

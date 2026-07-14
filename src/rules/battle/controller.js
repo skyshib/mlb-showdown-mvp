@@ -15,10 +15,10 @@ import {
   pendingAdvanceDecision,
   resolveAdvanceDecision,
   stateLeverage
-} from "../game.js?v=20260714-b";
-import { buildTeam } from "../draft.js?v=20260714-b";
-import { createRng } from "../rng.js?v=20260714-b";
-import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js?v=20260714-b";
+} from "../game.js?v=20260714-c";
+import { buildTeam } from "../draft.js?v=20260714-c";
+import { createRng } from "../rng.js?v=20260714-c";
+import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js?v=20260714-c";
 
 // The interactive battle: one seeded game where the engine pauses before
 // every plate appearance so the humans (well, one human) can manage.

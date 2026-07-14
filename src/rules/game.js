@@ -1,6 +1,6 @@
-import { RESULTS, resolveChart } from "./cards.js?v=20260714-b";
-import { reliefDecision, lineupProfile } from "./pitching.js?v=20260714-b";
-import { createRng } from "./rng.js?v=20260714-b";
+import { RESULTS, resolveChart } from "./cards.js?v=20260714-c";
+import { reliefDecision, lineupProfile } from "./pitching.js?v=20260714-c";
+import { createRng } from "./rng.js?v=20260714-c";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 
@@ -1375,10 +1375,17 @@ function splitAutoAdvanceCredit(state, battingSide, batter, taker, wpBefore) {
   ensureHitterLine(state, { id: taker.id, name: taker.name }).wpa += half;
 }
 
-// A base he cannot be thrown out taking. The defense would need a 21 — there is
-// no die that gets him — so the throw is not made and the base is simply his.
+// A base he cannot be thrown out taking, and CANNOT means a hundred percent.
+//
+// Not "the defense would need a 21", which is a proxy for the same thing and is
+// only the same thing while every number in it is a whole one. Give an outfield a
+// half point of arm, or a base a half-point bonus, and the proxy still says he is
+// safe while a 20 on the die guns him down — and the game would have taken the
+// decision away from the player and then thrown him out with it. So the question
+// is put to the odds themselves. Ninety-five percent is not certain. It is a
+// gamble with good numbers, and the gamble is the player's to take.
 export function certainSafe(candidate) {
-  return Boolean(fieldingCheckNeeds(candidate)?.impossible);
+  return Number(candidate?.safeChance) >= 1;
 }
 
 // How many of the lead runners are going for FREE. Runners are asked about lead

@@ -1,5 +1,5 @@
-import { ensureAlmanac } from "./state.js?v=20260714-b";
-import { loadHallOfFame } from "./hallOfFame.js?v=20260714-b";
+import { ensureAlmanac } from "./state.js?v=20260714-c";
+import { loadHallOfFame } from "./hallOfFame.js?v=20260714-c";
 
 // The record book, and it is the whole league's, not yours.
 //

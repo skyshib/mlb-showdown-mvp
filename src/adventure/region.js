@@ -1,5 +1,5 @@
-import { timesBeaten } from "./state.js?v=20260714-b";
-import { poolCeiling, LADDER_REFERENCE } from "./packs.js?v=20260714-b";
+import { timesBeaten } from "./state.js?v=20260714-c";
+import { poolCeiling, LADDER_REFERENCE } from "./packs.js?v=20260714-c";
 
 // The Cascade League: one town so far, with routes climbing past it. Trainers
 // are pure data — teams build deterministically from teamSeed + pointBudget.
