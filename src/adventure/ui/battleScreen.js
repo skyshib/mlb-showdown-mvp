@@ -578,7 +578,12 @@ function d20FaceHtml() {
 // before anybody has told you there is a ground ball is watching a die for no
 // reason.
 const DIE_HOLD_MS = 350;      // between two dice of the same roll: pitch, swing
-const READ_THE_PLAY_MS = 1250; // between the bat's answer and the glove's question
+// Between the bat's answer and the glove's question. Long, and deliberately so:
+// you are being told a ball is in play and a glove is about to decide what it is
+// worth, and a beat that only just clears the reading of it is a beat you feel
+// hurried through. This is the one place in the game where the pause IS the
+// point — the ball is in the air and nobody knows yet.
+const READ_THE_PLAY_MS = 2200;
 
 function mountDrama(app) {
   stopDramaTimer();
