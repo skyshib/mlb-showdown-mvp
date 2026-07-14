@@ -663,6 +663,16 @@ h1.gq-logo {
 [data-card-id] { cursor: help; }
 
 /* The rival-ambush exclamation, straight out of a trainer's line of sight. */
+/* The man who just jumped you, drawn the way he is drawn when he walks onto the
+   field: the same seeded portrait, so the face that ambushes you is the face you
+   are about to play. A two-letter tag and a text-message frown were standing in
+   for him. */
+.gq-ambush-card .gq-versus-sprite {
+  width: 24cqw;
+  height: 24cqw;
+  margin: 0 auto 1.5cqw;
+}
+
 .gq-ambush-bang {
   font-size: 14cqw;
   font-weight: 700;

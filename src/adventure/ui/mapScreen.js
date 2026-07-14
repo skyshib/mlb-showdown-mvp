@@ -85,9 +85,8 @@ export const ambushScreen = {
       <div class="gq-topbar"><span>CEDAR YARDS</span><span>!!</span></div>
       <div class="gq-body gq-center">
         <p class="gq-ambush-bang gq-blink">!</p>
-        <div class="gq-frame gq-title-frame">
-          <b style="font-size:8cqw">&gt;:(</b><br>
-          <b style="font-size:5cqw">[${escapeHtml(rival.sprite)}]</b><br>
+        <div class="gq-frame gq-title-frame gq-ambush-card">
+          ${versusSprite(`${rival.id}-${rival.name}`, rival.sprite)}
           <b>${escapeHtml(rival.name)}</b><br>
           <span class="gq-dim">HE LOOKS MEAN. ${npcBudget(app.save, rival)} PT OF MEAN.</span>
         </div>
