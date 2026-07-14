@@ -685,9 +685,17 @@ function playLogHtml(app, battle) {
         previous.score[you]
       }-${previous.score[them]}</span></div>`;
     }
-    html += entry.lines.map((line) => `<p>${line}</p>`).join("");
+    // Each play is its own block, so plays stand apart from each other and the
+    // newest one has something the scroll can be aimed at.
+    html += `<div class="gq-play">${entry.lines.map((line) => `<p>${line}</p>`).join("")}</div>`;
     previous = entry;
   }
+  // The room under the last play. Without it the newest play cannot be scrolled
+  // to the TOP of the box — there is nothing beneath it to scroll up past — and
+  // it would sit at the bottom with the old plays above it, which is the one
+  // thing this log must not do: what just happened has to be the first thing your
+  // eye lands on, not the last.
+  html += `<div class="gq-play-floor"></div>`;
   void state;
   return html;
 }
@@ -975,9 +983,25 @@ export const battleScreen = {
   },
   mounted(app) {
     if (app.screen.mode === "drama" && app.screen.drama) mountDrama(app);
-    // The call of the play is the newest line, and it's the one worth reading.
+    // The newest play goes to the TOP of the box, not the bottom: it is what you
+    // are here to read, so it is the first thing the eye lands on. Everything
+    // before it is above it, out of the way, and reachable by scrolling up on
+    // purpose — which is the only way anybody should ever read it.
     const lines = document.querySelector(".gq-battle-lines");
-    if (lines) lines.scrollTop = lines.scrollHeight;
+    // NOT :last-of-type — that matches the last element of a TAG among its
+    // siblings, and the last div in this box is the floor under the plays, not a
+    // play. It quietly matched nothing, the scroll fell back to the bottom, and
+    // the bottom is now a screen of blank floor below the play you wanted to see.
+    const plays = lines?.querySelectorAll(".gq-play");
+    const newest = plays?.length ? plays[plays.length - 1] : null;
+    if (lines && newest) {
+      // An ABSOLUTE position, not a delta: mounted() runs on every render, and a
+      // scroll expressed as "move by this much" applied twice moves twice. The
+      // box is position:relative so offsetTop is measured from the box itself.
+      lines.scrollTop = newest.offsetTop - lines.clientTop;
+    } else if (lines) {
+      lines.scrollTop = lines.scrollHeight;
+    }
     playMotionOnce(app);
   },
   key(app, key) {

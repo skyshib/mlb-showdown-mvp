@@ -2004,6 +2004,17 @@ test("the play description is the whole book of the game, ruled at the innings",
   assert.ok(html.includes(entries[0].lines[0]), "the first thing said is still there");
   assert.ok(html.includes(entries.at(-1).lines.at(-1)), "and so is the newest");
 
+  // Each play stands apart, and there is floor under the last one — without it the
+  // newest play cannot be scrolled to the TOP of the box, and would sit at the
+  // bottom with the old plays above it, which is the one thing this log must not
+  // do: what just happened has to be the first thing your eye lands on.
+  assert.equal(
+    (html.match(/class="gq-play"/g) ?? []).length,
+    entries.length,
+    "every play is its own block"
+  );
+  assert.match(html, /gq-play-floor/, "and there is room under the last of them");
+
   // A rule wherever the sides changed, naming the half that closed and the score
   // as it stood, read from your dugout.
   const halves = new Set(entries.map((entry) => `${entry.half}${entry.inning}`));

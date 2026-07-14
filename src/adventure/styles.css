@@ -453,7 +453,24 @@ h1.gq-logo {
   overflow-y: auto;
   align-self: center;
 }
-.gq-battle-lines { flex: 1.3; min-width: 0; max-height: 100%; overflow-y: auto; }
+/* position:relative so the plays inside it measure their offsets against the BOX
+   — which is what lets the newest one be scrolled to the top of it exactly. */
+.gq-battle-lines { flex: 1.3; min-width: 0; max-height: 100%; overflow-y: auto; position: relative; }
+
+/* Plays stand apart from one another: a wall of paragraphs with nothing between
+   them reads as one long play. */
+.gq-play + .gq-play { margin-top: 1.8cqw; }
+
+/* The room under the last play, so it can be scrolled to the TOP of the box with
+   nothing under it. A box that cannot scroll past its own content cannot put the
+   newest play anywhere but the bottom.
+
+   Measured in cqh (a share of the whole handheld) and not in %: the box's own
+   height comes from a flex line with a max-height on it, which is not a definite
+   height, and a percentage resolved against it collapses to nothing — which is
+   exactly what it did. More room than the box needs is harmless; there is never
+   anything under the newest play to see. */
+.gq-play-floor { min-height: 45cqh; }
 
 /* Where an inning closed. The rule runs the full width of the box — a short one
    would read as a bullet, and this is a door — with the half-inning that just
