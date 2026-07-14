@@ -11,17 +11,17 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260714-c";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-c";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260714-c";
-import { longestHitStreak } from "../records.js?v=20260714-c";
-import { cardById } from "../packs.js?v=20260714-c";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds } from "../../rules/game.js?v=20260714-c";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-c";
-import { gameFeats } from "../feats.js?v=20260714-c";
-import { buildNpcTeam } from "../npcTeams.js?v=20260714-c";
-import { positionsOverlap } from "../../rules/cards.js?v=20260714-c";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-c";
+} from "./helpers.js?v=20260714-d";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-d";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260714-d";
+import { longestHitStreak } from "../records.js?v=20260714-d";
+import { cardById } from "../packs.js?v=20260714-d";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-d";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-d";
+import { gameFeats } from "../feats.js?v=20260714-d";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-d";
+import { positionsOverlap } from "../../rules/cards.js?v=20260714-d";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-d";
 import {
   persistSave,
   deriveSeed,
@@ -43,7 +43,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260714-c";
+} from "../state.js?v=20260714-d";
 import {
   createBattle,
   battlePhase,
@@ -57,10 +57,11 @@ import {
   fastForward,
   runSimSeries,
   isDramaticMoment,
+  DRAMA_LEVERAGE,
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260714-c";
+} from "../../rules/battle/controller.js?v=20260714-d";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -690,6 +691,11 @@ export function fatigueAlarm(battle, heard = {}) {
       else spent = true;
     }
   }
+  // The phone is a WARNING — go and get him, he has nothing left — and a warning
+  // about a game that is already over is not a warning. It is the last out
+  // honking at you a beat before the victory music, about an arm nobody is going
+  // to have to make a decision on. Whatever he has left, he can keep.
+  if (isGameOver(battle.state)) return { now, sound: null };
   // One sound a play, and the worse news is the news.
   return { now, sound: spent ? "spent" : tiring ? "tiring" : null };
 }
@@ -786,6 +792,7 @@ function afterAction(app, events, presetLines = null) {
   // Every play comes through here, so this is where the diamond learns what to
   // act out. The id is what stops a cursor keypress from replaying it.
   app.screen.motion = { id: (app.screen.motion?.id ?? 0) + 1, ...playMotion(events) };
+  // Rings only if there is a game left to ring about — see fatigueAlarm.
   callTheBullpenPhone(app);
   logPlay(app, lines, [...events, visit]);
   app.screen.lines = lines.length ? lines : app.screen.lines;
@@ -1164,7 +1171,31 @@ function renderScoreboard(battle, trainer, series) {
     <span class="gq-board-bases">
       ${diamondHtml(state)}${outsHtml(state.outs)}
     </span>
+    ${boardMetaHtml(battle)}
   </div>`;
+}
+
+// The two numbers the game already knows about itself, small, in the corner.
+//
+// WP is YOUR win probability, not the home team's — the engine thinks in home
+// terms and the player does not. LI is what the next play is worth: 1.0 is an
+// ordinary moment, and the same table the drama roll reads (see stateLeverage).
+// Both come out of MLB history rather than out of a rule somebody wrote, and both
+// were already being computed on every play to run the win-probability chart and
+// decide when the die comes out slow. They were just never shown.
+//
+// It lights up at the same line the slow die comes out at, so the corner tells
+// you WHY the game is suddenly taking its time.
+function boardMetaHtml(battle) {
+  const state = battle.state;
+  const homeWp = winProbabilityHome(state);
+  const mine = battle.playerSide === "home" ? homeWp : 1 - homeWp;
+  const leverage = stateLeverage(state);
+  const hot = leverage >= DRAMA_LEVERAGE;
+  return `<span class="gq-board-meta${hot ? " gq-board-meta-hot" : ""}">
+    <span><b>WP</b> ${Math.round(mine * 100)}%</span>
+    <span><b>LI</b> ${leverage.toFixed(1)}</span>
+  </span>`;
 }
 
 // The hand-operated board: a slot per inning, hung as the runs come in, with

@@ -3978,3 +3978,32 @@ test("a runner who cannot be thrown out takes the base without being asked", asy
   assert.equal(flyState.score.away, 1, "he tagged and scored");
   assert.equal(flyState.bases[2], null, "third is empty behind him");
 });
+
+// The bullpen phone is a WARNING — go and get him, he has nothing left. A warning
+// about a game that is already over is not a warning: it is the last out honking
+// at you a beat before the victory music, about an arm nobody has to decide
+// anything about ever again.
+test("the tired-arm alarm keeps quiet on the play that ends the game", async () => {
+  const { fatigueAlarm } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "last-out", playerIsAway: false });
+  const state = battle.state;
+  const mound = pitcherStatus(state, "home");
+
+  // He is one batter past his tank: mid-game, that is news.
+  state.pitching.home.battersFaced = mound.tiredAt + 1;
+  const midGame = fatigueAlarm(battle, {});
+  assert.equal(midGame.sound, "tiring", "with a game still to play, the phone rings");
+
+  // The same tired arm, on the last out of the ballgame. Nothing to say.
+  state.inning = 9;
+  state.half = "bottom";
+  state.outs = 3;
+  state.score = { away: 2, home: 5 };
+  state.gameOver = true;
+  const final = fatigueAlarm(battle, {});
+  assert.equal(final.sound, null, "the game is over; his tiredness is his own business");
+  // The book is still kept, so nothing is double-counted if anybody asks later.
+  assert.deepEqual(final.now, midGame.now, "what was heard is still tracked, it is simply not sounded");
+});

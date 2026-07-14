@@ -1,12 +1,12 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-c";
-import { sectionedMenu } from "./statsScreens.js?v=20260714-c";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-d";
+import { sectionedMenu } from "./statsScreens.js?v=20260714-d";
 import {
   RECORDS,
   leaderboard,
   cachedGlobalRecords,
   fetchGlobalRecords,
   submitRecords
-} from "../records.js?v=20260714-c";
+} from "../records.js?v=20260714-d";
 
 // ---- World records ----------------------------------------------------------
 //

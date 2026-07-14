@@ -329,6 +329,29 @@ h1.gq-logo {
   padding: 0.8cqw 1.5cqw;
 }
 .gq-board-bases { display: flex; align-items: center; gap: 1.5cqw; flex: none; }
+
+/* WP and LI, in the corner, small enough to be ignored. Two lines stacked so the
+   corner stays a corner rather than a third column shouldering the bases along:
+   flex:none and the board's own flex:1 keep the frames where they were. It sits
+   at the far right of the banner because that is where you glance when you want
+   a number and not a picture. */
+.gq-board-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  flex: none;
+  gap: 0.2cqw;
+  font-size: 2cqw;
+  line-height: 1.15;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.gq-board-meta b { font-weight: 700; opacity: 0.6; margin-right: 0.4cqw; }
+/* The same line the slow die comes out at (DRAMA_LEVERAGE), so the corner says
+   WHY the game has started taking its time. */
+.gq-board-meta-hot { opacity: 1; }
+.gq-board-meta-hot b { opacity: 0.85; }
 /* The game number lives in the board's corner cell now — above the clubs, beside
    the frames — so it reads as a fact about this board rather than a caption
    floating beside the bases. It is left-aligned with the club names under it. */
