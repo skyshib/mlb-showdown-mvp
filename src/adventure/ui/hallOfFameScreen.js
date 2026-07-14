@@ -8,6 +8,7 @@ import {
   cachedGlobalEntries,
   fetchGlobalEntries,
   submitRun,
+  syncRunProgress,
   mergeEntries
 } from "../hallOfFame.js?v=20260713-x";
 
@@ -51,6 +52,14 @@ function leagueName(entry) {
   return universeConfig(entry.universe)?.name ?? entry.universe.toUpperCase();
 }
 
+// What this champion has collected. Plaques from before the catalog was counted
+// simply do not say — better a quiet plaque than a lie about a zero.
+function collectionTag(entry) {
+  if (!entry.cardsTotal) return "&#8212;";
+  if (entry.catalogComplete) return "FULL CATALOG";
+  return `${entry.cardsOwned}/${entry.cardsTotal} CARDS`;
+}
+
 function leaderboardRows() {
   const rows = [];
   const entries = mergeEntries(loadHallOfFame(), cachedGlobalEntries());
@@ -58,7 +67,7 @@ function leaderboardRows() {
     modeEntries.forEach((entry, place) => rows.push({
       section: MODE_LABELS[mode] ?? mode.toUpperCase(),
       entry,
-      html: `${place + 1}. ${escapeHtml(entry.name)} — <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> <span class="gq-dim">${entry.wins}-${entry.losses} &middot; ${escapeHtml(leagueName(entry))}</span>`
+      html: `${place + 1}. ${escapeHtml(entry.name)}${entry.catalogComplete ? " &#9733;" : ""} — <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> <span class="gq-dim">${entry.wins}-${entry.losses} &middot; ${collectionTag(entry)} &middot; ${escapeHtml(leagueName(entry))}</span>`
     }));
   }
   return rows;
@@ -83,6 +92,10 @@ export const hallOfFameScreen = {
     // rerenders and resets on the next go().
     if (app.screen.synced) return;
     app.screen.synced = true;
+    // A champion who is still collecting has a plaque that is out of date. Bring
+    // it up to what he actually owns before the board is read — and push the
+    // amendment up, so the global board sees it too.
+    syncRunProgress(app.save);
     syncGlobal(app);
   },
   key(app, key) {
@@ -137,6 +150,11 @@ export const hofTeamScreen = {
           <b>&#9733; WORLD SERIES CHAMPION &#9733;</b>
           <p class="gq-mt">THE TROPHY IN <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> &middot; WENT <b>${entry.wins}-${entry.losses}</b> ON THE FIELD.</p>
           <p class="gq-dim">BATTLES ${entry.battlesWon}-${entry.battlesLost} &middot; ${entry.badges.length} BADGES &middot; ${entry.rosterPoints} PT ROSTER &middot; ${escapeHtml(leagueName(entry))} &middot; ${escapeHtml(finished.toUpperCase())}</p>
+          ${entry.catalogComplete
+            ? `<p><b>&#9733; THE COMPLETE CATALOG &#9733;</b><br><span class="gq-dim">EVERY CARD IN THE LEAGUE${entry.catalogCompletedOn ? ` &middot; DAY ${entry.catalogCompletedOn}` : ""}</span></p>`
+            : entry.cardsTotal
+              ? `<p class="gq-dim">COLLECTED ${entry.cardsOwned}/${entry.cardsTotal} CARDS</p>`
+              : ""}
         </div>
         <div class="gq-frame gq-scroll gq-map-node">${sectionedMenu(rows, index)}</div>
       </div>

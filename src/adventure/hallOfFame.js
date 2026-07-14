@@ -1,4 +1,5 @@
 import {
+  catalogProgress,
   ensureAlmanac,
   ensureSeasonStats,
   rosterCards,
@@ -51,6 +52,10 @@ export function recordCompletedRun(save, storage = defaultStorage()) {
     battlesLost: save.progress.counters.battlesLost,
     badges: [...save.player.badges],
     rosterPoints: rosterPoints(save),
+    // The trophy is one ending. The catalog is the other, and it is not finished
+    // when the trophy lands — so the plaque carries it and keeps carrying it.
+    // See syncRunProgress: the plaque is written once and amended forever after.
+    ...catalogFields(save),
     roster: rosterCards(save),
     hitters: seasonHitters(save).filter((line) => rosterIds.includes(line.id)),
     pitchers: seasonPitchers(save).filter((line) => rosterIds.includes(line.id))
@@ -59,6 +64,35 @@ export function recordCompletedRun(save, storage = defaultStorage()) {
   storage?.setItem(HOF_KEY, JSON.stringify(entries));
   // Best effort: the run also goes up to the shared board. If the network is
   // down it stays local, and the leaderboard screen resubmits it next visit.
+  submitRun(entry);
+  return entry;
+}
+
+function catalogFields(save) {
+  const catalog = catalogProgress(save);
+  return {
+    cardsOwned: catalog.owned,
+    cardsTotal: catalog.total,
+    catalogComplete: catalog.complete,
+    catalogCompletedOn: save.progress?.catalogCompletedOn ?? null
+  };
+}
+
+// A finished run keeps going: the champion is still out there buying cards. The
+// plaque is written the day the trophy is won and AMENDED every time the hall is
+// opened, so the board shows how much of the league that manager has actually
+// collected — and marks the ones who got all of it. Nothing else on the plaque
+// moves; the run's record is the run's record.
+export function syncRunProgress(save, storage = defaultStorage()) {
+  if (!save) return null;
+  const entries = loadHallOfFame(storage);
+  const entry = entries.find((item) => item.saveSeed === save.saveSeed);
+  if (!entry) return null;
+  const fields = catalogFields(save);
+  const changed = Object.entries(fields).some(([key, value]) => entry[key] !== value);
+  if (!changed) return entry;
+  Object.assign(entry, fields);
+  storage?.setItem(HOF_KEY, JSON.stringify(entries));
   submitRun(entry);
   return entry;
 }

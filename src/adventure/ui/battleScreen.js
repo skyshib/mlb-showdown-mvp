@@ -38,8 +38,7 @@ import {
   ensureSeasonStats,
   recordAlmanacGame,
   addTrophies,
-  clearSeries,
-  LOSS_FEE
+  clearSeries
 } from "../state.js?v=20260713-x";
 import {
   createBattle,
@@ -176,7 +175,9 @@ export function applyOutcome(app, trainer, won) {
   if (!won) {
     recordTrainerLoss(save);
     addLog(save, `Lost to ${trainer.name}.`);
-    return { won: false, coins: -LOSS_FEE };
+    // A loss costs the game and nothing else. Going out to lose to somebody
+    // better than you is how a manager gets better, and it should not be taxed.
+    return { won: false, coins: 0 };
   }
   const firstWin = timesBeaten(save, trainer.id) === 0;
   const coins = rewardCoins(save, trainer);
@@ -190,7 +191,11 @@ export function applyOutcome(app, trainer, won) {
     // hall of fame the moment it is won.
     if (trainer.rewards.badge === "trophy") recordCompletedRun(save);
   }
-  if (trainer.rewards.pack) {
+  // The pack, like the badge and the claimed card, is paid ONCE. A rematch pays
+  // a wage, in coins, and the coins are the point: cards you go and buy, from a
+  // shop, chasing the catalog. A boss who handed out a fresh pack every lap would
+  // fill it for you.
+  if (trainer.rewards.pack && firstWin) {
     save.progress.counters.packsOpened += 1;
     save.pendingPacks.push({
       packId: trainer.rewards.pack,
@@ -198,7 +203,8 @@ export function applyOutcome(app, trainer, won) {
     });
     outcome.pack = trainer.rewards.pack;
   }
-  addLog(save, `Beat ${trainer.name} (+${coins} coins).`);
+  outcome.rematch = !firstWin;
+  addLog(save, `${firstWin ? "Beat" : "Beat (again)"} ${trainer.name} (+${coins} coins).`);
   return outcome;
 }
 
@@ -1190,7 +1196,9 @@ export const battleResultScreen = {
       <div class="gq-body gq-center">
         <div class="gq-frame gq-title-frame">
           <b style="font-size:6cqw">${outcome.won ? "&#9733; W &#9733;" : "L"}</b>
-          <p class="gq-mt">${outcome.won ? `+&#9679; ${outcome.coins} COINS` : `LOST &#9679; ${LOSS_FEE} SCRAMBLING HOME`}</p>
+          <p class="gq-mt">${outcome.won
+            ? `+&#9679; ${outcome.coins} COINS${outcome.rematch ? ` <span class="gq-dim">REMATCH RATE</span>` : ""}`
+            : `NO FEE. COME BACK AND TAKE HIM.`}</p>
           ${outcome.badge ? `<p><b>THE ${escapeHtml(outcome.badge.toUpperCase())} BADGE IS YOURS!</b><br><span class="gq-dim">NEW CHALLENGERS AWAIT.</span></p>` : ""}
           ${outcome.pack ? `<p>BONUS: A BOOSTER PACK!</p>` : ""}
           ${outcome.cardClaim ? `<p>WINNER'S RULE: TAKE A CARD FROM THEIR ROSTER!</p>` : ""}
@@ -1310,7 +1318,7 @@ export const simSeriesScreen = {
         <div class="gq-frame">${rows || `<p class="gq-dim">THE CAGE LIGHTS FLICKER ON...</p>`}</div>
         ${done
           ? `<div class="gq-frame gq-center"><b style="font-size:5cqw">${series.playerWins} - ${series.npcWins}</b><br>
-              ${outcome.won ? `SERIES WON! +&#9679; ${outcome.coins}` : `SERIES LOST. -&#9679; ${LOSS_FEE}`}
+              ${outcome.won ? `SERIES WON! +&#9679; ${outcome.coins}${outcome.rematch ? " (REMATCH)" : ""}` : `SERIES LOST. IT COST YOU NOTHING BUT THE GAMES.`}
               ${outcome.cardClaim ? `<br>WINNER'S RULE: TAKE A CARD FROM THEIR ROSTER!` : ""}</div>`
           : ""}
       </div>

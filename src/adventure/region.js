@@ -388,11 +388,21 @@ export function isTrainerUnlocked(save, trainer) {
   return trainer.requires.every((id) => timesBeaten(save, id) > 0);
 }
 
+// Nobody leaves the map. A beaten trainer used to disappear, which quietly ended
+// the game the moment the last badge was won — and the game does not end there:
+// the catalog is still out there, and it is bought with coins, and coins come
+// from playing ball. So every trainer you have beaten will play you again, for
+// a tenth of what he paid the first time (see rewardCoins). It is a wage, not a
+// jackpot: enough to keep collecting, never enough to make the first win cheap.
+// A rival's ambush is still the one thing that happens exactly once.
 export function isTrainerAvailable(save, trainer) {
   if (!isTrainerUnlocked(save, trainer)) return false;
   if (trainer.ambush && ambushDone(save, trainer.id)) return false;
-  return trainer.repeatable || timesBeaten(save, trainer.id) === 0;
+  return true;
 }
+
+// What a rematch pays: a tenth of the printed purse.
+export const REMATCH_RATE = 0.1;
 
 // The NPC budget a save actually faces. The printed ladder (2500 -> 8800)
 // was tuned against the fictional league, whose best legal 13-card roster
@@ -413,12 +423,19 @@ export function npcBudget(save, trainer) {
   return Math.max(printed, Math.min(curve, rung));
 }
 
-// Repeatable rewards shrink on repeat wins so farming stays a floor, not an
-// exploit: 100%, 75%, 56%... with a floor of 50 coins.
+// The first win over a man is the win. Every one after it is a day's work: a
+// flat tenth of the printed purse, however many times you come back. It does not
+// decay to nothing — a grind that pays less every lap is a grind nobody finishes
+// — and it does not scale up, so the ladder is still climbed once.
 export function rewardCoins(save, trainer) {
   const beaten = timesBeaten(save, trainer.id);
-  if (!trainer.repeatable || beaten === 0) return trainer.rewards.coins;
-  return Math.max(50, Math.round(trainer.rewards.coins * Math.pow(0.75, beaten)));
+  if (beaten === 0) return trainer.rewards.coins;
+  return Math.max(5, Math.round(trainer.rewards.coins * REMATCH_RATE));
+}
+
+// Is this one a rematch — his purse already collected, his badge already hung?
+export function isRematch(save, trainer) {
+  return timesBeaten(save, trainer?.id) > 0;
 }
 
 // ---- Rival ambushes ----------------------------------------------------------

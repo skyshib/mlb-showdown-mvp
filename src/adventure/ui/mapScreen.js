@@ -41,7 +41,11 @@ function mapItems(app) {
     if (trainer.ambush && !beaten && (!ambushSprung(save, trainer.id) || ambushDone(save, trainer.id))) continue;
     const unlocked = isTrainerUnlocked(save, trainer);
     const available = isTrainerAvailable(save, trainer) && !save.activeSeries;
-    const marker = beaten ? (trainer.repeatable ? "&#8635;" : "&#10003;") : formatTag(trainer);
+    // Beaten men keep their tick — you did beat them — and carry the wage they
+    // will play you for now, so the map itself says where the coins are.
+    const marker = beaten
+      ? `&#10003; &#8635; &#9679; ${rewardCoins(save, trainer)}`
+      : formatTag(trainer);
     items.push({
       section: trainer.title.toUpperCase(),
       html: `${escapeHtml(trainer.name)} <span class="gq-dim">${unlocked ? marker : "LOCKED"}</span>`,
@@ -234,7 +238,7 @@ export const trainerIntroScreen = {
         ${versusHtml(app, trainer)}
         <div class="gq-frame gq-title-frame">
           <b>${escapeHtml(trainer.name)}</b><br>
-          <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS &#9679; ${rewardCoins(app.save, trainer)}${beaten && trainer.repeatable ? " (REMATCH)" : ""}</span>
+          <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS &#9679; ${rewardCoins(app.save, trainer)}${beaten ? " &middot; REMATCH RATE" : ""}</span>
         </div>
       </div>
       <div class="gq-textbox">

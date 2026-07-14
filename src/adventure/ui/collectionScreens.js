@@ -10,6 +10,7 @@ import {
   removeCardFromCollection,
   collectionCards,
   ownedCount,
+  catalogProgress,
   isStarred,
   toggleStar,
   rosterCards,
@@ -339,8 +340,12 @@ export const catalogScreen = {
     // change while you are typing a name into the box.
     const page = catalogRows(filter);
     const owned = page.filter((card) => ownedCount(app.save, card.id) > 0).length;
+    // The whole league, not just this page — the thing you are actually chasing.
+    const all = catalogProgress(app.save);
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)} &middot; OWNED ${owned}/${page.length}</span><span>${rows.length ? index + 1 : 0}/${rows.length}</span></div>
+      <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)} &middot; OWNED ${owned}/${page.length}</span><span>${
+        all.complete ? "&#9733; COMPLETE" : `${all.owned}/${all.total} IN ALL`
+      }</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${list}</div>
         <div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>

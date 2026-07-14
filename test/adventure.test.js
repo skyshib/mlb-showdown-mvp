@@ -697,14 +697,53 @@ test("series bookkeeping clinches at the majority and salts attempts", () => {
   assert.equal(rematch.attempt, firstAttempt + 1, "attempt counter moves forward");
 });
 
-test("repeatable rewards diminish but never fall below the floor", () => {
+test("the first win is the win; a rematch is a wage that never runs dry", () => {
   const save = testSave();
-  const farm = { id: "test-farm", repeatable: true, rewards: { coins: 200 } };
-  assert.equal(rewardCoins(save, farm), 200);
-  save.progress.trainersBeaten[farm.id] = 1;
-  assert.equal(rewardCoins(save, farm), 150);
-  save.progress.trainersBeaten[farm.id] = 20;
-  assert.equal(rewardCoins(save, farm), 50);
+  const boss = { id: "test-boss", rewards: { coins: 200 } };
+  assert.equal(rewardCoins(save, boss), 200, "the purse is the purse, once");
+  save.progress.trainersBeaten[boss.id] = 1;
+  assert.equal(rewardCoins(save, boss), 20, "and a tenth of it every time after");
+  save.progress.trainersBeaten[boss.id] = 20;
+  assert.equal(rewardCoins(save, boss), 20, "the twentieth lap pays what the second did");
+  // A grind that decays to nothing is a grind nobody finishes — and the catalog
+  // is bought with these coins.
+  assert.equal(rewardCoins(save, { id: "test-scrub", rewards: { coins: 12 } }), 12);
+  save.progress.trainersBeaten["test-scrub"] = 3;
+  assert.equal(rewardCoins(save, { id: "test-scrub", rewards: { coins: 12 } }), 5, "with a floor under the small fry");
+});
+
+test("nobody leaves the map: a beaten trainer will play you again", async () => {
+  const { isTrainerAvailable, isRematch } = await import("../src/adventure/region.js");
+  const save = testSave();
+  const jojo = trainerById("scout-jojo");
+  assert.equal(isTrainerAvailable(save, jojo), true);
+  save.progress.trainersBeaten[jojo.id] = 1;
+  assert.equal(isTrainerAvailable(save, jojo), true, "beating him does not retire him");
+  assert.equal(isRematch(save, jojo), true, "and the game knows it is a rematch");
+});
+
+test("a loss costs the game and nothing else", () => {
+  const save = testSave();
+  save.player.coins = 250;
+  const app = { save, go() {}, rerender() {} };
+  const outcome = applyOutcome(app, trainerById("scout-jojo"), false);
+  assert.equal(outcome.coins, 0, "no fee");
+  assert.equal(save.player.coins, 250, "and the purse is untouched");
+  assert.equal(save.progress.counters.battlesLost, 1, "the loss is still a loss");
+});
+
+test("a rematch pays coins only — no second pack, no second card off his roster", () => {
+  const save = testSave();
+  const trainer = TRAINERS.find((entry) => entry.rewards.pack && !entry.ambush);
+  const app = { save, go() {}, rerender() {} };
+  const first = applyOutcome(app, trainer, true);
+  assert.equal(first.pack, trainer.rewards.pack, "the first win pays the pack");
+  assert.equal(first.cardClaim, true, "and a card off his roster");
+  const again = applyOutcome(app, trainer, true);
+  assert.equal(again.pack, null, "the rematch does not");
+  assert.equal(again.cardClaim, false, "nor another claim — that would fill the catalog for you");
+  assert.equal(again.rematch, true);
+  assert.equal(again.coins, Math.max(5, Math.round(trainer.rewards.coins * 0.1)), "it pays the wage");
 });
 
 test("gym unlock requires both route scouts", () => {
@@ -2827,6 +2866,48 @@ test("winning the world series puts the run in the hall of fame, once", async ()
   // The plaque is once per campaign: a re-record is refused.
   assert.equal(recordCompletedRun(save), null);
   assert.equal(loadHallOfFame().filter((item) => item.saveSeed === "hof-champion-seed").length, 1);
+});
+
+test("the champion keeps collecting, and the plaque keeps up", async () => {
+  const { syncRunProgress } = await import("../src/adventure/hallOfFame.js");
+  const { catalogProgress, addCardToCollection } = await import("../src/adventure/state.js");
+  const { adventurePool } = await import("../src/adventure/packs.js");
+  const storage = fakeStorage();
+  const save = await finishedSave("hof-collector-seed", { days: 20, losses: 2 });
+  const app = { save };
+  applyOutcome(app, trainerById("post-worldseries"), true);
+
+  const before = catalogProgress(save);
+  assert.ok(before.total > before.owned, "a fresh champion has not seen most of the league");
+  assert.equal(before.complete, false);
+
+  // The plaque as written the day the trophy landed.
+  const written = loadHallOfFame().find((item) => item.saveSeed === "hof-collector-seed");
+  assert.equal(written.cardsOwned, before.owned, "it carries what he had collected");
+  assert.equal(written.catalogComplete, false);
+
+  // He keeps playing the beaten bosses for wages and buys the league out.
+  for (const card of adventurePool()) addCardToCollection(save, card.id);
+  const after = catalogProgress(save);
+  assert.equal(after.complete, true, "the catalog is complete");
+  assert.equal(after.owned, after.total);
+  assert.ok(save.progress.catalogCompletedOn != null, "the day it happened is written down");
+  assert.ok(
+    save.log.some((line) => line.includes("THE CATALOG IS COMPLETE")),
+    "and it is recognized at the time, in the log"
+  );
+
+  // Opening the hall amends the plaque, which was written long before this.
+  const amended = syncRunProgress(save);
+  assert.equal(amended.catalogComplete, true, "the plaque catches up");
+  assert.equal(amended.cardsOwned, after.total);
+  assert.equal(amended.days, 20, "and nothing else about the run moves");
+  assert.equal(
+    loadHallOfFame().find((item) => item.saveSeed === "hof-collector-seed").catalogComplete,
+    true,
+    "the amendment is written to the board, not just handed back"
+  );
+  void storage;
 });
 
 test("the leaderboard splits by mode and ranks by fewest days, losses breaking ties", async () => {

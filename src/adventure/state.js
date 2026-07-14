@@ -1,4 +1,4 @@
-import { cardById, dualPartnerId, budgetCap } from "./packs.js?v=20260713-x";
+import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260713-x";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
@@ -11,7 +11,12 @@ export const SAVE_VERSION = 2;
 // finding bargains, not raising the cap. UNCAPPED saves have no limit at
 // all — and face far richer bosses.
 
-export const LOSS_FEE = 50;
+// A loss costs nothing but the game. It used to cost 50 coins, which taxed the
+// one thing a player most needs to do to get better — go and lose to somebody
+// stronger — and hit hardest exactly when a manager could least afford it. The
+// export stays at zero so the screens that used to name a fee still compile
+// against something honest.
+export const LOSS_FEE = 0;
 
 export function createSave({ name, saveSeed, universe = "fictional", mode = "budget" }) {
   return {
@@ -113,6 +118,33 @@ export function addCardToCollection(save, cardId, count = 1) {
   save.collection[cardId] = (save.collection[cardId] ?? 0) + count;
   const partner = dualPartnerId(cardId);
   if (partner) save.collection[partner] = (save.collection[partner] ?? 0) + count;
+  noteCatalogComplete(save);
+}
+
+// ---- The catalog ------------------------------------------------------------
+//
+// The other way to finish this game. The trophy is one ending; owning every card
+// the league ever printed is the other, and it is the one that outlasts the
+// championship — which is why the bosses stay on the map afterwards and keep
+// paying, small, forever.
+//
+// A card and its two-way partner are one card here, the way they are one card
+// everywhere else: the catalog lists the pair once, so it counts the pair once.
+export function catalogProgress(save) {
+  const pool = adventurePool().filter((card) => dualPrimaryId(card.id) === card.id);
+  const owned = pool.filter((card) => (save?.collection?.[card.id] ?? 0) > 0).length;
+  return { owned, total: pool.length, complete: pool.length > 0 && owned >= pool.length };
+}
+
+// The moment it happens, it is written down: the day, and a line in the log. It
+// is checked on the way IN — you complete a catalog by acquiring a card, never
+// by selling one — so a spare sold off later cannot un-write the day you did it.
+function noteCatalogComplete(save) {
+  if (!save || save.progress?.catalogCompletedOn) return;
+  const { complete } = catalogProgress(save);
+  if (!complete) return;
+  save.progress.catalogCompletedOn = ensureSeasonStats(save).games;
+  addLog(save, "THE CATALOG IS COMPLETE. Every card in the league is yours.");
 }
 
 export function ownedCount(save, cardId) {
@@ -319,7 +351,6 @@ export function recordTrainerWin(save, trainerId) {
 
 export function recordTrainerLoss(save) {
   save.progress.counters.battlesLost += 1;
-  save.player.coins = Math.max(0, save.player.coins - LOSS_FEE);
 }
 
 export function grantBadge(save, badge) {
