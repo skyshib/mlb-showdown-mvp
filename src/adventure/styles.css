@@ -873,16 +873,14 @@ h1.gq-logo {
 .gq-die-row:has(.gq-die-stage:nth-child(3)) .gq-die {
   width: 13cqw;
   height: 13cqw;
-  font-size: 6.4cqw;
-  border-width: 0.9cqw;
 }
+.gq-die-row:has(.gq-die-stage:nth-child(3)) .gq-die-roll { font-size: 3.9cqw; }
 .gq-die-row:has(.gq-die-stage:nth-child(4)) { gap: 2cqw; }
 .gq-die-row:has(.gq-die-stage:nth-child(4)) .gq-die {
   width: 10.5cqw;
   height: 10.5cqw;
-  font-size: 5.2cqw;
-  border-width: 0.7cqw;
 }
+.gq-die-row:has(.gq-die-stage:nth-child(4)) .gq-die-roll { font-size: 3.1cqw; }
 
 .gq-die-stage {
   display: flex;
@@ -891,25 +889,67 @@ h1.gq-logo {
   gap: 1.2cqw;
 }
 
+/* A twenty-sided die, not a tile. Head-on an icosahedron is a hexagon with one
+   triangle facing you, and the roll is thrown on that triangle — so the number
+   sits in the triangle's middle, which is ABOVE the middle of the box. */
 .gq-die {
+  position: relative;
   width: 17cqw;
   height: 17cqw;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.1cqw solid var(--gb-darkest);
-  background: var(--gb-lightest);
   font-size: 8cqw;
   font-weight: 700;
   animation: gq-die-tumble 0.18s steps(2) infinite;
 }
 
+.gq-die-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.gq-die-body {
+  fill: var(--gb-lightest);
+  stroke: var(--gb-darkest);
+  stroke-width: 6;
+  stroke-linejoin: round;
+}
+
+.gq-die-top {
+  fill: none;
+  stroke: var(--gb-darkest);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+
+.gq-die-edge {
+  stroke: var(--gb-darkest);
+  stroke-width: 3;
+}
+
+/* The number rides ON the face it was thrown on, so it has to FIT on it: a
+   triangle is at its narrowest where a box is at its widest, and a two-digit roll
+   set to the die's own size ran straight off the sides of it. Sized to the face,
+   and dropped toward the base where the face has room — nudged UP, a 20 sat in
+   the apex and collided with both edges at once. */
+.gq-die-roll {
+  position: relative;
+  z-index: 1;
+  transform: translateY(9%);
+  font-size: 5cqw;
+  line-height: 1;
+}
+
+/* It lands: the face it landed on fills in, and the number reads out of it. */
 .gq-die-landed {
   animation: none;
   transform: scale(1.12);
-  background: var(--gb-darkest);
-  color: var(--gb-lightest);
 }
+.gq-die-landed .gq-die-top { fill: var(--gb-darkest); }
+.gq-die-landed .gq-die-roll { color: var(--gb-lightest); }
 
 @keyframes gq-die-tumble {
   0% { transform: rotate(-9deg) translateY(-0.6cqw); }
