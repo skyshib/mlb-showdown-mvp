@@ -1265,6 +1265,23 @@ function chooseThrowTarget(candidates) {
   return [...candidates].sort((a, b) => a.safeChance - b.safeChance || b.toIndex - a.toIndex)[0];
 }
 
+// The number the DEFENSE has to roll to get the out. Every fielding check in the
+// game is the same shape — the runner is safe when his roll plus the gloves comes
+// in AT or under the target his speed sets, and out when it goes past — so the
+// out needs roll > target - fielding, and the smallest die that does it is one
+// more than that.
+//
+// It can fall outside the die. A rocket in front of a butcher's infield needs a
+// 21 and cannot be had; a plodder in front of a good one is out on a 1. Callers
+// are told which, because "needs a 21" is a lie and "needs a 0" is nonsense.
+export function fieldingCheckNeeds(attempt) {
+  if (!attempt || typeof attempt.target !== "number" || typeof attempt.fielding !== "number") return null;
+  const needed = attempt.target - attempt.fielding + 1;
+  if (needed <= 1) return { needed: 1, certain: true, impossible: false };
+  if (needed > 20) return { needed: 21, certain: false, impossible: true };
+  return { needed, certain: false, impossible: false };
+}
+
 function describeAdvanceAttempt(candidate, outcome) {
   return {
     runner: candidate.runner.name,

@@ -3015,18 +3015,23 @@ test("a glove's die is announced before it is thrown, and the bat's answer is re
     chartOwner: "hitter",
     resultRoll: 11,
     result: "GB",
-    playDetails: { doublePlayAttempt: { batterOut: true, roll: 17 } }
+    // He needs a 13: the runner's speed sets a target of 15, the infield adds 3,
+    // so the out lands anywhere past 12.
+    playDetails: { doublePlayAttempt: { batterOut: true, roll: 17, fielding: 3, target: 15 } }
   };
   const [pitch, swing, pivot] = dramaStages([grounder]);
 
   assert.match(swing.caption, /GB — GROUND BALL/, "the swing says what the bat did");
   assert.match(pivot.lead, /THEY GO FOR TWO/, "and the glove says what it is about to do — before it does it");
+  // And what the die has to BEAT. A die you are watching without knowing what it
+  // needs is a die you are only waiting on.
+  assert.match(pivot.lead, /DEFENSE NEEDS A 13/, "with the number the defense has to throw");
   assert.match(pivot.caption, /TWO DOWN/, "and what it did, after");
   assert.ok(pivot.late, "the pivot is late, so the screen holds a beat for it");
   assert.ok(!swing.late && !pitch.late, "the duel's own dice are not");
 
   // A throw names the man being run at, and it does so BEFORE the die tumbles.
-  const thrown = { runner: "Lead Man '99", to: "home", safe: false, roll: 6 };
+  const thrown = { runner: "Lead Man '99", to: "home", safe: false, roll: 6, fielding: 2, target: 14 };
   const single = {
     controlRoll: 9,
     controlTotal: 12,
@@ -3039,6 +3044,14 @@ test("a glove's die is announced before it is thrown, and the bat's answer is re
   const stages = dramaStages([single]);
   assert.match(stages[1].caption, /1B — BASE HIT/, "the base hit is called");
   assert.match(stages[2].lead, /L\.MAN IS SENT TO HOME/, "and the runner is sent, before the throw is rolled");
+  assert.match(stages[2].lead, /DEFENSE NEEDS A 13/, "and the throw's number is on the screen with him");
+
+  // The check can fall off the die at either end, and neither reads as a number.
+  const { fieldingCheckNeeds } = await import("../src/rules/game.js");
+  assert.deepEqual(fieldingCheckNeeds({ target: 15, fielding: 3 }), { needed: 13, certain: false, impossible: false });
+  assert.equal(fieldingCheckNeeds({ target: 4, fielding: 8 }).certain, true, "a plodder in front of good gloves is out on anything");
+  assert.equal(fieldingCheckNeeds({ target: 25, fielding: 1 }).impossible, true, "and a rocket cannot be caught at all");
+  assert.equal(fieldingCheckNeeds(null), null);
 
   // A swing with no glove to answer it says nothing extra — the play is about to
   // read out in the textbox anyway, and calling it twice steps on it.

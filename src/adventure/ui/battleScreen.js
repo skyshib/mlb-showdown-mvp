@@ -15,7 +15,7 @@ import {
 import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260713-x";
 import { recordCompletedRun } from "../hallOfFame.js?v=20260713-x";
 import { cardById } from "../packs.js?v=20260713-x";
-import { buildBoxScore, inningsPlayed, pitcherStatus } from "../../rules/game.js?v=20260713-x";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds } from "../../rules/game.js?v=20260713-x";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260713-x";
 import { gameFeats } from "../feats.js?v=20260713-x";
 import { buildNpcTeam } from "../npcTeams.js?v=20260713-x";
@@ -393,6 +393,16 @@ const SWING_CALL = {
   HR: "GONE"
 };
 
+// What the defense has to throw. A die you are watching without knowing what it
+// has to beat is a die you are only waiting on.
+function needsLine(attempt) {
+  const needs = fieldingCheckNeeds(attempt);
+  if (!needs) return "";
+  if (needs.certain) return "THEY HAVE HIM DEAD TO RIGHTS";
+  if (needs.impossible) return "NOTHING CAN CATCH HIM";
+  return `DEFENSE NEEDS A ${needs.needed}`;
+}
+
 function swingCall(event) {
   const call = SWING_CALL[event.result];
   return call ? `${escapeHtml(event.result)} — ${call}` : escapeHtml(String(event.result ?? "IN PLAY"));
@@ -406,8 +416,10 @@ function fieldingStages(event) {
     stages.push({
       label: "THE PIVOT",
       roll: dp.roll,
-      // Said BEFORE the die tumbles, so you know what you are watching.
-      lead: "THEY GO FOR TWO&hellip;",
+      // Said BEFORE the die tumbles, so you know what you are watching — and what
+      // the die has to beat, which is the only thing that makes watching it a
+      // sweat rather than a wait.
+      lead: `THEY GO FOR TWO&hellip; ${needsLine(dp)}`,
       // LATE: a glove only has something to do if the ball is in play, so a die
       // that says THE PIVOT sitting on the screen while the swing is still
       // tumbling has already told you the swing was a ball in play. It is not
@@ -432,7 +444,7 @@ function fieldingStages(event) {
     stages.push({
       label: `THROW TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}`,
       roll: attempt.roll,
-      lead: `${escapeHtml(shortName(stripCardYear(attempt.runner ?? "")))} IS SENT TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}&hellip;`,
+      lead: `${escapeHtml(shortName(stripCardYear(attempt.runner ?? "")))} IS SENT TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}&hellip; ${needsLine(attempt)}`,
       // Late, and for the same reason: THROW TO HOME on the screen is a hit,
       // announced before the bat has even been swung.
       late: true,
