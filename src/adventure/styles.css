@@ -527,12 +527,14 @@ h1.gq-logo {
 }
 .gq-strip-bf.gq-fatigued { animation: gq-blink 1s steps(2) infinite; }
 
-/* The gloves behind him, hung under his workload and indented to the same
-   column: his name, then what he has done, then what he has standing behind him.
-   One arm's story, top to bottom. */
+/* The gloves behind him. Unlike the workload — which is a fact about the MAN, and
+   so starts where his name starts — the defense is a fact about the CLUB, and it
+   runs the full width of the club's strip: out to the edge, starting under the
+   P rather than under him. The two lines under an arm say different-sized things
+   and are indented to say so. */
 .gq-strip-def {
   display: block;
-  padding: 0 0.5cqw 0 calc(0.5cqw + 1ch + 0.7cqw);
+  padding: 0 0.5cqw;
   text-align: left;
   font-size: 1.8cqw;
   color: var(--gb-dark);
