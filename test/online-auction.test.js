@@ -66,6 +66,23 @@ function firstNominatable(room) {
   return buildDraftPool(room.universe, room.seed).find((player) => player.kind === "hitter").id;
 }
 
+
+// A sealed bid must not be readable ANYWHERE in what the server hands a client —
+// so the test greps the whole payload for the amount. Which means the payload has
+// to be scrubbed of numbers that are not bids first, because the room carries a
+// wall clock, and a wall clock is a number nobody chose:
+//
+//   "at": 1784042090086   <- contains "420"
+//
+// The bid was 420. The test went red on a Tuesday morning in July 2026 with the
+// code entirely correct, and would have again on any millisecond whose digits
+// happened to spell the amount. Strip the clocks and the ports; grep what is left.
+function withoutClocks(payload) {
+  return JSON.stringify(payload, (key, value) => (
+    key === "at" || key === "serverNow" || key === "lanOrigin" || key === "clock" ? undefined : value
+  ));
+}
+
 test("an auction room deals budgets, opens a lot, and sells to the high bid at second price + 1", async (t) => {
   const base = await startServer(t);
   const room = await openAuctionRoom(base, { budget: 4000 });
@@ -229,7 +246,7 @@ test("sealed bids are withheld from the room until the card sells", async (t) =>
     0,
     "no bid is in the action log while the lot is live"
   );
-  assert.doesNotMatch(JSON.stringify(midLot.data), /777/, "the amount is nowhere in the room payload");
+  assert.doesNotMatch(withoutClocks(midLot.data), /777/, "the amount is nowhere in the room payload");
 
   // What Bo does get: that Ana has bid, and that he is on the clock.
   assert.deepEqual(midLot.data.lot.bidsIn, ["team-1"]);
@@ -445,7 +462,7 @@ test("a room restarted mid-lot keeps the withheld bids and still sells correctly
   assert.deepEqual(revived.data.lot.bidsIn, ["team-1"]);
   assert.deepEqual(revived.data.lot.pending, ["team-2"]);
   assert.equal(revived.data.actions.filter((entry) => entry.action.type === "seal-bid").length, 0);
-  assert.doesNotMatch(JSON.stringify(revived.data), /420/);
+  assert.doesNotMatch(withoutClocks(revived.data), /420/, "the remembered bid is still nobody's to read");
 
   // Bidding resumes on the new process and the sale prices off the remembered bid.
   assert.equal(
