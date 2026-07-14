@@ -591,6 +591,48 @@ test("sell-all clears every duplicate at the pawn rate, keeping first copies", a
   assert.ok(RARITIES.common.sellValue <= 30, "the shop pays pawn rates now");
 });
 
+test("WHO SITS names each man by the spot he is standing in", async () => {
+  const { binderScreen, lineupSlotOf, rotationSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const roster = rosterCards(save);
+  const spare = adventurePool().find((card) => card.kind === "hitter" && !save.roster.cardIds.includes(card.id));
+  addCardToCollection(save, spare.id);
+
+  const app = {
+    save,
+    screen: { name: "binder", index: 0, filter: "ALL", mode: "team-swap", pickIndex: 0 },
+    go() {},
+    rerender() {}
+  };
+  // Walk the binder until the cursor is on the spare bat, then ask who sits.
+  const surnameOf = (card) => card.name.split(" ").pop().toUpperCase();
+  let html = null;
+  for (let index = 0; index < Object.keys(save.collection).length + 2; index += 1) {
+    app.screen.index = index;
+    const rendered = binderScreen.render(app);
+    if (rendered.includes(`WHO SITS FOR`) && rendered.includes(surnameOf(spare))) {
+      html = rendered;
+      break;
+    }
+  }
+  assert.ok(html, "the spare bat is in the binder and asks the question");
+  // Every man offered is named with the spot he is actually playing — the LF/RF
+  // man in left reads LF, the DH reads DH — not with everything his card allows.
+  let checked = 0;
+  for (const bat of roster.filter((card) => card.kind === "hitter")) {
+    const slot = lineupSlotOf(save, bat);
+    if (!slot) continue;
+    assert.ok(
+      html.includes(`<span class="gq-dim">${slot}</span>`),
+      `somebody is offered at ${slot}`
+    );
+    checked += 1;
+  }
+  assert.ok(checked >= 8, "every man in the order is named by where he is standing");
+  assert.ok(html.includes('<span class="gq-dim">DH</span>'), "the DH reads DH, not the glove on his card");
+  void rotationSlotOf;
+});
+
 test("stars flag keepers in binder and catalog; the sell sweeps can spare them", async () => {
   const { binderScreen, catalogScreen, sellScreen, sellAllCards, sellAllDuplicates } = await import("../src/adventure/ui/collectionScreens.js");
   const { isStarred } = await import("../src/adventure/state.js");

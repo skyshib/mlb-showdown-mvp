@@ -22,7 +22,7 @@ import {
   addLog
 } from "../state.js?v=20260713-x";
 import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-x";
-import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js?v=20260713-x";
+import { personConflict, playsPosition, positionsLabel, positionsOverlap } from "../../rules/cards.js?v=20260713-x";
 import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-x";
 import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-x";
 
@@ -643,6 +643,16 @@ function binderVisibleRows(app) {
 
 // Roster spots this card could take: same kind, and not a second era of
 // someone already on the team (unless he's the one sitting down).
+// Where a rostered man is standing right now: the position a bat is playing (the
+// LF/RF man in left reads LF, the DH reads DH), or the game an arm is taking. A
+// bat the lineup could not seat falls back to what is printed on his card.
+function currentSpot(save, card) {
+  if (card.kind === "pitcher") {
+    return rotationSlotOf(save, card) ?? card.role;
+  }
+  return lineupSlotOf(save, card) ?? positionsLabel(card);
+}
+
 function swapTargets(save, card) {
   const roster = rosterCards(save);
   return roster.filter((target) =>
@@ -691,11 +701,17 @@ export const binderScreen = {
     if (app.screen.actionMenu) {
       list = actionMenuHtml(actionMenuTitle(app, selected?.card), menuActions(app, selected?.card, binderActions), app.screen.actionIndex);
     } else if (swapping) {
-      // Names only. The cards are RIGHT THERE, both of them — repeating a man's
-      // position and points in the row is telling you what you are already
-      // looking at, and it costs the column the width the two cards need.
+      // The name and the spot he is standing in, and nothing else. Which man to
+      // bench is a question about WHERE they play — you are not scanning this
+      // list for points, you are looking for the hole your card fills — and the
+      // cards themselves are right there for everything else.
       list = `<h3>WHO SITS FOR ${escapeHtml(shortName(selected.card.name))}?</h3>${menuHtml(
-        [...targets.map((target) => ({ html: escapeHtml(shortName(target.name)) })), { label: "CANCEL" }],
+        [
+          ...targets.map((target) => ({
+            html: `${escapeHtml(shortName(target.name))} <span class="gq-dim">${escapeHtml(currentSpot(app.save, target))}</span>`
+          })),
+          { label: "CANCEL" }
+        ],
         pickIndex
       )}`;
     } else {
