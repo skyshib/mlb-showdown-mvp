@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { assignLineupSlots, autopick, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pickPlayer, repairDraftRosters, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pauseSnake, pickPlayer, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
   applyDouble,
@@ -1421,4 +1421,92 @@ test("a 1B side-listing plays first base at its printed rating, not minus one", 
   assert.equal(firstBase.outOfPosition, false);
   const thirdBase = team.lineup.find((player) => player.defensivePosition === "3B");
   assert.equal(thirdBase.id, "corner-3b");
+});
+
+// ---- the snake's chess clock -------------------------------------------------
+
+function clockDraft(managers = ["Ana", "Bo"], timer = { bankSeconds: 60, incrementSeconds: 10 }) {
+  return createDraft(managers, makeDraftPool("clock", 40, 20), 13, "clock-seed", { snakeTimer: timer });
+}
+
+test("a snake draft has no clock unless it asks for one", () => {
+  const plain = createDraft(["Ana", "Bo"], makeDraftPool("plain"), 13);
+  assert.equal(snakeClockEnabled(plain), false, "an untimed draft stays untimed");
+  assert.equal(plain.clock, undefined, "and carries no clock at all");
+  assert.equal(snakeClockEnabled(clockDraft()), true, "one that asks for a chess clock gets one");
+});
+
+test("the chess clock spends the man on the clock, and only him", () => {
+  const draft = clockDraft();
+  const [ana, bo] = draft.managers;
+  const t0 = 1_000_000;
+  startSnakeClock(draft, t0);
+  assert.equal(snakeTimeRemainingMs(draft, ana, t0), 60_000, "both start with a full bank");
+  assert.equal(snakeTimeRemainingMs(draft, bo, t0), 60_000);
+
+  // Ana sits on the pick for 20 seconds. Bo's clock does not move.
+  assert.equal(snakeTimeRemainingMs(draft, ana, t0 + 20_000), 40_000, "her bank drains while she thinks");
+  assert.equal(snakeTimeRemainingMs(draft, bo, t0 + 20_000), 60_000, "his does not — it is not his turn");
+
+  // She picks at 20s: charged 20, paid the 10s increment.
+  pickPlayer(draft, availablePlayers(draft)[0].id, t0 + 20_000);
+  assert.equal(snakeClockBankMs(draft, ana), 50_000, "charged for the time, credited the increment");
+  assert.equal(currentManager(draft).id, bo.id, "and the clock passes to the next man");
+  assert.equal(snakeTimeRemainingMs(draft, bo, t0 + 25_000), 55_000, "whose bank is now the one running");
+  assert.equal(snakeTimeRemainingMs(draft, ana, t0 + 25_000), 50_000, "hers is parked where she left it");
+});
+
+test("a manager who runs out of time keeps drafting — the picks are just made for him", () => {
+  const draft = clockDraft();
+  const [ana] = draft.managers;
+  const t0 = 2_000_000;
+  startSnakeClock(draft, t0);
+  // Ana walks away from the table for two minutes, on a one-minute bank.
+  const late = t0 + 120_000;
+  assert.equal(snakeTimeRemainingMs(draft, ana, late), 0, "the flag is down");
+  assert.equal(snakeClockFlagged(draft, ana, late), true);
+
+  const before = ana.roster.length;
+  autopick(draft, late);
+  assert.equal(ana.roster.length, before + 1, "the pick is made for her");
+  assert.equal(snakeClockBankMs(draft, ana), 0, "and the increment does not bring her back");
+
+  // Round 2 comes back to her (snake): still flagged, still automatic.
+  autopick(draft, late + 1000);
+  assert.equal(snakeClockBankMs(draft, ana), 0, "a flagged manager stays flagged");
+  assert.equal(snakeClockFlagged(draft, ana, late + 2000), true);
+});
+
+test("pausing a chess-clocked snake costs the man on the clock nothing", () => {
+  const draft = clockDraft();
+  const [ana] = draft.managers;
+  const t0 = 3_000_000;
+  startSnakeClock(draft, t0);
+  pauseSnake(draft, null, t0 + 15_000);
+  assert.equal(snakeClockBankMs(draft, ana), 45_000, "the pause settles what she had used");
+  // An hour goes by with the room stopped.
+  assert.equal(snakeTimeRemainingMs(draft, ana, t0 + 3_600_000), 45_000, "and a stopped clock does not tick");
+  resumeSnake(draft, t0 + 3_600_000);
+  assert.equal(snakeTimeRemainingMs(draft, ana, t0 + 3_600_000), 45_000, "she comes back to the clock she left");
+  assert.equal(snakeTimeRemainingMs(draft, ana, t0 + 3_605_000), 40_000, "and it runs again from there");
+});
+
+test("a room replays its clock: same actions, same timestamps, same banks", () => {
+  const live = clockDraft(["Ana", "Bo", "Cy"]);
+  const t0 = 4_000_000;
+  const log = [{ type: "start-clock", at: t0 }];
+  applyDraftAction(live, log[0]);
+  let at = t0;
+  for (let i = 0; i < 6; i += 1) {
+    at += (i + 1) * 7_000; // each manager dawdles a different amount
+    const action = { type: "pick", playerId: availablePlayers(live)[i].id, at };
+    applyDraftAction(live, log[log.length] = action);
+  }
+  applyDraftAction(live, log[log.length] = { type: "pause", at: at + 5_000 });
+  applyDraftAction(live, log[log.length] = { type: "resume", at: at + 500_000 });
+
+  const replayed = clockDraft(["Ana", "Bo", "Cy"]);
+  for (const action of log) applyDraftAction(replayed, action);
+  assert.deepEqual(replayed.clock.banks, live.clock.banks, "the banks land where they landed");
+  assert.equal(replayed.pickNumber, live.pickNumber, "off the same picks");
 });

@@ -184,6 +184,29 @@ function normalizeTimerMs(ms, seconds, fallbackSeconds) {
   return Math.max(0, Math.round(value));
 }
 
+export const SNAKE_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
+export const SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS = 30;
+
+// The snake's chess clock: one bank for the WHOLE draft, plus an increment
+// handed back on every pick. It is the auction's model, and it asks the same
+// thing of a manager — spend your minutes where the picks are hard, and you
+// will have none left for the easy ones.
+//
+// A snake draft is UNTIMED unless it says otherwise, which is the opposite of
+// the auction's house rule: the per-pick clock is the older option and rooms
+// that name no clock at all have always had none. So a missing config here
+// normalizes to OFF, and a draft only gets a chess clock by asking for one.
+export function normalizeSnakeTimerConfig(timer) {
+  if (!timer || timer === false || timer.enabled === false) {
+    return { enabled: false, bankMs: 0, incrementMs: 0 };
+  }
+  return {
+    enabled: true,
+    bankMs: normalizeTimerMs(timer.bankMs, timer.bankSeconds, SNAKE_DEFAULT_CLOCK_BANK_SECONDS),
+    incrementMs: normalizeTimerMs(timer.incrementMs, timer.incrementSeconds, SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS)
+  };
+}
+
 // 0 disables the pick clock; anything else is clamped to a sane range so a
 // typo can't create a 1-second or 3-hour draft.
 export function normalizePickTimerSeconds(value) {
@@ -255,6 +278,18 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
     if (draft.nomination === "random") {
       draft.auction.queue = buildNominationQueue(draft);
       draft.auction.queueIndex = 0;
+    }
+  } else {
+    const timer = normalizeSnakeTimerConfig(options.snakeTimer);
+    if (timer.enabled) {
+      draft.clock = {
+        timer,
+        banks: Object.fromEntries(cleanManagers.map((manager) => [manager.id, timer.bankMs])),
+        // Nobody is on the clock until the draft says go — startSnakeClock is
+        // the gun, and it is a recorded action so a replayed room starts its
+        // clocks at the same instant the live one did.
+        turnStartedAt: null
+      };
     }
   }
 
@@ -409,7 +444,7 @@ export function canPickPlayer(draft, manager, player) {
   return { ok: true, reason: "" };
 }
 
-export function pickPlayer(draft, playerId) {
+export function pickPlayer(draft, playerId, now = Date.now()) {
   if (draft.complete) return draft;
   if (isAuctionDraft(draft)) {
     throw new Error("Auction drafts add players by selling lots");
@@ -427,6 +462,9 @@ export function pickPlayer(draft, playerId) {
     throw new Error(legality.reason);
   }
 
+  // The clock is charged BEFORE the pick advances the turn, because the man
+  // being charged is the man whose turn it still is.
+  chargeSnakeClock(draft, now);
   manager.roster.push(player);
   draft.pickedIds.add(playerId);
   draft.pickNumber += 1;
@@ -533,13 +571,27 @@ export function isDraftPaused(draft) {
 
 export function pauseSnake(draft, remainingMs = null, now = Date.now()) {
   if (isAuctionDraft(draft) || draft.complete || isSnakePaused(draft)) return false;
-  draft.pausedAt = normalizeTimestamp(now);
+  const timestamp = normalizeTimestamp(now);
+  // A chess clock spends a manager's own bank, so the pause has to settle it on
+  // the spot: the man on the clock is charged what he has used, and the pause
+  // itself costs him nothing. (The per-pick clock has no bank to protect — it
+  // just carries its remainder over, which is what remainingMs is.)
+  if (snakeClockEnabled(draft) && draft.clock.turnStartedAt !== null) {
+    const manager = currentManager(draft);
+    if (manager) draft.clock.banks[manager.id] = snakeTimeRemainingMs(draft, manager, timestamp);
+    draft.clock.turnStartedAt = timestamp;
+  }
+  draft.pausedAt = timestamp;
   draft.pausedRemainingMs = Number.isFinite(remainingMs) ? Math.max(0, remainingMs) : null;
   return true;
 }
 
-export function resumeSnake(draft) {
+export function resumeSnake(draft, now = Date.now()) {
   if (isAuctionDraft(draft) || !isSnakePaused(draft)) return false;
+  // The bank was settled at the pause; the clock simply starts again.
+  if (snakeClockEnabled(draft) && draft.clock.turnStartedAt !== null) {
+    draft.clock.turnStartedAt = normalizeTimestamp(now);
+  }
   draft.pausedAt = null;
   return true;
 }
@@ -599,6 +651,59 @@ export function resumeAuction(draft, now = Date.now()) {
   }
   draft.auction.pausedAt = null;
   return true;
+}
+
+// ---- the snake's chess clock -------------------------------------------------
+//
+// One bank each, running only while it is your turn, with an increment paid
+// back on every pick you make. Everything is settled INTO the bank — at the
+// pick, at the pause — so the draft never has to ask what time it is except at
+// the moment somebody does something. Which is what makes it replayable: the
+// same actions with the same timestamps land on the same banks, on the server
+// and in every client.
+export function snakeClockEnabled(draft) {
+  return Boolean(!isAuctionDraft(draft) && draft?.clock?.timer?.enabled);
+}
+
+export function startSnakeClock(draft, now = Date.now()) {
+  if (!snakeClockEnabled(draft) || draft.clock.turnStartedAt !== null) return false;
+  draft.clock.turnStartedAt = normalizeTimestamp(now);
+  return true;
+}
+
+export function snakeClockBankMs(draft, manager) {
+  return Math.max(0, Number(draft?.clock?.banks?.[manager?.id] ?? 0));
+}
+
+// What is left on a manager's clock right now: his bank, less the time he has
+// been sitting on this pick. Only the man on the clock is spending.
+export function snakeTimeRemainingMs(draft, manager, now = Date.now()) {
+  const bank = snakeClockBankMs(draft, manager);
+  if (!snakeClockEnabled(draft) || isSnakePaused(draft) || draft.complete) return bank;
+  if (draft.clock.turnStartedAt === null) return bank;
+  if (currentManager(draft)?.id !== manager?.id) return bank;
+  const elapsed = Math.max(0, normalizeTimestamp(now) - draft.clock.turnStartedAt);
+  return Math.max(0, bank - elapsed);
+}
+
+// Out of time. His picks are made for him from here on — the increment cannot
+// bring him back, because a bank that refilled itself every turn would never
+// have run out in the first place.
+export function snakeClockFlagged(draft, manager, now = Date.now()) {
+  return snakeClockEnabled(draft) && snakeTimeRemainingMs(draft, manager, now) <= 0;
+}
+
+// The pick is made: charge the man who made it for the time he took, pay him
+// his increment, and start the next man's clock at the same instant. A manager
+// who has already flagged gets no increment — he is out of time for good.
+function chargeSnakeClock(draft, now) {
+  if (!snakeClockEnabled(draft) || draft.clock.turnStartedAt === null) return;
+  const manager = currentManager(draft);
+  if (!manager) return;
+  const timestamp = normalizeTimestamp(now);
+  const remaining = snakeTimeRemainingMs(draft, manager, timestamp);
+  draft.clock.banks[manager.id] = remaining > 0 ? remaining + draft.clock.timer.incrementMs : 0;
+  draft.clock.turnStartedAt = timestamp;
 }
 
 export function auctionClockBankMs(draft, manager) {
@@ -1088,7 +1193,10 @@ export const SIM_ACTION_TYPES = new Set(["batch"]);
 export function applyDraftAction(draft, action) {
   switch (action?.type) {
     case "pick":
-      pickPlayer(draft, action.playerId);
+      pickPlayer(draft, action.playerId, action.at);
+      return;
+    case "start-clock":
+      startSnakeClock(draft, action.at);
       return;
     case "nominate":
       nominatePlayer(draft, action.playerId, action.at);
@@ -1116,7 +1224,7 @@ export function applyDraftAction(draft, action) {
       return;
     case "resume":
       if (isAuctionDraft(draft)) resumeAuction(draft, action.at);
-      else resumeSnake(draft);
+      else resumeSnake(draft, action.at);
       return;
     case "seat":
       setManagerCpu(draft, action.managerId, action.cpu);
@@ -1189,7 +1297,7 @@ export function draftHistory(draft) {
 export function autopick(draft, now = Date.now()) {
   if (isAuctionDraft(draft)) return autoRunAuctionLot(draft, now);
   const best = bestAutopickTarget(draft, currentManager(draft));
-  return pickPlayer(draft, best.id);
+  return pickPlayer(draft, best.id, now);
 }
 
 function bestAutopickTarget(draft, manager) {

@@ -765,6 +765,45 @@ td span {
   animation: pick-clock-pulse 1s ease-in-out infinite;
 }
 
+/* The table's chess clocks, side by side. The bank that is running is the only
+   one that moves, and a flag that has fallen stays on the board — that manager's
+   picks are being made for him now, and the room can see it. */
+.snake-clocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.snake-clock-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.snake-clock-chip b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.snake-clock-chip.running {
+  border-color: var(--accent-dark);
+  color: var(--ink);
+}
+
+.snake-clock-chip.flagged,
+.snake-clock-chip.flagged b,
+.snake-clock-chip b.flagged {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
 @keyframes pick-clock-pulse {
   50% {
     opacity: 0.45;

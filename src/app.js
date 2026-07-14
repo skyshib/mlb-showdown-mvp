@@ -35,6 +35,8 @@ import {
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
   AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS,
   AUCTION_DEFAULT_REVIEW_SECONDS,
+  SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
+  SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS,
   AUCTION_MIN_BID,
   AUCTION_MIN_RAISE,
   CORNER_OUTFIELD_POSITION,
@@ -84,6 +86,7 @@ import {
   normalizeAuctionTimerConfig,
   normalizeCardPosition,
   normalizePickTimerSeconds,
+  normalizeSnakeTimerConfig,
   pauseAuction,
   pauseSnake,
   pickPlayer,
@@ -94,8 +97,13 @@ import {
   resumeSnake,
   sealedBidder,
   setManagerCpu,
+  snakeClockBankMs,
+  snakeClockEnabled,
+  snakeClockFlagged,
+  snakeTimeRemainingMs,
   staffStatus,
   startAuctionReview,
+  startSnakeClock,
   syncAuctionTimer,
   undoLastPick,
   upcomingNominators,
@@ -271,6 +279,34 @@ function formatAuctionClock(ms) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+// A snake draft has one clock or none: the per-pick countdown, or the chess
+// clock. Which one is a question about the draft, so it is a question about
+// state, not two settings that can quietly both be on.
+function snakeClockMode(value) {
+  if (value.snakeTimer?.enabled) return "chess";
+  return value.pickTimerSeconds > 0 ? "pick" : "off";
+}
+
+// The form's three radios, read back into the two settings the rest of the app
+// already understands. Only one of them can be live at a time.
+function snakeClockFromForm(form) {
+  const mode = String(form.get("snakeClock") ?? "off");
+  return {
+    pickTimerSeconds: mode === "pick" ? normalizePickTimerSeconds(form.get("pickTimer") || 60) : 0,
+    snakeTimer: {
+      enabled: mode === "chess",
+      bankSeconds: normalizeTimerSeconds(form.get("snakeBankSeconds"), SNAKE_DEFAULT_CLOCK_BANK_SECONDS),
+      incrementSeconds: normalizeTimerSeconds(form.get("snakeIncrementSeconds"), SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS)
+    }
+  };
+}
+
+// What createDraft wants: the config, or false for a draft with no chess clock
+// at all. An auction never has one — it has its own.
+function snakeTimerConfig(value, draftType) {
+  return draftType !== "auction" && value.snakeTimer?.enabled ? { ...value.snakeTimer } : false;
+}
+
 function normalizeAuctionTimerInput(form) {
   return {
     reviewSeconds: normalizeTimerSeconds(form.get("auctionReviewSeconds"), AUCTION_DEFAULT_REVIEW_SECONDS),
@@ -282,6 +318,15 @@ function normalizeAuctionTimerInput(form) {
 function normalizeTimerSeconds(value, fallback) {
   const seconds = Math.round(Number(value));
   return Number.isFinite(seconds) ? Math.max(0, seconds) : fallback;
+}
+
+function normalizeSnakeTimerState(value) {
+  const timer = normalizeSnakeTimerConfig(value);
+  return {
+    enabled: timer.enabled,
+    bankSeconds: timer.enabled ? Math.round(timer.bankMs / 1000) : SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
+    incrementSeconds: timer.enabled ? Math.round(timer.incrementMs / 1000) : SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS
+  };
 }
 
 function normalizeAuctionTimerState(value) {
@@ -322,18 +367,39 @@ function pickClockTick() {
       clearTurnAnnouncement();
     }
   }
-  if (!state.pickTimerSeconds) {
+  // The chess clock does not reset with the turn: what is left is whatever this
+  // manager has left, and the draft itself is the one keeping it.
+  const chess = snakeClockEnabled(state.draft);
+  if (!state.pickTimerSeconds && !chess) {
     updatePickClockDisplay(null);
     return;
   }
-  const remaining = pickClockDeadline - Date.now();
-  updatePickClockDisplay(remaining);
+  const remaining = chess
+    ? snakeTimeRemainingMs(liveDraft(state.draft), turn.current, draftNow())
+    : pickClockDeadline - Date.now();
+  updatePickClockDisplay(remaining, chess ? turn.current : null);
+  updateSnakeBankDisplays();
   // Ten seconds out, the clock stops being furniture and starts being a threat.
   if (!pickClockWarned && remaining > 0 && remaining <= 10_000 && shouldChimeForTurn(turn.current)) {
     pickClockWarned = true;
     playClockWarning();
   }
   if (remaining <= 0) handlePickClockExpiry(turn);
+}
+
+// Every manager's bank, wherever it is shown, kept honest between renders —
+// the one that is running is the only one that moves.
+function updateSnakeBankDisplays() {
+  const draft = state.draft;
+  if (!snakeClockEnabled(draft)) return;
+  const live = liveDraft(draft);
+  for (const node of document.querySelectorAll("[data-snake-clock][data-manager-id]")) {
+    const manager = draft.managers.find((item) => item.id === node.dataset.managerId);
+    if (!manager) continue;
+    const left = snakeTimeRemainingMs(live, manager, draftNow());
+    node.textContent = formatAuctionClock(left);
+    node.classList.toggle("flagged", left <= 0);
+  }
 }
 
 function handlePickClockExpiry(turn) {
@@ -462,15 +528,20 @@ function driveOnlineCpuTurn() {
   sendOnlineAction({ type: "autopick" });
 }
 
-function updatePickClockDisplay(remaining) {
+function updatePickClockDisplay(remaining, onTheClock = null) {
   const clock = document.querySelector("[data-pick-timer]");
   if (!clock) return;
-  if (remaining === null || !state.pickTimerSeconds) {
+  if (remaining === null || (!state.pickTimerSeconds && !snakeClockEnabled(state.draft))) {
     clock.hidden = true;
     return;
   }
   clock.hidden = false;
-  clock.textContent = `⏱ ${formatPickClock(remaining)}`;
+  // A chess clock is somebody's clock, so it says whose. A flag that is down
+  // says so too — his picks are being made for him now, and the room can see it.
+  const flagged = onTheClock && remaining <= 0;
+  clock.textContent = flagged
+    ? `⚑ ${onTheClock.name} — out of time`
+    : `⏱ ${formatPickClock(remaining)}${onTheClock ? ` · ${onTheClock.name}` : ""}`;
   clock.classList.toggle("low", remaining <= 10_000);
 }
 
@@ -482,8 +553,8 @@ function formatPickClock(ms) {
 function shouldChimeForTurn(current) {
   if (state.online) return Boolean(state.online.managerId) && current.id === state.online.managerId;
   // Hotseat: the chime calls the next manager over to the shared screen, but
-  // only when a timed draft is actually being played.
-  return state.pickTimerSeconds > 0;
+  // only when a timed draft is actually being played — on either clock.
+  return state.pickTimerSeconds > 0 || snakeClockEnabled(state.draft);
 }
 
 function toggleSound() {
@@ -643,6 +714,13 @@ function defaultState() {
       incrementSeconds: AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS
     },
     pickTimerSeconds: 0,
+    // The snake's chess clock: off by default, because the per-pick clock was
+    // the only clock a snake draft ever had and a room that names none has none.
+    snakeTimer: {
+      enabled: false,
+      bankSeconds: SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
+      incrementSeconds: SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS
+    },
     // Which seat is yours. Kept outside `online`, which is cleared when the
     // room ends — see viewerManager().
     myManagerId: null,
@@ -815,7 +893,9 @@ function rebuildOnlineDraft(room) {
       // then the room's own log will not replay through it: the nomination that
       // was legal when it was recorded throws "Review period is still open" and
       // the room can never be opened again.
-      timer: room.auctionTimer ?? false
+      timer: room.auctionTimer ?? false,
+      // Same rule for the snake's chess clock: a room that names none has none.
+      snakeTimer: room.snakeTimer ?? false
     }
   );
   // The bids on the card currently up are withheld until it sells, so the
@@ -1429,15 +1509,43 @@ function renderSetup(setupError = "") {
             <input name="rosterSize" type="number" min="13" max="13" value="13" />
           </label>
         </div>
-        <label>
-          Snake pick timer
-          <select name="pickTimer">
-            ${[[0, "Off"], [30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
-              .map(([seconds, label]) => `<option value="${seconds}" ${state.pickTimerSeconds === seconds ? "selected" : ""}>${label}</option>`)
-              .join("")}
-          </select>
-          <small>When the clock hits zero the pick is made automatically.</small>
-        </label>
+        <fieldset class="pool-mode snake-clock-mode">
+          <legend>Snake clock</legend>
+          <label class="pool-option">
+            <input type="radio" name="snakeClock" value="off" ${snakeClockMode(state) === "off" ? "checked" : ""} />
+            <span><strong>Off</strong><small>Take as long as you like.</small></span>
+          </label>
+          <label class="pool-option">
+            <input type="radio" name="snakeClock" value="pick" ${snakeClockMode(state) === "pick" ? "checked" : ""} />
+            <span><strong>Per pick</strong><small>The same clock for every pick, and it resets each turn. Run it out and the pick is made for you.</small></span>
+          </label>
+          <div class="pool-suboptions snake-pick-suboptions" ${snakeClockMode(state) === "pick" ? "" : "hidden"}>
+            <label class="auction-budget-field">
+              Seconds per pick
+              <select name="pickTimer">
+                ${[[30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
+                  .map(([seconds, label]) => `<option value="${seconds}" ${(state.pickTimerSeconds || 60) === seconds ? "selected" : ""}>${label}</option>`)
+                  .join("")}
+              </select>
+            </label>
+          </div>
+          <label class="pool-option">
+            <input type="radio" name="snakeClock" value="chess" ${snakeClockMode(state) === "chess" ? "checked" : ""} />
+            <span><strong>Chess clock</strong><small>One bank of time for the whole draft, plus an increment paid back on every pick &mdash; the model the auction uses. Your clock runs only on your turn, so a long think in the third round is a short one in the tenth. Run the bank out and your picks are made for you from there.</small></span>
+          </label>
+          <div class="pool-suboptions snake-chess-suboptions" ${snakeClockMode(state) === "chess" ? "" : "hidden"}>
+            <label class="auction-budget-field">
+              Clock bank
+              <input name="snakeBankSeconds" type="number" min="0" max="7200" step="30" value="${state.snakeTimer.bankSeconds}" />
+              <small>Seconds each manager has for the whole draft.</small>
+            </label>
+            <label class="auction-budget-field">
+              Per-pick increment
+              <input name="snakeIncrementSeconds" type="number" min="0" max="600" step="5" value="${state.snakeTimer.incrementSeconds}" />
+              <small>Seconds added back to the bank each time you make a pick.</small>
+            </label>
+          </div>
+        </fieldset>
       </div>
       <div class="setup-col">
         <h2 class="setup-h2">The draft</h2>
@@ -1518,6 +1626,13 @@ function renderSetup(setupError = "") {
     const auction = new FormData(setupForm).get("draftType") === "auction";
     setupForm.querySelector(".auction-suboptions").hidden = !auction;
   };
+  // The snake has one clock or none, so each clock shows only its own settings —
+  // and reaching for a setting says you want the clock it belongs to.
+  const syncSnakeClockOptions = () => {
+    const mode = new FormData(setupForm).get("snakeClock");
+    setupForm.querySelector(".snake-pick-suboptions").hidden = mode !== "pick";
+    setupForm.querySelector(".snake-chess-suboptions").hidden = mode !== "chess";
+  };
   // The one button offers whichever move is left: check them all, or clear them.
   const syncDecadeToggle = () => {
     const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
@@ -1538,6 +1653,14 @@ function renderSetup(setupError = "") {
       setupForm.querySelector('input[name="draftType"][value="auction"]').checked = true;
     }
     if (["draftType", "nomination", "auctionBudget", "auctionReviewSeconds", "auctionBankSeconds", "auctionIncrementSeconds"].includes(event.target.name)) syncAuctionOptions();
+
+    if (event.target.name === "pickTimer") {
+      setupForm.querySelector('input[name="snakeClock"][value="pick"]').checked = true;
+    }
+    if (["snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
+      setupForm.querySelector('input[name="snakeClock"][value="chess"]').checked = true;
+    }
+    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) syncSnakeClockOptions();
   });
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
@@ -1606,7 +1729,9 @@ function renderSetup(setupError = "") {
     state.nomination = mode.nomination;
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
     state.auctionTimer = normalizeAuctionTimerInput(form);
-    state.pickTimerSeconds = normalizePickTimerSeconds(form.get("pickTimer"));
+    const snakeClock = snakeClockFromForm(form);
+    state.pickTimerSeconds = snakeClock.pickTimerSeconds;
+    state.snakeTimer = snakeClock.snakeTimer;
     const pool = buildDraftPool(state.universe, state.seed, {
       nomination: state.nomination,
       managerCount: state.managers.length
@@ -1620,9 +1745,13 @@ function renderSetup(setupError = "") {
       draftType: state.draftType,
       nomination: state.nomination,
       budget: state.auctionBudget,
-      timer: state.auctionTimer
+      timer: state.auctionTimer,
+      snakeTimer: snakeTimerConfig(state, state.draftType)
     });
     if (isAuctionDraft(state.draft)) startAuctionReview(state.draft, draftNow());
+    // The gun. Both clocks start when the board is dealt, not when somebody
+    // first looks at it.
+    else startSnakeClock(state.draft, draftNow());
     state.compare = [];
     state.tournament = null;
     state.batch = null;
@@ -1647,7 +1776,8 @@ function renderSetup(setupError = "") {
     );
     const seed = String(form.get("seed")).trim() || "showdown";
     const universe = universeFromForm(form);
-    const pickTimer = normalizePickTimerSeconds(form.get("pickTimer"));
+    const snakeClock = snakeClockFromForm(form);
+    const pickTimer = snakeClock.pickTimerSeconds;
     const { draftType, nomination } = draftModeFromForm(form);
     const budget = normalizeAuctionBudget(form.get("auctionBudget"), 13);
     const auctionTimer = normalizeAuctionTimerInput(form);
@@ -1668,7 +1798,8 @@ function renderSetup(setupError = "") {
         draftType,
         nomination,
         budget,
-        auctionTimer
+        auctionTimer,
+        snakeTimer: snakeTimerConfig(snakeClock, draftType)
       });
       storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
       location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
@@ -1981,6 +2112,28 @@ function liveLot(draft) {
 }
 
 // A read-only stand-in for the rules helpers that take a whole draft.
+// The whole table's clocks, side by side — which is the point of a chess clock.
+// A manager's bank is only interesting next to everybody else's: the man with
+// four minutes left in round eight is in trouble, and the room should be able to
+// see it coming. The one that is running is marked; a flag that has fallen stays
+// visible, because his picks are being made for him from here.
+function snakeClocksHtml(draft) {
+  if (!snakeClockEnabled(draft)) return "";
+  const now = draftNow();
+  const onTheClock = draft.complete || isDraftPaused(draft) ? null : currentManager(draft);
+  const chips = draft.managers
+    .map((manager) => {
+      const left = snakeTimeRemainingMs(draft, manager, now);
+      const running = onTheClock?.id === manager.id;
+      return `<span class="snake-clock-chip${running ? " running" : ""}${left <= 0 ? " flagged" : ""}">
+        ${escapeHtml(manager.name)}
+        <b data-snake-clock data-manager-id="${escapeHtml(manager.id)}"${left <= 0 ? ' class="flagged"' : ""}>${formatAuctionClock(left)}</b>
+      </span>`;
+    })
+    .join("");
+  return `<p class="snake-clocks">${chips}</p>`;
+}
+
 function liveDraft(draft) {
   const lot = liveLot(draft);
   if (!draft?.auction) return draft;
@@ -4750,6 +4903,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
       </div>
       ${remaining}
+      ${snakeClocksHtml(draft)}
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
     </div>
     <div class="roster-view">
@@ -6164,6 +6318,7 @@ function reviveState(value) {
     auctionBudget: normalizeAuctionBudget(value.auctionBudget ?? AUCTION_DEFAULT_BUDGET, 13),
     auctionTimer: normalizeAuctionTimerState(value.auctionTimer),
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
+    snakeTimer: normalizeSnakeTimerState(value.snakeTimer),
     maskBids: Boolean(value.maskBids),
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),

@@ -14,6 +14,8 @@ import {
   applyDraftAction,
   auctionReviewComplete,
   auctionTimerEnabled,
+  normalizeSnakeTimerConfig,
+  snakeClockEnabled,
   canCancelLot,
   cpuSealedBid,
   createDraft,
@@ -184,7 +186,7 @@ function reviveRoom(saved) {
     pool,
     saved.rosterSize,
     saved.seed,
-    { draftType, nomination, budget: auctionBudget, timer: saved.auctionTimer ?? false }
+    { draftType, nomination, budget: auctionBudget, timer: saved.auctionTimer ?? false, snakeTimer: saved.snakeTimer ?? false }
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
@@ -207,6 +209,7 @@ function reviveRoom(saved) {
     poolMode: saved.poolMode === "real" ? "real" : "random",
     realPool,
     pickTimer: normalizePickTimerSeconds(saved.pickTimer),
+    snakeTimer: draft.clock?.timer ?? null,
     draftType,
     nomination,
     auctionBudget,
@@ -235,6 +238,7 @@ function persistRoom(store, room) {
     poolMode: room.poolMode,
     realPool: room.realPool,
     pickTimer: room.pickTimer,
+    snakeTimer: room.snakeTimer ?? null,
     draftType: room.draftType,
     nomination: room.nomination ?? "manual",
     auctionBudget: room.auctionBudget,
@@ -450,6 +454,7 @@ async function createRoom(store, request, response) {
   const nomination = draftType === "auction" && body.nomination === "random" ? "random" : "manual";
   const auctionBudget = draftType === "auction" ? normalizeAuctionBudget(body.budget, rosterSize) : null;
   const auctionTimer = draftType === "auction" ? normalizeAuctionTimerConfig(body.auctionTimer) : null;
+  const snakeTimer = draftType === "auction" ? null : normalizeSnakeTimerConfig(body.snakeTimer);
   const cpuNames = Array.isArray(body.cpu)
     ? body.cpu.map((name) => String(name)).filter((name) => managers.includes(name))
     : [];
@@ -481,12 +486,19 @@ async function createRoom(store, request, response) {
     pool,
     rosterSize,
     seed,
-    { draftType, nomination, budget: auctionBudget, timer: auctionTimer }
+    { draftType, nomination, budget: auctionBudget, timer: auctionTimer, snakeTimer }
   );
   const createdAt = Date.now();
   const actions = [];
   if (isAuctionDraft(draft)) {
     const action = { type: "start-review", at: createdAt };
+    applyDraftAction(draft, action);
+    actions.push({ seq: 1, action });
+  } else if (snakeClockEnabled(draft)) {
+    // The gun, recorded like any other action: every client that replays this
+    // room starts its clocks at the instant the room opened, not at the instant
+    // it happened to load.
+    const action = { type: "start-clock", at: createdAt };
     applyDraftAction(draft, action);
     actions.push({ seq: 1, action });
   }
@@ -499,6 +511,7 @@ async function createRoom(store, request, response) {
     // each card with the roster slot it was dealt to fill.
     deck: pool.map(deckEntry),
     pickTimer,
+    snakeTimer: draft.clock?.timer ?? null,
     draftType,
     nomination,
     auctionBudget,
@@ -955,6 +968,7 @@ function roomSnapshot(room, port = null) {
     poolMode: room.poolMode,
     realPool: room.realPool ?? "stars",
     pickTimer: room.pickTimer ?? 0,
+    snakeTimer: room.snakeTimer ?? null,
     draftType: room.draftType ?? "snake",
     nomination: room.nomination ?? "manual",
     auctionBudget: room.auctionBudget ?? null,
