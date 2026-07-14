@@ -1111,6 +1111,42 @@ test("manual pitching keeps every arm in until pulled — yours by hand, theirs 
   assert.notEqual(pitcherStatus(state, "home").pitcher.id, npcStarter.id);
 });
 
+test("fast forward runs YOUR pen on the same hook as theirs — best arm, not next man along the bench", async () => {
+  // The bug this pins: the autopilot managing the player's pen was the rule the
+  // hook replaced, kept alive in the one place nobody looked. It pulled at a flat
+  // fatigue 2 and took `the next man along the bench` — and the bench is sorted
+  // WORST-CONTROL-FIRST (buildPitchingPlan, a leftover from the old scripted
+  // staff where the closer was meant to finish). So your worst reliever went in
+  // first BY CONSTRUCTION and your best one waited behind him for a game that
+  // usually ended first: an IP 1 arm throwing four innings while the ace of your
+  // pen got a one-inning cameo.
+  const { fastForward } = await import("../src/rules/battle/controller.js");
+  const { isGameOver } = await import("../src/rules/game.js");
+  const { player, npc } = hookTeams();
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "ff-pen" });
+
+  const staff = battle.state[battle.playerSide].pitchers;
+  const bench = staff.slice(1);
+  assert.ok(bench.length >= 2, "the fixture has a pen to choose from");
+  const nextManAlong = bench[0];
+  const bestArm = [...bench].sort((a, b) => b.control - a.control)[0];
+  assert.notEqual(nextManAlong.id, bestArm.id, "and the stack really does bury the best arm — else this proves nothing");
+
+  let guard = 40;
+  while (!isGameOver(battle.state) && guard > 0) {
+    guard -= 1;
+    fastForward(battle);
+  }
+
+  const used = battle.events
+    .filter((event) => event?.type === "pitching-change" && event.side === battle.playerSide)
+    .map((event) => event.pitcher);
+  assert.ok(used.length >= 1, "the autopilot went to the pen at all");
+  // The hook rates every arm and brings in the BEST one, jumping the men in front
+  // of him — the same call the other dugout has been making all along.
+  assert.equal(used[0], bestArm.name, `the first arm in is the best one (${bestArm.name}), not the next seat on the bench (${nextManAlong.name})`);
+});
+
 test("a sacrifice bunt trades an out to move the runners", () => {
   const { player, npc } = hookTeams();
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "bunt-seed" });

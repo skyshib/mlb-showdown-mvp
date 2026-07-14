@@ -5,6 +5,7 @@ import {
   stealCandidates,
   attemptSteal,
   changePitcher,
+  autoRelieve,
   pitcherStatus,
   isGameOver,
   simulateGame,
@@ -321,12 +322,21 @@ export function fastForward(battle, { maxEvents = 500 } = {}) {
       const pulled = npcMaybePullPitcher(state, battle.npcSide, battle.profile);
       if (pulled) events.push(pushEvent(battle, pitchingChangeEvent(battle, battle.npcSide, pulled)));
     } else {
-      // Manage the player's pen the way a balanced skipper would.
-      const mound = pitcherStatus(state, battle.playerSide);
-      if (mound.fatiguePenalty >= 2 && mound.hasReliefAvailable) {
-        const pitcher = changePitcher(state, battle.playerSide);
-        if (pitcher) events.push(pushEvent(battle, pitchingChangeEvent(battle, battle.playerSide, pitcher)));
-      }
+      // Manage the player's pen the way a balanced skipper would — which for a
+      // long time this did not do. It said "pull at fatigue 2 and take the next
+      // man along the bench," which is the rule the hook replaced, kept alive in
+      // the one place nobody looked: your own dugout, on autopilot. It was blind
+      // in both directions and worse than blind in one. The bench is sorted
+      // WORST-CONTROL-FIRST (buildPitchingPlan, from the old scripted staff where
+      // the closer was meant to finish), so "the next man along" is by
+      // construction the worst arm you own — and your best one waited behind him
+      // for a game that usually ended first. That is how an IP 1 reliever throws
+      // four innings while the ace of your pen gets a one-inning cameo.
+      //
+      // It is the same hook now, at the same bar, that the other dugout has been
+      // using all along. One rule, every mound.
+      const pulled = autoRelieve(state, battle.playerSide);
+      if (pulled) events.push(pushEvent(battle, pitchingChangeEvent(battle, battle.playerSide, pulled)));
     }
     const event = playStealAttempt(state, battle.rng) ?? playPlateAppearance(state, battle.rng);
     events.push(pushEvent(battle, event));
