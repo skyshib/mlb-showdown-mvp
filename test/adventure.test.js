@@ -2792,6 +2792,64 @@ test("finished games write the almanac and rare feats fill the trophy room", asy
   assert.ok(caseHtml.includes("DAY 2"), "with its date");
 });
 
+test("the suspense screen stages every die the play threw, gloves included", async () => {
+  const { dramaStages } = await import("../src/adventure/ui/battleScreen.js");
+
+  // A ball in play that turns two. The suspense used to stop at the swing — it
+  // cut to black exactly where the play got interesting, and the die that turned
+  // it, the one you were actually sweating, was never shown.
+  const grounder = {
+    controlRoll: 4,
+    controlTotal: 8,
+    onBase: 10,
+    chartOwner: "hitter",
+    resultRoll: 11,
+    result: "GB",
+    playDetails: { doublePlayAttempt: { batterOut: true, roll: 17 } }
+  };
+  const turned = dramaStages([grounder]);
+  assert.deepEqual(turned.map((stage) => stage.label), ["PITCH", "SWING", "THE PIVOT"]);
+  assert.deepEqual(turned.map((stage) => stage.roll), [4, 11, 17]);
+  assert.match(turned[2].caption, /TWO DOWN/, "and it says what the glove did with it");
+
+  // A single with a man cut down at the plate: pitch, swing, throw.
+  const thrown = { runner: "Lead Man '99", to: "home", safe: false, roll: 6 };
+  const single = {
+    controlRoll: 9,
+    controlTotal: 12,
+    onBase: 14,
+    chartOwner: "hitter",
+    resultRoll: 15,
+    result: "1B",
+    // The throw is filed twice — the attempts list holds the very same object —
+    // and must still be staged once, or the play looks like it threw two dice.
+    playDetails: { thrownAttempt: thrown, attempts: [thrown, { runner: "Trailer", to: "2B", thrown: false }] }
+  };
+  const cutDown = dramaStages([single]);
+  assert.deepEqual(cutDown.map((stage) => stage.label), ["PITCH", "SWING", "THROW TO HOME"]);
+  assert.equal(cutDown[2].roll, 6);
+  assert.match(cutDown[2].caption, /^L\.MAN IS OUT!$/, "the man, short, and without his card year");
+
+  // A deferred send throws no pitch and takes no swing. The whole play is the
+  // throw — the most suspenseful die in the game — so it stages on its own.
+  const send = {
+    type: "advance",
+    playDetails: { kind: "advance", attempts: [{ runner: "Speedy", to: "3B", safe: true, roll: 3 }] }
+  };
+  const sent = dramaStages([send]);
+  assert.deepEqual(sent.map((stage) => stage.label), ["THROW TO 3B"]);
+  assert.match(sent[0].caption, /IS SAFE!/);
+
+  // A steal is one die and always was.
+  const steal = { playDetails: { stealAttempt: { runner: "Thief", to: "2B", safe: false, roll: 19 } } };
+  const stolen = dramaStages([steal]);
+  assert.deepEqual(stolen.map((stage) => stage.label), ["THE THROW"]);
+  assert.match(stolen[0].caption, /GUNNED DOWN/);
+
+  // A play with no dice at all stages nothing.
+  assert.equal(dramaStages([{ type: "pitching-change" }]), null);
+});
+
 test("high-leverage plate appearances pause on the d20 before revealing", async () => {
   const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
   const { isDramaticMoment } = await import("../src/rules/battle/controller.js");

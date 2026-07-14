@@ -7,6 +7,7 @@ import {
   diamondHtml,
   outsHtml,
   shortName,
+  stripCardYear,
   surname,
   cardPanelHtml,
   cardLine
@@ -279,6 +280,7 @@ function advanceMenuItems(pending) {
   const verb = pending.kind === "tagup" ? "TAG UP" : "SEND";
   const items = [{
     label: pending.kind === "tagup" ? "NOBODY TAGS" : "HOLD THE RUNNERS",
+    // Holding throws no dice. There is nothing to be suspenseful about.
     run: (a) => afterAction(a, actAdvance(a.screen.battle, 0), ["The runners hold."])
   }];
   pending.candidates.forEach((candidate, index) => {
@@ -290,7 +292,7 @@ function advanceMenuItems(pending) {
     const odds = Math.round(Math.min(...sent.map((c) => c.safeChance)) * 100);
     items.push({
       html: `${verb} ${names} <span class="gq-dim">${odds}% SAFE</span>`,
-      run: (a) => afterAction(a, actAdvance(a.screen.battle, index + 1))
+      run: (a) => resolveWithDrama(a, () => actAdvance(a.screen.battle, index + 1))
     });
   });
   return items;
@@ -367,15 +369,61 @@ function resolveWithDrama(app, act) {
   app.screen.drama = { events, stages };
 }
 
+// EVERY die the play threw, in the order the table would have thrown them. The
+// pitch and the swing were the only two staged, which meant the suspense screen
+// stopped talking exactly where the play got interesting: a two-out grounder in
+// the ninth cut to black and came back as a double play, and the die that turned
+// it — the one you were actually sweating — was never shown. A ball in play is
+// checked by a glove, and the glove rolls too.
+function fieldingStages(event) {
+  const details = event.playDetails ?? {};
+  const stages = [];
+  const dp = details.doublePlayAttempt;
+  if (typeof dp?.roll === "number") {
+    stages.push({
+      label: "THE PIVOT",
+      roll: dp.roll,
+      caption: dp.batterOut ? "TURNED IT — TWO DOWN" : "ONLY ONE — HE BEAT THE THROW"
+    });
+  }
+  // A throw is recorded once but filed twice: the attempts list holds the very
+  // same object the thrownAttempt does. Dedupe by identity or the die is staged
+  // twice and the play looks like it threw two of them.
+  const seen = new Set();
+  const throws = [
+    details.thrownAttempt,
+    ...(details.attempts ?? []),
+    ...(details.tagUpAttempts ?? []),
+    ...(details.extraBaseAttempts ?? [])
+  ];
+  for (const attempt of throws) {
+    if (!attempt || typeof attempt.roll !== "number" || seen.has(attempt)) continue;
+    seen.add(attempt);
+    stages.push({
+      label: `THROW TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}`,
+      roll: attempt.roll,
+      caption: `${escapeHtml(shortName(stripCardYear(attempt.runner ?? "")))} ${attempt.safe ? "IS SAFE!" : "IS OUT!"}`
+    });
+  }
+  return stages;
+}
+
 // The rolls worth staging, from the newest event that has any: a plate
-// appearance carries the pitcher's control roll AND the batter's chart roll;
-// an NPC steal only has the throw.
-function dramaStages(events) {
+// appearance carries the pitcher's control roll, the batter's chart roll, and
+// then whatever the gloves had to do about it; an NPC steal only has the throw;
+// a send is nothing BUT the throw. Exported for tests.
+export function dramaStages(events) {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
     if (!event) continue;
     const steal = event.playDetails?.stealAttempt;
-    if (typeof steal?.roll === "number") return [{ label: "THE THROW", roll: steal.roll }];
+    if (typeof steal?.roll === "number") {
+      return [{
+        label: "THE THROW",
+        roll: steal.roll,
+        caption: `${escapeHtml(shortName(stripCardYear(steal.runner ?? "")))} ${steal.safe ? "IS SAFE!" : "IS GUNNED DOWN!"}`
+      }];
+    }
     if (typeof event.resultRoll === "number") {
       const stages = [];
       if (typeof event.controlRoll === "number") {
@@ -387,8 +435,12 @@ function dramaStages(events) {
         });
       }
       stages.push({ label: "SWING", roll: event.resultRoll });
-      return stages;
+      return [...stages, ...fieldingStages(event)];
     }
+    // A deferred send throws no pitch and takes no swing — the whole play is the
+    // throw, and it is the most suspenseful die in the game.
+    const fielding = fieldingStages(event);
+    if (fielding.length) return fielding;
   }
   return null;
 }

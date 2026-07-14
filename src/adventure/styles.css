@@ -45,6 +45,9 @@
      in the banner's own color is a run you cannot see. franchisePalette.js
      solves one per club that reads on both the banner and the ground. */
   --gq-flare: var(--accent);
+  /* The man in the silhouette. Grey, and only grey: a club's colors belong on
+     the cap, and a body painted in them would compete with it. */
+  --gq-figure: #6f737a;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -639,14 +642,23 @@ h1.gq-logo {
   object-fit: cover;
 }
 
-/* The back of your own head. Ink, because it is a silhouette — the only thing
-   worth reading on your side of the field is that you are facing the other way. */
+/* The back of your own head. The MAN is a grey silhouette — nothing about him is
+   worth reading except that he is facing the other way — and the CAP is where the
+   club lives: the crown in the club's own color, the tab at the back in the color
+   its bars are painted, and a sliver of brim poking out past the head in the
+   third. In the house palette two of those three are the same red, so the brim
+   keeps a dark rule around it and reads as a brim either way. */
 .gq-versus-back { background: var(--gb-lightest); }
 .gq-versus-back svg { width: 100%; height: 100%; display: block; }
 .gq-back-body,
-.gq-back-head { fill: var(--gb-darkest); }
-.gq-back-cap { fill: var(--gq-flare); }
-.gq-back-strap { fill: var(--gb-lightest); }
+.gq-back-head { fill: var(--gq-figure); }
+.gq-back-brim {
+  fill: var(--gq-flare);
+  stroke: var(--gb-darkest);
+  stroke-width: 1.2;
+}
+.gq-back-cap { fill: var(--accent-bright); }
+.gq-back-strap { fill: var(--gq-lead); }
 
 /* The ground moving under them. In the handheld the whole FIELD slides while
    the two of you come in — that is what makes it a pan rather than two labels
@@ -828,10 +840,30 @@ h1.gq-logo {
   height: 100%;
 }
 
+/* Two dice was the old maximum; a ball in play can throw four (pitch, swing, the
+   pivot, the throw). They give up the wide gap before they give up the row. */
 .gq-die-row {
   display: flex;
   gap: 7cqw;
   justify-content: center;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+/* Three or four dice give up size as well as the gap — a die that stands as tall
+   as it did when there were two would run the row off the screen. */
+.gq-die-row:has(.gq-die-stage:nth-child(3)) { gap: 3.5cqw; }
+.gq-die-row:has(.gq-die-stage:nth-child(3)) .gq-die {
+  width: 13cqw;
+  height: 13cqw;
+  font-size: 6.4cqw;
+  border-width: 0.9cqw;
+}
+.gq-die-row:has(.gq-die-stage:nth-child(4)) { gap: 2cqw; }
+.gq-die-row:has(.gq-die-stage:nth-child(4)) .gq-die {
+  width: 10.5cqw;
+  height: 10.5cqw;
+  font-size: 5.2cqw;
+  border-width: 0.7cqw;
 }
 
 .gq-die-stage {

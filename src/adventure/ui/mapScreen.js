@@ -238,6 +238,7 @@ function playerSilhouette() {
     <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
       <path class="gq-back-body" d="M4 100 C 9 73, 27 62, 50 62 C 73 62, 91 73, 96 100 Z" />
       <circle class="gq-back-head" cx="50" cy="38" r="25" />
+      <ellipse class="gq-back-brim" cx="50" cy="34" rx="30" ry="7" />
       <path class="gq-back-cap" d="M25 37 a 25 25 0 0 1 50 0 l 0 3 l -50 0 Z" />
       <rect class="gq-back-strap" x="44" y="31" width="12" height="9" rx="1" />
     </svg>
