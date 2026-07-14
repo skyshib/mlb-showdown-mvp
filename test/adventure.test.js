@@ -1979,6 +1979,48 @@ test("a game in progress rebuilds itself from its seed and the decisions taken",
   );
 });
 
+test("the play description is the whole book of the game, ruled at the innings", async () => {
+  const { battleScreen, startTrainerBattle, rebuildPlayLog } = await import("../src/adventure/ui/battleScreen.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const app = { save, screen: {}, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  startTrainerBattle(app, trainer);
+
+  // The book opens with the words the game opens with.
+  assert.ok(app.screen.playLog.length, "there is a book");
+  const opening = app.screen.playLog[0].lines.join(" ");
+  assert.match(opening, /Winner takes the coins|best-of/, "and it opens where the game does");
+
+  // Play a couple of innings.
+  for (let i = 0; i < 24 && app.screen.name === "battle"; i += 1) {
+    if (battlePhase(app.screen.battle).type === "over") break;
+    battleScreen.key(app, "a");
+  }
+  const entries = app.screen.playLog;
+  assert.ok(entries.length > 6, "every play went in the book, not just the last one");
+
+  const html = battleScreen.render(app);
+  // The oldest play is still on the screen — that is the whole point. It scrolls.
+  assert.ok(html.includes(entries[0].lines[0]), "the first thing said is still there");
+  assert.ok(html.includes(entries.at(-1).lines.at(-1)), "and so is the newest");
+
+  // A rule wherever the sides changed, naming the half that closed and the score
+  // as it stood, read from your dugout.
+  const halves = new Set(entries.map((entry) => `${entry.half}${entry.inning}`));
+  const rules = [...html.matchAll(/gq-play-break[^>]*><span>([^<]+)<\/span>/g)].map((match) => match[1]);
+  assert.equal(rules.length, halves.size - 1, "one rule per half-inning that ended");
+  assert.match(rules[0], /END TOP 1 &middot; \d+-\d+/, "which names it and says where the game stood");
+
+  // A game you come back to comes back to the whole book, not a blank box.
+  const rebuilt = rebuildPlayLog(app.screen.battle);
+  assert.ok(rebuilt.length > 5, "the book rebuilds from the plays themselves");
+  assert.deepEqual(
+    rebuilt.at(-1).lines,
+    entries.at(-1).lines,
+    "and the last thing it says is the last thing that happened"
+  );
+});
+
 test("closing the tab mid-inning does not cost you the game", async () => {
   const { startTrainerBattle, resumeBattle, battleScreen, gameOverScreen } = await import("../src/adventure/ui/battleScreen.js");
   const save = testSave();

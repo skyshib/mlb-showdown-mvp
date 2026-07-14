@@ -118,7 +118,15 @@ function launchSeriesGame(app, trainer) {
   ];
   stashBattle(save, trainer.id, battle, lines);
   persistSave(save);
-  app.go("battle", { trainerId: trainer.id, battle, lines, menuIndex: 0, mode: "menu" });
+  app.go("battle", {
+    trainerId: trainer.id,
+    battle,
+    lines,
+    // The book opens with the words the game opens with.
+    playLog: [{ half: "top", inning: 1, score: { away: 0, home: 0 }, lines }],
+    menuIndex: 0,
+    mode: "menu"
+  });
   app.rerender();
 }
 
@@ -156,7 +164,14 @@ export function resumeBattle(app) {
     persistSave(save);
     return null;
   }
-  const screen = { trainerId: trainer.id, battle, lines: stashed.lines ?? [], menuIndex: 0, mode: "menu" };
+  const screen = {
+    trainerId: trainer.id,
+    battle,
+    lines: stashed.lines ?? [],
+    playLog: rebuildPlayLog(battle),
+    menuIndex: 0,
+    mode: "menu"
+  };
   // A game that was already over when the tab closed comes back to its FINAL
   // screen — the coins and the box score are handed out from there, and they
   // have not been handed out yet.
@@ -649,6 +664,73 @@ function callTheBullpenPhone(app) {
   else if (sound === "tiring") playArmTiring();
 }
 
+// The book, drawn: every play in order, with a rule ACROSS THE BOX wherever the
+// sides changed and the half-inning that just closed named on it, with the score
+// as it stood. A wall of plays with nothing between them makes you count the
+// outs to find where an inning went.
+function playLogHtml(app, battle) {
+  const entries = app.screen.playLog ?? [];
+  if (!entries.length) return (app.screen.lines ?? []).map((line) => `<p>${line}</p>`).join("");
+  const state = battle.state;
+  const you = battle.playerSide;
+  const them = battle.npcSide;
+  const half = (entry) => `${entry.half === "top" ? "TOP" : "BOT"} ${entry.inning}`;
+  let html = "";
+  let previous = null;
+  for (const entry of entries) {
+    if (previous && (previous.half !== entry.half || previous.inning !== entry.inning)) {
+      // The score reads from your dugout, the way every other score in this game
+      // does.
+      html += `<div class="gq-play-break"><span>END ${half(previous)} &middot; ${
+        previous.score[you]
+      }-${previous.score[them]}</span></div>`;
+    }
+    html += entry.lines.map((line) => `<p>${line}</p>`).join("");
+    previous = entry;
+  }
+  void state;
+  return html;
+}
+
+// ---- The book of the game ------------------------------------------------------
+//
+// The textbox used to hold the last play and nothing else: whatever had just
+// happened wiped whatever happened before it, and a game you looked away from for
+// ten seconds was a game you could not catch up on. It is a LOG now — every play
+// of the game, oldest at the top, scrolled to the bottom where the newest one is —
+// and it looks exactly as it did, because the newest play is still the thing you
+// are looking at. The rest is simply still there, above it.
+//
+// Each entry knows the half-inning it belongs to and what the score was when it
+// ended, which is what lets the log rule a line between innings and say where the
+// game stood as each one closed.
+function logPlay(app, lines, events) {
+  if (!lines.length) return;
+  const state = app.screen.battle.state;
+  // The half-inning the play HAPPENED in, not the one the game has since rolled
+  // over into: the third out belongs to the inning it ended, not the next one.
+  const last = [...events].filter(Boolean).pop();
+  const half = last?.half ?? state.half;
+  const inning = last?.inning ?? state.inning;
+  const score = last?.scoreAfter ?? state.score;
+  app.screen.playLog = [
+    ...(app.screen.playLog ?? []),
+    { half, inning, lines, score: { away: score.away, home: score.home } }
+  ];
+}
+
+// A resumed game rebuilds its book from the plays themselves — the same events
+// the engine replayed — so coming back to a game mid-inning comes back to the
+// whole of it, not to a blank box.
+export function rebuildPlayLog(battle) {
+  return battle.events.filter(Boolean).map((event) => ({
+    half: event.half,
+    inning: event.inning,
+    score: { away: event.scoreAfter?.away ?? 0, home: event.scoreAfter?.home ?? 0 },
+    lines: describeEvent(event, battle.playerSide)
+  })).filter((entry) => entry.lines.length);
+}
+
 function afterAction(app, events, presetLines = null) {
   const playerSide = app.screen.battle.playerSide;
   const lines = presetLines ?? events.filter(Boolean).flatMap((event) => describeEvent(event, playerSide));
@@ -660,6 +742,7 @@ function afterAction(app, events, presetLines = null) {
   // act out. The id is what stops a cursor keypress from replaying it.
   app.screen.motion = { id: (app.screen.motion?.id ?? 0) + 1, ...playMotion(events) };
   callTheBullpenPhone(app);
+  logPlay(app, lines, [...events, visit]);
   app.screen.lines = lines.length ? lines : app.screen.lines;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
@@ -878,7 +961,7 @@ export const battleScreen = {
       ${renderScoreboard(battle, trainer, series)}
       <div class="gq-textbox${phase.type === "player-pitching" ? " gq-textbox-fielding" : ""}">
         <div class="gq-battle-menu">${renderBattleMenu(app, phase)}</div>
-        <div class="gq-battle-lines">${(app.screen.lines ?? []).map((line) => `<p>${line}</p>`).join("")}</div>
+        <div class="gq-battle-lines">${playLogHtml(app, battle)}</div>
       </div>
       ${renderHud(battle, phase)}
     </div>`;
