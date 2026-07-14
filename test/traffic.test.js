@@ -247,3 +247,37 @@ test("stats are open by default and shut when a token is set", async (t) => {
   assert.equal((await fetch(`${base}/api/stats?token=nope`)).status, 401);
   assert.equal((await fetch(`${base}/api/stats?token=letmein`)).status, 200);
 });
+
+// The image builds clean, deploys green, and dies on the first boot:
+//
+//   Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/app/scripts/traffic.js'
+//     imported from /app/scripts/online-server.js
+//
+// scripts/ is 172MB of build-time junk and .dockerignore throws all of it away
+// except the server — and "the server" is not one file. Every module it imports
+// has to be let back in by name, and the only thing that was checking is
+// production.
+test("every module the server imports survives .dockerignore", async () => {
+  const { readFileSync } = await import("node:fs");
+  const server = readFileSync("scripts/online-server.js", "utf8");
+  const ignore = readFileSync(".dockerignore", "utf8");
+
+  // What the server pulls in from its own directory.
+  const siblings = [...server.matchAll(/from\s+"\.\/([^"]+)"/g)].map((match) => match[1]);
+  assert.ok(siblings.length, "the server imports something from scripts/");
+
+  // What .dockerignore lets back in past `scripts/*`.
+  const allowed = new Set(
+    ignore.split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("!scripts/"))
+      .map((line) => line.slice("!scripts/".length))
+  );
+
+  for (const sibling of siblings) {
+    assert.ok(
+      allowed.has(sibling),
+      `scripts/${sibling} is imported by the server but excluded from the image — add "!scripts/${sibling}" to .dockerignore`
+    );
+  }
+});

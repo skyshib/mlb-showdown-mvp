@@ -11,8 +11,15 @@ data
 # dumps, the scraped card images, the fetched pages. The data the app actually
 # reads was generated from them and is committed under src/data/, so the image
 # only needs the server itself.
+#
+# "The server" is not one file. Every module online-server.js IMPORTS has to come
+# with it, or the image builds clean, deploys green, and then dies on the first
+# boot with ERR_MODULE_NOT_FOUND — which is exactly what happened the day the
+# pageview counter went in. If you add an import to online-server.js, add it here.
 scripts/*
 !scripts/online-server.js
+!scripts/traffic.js
+!scripts/geo.js
 
 # Never opened by the running server.
 test
