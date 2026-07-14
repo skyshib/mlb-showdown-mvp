@@ -125,27 +125,42 @@ function runsPerControlPoint(pitcher, batters) {
 // spending whatever it has. So the bar to walk out there is the option value of
 // his remaining tank, and it slides down with the outs left to get.
 //
-// The floor is a HEDGE and it is deliberate. `outsRemaining` bottoms out at 3
-// (see outsRemainingToPitch), so extra innings look to this rule like a game
-// that is permanently one inning from over — and the arms it burns on that
-// belief still have to pitch the twelfth. A pen is also short of what it thinks:
-// an inning is four batters only if nobody reaches. Keep a real point of control
-// between the two men before spending an arm you cannot get back.
-const MARGIN_EARLY = 5.5;
-const MARGIN_LATE = 1.5;
+// The floor is where I put a HEDGE and put it in the wrong shape. It was a flat
+// toll — keep a real point of control between the two men before spending an arm
+// you cannot get back — and a toll gets charged even when there is nothing left
+// to protect. In the eleventh inning, with three outs to get and six sitting in
+// the pen, a starter's remaining outs are worth exactly NOTHING: the pen covers
+// everything that is left. A bar of any size there is a bar against the truth,
+// and it bought an eleven-inning complete game from a man who by then was three
+// control points worse than the arm warming up behind him.
+//
+// So the floor comes down to a half point — enough that a coin-flip upgrade does
+// not churn an arm, and no more than that. The hedging is done by the clause that
+// can actually TELL whether the pen is too short to spend: while it cannot cover
+// what is left, the bar is DESPERATION_GAP and the sliding one does not apply.
+// That clause knows what a floor can only guess at.
+//
+// Both ends of the line are points the game really visits. `outsRemaining` bottoms
+// out at 3 (see outsRemainingToPitch) — every extra inning looks to this rule like
+// the ninth — so the line is anchored THERE and not at a zero it never reaches.
+const MARGIN_EARLY = 5.5;   // the bar with a whole game still to get
+const MARGIN_LATE = 0.5;    // the bar with three outs left, and in every extra inning
 const REGULATION_OUTS = 27;
+const FLOOR_OUTS = 3;
 
 // The bar, at this point in the game. `bias` is the skipper's temperament in
 // control points: positive rides his starter, negative is a quick hook.
 export function pullMargin(outsRemaining = REGULATION_OUTS, bias = 0) {
   const outs = Number(outsRemaining);
-  const share = Math.max(0, Math.min(1, (Number.isFinite(outs) ? outs : REGULATION_OUTS) / REGULATION_OUTS));
+  const clamped = Math.max(FLOOR_OUTS, Number.isFinite(outs) ? outs : REGULATION_OUTS);
+  const share = Math.min(1, (clamped - FLOOR_OUTS) / (REGULATION_OUTS - FLOOR_OUTS));
   return Math.max(0, MARGIN_LATE + (MARGIN_EARLY - MARGIN_LATE) * share + bias);
 }
 
 // The bar when the pen CANNOT cover what is left, which is flat and higher. Late
 // in a game a short pen is the last thing between you and extra innings, so the
 // sliding bar is not allowed to talk you into emptying it for a small upgrade.
+// This is the hedge the floor used to be pretending to be.
 const DESPERATION_GAP = 4;
 
 // The hook, as one decision.
