@@ -2123,6 +2123,25 @@ test("a tiring arm rings the bullpen phone — once per step down, and never for
   assert.equal(alarm.sound, "tiring", "and when he tires, the phone rings for him too");
 });
 
+test("the winner's pick says which of his men you already own", async () => {
+  const { claimCardScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const theirs = buildNpcTeam(trainer, save).roster;
+
+  const app = { save, screen: { name: "claimCard", trainerId: trainer.id, index: 0 }, go() {}, rerender() {} };
+  const before = claimCardScreen.render(app);
+  assert.ok(!before.includes("*x"), "a man you do not own is not marked");
+
+  // Claiming a man you already hold is a real choice — a spare to sell, a hedge —
+  // but it has to be a choice you MAKE, not one you discover afterwards.
+  addCardToCollection(save, theirs[0].id);
+  addCardToCollection(save, theirs[0].id);
+  const html = claimCardScreen.render(app);
+  assert.match(html, /\*x2/, "the row says how many you hold");
+  assert.match(html, /x2</, "and so does the card, the way it does everywhere else");
+});
+
 test("the bullpen opens as a compare screen: the warming arm beside the one on the mound", async () => {
   const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
   const { battlePhase } = await import("../src/rules/battle/controller.js");

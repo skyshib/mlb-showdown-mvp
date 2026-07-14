@@ -32,6 +32,7 @@ import {
   grantBadge,
   addCardToCollection,
   rosterCards,
+  ownedCount,
   addLog,
   startSeries,
   attemptNumber,
@@ -1528,13 +1529,21 @@ export const battleResultScreen = {
 // the upgrade (or trap) is a straight side-read.
 function claimComparisonHtml(app, selected) {
   if (!selected) return "";
-  const mine = rosterCards(app.save).filter((card) =>
+  const save = app.save;
+  const mine = rosterCards(save).filter((card) =>
     selected.kind === "pitcher" ? card.role === selected.role : card.kind === "hitter" && positionsOverlap(card, selected)
   );
   const slot = selected.kind === "pitcher" ? selected.role : selected.position;
-  return `${cardPanelHtml(selected)}
+  // The count you already hold, on the card. Claiming a man you already own is a
+  // real choice — a second copy is a spare to sell, or a hedge — but it must be a
+  // choice you MAKE and not one you discover afterwards. The card says x1, the way
+  // it does everywhere else you are asked to think about a card.
+  const owned = (card) => ownedCount(save, card.id) || null;
+  return `${cardPanelHtml(selected, { count: owned(selected) })}
     <p class="gq-dim">YOURS AT ${escapeHtml(slot)}:</p>
-    ${mine.length ? mine.map((card) => cardPanelHtml(card)).join("") : `<p class="gq-dim">NOBODY. OPEN SLOT.</p>`}`;
+    ${mine.length
+      ? mine.map((card) => cardPanelHtml(card, { count: owned(card) })).join("")
+      : `<p class="gq-dim">NOBODY. OPEN SLOT.</p>`}`;
 }
 
 // What the beaten trainer actually puts on the table: the whole roster, every
@@ -1553,7 +1562,13 @@ export const claimCardScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>WINNER'S PICK</span><span>${escapeHtml(trainer.name)}</span></div>
       <div class="gq-body"><div class="gq-columns">
-        <div class="gq-frame gq-scroll">${menuHtml(roster.map((card) => ({ html: cardLine(card) })), index)}</div>
+        <div class="gq-frame gq-scroll">${menuHtml(
+          roster.map((card) => {
+            const held = ownedCount(app.save, card.id);
+            return { html: `${cardLine(card)}${held ? ` <span class="gq-dim">*x${held}</span>` : ""}` };
+          }),
+          index
+        )}</div>
         <div class="gq-card-side">${claimComparisonHtml(app, selected)}</div>
       </div></div>
       <div class="gq-textbox"><p>Take ONE card from their roster — your own ${selected ? escapeHtml(selected.kind === "pitcher" ? selected.role : selected.position) : ""} cards show below theirs. Z claims it. X walks away empty-handed.</p></div>
