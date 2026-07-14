@@ -3020,27 +3020,60 @@ test("high-leverage plate appearances pause on the d20 before revealing", async 
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "drama-seed" });
   const state = battle.state;
 
-  assert.equal(isDramaticMoment(state), false, "top 1, nobody on: no drama");
+  // Which moments earn the slow dice is not a rule anybody wrote down any more:
+  // it is Greg Stoll's leverage index, off the same Retrosheet history the win
+  // expectancy comes from. 1.0 is an average plate appearance; the dice come out
+  // at two and a half.
+  const runners = () => [
+    { id: "r1", name: "A", speed: 10 },
+    { id: "r2", name: "B", speed: 10 },
+    { id: "r3", name: "C", speed: 10 }
+  ];
+
+  assert.equal(isDramaticMoment(state), false, "top 1, nobody on (0.86): no drama");
   state.outs = 2;
-  state.bases = [{ id: "r1", name: "A", speed: 10 }, { id: "r2", name: "B", speed: 10 }, { id: "r3", name: "C", speed: 10 }];
-  assert.equal(isDramaticMoment(state), true, "two outs, bases loaded: drama");
+  state.bases = runners();
+  assert.equal(isDramaticMoment(state), true, "two outs, bases loaded in a tie (3.06): drama");
+
+  // The old rules called every ninth-inning plate appearance dramatic. Nobody on
+  // and nobody out in a tied ninth is a real spot — but it is a 2.04, and the
+  // game should save its breath for what comes after somebody reaches.
   state.bases = [null, null, null];
   state.outs = 0;
   state.inning = 9;
-  state.score = { away: 1, home: 2 };
-  assert.equal(isDramaticMoment(state), true, "trailing by one in the 9th: drama");
   state.score = { away: 2, home: 2 };
-  assert.equal(isDramaticMoment(state), true, "tied in the 9th: drama");
-  state.score = { away: 9, home: 1 };
-  assert.equal(isDramaticMoment(state), false, "a 9th-inning blowout stays quick");
-  // The batting team piling onto a losing arm is mop-up, not drama...
-  state.score = { away: 3, home: 2 };
-  assert.equal(isDramaticMoment(state), false, "the pitching team losing in the 9th: no spotlight");
-  // ...unless the bases are loaded under him.
-  state.bases = [{ id: "r1", name: "A", speed: 10 }, { id: "r2", name: "B", speed: 10 }, { id: "r3", name: "C", speed: 10 }];
-  assert.equal(isDramaticMoment(state), true, "bases loaded brings the lights back");
-  state.bases = [null, null, null];
+  assert.equal(isDramaticMoment(state), false, "tied 9th, nobody on (2.04): not yet");
+  state.bases = [runners()[0], null, null];
+  assert.equal(isDramaticMoment(state), true, "tied 9th, a man aboard (2.8+): now");
 
+  state.bases = [null, null, null];
+  state.score = { away: 9, home: 1 };
+  assert.equal(isDramaticMoment(state), false, "a 9th-inning blowout (0.00) stays quick");
+
+  // The old rules said a batting team already ahead was mop-up UNLESS the bases
+  // were loaded, and then the lights came back on. The table says they were right
+  // about the first part and wrong about the second: the visitors padding a lead
+  // in the top of the ninth is a 0.46, and loading the bases under that arm only
+  // takes it to 1.44 — because runs that pad a lead barely move the win
+  // probability. The pressure in that ballgame is in the BOTTOM half, and that is
+  // where the game now spends its dice.
+  state.score = { away: 3, home: 2 };
+  assert.equal(isDramaticMoment(state), false, "visitors up one, nobody on (0.46): mop-up");
+  state.bases = runners();
+  state.outs = 2;
+  assert.equal(isDramaticMoment(state), false, "and up one with the bases loaded (1.44) is still padding");
+
+  // The rules used to miss this one entirely: it is not the ninth, and the bases
+  // are not loaded, so nothing about it was dramatic. It is a 3.53.
+  state.inning = 4;
+  state.bases = [null, runners()[1], runners()[2]];
+  state.outs = 2;
+  state.score = { away: 1, home: 2 };
+  assert.equal(isDramaticMoment(state), true, "down one, second and third, two out in the 4th: drama");
+
+  state.inning = 9;
+  state.outs = 0;
+  state.bases = [runners()[0], null, null];
   state.score = { away: 1, home: 2 };
   const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "menu", menuIndex: 0, lines: [] }, go(name, data) { this.screen = { name, ...data }; }, rerender() {} };
   const eventsBefore = battle.events.length;

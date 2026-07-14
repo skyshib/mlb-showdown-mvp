@@ -13,7 +13,8 @@ import {
   attemptBunt,
   intentionalWalk,
   pendingAdvanceDecision,
-  resolveAdvanceDecision
+  resolveAdvanceDecision,
+  stateLeverage
 } from "../game.js?v=20260713-x";
 import { buildTeam } from "../draft.js?v=20260713-x";
 import { createRng } from "../rng.js?v=20260713-x";
@@ -253,28 +254,40 @@ function pitchingChangeEvent(battle, side, pitcher) {
 
 // Is this a moment worth stopping the fast-forward for? Late innings always;
 // earlier, a runner in scoring position in a close game.
+// ---- Leverage ----------------------------------------------------------------
+//
+// What a moment is WORTH, from MLB history rather than from a rule somebody
+// wrote down: src/data/leverage.js is Greg Stoll's leverage index, the same
+// Retrosheet dataset the win expectancy comes from. 1.0 is an average plate
+// appearance; 3.06 is the bases loaded with two out in a tie; 10.4 is bases
+// loaded, two out, down one in the bottom of the ninth.
+//
+// The rules these thresholds replaced were guesses at the same quantity, and
+// they were wrong in both directions: they called EVERY eighth-inning plate
+// appearance a leverage moment (a 9-run game in the 8th is not a leverage
+// moment) and they refused to call a one-run ninth dramatic if the batting team
+// happened to be the one ahead (a closer protecting a one-run lead is the most
+// leveraged thing in baseball). The table knows the difference. Nothing else in
+// the game had to change: the moments simply became the real ones.
+
+// Fast-forward hands the game back when it starts to matter — twice an average
+// plate appearance. About one in fourteen.
+export const LEVERAGE_STOP = 2;
+
+// And the d20 comes out slow when it REALLY matters: two and a half times an
+// average moment, which lands on about one plate appearance in thirty — the
+// same rate the old hand-written rules fired at, spent on better moments.
+export const DRAMA_LEVERAGE = 2.5;
+
 export function isLeverageMoment(state) {
-  if (state.inning >= 8) return true;
-  const diff = Math.abs(state.score.home - state.score.away);
-  const risp = Boolean(state.bases[1] || state.bases[2]);
-  return risp && diff <= 2;
+  return stateLeverage(state) >= LEVERAGE_STOP;
 }
 
-// The moments that earn the slow d20: two outs with the bases loaded, any
-// time; or the 9th inning onward while the game hangs — the side at the
-// plate tied or clawing back within two. A batting team already AHEAD is
-// mop-up for the losing arm, not drama, unless the bases are loaded under
-// him. Checked BEFORE the plate appearance resolves — the drama is in the
-// wind-up.
+// The moments that earn the slow d20. Checked BEFORE the plate appearance
+// resolves — the drama is in the wind-up, which is exactly what the leverage
+// index measures: not what happened, but what COULD.
 export function isDramaticMoment(state) {
-  const basesLoaded = Boolean(state.bases[0] && state.bases[1] && state.bases[2]);
-  if (state.outs === 2 && basesLoaded) return true;
-  if (state.inning < 9) return false;
-  const battingSide = state.half === "top" ? "away" : "home";
-  const pitchingSide = battingSide === "away" ? "home" : "away";
-  const lead = state.score[battingSide] - state.score[pitchingSide];
-  if (lead > 0) return basesLoaded;
-  return lead >= -2;
+  return stateLeverage(state) >= DRAMA_LEVERAGE;
 }
 
 // Auto-resolve on engine autopilot (decision matrix steals and advances,

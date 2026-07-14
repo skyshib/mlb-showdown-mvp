@@ -384,6 +384,11 @@ function fieldingStages(event) {
     stages.push({
       label: "THE PIVOT",
       roll: dp.roll,
+      // LATE: a glove only has something to do if the ball is in play, so a die
+      // that says THE PIVOT sitting on the screen while the swing is still
+      // tumbling has already told you the swing was a ball in play. It is not
+      // drawn until it is thrown.
+      late: true,
       caption: dp.batterOut ? "TURNED IT — TWO DOWN" : "ONLY ONE — HE BEAT THE THROW"
     });
   }
@@ -403,6 +408,9 @@ function fieldingStages(event) {
     stages.push({
       label: `THROW TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}`,
       roll: attempt.roll,
+      // Late, and for the same reason: THROW TO HOME on the screen is a hit,
+      // announced before the bat has even been swung.
+      late: true,
       caption: `${escapeHtml(shortName(stripCardYear(attempt.runner ?? "")))} ${attempt.safe ? "IS SAFE!" : "IS OUT!"}`
     });
   }
@@ -469,7 +477,7 @@ function renderDrama(app, trainer) {
     <div class="gq-body gq-center gq-drama">
       <p>THE CROWD IS ON ITS FEET...</p>
       <div class="gq-die-row">${stages
-        .map((stage, index) => `<div class="gq-die-stage">
+        .map((stage, index) => `<div class="gq-die-stage${stage.late ? " gq-die-unthrown" : ""}" data-die-stage="${index}">
           <div class="gq-die">${d20FaceHtml()}<span class="gq-die-roll" data-die="${index}">&nbsp;</span></div>
           <p class="gq-dim">${escapeHtml(stage.label)}</p>
         </div>`)
@@ -510,6 +518,9 @@ function mountDrama(app) {
   const spin = (index) => {
     const die = document.querySelector(`[data-die="${index}"]`);
     if (!die || !app.screen.drama) return stopDramaTimer();
+    // A die that has not been thrown is not on the table. The gloves' dice
+    // appear at the moment they are thrown, and not one beat sooner.
+    document.querySelector(`[data-die-stage="${index}"]`)?.classList.remove("gq-die-unthrown");
     let ticks = 0;
     dramaTimer = setInterval(() => {
       if (!die.isConnected || !app.screen.drama) return stopDramaTimer();
@@ -992,7 +1003,7 @@ function lineScoreHtml(battle, series = null) {
   // a fact ABOUT this board (which game of the series it is, and where the series
   // stands), so it belongs on the board and not floating beside the bases.
   const corner = series && series.bestOf > 1
-    ? `G${series.nextGame} <span class="gq-dim">(${series.wins}-${series.losses})</span>`
+    ? `GAME ${series.nextGame} (${series.wins}-${series.losses})`
     : "";
   return `<table class="gq-linescore" aria-label="line score">
     <tr class="gq-line-head">

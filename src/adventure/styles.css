@@ -320,14 +320,20 @@ h1.gq-logo {
 /* The game number lives in the board's corner cell now — above the clubs, beside
    the frames — so it reads as a fact about this board rather than a caption
    floating beside the bases. It is left-aligned with the club names under it. */
-/* Matched on the cell, not the class alone: `.gq-linescore th` centres every
-   cell at a higher specificity, and a bare `.gq-line-series` asking for left
-   would be quietly thrown away — the same trap the live frame's border fell into. */
-.gq-linescore th.gq-line-series {
-  font-size: 2.2cqw;
+/* The game number reads as part of the board — the table's own ink, bold, and
+   centred over the club names like the heading it is.
+
+   :first-child is on the selector because it has to be: `.gq-linescore tr
+   th:first-child` left-aligns the club column at (0,2,2), and a pseudo-class
+   counts class-level — so a rule without one loses to it however many classes it
+   carries. This is the third time the line score's specificity has bitten. */
+.gq-linescore tr th.gq-line-series:first-child {
+  font-size: 2.4cqw;
+  font-weight: 700;
   white-space: nowrap;
-  text-align: left;
+  text-align: center;
 }
+.gq-battle-topbar .gq-line-head th.gq-line-series { color: var(--gq-lead-ink); }
 
 /* On the ink the bases invert: the paper tone draws them, not the navy. The
    margin is on all four sides — the 45deg turn throws the corners out
@@ -463,7 +469,7 @@ h1.gq-logo {
 /* The club's name, not a caption: it gets room, and gives up its tail last. */
 .gq-linescore tr th:first-child {
   text-align: left;
-  max-width: 30cqw;
+  max-width: 34cqw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -910,6 +916,12 @@ h1.gq-logo {
   align-items: center;
   gap: 1.2cqw;
 }
+
+/* Not thrown yet, so not on the table. display:none and not visibility:hidden —
+   an empty gap where a die is about to be is the same spoiler as the die. The
+   row is still sized for the full set (the :has rules below count children,
+   hidden or not), so nothing jumps when the glove's die does arrive. */
+.gq-die-unthrown { display: none; }
 
 /* A twenty-sided die, not a tile. Head-on an icosahedron is a hexagon with one
    triangle facing you, and the roll is thrown on that triangle — so the number

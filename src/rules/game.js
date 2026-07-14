@@ -1,6 +1,7 @@
 import { RESULTS, resolveChart } from "./cards.js?v=20260713-x";
 import { createRng } from "./rng.js?v=20260713-x";
 import { winExpectancy } from "../data/winExpectancy.js";
+import { leverageIndex } from "../data/leverage.js";
 
 // Go/no-go floors for taking a base, by outs and destination. Second and
 // home loosen as outs mount (with two gone the runner is off on contact and
@@ -17,6 +18,29 @@ const ADVANCE_DECISION_MATRIX = {
 // table instead of replacing it with their own thresholds.
 export function advanceDecisionMinimum(outs, destination) {
   return ADVANCE_DECISION_MATRIX[outs]?.[destination] ?? 1;
+}
+
+// How much this plate appearance MATTERS, looked up in the same MLB history the
+// win expectancy comes from: the swing the next play can make in the game's
+// outcome, measured against the swing an average plate appearance makes.
+//
+// 1.0 is an average moment. 0.86 is the first pitch of a ball game. Bases loaded
+// with two out in a tie is 3.06, and the same with your side down one in the
+// bottom of the ninth is 10.4, which is about as much as a single plate
+// appearance has ever been worth. A blowout is 0.
+//
+// This is a REAL number about a real game, and it replaces the hand-written
+// rules that used to guess at the same thing.
+export function stateLeverage(state) {
+  const battingSide = state.half === "top" ? "away" : "home";
+  const fieldingSide = battingSide === "away" ? "home" : "away";
+  return leverageIndex({
+    half: state.half,
+    inning: state.inning,
+    outs: Math.min(state.outs, 2),
+    bases: state.bases,
+    diff: state.score[battingSide] - state.score[fieldingSide]
+  });
 }
 
 // Probability that the home team wins from the given state, looked up in
