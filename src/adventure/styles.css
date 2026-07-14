@@ -350,15 +350,26 @@ h1.gq-logo {
    flex:none and the board's own flex:1 keep the frames where they were. It sits
    at the far right of the banner because that is where you glance when you want
    a number and not a picture. */
-.gq-board-meta {
+/* The corner: WP and LI stacked over the diamond and the outs, so the two numbers
+   cost the board no width at all — only the height of one small line, which the
+   bases had going spare. As a third column they were eating frames off the line
+   score, and a frame the board cannot hang is an inning you cannot see. */
+.gq-board-corner {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
   flex: none;
-  gap: 0.2cqw;
-  font-size: 2cqw;
-  line-height: 1.15;
+  gap: 0.4cqw;
+}
+.gq-board-meta {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 1.2cqw;
+  font-size: 1.9cqw;
+  line-height: 1;
   opacity: 0.75;
   white-space: nowrap;
 }
@@ -1455,3 +1466,40 @@ html.club .gq-exit:focus-visible {
 .gq-board-row { padding: 0.2cqw 0.6cqw; cursor: pointer; }
 .gq-board-row.gq-cursor { background: var(--gq-lead); color: var(--gq-lead-ink); }
 .gq-board-row.gq-cursor .gq-dim { color: var(--gb-light); }
+
+/* ---- The box score, as a table ------------------------------------------------
+
+   A box score is a table because the questions you ask of it are columnar: who
+   drove in the runs, who struck out four times, which arm gave up the eight hits.
+   The rows are still MENU rows — the cursor walks them and hovering one floats the
+   man's card — so the grid lives inside the row rather than replacing it, and the
+   section header wears the same grid plus a caret-sized spacer so the labels sit
+   over their own numbers instead of one arrow to the left of them.
+
+   The name takes what is left (minmax(0,1fr), so a long name ellipsises rather
+   than shoving the columns off the screen) and every stat gets the same narrow,
+   right-aligned cell — which is what lets the eye run straight down it. */
+.gq-menu-text:has(.gq-box-row) { flex: 1; }
+/* The columns are sized in CH, off the row's own font, because what has to fit is
+   TEXT: the widest thing in a column is not the number (2 digits) but the LABEL
+   over it — "H-AB" is four characters and "+100%" is five. Sized for the digits,
+   the header ran its labels into each other: WPAH-AHR BB. */
+.gq-box-row { display: grid; align-items: baseline; gap: 0.4ch; width: 100%; font-size: 2.5cqw; }
+/* Each column is only as wide as the widest thing IN it — which is the label, not
+   the number. WPA holds "+100%", H-AB holds "10-10"; the rest hold two digits and
+   a three-letter label. Sized as one uniform column they were fat enough for the
+   widest of them and the NAMES paid for it: S.ALOMA…, S.PODSE…. A box score whose
+   men cannot be told apart is not a box score. */
+.gq-box-bats { grid-template-columns: minmax(0, 1fr) 5.4ch 5.2ch repeat(7, 3.4ch); }
+.gq-box-arms { grid-template-columns: minmax(0, 1fr) 5.4ch 3.4ch 3.8ch repeat(4, 3.4ch); }
+.gq-box-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gq-box-cell { text-align: right; white-space: nowrap; }
+/* A zero is noise; the eye is hunting for what happened. */
+.gq-box-nil { color: var(--gb-dark); opacity: 0.5; }
+.gq-menu li.gq-cursor .gq-box-nil { color: var(--gb-light); }
+
+/* The header is an <h3> the section renderer hands us, so it has to be told to
+   lay out like a row rather than like a heading. */
+.gq-box-head { display: flex; gap: 0.8cqw; width: 100%; padding: 0 0.8cqw; }
+.gq-box-head .gq-box-cell,
+.gq-box-head .gq-box-name { color: var(--gb-dark); }

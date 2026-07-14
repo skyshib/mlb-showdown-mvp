@@ -1,8 +1,8 @@
-import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260714-e";
-import { trainerById } from "../region.js?v=20260714-e";
-import { cardById } from "../packs.js?v=20260714-e";
-import { seasonHitters, seasonPitchers, seasonTeam, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260714-e";
-import { expandGame } from "../gameLog.js?v=20260714-e";
+import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260714-f";
+import { trainerById } from "../region.js?v=20260714-f";
+import { cardById } from "../packs.js?v=20260714-f";
+import { seasonHitters, seasonPitchers, seasonTeam, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260714-f";
+import { expandGame } from "../gameLog.js?v=20260714-f";
 
 // ---- Formatting --------------------------------------------------------------
 
@@ -183,20 +183,89 @@ function gameStatRows(app) {
   for (const { box, club } of sides) {
     for (const line of box.hitters) {
       rows.push({
-        section: `${escapeHtml(club.toUpperCase())} &middot; BATS`,
+        section: boxHead(`${club.toUpperCase()} &middot; BATS`, HITTER_COLUMNS, "gq-box-bats"),
         id: line.id,
-        html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${escapeHtml(hitterGameLine(line))}</span>`
+        html: boxRow(hitterCells(line), HITTER_COLUMNS, "gq-box-bats", line.name)
       });
     }
     for (const line of box.pitchers) {
       rows.push({
-        section: `${escapeHtml(club.toUpperCase())} &middot; ARMS`,
+        section: boxHead(`${club.toUpperCase()} &middot; ARMS`, PITCHER_COLUMNS, "gq-box-arms"),
         id: line.id,
-        html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${escapeHtml(pitcherGameLine(line))}</span>`
+        html: boxRow(pitcherCells(line), PITCHER_COLUMNS, "gq-box-arms", line.name)
       });
     }
   }
   return rows;
+}
+
+// ---- The box score, as a box score --------------------------------------------
+//
+// It used to be a sentence — "2-4, HR, 3 RBI, 1 BB" — one per man, and a sentence
+// cannot be READ DOWN. A box score is a table because the questions you ask of it
+// are columnar: who drove in the runs, who struck out four times, which arm gave
+// up the eight hits. You answer those by running your eye down a column, and you
+// cannot run your eye down prose.
+//
+// The columns are the ones a scorebook keeps, plus WPA — which is not on any
+// scorebook, and is the most useful number here, because it is the only one that
+// says whether any of it MATTERED. Three hits in a blowout and a single in the
+// ninth are not the same afternoon.
+//
+// H-AB rather than AB and H apart: "2-4" is how a line is read aloud, and it
+// costs one column instead of two on a screen that has none to spare.
+const HITTER_COLUMNS = ["WPA", "H-AB", "HR", "BB", "K", "RBI", "R", "SB", "CS"];
+// BF before IP, the way a scorebook reads it: how many men he had to get, and
+// then how many he got. IP is the OUTS he recorded; BF is the traffic he faced,
+// and the gap between them is the whole story of a bad afternoon.
+const PITCHER_COLUMNS = ["WPA", "BF", "IP", "H", "R", "K", "BB"];
+
+// A zero is noise. The eye is hunting for the numbers that HAPPENED, and a column
+// of dim dots lets it skip everything else — which is the entire reason a real
+// box score prints a dash instead of a nought.
+function num(value) {
+  const number = Number(value) || 0;
+  return number === 0 ? `<span class="gq-box-nil">&middot;</span>` : String(number);
+}
+
+function hitterCells(line) {
+  return [
+    wpaHtml(line.wpa),
+    `${Number(line.h) || 0}-${Number(line.ab) || 0}`,
+    num(line.hr),
+    num(line.bb),
+    num(line.so),
+    num(line.rbi),
+    num(line.r),
+    num(line.sb),
+    num(line.cs)
+  ];
+}
+
+function pitcherCells(line) {
+  return [
+    wpaHtml(line.wpa),
+    num(line.bf),
+    ipText(Number(line.outs) || 0),
+    num(line.h),
+    num(line.r),
+    num(line.so),
+    num(line.bb)
+  ];
+}
+
+// The header carries the same grid as the rows, plus a caret-sized spacer, or the
+// columns and their labels drift apart by exactly one arrow.
+function boxHead(title, columns, kind) {
+  return `<span class="gq-box-head"><span class="gq-caret">&nbsp;</span><span class="gq-box-row ${kind}"><span class="gq-box-name">${title}</span>${
+    columns.map((column) => `<span class="gq-box-cell">${column}</span>`).join("")
+  }</span></span>`;
+}
+
+function boxRow(cells, columns, kind, name) {
+  return `<span class="gq-box-row ${kind}"><span class="gq-box-name">${escapeHtml(shortName(name))}</span>${
+    cells.map((cell) => `<span class="gq-box-cell">${cell}</span>`).join("")
+  }</span>`;
 }
 
 export function sectionedMenu(rows, index) {

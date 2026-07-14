@@ -1,11 +1,11 @@
 import { generatePlayerPool } from "./playerGeneration.js";
-import { createRng } from "../rules/rng.js?v=20260714-e";
+import { createRng } from "../rules/rng.js?v=20260714-f";
 import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
-import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260714-e";
-import { poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260714-e";
-import { authenticPoints } from "../rules/pricing.js?v=20260714-e";
+import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260714-f";
+import { poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260714-f";
+import { authenticPoints } from "../rules/pricing.js?v=20260714-f";
 import { PRICE_MODEL } from "./priceModel.js";
 
 // The card universes — the leagues both games are played in. A universe is a

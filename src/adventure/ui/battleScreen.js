@@ -11,18 +11,18 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260714-e";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-e";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260714-e";
-import { longestHitStreak } from "../records.js?v=20260714-e";
-import { compactGame } from "../gameLog.js?v=20260714-e";
-import { cardById } from "../packs.js?v=20260714-e";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-e";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-e";
-import { gameFeats } from "../feats.js?v=20260714-e";
-import { buildNpcTeam } from "../npcTeams.js?v=20260714-e";
-import { positionsOverlap } from "../../rules/cards.js?v=20260714-e";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-e";
+} from "./helpers.js?v=20260714-f";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-f";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260714-f";
+import { longestHitStreak } from "../records.js?v=20260714-f";
+import { compactGame } from "../gameLog.js?v=20260714-f";
+import { cardById } from "../packs.js?v=20260714-f";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-f";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-f";
+import { gameFeats } from "../feats.js?v=20260714-f";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-f";
+import { positionsOverlap } from "../../rules/cards.js?v=20260714-f";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-f";
 import {
   persistSave,
   deriveSeed,
@@ -44,7 +44,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260714-e";
+} from "../state.js?v=20260714-f";
 import {
   createBattle,
   battlePhase,
@@ -62,7 +62,7 @@ import {
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260714-e";
+} from "../../rules/battle/controller.js?v=20260714-f";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -1170,12 +1170,19 @@ function currentMatchup(battle) {
 // the board has both clubs on it, which is what a board is for.
 function renderScoreboard(battle, trainer, series) {
   const state = battle.state;
+  // WP and LI sit ABOVE the outs rather than beside them. As a third column they
+  // were taking horizontal room off the board — and the board is the one thing on
+  // this screen that cannot be squeezed, because a frame it cannot hang is an
+  // inning you cannot see. Stacked in the corner they cost nothing across, only
+  // the height of two small lines, which the diamond had spare.
   return `<div class="gq-topbar gq-battle-topbar">
     ${lineScoreHtml(battle, series)}
-    <span class="gq-board-bases">
-      ${diamondHtml(state)}${outsHtml(state.outs)}
+    <span class="gq-board-corner">
+      ${boardMetaHtml(battle)}
+      <span class="gq-board-bases">
+        ${diamondHtml(state)}${outsHtml(state.outs)}
+      </span>
     </span>
-    ${boardMetaHtml(battle)}
   </div>`;
 }
 
