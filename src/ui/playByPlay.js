@@ -1,4 +1,4 @@
-import { shortName, stripCardYear } from "./cardFace.js?v=20260714-h";
+import { shortName, stripCardYear } from "./cardFace.js?v=20260714-i";
 
 // The booth: one engine event becomes the lines a broadcaster would say.
 // Shared by both games — the adventure prints these in its text box, the

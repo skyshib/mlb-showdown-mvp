@@ -1,8 +1,8 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-h";
-import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260714-h";
-import { ensureAlmanac } from "../state.js?v=20260714-h";
-import { expandGame } from "../gameLog.js?v=20260714-h";
-import { fetchGames } from "../gameArchive.js?v=20260714-h";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-i";
+import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260714-i";
+import { ensureAlmanac } from "../state.js?v=20260714-i";
+import { expandGame } from "../gameLog.js?v=20260714-i";
+import { fetchGames } from "../gameArchive.js?v=20260714-i";
 import {
   RECORD_PAGES,
   recordsOnPage,
@@ -10,18 +10,23 @@ import {
   cachedGlobalRecords,
   fetchGlobalRecords,
   submitRecords
-} from "../records.js?v=20260714-h";
+} from "../records.js?v=20260714-i";
 
 // ---- World records ----------------------------------------------------------
 //
-// The league's book. One row per record, YOUR mark on the same line, and the top
-// five behind it when you stop on one — so the screen answers the two questions
-// you actually have, in the order you have them: what is the number, and how far
-// off it am I?
+// The league's book. One row per record — the number and the man holding it —
+// and the top five behind it when you stop on one.
 //
-// A record you have never set reads as a dash rather than a zero. Nought runs in
-// a game is a thing that can happen; never having played a game is not the same
-// thing, and a leaderboard that cannot tell them apart is lying.
+// It does not keep score of YOU. It did: every row carried where you came and
+// what you had done, and the board pinned a little arrow on your line in case you
+// had not noticed your own name. A record book is a list of who did it, and the
+// reader can be trusted to look for himself. Your mark is folded into the board
+// (see leaderboard) exactly like everyone else's — if it is good enough, your
+// name is simply on a line, and if it is not, it is not.
+//
+// A record nobody has set reads UNSET rather than nought. Nought runs in a game
+// is a thing that can happen; never having played one is not the same thing, and
+// a leaderboard that cannot tell them apart is lying.
 //
 // The book has two pages and &#9664;/&#9654; turns them: the MANAGER records, which are
 // afternoons you had, and the PLAYER records, which are campaigns your men had.
@@ -70,17 +75,16 @@ function currentPage(app) {
 }
 
 // The rows: every record on this page, whether or not anybody has set it.
+//
+// The number and the man who holds it, and nothing else. The book does not chase
+// you round it telling you where you came — your mark is folded into the board
+// like everyone else's (see leaderboard), and if it is any good your name is on
+// the line. That is what a record book is: a list of who did it. You can read.
 function recordRows(app) {
   const globals = cachedGlobalRecords();
   return recordsOnPage(currentPage(app).key).map((record) => {
     const board = leaderboard(record, globals, app.save);
     const holder = board.top[0] ?? null;
-    const mine = board.you ?? null;
-    const standing = !mine
-      ? `<span class="gq-dim">&mdash;</span>`
-      : board.yourRank === 1
-        ? `<b>YOURS</b>`
-        : `<span class="gq-dim">YOU ${valueText(record, mine.value)}${board.yourRank ? ` &middot; ${ordinal(board.yourRank)}` : ""}</span>`;
     return {
       section: record.group,
       record,
@@ -89,22 +93,14 @@ function recordRows(app) {
         holder
           ? `<b>${valueText(record, holder.value)}</b> <span class="gq-dim">${holderText(record, holder)}</span>`
           : `<span class="gq-dim">UNSET</span>`
-      } ${standing}`
+      }`
     };
   });
 }
 
-function ordinal(place) {
-  const suffix = place % 100 >= 11 && place % 100 <= 13 ? "TH"
-    : place % 10 === 1 ? "ST"
-      : place % 10 === 2 ? "ND"
-        : place % 10 === 3 ? "RD"
-          : "TH";
-  return `${place}${suffix}`;
-}
-
-// The top five for the record under the cursor, with you marked wherever you
-// stand in it — and appended below if you are not in it at all.
+// The top five for the record under the cursor. Just the five: the board does not
+// annotate itself with where YOU came, because the five lines have names on them
+// and one of those names may well be yours.
 //
 // It is a MENU when you step into it (Z), because every line of it is an
 // afternoon somebody had, and an afternoon you cannot open is just a number with
@@ -122,18 +118,14 @@ function boardHtml(row, app, active) {
   const cursor = clampIndex(app.screen.boardIndex ?? 0, board.top.length);
   const lines = board.top.map((entry, place) => {
     const text = `${place + 1}. <b>${valueText(record, entry.value)}</b> ${holderText(record, entry)}`;
-    if (!active) return `<p class="${entry.you ? "" : "gq-dim"}">${text}</p>`;
+    if (!active) return `<p class="gq-dim">${text}</p>`;
     return `<p class="gq-board-row${place === cursor ? " gq-cursor" : ""}" data-menu-index="${place}">${
       place === cursor ? "&#9654; " : "&nbsp;&nbsp;"
     }${text}</p>`;
   }).join("");
-  const below = board.you && !board.top.some((entry) => entry.you)
-    ? `<p>${board.yourRank ? `${board.yourRank}.` : ""} <b>${valueText(record, board.you.value)}</b> ${holderText(record, board.you)} &#9664; YOU</p>`
-    : "";
-  const yourNone = !board.you ? `<p class="gq-dim">YOU HAVE NOT SET THIS ONE.</p>` : "";
   return `<div class="gq-frame">
     <h3>${escapeHtml(record.title)}</h3>
-    ${lines}${below}${yourNone}
+    ${lines}
   </div>`;
 }
 

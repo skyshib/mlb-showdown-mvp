@@ -1,6 +1,6 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260714-h";
-import { resumeBattle } from "./battleScreen.js?v=20260714-h";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260714-h";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260714-i";
+import { resumeBattle } from "./battleScreen.js?v=20260714-i";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260714-i";
 import {
   createSave,
   persistSave,
@@ -12,7 +12,7 @@ import {
   exportSaveCode,
   importSaveCode,
   saveFileName
-} from "../state.js?v=20260714-h";
+} from "../state.js?v=20260714-i";
 
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],
@@ -231,12 +231,9 @@ export const nameEntryScreen = {
     </div>`;
   },
   mounted() {
-    const input = document.getElementById("gq-name");
-    if (input) {
-      input.value = "SKY";
-      input.focus();
-      input.select();
-    }
+    // Empty, and waiting. A name typed over a name somebody else left in the box
+    // is not the same gesture as a name typed into nothing.
+    document.getElementById("gq-name")?.focus();
   },
   key(app, key) {
     if (key === "a") {

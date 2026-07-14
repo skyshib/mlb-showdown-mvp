@@ -1,5 +1,5 @@
-import { createRng } from "./rng.js?v=20260714-h";
-import { RESULTS, chartSpan } from "./cards.js?v=20260714-h";
+import { createRng } from "./rng.js?v=20260714-i";
+import { RESULTS, chartSpan } from "./cards.js?v=20260714-i";
 
 const HITTER_BASE_WEIGHTS = {
   onBase: 20,
