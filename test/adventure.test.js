@@ -2044,6 +2044,61 @@ test("the play-by-play opens with the two dice that decided the at-bat", async (
   assert.ok(!advance.some((line) => line.startsWith("PITCH")), "no pitch line where there was no pitch");
 });
 
+test("the finished game's log carries the win-probability line, dotted at the swings", async () => {
+  const { gameStatsScreen, winProbChartHtml } = await import("../src/adventure/ui/statsScreens.js");
+  const play = (over) => ({
+    inning: 1 + Math.floor(over / 2),
+    half: over % 2 === 0 ? "top" : "bottom",
+    batter: `Bat ${over}`,
+    pitcher: `Arm ${over}`,
+    result: "GB",
+    runs: 0,
+    outsBefore: 0,
+    basesBefore: [null, null, null],
+    scoreAfter: { away: 0, home: 0 },
+    wpa: 0.02,
+    wpAfter: 0.5
+  });
+  const events = [play(0), play(1), play(2), play(3)];
+  // Two plays that actually swung it, and one arm change, which has no odds of
+  // its own and no row on the line.
+  events[1] = { ...events[1], wpa: 0.22, wpAfter: 0.72, result: "HR" };
+  events[3] = { ...events[3], wpa: -0.31, wpAfter: 0.41, result: "SO" };
+  events.splice(2, 0, { type: "pitching-change", inning: 2, half: "top", team: "Them", pitcher: "Reliever" });
+
+  const chart = winProbChartHtml(events, "home", 0);
+  assert.match(chart, /gq-wp-chart/, "the line is drawn");
+  const swings = [...chart.matchAll(/gq-wp-swing/g)];
+  assert.equal(swings.length, 2, "a dot on each 10%+ swing, and only those");
+  assert.match(chart, /22% swing/, "the dot says how far it moved");
+
+  // Clicks carry the row in the LIST, not the position on the line: the arm
+  // change has no point of its own, so the two indexes are not the same number.
+  const rows = [...chart.matchAll(/data-log-index="(\d+)"/g)].map((match) => Number(match[1]));
+  assert.deepEqual(rows, [0, 1, 3, 4], "every point points at the play it came from");
+
+  // And the screen the player actually lands on after a game shows it.
+  const app = {
+    save: testSave(),
+    screen: {
+      name: "gameStats",
+      view: "log",
+      events,
+      playerSide: "home",
+      score: { home: 3, away: 1 },
+      trainerId: "scout-jojo",
+      index: 0,
+      next: { name: "map", data: {} }
+    }
+  };
+  const html = gameStatsScreen.render(app);
+  assert.match(html, /gq-wp-chart/, "the finished log has the line above it");
+  assert.match(html, /gq-wp-swing/, "with the swings dotted");
+  // A game with nothing to plot draws nothing rather than a degenerate line.
+  assert.equal(winProbChartHtml([events[0]], "home", 0), "", "one play is not a chart");
+  assert.equal(winProbChartHtml([], "home", 0), "");
+});
+
 test("the game log shows the dice and the running win probability", async () => {
   const { gameLogLine } = await import("../src/adventure/ui/statsScreens.js");
   const pa = {

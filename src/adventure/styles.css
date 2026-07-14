@@ -855,6 +855,14 @@ h1.gq-logo {
    flare is not for this: it is solved against the BANNER, and a club whose flare
    is dark (Baltimore's, on its orange) would lose the dot in the board. */
 .gq-wp-now { fill: var(--gq-lead); }
+/* The plays that swung it ten points or more. Hollow, in the flare, so they read
+   as marks ON the line rather than as a second line — and so the solid cursor
+   dot is never mistaken for one of them. */
+.gq-wp-swing {
+  fill: var(--gb-lightest);
+  stroke: var(--gq-flare);
+  stroke-width: 0.9;
+}
 .gq-wp-zone { cursor: pointer; }
 .gq-wp-zone:hover { fill: var(--gb-light); fill-opacity: 0.55; }
 

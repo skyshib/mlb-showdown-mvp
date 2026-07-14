@@ -11,7 +11,7 @@ import {
   cardPanelHtml,
   cardLine
 } from "./helpers.js?v=20260713-x";
-import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js?v=20260713-x";
+import { gameStars, gameLogLine, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260713-x";
 import { recordCompletedRun } from "../hallOfFame.js?v=20260713-x";
 import { cardById } from "../packs.js?v=20260713-x";
 import { buildBoxScore, inningsPlayed, pitcherStatus } from "../../rules/game.js?v=20260713-x";
@@ -329,67 +329,13 @@ function renderGameLog(app, battle, trainer) {
   const index = clampIndex(app.screen.logIndex ?? rows.length - 1, rows.length);
   return `<div class="gq-screen">
     <div class="gq-topbar"><span>GAME LOG &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
-    ${winProbChartHtml(battle, index)}
+    ${winProbChartHtml(battle.events, battle.playerSide, index)}
     <div class="gq-body"><div class="gq-frame gq-scroll">${
       rows.length
         ? menuHtml(rows, index, { className: "gq-log-list" })
         : `<p class="gq-dim">NO PLAYS YET. GO MAKE SOME HISTORY.</p>`
     }</div></div>
     <div class="gq-textbox"><p class="gq-dim">THE LINE IS YOUR WIN ODDS, PLAY BY PLAY &mdash; TOUCH IT TO JUMP TO THE PLAY. X to go back.</p></div>
-  </div>`;
-}
-
-// Your odds of winning, play by play, on the same four tones as everything
-// else. The cursor's play is marked on the line, so the chart and the list are
-// reading the same row; touching the chart moves the list (main.js maps a
-// click's data-log-index onto the cursor).
-function winProbChartHtml(battle, index) {
-  const events = battle.events.filter((event) => typeof event.wpAfter === "number");
-  if (events.length < 2) return "";
-  // The coordinate space scales UNIFORMLY (no preserveAspectRatio="none"): a
-  // separately-stretched x would stretch the half-inning labels with it.
-  const width = 200;
-  const plot = 26;
-  const height = 32;
-  const playerIsHome = battle.playerSide === "home";
-  // wpAfter is the HOME club's number. Read it from your dugout.
-  const mine = (wp) => (playerIsHome ? wp : 1 - wp);
-  const xFor = (at) => (at / (events.length - 1)) * width;
-  const yFor = (wp) => plot - mine(wp) * plot;
-  const half = (event) => `${event.half === "top" ? "T" : "B"}${event.inning}`;
-  const points = events.map((event, at) => `${xFor(at).toFixed(1)},${yFor(event.wpAfter).toFixed(1)}`);
-  // A coin flip is the line to beat, so it is drawn.
-  const parity = (plot / 2).toFixed(1);
-
-  // Where each half-inning starts, ruled and named. A game is read in halves,
-  // and without them the line is just a shape.
-  const marks = [];
-  let last = null;
-  events.forEach((event, at) => {
-    const label = half(event);
-    if (label === last) return;
-    last = label;
-    const x = xFor(at);
-    marks.push(`<line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${plot}" class="gq-wp-inning" />`);
-    marks.push(`<text x="${(x + 0.8).toFixed(1)}" y="${height - 1}" class="gq-wp-inning-label">${label}</text>`);
-  });
-
-  const cursorAt = Math.min(index, events.length - 1);
-  // Wide invisible bands, so a play can be hit without pixel-hunting.
-  const band = width / events.length;
-  const zones = events.map((event, at) =>
-    `<rect x="${(xFor(at) - band / 2).toFixed(1)}" y="0" width="${band.toFixed(2)}" height="${plot}"
-       fill="transparent" class="gq-wp-zone" data-log-index="${at}">
-       <title>${escapeHtml(`${half(event)} ${event.batter} ${event.result} — ${Math.round(mine(event.wpAfter) * 100)}%`)}</title>
-     </rect>`);
-  return `<div class="gq-wp-chart">
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="your win probability, play by play">
-      ${marks.join("")}
-      <line x1="0" y1="${parity}" x2="${width}" y2="${parity}" class="gq-wp-parity" />
-      <polyline points="${points.join(" ")}" class="gq-wp-line" fill="none" />
-      <circle cx="${xFor(cursorAt).toFixed(1)}" cy="${yFor(events[cursorAt].wpAfter).toFixed(1)}" r="1.6" class="gq-wp-now" />
-      ${zones.join("")}
-    </svg>
   </div>`;
 }
 

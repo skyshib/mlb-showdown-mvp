@@ -146,7 +146,10 @@ document.addEventListener("click", (event) => {
   // line snaps the list to that row (and rerender scrolls the cursor into view).
   const point = event.target.closest("[data-log-index]");
   if (point) {
-    app.screen.logIndex = Number(point.dataset.logIndex);
+    // The chart hangs over two different logs — the live one (logIndex) and the
+    // finished one on the box-score screen (index) — so it moves whichever
+    // cursor the screen it is standing on actually keeps.
+    app.screen[clickCursorField(app.screen)] = Number(point.dataset.logIndex);
     app.rerender();
     return;
   }
