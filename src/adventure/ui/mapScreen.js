@@ -289,11 +289,11 @@ export const trainerIntroScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>${escapeHtml(trainer.title)}</span><span>${formatTag(trainer)}</span></div>
       <div class="gq-body gq-center">
-        ${versusHtml(app, trainer)}
         <div class="gq-frame gq-title-frame${late}">
           <b>${escapeHtml(trainer.name)}</b><br>
           <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS $${rewardCoins(app.save, trainer)}${beaten ? " &middot; REMATCH RATE" : ""}</span>
         </div>
+        ${versusHtml(app, trainer)}
       </div>
       <div class="gq-textbox${late}">
         <p>${escapeHtml(dialog[Math.min(app.screen.page, dialog.length - 1)])}</p>
