@@ -11,18 +11,18 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260714-f";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-f";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260714-f";
-import { longestHitStreak } from "../records.js?v=20260714-f";
-import { compactGame } from "../gameLog.js?v=20260714-f";
-import { cardById } from "../packs.js?v=20260714-f";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-f";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-f";
-import { gameFeats } from "../feats.js?v=20260714-f";
-import { buildNpcTeam } from "../npcTeams.js?v=20260714-f";
-import { positionsOverlap } from "../../rules/cards.js?v=20260714-f";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-f";
+} from "./helpers.js?v=20260714-g";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-g";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260714-g";
+import { longestHitStreak } from "../records.js?v=20260714-g";
+import { compactGame } from "../gameLog.js?v=20260714-g";
+import { cardById } from "../packs.js?v=20260714-g";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-g";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-g";
+import { gameFeats } from "../feats.js?v=20260714-g";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-g";
+import { positionsOverlap } from "../../rules/cards.js?v=20260714-g";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-g";
 import {
   persistSave,
   deriveSeed,
@@ -44,7 +44,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260714-f";
+} from "../state.js?v=20260714-g";
 import {
   createBattle,
   battlePhase,
@@ -62,7 +62,7 @@ import {
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260714-f";
+} from "../../rules/battle/controller.js?v=20260714-g";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -1195,17 +1195,22 @@ function renderScoreboard(battle, trainer, series) {
 // were already being computed on every play to run the win-probability chart and
 // decide when the die comes out slow. They were just never shown.
 //
-// It lights up at the same line the slow die comes out at, so the corner tells
-// you WHY the game is suddenly taking its time.
+// The LI lights up at the same line the slow die comes out at — bold, and in the
+// club's flare, the color a run scoring is announced in. It is the one number on
+// the screen that is about to change everything, and the corner should say so
+// before the die does rather than after.
+//
+// Only the LI. The WP does not light: it is a level, always true, and a number
+// that is always shouting is a number nobody reads. The leverage is the alarm.
 function boardMetaHtml(battle) {
   const state = battle.state;
   const homeWp = winProbabilityHome(state);
   const mine = battle.playerSide === "home" ? homeWp : 1 - homeWp;
   const leverage = stateLeverage(state);
   const hot = leverage >= DRAMA_LEVERAGE;
-  return `<span class="gq-board-meta${hot ? " gq-board-meta-hot" : ""}">
-    <span><b>WP</b> ${Math.round(mine * 100)}%</span>
-    <span><b>LI</b> ${leverage.toFixed(1)}</span>
+  return `<span class="gq-board-meta">
+    <span><span class="gq-board-tag">WP</span> ${Math.round(mine * 100)}%</span>
+    <span class="gq-board-li${hot ? " gq-board-li-hot" : ""}"><span class="gq-board-tag">LI</span> ${leverage.toFixed(1)}</span>
   </span>`;
 }
 

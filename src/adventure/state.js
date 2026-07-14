@@ -1,4 +1,4 @@
-import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260714-f";
+import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260714-g";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point

@@ -1,6 +1,6 @@
-import { RESULTS, resolveChart } from "./cards.js?v=20260714-f";
-import { reliefDecision, lineupProfile } from "./pitching.js?v=20260714-f";
-import { createRng } from "./rng.js?v=20260714-f";
+import { RESULTS, resolveChart } from "./cards.js?v=20260714-g";
+import { reliefDecision, lineupProfile } from "./pitching.js?v=20260714-g";
+import { createRng } from "./rng.js?v=20260714-g";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 

@@ -14,7 +14,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260714-f";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260714-g";
 import {
   isMuted,
   playClockWarning,
@@ -26,10 +26,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260714-f";
-import { hydratePhotos } from "./ui/photos.js?v=20260714-f";
-import { createBattle } from "./rules/battle/controller.js?v=20260714-f";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260714-f";
+} from "./ui/sounds.js?v=20260714-g";
+import { hydratePhotos } from "./ui/photos.js?v=20260714-g";
+import { createBattle } from "./rules/battle/controller.js?v=20260714-g";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260714-g";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -108,7 +108,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260714-f";
+} from "./rules/draft.js?v=20260714-g";
 import {
   createRoom,
   fetchRoom,
@@ -117,7 +117,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260714-f";
+} from "./onlineClient.js?v=20260714-g";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -126,12 +126,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260714-f";
-import { computeAwards } from "./rules/awards.js?v=20260714-f";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260714-f";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260714-f";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260714-f";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260714-f";
+} from "./rules/batch.js?v=20260714-g";
+import { computeAwards } from "./rules/awards.js?v=20260714-g";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260714-g";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260714-g";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260714-g";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260714-g";
 import {
   basesText,
   cardRarity,
@@ -146,7 +146,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260714-f";
+} from "./ui/render.js?v=20260714-g";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];

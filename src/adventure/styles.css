@@ -362,22 +362,36 @@ h1.gq-logo {
   flex: none;
   gap: 0.4cqw;
 }
+/* LI under WP, both hard right: two short lines in the corner, so the pair reads
+   as a stack rather than a sentence and still costs the board nothing across. */
 .gq-board-meta {
   display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 1.2cqw;
-  font-size: 1.9cqw;
-  line-height: 1;
-  opacity: 0.75;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.2cqw;
+  font-size: 2cqw;
+  line-height: 1.15;
   white-space: nowrap;
 }
-.gq-board-meta b { font-weight: 700; opacity: 0.6; margin-right: 0.4cqw; }
-/* The same line the slow die comes out at (DRAMA_LEVERAGE), so the corner says
-   WHY the game has started taking its time. */
-.gq-board-meta-hot { opacity: 1; }
-.gq-board-meta-hot b { opacity: 0.85; }
+/* Nothing here is bold. These are two small facts sitting quietly in a corner,
+   and a label that shouts is a label you stop seeing. */
+.gq-board-tag { opacity: 0.55; margin-right: 0.5cqw; }
+.gq-board-meta > span { opacity: 0.8; }
+
+/* Except when the leverage says otherwise. At the same line the slow die comes
+   out at (DRAMA_LEVERAGE) the LI goes bold and takes the flare — the color a run
+   scoring is announced in, which franchisePalette guarantees reads on the banner
+   in every club's kit. It is the one number on the screen that is about to change
+   everything, and it says so before the die does rather than after.
+   The WP never lights: it is a level, always true, and a number that is always
+   shouting is a number nobody reads. */
+.gq-board-li-hot {
+  opacity: 1;
+  font-weight: 700;
+  color: var(--gq-flare);
+}
+.gq-board-li-hot .gq-board-tag { opacity: 0.9; }
 /* The game number lives in the board's corner cell now — above the clubs, beside
    the frames — so it reads as a fact about this board rather than a caption
    floating beside the bases. It is left-aligned with the club names under it. */
