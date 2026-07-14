@@ -745,12 +745,36 @@ export const battleScreen = {
 
 // Team defense at a glance, mirroring the engine's steal/bunt/tag-up math:
 // the catcher's arm, the four infielders, the three outfielders.
-function fieldingNote(title, team) {
+// The gloves standing behind a pitcher, added up the way the engine adds them:
+// the catcher's arm, the four infielders, the three outfielders. One definition,
+// because the hover note and the club's strip must never disagree about what the
+// defense is.
+function fieldingSums(team) {
   const total = (positions) => team.lineup
     .filter((player) => positions.includes(player.assignedPosition ?? player.position))
     .reduce((sum, player) => sum + (Number(player.fielding) || 0), 0);
-  const signed = (value) => `${value >= 0 ? "+" : ""}${value}`;
-  return `${title}\nCATCHER ${signed(total(["C", "CA"]))}\nINFIELD ${signed(total(["1B", "2B", "3B", "SS"]))}\nOUTFIELD ${signed(total(["LF", "CF", "RF"]))}`;
+  return {
+    catcher: total(["C", "CA"]),
+    infield: total(["1B", "2B", "3B", "SS"]),
+    outfield: total(["LF", "CF", "RF"])
+  };
+}
+
+function signedFielding(value) {
+  return `${value >= 0 ? "+" : ""}${value}`;
+}
+
+function fieldingNote(title, team) {
+  const sums = fieldingSums(team);
+  return `${title}\nCATCHER ${signedFielding(sums.catcher)}\nINFIELD ${signedFielding(sums.infield)}\nOUTFIELD ${signedFielding(sums.outfield)}`;
+}
+
+// What the arm has behind him. His control and his workload say what HE can do;
+// this says what happens when the ball is put in play, which is most of the time
+// — and it belongs under him, because it is the rest of the sentence.
+function defenseLine(team) {
+  const sums = fieldingSums(team);
+  return `C ${signedFielding(sums.catcher)} &middot; IF ${signedFielding(sums.infield)} &middot; OF ${signedFielding(sums.outfield)}`;
 }
 
 // Who is actually facing whom right now, whatever the player is being asked.
@@ -981,6 +1005,7 @@ function lineupStripHtml(team, { litId, nextId, mound }) {
     ? `<li class="gq-strip-arm" data-card-id="${escapeHtml(pitcher.id)}">
         <span class="gq-strip-line">${line("P", pitcher, pitcher.control)}</span>
         <span class="gq-strip-bf${(mound.fatiguePenalty ?? 0) > 0 ? " gq-fatigued" : ""}">${moundLine(mound)}</span>
+        <span class="gq-strip-def">${defenseLine(team)}</span>
       </li>`
     : "";
   return `<ul class="gq-hud-strip">${bats}${arm}</ul>`;

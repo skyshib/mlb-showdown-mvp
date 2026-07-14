@@ -527,6 +527,18 @@ h1.gq-logo {
 }
 .gq-strip-bf.gq-fatigued { animation: gq-blink 1s steps(2) infinite; }
 
+/* The gloves behind him, hung under his workload and indented to the same
+   column: his name, then what he has done, then what he has standing behind him.
+   One arm's story, top to bottom. */
+.gq-strip-def {
+  display: block;
+  padding: 0 0.5cqw 0 calc(0.5cqw + 1ch + 0.7cqw);
+  text-align: left;
+  font-size: 1.8cqw;
+  color: var(--gb-dark);
+  white-space: nowrap;
+}
+
 /* The 45deg turn swings every corner (12cqw * sqrt2 - 12cqw) / 2 outside the
    box layout reserved for it. The vertical margin buys that overhang back, so
    second base stays clear of the top bar and home plate stays off the outs. */
