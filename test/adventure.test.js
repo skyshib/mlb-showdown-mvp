@@ -1662,6 +1662,44 @@ test("every run reaches the board, in the inning it was scored", async () => {
   assert.ok(state.lineScore.home.length <= state.inning);
 });
 
+test("the walk-on survives the render that lands on top of it", async () => {
+  const { mapScreen, trainerIntroScreen } = await import("../src/adventure/ui/mapScreen.js");
+  const save = testSave();
+  const app = {
+    save,
+    screen: { name: "map" },
+    go(name, data = {}) { this.screen = { name, ...data }; this.rerender(); },
+    rerender() {
+      const screen = this.screen.name === "map" ? mapScreen : trainerIntroScreen;
+      this.html = screen.render(this);
+      screen.mounted?.(this);
+    }
+  };
+  app.rerender();
+
+  // Walking onto a trainer is TWO renders in one task: go() renders and mounts,
+  // then mapScreen.key rerenders on its way out. The animation has to survive
+  // the second one — marking the intro spent in mounted() killed it before the
+  // browser ever painted a frame.
+  mapScreen.key(app, "a");
+  assert.equal(app.screen.name, "trainerIntro", "we are at the stare-down");
+  assert.match(app.html, /gq-versus-enter/, "and the two of them are still walking on");
+  assert.match(app.html, /gq-intro-late/, "with the name plate and his line still held back");
+  assert.ok(app.screen.introRunning, "the walk-on is running");
+
+  // Nothing you press hurries it, and nothing you press restarts it.
+  trainerIntroScreen.key(app, "a");
+  assert.match(app.html, /gq-versus-enter/, "a button during the walk-on does nothing");
+  assert.equal(app.screen.page, 0, "his first line is still his first line");
+
+  // Once it has actually played, the screen draws the two of you standing there.
+  app.screen.introRunning = false;
+  app.screen.introPlayed = true;
+  app.rerender();
+  assert.ok(!app.html.includes("gq-versus-enter"), "no second walk-on");
+  assert.ok(!app.html.includes("gq-intro-late"), "and nobody waits to speak again");
+});
+
 test("the scoreboard puts up the man, not his suffix", async () => {
   const { surname } = await import("../src/ui/cardFace.js");
   assert.equal(surname("Ken Griffey Jr."), "GRIFFEY", "the lineup strip had a JR. batting third");

@@ -199,6 +199,11 @@ function scoutRows(trainer, save) {
 
 // ---- The stare-down ----------------------------------------------------------
 //
+// How long the walk-on runs, start to finish: he crosses, you cross behind him,
+// the park shakes, and only then does anybody speak. Kept in step with the
+// timings in styles.css (.gq-versus-enter and .gq-intro-late).
+const INTRO_MS = 2500;
+//
 // The Game Boy did this with a pan: the field slides sideways and the two of you
 // arrive from opposite edges, each behind a bracket of your team. You come in
 // from the left, he comes in from the right, and for one beat before anybody
@@ -246,7 +251,7 @@ function versusHtml(app, trainer) {
   // The pan runs once, when the screen opens. Paging through his dialog
   // rerenders this markup, and a slide that replayed under every line of
   // trash talk would stop being an entrance.
-  return `<div class="gq-versus${app.screen.introPlayed ? "" : " gq-versus-in"}">
+  return `<div class="gq-versus${app.screen.introPlayed ? "" : " gq-versus-enter"}">
     <span class="gq-versus-field"></span>
     <div class="gq-versus-row gq-versus-them">
       ${teamDots(theirs)}
@@ -278,16 +283,19 @@ export const trainerIntroScreen = {
     const beaten = timesBeaten(app.save, trainer.id) > 0;
     const dialog = trainer.dialog.intro;
     const onLastPage = app.screen.page >= dialog.length - 1;
+    // Nobody talks during the walk-on: the plate with his name on it and the
+    // first thing he says both wait until the two of you have stopped moving.
+    const late = app.screen.introPlayed ? "" : " gq-intro-late";
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>${escapeHtml(trainer.title)}</span><span>${formatTag(trainer)}</span></div>
       <div class="gq-body gq-center">
         ${versusHtml(app, trainer)}
-        <div class="gq-frame gq-title-frame">
+        <div class="gq-frame gq-title-frame${late}">
           <b>${escapeHtml(trainer.name)}</b><br>
           <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS $${rewardCoins(app.save, trainer)}${beaten ? " &middot; REMATCH RATE" : ""}</span>
         </div>
       </div>
-      <div class="gq-textbox">
+      <div class="gq-textbox${late}">
         <p>${escapeHtml(dialog[Math.min(app.screen.page, dialog.length - 1)])}</p>
         ${onLastPage
           ? menuHtml(
@@ -308,12 +316,26 @@ export const trainerIntroScreen = {
     return scoutRows(trainerById(app.screen.trainerId), app.save)[index] ?? null;
   },
   mounted(app) {
-    // The entrance is spent. Every rerender from here on draws the two of you
-    // already standing there.
-    if (app.screen.mode !== "scout") app.screen.introPlayed = true;
+    if (app.screen.mode === "scout" || app.screen.introPlayed || app.screen.introRunning) return;
+    // The entrance is spent when it has actually HAPPENED, not the instant the
+    // screen is first painted. Marking it played in mounted looked right and was
+    // fatal: mapScreen.key calls rerender() after item.run() has already gone to
+    // this screen, so a second render landed in the same task — with the flag now
+    // set, it dropped the animation class, and the browser never painted a single
+    // frame of the walk-on. Nobody ever saw it.
+    app.screen.introRunning = true;
+    setTimeout(() => {
+      app.screen.introPlayed = true;
+      app.screen.introRunning = false;
+      app.rerender();
+    }, INTRO_MS);
   },
   key(app, key) {
     const trainer = trainerById(app.screen.trainerId);
+    // Nothing you press hurries a man walking onto a field. Buttons are dead
+    // until he is standing there — which also stops a keypress mid-walk-on from
+    // rerendering the screen and restarting the animation from the top.
+    if (app.screen.introRunning && app.screen.mode !== "scout") return;
     if (app.screen.mode === "scout") {
       const rows = scoutRows(trainer);
       if (key === "up" || key === "down") {

@@ -684,14 +684,34 @@ h1.gq-logo {
 /* The entrance. He comes in off the right edge, you come off the left, and a
    band of light sweeps across the field between you — the pan, which is the
    part that sells it. Once only: see introPlayed. */
+/* Each man is thrown across the field and STOPS dead, which is what a Game Boy
+   sprite does: no drift, no float. The overshoot at 88% is the body arriving
+   before the feet do. */
 @keyframes gq-versus-from-right {
-  from { transform: translateX(115%); }
+  from { transform: translateX(130%); }
+  88% { transform: translateX(-2.5%); }
   to { transform: translateX(0); }
 }
 
 @keyframes gq-versus-from-left {
-  from { transform: translateX(-115%); }
+  from { transform: translateX(-130%); }
+  88% { transform: translateX(2.5%); }
   to { transform: translateX(0); }
+}
+
+/* When the second man lands, the ballpark takes it: one hard shake. */
+@keyframes gq-versus-impact {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-1.2cqw); }
+  55% { transform: translateX(0.9cqw); }
+  80% { transform: translateX(-0.4cqw); }
+}
+
+/* The line the game speaks, and the plate with his name on it, are held back
+   until the two of you have stopped moving. Nobody talks during the walk-on. */
+@keyframes gq-intro-settle {
+  from { opacity: 0; transform: translateY(2cqw); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* The band has to leave the FIELD, not just the middle of it: the box clips at
@@ -711,26 +731,41 @@ h1.gq-logo {
    Slower and flatter than a bounce: the handheld's pan is a steady slide that
    arrives and stops, and the two of you travel the same distance in the same
    time from opposite edges. */
-.gq-versus-in .gq-versus-them {
-  animation: gq-versus-from-left 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+/* It is a WALK-ON, not a cut. He comes first, alone, and is allowed to stand
+   there a beat; then you are thrown in behind him; then the park shakes and only
+   then does anybody speak. Played at the old 900ms with everything landing at
+   once, the whole thing went by before you knew it had started. */
+.gq-versus-enter .gq-versus-them {
+  animation: gq-versus-from-left 1100ms cubic-bezier(0.2, 0.85, 0.25, 1) 250ms both;
 }
 
-.gq-versus-in .gq-versus-you {
-  animation: gq-versus-from-right 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+.gq-versus-enter .gq-versus-you {
+  animation: gq-versus-from-right 1100ms cubic-bezier(0.2, 0.85, 0.25, 1) 800ms both;
 }
 
 /* The ground runs the other way under the man crossing it, which is the whole
-   trick: it is the FIELD that is moving, and they are being carried in on it. */
-.gq-versus-in .gq-versus-field {
-  animation: gq-versus-ground 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+   trick: it is the FIELD that is moving, and they are being carried in on it.
+   It keeps rolling until the last man is down. */
+.gq-versus-enter .gq-versus-field {
+  animation: gq-versus-ground 1900ms cubic-bezier(0.15, 0.75, 0.3, 1) both;
+}
+
+/* Both men are set at 1900ms. That is when the park notices.  */
+.gq-versus-enter {
+  animation: gq-versus-impact 260ms steps(4) 1900ms both;
 }
 
 @keyframes gq-versus-ground {
-  from { background-position: 24cqw 0; }
+  from { background-position: 96cqw 0; }
   to { background-position: 0 0; }
 }
 
-.gq-versus-in::after {
+/* The name plate and his first line wait for the dust. */
+.gq-intro-late {
+  animation: gq-intro-settle 420ms ease-out 2050ms both;
+}
+
+.gq-versus-enter::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -738,16 +773,18 @@ h1.gq-logo {
   z-index: 2;
   background: linear-gradient(90deg, transparent, var(--gb-light), transparent);
   opacity: 0.75;
-  animation: gq-versus-pan 900ms ease-out both;
+  animation: gq-versus-pan 1900ms ease-out both;
   pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gq-versus-in .gq-versus-them,
-  .gq-versus-in .gq-versus-you,
-  .gq-versus-in .gq-versus-field,
-  .gq-versus-in::after { animation: none; }
-  .gq-versus-in::after { display: none; }
+  .gq-versus-enter,
+  .gq-versus-enter .gq-versus-them,
+  .gq-versus-enter .gq-versus-you,
+  .gq-versus-enter .gq-versus-field,
+  .gq-intro-late,
+  .gq-versus-enter::after { animation: none; }
+  .gq-versus-enter::after { display: none; }
 }
 
 /* ---- Foil cards ---- */
