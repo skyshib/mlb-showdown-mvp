@@ -1,7 +1,7 @@
-import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml } from "./helpers.js?v=20260713-v";
-import { trainerById } from "../region.js?v=20260713-v";
-import { cardById } from "../packs.js?v=20260713-v";
-import { seasonHitters, seasonPitchers, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260713-v";
+import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260713-w";
+import { trainerById } from "../region.js?v=20260713-w";
+import { cardById } from "../packs.js?v=20260713-w";
+import { seasonHitters, seasonPitchers, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260713-w";
 
 // ---- Formatting --------------------------------------------------------------
 
@@ -51,15 +51,18 @@ export function wpaHtml(wpa) {
 // shrunk — "1-3" always had to be decoded, and the shape never does.
 function situationTag(event) {
   if (!Array.isArray(event.basesBefore) || typeof event.outsBefore !== "number") return "";
-  return `<span class="gq-dim">${event.outsBefore}o</span>${miniDiamondHtml(event.basesBefore)} `;
+  // The outs are the same three lamps the banner shows, not the digit "0o" —
+  // the row already asks you to read a diamond, so read the dots too.
+  return `${outsHtml(event.outsBefore)}${miniDiamondHtml(event.basesBefore)} `;
 }
 
-// The running number: YOUR odds of winning once the play is in the books —
-// the level, where the WPA beside it is only the step.
-function winProbTag(event, playerSide) {
-  if (event.wpAfter == null) return "";
+// The running number: YOUR odds of winning once the play is in the books — the
+// level first, with the step it took in parentheses behind it, because the
+// level is what you are actually tracking down the column.
+function winProbTag(event, playerSide, wpa) {
+  if (event.wpAfter == null) return wpa == null ? "" : wpaHtml(wpa);
   const mine = playerSide === "home" ? event.wpAfter : 1 - event.wpAfter;
-  return `<span class="gq-dim">WIN ${Math.round(mine * 100)}%</span>`;
+  return `<span class="gq-dim">WP: ${Math.round(mine * 100)}%</span> (${wpaHtml(wpa)})`;
 }
 
 // A man in the duel: his name, hoverable, with the die he threw beside it. The
@@ -98,8 +101,8 @@ export function gameLogLine(event, playerSide) {
     : `${manTag(event.pitcher, event.pitcherId, event.controlRoll)} <span class="gq-dim">v</span> ${
         manTag(actor, event.batterId, event.resultRoll)
       }`;
-  return `${inning} ${situationTag(event)}${duel} <b>${escapeHtml(event.result)}</b>${score} ${wpaHtml(wpa)} ${
-    winProbTag(event, playerSide)
+  return `${inning} ${situationTag(event)}${duel} <b>${escapeHtml(event.result)}</b>${score} ${
+    winProbTag(event, playerSide, wpa)
   }`;
 }
 

@@ -1,5 +1,5 @@
-import { RESULTS, resolveChart } from "./cards.js?v=20260713-v";
-import { createRng } from "./rng.js?v=20260713-v";
+import { RESULTS, resolveChart } from "./cards.js?v=20260713-w";
+import { createRng } from "./rng.js?v=20260713-w";
 import { winExpectancy } from "../data/winExpectancy.js";
 
 // Go/no-go floors for taking a base, by outs and destination. Second and

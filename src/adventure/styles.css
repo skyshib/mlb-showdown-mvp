@@ -204,8 +204,21 @@ h1.gq-logo {
 /* A game-log row is ONE line — the whole play, dice and all. It is set smaller
    than a menu of choices because it is a row of record, not a thing to pick
    between, and because the line has to hold both men and both their dice. */
-.gq-log-list { font-size: 2.5cqw; letter-spacing: 0.02em; }
+/* Sized off the worst row the pools can deal — a J.SALTALAMACCHIA against a
+   C.GUERRERO JR. with both dice, the call, the score and the odds behind them.
+   At 1.9cqw that pair still folds; at 1.8 it holds. */
+.gq-log-list { font-size: 1.8cqw; letter-spacing: 0; }
 .gq-log-list li { padding: 0.5cqw 0.8cqw; }
+/* The row is a row: two names, two dice, the call, the score and the odds. It
+   is sized to survive the worst of them without folding onto a second line. */
+.gq-log-list .gq-outs { margin-right: 0.4cqw; }
+.gq-log-list .gq-outs i { width: 1.5cqw; height: 1.5cqw; border-width: 0.3cqw; }
+/* The diamond has to ride INSIDE the row it belongs to. Sized against the old
+   text it stood taller than the line and its bags bled into the plays above
+   and below, which read as a column of loose diamonds down the log. */
+.gq-log-list .gq-diamond-mini { margin: 0 0.9cqw 0 0.5cqw; }
+.gq-log-list .gq-diamond-mini .gq-diamond { width: 2.3cqw; height: 2.3cqw; }
+.gq-log-list .gq-diamond-mini .gq-base { width: 0.8cqw; height: 0.8cqw; border-width: 0.16cqw; }
 
 /* The diamond shrunk into a line of text. The rotation overhangs its box, so
    the wrapper carries the margin that keeps it off the words either side. */
@@ -241,6 +254,17 @@ h1.gq-logo {
 }
 
 .gq-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2cqw; height: 100%; min-height: 0; }
+/* The pen is a comparison: the list, the arm you're warming, and the arm he
+   would replace, all three readable without scrolling anything. The list is
+   given the wider share — a name that wraps is harder to read than a card
+   that is a few percent smaller. The label above each card and the note below
+   it are single lines on both sides, so the two cards hang level. */
+.gq-columns-pen { grid-template-columns: 1.25fr 1fr 1fr; }
+.gq-columns-pen .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
+.gq-columns-pen .gq-card-side > p:last-child { margin: 0.6cqw 0 0; }
+/* Two cards to a row means each column is already narrow; the card takes all
+   of it back — there is height to spare and the chart has to be readable. */
+.gq-columns-pen .gq-card-side .gq-card { width: 100%; }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
 /* Screens that want the whole card visible without scrolling (the Team
    view) shrink it a quarter and center it; the catalog goes a notch
@@ -280,8 +304,13 @@ h1.gq-logo {
 
 /* A man reaching a base swells it, briefly. The bases are staggered along the
    path he ran, so a home run reads as a lap rather than four lamps coming on
-   together. Being thrown out shakes the bag and turns it the sign's red — the
-   one place in the game that colour means anything but a button. */
+   together.
+
+   Being thrown out shakes the bag and flashes it HOLLOW — the ring flares and
+   the middle stays empty. The colour is reserved: the flare fills a bag only
+   when a run is in, so a man cut down at the plate cannot flash the same thing
+   his run would have. A fill means a run; an empty bag rattling means he's
+   dead. */
 @keyframes gq-base-pulse {
   0% { transform: scale(1); }
   45% { transform: scale(1.9); }
@@ -289,13 +318,13 @@ h1.gq-logo {
 }
 @keyframes gq-base-out {
   0% { transform: scale(1) rotate(0deg); }
-  20% { transform: scale(1.35) rotate(10deg); border-color: var(--gq-flare); background: var(--gq-flare); }
-  45% { transform: scale(1.2) rotate(-10deg); border-color: var(--gq-flare); background: var(--gq-flare); }
-  70% { transform: scale(1.3) rotate(8deg); border-color: var(--gq-flare); background: var(--gq-flare); }
+  20% { transform: scale(1.35) rotate(10deg); border-color: var(--gq-lead-ink); background: transparent; }
+  45% { transform: scale(1.2) rotate(-10deg); border-color: var(--gq-lead-ink); background: transparent; }
+  70% { transform: scale(1.3) rotate(8deg); border-color: var(--gq-lead-ink); background: transparent; }
   100% { transform: scale(1) rotate(0deg); }
 }
 /* The plate is the one bag that means something when a man touches it, so it
-   does not just swell — it lights the sign's red, and holds it a beat longer
+   does not just swell — it fills with the flare, and holds it a beat longer
    than a bag on the basepaths does. */
 @keyframes gq-base-score {
   0% { transform: scale(1); }
@@ -402,6 +431,13 @@ h1.gq-logo {
 .gq-line-head th:first-child { border: 0; }
 .gq-line-total { font-weight: 700; background: var(--gb-light); }
 .gq-battle-topbar .gq-line-total { background: rgba(240, 231, 210, 0.16); }
+
+/* Hung in the banner the board is a closed table: the club column and the
+   header row get their outer edges back, so the frames read as a ruled grid
+   instead of a sheet that trails off at the top-left corner. */
+.gq-battle-topbar .gq-linescore tr th:first-child { border-left: 0.2cqw solid currentColor; }
+.gq-battle-topbar .gq-line-head th { border-top: 0.2cqw solid currentColor; }
+.gq-battle-topbar .gq-line-head th:first-child { border: 0.2cqw solid currentColor; }
 
 /* The board hung above a finished game's box score. */
 .gq-final-board {

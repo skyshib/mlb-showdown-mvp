@@ -1,4 +1,4 @@
-import { shortName, stripCardYear } from "./cardFace.js?v=20260713-v";
+import { shortName, stripCardYear } from "./cardFace.js?v=20260713-w";
 
 // The booth: one engine event becomes the lines a broadcaster would say.
 // Shared by both games — the adventure prints these in its text box, the
@@ -28,6 +28,15 @@ function playName(name) {
 // the table always sees the throw that decided the play.
 function rolled(attempt) {
   return typeof attempt?.roll === "number" ? ` (rolled ${attempt.roll})` : "";
+}
+
+// The two dice that decided the at-bat, called before the call itself: the
+// pitch that set the chart, then the swing rolled off it. Plays that aren't a
+// duel (a bunt, a walk, a trot around on someone else's hit) have no such pair
+// and get no such line.
+function duelLine(event) {
+  if (typeof event.controlRoll !== "number" || typeof event.resultRoll !== "number") return null;
+  return `PITCH ${event.controlRoll} vs SWING ${event.resultRoll}.`;
 }
 
 // Scores always read from the player's side: up 3-0 is "3-0" whether the
@@ -85,6 +94,8 @@ export function describeEvent(event, playerSide = "away") {
     }
     return lines;
   }
+  const duel = duelLine(event);
+  if (duel) lines.push(duel);
   if (event.result === "HR" && event.runs === 4) {
     lines.push(`${playName(event.batter)} unloads the bases... GRAND SLAM!`);
   } else {

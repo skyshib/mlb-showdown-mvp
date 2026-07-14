@@ -1,6 +1,6 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260713-v";
-import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260713-v";
-import { packEggs } from "../feats.js?v=20260713-v";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260713-w";
+import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260713-w";
+import { packEggs } from "../feats.js?v=20260713-w";
 import {
   persistSave,
   deriveSeed,
@@ -19,11 +19,11 @@ import {
   setBattingOrder,
   managerFor,
   addLog
-} from "../state.js?v=20260713-v";
-import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-v";
-import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js?v=20260713-v";
-import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-v";
-import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-v";
+} from "../state.js?v=20260713-w";
+import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-w";
+import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js?v=20260713-w";
+import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-w";
+import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-w";
 
 // ---- Two-way pairs -----------------------------------------------------------
 
@@ -983,7 +983,13 @@ export const teamScreen = {
         : rosterIndex < roster.length
           ? roster[rosterIndex]
           : actions[rosterIndex - roster.length]?.preview ?? null;
-    const dhId = lineupSlots(save).find((slot) => slot.label === "DH")?.player?.id ?? null;
+    // A man in the lineup is listed by the position he is PLAYING, not by
+    // everything he could play — the roster is a lineup card, and a lineup card
+    // names one spot per man. (Bats the lineup couldn't seat keep their printed
+    // eligibility, since there is no spot to name.)
+    const slotById = new Map(
+      lineupSlots(save).filter((slot) => slot.player).map((slot) => [slot.player.id, slot.label])
+    );
     let list;
     if (app.screen.actionMenu && rosterIndex < roster.length) {
       list = actionMenuHtml(actionMenuTitle(app, roster[rosterIndex]), menuActions(app, roster[rosterIndex], teamCardActions), app.screen.actionIndex);
@@ -1004,7 +1010,7 @@ export const teamScreen = {
     } else {
       list = menuHtml(
         [
-          ...roster.map((card) => ({ html: cardLine(card, { slot: card.id === dhId ? "DH" : null }) })),
+          ...roster.map((card) => ({ html: cardLine(card, { slot: slotById.get(card.id) ?? null }) })),
           ...actions.map((action) => ({ html: action.html, disabled: action.disabled }))
         ],
         rosterIndex

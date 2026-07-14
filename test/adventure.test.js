@@ -1192,6 +1192,26 @@ test("the team menu swaps the rotation, and a hitter switches position legally a
   assert.equal(slots.find((slot) => slot.label === "DH").player.id, target.player.id);
 });
 
+test("the team roster names the spot each man is playing, not every spot he could", async () => {
+  const { teamScreen, lineupSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const app = { save, screen: { name: "team", index: 0, mode: "roster" }, rerender() {} };
+  const text = teamScreen.render(app).replace(/<[^>]+>/g, " ");
+  for (const card of rosterCards(save)) {
+    const slot = lineupSlotOf(save, card);
+    if (!slot) continue; // an arm, or a bat the lineup couldn't seat
+    const surname = card.name.split(" ").pop().toUpperCase();
+    assert.match(text, new RegExp(`${surname}\\s+${slot.replace("/", "\\/")}\\s+OB`), `${surname} is listed at ${slot}`);
+  }
+  // A man eligible at more than one spot is listed at the one he's filling —
+  // his card's whole eligibility list never reaches the row.
+  const multi = rosterCards(save).find((card) => (card.positions ?? []).length > 1 && lineupSlotOf(save, card));
+  if (multi) {
+    const label = (multi.positions ?? []).join("/");
+    assert.ok(!text.includes(` ${label} OB`), "the eligibility list stays on the card, off the lineup row");
+  }
+});
+
 test("the team roster lists the DH as DH, and his swap opens on every spare bat", async () => {
   const { teamScreen, benchCards, lineupSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();
@@ -1542,13 +1562,29 @@ test("the menu right-aligns when the opponent is hitting", async () => {
   const homeGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "align-home", playerIsAway: false });
   const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle: homeGame, mode: "menu", menuIndex: 0, lines: [] } };
   assert.ok(battleScreen.render(app).includes("gq-menu-right"), "the defense menu reads from the other dugout");
-  app.screen.mode = "pen";
-  app.screen.penIndex = 0;
-  assert.ok(battleScreen.render(app).includes("gq-menu-right"), "the bullpen list too");
   // Road game, top 1: the player bats — the offense menu stays left.
   const roadGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "align-road" });
   const roadApp = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle: roadGame, mode: "menu", menuIndex: 0, lines: [] } };
   assert.ok(!battleScreen.render(roadApp).includes("gq-menu-right"), "the batting menu stays left-aligned");
+});
+
+test("the bullpen opens as a compare screen: the warming arm beside the one on the mound", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { battlePhase } = await import("../src/rules/battle/controller.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  // Home game, top 1: the player is pitching, so the pen is live.
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "pen-compare", playerIsAway: false });
+  const app = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle, mode: "pen", penIndex: 0, lines: [] } };
+  const reliever = battlePhase(battle).bullpen[0].pitcher;
+  const starter = battle.state.home.pitchers[0];
+  const html = battleScreen.render(app);
+  assert.ok(html.includes("BULLPEN"), "the pen gets the whole screen, not a corner of the textbox");
+  assert.ok(html.includes("gq-card-side"), "and the roster book's card column");
+  assert.ok(html.includes(reliever.name.toUpperCase()), "the warming arm's card is up");
+  assert.ok(html.includes("ON THE MOUND"), "so is the man he would replace");
+  assert.ok(html.includes(starter.name.toUpperCase()), "the starter's card is there to read against him");
+  assert.equal(battleScreen.hoverCard(app, 0)?.id, reliever.id, "hovering a pen row floats his card");
 });
 
 test("series games can put the player at home, batting second", () => {
@@ -1751,7 +1787,10 @@ test("the game log lines carry player-perspective WPA", async () => {
   // Rows carry the base-out situation the play happened in — as the diamond
   // itself, occupied bags filled, rather than "1-3" to be decoded.
   const situated = gameLogLine({ ...swing, outsBefore: 1, basesBefore: ["A Runner", null, "C Runner"] }, "away");
-  assert.ok(situated.includes("1o"), "the outs show before the actor");
+  // The outs are the banner's three lamps, not the digit: one lit, two dark.
+  const lamps = [...situated.matchAll(/<i class="(gq-out-on)?"><\/i>/g)];
+  assert.equal(lamps.length, 3, "three lamps, before the actor");
+  assert.equal(lamps.filter((m) => m[1]).length, 1, "one of them lit for the one out");
   assert.match(situated, /gq-diamond-mini/, "and the bases show as the diamond");
   const filled = [...situated.matchAll(/class="gq-base ([^"]*)"/g)].map((m) => m[1]);
   assert.ok(filled.some((c) => c.includes("gq-base-1") && c.includes("gq-base-on")), "first is occupied");
@@ -1760,6 +1799,32 @@ test("the game log lines carry player-perspective WPA", async () => {
   const empty = gameLogLine({ ...swing, outsBefore: 0, basesBefore: [null, null, null] }, "away");
   assert.ok(!empty.includes("gq-base-on"), "empty bases fill nothing");
   assert.ok(!gameLogLine(swing, "away").includes("gq-diamond-mini"), "rows without a snapshot stay clean");
+});
+
+test("the play-by-play opens with the two dice that decided the at-bat", async () => {
+  const { describeEvent } = await import("../src/adventure/ui/helpers.js");
+  const swing = {
+    inning: 3,
+    half: "top",
+    batter: "Al Smith",
+    pitcher: "Bo Diaz",
+    result: "HR",
+    runs: 1,
+    outsAfter: 1,
+    scoreAfter: { away: 1, home: 0 },
+    controlRoll: 4,
+    resultRoll: 19
+  };
+  const lines = describeEvent(swing, "away");
+  assert.equal(lines[0], "PITCH 4 vs SWING 19.", "the dice are called before the play is");
+  assert.ok(lines[1].includes("SMITH"), "and the call still follows");
+  // A play with no duel — a man taking an extra base — has no dice to call.
+  const advance = describeEvent({
+    ...swing,
+    type: "advance",
+    playDetails: { attempts: [{ runner: "Lead Man", to: "3B", thrown: false }] }
+  }, "away");
+  assert.ok(!advance.some((line) => line.startsWith("PITCH")), "no pitch line where there was no pitch");
 });
 
 test("the game log shows the dice and the running win probability", async () => {
@@ -1792,8 +1857,10 @@ test("the game log shows the dice and the running win probability", async () => 
   assert.ok(!line.includes("gq-log-detail"), "and there is no second line to put it on");
   assert.match(line, /data-card-id="p-9"/, "the arm still hovers");
   assert.match(line, /data-card-id="h-1"/, "and so does the bat");
-  assert.ok(line.includes("WIN 72%"), "the away player's running odds are the home team's inverted");
-  assert.ok(gameLogLine(pa, "home").includes("WIN 28%"), "the home player reads them straight");
+  // The odds lead with the level and carry the step in parentheses behind it.
+  assert.ok(line.includes("WP: 72%"), "the away player's running odds are the home team's inverted");
+  assert.ok(gameLogLine(pa, "home").includes("WP: 28%"), "the home player reads them straight");
+  assert.match(line.replace(/<[^>]+>/g, ""), /WP: 72% \(\+\d+%\)/, "the swing rides behind the level, in parentheses");
 
   // A steal throws one die, and it belongs to the runner. The arm on the mound
   // did not beat him, so he is not in the row at all.
@@ -1812,7 +1879,7 @@ test("the game log shows the dice and the running win probability", async () => 
   const stealLine = gameLogLine(steal, "home");
   const stealText = stealLine.replace(/<[^>]+>/g, "");
   assert.match(stealText, /D\.GORDON \(13\)/, "the runner carries the throw he beat");
-  assert.ok(stealLine.includes("WIN 60%"), "and the odds it left you at");
+  assert.ok(stealLine.includes("WP: 60%"), "and the odds it left you at");
   assert.ok(!stealText.includes(" v "), "no pitcher is set against him");
 
   const pen = gameLogLine({ type: "pitching-change", inning: 5, half: "bottom", team: "Them Club", pitcher: "Cy Muller" }, "away");

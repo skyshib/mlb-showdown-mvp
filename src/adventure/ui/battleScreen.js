@@ -10,15 +10,15 @@ import {
   stripCardYear,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260713-v";
-import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js?v=20260713-v";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260713-v";
-import { cardById } from "../packs.js?v=20260713-v";
-import { buildBoxScore, inningsPlayed, pitcherStatus } from "../../rules/game.js?v=20260713-v";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260713-v";
-import { gameFeats } from "../feats.js?v=20260713-v";
-import { buildNpcTeam } from "../npcTeams.js?v=20260713-v";
-import { positionsOverlap } from "../../rules/cards.js?v=20260713-v";
+} from "./helpers.js?v=20260713-w";
+import { gameStars, gameLogLine, statLineHtml, seriesStatLines } from "./statsScreens.js?v=20260713-w";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260713-w";
+import { cardById } from "../packs.js?v=20260713-w";
+import { buildBoxScore, inningsPlayed, pitcherStatus } from "../../rules/game.js?v=20260713-w";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260713-w";
+import { gameFeats } from "../feats.js?v=20260713-w";
+import { buildNpcTeam } from "../npcTeams.js?v=20260713-w";
+import { positionsOverlap } from "../../rules/cards.js?v=20260713-w";
 import {
   persistSave,
   deriveSeed,
@@ -40,7 +40,7 @@ import {
   addTrophies,
   clearSeries,
   LOSS_FEE
-} from "../state.js?v=20260713-v";
+} from "../state.js?v=20260713-w";
 import {
   createBattle,
   battlePhase,
@@ -55,7 +55,7 @@ import {
   runSimSeries,
   isDramaticMoment,
   npcMoundVisit
-} from "../../rules/battle/controller.js?v=20260713-v";
+} from "../../rules/battle/controller.js?v=20260713-w";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -623,6 +623,37 @@ function renderRosters(app, battle, trainer) {
   </div>`;
 }
 
+// Going to the pen is a comparison, not a menu pick: you are weighing a fresh
+// arm against the one that is tiring in front of you. So it opens like the
+// roster book — the pen down the left, and both cards up where you can read
+// their charts against each other.
+function renderPen(app, battle, trainer, phase) {
+  const options = phase.bullpen ?? [];
+  const index = clampIndex(app.screen.penIndex ?? 0, options.length + 1);
+  const selected = options[index]?.pitcher ?? null;
+  const mound = pitcherStatus(battle.state, battle.playerSide);
+  const rows = options.map(({ pitcher }) => ({
+    html: `${escapeHtml(pitcher.role)} ${escapeHtml(shortName(pitcher.name))} <span class="gq-dim">CTRL${pitcher.control} IP${pitcher.ip}</span>`
+  }));
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>BULLPEN &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
+    <div class="gq-body"><div class="gq-columns gq-columns-pen">
+      <div class="gq-frame gq-scroll"><h3>YOUR PEN</h3>${menuHtml([...rows, { label: "NEVER MIND" }], index)}</div>
+      <div class="gq-card-side">
+        <p class="gq-dim">${selected ? "WARMING UP" : "&nbsp;"}</p>
+        ${selected ? cardPanelHtml(selected) : ""}
+        <p class="gq-dim">${selected ? "FRESH" : "&nbsp;"}</p>
+      </div>
+      <div class="gq-card-side">
+        <p class="gq-dim">ON THE MOUND</p>
+        ${cardPanelHtml(mound.pitcher)}
+        <p class="gq-dim">${moundLine(mound)}</p>
+      </div>
+    </div></div>
+    <div class="gq-textbox"><p class="gq-dim">A brings him in. X leaves your arm in the game.</p></div>
+  </div>`;
+}
+
 export const battleScreen = {
   render(app) {
     const battle = app.screen.battle;
@@ -632,6 +663,7 @@ export const battleScreen = {
     if (app.screen.mode === "log") return renderGameLog(app, battle, trainer);
     if (app.screen.mode === "drama") return renderDrama(app, trainer);
     const phase = battlePhase(battle);
+    if (app.screen.mode === "pen" && phase.type !== "over") return renderPen(app, battle, trainer, phase);
     const series = app.save.activeSeries;
     return `<div class="gq-screen gq-battle-screen">
       ${renderScoreboard(battle, trainer, series)}
@@ -643,6 +675,9 @@ export const battleScreen = {
     </div>`;
   },
   hoverCard(app, index) {
+    if (app.screen.mode === "pen") {
+      return battlePhase(app.screen.battle).bullpen?.[index]?.pitcher ?? null;
+    }
     if (app.screen.mode !== "rosters") return null;
     return rosterRows(app.screen.battle)[index]?.card ?? null;
   },
@@ -980,12 +1015,6 @@ function moundLine(mound) {
 // aligned, mirroring the matchup panel's YOUR ARM side.
 function renderBattleMenu(app, phase) {
   if (phase.type === "over") return "";
-  if (app.screen.mode === "pen") {
-    const options = (phase.bullpen ?? []).map(({ pitcher }) => ({
-      html: `${escapeHtml(pitcher.role)} ${escapeHtml(shortName(pitcher.name))} <span class="gq-dim">CTRL${pitcher.control} IP${pitcher.ip}</span>`
-    }));
-    return menuHtml([...options, { label: "NEVER MIND" }], app.screen.penIndex ?? 0, { className: "gq-menu-right" });
-  }
   return menuHtml(
     battleMenuItems(app, phase).map((item) => ({ label: item.label, html: item.html, disabled: item.disabled })),
     app.screen.menuIndex ?? 0,
