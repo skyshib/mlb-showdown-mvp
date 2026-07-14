@@ -11,6 +11,7 @@ import { dayWhimsy } from "../feats.js?v=20260713-x";
 import { validateRoster } from "../../rules/draft.js?v=20260713-x";
 import { buildNpcTeam } from "../npcTeams.js?v=20260713-x";
 import { startTrainerBattle } from "./battleScreen.js?v=20260713-x";
+import { playChallenge, playFootfall } from "../../ui/sounds.js?v=20260713-x";
 
 export function rosterProblems(save) {
   const issues = validateRoster(managerFor(save));
@@ -203,6 +204,8 @@ function scoutRows(trainer, save) {
 // the park shakes, and only then does anybody speak. Kept in step with the
 // timings in styles.css (.gq-versus-enter and .gq-intro-late).
 const INTRO_MS = 2500;
+// The frame the second man lands on, and the park with him.
+const INTRO_IMPACT_MS = 1900;
 //
 // The Game Boy did this with a pan: the field slides sideways and the two of you
 // arrive from opposite edges, each behind a bracket of your team. You come in
@@ -318,6 +321,15 @@ export const trainerIntroScreen = {
   },
   mounted(app) {
     if (app.screen.mode === "scout" || app.screen.introPlayed || app.screen.introRunning) return;
+    // He is coming. The sting rides the walk-on, and his boots land on the frame
+    // where the park shakes — see the timings in styles.css.
+    playChallenge();
+    const walkingOn = app.screen.trainerId;
+    setTimeout(() => {
+      // He may not be on the screen any more — a save reloaded, a screen changed.
+      // Boots that land on an empty field are just a noise.
+      if (app.screen.trainerId === walkingOn && app.screen.introRunning) playFootfall();
+    }, INTRO_IMPACT_MS);
     // The entrance is spent when it has actually HAPPENED, not the instant the
     // screen is first painted. Marking it played in mounted looked right and was
     // fatal: mapScreen.key calls rerender() after item.run() has already gone to

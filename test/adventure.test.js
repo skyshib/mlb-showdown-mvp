@@ -1916,6 +1916,54 @@ test("closing the tab mid-inning does not cost you the game", async () => {
   assert.equal(reloaded.activeBattle, null, "and once it pays out, the book is closed");
 });
 
+test("a tiring arm rings the bullpen phone — once per step down, and never for the new man", async () => {
+  const { fatigueAlarm } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  // The player is at home, so the arm the manager can actually pull is the home
+  // one — actChangePitcher goes to HIS pen.
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "fatigue-seed", playerIsAway: false });
+  const state = battle.state;
+  const fresh = pitcherStatus(state, "home");
+
+  // Nobody is tired yet, so nothing is said.
+  let heard = {};
+  let alarm = fatigueAlarm(battle, heard);
+  assert.equal(alarm.sound, null, "a fresh arm is not news");
+  heard = alarm.now;
+
+  // He goes past his tank: the first step down is the arm starting to labour.
+  state.pitching.home.battersFaced = fresh.tiredAt + 1;
+  alarm = fatigueAlarm(battle, heard);
+  assert.equal(alarm.sound, "tiring", "the first step down says so");
+  heard = alarm.now;
+
+  // Same batter count, same penalty: it does not say it twice.
+  alarm = fatigueAlarm(battle, heard);
+  assert.equal(alarm.sound, null, "a penalty that has not moved is not news again");
+  heard = alarm.now;
+
+  // Deeper into the hole: a different sound, because it is a different problem.
+  state.pitching.home.battersFaced = fresh.tiredAt + 12;
+  alarm = fatigueAlarm(battle, heard);
+  assert.equal(alarm.sound, "spent", "getting worse gets its own noise");
+  heard = alarm.now;
+
+  // The manager goes to the pen. The new man is fresh, and his zero must not be
+  // heard as the old man's tiredness coming down — nor may he inherit it, and
+  // then say nothing when HE starts to labour.
+  const relief = actChangePitcher(battle);
+  assert.ok(relief.length, "an arm comes in");
+  alarm = fatigueAlarm(battle, heard);
+  assert.equal(alarm.sound, null, "a fresh arm out of the pen is quiet");
+  heard = alarm.now;
+
+  const newMan = pitcherStatus(state, "home");
+  state.pitching.home.battersFaced = newMan.tiredAt + 1;
+  alarm = fatigueAlarm(battle, heard);
+  assert.equal(alarm.sound, "tiring", "and when he tires, the phone rings for him too");
+});
+
 test("the bullpen opens as a compare screen: the warming arm beside the one on the mound", async () => {
   const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
   const { battlePhase } = await import("../src/rules/battle/controller.js");

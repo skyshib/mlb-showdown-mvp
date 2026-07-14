@@ -114,6 +114,10 @@ function phrase(notes, { level = 0.4, type = "triangle", shimmer = false, tail =
   }
 }
 
+const D3 = 146.83;
+const F3 = 174.61;
+const G3 = 196;
+const A3 = 220;
 const G4 = 392;
 const C5 = 523.25;
 const E5 = 659.25;
@@ -168,6 +172,38 @@ export function playDraftComplete() {
     [[C5, 0, 0.3], [E5, 0.12, 0.3], [G5, 0.24, 0.34], [C6, 0.38, 0.5], [E6, 0.52, 0.9]],
     { level: 0.44, shimmer: true, tail: 0.9 }
   );
+}
+
+// A man has walked onto the field to play you. A rising sting, and it does not
+// resolve — it stops on the step below the note it is reaching for, so the ear
+// is left leaning forward. That is the whole job: something is about to happen.
+export function playChallenge() {
+  phrase(
+    [[G3, 0, 0.16], [C5, 0.1, 0.18], [E5, 0.22, 0.2], [G5, 0.36, 0.5]],
+    { level: 0.36, type: "square", shimmer: true, tail: 0.4 }
+  );
+}
+
+// His boots land. A low, blunt thud with no tone to speak of — it is felt more
+// than heard, and it lands on the frame where the park shakes.
+export function playFootfall() {
+  phrase([[D3, 0, 0.1], [D3, 0.05, 0.16]], { level: 0.4, type: "square", tail: 0.12 });
+}
+
+// An arm has started to labour. Everything else in this kit rises or rings; this
+// one SAGS — two notes falling a step, low and dry, with no shimmer on them. It
+// is the sound of a man who has thrown enough, and it should feel like the game
+// telling you something you would rather not hear.
+export function playArmTiring() {
+  phrase([[A3, 0, 0.3], [G3, 0.16, 0.46]], { level: 0.26, type: "triangle", tail: 0.35 });
+}
+
+// And he is worse now. Same shape, lower, longer, and rough — a sawtooth where
+// the first was a triangle — so a second warning cannot be mistaken for a repeat
+// of the first. However deep the hole gets, this is the sound: the difference
+// that matters is FRESH, TIRING, GONE.
+export function playArmSpent() {
+  phrase([[F3, 0, 0.34], [D3, 0.18, 0.62]], { level: 0.32, type: "sawtooth", tail: 0.5 });
 }
 
 export function soundsUnlocked() {

@@ -20,6 +20,7 @@ import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=2026071
 import { gameFeats } from "../feats.js?v=20260713-x";
 import { buildNpcTeam } from "../npcTeams.js?v=20260713-x";
 import { positionsOverlap } from "../../rules/cards.js?v=20260713-x";
+import { playArmTiring, playArmSpent } from "../../ui/sounds.js?v=20260713-x";
 import {
   persistSave,
   deriveSeed,
@@ -509,6 +510,50 @@ function mountDrama(app) {
   spin(0);
 }
 
+// ---- A tiring arm --------------------------------------------------------------
+//
+// The BF line has always said this and nobody reads it — a number under a name
+// changing from 23/24 to 25/24 is not an event, it is a footnote. It IS an event:
+// the man on the mound just got worse, and every pitch from here is thrown by a
+// lesser pitcher than the one you scouted.
+//
+// So it makes a noise. The first step down is the arm starting to labour; every
+// step after that is the same, deeper sound — the difference that matters to a
+// manager is FRESH, TIRING, GONE, not the exact number of the penalty. Both
+// mounds ring: his arm going is as much your business as yours going, and you
+// are the one who has to decide what to do about either.
+// The decision, kept apart from the noise so it can be tested without a speaker:
+// what has changed on the two mounds since the last play, and what that is worth
+// hearing about. Exported for tests.
+export function fatigueAlarm(battle, heard = {}) {
+  const now = {};
+  let tiring = false;
+  let spent = false;
+  for (const side of ["away", "home"]) {
+    const mound = pitcherStatus(battle.state, side);
+    const penalty = mound?.fatiguePenalty ?? 0;
+    // Keyed on the MAN, not the side: a fresh arm out of the pen starts at zero,
+    // and his zero must not read as the last man's penalty coming down — nor may
+    // the new man inherit the tiredness the old man was making noises about.
+    const key = `${side}:${mound?.pitcher?.id ?? ""}`;
+    now[key] = penalty;
+    const before = heard[key] ?? 0;
+    if (penalty > before) {
+      if (before === 0) tiring = true;
+      else spent = true;
+    }
+  }
+  // One sound a play, and the worse news is the news.
+  return { now, sound: spent ? "spent" : tiring ? "tiring" : null };
+}
+
+function callTheBullpenPhone(app) {
+  const { now, sound } = fatigueAlarm(app.screen.battle, app.screen.fatigueHeard ?? {});
+  app.screen.fatigueHeard = now;
+  if (sound === "spent") playArmSpent();
+  else if (sound === "tiring") playArmTiring();
+}
+
 function afterAction(app, events, presetLines = null) {
   const playerSide = app.screen.battle.playerSide;
   const lines = presetLines ?? events.filter(Boolean).flatMap((event) => describeEvent(event, playerSide));
@@ -519,6 +564,7 @@ function afterAction(app, events, presetLines = null) {
   // Every play comes through here, so this is where the diamond learns what to
   // act out. The id is what stops a cursor keypress from replaying it.
   app.screen.motion = { id: (app.screen.motion?.id ?? 0) + 1, ...playMotion(events) };
+  callTheBullpenPhone(app);
   app.screen.lines = lines.length ? lines : app.screen.lines;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;

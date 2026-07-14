@@ -9,6 +9,27 @@ import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, si
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260713-x";
 import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260713-x";
 import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260713-x";
+import { unlockSounds, soundsUnlocked, isMuted } from "../ui/sounds.js?v=20260713-x";
+
+// A browser will not let a page make a noise until the person has touched it, so
+// the adventure buys the right on the first button pressed — the one that opens
+// the save, long before anything has anything to say. Without this the whole kit
+// is silent here and the sounds look broken rather than absent.
+//
+// It asks again on every gesture until it works, rather than asking once and
+// latching: a first attempt can be refused (a tab that is not visible, a resume
+// the browser simply never answers), and a page that gave up after one try would
+// be silent for the rest of the session with nothing to show for it. Once the
+// context is running, this costs a boolean check per keypress.
+//
+// The draft room's mute switch is honoured — it is one setting, in one place,
+// for one site.
+function askForSound() {
+  if (isMuted() || soundsUnlocked()) return;
+  unlockSounds().catch(() => {});
+}
+document.addEventListener("keydown", askForSound);
+document.addEventListener("pointerdown", askForSound);
 
 const SCREENS = {
   title: titleScreen,
