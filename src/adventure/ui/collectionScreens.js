@@ -22,7 +22,7 @@ import {
   addLog
 } from "../state.js?v=20260713-x";
 import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-x";
-import { personConflict, playsPosition, positionsLabel, positionsOverlap } from "../../rules/cards.js?v=20260713-x";
+import { hitterPositions, personConflict, playsPosition, positionsLabel, positionsOverlap } from "../../rules/cards.js?v=20260713-x";
 import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-x";
 import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-x";
 
@@ -643,6 +643,27 @@ function binderVisibleRows(app) {
 
 // Roster spots this card could take: same kind, and not a second era of
 // someone already on the team (unless he's the one sitting down).
+// Whose spot the incoming card is really after: his OWN primary position — the
+// first one printed on him, which is the one he plays best — or, for an arm, the
+// same job. If nobody on the roster is standing there (you are adding a catcher
+// to a club whose catcher is somehow not a catcher), fall back to the first man
+// he could legally replace, and only then to the top of the list.
+function defaultSwapIndex(save, incoming, targets) {
+  const spotOf = (target) => currentSpot(save, target);
+  if (incoming.kind === "pitcher") {
+    const sameJob = targets.findIndex((target) => target.role === incoming.role);
+    return sameJob >= 0 ? sameJob : 0;
+  }
+  const primary = hitterPositions(incoming)[0]?.pos ?? null;
+  const atHisSpot = primary === null ? -1 : targets.findIndex((target) => spotOf(target) === primary);
+  if (atHisSpot >= 0) return atHisSpot;
+  const anySpotHeCanFill = targets.findIndex((target) => {
+    const slot = lineupSlotOf(save, target);
+    return slot ? canPlayerFillLineupSlot(incoming, slot) : false;
+  });
+  return anySpotHeCanFill >= 0 ? anySpotHeCanFill : 0;
+}
+
 // Where a rostered man is standing right now: the position a bat is playing (the
 // LF/RF man in left reads LF, the DH reads DH), or the game an arm is taking. A
 // bat the lineup could not seat falls back to what is printed on his card.
@@ -673,7 +694,11 @@ function binderActions(app, card) {
       disabled: Boolean(blocked),
       run: () => {
         app.screen.mode = "team-swap";
-        app.screen.pickIndex = 0;
+        // The cursor opens on the man he is HERE TO REPLACE. A shortstop is
+        // being added to play shortstop; asking who sits and then pointing at
+        // the catcher makes you walk down the list every single time to answer
+        // the question you already answered by choosing the card.
+        app.screen.pickIndex = defaultSwapIndex(app.save, card, targets);
       }
     }
   ];

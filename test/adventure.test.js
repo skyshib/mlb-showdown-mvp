@@ -591,6 +591,65 @@ test("sell-all clears every duplicate at the pawn rate, keeping first copies", a
   assert.ok(RARITIES.common.sellValue <= 30, "the shop pays pawn rates now");
 });
 
+// Walk the binder to a card, open its actions, and take ADD TO TEAM. Returns the
+// WHO SITS row the cursor came to rest on.
+//
+// The card has to be the one the QUESTION is about — every row of the binder is
+// in the rendered list, so "his name appears" proves nothing; the header does.
+function openSwapAndReadCursor(app, binderScreen, card) {
+  const asked = `WHO SITS FOR ${card.name.split(" ")[0][0]}.${card.name.split(" ").pop()}?`.toUpperCase();
+  for (let index = 0; index < 60; index += 1) {
+    app.screen = { name: "binder", index, filter: "ALL" };
+    binderScreen.key(app, "a"); // open his actions
+    binderScreen.key(app, "a"); // ADD TO TEAM -> PICK WHO SITS
+    if (app.screen.mode !== "team-swap") continue;
+    const html = binderScreen.render(app);
+    if (!html.toUpperCase().includes(asked)) continue;
+    const cursor = html.match(/<li class="gq-cursor[^"]*"[^>]*>([\s\S]*?)<\/li>/);
+    return cursor ? cursor[1] : null;
+  }
+  return null;
+}
+
+test("WHO SITS opens on the man the new card is here to replace", async () => {
+  const { binderScreen, lineupSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
+  const { hitterPositions } = await import("../src/rules/cards.js");
+  const save = testSave();
+  const roster = rosterCards(save);
+
+  // A shortstop is being added to play shortstop. Asking who sits and then
+  // pointing at the catcher makes you walk the list every time to answer the
+  // question you already answered by choosing the card.
+  const seatedSS = roster.find((card) => lineupSlotOf(save, card) === "SS");
+  assert.ok(seatedSS, "somebody is playing short");
+  const newSS = adventurePool().find((card) =>
+    card.kind === "hitter" &&
+    !save.roster.cardIds.includes(card.id) &&
+    hitterPositions(card)[0]?.pos === "SS");
+  assert.ok(newSS, "the pool prints a shortstop");
+  addCardToCollection(save, newSS.id);
+
+  const app = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go() {}, rerender() {} };
+  const cursorRow = openSwapAndReadCursor(app, binderScreen, newSS);
+  assert.ok(cursorRow, "his ADD TO TEAM opens the WHO SITS list");
+  assert.match(cursorRow, /<span class="gq-swap-spot">SS<\/span>/, "the cursor stands on the shortstop");
+  assert.ok(
+    cursorRow.includes(seatedSS.name.split(" ").pop().toUpperCase()),
+    "and on the man actually playing there, not on whoever happens to be first"
+  );
+
+  // An arm opens on an arm of the same job.
+  const newRP = adventurePool().find((card) =>
+    card.kind === "pitcher" && card.role === "RP" && !save.roster.cardIds.includes(card.id));
+  if (newRP) {
+    addCardToCollection(save, newRP.id);
+    const armApp = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go() {}, rerender() {} };
+    const armRow = openSwapAndReadCursor(armApp, binderScreen, newRP);
+    assert.ok(armRow, "the arm opens his list too");
+    assert.match(armRow, /<span class="gq-swap-spot">RP<\/span>/, "a reliever opens on a reliever, not the game-one starter");
+  }
+});
+
 test("WHO SITS names each man by the spot he is standing in", async () => {
   const { binderScreen, lineupSlotOf, rotationSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
   const save = testSave();
