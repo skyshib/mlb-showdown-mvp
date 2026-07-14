@@ -52,6 +52,11 @@ import {
   actSteal,
   actAdvance,
   actChangePitcher,
+  actBunt,
+  actIntentionalWalk,
+  npcMoundVisit,
+  serializeBattle,
+  restoreBattle,
   fastForward,
   runSimSeries
 } from "../src/rules/battle/controller.js";
@@ -1566,6 +1571,108 @@ test("the menu right-aligns when the opponent is hitting", async () => {
   const roadGame = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "align-road" });
   const roadApp = { save: testSave(), screen: { name: "battle", trainerId: trainer.id, battle: roadGame, mode: "menu", menuIndex: 0, lines: [] } };
   assert.ok(!battleScreen.render(roadApp).includes("gq-menu-right"), "the batting menu stays left-aligned");
+});
+
+test("a game in progress rebuilds itself from its seed and the decisions taken", () => {
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "resume-me", playerIsAway: false });
+  // Manage a game with every kind of decision in it, exactly the way the battle
+  // screen does — including the NPC skipper's look at his mound after each one.
+  const rng = createRng("resume-choices");
+  for (let i = 0; i < 60; i += 1) {
+    const phase = battlePhase(battle);
+    if (phase.type === "over") break;
+    if (phase.type === "advance-decision") actAdvance(battle, rng.next() < 0.5 ? 0 : 1);
+    else if (phase.type === "player-batting") {
+      if (phase.stealOptions.length && rng.next() < 0.5) actSteal(battle, phase.stealOptions[0].fromIndex);
+      else if (phase.canBunt && rng.next() < 0.3) actBunt(battle);
+      else actSwing(battle);
+    } else if (rng.next() < 0.1 && phase.bullpen.length) actChangePitcher(battle, phase.bullpen[0].index);
+    else if (rng.next() < 0.1) actIntentionalWalk(battle);
+    else actPitch(battle);
+    npcMoundVisit(battle);
+  }
+  assert.ok(battle.eventCount > 10, "there is a game here to lose");
+  const kinds = new Set(battle.actions.map((action) => action.type));
+  assert.ok(kinds.size >= 3, "and it was managed, not just swung at");
+
+  // What the save would hold: a seed, a few hundred bytes of decisions. No state.
+  const stashed = JSON.parse(JSON.stringify(serializeBattle(battle)));
+  const resumed = restoreBattle({ playerManager: player, npcManager: npc, trainer, ...stashed });
+  assert.ok(resumed, "the recording replays");
+  assert.deepEqual(resumed.state.score, battle.state.score, "same score");
+  assert.equal(resumed.state.inning, battle.state.inning, "same inning");
+  assert.equal(resumed.state.half, battle.state.half, "same half");
+  assert.equal(resumed.state.outs, battle.state.outs, "same outs");
+  assert.deepEqual(
+    resumed.state.bases.map((runner) => runner?.id ?? null),
+    battle.state.bases.map((runner) => runner?.id ?? null),
+    "same men on"
+  );
+  assert.deepEqual(resumed.state.lineScore, battle.state.lineScore, "same frames hung on the board");
+  assert.equal(resumed.events.length, battle.events.length, "every play back in the book");
+  assert.deepEqual(
+    resumed.events.map((event) => `${event.result ?? event.type}:${event.resultRoll ?? ""}`),
+    battle.events.map((event) => `${event.result ?? event.type}:${event.resultRoll ?? ""}`),
+    "the same dice, in the same order"
+  );
+  assert.deepEqual(battlePhase(resumed), battlePhase(battle), "and it asks the manager the same question");
+
+  // A recording this engine cannot read is refused, not half-applied.
+  assert.equal(
+    restoreBattle({ playerManager: player, npcManager: npc, trainer, ...stashed, actions: [{ type: "levitate" }] }),
+    null,
+    "an unknown decision means no resume"
+  );
+  assert.equal(
+    restoreBattle({ playerManager: player, npcManager: npc, trainer, ...stashed, eventCount: stashed.eventCount + 1 }),
+    null,
+    "and so does a game that replays to a different number of plays"
+  );
+});
+
+test("closing the tab mid-inning does not cost you the game", async () => {
+  const { startTrainerBattle, resumeBattle, battleScreen, gameOverScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const app = { save, screen: {}, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  startTrainerBattle(app, trainer);
+  assert.equal(app.screen.name, "battle");
+  assert.ok(save.activeBattle, "the game is on the books the moment it starts");
+
+  // Manage a few plate appearances.
+  for (let i = 0; i < 8; i += 1) {
+    if (battlePhase(app.screen.battle).type === "over") break;
+    battleScreen.key(app, "a");
+  }
+  const battle = app.screen.battle;
+  assert.ok(save.activeBattle.actions.length > 0, "and every decision after that");
+  assert.ok(!save.activeBattle.state, "the state is replayed, never stored");
+
+  // Close the tab: all that survives is what went to localStorage.
+  const reloaded = JSON.parse(JSON.stringify(save));
+  const booted = { save: reloaded, screen: { name: "title" } };
+  const screen = resumeBattle(booted);
+  assert.ok(screen, "and the save knows there is a game to come back to");
+  assert.equal(screen.name, "battle", "which opens at the plate, not the title");
+  assert.equal(screen.trainerId, trainer.id);
+  assert.deepEqual(screen.battle.state.score, battle.state.score, "same score");
+  assert.equal(screen.battle.state.inning, battle.state.inning, "same inning");
+  assert.equal(screen.battle.state.outs, battle.state.outs, "same outs");
+  assert.equal(screen.battle.events.length, battle.events.length, "the same plays in the book");
+  assert.deepEqual(screen.lines, app.screen.lines, "and the same call still on the screen");
+
+  // Finish it. Once the coins are paid there is nothing to come back to.
+  booted.go = function (name, data = {}) { this.screen = { name, ...data }; };
+  booted.rerender = () => {};
+  booted.screen = screen;
+  for (let i = 0; i < 400 && booted.screen.name === "battle"; i += 1) battleScreen.key(booted, "a");
+  assert.equal(booted.screen.name, "gameOver", "the game ends on the FINAL screen");
+  assert.ok(reloaded.activeBattle, "which has not paid out yet, so the game is still on the books");
+  assert.equal(resumeBattle({ save: JSON.parse(JSON.stringify(reloaded)) })?.name, "gameOver", "a reload there comes back to FINAL");
+  gameOverScreen.key(booted, "a");
+  assert.equal(reloaded.activeBattle, null, "and once it pays out, the book is closed");
 });
 
 test("the bullpen opens as a compare screen: the warming arm beside the one on the mound", async () => {

@@ -54,7 +54,9 @@ import {
   fastForward,
   runSimSeries,
   isDramaticMoment,
-  npcMoundVisit
+  npcMoundVisit,
+  serializeBattle,
+  restoreBattle
 } from "../../rules/battle/controller.js?v=20260713-w";
 
 export function startTrainerBattle(app, trainer) {
@@ -109,18 +111,58 @@ function launchSeriesGame(app, trainer) {
     starterIndex: series.nextGame - 1,
     playerIsAway
   });
+  const lines = [
+    series.bestOf > 1 ? `GAME ${series.nextGame} of the best-of-${series.bestOf}.` : "One game. Winner takes the coins.",
+    playerIsAway ? "You're the visitors. Top 1 — grab a bat." : "Your ballpark tonight. Take the mound."
+  ];
+  stashBattle(save, trainer.id, battle, lines);
   persistSave(save);
-  app.go("battle", {
-    trainerId: trainer.id,
-    battle,
-    lines: [
-      series.bestOf > 1 ? `GAME ${series.nextGame} of the best-of-${series.bestOf}.` : "One game. Winner takes the coins.",
-      playerIsAway ? "You're the visitors. Top 1 — grab a bat." : "Your ballpark tonight. Take the mound."
-    ],
-    menuIndex: 0,
-    mode: "menu"
-  });
+  app.go("battle", { trainerId: trainer.id, battle, lines, menuIndex: 0, mode: "menu" });
   app.rerender();
+}
+
+// ---- A game you can walk away from mid-inning --------------------------------
+
+// A game in progress belongs in the save, not just in the tab. What's written
+// is the seed and the decisions taken — the state is replayed from them — so
+// a game costs a few hundred bytes and can never be a half-consistent snapshot
+// of the engine's internals.
+function stashBattle(save, trainerId, battle, lines) {
+  save.activeBattle = { trainerId, lines: lines ?? [], ...serializeBattle(battle) };
+}
+
+function clearBattle(save) {
+  save.activeBattle = null;
+}
+
+// Boot with a game still on the books: deal it again, re-take every decision,
+// and put the manager back where he was standing. A recording this build can't
+// replay is dropped rather than half-applied — you lose the game, not the save.
+// Returns the screen to open on, or null if there is nothing to come back to.
+export function resumeBattle(app) {
+  const save = app.save;
+  const stashed = save?.activeBattle;
+  if (!stashed) return null;
+  const trainer = trainerById(stashed.trainerId);
+  const battle = trainer && restoreBattle({
+    playerManager: managerFor(save),
+    npcManager: buildNpcTeam(trainer, save),
+    trainer,
+    ...stashed
+  });
+  if (!battle) {
+    clearBattle(save);
+    persistSave(save);
+    return null;
+  }
+  const screen = { trainerId: trainer.id, battle, lines: stashed.lines ?? [], menuIndex: 0, mode: "menu" };
+  // A game that was already over when the tab closed comes back to its FINAL
+  // screen — the coins and the box score are handed out from there, and they
+  // have not been handed out yet.
+  const phase = battlePhase(battle);
+  return phase.type === "over"
+    ? { name: "gameOver", ...screen, phase }
+    : { name: "battle", ...screen };
 }
 
 // Coins, badge, pack, and log bookkeeping for any battle outcome. Reward
@@ -476,6 +518,10 @@ function afterAction(app, events, presetLines = null) {
   app.screen.lines = lines.length ? lines : app.screen.lines;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
+  // The book is written after every decision, so a closed tab costs the manager
+  // nothing: the game he comes back to is the one he left, mid-inning.
+  stashBattle(app.save, app.screen.trainerId, app.screen.battle, app.screen.lines);
+  persistSave(app.save);
   const phase = battlePhase(app.screen.battle);
   if (phase.type === "over") {
     // Land on the FINAL screen first: the last play and the outcome, stated
@@ -543,6 +589,9 @@ function resolveGameEnd(app, phase) {
     lineScore: battle.state.lineScore
   });
   const status = recordSeriesGame(save, phase.playerWon);
+  // The game is in the books now — coins paid, stats recorded. Nothing left to
+  // come back to, so the recording comes off the save.
+  clearBattle(save);
   persistSave(save);
 
   let next;

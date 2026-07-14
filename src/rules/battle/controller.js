@@ -43,12 +43,61 @@ export function createBattle({ playerManager, npcManager, trainer, seed, starter
     trainer,
     playerSide,
     npcSide,
+    starterIndex,
+    playerIsAway,
     profile: profileFor(trainer?.aiProfile),
     state,
     rng: createRng(seed),
     events: [],
-    eventCount: 0
+    eventCount: 0,
+    // Every managerial decision, in the order it was made. The game is a pure
+    // function of its seed and this list, which is the whole reason a battle
+    // can be rebuilt from a few hundred bytes instead of a serialized state.
+    actions: []
   };
+}
+
+// A game in progress, small enough to sit in the save: the seed it was dealt
+// from and the decisions taken since. The state is NOT stored — it is replayed.
+// (eventCount rides along as a checksum: if a rebuild lands on a different
+// number of events, the recording no longer describes this engine and the
+// caller is told so rather than handed a subtly wrong game.)
+export function serializeBattle(battle) {
+  return {
+    seed: battle.seed,
+    starterIndex: battle.starterIndex,
+    playerIsAway: battle.playerIsAway,
+    eventCount: battle.eventCount,
+    actions: battle.actions.map((action) => ({ ...action }))
+  };
+}
+
+const REPLAY = {
+  swing: (battle) => actSwing(battle),
+  pitch: (battle) => actPitch(battle),
+  steal: (battle, action) => actSteal(battle, action.from),
+  bunt: (battle) => actBunt(battle),
+  advance: (battle, action) => actAdvance(battle, action.send),
+  iwalk: (battle) => actIntentionalWalk(battle),
+  pen: (battle, action) => actChangePitcher(battle, action.index),
+  fastForward: (battle) => fastForward(battle)
+};
+
+// Deal the same game again and re-take the same decisions. The dice follow,
+// because they always followed from the seed. Returns null if the recording
+// cannot be replayed onto this engine — a save from an older build, say —
+// so a bad restore reads as "no game to resume" rather than a wrong one.
+export function restoreBattle({ playerManager, npcManager, trainer, seed, starterIndex, playerIsAway, actions, eventCount }) {
+  const battle = createBattle({ playerManager, npcManager, trainer, seed, starterIndex, playerIsAway });
+  for (const action of actions ?? []) {
+    const replay = REPLAY[action.type];
+    if (!replay) return null;
+    replay(battle, action);
+    // The UI gives the NPC skipper his look at the mound after every action,
+    // so the replay has to give him the same look, at the same points.
+    npcMoundVisit(battle);
+  }
+  return typeof eventCount === "number" && battle.eventCount !== eventCount ? null : battle;
 }
 
 export function battingSide(battle) {
@@ -117,6 +166,13 @@ function pushEvent(battle, event) {
   return event;
 }
 
+// The decision goes in the book before the dice are thrown for it, so an action
+// that turns out to be a no-op (a steal call on an empty base) is still part of
+// the recording — replaying has to consume the game the same way it was played.
+function record(battle, action) {
+  battle.actions.push(action);
+}
+
 // The NPC skipper's between-batters mound visit, as its OWN event: the UI
 // calls this when a new plate appearance is about to start, so the change
 // announces itself before the player picks an action against the new arm —
@@ -131,11 +187,13 @@ export function npcMoundVisit(battle) {
 
 // Player action while batting: let the plate appearance rip.
 export function actSwing(battle) {
+  record(battle, { type: "swing" });
   return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng))];
 }
 
 // Player action while batting: send the runner on the chosen base.
 export function actSteal(battle, fromIndex) {
+  record(battle, { type: "steal", from: fromIndex });
   const event = attemptSteal(battle.state, fromIndex, battle.rng);
   return event ? [pushEvent(battle, event)] : [];
 }
@@ -143,6 +201,7 @@ export function actSteal(battle, fromIndex) {
 // Player action while batting: lay down a sacrifice bunt (traditional
 // Showdown — it always gets down, so no dice ride on it).
 export function actBunt(battle) {
+  record(battle, { type: "bunt" });
   const event = attemptBunt(battle.state);
   return event ? [pushEvent(battle, event)] : [];
 }
@@ -150,12 +209,14 @@ export function actBunt(battle) {
 // Player decision after their own hit or fly ball: send the first `sendCount`
 // runners (lead first), hold the rest.
 export function actAdvance(battle, sendCount) {
+  record(battle, { type: "advance", send: sendCount });
   const event = resolveAdvanceDecision(battle.state, sendCount, battle.rng);
   return event ? [pushEvent(battle, event)] : [];
 }
 
 // Player action while pitching: put the batter on for free.
 export function actIntentionalWalk(battle) {
+  record(battle, { type: "iwalk" });
   const event = intentionalWalk(battle.state);
   return event ? [pushEvent(battle, event)] : [];
 }
@@ -164,6 +225,7 @@ export function actIntentionalWalk(battle) {
 // steal look first; if a runner goes, that IS the event — the decision point
 // comes back around before the plate appearance.
 export function actPitch(battle) {
+  record(battle, { type: "pitch" });
   const steal = npcMaybeSteal(battle.state, battle.rng, battle.profile);
   if (steal) return [pushEvent(battle, steal)];
   return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng))];
@@ -172,6 +234,7 @@ export function actPitch(battle) {
 // Player action while pitching: go to the pen. Pass a staff index to bring
 // in a specific arm; omit it for the next man up.
 export function actChangePitcher(battle, targetIndex = null) {
+  record(battle, { type: "pen", index: targetIndex });
   const pitcher = changePitcher(battle.state, battle.playerSide, targetIndex);
   if (!pitcher) return [];
   return [pushEvent(battle, pitchingChangeEvent(battle, battle.playerSide, pitcher))];
@@ -218,6 +281,7 @@ export function isDramaticMoment(state) {
 // fatigue-based pitching for both sides, NPC profile moves) until the next
 // leverage moment or the end of the game.
 export function fastForward(battle, { maxEvents = 500 } = {}) {
+  record(battle, { type: "fastForward" });
   const state = battle.state;
   const events = [];
   let guard = maxEvents;

@@ -5,7 +5,7 @@ import { applyFranchisePalette } from "../ui/franchisePalette.js?v=20260713-w";
 import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260713-w";
 import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260713-w";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260713-w";
-import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen } from "./ui/battleScreen.js?v=20260713-w";
+import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen, resumeBattle } from "./ui/battleScreen.js?v=20260713-w";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260713-w";
 import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260713-w";
 import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260713-w";
@@ -104,6 +104,11 @@ if (app.save) {
   setUniverseSeed(app.save.saveSeed, app.save.universe ?? "fictional", {
     priceNoise: app.save.mode !== "uncapped"
   });
+  // A game left running is a game you are still in the middle of. Reloading the
+  // tab — or closing it and coming back tomorrow — puts you back at the plate,
+  // in the same inning, against the same arm, with the same men on.
+  const resumed = resumeBattle(app);
+  if (resumed) app.screen = resumed;
 }
 
 document.addEventListener("keydown", (event) => {
