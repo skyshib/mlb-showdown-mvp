@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Traffic — MLB Showdown</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.1);
+    --series-1: #2a78d6;
+    --series-2: #1baf7a;
+    --track: #edece7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --plane: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.1);
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --track: #262624;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --series-1: #3987e5;
+    --series-2: #199e70;
+    --track: #262624;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px 64px;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--text-secondary); margin: 0 0 28px; }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .tile-label { color: var(--text-secondary); font-size: 13px; }
+  .tile-value { font-size: 30px; font-weight: 600; letter-spacing: -0.01em; margin-top: 6px; }
+  .tile-note { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
+  .chart-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 14px;
+  }
+  h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .legend { display: flex; gap: 14px; align-items: center; }
+  .key { display: flex; gap: 6px; align-items: center; color: var(--text-secondary); font-size: 13px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+  .toggle {
+    font: inherit; font-size: 13px; color: var(--text-secondary);
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer;
+  }
+  .toggle:hover { color: var(--text-primary); }
+
+  .plot { width: 100%; height: auto; display: block; overflow: visible; }
+  .plot text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .band:hover .hit-bg { fill: currentColor; opacity: 0.05; }
+
+  /* The chart is the enhancement; this table is where every value stays
+     reachable — required relief, since the aqua sits under 3:1 in light mode. */
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--gridline); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-secondary); font-weight: 500; font-size: 13px; }
+  [hidden] { display: none !important; }
+
+  .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 24px; }
+  .note { color: var(--text-muted); font-size: 12px; margin: 6px 0 0; }
+  .rank { list-style: none; margin: 14px 0 0; padding: 0; }
+  .rank li { margin-bottom: 10px; }
+  .rank-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .rank-key { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-count { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .rank-track { height: 6px; border-radius: 3px; background: var(--track); margin-top: 4px; overflow: hidden; }
+  .rank-fill { height: 100%; border-radius: 3px; background: var(--series-1); }
+  .empty { color: var(--text-muted); }
+
+  #tip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity 90ms;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 12px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14); z-index: 10;
+  }
+  #tip .tip-day { color: var(--text-primary); font-weight: 600; margin-bottom: 4px; }
+  #tip .tip-row { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); }
+  #tip b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Traffic</h1>
+  <p class="sub" id="sub">Loading…</p>
+  <div id="view" hidden>
+    <section class="tiles" id="tiles"></section>
+
+    <section class="card">
+      <div class="chart-head">
+        <h2>Pageviews and visitors, last 30 days</h2>
+        <div class="legend">
+          <span class="key"><span class="swatch" style="background: var(--series-1)"></span>Pageviews</span>
+          <span class="key"><span class="swatch" style="background: var(--series-2)"></span>Visitors</span>
+          <button class="toggle" id="flip" aria-pressed="false">Table</button>
+        </div>
+      </div>
+      <svg class="plot" id="plot" viewBox="0 0 960 300" role="img" aria-label="Daily pageviews and visitors"></svg>
+      <div id="daily-table" hidden></div>
+    </section>
+
+    <div class="lists">
+      <section class="card">
+        <h2>Where people are playing</h2>
+        <p class="note">From the IP, so it is a good guess and not a fact — mobile often
+          resolves to the carrier's gateway city rather than the player.</p>
+        <ul class="rank" id="places"></ul>
+      </section>
+      <section class="card"><h2>Top pages</h2><ul class="rank" id="paths"></ul></section>
+      <section class="card"><h2>Nearest edge</h2><ul class="rank" id="regions"></ul></section>
+      <section class="card"><h2>Referrers</h2><ul class="rank" id="referrers"></ul></section>
+    </div>
+  </div>
+</main>
+<div id="tip" role="status" aria-live="polite"></div>
+
+<script type="module">
+// The three-letter codes are Fly's edges, not the visitor's country — the edge
+// that took the connection is simply the one nearest them. Naming the city is
+// honest about the resolution in a way that "nrt" is not.
+const EDGES = {
+  ams: "Amsterdam", arn: "Stockholm", atl: "Atlanta", bog: "Bogotá", bom: "Mumbai",
+  bos: "Boston", cdg: "Paris", den: "Denver", dfw: "Dallas", ewr: "New York",
+  eze: "Buenos Aires", fra: "Frankfurt", gdl: "Guadalajara", gig: "Rio de Janeiro",
+  gru: "São Paulo", hkg: "Hong Kong", iad: "Washington DC", jnb: "Johannesburg",
+  lax: "Los Angeles", lhr: "London", mad: "Madrid", mia: "Miami", nrt: "Tokyo",
+  ord: "Chicago", otp: "Bucharest", phx: "Phoenix", qro: "Querétaro", scl: "Santiago",
+  sea: "Seattle", sin: "Singapore", sjc: "San Jose", syd: "Sydney", waw: "Warsaw",
+  yul: "Montreal", yyz: "Toronto", local: "Local (no edge)"
+};
+
+const token = new URLSearchParams(location.search).get("token");
+const compact = (n) => n >= 10000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K` : n.toLocaleString();
+
+const res = await fetch(`/api/stats${token ? `?token=${encodeURIComponent(token)}` : ""}`);
+if (!res.ok) {
+  const body = await res.json().catch(() => ({}));
+  document.getElementById("sub").textContent =
+    res.status === 401
+      ? "These stats are private. Add ?token=… to the URL."
+      : body.error ?? `Could not load stats (${res.status}).`;
+} else {
+  render(await res.json());
+}
+
+function render(stats) {
+  document.getElementById("sub").textContent =
+    `${stats.totalViews.toLocaleString()} pageviews since counting began. Bots and the stats page itself are not counted.`;
+  document.getElementById("view").hidden = false;
+
+  tiles([
+    ["Today", stats.today.views, `${stats.today.visitors.toLocaleString()} ${plural(stats.today.visitors, "visitor")}`],
+    ["Last 30 days", stats.last30Days.views, `${stats.last30Days.visitors.toLocaleString()} ${plural(stats.last30Days.visitors, "visitor")}`],
+    ["All time", stats.totalViews, "pageviews"]
+  ]);
+
+  drawDaily(stats.days);
+  dailyTable(stats.days);
+  rank("places", stats.places, (k) => k);
+  rank("paths", stats.paths, (k) => k);
+  rank("regions", stats.regions, (k) => EDGES[k] ?? k);
+  rank("referrers", stats.referrers, (k) => k);
+
+  // toggleAttribute, not `.hidden`: an <svg> is an SVGElement, and `hidden` is an
+  // HTMLElement property — assigning it here sets a JS expando nobody reads, and
+  // the chart stays on screen underneath the table.
+  let showingTable = false;
+  document.getElementById("flip").addEventListener("click", (event) => {
+    showingTable = !showingTable;
+    document.getElementById("plot").toggleAttribute("hidden", showingTable);
+    document.getElementById("daily-table").toggleAttribute("hidden", !showingTable);
+    event.target.textContent = showingTable ? "Chart" : "Table";
+    event.target.setAttribute("aria-pressed", String(showingTable));
+  });
+}
+
+function plural(n, word) {
+  return n === 1 ? word : `${word}s`;
+}
+
+function tiles(rows) {
+  document.getElementById("tiles").innerHTML = rows.map(([label, value, note]) => `
+    <div class="card">
+      <div class="tile-label">${label}</div>
+      <div class="tile-value">${compact(value)}</div>
+      <div class="tile-note">${note}</div>
+    </div>`).join("");
+}
+
+function drawDaily(days) {
+  const svg = document.getElementById("plot");
+  if (!days.length) {
+    svg.outerHTML = '<p class="empty">Nobody has been here yet.</p>';
+    return;
+  }
+  const W = 960, H = 300, L = 44, R = 12, T = 12, B = 34;
+  const plotW = W - L - R, plotH = H - T - B;
+  const max = niceMax(Math.max(1, ...days.map((d) => d.views)));
+  const y = (v) => T + plotH - (v / max) * plotH;
+
+  const band = plotW / days.length;
+  const GAP = 2;                                     // the surface gap, doing the separating
+  const barW = Math.min(24, (band - GAP * 2) / 2);   // capped: never fill the slot
+
+  const ticks = [0, max / 2, max].map((v) => `
+    <line x1="${L}" y1="${y(v)}" x2="${W - R}" y2="${y(v)}" stroke="var(--gridline)" stroke-width="1" />
+    <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${compact(Math.round(v))}</text>`).join("");
+
+  // A label every fifth day. All thirty would collide and the axis would go unread.
+  const step = Math.ceil(days.length / 6);
+  const bars = days.map((d, i) => {
+    const mid = L + band * i + band / 2;
+    const x1 = mid - GAP / 2 - barW, x2 = mid + GAP / 2;
+    const label = i % step === 0
+      ? `<text x="${mid}" y="${H - B + 18}" text-anchor="middle">${d.day.slice(5)}</text>`
+      : "";
+    return `<g class="band" data-i="${i}">
+      <rect class="hit-bg" x="${L + band * i}" y="${T}" width="${band}" height="${plotH}" fill="transparent" />
+      ${col(x1, y(d.views), barW, T + plotH - y(d.views), "var(--series-1)")}
+      ${col(x2, y(d.visitors), barW, T + plotH - y(d.visitors), "var(--series-2)")}
+      ${label}
+    </g>`;
+  }).join("");
+
+  svg.innerHTML = `${ticks}
+    <line x1="${L}" y1="${T + plotH}" x2="${W - R}" y2="${T + plotH}" stroke="var(--baseline)" stroke-width="1" />
+    ${bars}`;
+
+  const tip = document.getElementById("tip");
+  for (const group of svg.querySelectorAll(".band")) {
+    const d = days[Number(group.dataset.i)];
+    group.addEventListener("pointerenter", () => {
+      tip.innerHTML = `<div class="tip-day">${d.day}</div>
+        <div class="tip-row"><span class="swatch" style="background: var(--series-1)"></span><b>${d.views.toLocaleString()}</b> pageviews</div>
+        <div class="tip-row"><span class="swatch" style="background: var(--series-2)"></span><b>${d.visitors.toLocaleString()}</b> ${plural(d.visitors, "visitor")}</div>`;
+      tip.style.opacity = "1";
+    });
+    group.addEventListener("pointermove", (event) => {
+      tip.style.left = `${Math.min(event.clientX + 14, innerWidth - tip.offsetWidth - 8)}px`;
+      tip.style.top = `${event.clientY + 14}px`;
+    });
+    group.addEventListener("pointerleave", () => { tip.style.opacity = "0"; });
+  }
+}
+
+// Square at the baseline, 4px rounded at the data end — so the bar reads as
+// growing off the axis rather than floating.
+function col(x, yTop, w, h, fill) {
+  if (h <= 0) return "";
+  const r = Math.min(4, h, w / 2);
+  return `<path d="M${x} ${yTop + h} L${x} ${yTop + r} Q${x} ${yTop} ${x + r} ${yTop}
+    L${x + w - r} ${yTop} Q${x + w} ${yTop} ${x + w} ${yTop + r} L${x + w} ${yTop + h} Z" fill="${fill}" />`;
+}
+
+function niceMax(value) {
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  for (const factor of [1, 1.5, 2, 2.5, 5, 10]) {
+    if (value <= magnitude * factor) return magnitude * factor;
+  }
+  return magnitude * 10;
+}
+
+function dailyTable(days) {
+  document.getElementById("daily-table").innerHTML = `<table>
+    <thead><tr><th>Day</th><th>Pageviews</th><th>Visitors</th></tr></thead>
+    <tbody>${[...days].reverse().map((d) => `
+      <tr><td>${d.day}</td><td>${d.views.toLocaleString()}</td><td>${d.visitors.toLocaleString()}</td></tr>`).join("")}
+    </tbody></table>`;
+}
+
+function rank(id, rows, name) {
+  const list = document.getElementById(id);
+  if (!rows.length) {
+    list.innerHTML = '<li class="empty">Nothing yet.</li>';
+    return;
+  }
+  const max = rows[0].views;
+  list.innerHTML = rows.slice(0, 10).map((row) => `
+    <li>
+      <div class="rank-row">
+        <span class="rank-key" title="${row.key}">${name(row.key)}</span>
+        <span class="rank-count">${row.views.toLocaleString()}</span>
+      </div>
+      <div class="rank-track"><div class="rank-fill" style="width: ${Math.max(2, (row.views / max) * 100)}%"></div></div>
+    </li>`).join("");
+}
+</script>
+</body>
+</html>
