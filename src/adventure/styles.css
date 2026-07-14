@@ -317,7 +317,17 @@ h1.gq-logo {
   padding: 0.8cqw 1.5cqw;
 }
 .gq-board-bases { display: flex; align-items: center; gap: 1.5cqw; flex: none; }
-.gq-board-series { font-size: 2.2cqw; white-space: nowrap; }
+/* The game number lives in the board's corner cell now — above the clubs, beside
+   the frames — so it reads as a fact about this board rather than a caption
+   floating beside the bases. It is left-aligned with the club names under it. */
+/* Matched on the cell, not the class alone: `.gq-linescore th` centres every
+   cell at a higher specificity, and a bare `.gq-line-series` asking for left
+   would be quietly thrown away — the same trap the live frame's border fell into. */
+.gq-linescore th.gq-line-series {
+  font-size: 2.2cqw;
+  white-space: nowrap;
+  text-align: left;
+}
 
 /* On the ink the bases invert: the paper tone draws them, not the navy. The
    margin is on all four sides — the 45deg turn throws the corners out

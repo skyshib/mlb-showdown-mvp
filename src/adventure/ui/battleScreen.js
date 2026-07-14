@@ -935,12 +935,9 @@ function currentMatchup(battle) {
 function renderScoreboard(battle, trainer, series) {
   const state = battle.state;
   return `<div class="gq-topbar gq-battle-topbar">
-    ${lineScoreHtml(battle)}
+    ${lineScoreHtml(battle, series)}
     <span class="gq-board-bases">
       ${diamondHtml(state)}${outsHtml(state.outs)}
-      ${series && series.bestOf > 1
-        ? `<span class="gq-board-series">G${series.nextGame} <span class="gq-dim">(${series.wins}-${series.losses})</span></span>`
-        : ""}
     </span>
   </div>`;
 }
@@ -957,7 +954,7 @@ function renderScoreboard(battle, trainer, series) {
 // takes the name column to its cap), not guessed.
 const MAX_FRAMES = 10;
 
-function lineScoreHtml(battle) {
+function lineScoreHtml(battle, series = null) {
   const state = battle.state;
   const played = Math.max(9, state.lineScore.away.length, state.lineScore.home.length, state.inning);
   // Extras hang new frames off the end until the board runs out of wall — which
@@ -990,9 +987,16 @@ function lineScoreHtml(battle) {
       }).join("")}
       <td class="gq-line-total">${state.score[side]}</td>
     </tr>`;
+  // The corner cell — above the clubs, beside the frame numbers — was empty, and
+  // a board with a hole in the corner of it is where the game number goes. It is
+  // a fact ABOUT this board (which game of the series it is, and where the series
+  // stands), so it belongs on the board and not floating beside the bases.
+  const corner = series && series.bestOf > 1
+    ? `G${series.nextGame} <span class="gq-dim">(${series.wins}-${series.losses})</span>`
+    : "";
   return `<table class="gq-linescore" aria-label="line score">
     <tr class="gq-line-head">
-      <th></th>${innings.map((inning) => `<th>${inning}</th>`).join("")}<th class="gq-line-total">R</th>
+      <th class="gq-line-series">${corner}</th>${innings.map((inning) => `<th>${inning}</th>`).join("")}<th class="gq-line-total">R</th>
     </tr>
     ${row("away")}
     ${row("home")}
