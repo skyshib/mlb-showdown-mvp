@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<!-- The game moved to Fly, where a real server backs it: the online rooms, the
+     hall of fame, and the record book are all API calls, and GitHub Pages can
+     only ever hand out files. This branch exists purely to forward anyone still
+     holding the old link.
+
+     Pages is static hosting, so a 301 is not on the table. A canonical link is
+     what tells a search engine which URL is the real one; the meta refresh and
+     the script are what move an actual person. `location.replace`, not `href`,
+     so the back button returns them to wherever they came from rather than
+     bouncing them through here again. -->
+<title>Moved — MLB Showdown</title>
+<link rel="canonical" href="https://mlb-showdown-mvp.fly.dev/" />
+<meta http-equiv="refresh" content="0; url=https://mlb-showdown-mvp.fly.dev/" />
+<meta name="robots" content="noindex, follow" />
+<script>
+  location.replace("https://mlb-showdown-mvp.fly.dev/" + location.hash);
+</script>
+<style>
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-content: center; gap: 8px;
+    text-align: center; background: #0d0d0d; color: #fff;
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { color: #3987e5; }
+</style>
+</head>
+<body>
+  <p>MLB Showdown has moved.</p>
+  <p><a href="https://mlb-showdown-mvp.fly.dev/">mlb-showdown-mvp.fly.dev</a></p>
+</body>
+</html>
