@@ -245,7 +245,7 @@ function playerSilhouette() {
       <ellipse class="gq-back-brim" cx="50" cy="34" rx="30" ry="7" clip-path="url(#gq-brim-right)" />
       <circle class="gq-back-head" cx="50" cy="38" r="25" />
       <path class="gq-back-cap" d="M25 37 a 25 25 0 0 1 50 0 l 0 3 l -50 0 Z" />
-      <rect class="gq-back-strap" x="42" y="31" width="16" height="9" rx="1" />
+      <rect class="gq-back-strap" x="42.8" y="29.6" width="14.4" height="7.2" rx="1" />
     </svg>
   </span>`;
 }
