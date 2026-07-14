@@ -1176,7 +1176,7 @@ export const claimCardScreen = {
       <div class="gq-topbar"><span>WINNER'S PICK</span><span>${escapeHtml(trainer.name)}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${menuHtml(roster.map((card) => ({ html: cardLine(card) })), index)}</div>
-        <div>${claimComparisonHtml(app, selected)}</div>
+        <div class="gq-card-side">${claimComparisonHtml(app, selected)}</div>
       </div></div>
       <div class="gq-textbox"><p>Take ONE card from their roster — your own ${selected ? escapeHtml(selected.kind === "pitcher" ? selected.role : selected.position) : ""} cards show below theirs. Z claims it. X walks away empty-handed.</p></div>
     </div>`;

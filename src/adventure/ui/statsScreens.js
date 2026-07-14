@@ -346,7 +346,7 @@ export const trophyScreen = {
               )
             : `<p class="gq-dim">THE CASE IS EMPTY. PERFECT GAMES, CYCLES, AND SLAMS EARN THEIR PLAQUES HERE.</p>`
         }</div>
-        <div>${
+        <div class="gq-card-side">${
           selected
             ? `<div class="gq-frame gq-trophy-plaque">&#127942; <b>${escapeHtml(selected.title)}</b><br>
                 <span class="gq-dim">${escapeHtml(selected.blurb)}</span><br>
