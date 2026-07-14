@@ -1,16 +1,16 @@
-import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260713-w";
-import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260713-w";
-import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js?v=20260713-w";
+import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260713-x";
+import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260713-x";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js?v=20260713-x";
 
 // "1973/3500 PT" under the cap; uncapped saves just count.
 export function pointsLabel(save) {
   const cap = pointCap(save);
   return Number.isFinite(cap) ? `${rosterPoints(save)}/${cap} PT` : `${rosterPoints(save)} PT &middot; UNCAPPED`;
 }
-import { dayWhimsy } from "../feats.js?v=20260713-w";
-import { validateRoster } from "../../rules/draft.js?v=20260713-w";
-import { buildNpcTeam } from "../npcTeams.js?v=20260713-w";
-import { startTrainerBattle } from "./battleScreen.js?v=20260713-w";
+import { dayWhimsy } from "../feats.js?v=20260713-x";
+import { validateRoster } from "../../rules/draft.js?v=20260713-x";
+import { buildNpcTeam } from "../npcTeams.js?v=20260713-x";
+import { startTrainerBattle } from "./battleScreen.js?v=20260713-x";
 
 export function rosterProblems(save) {
   const issues = validateRoster(managerFor(save));
@@ -172,6 +172,43 @@ function scoutRows(trainer, save) {
   ];
 }
 
+// ---- The stare-down ----------------------------------------------------------
+//
+// The Game Boy did this with a pan: the field slides sideways and the two of you
+// arrive from opposite edges, each behind a bracket of your team. You come in
+// from the left, he comes in from the right, and for one beat before anybody
+// says anything you are just two managers looking at each other across a
+// ballpark. It is the whole reason a trainer battle feels like an event.
+function teamDots(count) {
+  return `<span class="gq-versus-dots">${"<i></i>".repeat(Math.max(0, count))}</span>`;
+}
+
+// Two letters is what a Game Boy had room for, and it is what the trainers
+// carry. The player's plate is read off his own name the same way.
+function playerSprite(save) {
+  const name = String(save?.player?.name ?? "YOU").trim();
+  return (name.slice(0, 2) || "YO").toUpperCase();
+}
+
+function versusHtml(app, trainer) {
+  const save = app.save;
+  const theirs = scoutRows(trainer, save).length;
+  const yours = managerFor(save).roster.length;
+  // The pan runs once, when the screen opens. Paging through his dialog
+  // rerenders this markup, and a slide that replayed under every line of
+  // trash talk would stop being an entrance.
+  return `<div class="gq-versus${app.screen.introPlayed ? "" : " gq-versus-in"}">
+    <div class="gq-versus-row gq-versus-them">
+      ${teamDots(theirs)}
+      <span class="gq-versus-sprite">[${escapeHtml(trainer.sprite)}]</span>
+    </div>
+    <div class="gq-versus-row gq-versus-you">
+      <span class="gq-versus-sprite">[${escapeHtml(playerSprite(save))}]</span>
+      ${teamDots(yours)}
+    </div>
+  </div>`;
+}
+
 export const trainerIntroScreen = {
   render(app) {
     const trainer = trainerById(app.screen.trainerId);
@@ -194,8 +231,8 @@ export const trainerIntroScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>${escapeHtml(trainer.title)}</span><span>${formatTag(trainer)}</span></div>
       <div class="gq-body gq-center">
+        ${versusHtml(app, trainer)}
         <div class="gq-frame gq-title-frame">
-          <b style="font-size:6cqw">[${escapeHtml(trainer.sprite)}]</b><br>
           <b>${escapeHtml(trainer.name)}</b><br>
           <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS &#9679; ${rewardCoins(app.save, trainer)}${beaten && trainer.repeatable ? " (REMATCH)" : ""}</span>
         </div>
@@ -219,6 +256,11 @@ export const trainerIntroScreen = {
   hoverCard(app, index) {
     if (app.screen.mode !== "scout") return null;
     return scoutRows(trainerById(app.screen.trainerId), app.save)[index] ?? null;
+  },
+  mounted(app) {
+    // The entrance is spent. Every rerender from here on draws the two of you
+    // already standing there.
+    if (app.screen.mode !== "scout") app.screen.introPlayed = true;
   },
   key(app, key) {
     const trainer = trainerById(app.screen.trainerId);

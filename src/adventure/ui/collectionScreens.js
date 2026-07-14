@@ -1,6 +1,6 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260713-w";
-import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260713-w";
-import { packEggs } from "../feats.js?v=20260713-w";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260713-x";
+import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260713-x";
+import { packEggs } from "../feats.js?v=20260713-x";
 import {
   persistSave,
   deriveSeed,
@@ -19,11 +19,11 @@ import {
   setBattingOrder,
   managerFor,
   addLog
-} from "../state.js?v=20260713-w";
-import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-w";
-import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js?v=20260713-w";
-import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-w";
-import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-w";
+} from "../state.js?v=20260713-x";
+import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-x";
+import { personConflict, playsPosition, positionsOverlap } from "../../rules/cards.js?v=20260713-x";
+import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-x";
+import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-x";
 
 // ---- Two-way pairs -----------------------------------------------------------
 
@@ -334,8 +334,13 @@ export const catalogScreen = {
             { offset: start }
           )
         : `<p class="gq-dim">NO CARD ANSWERS TO "${escapeHtml(app.screen.query ?? "")}".</p>`;
+    // How much of this page you actually have. Counted over the FILTER's cards,
+    // not the search's — the answer to "how many catchers do I own" must not
+    // change while you are typing a name into the box.
+    const page = catalogRows(filter);
+    const owned = page.filter((card) => ownedCount(app.save, card.id) > 0).length;
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)}</span><span>${rows.length ? index + 1 : 0}/${rows.length}</span></div>
+      <div class="gq-topbar"><span>CARD CATALOG &middot; ${escapeHtml(filter)} &middot; OWNED ${owned}/${page.length}</span><span>${rows.length ? index + 1 : 0}/${rows.length}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${list}</div>
         <div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) || null }) : ""}</div>
@@ -777,12 +782,52 @@ export function rotationCards(save) {
 export function swapRotation(save) {
   const [first, second] = rotationCards(save);
   if (!first || !second) return false;
+  return switchRotationTo(save, first, rotationSlotOf(save, second));
+}
+
+// An arm's place in the rotation, said the way the roster row says it. Null for
+// a bat, or for a reliever — the pen has no order to be in.
+export function rotationSlotOf(save, card) {
+  if (card?.kind !== "pitcher" || card.role !== "SP") return null;
+  const index = rotationCards(save).findIndex((arm) => arm.id === card.id);
+  return index < 0 ? null : `GAME ${index + 1}`;
+}
+
+// Every other start this arm could take. A rotation is just an order, so there
+// is nothing to check: any starter can take any game, and the man who had it
+// takes the one being vacated. It is the same trade a position switch is.
+export function rotationSwitchOptions(save, card) {
+  const rotation = rotationCards(save);
+  const from = rotation.findIndex((arm) => arm.id === card.id);
+  if (from < 0) return [];
+  return rotation
+    .map((arm, index) => ({ label: `GAME ${index + 1}`, player: arm, card, from: `GAME ${from + 1}` }))
+    .filter((option, index) => index !== from);
+}
+
+// The rotation IS the order of the SP cards on the roster, so moving an arm is
+// swapping two ids in that list.
+export function switchRotationTo(save, card, label) {
+  const option = rotationSwitchOptions(save, card).find((item) => item.label === label);
+  if (!option) return false;
   const ids = [...save.roster.cardIds];
-  const a = ids.indexOf(first.id);
-  const b = ids.indexOf(second.id);
+  const a = ids.indexOf(card.id);
+  const b = ids.indexOf(option.player.id);
+  if (a < 0 || b < 0) return false;
   [ids[a], ids[b]] = [ids[b], ids[a]];
   setRoster(save, ids);
   return true;
+}
+
+// A hitter switches the position he plays; a starter switches the game he
+// takes. Same gesture, same menu, same trade — so the screen asks once and the
+// card answers for itself.
+export function slotSwitchOptions(save, card) {
+  return card?.kind === "pitcher" ? rotationSwitchOptions(save, card) : positionSwitchOptions(save, card);
+}
+
+export function switchSlotTo(save, card, label) {
+  return card?.kind === "pitcher" ? switchRotationTo(save, card, label) : switchPositionTo(save, card, label);
 }
 
 function lineupSlots(save) {
@@ -838,25 +883,14 @@ function switchLine(option) {
   }`;
 }
 
-// The Team menu's action rows, after the 13 cards. Position changes are not
-// here — they live on the card itself, under SWITCH POSITION.
-function teamActions(save) {
-  const rotation = rotationCards(save);
-  return [
-    {
-      html: rotation.length >= 2
-        ? `&#8645; SWAP ROTATION <span class="gq-dim">${escapeHtml(shortName(rotation[0].name))} &#8644; ${escapeHtml(shortName(rotation[1].name))}</span>`
-        : `&#8645; SWAP ROTATION <span class="gq-dim">NEEDS TWO STARTERS</span>`,
-      disabled: rotation.length < 2,
-      preview: rotation[0] ?? null,
-      run: (a) => {
-        if (!swapRotation(a.save)) return;
-        const [first] = rotationCards(a.save);
-        addLog(a.save, `${first.name} takes game 1.`);
-        persistSave(a.save);
-      }
-    }
-  ];
+// The Team menu's action rows, after the 13 cards. There are none: everything a
+// man's place on this team can be changed to is asked of the MAN, on his own
+// card. The rotation used to be the exception — a SWAP ROTATION row hanging
+// under the roster that could only ever trade the first two arms, and never said
+// which arm you were trading. Now a starter changes his start the way a hitter
+// changes his position, which is the same question and deserves the same menu.
+function teamActions() {
+  return [];
 }
 
 // ---- Team (roster editing) -------------------------------------------------
@@ -950,6 +984,21 @@ function teamCardActions(app, card) {
     });
     actions.push({ label: "BATTING ORDER", run: () => app.go("lineup", { returnTo: "team", index: 0 }) });
   }
+  // The same move, asked of an arm: which game does he take?
+  if (card.role === "SP") {
+    const starts = rotationSwitchOptions(save, card);
+    const now = rotationSlotOf(save, card);
+    actions.push({
+      label: starts.length
+        ? `CHANGE ROTATION SLOT <span class="gq-dim">NOW ${escapeHtml(now ?? "&mdash;")}</span>`
+        : `CHANGE ROTATION SLOT <span class="gq-dim">NO SECOND STARTER</span>`,
+      disabled: !starts.length,
+      run: () => {
+        app.screen.mode = "switchPos";
+        app.screen.pickIndex = 0;
+      }
+    });
+  }
   const sell = sellAction(app, card);
   if (sell) actions.push(sell);
   actions.push(starAction(app, card), { label: "CANCEL", run: () => {} });
@@ -970,7 +1019,7 @@ export const teamScreen = {
     const rosterIndex = clampIndex(app.screen.index ?? 0, roster.length + actions.length);
     const filter = app.screen.pickFilter ?? "position";
     const anchor = roster[rosterIndex] ?? null;
-    const switches = switching ? positionSwitchOptions(save, anchor) : [];
+    const switches = switching ? slotSwitchOptions(save, anchor) : [];
     // The pick list holds the man being replaced too, diamond-marked like
     // the binder and sorted into his rightful spot by points — picking him
     // keeps him.
@@ -1003,7 +1052,7 @@ export const teamScreen = {
         pickIndex
       )}`;
     } else if (switching) {
-      list = `<h3>${escapeHtml(shortName(anchor?.name ?? ""))} PLAYS&hellip;</h3>${menuHtml(
+      list = `<h3>${escapeHtml(shortName(anchor?.name ?? ""))} ${anchor?.kind === "pitcher" ? "STARTS" : "PLAYS"}&hellip;</h3>${menuHtml(
         [...switches.map((option) => ({ html: switchLine(option) })), { label: "CANCEL" }],
         pickIndex
       )}`;
@@ -1028,10 +1077,10 @@ export const teamScreen = {
           picking
             ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels."
             : switching
-              ? "Z sends him out there; the man he displaces takes his old spot. X cancels."
+              ? "Z gives him the spot; the man who had it takes his. X cancels."
               : save.activeSeries
                 ? "SERIES IN PROGRESS — swaps wait until it ends. Everything else in the card menu stays yours."
-                : "Z opens a card's actions — swap, switch position, batting order, sell, star. The rotation lives below the roster. X to leave."
+                : "Z opens a card's actions — swap, switch position or rotation slot, batting order, sell, star. X to leave."
         }</p>
       </div>
     </div>`;
@@ -1045,7 +1094,7 @@ export const teamScreen = {
     }
     if (app.screen.mode === "switchPos") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
-      return positionSwitchOptions(app.save, anchor)[index]?.player ?? anchor ?? null;
+      return slotSwitchOptions(app.save, anchor)[index]?.player ?? anchor ?? null;
     }
     if (index < roster.length) return roster[index] ?? null;
     return teamActions(app.save)[index - roster.length]?.preview ?? null;
@@ -1084,12 +1133,12 @@ export const teamScreen = {
       }
     } else if (app.screen.mode === "switchPos") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
-      const switches = positionSwitchOptions(save, anchor);
+      const switches = slotSwitchOptions(save, anchor);
       if (key === "up" || key === "down") {
         app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), switches.length + 1);
       } else if (key === "a") {
         const option = switches[app.screen.pickIndex ?? 0];
-        if (option && switchPositionTo(save, anchor, option.label)) {
+        if (option && switchSlotTo(save, anchor, option.label)) {
           addLog(save, option.player
             ? `${anchor.name} takes ${option.label}; ${option.player.name} moves to ${option.from}.`
             : `${anchor.name} takes ${option.label}.`);

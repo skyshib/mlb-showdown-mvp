@@ -551,6 +551,110 @@ h1.gq-logo {
   margin: 2cqw 0;
 }
 
+/* ---- The stare-down ---- */
+
+/* Him high and to the right, you low and to the left, each behind a bracket of
+   your team — the Game Boy's trainer card, laid out the way it laid it out. The
+   box clips: the two of you arrive from OUTSIDE it, which is the pan. */
+.gq-versus {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  padding: 1.5cqw 0 2.5cqw;
+  flex: none;
+}
+
+.gq-versus-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 2cqw;
+  padding: 0 3cqw;
+}
+
+/* The bracket and the man it belongs to hang at OPPOSITE edges — his team over
+   your side of the field and yours over his, which is what makes the two rows
+   read as one stare across a ballpark rather than two labels. */
+.gq-versus-them { justify-content: space-between; }
+.gq-versus-you { justify-content: space-between; margin-top: 1.2cqw; }
+
+.gq-versus-sprite {
+  font-size: 6cqw;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+/* The bracket of balls: one lamp per card on the club, hung under a rule with a
+   stub turned down at each end. */
+.gq-versus-dots {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.7cqw;
+  padding: 0 1cqw 1cqw;
+  border-bottom: 0.5cqw solid var(--gb-darkest);
+  border-left: 0.5cqw solid var(--gb-darkest);
+  border-right: 0.5cqw solid var(--gb-darkest);
+  border-radius: 0 0 0.4cqw 0.4cqw;
+  min-height: 3cqw;
+}
+
+.gq-versus-dots i {
+  display: block;
+  width: 1.6cqw;
+  height: 1.6cqw;
+  border: 0.35cqw solid var(--gb-darkest);
+  border-radius: 50%;
+  background: var(--gb-dark);
+}
+
+/* The entrance. He comes in off the right edge, you come off the left, and a
+   band of light sweeps across the field between you — the pan, which is the
+   part that sells it. Once only: see introPlayed. */
+@keyframes gq-versus-from-right {
+  from { transform: translateX(115%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes gq-versus-from-left {
+  from { transform: translateX(-115%); }
+  to { transform: translateX(0); }
+}
+
+/* The band has to leave the FIELD, not just the middle of it: the box clips at
+   its own edge, so a sweep that stops at 200% parks a lit strip permanently
+   behind the trainer. It runs all the way out, and goes dark on the way. */
+@keyframes gq-versus-pan {
+  from { transform: translateX(-120%); opacity: 0.75; }
+  85% { opacity: 0.75; }
+  to { transform: translateX(320%); opacity: 0; }
+}
+
+.gq-versus-in .gq-versus-them {
+  animation: gq-versus-from-right 620ms cubic-bezier(0.16, 0.9, 0.3, 1) both;
+}
+
+.gq-versus-in .gq-versus-you {
+  animation: gq-versus-from-left 620ms cubic-bezier(0.16, 0.9, 0.3, 1) 90ms both;
+}
+
+.gq-versus-in::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--gb-light), transparent);
+  opacity: 0.75;
+  animation: gq-versus-pan 620ms ease-out both;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gq-versus-in .gq-versus-them,
+  .gq-versus-in .gq-versus-you,
+  .gq-versus-in::after { animation: none; }
+  .gq-versus-in::after { display: none; }
+}
+
 /* ---- Foil cards ---- */
 
 /* Foil printings (and legends everywhere) get the slow shine sweep. */
