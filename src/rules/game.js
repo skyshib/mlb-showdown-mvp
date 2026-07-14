@@ -1,6 +1,6 @@
-import { RESULTS, resolveChart } from "./cards.js?v=20260714-x";
-import { reliefDecision, lineupProfile } from "./pitching.js?v=20260714-x";
-import { createRng } from "./rng.js?v=20260714-x";
+import { RESULTS, resolveChart } from "./cards.js?v=20260714-b";
+import { reliefDecision, lineupProfile } from "./pitching.js?v=20260714-b";
+import { createRng } from "./rng.js?v=20260714-b";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 
@@ -537,9 +537,13 @@ export function resolveAdvanceDecision(state, sendCount, rng) {
   if (!pending) return null;
   state.pendingAdvance = null;
   const { battingSide, pitchingSide, candidates, kind, batter } = pending;
+  // The free men are going whatever is chosen. Holding a base nobody can throw
+  // you out taking is not a choice the player is allowed to make by accident, so
+  // the floor is the floor even if a stale menu says otherwise.
+  const floor = pending.autoSend ?? 0;
   const chosen = sendCount === "auto"
     ? leadPrefixAttempts(candidates)
-    : candidates.slice(0, Math.max(0, Math.min(sendCount, candidates.length)));
+    : candidates.slice(0, Math.max(floor, Math.min(sendCount, candidates.length)));
   if (!chosen.length) return null;
 
   const before = snapshotBases(state);
@@ -856,23 +860,43 @@ export function applyFlyout(state, batter, battingSide, pitchingSide, rng) {
 
   if (state.deferAdvancesFor === battingSide && state.outs < 3) {
     const candidates = tagUpCandidates(state, pitchingSide, state.outs);
-    if (candidates.length) {
-      state.pendingAdvance = { kind: "tagup", battingSide, pitchingSide, outsBefore, candidates, batter };
+    // A tag-up nobody can throw out is not a question either — see the hit path.
+    // But it IS still a tag-up: if every man is going for free the play must fall
+    // through and actually send him, not swallow the question and leave him
+    // standing on the bag he was already on.
+    const free = freeAdvanceCount(candidates);
+    if (candidates.length && free < candidates.length) {
+      state.pendingAdvance = { kind: "tagup", battingSide, pitchingSide, outsBefore, candidates, batter, autoSend: free };
+      state.lastPlayDetails = {
+        kind: "flyout",
+        outsBefore,
+        tagUpAttempts: [],
+        thrownAttempt: null
+      };
+      return runs;
     }
-    state.lastPlayDetails = {
-      kind: "flyout",
-      outsBefore,
-      tagUpAttempts: [],
-      thrownAttempt: null
-    };
-    return runs;
+    if (!candidates.length) {
+      state.lastPlayDetails = {
+        kind: "flyout",
+        outsBefore,
+        tagUpAttempts: [],
+        thrownAttempt: null
+      };
+      return runs;
+    }
+    // Everybody is free: fall through to the autopilot, which sends anyone whose
+    // chance clears the bar — and a certainty clears every bar.
   }
 
   const tagUpAttempts = chooseTagUpAttempts(state, pitchingSide, state.outs);
 
   if (tagUpAttempts.length && state.outs < 3) {
+    const wpBeforeTag = winProbabilityHome(state);
     const attemptResult = resolveAdvanceAttempts(state, tagUpAttempts, battingSide, pitchingSide, rng);
     runs += attemptResult.runs;
+    // A sacrifice fly is two men's doing as much as a hit is: he hit it deep
+    // enough, and the man on third had to go. Half each.
+    splitAutoAdvanceCredit(state, battingSide, batter, tagUpAttempts[0].runner, wpBeforeTag);
     state.lastPlayDetails = {
       kind: "flyout",
       outsBefore,
@@ -1190,8 +1214,14 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
     }))
     .sort((a, b) => b.toIndex - a.toIndex);
 
-  if (state.deferAdvancesFor === battingSide && allCandidates.length) {
-    state.pendingAdvance = { kind: "hit", battingSide, pitchingSide, outsBefore, candidates: allCandidates, batter };
+  // Ask only when there is something to ask. If every man who could go is going
+  // for free, the play resolves itself — the autopilot below sends anybody whose
+  // chance clears the bar, and a certainty clears every bar. `autoSend` carries
+  // the free men into the question when only SOME of them are free: those bases
+  // are already taken, and the decision left is about the man behind them.
+  const free = freeAdvanceCount(allCandidates);
+  if (state.deferAdvancesFor === battingSide && allCandidates.length && free < allCandidates.length) {
+    state.pendingAdvance = { kind: "hit", battingSide, pitchingSide, outsBefore, candidates: allCandidates, batter, autoSend: free };
     state.lastPlayDetails = {
       kind: "hit",
       outsBefore,
@@ -1213,7 +1243,11 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
     return 0;
   }
 
+  const wpBeforeAdvance = winProbabilityHome(state);
   const attemptResult = resolveAdvanceAttempts(state, attempts, battingSide, pitchingSide, rng);
+  // He went and got it — half the swing is his, whether he was sent for it or
+  // simply took a base nobody could defend.
+  splitAutoAdvanceCredit(state, battingSide, batter, attempts[0].runner, wpBeforeAdvance);
   state.lastPlayDetails = {
     kind: "hit",
     outsBefore,
@@ -1317,6 +1351,47 @@ export function fieldingCheckNeeds(attempt) {
   if (needed <= 1) return { needed: 1, certain: true, impossible: false };
   if (needed > 20) return { needed: 21, certain: false, impossible: true };
   return { needed, certain: false, impossible: false };
+}
+
+// An extra base is TWO men's doing — the hitter put the ball where a base could
+// be had, the runner is the one who went and got it — so they split it, half
+// each. resolveAdvanceDecision does this for a base the player SENT him for.
+// This does it for a base taken on the autopilot: the free ones nobody can
+// defend, and the NPC's and the simulator's.
+//
+// The difference is only in the bookkeeping. A sent runner's advance is its own
+// event, credited from scratch. An automatic one happens INSIDE the plate
+// appearance, and the plate appearance hands the batter the whole swing when it
+// closes — so the runner's half is taken back off the batter here rather than
+// added to him twice. The offense's total is untouched either way, which is why
+// the zero-sum stays zero.
+function splitAutoAdvanceCredit(state, battingSide, batter, taker, wpBefore) {
+  if (!batter?.id || !taker?.id || batter.id === taker.id) return;
+  const wpAfter = winProbabilityHome(state);
+  const advanceWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
+  if (!advanceWpa) return;
+  const half = advanceWpa / 2;
+  ensureHitterLine(state, { id: batter.id, name: batter.name }).wpa -= half;
+  ensureHitterLine(state, { id: taker.id, name: taker.name }).wpa += half;
+}
+
+// A base he cannot be thrown out taking. The defense would need a 21 — there is
+// no die that gets him — so the throw is not made and the base is simply his.
+export function certainSafe(candidate) {
+  return Boolean(fieldingCheckNeeds(candidate)?.impossible);
+}
+
+// How many of the lead runners are going for FREE. Runners are asked about lead
+// first and a trailing man can only go if the man ahead of him goes, so what
+// matters is the leading run of them: those bases are not a decision, and a
+// question with only one answer is not a question. It should never be put.
+export function freeAdvanceCount(candidates) {
+  let free = 0;
+  for (const candidate of candidates ?? []) {
+    if (!certainSafe(candidate)) break;
+    free += 1;
+  }
+  return free;
 }
 
 function describeAdvanceAttempt(candidate, outcome) {

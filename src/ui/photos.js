@@ -4,7 +4,7 @@
 // a thumbnail by player name, and misses are cached so we only ask once.
 // v2: the lookup grew a search-API second pass — retire v1's cached misses
 // so the old-timers get their retry.
-import { surname as cardSurname } from "./cardFace.js?v=20260714-x";
+import { surname as cardSurname } from "./cardFace.js?v=20260714-b";
 
 const CACHE_KEY = "sq-photo-cache-v2";
 const MISS = "none";

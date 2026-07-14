@@ -1175,8 +1175,12 @@ test("hits defer the extra-base call to the player, who can hold or send", () =>
   assert.equal(state.pendingAdvance, null);
   assert.equal(state.bases[2]?.id, "r2", "runner parked at third");
 
-  state.bases = [null, { id: "r5", name: "Runner Five", speed: 20 }, null];
+  // Speed 14, not 20: a burner cannot be thrown out going home from second and is
+  // no longer ASKED about at all (see the auto-safe test below). This man can be,
+  // so the call is still the player's, and sending him is still a gamble.
+  state.bases = [null, { id: "r5", name: "Runner Five", speed: 14 }, null];
   applySingle(state, state.away.lineup[1], "away", "home", createRng("adv-roll-2"), pitcher);
+  assert.ok(state.pendingAdvance, "a man who CAN be thrown out is still a question");
   const outsBefore = state.outs;
   const scoreBefore = state.score.away;
   const event = resolveAdvanceDecision(state, 1, createRng("send-roll"));
@@ -1195,7 +1199,10 @@ test("an extra base is split between the man who hit it and the man who took it;
 
   // A single with a man on second: the runner is sent, and the play is two
   // men's doing — the hitter put the ball out there, the runner went and got it.
-  state.bases[1] = { id: "r2", name: "Runner Two", speed: 18 };
+  // Speed 14: he can be thrown out, so going is a RISK he takes, and the credit
+  // is shared. (A man who cannot be thrown out is never asked and never sent —
+  // the base was the hit's doing, not his.)
+  state.bases[1] = { id: "r2", name: "Runner Two", speed: 14 };
   applySingle(state, batter, "away", "home", createRng("split-roll"), pitcher);
   const event = resolveAdvanceDecision(state, 1, createRng("send"));
   assert.equal(event.type, "advance");
@@ -3877,4 +3884,97 @@ test("the record book ranks each record the right way round, and folds you in", 
   const untouched = leaderboard(RECORDS.find((r) => r.key === "hit-streak"), {}, save);
   assert.equal(untouched.top.length, 0);
   assert.equal(untouched.you, null, "never having done it is not the same as having done it badly");
+});
+
+// The drama screen always KNEW how to stage a steal (see the THE THROW test
+// above). The man breaking for second was simply never asked: the swing asked,
+// the pitch asked, the runner sent on a hit asked, and the steal went straight
+// to the box score. A die thrown at a base with the game on it is the most
+// suspenseful thing in the sport.
+test("a steal in a big spot throws the slow die too", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { createBattle, battlePhase, isDramaticMoment, DRAMA_LEVERAGE } = await import("../src/rules/battle/controller.js");
+  const { managerFor } = await import("../src/adventure/state.js");
+  const { buildNpcTeam } = await import("../src/adventure/npcTeams.js");
+  const { stateLeverage } = await import("../src/rules/game.js");
+
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const battle = createBattle({
+    playerManager: managerFor(save),
+    npcManager: buildNpcTeam(trainer, save),
+    trainer,
+    seed: "steal-drama",
+    playerIsAway: true
+  });
+
+  // Ninth, two out, down one, the tying run on first and running. About as big
+  // as a steal gets.
+  const state = battle.state;
+  state.inning = 9;
+  state.half = "top";
+  state.outs = 2;
+  state.score = { away: 2, home: 3 };
+  state.bases = [{ ...state.away.lineup[0], speed: 20 }, null, null];
+
+  assert.ok(stateLeverage(state) >= DRAMA_LEVERAGE, `this is a big spot (leverage ${stateLeverage(state).toFixed(2)})`);
+  assert.ok(isDramaticMoment(state), "so the die should come out slow");
+
+  const phase = battlePhase(battle);
+  assert.equal(phase.type, "player-batting");
+  assert.ok(phase.stealOptions.length, "and the runner can go");
+
+  const app = { save, screen: { name: "battle", battle, trainerId: trainer.id, menuIndex: 0 }, go() {}, rerender() {} };
+  // Find the STEAL row the way a player finds it: by looking at the screen.
+  const html = battleScreen.render(app);
+  const rows = [...html.matchAll(/data-menu-index="(\d+)"([\s\S]*?)<\/li>/g)];
+  const stealRow = rows.find(([, , body]) => /STEAL/.test(body));
+  assert.ok(stealRow, "the steal is on the menu");
+
+  app.screen.menuIndex = Number(stealRow[1]);
+  battleScreen.key(app, "a");
+
+  assert.equal(app.screen.mode, "drama", "sending him pauses on the tumbling die");
+  assert.equal(app.screen.drama.stages[0].label, "THE THROW", "and the die is the throw to the bag");
+});
+
+// A question with one answer is not a question. If nobody can throw the man out,
+// he takes the base — the game does not stop and ask permission to give you
+// something free.
+test("a runner who cannot be thrown out takes the base without being asked", async () => {
+  const { applySingle, applyFlyout, pendingAdvanceDecision, certainSafe, freeAdvanceCount } = await import("../src/rules/game.js");
+  const { player, npc } = hookTeams();
+
+  const setUp = (speed) => {
+    const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "free-base" });
+    const state = battle.state;
+    state.bases = [null, { id: "r", name: "Runner", speed }, null];
+    return { state, batter: state.away.lineup[0], pitcher: pitcherStatus(state, "home").pitcher };
+  };
+
+  // The plodder can be gunned down at the plate, so the call is yours.
+  const slow = setUp(10);
+  applySingle(slow.state, slow.batter, "away", "home", createRng("slow"), slow.pitcher);
+  const asked = pendingAdvanceDecision(slow.state);
+  assert.ok(asked, "a man who can be thrown out is a decision");
+  assert.ok(!certainSafe(asked.candidates[0]), "because he can be thrown out");
+  assert.equal(freeAdvanceCount(asked.candidates), 0, "nothing here is free");
+
+  // The burner cannot be. No question, and he is already home.
+  const fast = setUp(20);
+  const scoreBefore = fast.state.score.away;
+  applySingle(fast.state, fast.batter, "away", "home", createRng("fast"), fast.pitcher);
+  assert.equal(pendingAdvanceDecision(fast.state), null, "nobody is asked about a base nobody can defend");
+  assert.equal(fast.state.score.away, scoreBefore + 1, "and he scored, rather than standing on second waiting to be asked");
+
+  // The same on a fly ball: a tag-up nobody can throw out is not a question, and
+  // — the bug this nearly shipped with — he must actually GO, not be swallowed.
+  const flyBattle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "free-tag" });
+  const flyState = flyBattle.state;
+  flyState.outs = 0;
+  flyState.bases = [null, null, { id: "t", name: "Tagger", speed: 20 }];
+  applyFlyout(flyState, flyState.away.lineup[0], "away", "home", createRng("tag"));
+  assert.equal(pendingAdvanceDecision(flyState), null, "no question");
+  assert.equal(flyState.score.away, 1, "he tagged and scored");
+  assert.equal(flyState.bases[2], null, "third is empty behind him");
 });

@@ -11,17 +11,17 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260714-x";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-x";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260714-x";
-import { longestHitStreak } from "../records.js?v=20260714-x";
-import { cardById } from "../packs.js?v=20260714-x";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds } from "../../rules/game.js?v=20260714-x";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-x";
-import { gameFeats } from "../feats.js?v=20260714-x";
-import { buildNpcTeam } from "../npcTeams.js?v=20260714-x";
-import { positionsOverlap } from "../../rules/cards.js?v=20260714-x";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-x";
+} from "./helpers.js?v=20260714-b";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-b";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260714-b";
+import { longestHitStreak } from "../records.js?v=20260714-b";
+import { cardById } from "../packs.js?v=20260714-b";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds } from "../../rules/game.js?v=20260714-b";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-b";
+import { gameFeats } from "../feats.js?v=20260714-b";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-b";
+import { positionsOverlap } from "../../rules/cards.js?v=20260714-b";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-b";
 import {
   persistSave,
   deriveSeed,
@@ -43,7 +43,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260714-x";
+} from "../state.js?v=20260714-b";
 import {
   createBattle,
   battlePhase,
@@ -60,7 +60,7 @@ import {
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260714-x";
+} from "../../rules/battle/controller.js?v=20260714-b";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -274,7 +274,11 @@ function battleMenuItems(app, phase) {
     for (const option of phase.stealOptions) {
       items.push({
         html: `STEAL ${option.toIndex === 2 ? "3B" : "2B"} — ${escapeHtml(shortName(option.runner.name))} <span class="gq-dim">${Math.round(option.safeChance * 100)}% SAFE</span>`,
-        run: (a) => afterAction(a, actSteal(a.screen.battle, option.fromIndex))
+        // A steal in the ninth is a die thrown at a base with the game on it, and
+        // it went by in a blink: the drama screen knew how to stage a steal (see
+        // dramaStages, THE THROW) and the send already asked for it — the man
+        // breaking for second was the only one who never got asked.
+        run: (a) => resolveWithDrama(a, () => actSteal(a.screen.battle, option.fromIndex))
       });
     }
     items.push(rostersItem(), gameLogItem(), fastForwardItem());
@@ -301,12 +305,27 @@ function battleMenuItems(app, phase) {
 // first, and a trailing runner only goes if everyone ahead of him goes.
 function advanceMenuItems(pending) {
   const verb = pending.kind === "tagup" ? "TAG UP" : "SEND";
+  // The lead men who cannot be thrown out are already gone — the engine does not
+  // even ask when they are the only ones who could go (see freeAdvanceCount). So
+  // the hold option holds only the men who are actually holdable, and it says so:
+  // "HOLD THE RUNNERS" over a man trotting into third uncontested is a lie.
+  const floor = pending.autoSend ?? 0;
+  const freeNames = pending.candidates
+    .slice(0, floor)
+    .map((c) => `${shortName(c.runner.name)} &#8594; ${destLabel(c.toIndex)}`)
+    .join(", ");
   const items = [{
-    label: pending.kind === "tagup" ? "NOBODY TAGS" : "HOLD THE RUNNERS",
-    // Holding throws no dice. There is nothing to be suspenseful about.
-    run: (a) => afterAction(a, actAdvance(a.screen.battle, 0), ["The runners hold."])
+    html: floor > 0
+      ? `${pending.kind === "tagup" ? "NOBODY ELSE TAGS" : "HOLD THE REST"} <span class="gq-dim">${freeNames} GOES FREE</span>`
+      : pending.kind === "tagup" ? "NOBODY TAGS" : "HOLD THE RUNNERS",
+    // Holding throws no dice at the men who are held. There is nothing to be
+    // suspenseful about — and the free man walks in either way.
+    run: (a) => afterAction(a, actAdvance(a.screen.battle, floor), [floor > 0 ? "The rest hold." : "The runners hold."])
   }];
   pending.candidates.forEach((candidate, index) => {
+    // Sending exactly the free men is not an option, it is the floor: it is what
+    // the first row already does.
+    if (index + 1 <= floor) return;
     const sent = pending.candidates.slice(0, index + 1);
     const names = sent
       .map((c) => `${shortName(c.runner.name)} &#8594; ${destLabel(c.toIndex)}`)
@@ -377,12 +396,18 @@ function fastForwardItem() {
 
 // ---- Dice-roll drama ---------------------------------------------------------
 
-// High-leverage plate appearances (two outs and the bases loaded, or the 9th
-// onward in a tight game) pause on the tumbling d20s before the call. The
-// engine has already rolled — the pause is pure theater, staged the way the
-// tabletop plays it: the PITCH die lands first and calls whose chart it is,
-// then the SWING die lands, then the lines read out. The drama screen hides
-// the HUD so the updated score can't spoil the result. Z skips the suspense.
+// High-leverage moments pause on the tumbling d20s before the call. The engine
+// has already rolled — the pause is pure theater, staged the way the tabletop
+// plays it: the PITCH die lands first and calls whose chart it is, then the SWING
+// die lands, then whatever the gloves had to do about it, then the lines read
+// out. The drama screen hides the HUD so the updated score can't spoil the
+// result. Z skips the suspense.
+//
+// A MOMENT, not a plate appearance. Whatever throws the die gets the treatment:
+// the swing, the pitch, the runner sent on a hit — and the steal, which is a die
+// thrown at a base with the game riding on it and which used to go by in a blink.
+// The threshold is asked of the state BEFORE the play, because the drama is in
+// the wind-up: what could happen, not what did.
 function resolveWithDrama(app, act) {
   const dramatic = isDramaticMoment(app.screen.battle.state);
   const events = act();

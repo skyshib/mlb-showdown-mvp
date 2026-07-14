@@ -15,10 +15,10 @@ import {
   pendingAdvanceDecision,
   resolveAdvanceDecision,
   stateLeverage
-} from "../game.js?v=20260714-x";
-import { buildTeam } from "../draft.js?v=20260714-x";
-import { createRng } from "../rng.js?v=20260714-x";
-import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js?v=20260714-x";
+} from "../game.js?v=20260714-b";
+import { buildTeam } from "../draft.js?v=20260714-b";
+import { createRng } from "../rng.js?v=20260714-b";
+import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js?v=20260714-b";
 
 // The interactive battle: one seeded game where the engine pauses before
 // every plate appearance so the humans (well, one human) can manage.
@@ -271,13 +271,22 @@ function pitchingChangeEvent(battle, side, pitcher) {
 // the game had to change: the moments simply became the real ones.
 
 // Fast-forward hands the game back when it starts to matter — twice an average
-// plate appearance. About one in fourteen.
+// plate appearance. Measured over 300 games: 8.5% of plate appearances, about
+// one in twelve.
 export const LEVERAGE_STOP = 2;
 
-// And the d20 comes out slow when it REALLY matters: two and a half times an
-// average moment, which lands on about one plate appearance in thirty — the
-// same rate the old hand-written rules fired at, spent on better moments.
-export const DRAMA_LEVERAGE = 2.5;
+// And the d20 comes out slow when it REALLY matters. Measured the same way:
+//
+//   2.50 ... 4.5% of plate appearances, about 1 in 22
+//   2.25 ... 5.7% of plate appearances, about 1 in 18   <- here
+//   2.00 ... 8.5%, which is where fast-forward already hands back
+//
+// It sat at 2.50 and the die came out a shade too rarely to feel like the game's
+// heartbeat. A quarter of a point is the whole change: roughly one dramatic
+// moment every eighteen plate appearances instead of every twenty-two — four or
+// five a game rather than three. Still scarce, which is the point of it; a die
+// that tumbles for everything is just a slow game.
+export const DRAMA_LEVERAGE = 2.25;
 
 export function isLeverageMoment(state) {
   return stateLeverage(state) >= LEVERAGE_STOP;

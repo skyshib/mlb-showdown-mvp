@@ -1610,3 +1610,33 @@ test("the hook holds when the pen has no innings left to give", () => {
 
   assert.equal(event.pitcher, "Journeyman", "a slightly better arm is not worth burning the last one in the first");
 });
+
+// A base nobody could have thrown him out taking is not asked about — but it is
+// still HIS base. He read it, he ran it, he scored. The credit is split with the
+// hitter exactly as it is when the player sends him for a contested one; the only
+// thing the free base changes is that nobody had to be asked.
+test("a free base is still half the runner's", () => {
+  const state = createInitialState(teamA, weakDefense);
+  const batter = makeHitter({ id: "sng", name: "Singler", chart: [{ from: 1, to: 20, result: RESULTS.SINGLE }] });
+  state.away.lineup[0] = batter;
+  // The player's side: normally he would be asked to send or hold.
+  state.deferAdvancesFor = "away";
+  state.bases = [null, makeHitter({ id: "burner", name: "Burner", speed: 20 }), null];
+
+  const event = playPlateAppearance(state, repeatingRng(1, 5));
+
+  assert.equal(event.result, RESULTS.SINGLE);
+  assert.equal(state.pendingAdvance, null, "he cannot be thrown out, so nobody was asked");
+  assert.equal(state.score.away, 1, "and he came all the way home");
+
+  const hitter = state.stats.hitters.get("away:sng");
+  const runner = state.stats.hitters.get("away:burner");
+  assert.ok(runner.wpa > 0, "the man who went and got it is paid for going and getting it");
+  assert.ok(hitter.wpa > 0, "and the man who hit it still has the bigger half of his own single");
+  assert.ok(
+    Math.abs((hitter.wpa + runner.wpa) - event.wpa) < 1e-9,
+    "the two of them are the whole play and no more — nothing invented, nothing lost"
+  );
+  const arm = state.stats.pitchers.get("home:wd-p");
+  assert.ok(Math.abs(arm.wpa + event.wpa) < 1e-9, "and the pitcher wears all of it");
+});
