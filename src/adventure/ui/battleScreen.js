@@ -804,13 +804,19 @@ export const battleScreen = {
     const phase = battlePhase(battle);
     if (app.screen.mode === "pen" && phase.type !== "over") return renderPen(app, battle, trainer, phase);
     const series = app.save.activeSeries;
+    // The board, then the game, then the clubs. What you are DOING — the menu you
+    // are choosing from and the call of the play you just made — sits in the
+    // middle of the screen where your eyes already are, and the two lineups hold
+    // the floor underneath it. The order used to put the men above the menu,
+    // which meant the one thing you actually touch was the thing furthest from
+    // everything else on the screen.
     return `<div class="gq-screen gq-battle-screen">
       ${renderScoreboard(battle, trainer, series)}
-      ${renderHud(battle, phase)}
       <div class="gq-textbox${phase.type === "player-pitching" ? " gq-textbox-fielding" : ""}">
         <div class="gq-battle-menu">${renderBattleMenu(app, phase)}</div>
         <div class="gq-battle-lines">${(app.screen.lines ?? []).map((line) => `<p>${line}</p>`).join("")}</div>
       </div>
+      ${renderHud(battle, phase)}
     </div>`;
   },
   hoverCard(app, index) {

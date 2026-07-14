@@ -406,6 +406,10 @@ h1.gq-logo {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto minmax(0, 1fr);
   gap: 2cqw;
+  /* The clubs hold the floor now, under the menu — so the rule that used to
+     divide the textbox from them belongs on this side of the join. */
+  flex: none;
+  border-top: 0.6cqw solid var(--gb-darkest);
   /* Hang everything from the top: the arm's workload line makes his column
      taller than the batter's, and centred columns would set the two cards at
      different heights. */
