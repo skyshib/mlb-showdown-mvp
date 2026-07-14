@@ -30,6 +30,7 @@ function mapItems(app) {
       label: `RESUME SERIES: ${trainer.name} (${save.activeSeries.wins}-${save.activeSeries.losses})`,
       section: "! GYM SERIES IN PROGRESS",
       battle: true,
+      resume: true,
       run: (a) => startTrainerBattle(a, trainer)
     });
   }
@@ -44,13 +45,14 @@ function mapItems(app) {
     // Beaten men keep their tick — you did beat them — and carry the wage they
     // will play you for now, so the map itself says where the coins are.
     const marker = beaten
-      ? `&#10003; &#8635; &#9679; ${rewardCoins(save, trainer)}`
+      ? `&#10003; &#8635; $${rewardCoins(save, trainer)}`
       : formatTag(trainer);
     items.push({
       section: trainer.title.toUpperCase(),
       html: `${escapeHtml(trainer.name)} <span class="gq-dim">${unlocked ? marker : "LOCKED"}</span>`,
       disabled: !available,
       battle: true,
+      beaten,
       run: (a) => a.go("trainerIntro", { trainerId: trainer.id, page: 0 })
     });
   }
@@ -104,10 +106,29 @@ export const ambushScreen = {
   }
 };
 
+// Where the cursor stands when you walk onto the map. Beaten trainers no longer
+// retire — the ladder only grows — so the top of the list is a museum of men you
+// have already beaten, and the man you are actually here for is at the bottom of
+// it. The cursor opens on him: the FARTHEST one you can still take for the first
+// time, or, once they are all beaten, the farthest one you can play at all.
+// A series you are in the middle of outranks everything: finish it.
+function defaultMapIndex(items) {
+  const playable = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.battle && !item.disabled);
+  const resume = playable.find(({ item }) => item.resume);
+  if (resume) return resume.index;
+  const fresh = playable.filter(({ item }) => !item.beaten);
+  const pick = (fresh.length ? fresh : playable).at(-1);
+  return pick ? pick.index : 0;
+}
+
 export const mapScreen = {
   render(app) {
     const save = app.save;
     const items = mapItems(app);
+    // Only on the way in. Once you have moved the cursor yourself it is yours.
+    if (app.screen.menuIndex === undefined) app.screen.menuIndex = defaultMapIndex(items);
     const problems = rosterProblems(save);
     const sections = [];
     for (const [index, item] of items.entries()) {
@@ -125,13 +146,13 @@ export const mapScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar">
         <span>${escapeHtml(save.player.name)} &middot; DAY ${ensureSeasonStats(save).games + 1}</span>
-        <span>&#9679; ${save.player.coins} &middot; ${pointsLabel(save)} &middot; BADGES <span class="gq-badgeline">${badgeLine(save)}</span></span>
+        <span class="gq-map-purse">$${save.player.coins} &middot; ${pointsLabel(save)} &middot; <span class="gq-badgeline">${badgeLine(save)}</span></span>
       </div>
       <div class="gq-body">${html}</div>
       <div class="gq-textbox">${
         problems.length
           ? `<p>! ROSTER NOT GAME-READY: ${escapeHtml(problems.join(", "))}. Fix it in TEAM.</p>`
-          : `<p>${escapeHtml(dayWhimsy(ensureSeasonStats(save).games + 1) ?? "Pick a place to go. Trainers pay coins; the gym pays a badge.")}</p>`
+          : `<p>${escapeHtml(dayWhimsy(ensureSeasonStats(save).games + 1) ?? "Pick a place to go. Trainers pay cash; the gym pays a badge.")}</p>`
       }</div>
     </div>`;
   },
@@ -257,7 +278,7 @@ export const trainerIntroScreen = {
         ${versusHtml(app, trainer)}
         <div class="gq-frame gq-title-frame">
           <b>${escapeHtml(trainer.name)}</b><br>
-          <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS &#9679; ${rewardCoins(app.save, trainer)}${beaten ? " &middot; REMATCH RATE" : ""}</span>
+          <span class="gq-dim">TEAM BUDGET ${npcBudget(app.save, trainer)} PT &middot; PAYS $${rewardCoins(app.save, trainer)}${beaten ? " &middot; REMATCH RATE" : ""}</span>
         </div>
       </div>
       <div class="gq-textbox">

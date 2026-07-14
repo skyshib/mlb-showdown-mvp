@@ -1190,7 +1190,7 @@ export const battleResultScreen = {
         <div class="gq-frame gq-title-frame">
           <b style="font-size:6cqw">${outcome.won ? "&#9733; W &#9733;" : "L"}</b>
           <p class="gq-mt">${outcome.won
-            ? `+&#9679; ${outcome.coins} COINS${outcome.rematch ? ` <span class="gq-dim">REMATCH RATE</span>` : ""}`
+            ? `+$${outcome.coins}${outcome.rematch ? ` <span class="gq-dim">REMATCH RATE</span>` : ""}`
             : `NO FEE. COME BACK AND TAKE HIM.`}</p>
           ${outcome.badge ? `<p><b>THE ${escapeHtml(outcome.badge.toUpperCase())} BADGE IS YOURS!</b><br><span class="gq-dim">NEW CHALLENGERS AWAIT.</span></p>` : ""}
           ${outcome.pack ? `<p>BONUS: A BOOSTER PACK!</p>` : ""}
@@ -1311,7 +1311,7 @@ export const simSeriesScreen = {
         <div class="gq-frame">${rows || `<p class="gq-dim">THE CAGE LIGHTS FLICKER ON...</p>`}</div>
         ${done
           ? `<div class="gq-frame gq-center"><b style="font-size:5cqw">${series.playerWins} - ${series.npcWins}</b><br>
-              ${outcome.won ? `SERIES WON! +&#9679; ${outcome.coins}${outcome.rematch ? " (REMATCH)" : ""}` : `SERIES LOST. IT COST YOU NOTHING BUT THE GAMES.`}
+              ${outcome.won ? `SERIES WON! +$${outcome.coins}${outcome.rematch ? " (REMATCH)" : ""}` : `SERIES LOST. IT COST YOU NOTHING BUT THE GAMES.`}
               ${outcome.cardClaim ? `<br>WINNER'S RULE: TAKE A CARD FROM THEIR ROSTER!` : ""}</div>`
           : ""}
       </div>

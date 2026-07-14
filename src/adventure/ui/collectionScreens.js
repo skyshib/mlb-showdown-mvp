@@ -62,7 +62,7 @@ function shopItems(app) {
   const items = [];
   const pack = PACKS.booster;
   items.push({
-    html: `${escapeHtml(pack.name.toUpperCase())} <span class="gq-dim">&#9679; ${pack.price}</span>`,
+    html: `${escapeHtml(pack.name.toUpperCase())} <span class="gq-dim">$${pack.price}</span>`,
     disabled: save.player.coins < pack.price,
     run: (a) => buyPack(a, pack)
   });
@@ -77,7 +77,7 @@ function shopItems(app) {
     const price = RARITIES[card.rarity].singlePrice + (partner ? RARITIES[partner.rarity].singlePrice : 0);
     // Condensed row — the card panel beside the list shows the full stats.
     items.push({
-      html: `${escapeHtml(shortName(card.name))} <span class="gq-dim">${card.points}PT &middot; &#9679; ${price}</span>`,
+      html: `${escapeHtml(shortName(card.name))} <span class="gq-dim">${card.points}PT &middot; $${price}</span>`,
       card,
       disabled: save.player.coins < price,
       run: (a) => buySingle(a, card, price)
@@ -267,7 +267,7 @@ function sellAction(app, card) {
   return {
     label: locked
       ? `SELL A COPY <span class="gq-dim">ROSTER COPY &mdash; NOT FOR SALE</span>`
-      : `SELL A COPY <span class="gq-dim">&#8594; &#9679; ${value}</span>`,
+      : `SELL A COPY <span class="gq-dim">&#8594; $${value}</span>`,
     disabled: locked,
     run: () => {
       openActionMenu(app);
@@ -280,7 +280,7 @@ function sellConfirmActions(app, card) {
   const value = sellValueOf(app.save, card);
   return [
     {
-      label: `YES &mdash; SELL FOR &#9679; ${value}`,
+      label: `YES &mdash; SELL FOR $${value}`,
       run: () => {
         app.screen.confirmSell = null;
         if (removeCardFromCollection(app.save, card.id)) {
@@ -422,7 +422,7 @@ export const shopScreen = {
     const items = shopItems(app);
     const selected = items[app.screen.menuIndex ?? 0];
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>CEDAR YARDS CARD SHOP</span><span>&#9679; ${app.save.player.coins}</span></div>
+      <div class="gq-topbar"><span>CEDAR YARDS CARD SHOP</span><span>$${app.save.player.coins}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${menuHtml(
           items.map((item) => ({ label: item.label, html: item.html, disabled: item.disabled })),
@@ -539,19 +539,19 @@ export const sellScreen = {
     const confirming = Boolean(app.screen.confirmSellAll);
     const items = [
       ...rows.map(({ card, count, locked, value }) => ({
-        html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; &#9679; ${value}</span>${starMark(app.save, card)}`
+        html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; $${value}</span>${starMark(app.save, card)}`
       })),
       ...(rows.length
         ? [
-            { html: `SELL ALL DUPLICATES <span class="gq-dim">&#8594; &#9679; ${duplicateHaul(app.save, spare)}</span>` },
-            { html: `SELL ALL CARDS <span class="gq-dim">&#8594; &#9679; ${fullHaul(app.save, spare)}</span>` },
+            { html: `SELL ALL DUPLICATES <span class="gq-dim">&#8594; $${duplicateHaul(app.save, spare)}</span>` },
+            { html: `SELL ALL CARDS <span class="gq-dim">&#8594; $${fullHaul(app.save, spare)}</span>` },
             { html: `&#9733; PROTECT STARRED <span class="gq-dim">${spare ? "ON — sweeps spare them" : "OFF — everything goes"}</span>` }
           ]
         : []),
       { label: "DONE SELLING" }
     ];
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>SELL TO THE SHOP</span><span>&#9679; ${app.save.player.coins}</span></div>
+      <div class="gq-topbar"><span>SELL TO THE SHOP</span><span>$${app.save.player.coins}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${
           rows.length ? "" : `<p class="gq-dim">NOTHING SPARE TO SELL.</p>`

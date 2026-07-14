@@ -864,6 +864,13 @@ h1.gq-logo {
 .gq-map-node h3 { font-size: 3.2cqw; border-bottom: 0.4cqw solid var(--gb-dark); margin-bottom: 0.6cqw; }
 .gq-badgeline { letter-spacing: 0.3em; }
 
+/* The purse, the cap and the badges are the whole point of the header, and the
+   badges were being cut off the end of it: the bar is one nowrap line, and the
+   name at the left was taking whatever it liked. The right side never shrinks
+   now; a long manager name gives way instead. */
+.gq-topbar > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.gq-map-purse { flex: none; }
+
 /* ---- Pack opening ---- */
 
 /* min-height:0 and the clip are load-bearing: the stage is the flexible row, and
