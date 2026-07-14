@@ -680,7 +680,15 @@ h1.gq-logo {
   stroke-width: 1.2;
 }
 .gq-back-cap { fill: var(--accent-bright); }
-.gq-back-strap { fill: var(--gq-lead); }
+/* The closure tab on the back of the crown, where a cap is adjusted. It sits ON
+   the bottom edge of the cap — half on the crown, half on the head — because
+   that is where the band is, and it carries a rule so it reads as a piece of the
+   hat rather than a hole in it. */
+.gq-back-strap {
+  fill: var(--gq-lead);
+  stroke: var(--gb-darkest);
+  stroke-width: 1.2;
+}
 
 /* The ground moving under them. In the handheld the whole FIELD slides while
    the two of you come in — that is what makes it a pan rather than two labels
