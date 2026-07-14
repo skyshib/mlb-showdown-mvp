@@ -622,6 +622,15 @@ h1.gq-logo {
   object-fit: cover;
 }
 
+/* The back of your own head. Ink, because it is a silhouette — the only thing
+   worth reading on your side of the field is that you are facing the other way. */
+.gq-versus-back { background: var(--gb-lightest); }
+.gq-versus-back svg { width: 100%; height: 100%; display: block; }
+.gq-back-body,
+.gq-back-head { fill: var(--gb-darkest); }
+.gq-back-cap { fill: var(--gq-flare); }
+.gq-back-strap { fill: var(--gb-lightest); }
+
 /* The ground moving under them. In the handheld the whole FIELD slides while
    the two of you come in — that is what makes it a pan rather than two labels
    sliding about on a still page. */
@@ -682,15 +691,20 @@ h1.gq-logo {
   to { transform: translateX(320%); opacity: 0; }
 }
 
-/* Slower and flatter than a bounce: the handheld's pan is a steady slide that
+/* They CROSS. He comes in off the left edge and travels to his side of the
+   field; you come in off the right and travel to yours. Two men walking past
+   each other to their own dugouts is the whole staging — an entrance where each
+   man arrives from the side he ends up on is barely an entrance at all.
+
+   Slower and flatter than a bounce: the handheld's pan is a steady slide that
    arrives and stops, and the two of you travel the same distance in the same
    time from opposite edges. */
 .gq-versus-in .gq-versus-them {
-  animation: gq-versus-from-right 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+  animation: gq-versus-from-left 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
 }
 
 .gq-versus-in .gq-versus-you {
-  animation: gq-versus-from-left 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+  animation: gq-versus-from-right 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
 }
 
 /* The ground runs the other way under the man crossing it, which is the whole

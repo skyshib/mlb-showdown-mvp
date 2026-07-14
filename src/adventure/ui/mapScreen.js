@@ -224,13 +224,19 @@ function versusSprite(seed, initials) {
   </span>`;
 }
 
-function playerInitials(save) {
-  const name = String(save?.player?.name ?? "YOU").trim();
-  const words = name.split(/\s+/).filter(Boolean);
-  const letters = words.length > 1
-    ? words.slice(0, 2).map((word) => word[0]).join("")
-    : name.slice(0, 2);
-  return (letters || "YO").toUpperCase();
+// You are not looking at yourself. In the handheld the manager on your side of
+// the field is drawn from BEHIND — the back of a head, a cap, a pair of
+// shoulders — because you are standing where he is standing and looking out at
+// the man who came to beat you. A face on your side would be a second opponent.
+function playerSilhouette() {
+  return `<span class="gq-versus-sprite gq-versus-back">
+    <svg viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+      <path class="gq-back-body" d="M4 100 C 9 73, 27 62, 50 62 C 73 62, 91 73, 96 100 Z" />
+      <circle class="gq-back-head" cx="50" cy="38" r="25" />
+      <path class="gq-back-cap" d="M25 37 a 25 25 0 0 1 50 0 l 0 3 l -50 0 Z" />
+      <rect class="gq-back-strap" x="44" y="31" width="12" height="9" rx="1" />
+    </svg>
+  </span>`;
 }
 
 function versusHtml(app, trainer) {
@@ -247,7 +253,7 @@ function versusHtml(app, trainer) {
       ${versusSprite(`${trainer.id}-${trainer.name}`, trainer.sprite)}
     </div>
     <div class="gq-versus-row gq-versus-you">
-      ${versusSprite(`manager-${save.saveSeed}-${save.player.name}`, playerInitials(save))}
+      ${playerSilhouette()}
       ${teamDots(yours)}
     </div>
   </div>`;
