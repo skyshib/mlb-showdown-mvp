@@ -23,6 +23,27 @@ import { FRANCHISE_COLORS, franchiseCode } from "../data/franchiseColors.js";
 // The sheet the whole site is printed on. The club tints it; it never leaves.
 const CREAM = "#f0e7d2";
 
+// The disc both managers stand in, the man who stands in it, and the near-black
+// everything drawn on it is ruled in. All three are fixed, and none of them are
+// the club's — the disc is the one surface a club does not tint, which is what
+// lets the cap on top of it be the club's actual color instead of a version of it
+// dragged bright enough to survive a club-colored ground.
+//
+// ONE grey for all thirty, not one each. It was solved per club for a while — the
+// darkest grey each club's own colors could stand on — and the honest cost of that
+// was thirty discs of thirty different brightnesses, which reads as thirty
+// different screens rather than one league. A single grey is the simpler object,
+// and the price is paid by two clubs: Philadelphia's bright red crown sits at
+// 1.75:1 on it (the crown is the one piece with no rule around it, so it is
+// carried by chroma — a saturated red on a neutral grey — rather than by
+// lightness), and Kansas City's tan gold bill lands at 1.00:1, the same luminance
+// as the ground exactly, and is held apart from it by its rule alone.
+// Kept in step with --gq-cap-ground, --gq-figure and --gq-cap-ink in
+// adventure/styles.css.
+export const CAP_GROUND = "#a0a0a0";
+export const CAP_FIGURE = "#6f737a";
+export const CAP_INK = "#1b1d21";
+
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
 function toRgb(hex) {
@@ -137,6 +158,12 @@ export function derivePalette({ ink, accent, extras = [] }) {
     ink: strongInk,
     dim: solveMidtone(paper, strongInk, 4.7),
     tint: mix(paper, strongInk, 0.22),
+    // The cap: the only two colors on the site that are not solved against
+    // anything, bent toward nothing, and taken exactly as the club publishes them.
+    // They can be, because the grey they stand on is not the club's — see
+    // CAP_GROUND, which is the same grey for all thirty.
+    capCrown: ink,
+    capBill: accent,
     // Two accents, because one color cannot do both jobs.
     //
     // --accent is the club's second color deepened until it can be READ: it is
@@ -443,7 +470,9 @@ const TOKENS = [
   "--navy", "--navy-deep", "--line", "--accent", "--accent-dark",
   "--accent-bright", "--accent-ink",
   "--gb-darkest", "--gb-dark", "--gb-light", "--gb-lightest", "--room",
-  "--gq-lead", "--gq-lead-ink", "--gq-flare", "--shell", "--shell-dark",
+  "--gq-lead", "--gq-lead-ink", "--gq-flare",
+  "--gq-cap-crown", "--gq-cap-bill",
+  "--shell", "--shell-dark",
   "--tv-bg", "--tv-panel", "--tv-panel-2", "--tv-panel-3",
   "--tv-line", "--tv-line-soft", "--tv-line-strong", "--tv-line-hover",
   "--tv-faint", "--tv-dim-2", "--tv-dim", "--tv-text-soft", "--tv-text-strong",
@@ -520,6 +549,11 @@ export function applyFranchisePalette(universeKey, root = document.documentEleme
   // disappears into it. This is the token that used to be --accent-bright, which
   // in a club league IS the lead.
   root.style.setProperty("--gq-flare", palette.boldFlare);
+  // The cap, and the disc both managers stand in. The club's two colors exactly as
+  // it publishes them. The disc under them is NOT set here: it is the same grey for
+  // all thirty, so it lives in the stylesheet and no club overrides it.
+  root.style.setProperty("--gq-cap-crown", palette.capCrown);
+  root.style.setProperty("--gq-cap-bill", palette.capBill);
   root.style.setProperty("--room", palette.boldBg);
   root.style.setProperty("--shell", palette.boldShell);
   root.style.setProperty("--shell-dark", palette.boldShellDark);

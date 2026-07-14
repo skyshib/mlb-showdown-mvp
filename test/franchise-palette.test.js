@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FRANCHISE_COLORS, franchiseCode } from "../src/data/franchiseColors.js";
-import { contrast, derivePalette, flareSeparates, franchisePalette, luminance } from "../src/ui/franchisePalette.js";
+import { CAP_FIGURE, CAP_GROUND, contrast, derivePalette, flareSeparates, franchisePalette, luminance } from "../src/ui/franchisePalette.js";
 
 // The sheet every club prints on, and the text color that sits on every accent
 // fill in the draft (--sheet).
@@ -87,12 +87,24 @@ test("the golds and the oranges actually come out gold and orange", () => {
   const vivid = { PIT: "#FDB827", OAK: "#EFB21E", SDP: "#FFC425", MIL: "#FFC52F", BAL: "#DF4601", SFG: "#FD5A1E" };
   for (const [code, want] of Object.entries(vivid)) {
     const p = derivePalette(FRANCHISE_COLORS[code]);
-    // Luminance is the tell: the deepened accent is dark enough to read as text
-    // on cream, so anything that bright is a fill that never got flattened.
+    // The fill must not BE the flattened accent — that is the failure this test
+    // exists to catch, and it is the one thing luminance can say plainly.
+    //
+    // It used to demand the fill be twice as bright as the flattened accent, and
+    // that number was a proxy for "the walk happened" — which quietly assumed the
+    // walk always has to. It does not. Baltimore's ink was a soft near-black
+    // (#27251F, and a retired one at that), soft enough that it could not quite
+    // bite on the club's orange, so the orange had to be walked LIGHTER until it
+    // could. Give the Orioles the true black they actually wear and black reads on
+    // their true orange at 5.8:1 on the first try: no walk, and the button comes
+    // out #DF4601 exactly. The club ended up with MORE of its color than the old
+    // proxy was willing to allow. So the real guard is the one below — the fill has
+    // to be the club's published color — and this one only has to say it is not the
+    // darkened-for-text version of it.
     const flattened = luminance(p.accent);
     const onButton = luminance(p.accentBright);
     assert.ok(
-      onButton > flattened * 2,
+      onButton > flattened,
       `${code}: the button fill (${p.accentBright}) is no brighter than the text-safe accent (${p.accent}) — the club lost its color`
     );
     assert.ok(luminance(want) / onButton < 1.6 && onButton / luminance(want) < 1.6,
@@ -117,6 +129,66 @@ test("no club scores a run in its own banner color", () => {
     );
     assert.notEqual(boldFlare, boldAccent, `${code}: the flare IS the banner`);
   }
+});
+
+// The cap is the one place a club's colors are used RAW. Everywhere else on the
+// site they bend to fit the screen — the golds darken until cream reads on them,
+// the navies lift until they clear a dark board — and every one of those bends is
+// a small lie about what color the club is. On a cap the lie is the whole thing:
+// a Dodgers manager in a lifted royal blue is not wearing a Dodgers cap. So this
+// is the test that nothing is allowed to touch them.
+test("every club wears its own two hexes on its cap, unbent", () => {
+  for (const [code, colors] of Object.entries(FRANCHISE_COLORS)) {
+    const { capCrown, capBill } = derivePalette(colors);
+    assert.equal(capCrown, colors.ink, `${code}: the crown is not the club's primary`);
+    assert.equal(capBill, colors.accent, `${code}: the bill is not the club's pop`);
+  }
+});
+
+// Which means the GREY is what has to work — and it is ONE grey for all thirty,
+// because the disc is the surface a club does not get to tint. Two things have to
+// hold, and they hold for every club: it is neutral (no hue for a club color to be
+// lost in, which is the whole reason the cap can be raw), and the man standing on
+// it still reads as a man.
+test("the whole league stands on one neutral grey, and the man reads on it", () => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(CAP_GROUND.slice(i, i + 2), 16));
+  assert.ok(r === g && g === b, `the disc is not a neutral grey (${CAP_GROUND})`);
+  const man = contrast(CAP_FIGURE, CAP_GROUND);
+  assert.ok(man >= 1.8, `the man is ${man.toFixed(2)}:1 on the disc — he has stopped being a man`);
+});
+
+// What the shared grey COSTS, written down so it cannot quietly get worse.
+//
+// One grey cannot suit thirty palettes. The clubs it suits least are known, and
+// they were looked at and accepted:
+//
+//   PHILADELPHIA owns the worst crown, 1.75:1 — and the crown is the one piece with
+//   no rule around it, so it is carried by CHROMA (a saturated red on a neutral
+//   grey) rather than by lightness. That is a real thing the eye does and a thing
+//   WCAG contrast cannot see; it is also the single riskiest cell in the league.
+//
+//   KANSAS CITY owns the worst bill, 1.00:1 — the exact luminance of the ground,
+//   held off it by its rule alone. Miami is not far behind at 1.10:1. Both are
+//   ruled in, which is what makes them survivable where the crown would not be.
+//
+// This does not relitigate those. It is the floor: if a club color is corrected, or
+// the grey moves, and anything drops BELOW today's worst case, that is a new
+// decision and somebody should have to make it on purpose instead of finding it on
+// a screen. The owners are asserted too — if the worst case changes hands, the
+// comment above has gone stale and should be rewritten.
+test("nothing on a cap falls below the worst case we accepted", () => {
+  const by = (pick) =>
+    Object.entries(FRANCHISE_COLORS)
+      .map(([code, colors]) => ({ code, ratio: contrast(pick(colors), CAP_GROUND) }))
+      .sort((a, b) => a.ratio - b.ratio)[0];
+
+  const crown = by((c) => c.ink);
+  assert.equal(crown.code, "PHI", `the worst crown on ${CAP_GROUND} is now ${crown.code}, not Philadelphia`);
+  assert.ok(crown.ratio >= 1.74, `the worst crown has slipped to ${crown.ratio.toFixed(2)}:1 (${crown.code})`);
+
+  const bill = by((c) => c.accent);
+  assert.equal(bill.code, "KCR", `the worst bill on ${CAP_GROUND} is now ${bill.code}, not Kansas City`);
+  assert.ok(bill.ratio >= 1.0, `the worst bill has slipped to ${bill.ratio.toFixed(2)}:1 (${bill.code})`);
 });
 
 // Seattle is the case that found the bug: teal leads, so the run cannot.

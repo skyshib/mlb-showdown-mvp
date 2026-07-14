@@ -48,6 +48,23 @@
   /* The man in the silhouette. Grey, and only grey: a club's colors belong on
      the cap, and a body painted in them would compete with it. */
   --gq-figure: #6f737a;
+  /* THE CAP, and the only place on the site a club's colors are used raw.
+     Everywhere else they bend to fit the screen — the golds darken so cream can
+     be read on them, the navies lift so they clear a dark board. A cap does not
+     get to bend: it is the club's actual color or it is a costume. So the crown
+     is the club's true primary and the bill is its true pop, and they can be,
+     because the disc under them is NOT the club's. It is one grey for all thirty
+     — a club-tinted disc is what forced the bending in the first place, since a
+     navy crown on a navy ground is a hole — and being the same grey everywhere is
+     what makes the thirty screens read as one league. Only the crown and the bill
+     are overridden per club; the grey and the ink below never move. Kept in step
+     with CAP_GROUND / CAP_FIGURE / CAP_INK in ui/franchisePalette.js.
+     --gq-cap-ink is what is drawn ON the disc — the rule around the bill, the
+     initials under a portrait — and it is dark because the disc is light. */
+  --gq-cap-crown: #1b3a63;
+  --gq-cap-bill: #b8352e;
+  --gq-cap-ground: #a0a0a0;
+  --gq-cap-ink: #1b1d21;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -796,7 +813,13 @@ h1.gq-logo {
   border: 0.5cqw solid var(--gb-darkest);
   border-radius: 50%;
   overflow: hidden;
-  background: var(--gb-light);
+  /* BOTH men stand in the same disc — the club's solved grey. It is the one
+     surface on the screen the club does not tint, and it is not tinted for the
+     man opposite either: two managers on one field stand on one ground, and a
+     grey disc facing a club-colored one reads as two different screens. What is
+     drawn on it is dark, because the disc is light. */
+  background: var(--gq-cap-ground);
+  color: var(--gq-cap-ink);
 }
 
 .gq-versus-initials {
@@ -816,11 +839,9 @@ h1.gq-logo {
 
 /* The back of your own head. The MAN is a grey silhouette — nothing about him is
    worth reading except that he is facing the other way — and the CAP is where the
-   club lives: the crown in the club's own color, the tab at the back in the color
-   its bars are painted, and a sliver of brim poking out past the head in the
-   third. In the house palette two of those three are the same red, so the brim
-   keeps a dark rule around it and reads as a brim either way. */
-.gq-versus-back { background: var(--gb-lightest); }
+   club lives: the crown in the color the club IS, the bill and the squatchee in
+   the color it spends. Both are the club's published hexes, unbent; the grey
+   behind them is what was solved to suit them. */
 .gq-versus-back svg { width: 100%; height: 100%; display: block; }
 .gq-back-body,
 .gq-back-head { fill: var(--gq-figure); }
@@ -828,21 +849,33 @@ h1.gq-logo {
    is the sliver that clears the side of his head. It is drawn BEHIND the head
    and clipped to one side: on top of the head it was a red ring straight across
    his skull, which is a halo, not a hat. */
-/* The bill wears the club's own color — the same one the crown does, because a
-   cap is one cap. The dark rule around it is what keeps the sliver readable where
-   it clears the head. */
+/* A two-tone cap: the CROWN in the club's true primary — the color the cap is
+   actually made in, which is the color you see most of — and the BILL in its true
+   pop, the loud one, which is how a cap with a contrast bill is built. The rule
+   around the bill is what keeps the sliver readable where it clears the head; it
+   is the disc's own dark ink rather than the screen's, because the screen's dark
+   is white in a club league and a white rule on a light grey disc is no rule. */
 .gq-back-brim {
-  fill: var(--accent-bright);
-  stroke: var(--gb-darkest);
+  fill: var(--gq-cap-bill);
+  stroke: var(--gq-cap-ink);
   stroke-width: 1.2;
 }
-.gq-back-cap { fill: var(--accent-bright); }
-/* The closure tab on the back of the crown, where a cap is adjusted: flush with
-   the bottom of the cap, sitting IN the band rather than hanging off it. It
-   carries a rule so it reads as a piece of the hat rather than a hole in it. */
-.gq-back-strap {
-  fill: var(--gq-lead);
-  stroke: var(--gb-darkest);
+.gq-back-cap { fill: var(--gq-cap-crown); }
+/* The squatchee: the button at the very top of the crown, where the six panels
+   meet. It sits at the apex of the crown's arc (r=25 about cy=37, so the top of
+   the hat is y=12) and it wears the trim color, like the bill and the tab — which
+   is what a squatchee is, the one place the trim gets the last word. Small on
+   purpose: a real one is a button, and at this size anything bigger reads as a
+   cherry on a hat.
+   It is an ELLIPSE, not a circle, for the same reason the brim is: you are behind
+   this man and slightly below the top of his head, so a disc lying flat on the
+   crown is seen at an angle and foreshortens. A perfect circle up there is a
+   button drawn face-on, which is a button you are looking at from somewhere you
+   are not standing. Squashed less than the brim (about 3:2 against the brim's
+   4:1), because the crown's apex is turned more toward you than the brim is. */
+.gq-back-squatchee {
+  fill: var(--gq-cap-bill);
+  stroke: var(--gq-cap-ink);
   stroke-width: 1.2;
 }
 

@@ -24,15 +24,44 @@
 // Mariners run now scores in, rather than a teal that vanished into the teal
 // banner. A club with no third color simply has none, and the solver falls back.
 //
-// Sourced from teamcolorcodes.com (which publishes each club's full palette);
-// the primaries and secondaries agree with teampalettes.com. Half the league has
-// nothing past two colors, and those entries are honestly empty rather than
-// padded out with a guess.
+// Sourced from teamcolorcodes.com (which publishes each club's full palette).
+// Half the league has nothing past two colors, and those entries are honestly
+// empty rather than padded out with a guess.
+//
+// READ THIS BEFORE YOU EDIT A HEX. A teamcolorcodes.com page is not one palette,
+// it is a STACK of them: the current one, and then every retired one the club has
+// worn, each under its own dated heading — "Primary Logo Colors (1999 – 2008)" and
+// so on. Take a hex from the wrong heading and you get a color the club really did
+// wear, in a year that is not this one, which is the most convincing kind of wrong.
+// A league-wide audit against the site (and, where it disagreed with itself, against
+// Wikipedia's infoboxes, teampalettes, and the CSS of the club's own mlb.com page)
+// found three:
+//   BAL black was #27251F — the 1999-2008 black. Today the Orioles are #000000.
+//   FLA black was #27251F — the 1993-2011 FLORIDA Marlins. Miami is #000000.
+//   PHI blue was #284898 — the 1992-2017 blue. They darkened it in 2019.
+// #27251F is the trap hex: it is a real current black for the White Sox, the
+// Pirates, and the Giants, and a retired one for everybody else who has ever
+// worn it. Matching it is not evidence.
+//
+// And the site is not gospel either. Two clubs here deliberately DISAGREE with it,
+// because it is the one that is out of date:
+//   CLE — teamcolorcodes still serves the pre-2013 Indians navy (#00385D) and a red
+//         (#E50022) nobody else lists. Wikipedia, teampalettes and brandcolorcode
+//         all put the Guardians at #0C2340 / #E31937, which is what is below.
+//   COL — teamcolorcodes says #333366. Six other sources, the club's own SVG, and
+//         MLB's own reporting on the shade all say #33006F (PMS 2685C).
+// Two more (PHI red, STL navy) were values no source anywhere could corroborate —
+// not current, not historical, not anybody's — and were replaced with the hexes the
+// catalogs agree on.
+//
+// The general lesson: a hex that matches SOMETHING on the page is not verified. It
+// has to match the CURRENT section, and when the sources fight, the club's own logo
+// wins.
 export const FRANCHISE_COLORS = {
   ANA: { ink: "#BA0021", accent: "#003263", extras: ["#862633", "#C4CED4"] }, // Angels — red, navy + maroon, silver
   ARI: { ink: "#A71930", accent: "#E3D4AD", extras: ["#30CED8", "#000000"] }, // Diamondbacks — Sedona red, sand + turquoise, black
   ATL: { ink: "#13274F", accent: "#CE1141", extras: ["#EAAA00"] },            // Braves — navy, red + gold
-  BAL: { ink: "#27251F", accent: "#DF4601" },                                 // Orioles — black, orange
+  BAL: { ink: "#000000", accent: "#DF4601" },                                 // Orioles — black, orange
   BOS: { ink: "#0C2340", accent: "#BD3039" },                                 // Red Sox — navy, red
   CHC: { ink: "#0E3386", accent: "#CC3433" },                                 // Cubs — blue, red
   CHW: { ink: "#27251F", accent: "#C4CED4" },                                 // White Sox — black, silver
@@ -40,7 +69,7 @@ export const FRANCHISE_COLORS = {
   CLE: { ink: "#0C2340", accent: "#E31937" },                                 // Cleveland — navy, red
   COL: { ink: "#33006F", accent: "#C4CED4", extras: ["#131413"] },            // Rockies — purple, silver + black
   DET: { ink: "#0C2340", accent: "#FA4616" },                                 // Tigers — navy, orange
-  FLA: { ink: "#27251F", accent: "#00A3E0", extras: ["#EF3340", "#41748D"] }, // Marlins — black, Miami blue + red, slate
+  FLA: { ink: "#000000", accent: "#00A3E0", extras: ["#EF3340", "#41748D"] }, // Marlins — black, Miami blue + red, slate
   HOU: { ink: "#002D62", accent: "#EB6E1F", extras: ["#F4911E"] },            // Astros — navy, orange + light orange
   KCR: { ink: "#004687", accent: "#BD9B60" },                                 // Royals — blue, gold
   LAD: { ink: "#005A9C", accent: "#EF3E42", extras: ["#A5ACAF"] },            // Dodgers — blue, red + silver
@@ -49,12 +78,12 @@ export const FRANCHISE_COLORS = {
   NYM: { ink: "#002D72", accent: "#FF5910" },                                 // Mets — blue, orange
   NYY: { ink: "#0C2340", accent: "#C4CED3", extras: ["#E4002C", "#003087"] }, // Yankees — navy, grey + red, blue
   OAK: { ink: "#003831", accent: "#EFB21E", extras: ["#A2AAAD"] },            // Athletics — green, gold + grey
-  PHI: { ink: "#C0102E", accent: "#284898" },                                 // Phillies — red, blue
+  PHI: { ink: "#E81828", accent: "#002D72" },                                 // Phillies — red, blue
   PIT: { ink: "#27251F", accent: "#FDB827" },                                 // Pirates — black, gold
   SDP: { ink: "#2F241D", accent: "#FFC425" },                                 // Padres — brown, gold
   SEA: { ink: "#0C2C56", accent: "#005C5C", extras: ["#D50032", "#C4CED4"] }, // Mariners — navy, teal + RED, silver
   SFG: { ink: "#27251F", accent: "#FD5A1E", extras: ["#AE8F6F", "#EFD19F"] }, // Giants — black, orange + bronze, sand
-  STL: { ink: "#C41E3A", accent: "#0A2252", extras: ["#FEDB00"] },            // Cardinals — red, navy + yellow
+  STL: { ink: "#C41E3A", accent: "#0C2340", extras: ["#FEDB00"] },            // Cardinals — red, navy + yellow
   TBD: { ink: "#092C5C", accent: "#8FBCE6", extras: ["#F5D130"] },            // Rays — navy, columbia blue + yellow
   TEX: { ink: "#003278", accent: "#C0111F" },                                 // Rangers — blue, red
   TOR: { ink: "#134A8E", accent: "#E8291C", extras: ["#1D2D5C"] },            // Blue Jays — blue, red + navy
