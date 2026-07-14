@@ -4018,21 +4018,142 @@ test("the record book has two pages, and left/right turns it", async () => {
   const managers = recordsScreen.render(app);
   assert.ok(managers.includes("MANAGER RECORDS"), "it opens on the afternoons");
   assert.ok(managers.includes("MOST RUNS IN A GAME"));
-  assert.ok(!managers.includes("MOST HOMERS, ONE PLAYER"), "the men are on the other page");
+  assert.ok(!managers.includes("MOST HOMERS, CAREER"), "the men are on the other page");
 
   recordsScreen.key(app, "right");
   const players = recordsScreen.render(app);
   assert.ok(players.includes("PLAYER RECORDS"));
-  assert.ok(players.includes("MOST HOMERS, ONE PLAYER"));
+  assert.ok(players.includes("MOST HOMERS, CAREER"));
   assert.ok(!players.includes("MOST RUNS IN A GAME"), "and the afternoons are on the other one");
   assert.ok(players.includes("MAYA") && players.includes("ME"), "the man who did it, and the club he did it for");
 
-  // There is no single afternoon behind a campaign, so there is nothing to open.
+  // Down to a CAREER record — the first three are single games, which do open.
+  // There is no one afternoon behind a career, so there is nothing to step into.
+  recordsScreen.key(app, "down");
+  recordsScreen.key(app, "down");
+  recordsScreen.key(app, "down");
   recordsScreen.key(app, "a");
   assert.notEqual(app.screen.mode, "board", "Z does not step into a career");
 
   recordsScreen.key(app, "left");
   assert.ok(recordsScreen.render(app).includes("MANAGER RECORDS"), "and left turns back");
+});
+
+// Two afternoons, written down the way the almanac writes them. The first is a
+// comeback: JOJO is up 4-0 before ME scores at all, and ME wins it 5-4 with a
+// four-run eighth. PIP throws a nine-inning no-hitter in the second, which is won
+// 3-0 in the eleventh — so the two games run into one long stretch of zeroes.
+function almanacSave() {
+  const save = testSave();
+  save.saveSeed = "sq-me";
+  save.player.name = "ME";
+  save.almanac = [
+    {
+      day: 1, opponent: "JOJO", won: true, innings: 9, playerSide: "away",
+      score: { away: 5, home: 4 },
+      lineScore: { away: [0, 0, 0, 0, 0, 1, 0, 4, 0], home: [3, 0, 1, 0, 0, 0, 0, 0, 0] },
+      boxScore: {
+        away: {
+          team: "ME",
+          hitters: [{ id: "h1", name: "MAYA", h: 3, hr: 2, rbi: 5 }],
+          pitchers: [{ id: "p2", name: "OKABE", so: 6, h: 7, outs: 27 }]
+        },
+        home: { team: "JOJO", hitters: [], pitchers: [] }
+      }
+    },
+    {
+      day: 2, opponent: "MABEL", won: true, innings: 11, playerSide: "home",
+      score: { home: 3, away: 0 },
+      lineScore: { home: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3], away: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+      boxScore: {
+        home: {
+          team: "ME",
+          hitters: [{ id: "h1", name: "MAYA", h: 1, hr: 0, rbi: 1 }],
+          pitchers: [{ id: "p1", name: "PIP", so: 12, h: 0, outs: 33 }]
+        },
+        away: { team: "MABEL", hitters: [], pitchers: [] }
+      }
+    }
+  ];
+  return save;
+}
+
+test("the afternoons the line score remembers: the comeback, the big inning, the zeroes", async () => {
+  const { RECORDS } = await import("../src/adventure/records.js");
+  const record = (key) => RECORDS.find((row) => row.key === key);
+  const save = almanacSave();
+
+  // Four down before we scored at all. The box score cannot know this; only the
+  // shape of the afternoon can.
+  assert.equal(record("comeback").read(save).value, 4, "the deepest hole climbed out of");
+  assert.equal(record("comeback").read(save).day, 1);
+  assert.equal(record("inning-runs").read(save).value, 4, "the four-run eighth");
+  assert.equal(record("longest-game").read(save).value, 11, "and only a game that went past nine counts");
+  assert.equal(record("shutouts").read(save).value, 1, "one of the two was a shutout");
+
+  // The zeroes run from JOJO's fourth through the end of MABEL: six, then eleven.
+  // The streak crosses the gap between two games, and is filed on the day it got
+  // there.
+  const zeroes = record("scoreless-streak").read(save);
+  assert.equal(zeroes.value, 17, "a streak does not stop just because the game did");
+  assert.equal(zeroes.day, 2);
+
+  // A win is a win: a comeback record does not count a hole you lost in.
+  const lost = almanacSave();
+  lost.almanac[0].won = false;
+  assert.equal(record("comeback").read(lost), null, "you did not come back — you lost");
+
+  // Twenty games or the win rate is not a rate, it is an anecdote.
+  assert.equal(record("win-pct").read(save), null, "two-for-two is not the best record in the league");
+});
+
+test("a game with no line score breaks a scoreless streak rather than bridging it", async () => {
+  const { RECORDS } = await import("../src/adventure/records.js");
+  const streak = RECORDS.find((row) => row.key === "scoreless-streak");
+  const shutout = (day) => ({
+    day, opponent: `OPP${day}`, won: true, innings: 9, playerSide: "away",
+    score: { away: 1, home: 0 },
+    lineScore: { away: [1, 0, 0, 0, 0, 0, 0, 0, 0], home: [0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    boxScore: { away: { team: "ME", hitters: [], pitchers: [] }, home: { team: "OPP", hitters: [], pitchers: [] } }
+  });
+  const save = testSave();
+
+  save.almanac = [shutout(1), shutout(2)];
+  assert.equal(streak.read(save).value, 18, "back-to-back shutouts run straight on into each other");
+
+  // The same two shutouts with an unrecorded afternoon between them. That game was
+  // played before the board existed and nobody can say what happened in it, so the
+  // streak starts again on the far side: an honest nine beats a fabricated
+  // eighteen.
+  const older = { ...shutout(9), lineScore: null };
+  save.almanac = [shutout(1), older, shutout(2)];
+  assert.equal(streak.read(save).value, 9, "a gap nobody can vouch for is not a run of zeroes");
+});
+
+test("a man's best afternoon opens the box score, and a no-hitter is worth nought hits", async () => {
+  const { RECORDS, personalBests } = await import("../src/adventure/records.js");
+  const record = (key) => RECORDS.find((row) => row.key === key);
+  const save = almanacSave();
+
+  // The single game, the man who had it, and the afternoon it can be opened at.
+  const homers = record("player-hr-game").read(save);
+  assert.deepEqual(homers, { value: 2, player: "MAYA", day: 1, opponent: "JOJO" });
+  assert.equal(record("player-hr-game").opens, true, "so the board can go and show you him doing it");
+  assert.equal(record("player-rbi-game").read(save).value, 5);
+  assert.equal(record("player-k-game").read(save).player, "PIP", "twelve, and OKABE's six is not the record");
+
+  // The trap, again, and it is the whole point of the board: a man who gave up NO
+  // hits reads nought, and nought is the best mark on it — not a missing one.
+  const noHitter = record("player-no-hitter").read(save);
+  assert.deepEqual(noHitter, { value: 0, player: "PIP", day: 2, opponent: "MABEL" });
+  assert.equal(record("player-no-hitter").better, "min");
+  assert.equal(personalBests(save)["player-no-hitter"].value, 0, "and it goes up to the league as nought");
+
+  // OKABE went the distance too, and gave up seven. A reliever who never did could
+  // not hold this record however clean his evening was.
+  const short = almanacSave();
+  short.almanac[1].boxScore.home.pitchers = [{ id: "p3", name: "REL", so: 3, h: 0, outs: 9 }];
+  assert.equal(record("player-no-hitter").read(short).value, 7, "three hitless innings is a fine evening, not a complete game");
 });
 
 // The drama screen always KNEW how to stage a steal (see the THE THROW test

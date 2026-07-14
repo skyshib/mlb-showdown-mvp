@@ -1,6 +1,6 @@
-import { createRng } from "./rng.js?v=20260714-j";
-import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js?v=20260714-j";
-import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260714-j";
+import { createRng } from "./rng.js?v=20260714-k";
+import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js?v=20260714-k";
+import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260714-k";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];

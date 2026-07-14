@@ -1,11 +1,11 @@
-import { positionsLabel } from "../../rules/cards.js?v=20260714-j";
-import { escapeHtml, shortName } from "../../ui/cardFace.js?v=20260714-j";
+import { positionsLabel } from "../../rules/cards.js?v=20260714-k";
+import { escapeHtml, shortName } from "../../ui/cardFace.js?v=20260714-k";
 
 // The card face and the booth are shared with the draft app (src/ui). What
 // lives here is the Game Boy shell around them: cursor menus, the compact
 // list lines, and the diamond.
-export { cardPanelHtml, escapeHtml, eraYear, rarityTag, shortName, stripCardYear, surname } from "../../ui/cardFace.js?v=20260714-j";
-export { describeEvent, halfLabel } from "../../ui/playByPlay.js?v=20260714-j";
+export { cardPanelHtml, escapeHtml, eraYear, rarityTag, shortName, stripCardYear, surname } from "../../ui/cardFace.js?v=20260714-k";
+export { describeEvent, halfLabel } from "../../ui/playByPlay.js?v=20260714-k";
 
 export function clampIndex(index, length) {
   if (length <= 0) return 0;

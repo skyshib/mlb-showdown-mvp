@@ -1,5 +1,5 @@
-import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260714-j";
-import { loadHallOfFame } from "./hallOfFame.js?v=20260714-j";
+import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260714-k";
+import { loadHallOfFame } from "./hallOfFame.js?v=20260714-k";
 
 // The record book, and it is the whole league's, not yours.
 //
@@ -49,19 +49,28 @@ export const RECORD_PAGES = [
 ];
 
 // A rate is not a count, and printing it as one ("0.8421052631578947 OPS") is
-// how you lose a reader. Three decimals, no leading nought, the way it is
-// printed on the back of the card.
+// how you lose a reader. Three ways to print one, and they are the three ways
+// they are printed on the back of the card: an average drops its leading nought,
+// an earned-run figure keeps it, and a per-nine gets the one decimal it deserves.
 const rate = (value) => value.toFixed(3).replace(/^0\./, ".");
+const era = (value) => value.toFixed(2);
+const perNine = (value) => value.toFixed(1);
 
 // A man has to have played enough to have a rate at all. One perfect afternoon
 // is not a season, and a board that cannot tell the difference belongs to
-// whoever went 1-for-1 in September.
+// whoever went 1-for-1 in September. The same is true of a club: a manager who
+// has won his only game has not got the best record in the league.
 const QUALIFIED_PA = 40;
 const QUALIFIED_OUTS = 45; // fifteen innings
+const QUALIFIED_GAMES = 20;
 
 // Every record: what it is called, which half of the book it is in, which way is
 // better, and how to read it out of a save. `read` returns the best mark for it,
 // or null when the save has never done the thing.
+//
+// `opens` marks the records whose mark points at ONE AFTERNOON — a day and an
+// opponent you can go and look at. A campaign total does not, and neither does a
+// finished run, so those do not pretend to: see openable() in the screen.
 export const RECORDS = [
   {
     key: "runs-game",
@@ -70,6 +79,7 @@ export const RECORDS = [
     title: "MOST RUNS IN A GAME",
     better: "max",
     unit: "runs",
+    opens: true,
     read: (save) => bestGame(save, "max", (game) => game.score?.[game.playerSide])
   },
   {
@@ -79,6 +89,7 @@ export const RECORDS = [
     title: "BIGGEST WIN MARGIN",
     better: "max",
     unit: "runs",
+    opens: true,
     read: (save) => bestGame(save, "max", (game) => {
       if (!game.won) return null;
       const theirs = game.playerSide === "away" ? "home" : "away";
@@ -89,18 +100,43 @@ export const RECORDS = [
     key: "homers-game",
     page: "manager",
     group: "AT THE PLATE",
-    title: "MOST HOMERS IN A GAME",
+    // The club's nine, not one man's afternoon — that is on the other page now,
+    // and two records called the same thing are two records nobody trusts.
+    title: "MOST HOMERS IN A GAME (CLUB)",
     better: "max",
     unit: "HR",
+    opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(mine(game)?.hitters, "hr"))
+  },
+  {
+    key: "comeback",
+    page: "manager",
+    group: "AT THE PLATE",
+    title: "BIGGEST COMEBACK",
+    better: "max",
+    unit: "runs",
+    opens: true,
+    read: (save) => bestGame(save, "max", comeback)
+  },
+  {
+    key: "inning-runs",
+    page: "manager",
+    group: "AT THE PLATE",
+    title: "MOST RUNS IN AN INNING",
+    better: "max",
+    unit: "runs",
+    opens: true,
+    read: (save) => bestGame(save, "max", biggestInning)
   },
   {
     key: "strikeouts-game",
     page: "manager",
     group: "ON THE MOUND",
-    title: "MOST STRIKEOUTS IN A GAME",
+    // The whole staff. One arm's own board is on the player page.
+    title: "MOST STRIKEOUTS IN A GAME (STAFF)",
     better: "max",
     unit: "K",
+    opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(mine(game)?.pitchers, "so"))
   },
   {
@@ -110,11 +146,21 @@ export const RECORDS = [
     title: "FEWEST HITS ALLOWED IN A WIN",
     better: "min",
     unit: "hits",
+    opens: true,
     // Nine innings or it is not a pitching record, it is a short game.
     read: (save) => bestGame(save, "min", (game) => {
       if (!game.won || (game.innings ?? 0) < 9) return null;
       return sum(mine(game)?.pitchers, "h");
     })
+  },
+  {
+    key: "shutouts",
+    page: "manager",
+    group: "ON THE MOUND",
+    title: "MOST SHUTOUTS IN A CAMPAIGN",
+    better: "max",
+    unit: "shutouts",
+    read: (save) => countGames(save, (game) => game.score?.[theirSide(game)] === 0)
   },
   {
     key: "hit-streak",
@@ -123,6 +169,7 @@ export const RECORDS = [
     title: "MOST CONSECUTIVE HITS",
     better: "max",
     unit: "hits",
+    opens: true,
     read: (save) => bestGame(save, "max", (game) => game.hitStreak ?? null)
   },
   {
@@ -132,7 +179,56 @@ export const RECORDS = [
     title: "LONGEST WINNING STREAK",
     better: "max",
     unit: "wins",
+    opens: true,
     read: (save) => longestWinStreak(save)
+  },
+  {
+    key: "scoreless-streak",
+    page: "manager",
+    group: "STREAKS",
+    title: "LONGEST SCORELESS STREAK",
+    better: "max",
+    unit: "innings",
+    opens: true,
+    read: (save) => scorelessStreak(save)
+  },
+  {
+    key: "longest-game",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: "LONGEST GAME",
+    better: "max",
+    unit: "innings",
+    opens: true,
+    read: (save) => bestGame(save, "max", (game) => ((game.innings ?? 0) > 9 ? game.innings : null))
+  },
+  {
+    key: "win-pct",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: `BEST WIN RATE (${QUALIFIED_GAMES} GP)`,
+    better: "max",
+    unit: "",
+    format: rate,
+    read: (save) => winRate(save)
+  },
+  {
+    key: "catalog-days",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: "FASTEST FULL CATALOG",
+    better: "min",
+    unit: "days",
+    read: (save) => catalogDays(save)
+  },
+  {
+    key: "fewest-losses-title",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: "FEWEST LOSSES IN A TITLE RUN",
+    better: "min",
+    unit: "losses",
+    read: () => fewestTitleLosses()
   },
   // Two boards, not one. A pennant bought with an uncapped chequebook and a
   // pennant built inside the budget are not the same feat, and the clock does not
@@ -157,13 +253,50 @@ export const RECORDS = [
     read: () => fastestTitle("uncapped")
   },
 
-  // The other half. Every one of these is a campaign total for ONE man, and the
-  // man is named on the line — the manager is only the club he did it for.
+  // The other half. Every one of these belongs to ONE man, and he is named on the
+  // line — the manager is only the club he did it for.
+  //
+  // First the afternoons. These have a day and an opponent behind them, so they
+  // open into the box score the way a manager's record does: you can go and watch
+  // the game the man had.
+  {
+    key: "player-hr-game",
+    page: "player",
+    group: "AT THE PLATE",
+    title: "MOST HOMERS IN A GAME (ONE MAN)",
+    better: "max",
+    unit: "HR",
+    opens: true,
+    read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.hr || null)
+  },
+  {
+    key: "player-rbi-game",
+    page: "player",
+    group: "AT THE PLATE",
+    title: "MOST RBI IN A GAME",
+    better: "max",
+    unit: "RBI",
+    opens: true,
+    read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.rbi || null)
+  },
+  {
+    key: "player-hits-game",
+    page: "player",
+    group: "AT THE PLATE",
+    title: "MOST HITS IN A GAME",
+    better: "max",
+    unit: "hits",
+    opens: true,
+    read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.h || null)
+  },
+  // Then the careers: a whole campaign in one man's hands. (The sections have to
+  // stay in one piece — the menu prints a header every time the group changes, so
+  // a plate record filed after a mound one would print AT THE PLATE twice.)
   {
     key: "player-homers",
     page: "player",
     group: "AT THE PLATE",
-    title: "MOST HOMERS, ONE PLAYER",
+    title: "MOST HOMERS, CAREER",
     better: "max",
     unit: "HR",
     read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.hr || null)
@@ -172,7 +305,7 @@ export const RECORDS = [
     key: "player-hits",
     page: "player",
     group: "AT THE PLATE",
-    title: "MOST HITS, ONE PLAYER",
+    title: "MOST HITS, CAREER",
     better: "max",
     unit: "hits",
     read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.h || null)
@@ -181,7 +314,7 @@ export const RECORDS = [
     key: "player-rbi",
     page: "player",
     group: "AT THE PLATE",
-    title: "MOST RBI, ONE PLAYER",
+    title: "MOST RBI, CAREER",
     better: "max",
     unit: "RBI",
     read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.rbi || null)
@@ -190,10 +323,20 @@ export const RECORDS = [
     key: "player-steals",
     page: "player",
     group: "AT THE PLATE",
-    title: "MOST STOLEN BASES, ONE PLAYER",
+    title: "MOST STOLEN BASES, CAREER",
     better: "max",
     unit: "SB",
     read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.sb || null)
+  },
+  {
+    key: "player-avg",
+    page: "player",
+    group: "AT THE PLATE",
+    title: `BEST AVERAGE (${QUALIFIED_PA} PA)`,
+    better: "max",
+    unit: "",
+    format: rate,
+    read: (save) => bestPlayer(seasonHitters(save), "max", (line) => (line.pa >= QUALIFIED_PA ? line.avg : null))
   },
   {
     key: "player-ops",
@@ -206,10 +349,34 @@ export const RECORDS = [
     read: (save) => bestPlayer(seasonHitters(save), "max", (line) => (line.pa >= QUALIFIED_PA ? line.ops : null))
   },
   {
+    key: "player-k-game",
+    page: "player",
+    group: "ON THE MOUND",
+    title: "MOST STRIKEOUTS IN A GAME (ONE ARM)",
+    better: "max",
+    unit: "K",
+    opens: true,
+    read: (save) => bestPlayerGame(save, "max", "pitchers", (line) => line.so || null)
+  },
+  {
+    key: "player-no-hitter",
+    page: "player",
+    group: "ON THE MOUND",
+    // The no-hitter board. A man who went the distance and gave up nothing reads
+    // 0 HITS, which is the whole point of it — so, again: never a truthiness test.
+    // He has to have gone the distance, too: three innings of hitless relief is a
+    // fine evening, and it is not this record.
+    title: "FEWEST HITS, COMPLETE GAME",
+    better: "min",
+    unit: "hits",
+    opens: true,
+    read: (save) => bestPlayerGame(save, "min", "pitchers", (line) => (line.outs >= 27 ? line.h : null))
+  },
+  {
     key: "player-strikeouts",
     page: "player",
     group: "ON THE MOUND",
-    title: "MOST STRIKEOUTS, ONE PITCHER",
+    title: "MOST STRIKEOUTS, CAREER",
     better: "max",
     unit: "K",
     read: (save) => bestPlayer(seasonPitchers(save), "max", (line) => line.so || null)
@@ -218,13 +385,47 @@ export const RECORDS = [
     key: "player-ra9",
     page: "player",
     group: "ON THE MOUND",
-    // A shutout arm reads 0.000 here, and that is a real number, not a missing
+    // A shutout arm reads 0.00 here, and that is a real number, not a missing
     // one — so this measure must never be filtered on truthiness.
     title: `LOWEST RUNS PER 9 (${QUALIFIED_OUTS / 3} IP)`,
     better: "min",
     unit: "RA9",
-    format: rate,
+    format: era,
     read: (save) => bestPlayer(seasonPitchers(save), "min", (line) => (line.outs >= QUALIFIED_OUTS ? line.runsPerNine : null))
+  },
+  {
+    key: "player-whip",
+    page: "player",
+    group: "ON THE MOUND",
+    title: `LOWEST WHIP (${QUALIFIED_OUTS / 3} IP)`,
+    better: "min",
+    unit: "WHIP",
+    format: era,
+    read: (save) => bestPlayer(seasonPitchers(save), "min", (line) => (line.outs >= QUALIFIED_OUTS ? whip(line) : null))
+  },
+  {
+    key: "player-k9",
+    page: "player",
+    group: "ON THE MOUND",
+    title: `MOST K PER 9 (${QUALIFIED_OUTS / 3} IP)`,
+    better: "max",
+    unit: "K/9",
+    format: perNine,
+    read: (save) => bestPlayer(seasonPitchers(save), "max", (line) => (line.outs >= QUALIFIED_OUTS ? line.strikeoutsPerNine : null))
+  },
+  {
+    key: "player-wpa162",
+    page: "player",
+    group: "THE LONG HAUL",
+    // The most valuable man anybody has ever owned, bat or arm — WPA is the one
+    // currency they are both paid in. A man who cost his club games has a negative
+    // one, and that is not a record, it is a warning: the board takes the men who
+    // won games, and lets the rest go unremarked.
+    title: "MOST VALUABLE MAN (WPA/162)",
+    better: "max",
+    unit: "WPA",
+    format: perNine,
+    read: (save) => mostValuable(save)
   }
 ];
 
@@ -236,6 +437,113 @@ export function recordsOnPage(page) {
 
 function mine(game) {
   return game?.boxScore?.[game.playerSide] ?? null;
+}
+
+function theirSide(game) {
+  return game?.playerSide === "away" ? "home" : "away";
+}
+
+const whip = (line) => (line.outs ? ((line.h + line.bb) * 3) / line.outs : null);
+
+// How many games in this campaign answer to something. A count of nought is not a
+// record — it is a campaign that never did the thing — so it does not go up.
+function countGames(save, matches) {
+  const count = ensureAlmanac(save).filter((game) => matches(game)).length;
+  return count > 0 ? { value: count } : null;
+}
+
+// The deepest hole a win was climbed out of. The line score is the only thing that
+// remembers a deficit: a box score knows the final and nothing about the shape of
+// the afternoon. The order the halves are batted in matters — a home side trails
+// only after the visitors have hit — so the deficit is measured after each half,
+// not each inning. Games from before the board existed have no line score, and
+// sit this one out rather than invent a comeback.
+function comeback(game) {
+  if (!game.won || !game.lineScore) return null;
+  const ours = game.lineScore[game.playerSide] ?? [];
+  const theirs = game.lineScore[theirSide(game)] ?? [];
+  const first = game.playerSide === "away" ? ours : theirs;
+  const second = game.playerSide === "away" ? theirs : ours;
+  let ourRuns = 0;
+  let theirRuns = 0;
+  let worst = 0;
+  for (let inning = 0; inning < Math.max(first.length, second.length); inning += 1) {
+    for (const half of [first, second]) {
+      const runs = half[inning] ?? 0;
+      if (half === ours) ourRuns += runs; else theirRuns += runs;
+      worst = Math.max(worst, theirRuns - ourRuns);
+    }
+  }
+  return worst > 0 ? worst : null;
+}
+
+// The biggest frame you ever put up. Also the line score's business.
+function biggestInning(game) {
+  const frames = game.lineScore?.[game.playerSide];
+  if (!Array.isArray(frames) || !frames.length) return null;
+  const best = Math.max(...frames.map((runs) => Number(runs) || 0));
+  return best > 0 ? best : null;
+}
+
+// Zeroes in a row, across games, in the order they were pitched — the line score
+// read end to end. A game with no line score cannot be vouched for, so it BREAKS
+// the streak rather than extending it through a gap nobody can see: an honest
+// twelve beats a fabricated thirty. The streak is filed on the day it reached its
+// length, which is the afternoon worth opening.
+function scorelessStreak(save) {
+  let best = null;
+  let run = 0;
+  for (const game of ensureAlmanac(save)) {
+    const frames = game.lineScore?.[theirSide(game)];
+    if (!Array.isArray(frames)) {
+      run = 0;
+      continue;
+    }
+    for (const runs of frames) {
+      if ((Number(runs) || 0) > 0) {
+        run = 0;
+        continue;
+      }
+      run += 1;
+      if (!best || run > best.value) best = { value: run, day: game.day, opponent: game.opponent };
+    }
+  }
+  return best;
+}
+
+// Games won over games played, once there are enough of them to mean anything.
+function winRate(save) {
+  const games = ensureAlmanac(save);
+  if (games.length < QUALIFIED_GAMES) return null;
+  return { value: games.filter((game) => game.won).length / games.length };
+}
+
+// The day the catalog closed. The save has kept it since the day it happened.
+function catalogDays(save) {
+  const day = Number(save?.progress?.catalogCompletedOn);
+  return Number.isFinite(day) && day > 0 ? { value: day } : null;
+}
+
+// The cleanest title run on this machine. Nought losses is the best mark there is
+// and it is a real number: no truthiness test here either.
+function fewestTitleLosses() {
+  let best = null;
+  for (const run of loadHallOfFame()) {
+    const losses = Number(run.losses);
+    if (!Number.isFinite(losses) || losses < 0) continue;
+    if (!best || losses < best.value) best = { value: losses, opponent: run.name };
+  }
+  return best;
+}
+
+// Bat or arm, whoever swung the most games. Each is held to his own qualifier,
+// because an innings and a plate appearance are not the same unit of having
+// turned up.
+function mostValuable(save) {
+  const bats = bestPlayer(seasonHitters(save), "max", (line) => (line.pa >= QUALIFIED_PA ? line.wpa162 : null));
+  const arms = bestPlayer(seasonPitchers(save), "max", (line) => (line.outs >= QUALIFIED_OUTS ? line.wpa162 : null));
+  const best = [bats, arms].filter(Boolean).sort((a, b) => b.value - a.value)[0] ?? null;
+  return best && best.value > 0 ? best : null;
 }
 
 // The best single game for one measure, and the page it happened on.
@@ -260,6 +568,23 @@ function bestGame(save, better, measure) {
 // to be carrying today, either: a man you cut in August still hit the homers he
 // hit in July, and a record book that forgets them the moment he clears waivers
 // is not a record book.
+// One man, one afternoon: the best single game any of your men ever had. Unlike a
+// career, this HAS a day and an opponent behind it, so the board can open the game
+// and show you him doing it.
+function bestPlayerGame(save, better, side, measure) {
+  let best = null;
+  for (const game of ensureAlmanac(save)) {
+    for (const line of mine(game)?.[side] ?? []) {
+      const value = measure(line);
+      if (value === null || value === undefined || !Number.isFinite(value)) continue;
+      if (!best || (better === "max" ? value > best.value : value < best.value)) {
+        best = { value, player: line.name, day: game.day, opponent: game.opponent };
+      }
+    }
+  }
+  return best;
+}
+
 function bestPlayer(lines, better, measure) {
   let best = null;
   for (const line of lines ?? []) {

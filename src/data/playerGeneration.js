@@ -1,5 +1,5 @@
-import { RESULTS } from "../rules/cards.js?v=20260714-j";
-import { createRng } from "../rules/rng.js?v=20260714-j";
+import { RESULTS } from "../rules/cards.js?v=20260714-k";
+import { createRng } from "../rules/rng.js?v=20260714-k";
 
 const FIRST_NAMES = [
   "Aaliyah",

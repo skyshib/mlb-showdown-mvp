@@ -1,8 +1,8 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-j";
-import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260714-j";
-import { ensureAlmanac } from "../state.js?v=20260714-j";
-import { expandGame } from "../gameLog.js?v=20260714-j";
-import { fetchGames } from "../gameArchive.js?v=20260714-j";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-k";
+import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260714-k";
+import { ensureAlmanac } from "../state.js?v=20260714-k";
+import { expandGame } from "../gameLog.js?v=20260714-k";
+import { fetchGames } from "../gameArchive.js?v=20260714-k";
 import {
   RECORD_PAGES,
   recordsOnPage,
@@ -10,7 +10,7 @@ import {
   cachedGlobalRecords,
   fetchGlobalRecords,
   submitRecords
-} from "../records.js?v=20260714-j";
+} from "../records.js?v=20260714-k";
 
 // ---- World records ----------------------------------------------------------
 //
@@ -56,9 +56,11 @@ function statusLabel() {
   return "THE LEAGUE";
 }
 
+// A batting average has no unit. ".412 AVG" is a thing nobody has ever said out
+// loud, and the number is already wearing its own name.
 function valueText(record, value) {
   const number = record.format ? record.format(value) : value;
-  return `${number} ${record.unit.toUpperCase()}`;
+  return record.unit ? `${number} ${record.unit.toUpperCase()}` : `${number}`;
 }
 
 // Whose record it is. On the manager page that is one name. On the player page it
@@ -158,11 +160,14 @@ async function openBoardGame(app, record, entry, back) {
   });
 }
 
-// A manager record is an afternoon and you can open it. A player record is a
-// campaign — five months in one man's hands, and no single box score behind it —
-// so there is nothing to step into, and the screen does not pretend there is.
+// Some records are an afternoon and you can open it — a manager's, and now a
+// man's best single game too. A campaign total is not: five months in one pair of
+// hands has no one box score behind it, and neither has a finished run. Those do
+// not pretend to open. The record itself says which it is (see `opens`), because
+// the page it is on stopped being the answer the moment the player page grew
+// afternoons of its own.
 function openable(record) {
-  return record?.page !== "player";
+  return Boolean(record?.opens);
 }
 
 export const recordsScreen = {

@@ -1,8 +1,8 @@
-import { chartSpan } from "../rules/cards.js?v=20260714-j";
-import { adventurePool } from "./packs.js?v=20260714-j";
-import { npcBudget, trainerById } from "./region.js?v=20260714-j";
-import { createRng } from "../rules/rng.js?v=20260714-j";
-import { personConflict, playsPosition } from "../rules/cards.js?v=20260714-j";
+import { chartSpan } from "../rules/cards.js?v=20260714-k";
+import { adventurePool } from "./packs.js?v=20260714-k";
+import { npcBudget, trainerById } from "./region.js?v=20260714-k";
+import { createRng } from "../rules/rng.js?v=20260714-k";
+import { personConflict, playsPosition } from "../rules/cards.js?v=20260714-k";
 
 // One roster slot per required lineup spot plus the four-man staff. "HITTER"
 // is the DH: any bat qualifies.
