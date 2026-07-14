@@ -66,7 +66,12 @@ const MIME_TYPES = {
 
 export function createOnlineServer(options = {}) {
   const dataDir = options.dataDir ?? process.env.ROOMS_DIR ?? join(root, "data", "rooms");
-  const store = { dataDir, rooms: loadRooms(dataDir), hallOfFame: loadHallOfFameFile(dataDir) };
+  const store = {
+    dataDir,
+    rooms: loadRooms(dataDir),
+    hallOfFame: loadHallOfFameFile(dataDir),
+    records: loadRecordsFile(dataDir)
+  };
   for (const room of store.rooms.values()) {
     scheduleRoomTimer(store, room);
     if (room.unpinnedDeck) {
@@ -125,7 +130,9 @@ function loadRooms(dataDir) {
   const rooms = new Map();
   mkdirSync(dataDir, { recursive: true });
   for (const file of readdirSync(dataDir)) {
-    if (!file.endsWith(".json") || file === HOF_FILE) continue;
+    // Every .json on the volume is a room, except the two that aren't: the hall
+    // of fame and the record book share the disk with them.
+    if (!file.endsWith(".json") || file === HOF_FILE || file === RECORDS_FILE) continue;
     try {
       const saved = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
       const room = reviveRoom(saved);
@@ -398,6 +405,99 @@ function trimHallOfFame(entries) {
   return kept;
 }
 
+// ---- The record book --------------------------------------------------------
+//
+// The hall of fame ranks finished RUNS. This ranks single feats, across every
+// manager who has ever played: the most runs anybody has scored in a game, the
+// longest anybody has strung hits together. Same discipline as the hall — one
+// file on the volume, written atomically, sanitized on the way in and trimmed so
+// it stays a leaderboard rather than an archive.
+//
+// The keys and their directions live on the SERVER as well as the client,
+// because a client is a thing a stranger can rewrite. An unknown key is dropped
+// rather than stored; a record that is better when lower is sorted that way here,
+// not wherever the submitter says.
+const RECORDS_FILE = "records.json";
+const RECORDS_MAX_PER_KEY = 25;
+const RECORD_DIRECTIONS = {
+  "runs-game": "max",
+  "margin-game": "max",
+  "homers-game": "max",
+  "strikeouts-game": "max",
+  "hits-allowed-win": "min",
+  "hit-streak": "max",
+  "win-streak": "max",
+  "fastest-title": "min"
+};
+
+function loadRecordsFile(dataDir) {
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    const book = JSON.parse(readFileSync(join(dataDir, RECORDS_FILE), "utf8"));
+    return book && typeof book === "object" && !Array.isArray(book) ? book : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistRecords(store) {
+  if (!store.dataDir) return;
+  const target = join(store.dataDir, RECORDS_FILE);
+  const tmp = `${target}.tmp`;
+  store.recordsSaveChain = (store.recordsSaveChain ?? Promise.resolve())
+    .then(() => writeFile(tmp, JSON.stringify(store.records)))
+    .then(() => rename(tmp, target))
+    .catch((error) => console.error(`Failed to save the record book: ${error.message}`));
+}
+
+// One line per campaign per record: a manager who breaks his own mark replaces
+// it rather than filling the board with every step on the way up.
+function fileRecord(store, key, row) {
+  const direction = RECORD_DIRECTIONS[key];
+  if (!direction) return;
+  const list = (store.records[key] ?? []).filter((existing) => existing.saveSeed !== row.saveSeed);
+  const previous = (store.records[key] ?? []).find((existing) => existing.saveSeed === row.saveSeed);
+  // Keep whichever of the two is actually better — a resubmission of an older,
+  // worse number must not erase a standing record.
+  const best = !previous ? row
+    : direction === "max" ? (row.value >= previous.value ? row : previous)
+      : (row.value <= previous.value ? row : previous);
+  list.push(best);
+  list.sort((a, b) => (direction === "max" ? b.value - a.value : a.value - b.value) || a.at - b.at);
+  store.records[key] = list.slice(0, RECORDS_MAX_PER_KEY);
+}
+
+async function postRecords(store, request, response) {
+  const body = await readJsonBody(request);
+  if (!body || typeof body !== "object") return sendJson(response, 400, { error: "Malformed records" });
+  const saveSeed = hofString(body.saveSeed, 60);
+  const name = hofString(body.name, 12);
+  const submitted = body.records;
+  if (!saveSeed || !name || !submitted || typeof submitted !== "object") {
+    return sendJson(response, 400, { error: "Malformed records" });
+  }
+  const mode = body.mode === "uncapped" ? "uncapped" : "budget";
+  let filed = 0;
+  for (const [key, entry] of Object.entries(submitted)) {
+    if (!RECORD_DIRECTIONS[key] || !entry || typeof entry !== "object") continue;
+    const value = hofNumber(entry.value, 1e6);
+    if (!Number.isFinite(value) || value < 0) continue;
+    fileRecord(store, key, {
+      value,
+      name,
+      saveSeed,
+      mode,
+      day: hofNumber(entry.day, 1e6),
+      opponent: hofString(entry.opponent, 40),
+      at: Date.now()
+    });
+    filed += 1;
+  }
+  if (!filed) return sendJson(response, 400, { error: "No known records submitted" });
+  persistRecords(store);
+  sendJson(response, 201, { ok: true, filed });
+}
+
 async function postHallOfFameEntry(store, request, response) {
   const body = await readJsonBody(request);
   const entry = sanitizeHofEntry(body);
@@ -417,6 +517,12 @@ async function handleApi(store, request, response, url) {
   if (segments[1] === "hall-of-fame" && !segments[2]) {
     if (request.method === "GET") return sendJson(response, 200, { entries: store.hallOfFame });
     if (request.method === "POST") return postHallOfFameEntry(store, request, response);
+    return sendJson(response, 404, { error: "Unknown API route" });
+  }
+  // /api/records — the league's record book: single feats, every manager.
+  if (segments[1] === "records" && !segments[2]) {
+    if (request.method === "GET") return sendJson(response, 200, { records: store.records });
+    if (request.method === "POST") return postRecords(store, request, response);
     return sendJson(response, 404, { error: "Unknown API route" });
   }
   // /api/rooms | /api/rooms/:id | /api/rooms/:id/(join|actions|stream)

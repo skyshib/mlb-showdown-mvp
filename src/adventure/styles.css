@@ -271,6 +271,13 @@ h1.gq-logo {
    The list is given the wider share — a name that wraps is harder to read than a
    card that is a few percent smaller. The label above each card is a single line
    on both sides, so the two cards hang level. */
+/* The record book's rows are sentences, not names — the record, who holds it,
+   and where you stand on it — so the list takes the wider share and reads a
+   size smaller. A record that wraps three deep is a record you have to decode
+   rather than glance at. */
+.gq-columns-records { grid-template-columns: 1.7fr 1fr; }
+.gq-columns-records .gq-menu { font-size: 2.5cqw; }
+
 .gq-columns-pen,
 .gq-columns-swap { grid-template-columns: 1.25fr 1fr 1fr; }
 /* The swap list carries a position AND a name on every row, which is wider than
@@ -1142,6 +1149,20 @@ h1.gq-logo {
 /* The pulled card stands at 44% width so the whole 5:7 face fits the
    stage with the count line above it. */
 .gq-pack-reveal { width: 44%; align-self: center; animation: gq-reveal 0.25s steps(3); }
+
+/* Once the card is turned over there is a menu under it — next, sell, add to the
+   team — and three rows plus their instruction do not fit the textbox's usual
+   floor of 24%. Raising max-height alone does nothing: the stage above takes
+   height:100%, so the box never grows past its MIN and the last row hangs off
+   the bottom where it cannot be seen. So the stage stops demanding the whole
+   column and simply takes what is left, and the floor comes up to fit the menu.
+   The room comes out of the CARD, which shrinks a little.
+
+   The sealed pack and the legend's curtain are untouched: no menu, no squeeze,
+   and the big reveal stays big. */
+.gq-pack-menued .gq-pack-stage { flex: 1 1 auto; height: auto; }
+.gq-pack-menued .gq-textbox { min-height: 36%; max-height: 58%; }
+.gq-pack-menued .gq-pack-reveal { width: 33%; }
 
 @keyframes gq-reveal {
   from { transform: scale(0.2); }

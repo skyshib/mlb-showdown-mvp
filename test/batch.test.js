@@ -78,8 +78,15 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
     assert.ok(Number.isFinite(line.hrPer162));
     assert.ok(Number.isFinite(line.csPer162));
   }
+  // Every rostered arm gets a LINE. He does not necessarily get an OUT: the
+  // skipper goes to the pen for the best arm out there rather than the next one
+  // along the bench, so a mop-up man who is a long way worse than the tired
+  // incumbent can sit all week — which is what a mop-up man does. His line reads
+  // zeroes, and they are finite zeroes (see rate(), which will not divide by a
+  // bullpen door that never opened).
+  assert.ok(summary.pitchers.some((line) => line.outs > 0), "somebody pitched");
   for (const line of summary.pitchers) {
-    assert.ok(line.outs > 0);
+    assert.ok(line.outs >= 0);
     assert.ok(Number.isFinite(line.runsPerNine));
     assert.ok(line.teamGames > 0);
     assert.ok(Number.isFinite(line.ipPer162));

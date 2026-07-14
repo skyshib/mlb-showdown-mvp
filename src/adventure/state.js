@@ -1,4 +1,4 @@
-import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260713-x";
+import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260714-x";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
@@ -73,8 +73,11 @@ export function clearSave(storage = defaultStorage()) {
   storage?.removeItem(SAVE_KEY);
 }
 
+// See hallOfFame.js: Node defines a localStorage global that has no getItem on
+// it, so the name being present proves nothing. Ask for the method.
 function defaultStorage() {
-  return typeof localStorage === "undefined" ? null : localStorage;
+  const store = typeof localStorage === "undefined" ? null : localStorage;
+  return typeof store?.getItem === "function" ? store : null;
 }
 
 function migrateSave(save) {

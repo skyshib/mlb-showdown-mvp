@@ -1,17 +1,17 @@
-import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260713-x";
-import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260713-x";
-import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js?v=20260713-x";
+import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260714-x";
+import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260714-x";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js?v=20260714-x";
 
 // "1973/3500 PT" under the cap; uncapped saves just count.
 export function pointsLabel(save) {
   const cap = pointCap(save);
   return Number.isFinite(cap) ? `${rosterPoints(save)}/${cap} PT` : `${rosterPoints(save)} PT &middot; UNCAPPED`;
 }
-import { dayWhimsy } from "../feats.js?v=20260713-x";
-import { validateRoster } from "../../rules/draft.js?v=20260713-x";
-import { buildNpcTeam } from "../npcTeams.js?v=20260713-x";
-import { startTrainerBattle } from "./battleScreen.js?v=20260713-x";
-import { playChallenge, playFootfall } from "../../ui/sounds.js?v=20260713-x";
+import { dayWhimsy } from "../feats.js?v=20260714-x";
+import { validateRoster } from "../../rules/draft.js?v=20260714-x";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-x";
+import { startTrainerBattle } from "./battleScreen.js?v=20260714-x";
+import { playChallenge, playFootfall } from "../../ui/sounds.js?v=20260714-x";
 
 export function rosterProblems(save) {
   const issues = validateRoster(managerFor(save));
@@ -86,7 +86,7 @@ export const ambushScreen = {
       <div class="gq-body gq-center">
         <p class="gq-ambush-bang gq-blink">!</p>
         <div class="gq-frame gq-title-frame gq-ambush-card">
-          ${versusSprite(`${rival.id}-${rival.name}`, rival.sprite)}
+          ${versusSprite(faceSeed(rival), rival.sprite)}
           <b>${escapeHtml(rival.name)}</b><br>
           <span class="gq-dim">HE LOOKS MEAN. ${npcBudget(app.save, rival)} PT OF MEAN.</span>
         </div>
@@ -223,6 +223,22 @@ function teamDots(count) {
 // The initials sit UNDER the portrait and are what you see if the portrait never
 // arrives (offline, blocked, slow): the sprite is a face when it can be and a
 // name plate when it can't, and the layout does not move either way.
+// Which PERSON a trainer entry is. Cam is four entries — he jumps you on Route
+// 1, after Garrick, after Quince, and again past the championship — and seeding
+// his face with the entry's id gave him a new face every ambush. The roster code
+// already knows those four are one man: INHERITS is how his binder follows him
+// up the chain, so it is how his face follows him too. Everyone else stands
+// alone at the root of his own chain and is seeded exactly as before.
+function faceSeed(trainer) {
+  let person = trainer;
+  const seen = new Set([person.id]);
+  while (person.inherits && !seen.has(person.inherits)) {
+    seen.add(person.inherits);
+    person = trainerById(person.inherits) ?? person;
+  }
+  return `${person.id}-${person.name}`;
+}
+
 function versusSprite(seed, initials) {
   const url = `https://api.dicebear.com/10.x/micah/svg?seed=${encodeURIComponent(seed)}&clothesVariant=crew`;
   return `<span class="gq-versus-sprite">
@@ -261,7 +277,7 @@ function versusHtml(app, trainer) {
     <span class="gq-versus-field"></span>
     <div class="gq-versus-row gq-versus-them">
       ${teamDots(theirs)}
-      ${versusSprite(`${trainer.id}-${trainer.name}`, trainer.sprite)}
+      ${versusSprite(faceSeed(trainer), trainer.sprite)}
     </div>
     <div class="gq-versus-row gq-versus-you">
       ${playerSilhouette()}

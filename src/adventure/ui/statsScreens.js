@@ -1,7 +1,7 @@
-import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260713-x";
-import { trainerById } from "../region.js?v=20260713-x";
-import { cardById } from "../packs.js?v=20260713-x";
-import { seasonHitters, seasonPitchers, seasonTeam, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260713-x";
+import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260714-x";
+import { trainerById } from "../region.js?v=20260714-x";
+import { cardById } from "../packs.js?v=20260714-x";
+import { seasonHitters, seasonPitchers, seasonTeam, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260714-x";
 
 // ---- Formatting --------------------------------------------------------------
 

@@ -1,6 +1,6 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260713-x";
-import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260713-x";
-import { packEggs } from "../feats.js?v=20260713-x";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260714-x";
+import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260714-x";
+import { packEggs } from "../feats.js?v=20260714-x";
 import {
   persistSave,
   deriveSeed,
@@ -20,11 +20,12 @@ import {
   setBattingOrder,
   managerFor,
   addLog
-} from "../state.js?v=20260713-x";
-import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260713-x";
-import { hitterPositions, personConflict, playsPosition, positionsLabel, positionsOverlap } from "../../rules/cards.js?v=20260713-x";
-import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260713-x";
-import { seasonHitters, seasonPitchers } from "../state.js?v=20260713-x";
+} from "../state.js?v=20260714-x";
+import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260714-x";
+import { hitterPositions, personConflict, playsPosition, positionsLabel, positionsOverlap } from "../../rules/cards.js?v=20260714-x";
+import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260714-x";
+import { seasonHitters, seasonPitchers } from "../state.js?v=20260714-x";
+import { playLegend } from "../../ui/sounds.js?v=20260714-x";
 
 // ---- Two-way pairs -----------------------------------------------------------
 
@@ -735,6 +736,19 @@ function binderActions(app, card) {
   return actions;
 }
 
+// The binder is where the cap gets spent, so the cap comes with it: the question
+// you are answering here is who to add, and the number that says whether you can
+// afford him was only ever on the team screen.
+//
+// Written the way the map bar writes it — bare, no TEAM in front of it. The word
+// does not fit: the bar is one nowrap line, and with a filter as wide as LF/RF on
+// the left it pushes the title into an ellipsis.
+function teamPointsLabel(save) {
+  const points = rosterPoints(save);
+  const cap = pointCap(save);
+  return Number.isFinite(cap) ? `${points}/${cap} PT` : `${points} PT`;
+}
+
 export const binderScreen = {
   render(app) {
     const filter = app.screen.filter ?? "ALL";
@@ -779,7 +793,7 @@ export const binderScreen = {
         : `<p class="gq-dim">NO ${escapeHtml(filter)} CARDS${app.screen.query ? ` NAMED "${escapeHtml(app.screen.query)}"` : ""} YET.</p>`;
     }
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>BINDER &middot; ${escapeHtml(filter)}</span><span>${rows.length} CARDS &middot; ${rows.reduce((sum, row) => sum + row.count, 0)} TOTAL</span></div>
+      <div class="gq-topbar"><span>BINDER &middot; ${escapeHtml(filter)}</span><span>${rows.length} CARDS &middot; ${rows.reduce((sum, row) => sum + row.count, 0)} TOTAL</span><span>${teamPointsLabel(app.save)}</span></div>
       <div class="gq-body"><div class="gq-columns${swapping ? " gq-columns-swap" : ""}">
         <div class="gq-frame gq-scroll">${list}</div>
         ${swapping
@@ -987,6 +1001,56 @@ function teamActions() {
 
 // ---- Team (roster editing) -------------------------------------------------
 
+// The roster read as a LINEUP CARD: down the diamond (C, 1B, 2B, ...), then the
+// bats the lineup couldn't seat, then the rotation in start order, then the pen.
+//
+// The stored order is arrival order, and a swap puts the incoming man in the
+// OUTGOING man's slot in the array — so adding a third baseman over your first
+// baseman filed the 3B under 1B, and the list read C, 3B, 2B, 1B, SS. The list
+// is a view; this sorts the view and leaves the save alone. It has to: the
+// rotation IS the roster's SP order (see rotationCards), so reordering
+// roster.cardIds to make this screen read nicely would silently reshuffle who
+// starts game 1.
+function teamRosterCards(save) {
+  const seat = new Map();
+  lineupSlots(save).forEach((slot, index) => {
+    if (slot.player) seat.set(slot.player.id, index);
+  });
+  const rotation = new Map(rotationCards(save).map((arm, index) => [arm.id, index]));
+  // [group, place-within-group]; ties hold their roster order, since sort is stable.
+  const rank = (card) => {
+    if (card.kind === "hitter") {
+      const seated = seat.get(card.id);
+      return seated === undefined ? [1, 0] : [0, seated];
+    }
+    if (card.role === "SP") return [2, rotation.get(card.id) ?? Number.MAX_SAFE_INTEGER];
+    return [3, 0];
+  };
+  return [...rosterCards(save)].sort((a, b) => {
+    const left = rank(a);
+    const right = rank(b);
+    return left[0] - right[0] || left[1] - right[1];
+  });
+}
+
+// The club reads as two pages, and left/right turns between them.
+//
+// Thirteen men in one column meant the arms lived below the fold: to change who
+// starts game 1 you scrolled past nine bats to get to him. They are two
+// different jobs asked in two different vocabularies — a bat has a POSITION and a
+// spot in the order, an arm has a ROLE and a start — and the roster is really a
+// lineup card stapled to a staff. So it is filed that way.
+const TEAM_PAGES = ["bats", "arms"];
+
+function teamPageCards(save, page) {
+  const wanted = page === "arms" ? "pitcher" : "hitter";
+  return teamRosterCards(save).filter((card) => card.kind === wanted);
+}
+
+function teamPageLabel(page, count) {
+  return `${count} ${page === "arms" ? "ARM" : "BAT"}${count === 1 ? "" : "S"}`;
+}
+
 // Replacement candidates for a roster card. The default view sticks to the
 // outgoing card's own position (role for pitchers); "all" widens to every
 // unrostered card of the same kind. Cards that would put a second era of a
@@ -1100,7 +1164,8 @@ function teamCardActions(app, card) {
 export const teamScreen = {
   render(app) {
     const save = app.save;
-    const roster = rosterCards(save);
+    const page = TEAM_PAGES.includes(app.screen.page) ? app.screen.page : "bats";
+    const roster = teamPageCards(save, page);
     const actions = teamActions(save);
     const issues = validateRoster(managerFor(save));
     const points = rosterPoints(save);
@@ -1158,7 +1223,7 @@ export const teamScreen = {
       );
     }
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>TEAM &middot; ${escapeHtml(save.player.name)}</span><span>${Number.isFinite(cap) ? `${points}/${cap} PT` : `${points} PT &middot; UNCAPPED`}</span></div>
+      <div class="gq-topbar"><span>TEAM &middot; ${escapeHtml(save.player.name)}</span><span>${teamPageLabel(page, roster.length)}</span><span>${Number.isFinite(cap) ? `${points}/${cap} PT` : `${points} PT &middot; UNCAPPED`}</span></div>
       <div class="gq-body"><div class="gq-columns">
         <div class="gq-frame gq-scroll">${list}</div>
         <div class="gq-card-side">${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) + seasonStatsHtml(save, preview) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
@@ -1171,14 +1236,14 @@ export const teamScreen = {
             : switching
               ? "Z gives him the spot; the man who had it takes his. X cancels."
               : save.activeSeries
-                ? "SERIES IN PROGRESS — swaps wait until it ends. Everything else in the card menu stays yours."
-                : "Z opens a card's actions — swap, switch position or rotation slot, batting order, sell, star. X to leave."
+                ? `SERIES IN PROGRESS — swaps wait until it ends. &#9664;/&#9654; ${page === "arms" ? "the bats" : "the arms"}.`
+                : `Z opens a card's actions &middot; &#9664;/&#9654; ${page === "arms" ? "THE BATS" : "THE ARMS"}. X to leave.`
         }</p>
       </div>
     </div>`;
   },
   hoverCard(app, index) {
-    const roster = rosterCards(app.save);
+    const roster = teamPageCards(app.save, TEAM_PAGES.includes(app.screen.page) ? app.screen.page : "bats");
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       if (!anchor) return null;
@@ -1193,7 +1258,8 @@ export const teamScreen = {
   },
   key(app, key) {
     const save = app.save;
-    const roster = rosterCards(save);
+    const page = TEAM_PAGES.includes(app.screen.page) ? app.screen.page : "bats";
+    const roster = teamPageCards(save, page);
     const actions = teamActions(save);
     if (app.screen.actionMenu) {
       const card = roster[clampIndex(app.screen.index ?? 0, roster.length + actions.length)] ?? null;
@@ -1240,6 +1306,12 @@ export const teamScreen = {
       } else if (key === "b") {
         app.screen.mode = "roster";
       }
+    } else if (key === "left" || key === "right") {
+      // Turn the page: the bats on one side, the arms on the other. The cursor
+      // starts at the top of the page you land on — carrying an index across
+      // would drop you on the fourth arm because you were on the fourth bat.
+      app.screen.page = page === "arms" ? "bats" : "arms";
+      app.screen.index = 0;
     } else if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), roster.length + actions.length);
     } else if (key === "a") {
@@ -1351,6 +1423,154 @@ function isLegend(card) {
   return card?.rarity === "legend";
 }
 
+// Turning the pack over: forward through the pulls, then out. The one thing the
+// pack screen did, and now the first item on its menu.
+function advancePack(app, cards) {
+  const save = app.save;
+  const revealed = app.screen.revealed ?? 0;
+  const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+  // The cursor goes home to NEXT CARD on every new face: the next thing you want
+  // to do with the next card is almost always look at the one after it.
+  app.screen.menuIndex = 0;
+  if (viewing < revealed) {
+    app.screen.viewing = viewing + 1;
+    return;
+  }
+  if (revealed < cards.length) {
+    const pulled = cards[revealed];
+    addCardToCollection(save, pulled.id);
+    app.screen.revealed = revealed + 1;
+    app.screen.viewing = revealed + 1;
+    // He is yours already. He is just not on the screen yet.
+    if (isLegend(pulled)) app.screen.curtain = (app.screen.curtain ?? 0) + revealed + 1;
+    persistSave(save);
+    return;
+  }
+  save.pendingPacks.shift();
+  persistSave(save);
+  if (save.pendingPacks.length) {
+    app.screen.revealed = 0;
+    app.screen.viewing = 0;
+  } else {
+    app.go(app.screen.returnTo ?? "map");
+  }
+}
+
+// What you can do with the man you just pulled, without leaving the pack.
+//
+// He is already yours — the card went into the collection the moment it was
+// turned over — so this is not a claim. It is the two things you were going to
+// walk to another screen to do anyway: sell the duplicate you did not want, and
+// put the star you did want straight into the lineup. NEXT CARD leads, and is
+// where the cursor sits, because ripping the pack is what you came here for.
+function packActions(app, card, cards) {
+  const save = app.save;
+  const revealed = app.screen.revealed ?? 0;
+  const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+  const rewound = viewing < revealed;
+  const actions = [{
+    label: rewound ? "FORWARD" : revealed < cards.length ? "NEXT CARD" : "DONE",
+    run: () => advancePack(app, cards)
+  }];
+  if (!card) return actions;
+
+  const owned = ownedCount(save, card.id);
+  const locked = pairRosterLocked(save, card);
+  const value = sellValueOf(save, card);
+  const sold = owned <= 0;
+  actions.push({
+    label: sold ? `SELL <span class="gq-dim">SOLD</span>`
+      : locked ? `SELL <span class="gq-dim">ROSTER COPY &mdash; NOT FOR SALE</span>`
+      : `SELL <span class="gq-dim">&#8594; $${value}</span>`,
+    disabled: sold || locked,
+    // Never on one keypress. The shop asks; so does the pack.
+    run: () => {
+      app.screen.confirmSell = card.id;
+      app.screen.menuIndex = 0;
+    }
+  });
+
+  const rostered = save.roster.cardIds.includes(card.id);
+  const targets = swapTargets(save, card);
+  const blocked = sold ? "SOLD"
+    : rostered ? "ALREADY ON THE TEAM"
+    : save.activeSeries ? "SERIES IN PROGRESS"
+    : targets.length === 0 ? "NO LEGAL SPOT"
+    : null;
+  actions.push({
+    label: blocked ? `ADD TO TEAM <span class="gq-dim">${blocked}</span>` : "ADD TO TEAM &#8594; PICK WHO SITS",
+    disabled: Boolean(blocked),
+    run: () => {
+      app.screen.mode = "team-swap";
+      // Opens on the man he is here to replace, the way the binder does it.
+      app.screen.pickIndex = defaultSwapIndex(save, card, targets);
+    }
+  });
+  return actions;
+}
+
+// Sell, but say it out loud first. Either way the cursor goes home to NEXT CARD
+// afterwards — the question is answered, and the pack is still half unopened.
+function packSellActions(app, card) {
+  const value = sellValueOf(app.save, card);
+  return [
+    {
+      label: `YES &mdash; SELL FOR $${value}`,
+      run: () => {
+        app.screen.confirmSell = null;
+        app.screen.menuIndex = 0;
+        if (removeCardFromCollection(app.save, card.id)) {
+          grantCoins(app.save, value);
+          addLog(app.save, `Sold ${card.name} (+${value} coins).`);
+          persistSave(app.save);
+        }
+      }
+    },
+    {
+      label: "NO &mdash; KEEP HIM",
+      run: () => {
+        app.screen.confirmSell = null;
+        app.screen.menuIndex = 0;
+      }
+    }
+  ];
+}
+
+// Everything under the card: the sealed pack's one instruction before the first
+// pull, then the menu, then the who-sits question if you asked it.
+function packFooter(app, card, cards) {
+  const save = app.save;
+  const revealed = app.screen.revealed ?? 0;
+  // Nothing has been turned over yet. There is only one thing to do.
+  if (revealed === 0) return `<p class="gq-blink">Z — RIP IT OPEN</p>`;
+
+  if (app.screen.mode === "team-swap" && card) {
+    const targets = swapTargets(save, card);
+    const pickIndex = clampIndex(app.screen.pickIndex ?? 0, targets.length + 1);
+    return `<h3>WHO SITS FOR ${escapeHtml(shortName(card.name))}?</h3>${menuHtml(
+      [
+        ...targets.map((target) => ({
+          html: `<span class="gq-swap-spot">${escapeHtml(currentSpot(save, target))}</span>${escapeHtml(shortName(target.name))}`
+        })),
+        { label: "CANCEL" }
+      ],
+      pickIndex
+    )}<p class="gq-dim">Z benches him for your card. X cancels.</p>`;
+  }
+
+  const items = card && app.screen.confirmSell === card.id
+    ? packSellActions(app, card)
+    : packActions(app, card, cards);
+  const index = clampIndex(app.screen.menuIndex ?? 0, items.length);
+  // The labels carry their own dim tails ("SELL -> $300"), and menuHtml escapes
+  // a plain label — so hand it markup, the way the action menus do.
+  const rows = items.map((item) => ({ html: item.label, disabled: item.disabled }));
+  return `${menuHtml(rows, index)}<p class="gq-dim">${
+    app.screen.confirmSell ? "Z answers. X keeps him."
+      : `Z picks &middot; &#9650;/&#9660; moves${revealed > 1 ? " &middot; &#9664;/&#9654; looks back through the pulls" : ""}`
+  }</p>`;
+}
+
 export const packOpenScreen = {
   render(app) {
     const save = app.save;
@@ -1364,7 +1584,10 @@ export const packOpenScreen = {
     // The curtain: he has been pulled, but he has not been shown.
     const curtain = Boolean(app.screen.curtain) && !rewound;
     const landed = isLegend(current) && !rewound && !curtain;
-    return `<div class="gq-screen${landed ? " gq-legend-screen" : ""}">
+    // A menu is standing under the card, and it needs the room to stand in: the
+    // card gives some back rather than pushing the last row off the bottom.
+    const menued = revealed > 0 && !curtain;
+    return `<div class="gq-screen${landed ? " gq-legend-screen" : ""}${menued ? " gq-pack-menued" : ""}">
       <div class="gq-topbar"><span>${escapeHtml(PACKS[pending.packId].name.toUpperCase())}</span><span>${revealed}/${cards.length}</span></div>
       <div class="gq-pack-stage">
         ${curtain
@@ -1385,9 +1608,7 @@ export const packOpenScreen = {
         ${revealed === cards.length && !rewound && !curtain
           ? packEggs(cards, (id) => ownedCount(save, id)).map((egg) => `<p><b>${egg}</b></p>`).join("")
           : ""}
-        ${curtain ? `<p class="gq-blink">&#9733; &#9733; &#9733;</p>` : `
-          ${revealed > 1 ? `<p class="gq-dim">&#9664;/&#9654; LOOK BACK THROUGH THE PULLS</p>` : ""}
-          <p class="gq-blink">${rewound ? "Z — FORWARD" : revealed < cards.length ? "Z — NEXT CARD" : "Z — DONE"}</p>`}
+        ${curtain ? `<p class="gq-blink">&#9733; &#9733; &#9733;</p>` : packFooter(app, current, cards)}
       </div>
     </div>`;
   },
@@ -1399,6 +1620,11 @@ export const packOpenScreen = {
     setTimeout(() => {
       if (app.screen.curtain !== app.screen.curtainRunning) return;
       app.screen.curtain = null;
+      // The noise lands with the card, not with the pull: the curtain spends a
+      // second promising a legend, and this is the payoff. It fires HERE, on the
+      // one frame the man appears, and so it fires once — paging back through the
+      // pack to look at him again is looking, not pulling.
+      playLegend();
       app.rerender();
     }, LEGEND_CURTAIN_MS);
   },
@@ -1413,33 +1639,66 @@ export const packOpenScreen = {
     const cards = openPack(pending.packId, pending.seed);
     const revealed = app.screen.revealed ?? 0;
     const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+    const current = viewing > 0 ? cards[viewing - 1] : null;
     // While the pack is glowing, the room waits.
     if (app.screen.curtain) return;
-    if (key === "left") {
-      if (viewing > 1) app.screen.viewing = viewing - 1;
+
+    // A sealed pack has no menu. Z opens it.
+    if (revealed === 0) {
+      if (key === "a" || key === "b") advancePack(app, cards);
+      app.rerender();
+      return;
+    }
+
+    // Who sits for the man you just pulled.
+    if (app.screen.mode === "team-swap" && current) {
+      const targets = swapTargets(save, current);
+      if (key === "up" || key === "down") {
+        app.screen.pickIndex = clampIndex((app.screen.pickIndex ?? 0) + (key === "down" ? 1 : -1), targets.length + 1);
+      } else if (key === "a") {
+        const target = targets[clampIndex(app.screen.pickIndex ?? 0, targets.length + 1)];
+        if (target) {
+          setRoster(save, save.roster.cardIds.map((id) => (id === target.id ? current.id : id)));
+          addLog(save, `${current.name} takes ${target.name}'s roster spot.`);
+          persistSave(save);
+        }
+        app.screen.mode = null;
+        // Done with him. The cursor goes home to NEXT CARD rather than resting on
+        // an ADD TO TEAM that now reads ALREADY ON THE TEAM — a finished job is
+        // not what you want your thumb sitting on.
+        app.screen.menuIndex = 0;
+      } else if (key === "b") {
+        app.screen.mode = null;
+        app.screen.menuIndex = 0;
+      }
+      app.rerender();
+      return;
+    }
+
+    const items = current && app.screen.confirmSell === current.id
+      ? packSellActions(app, current)
+      : packActions(app, current, cards);
+
+    if (key === "up" || key === "down") {
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), items.length);
+    } else if (key === "left") {
+      if (viewing > 1) {
+        app.screen.viewing = viewing - 1;
+        app.screen.menuIndex = 0;
+      }
     } else if (key === "right") {
-      if (viewing < revealed) app.screen.viewing = viewing + 1;
-    } else if (key === "a" || key === "b") {
       if (viewing < revealed) {
         app.screen.viewing = viewing + 1;
-      } else if (revealed < cards.length) {
-        const pulled = cards[revealed];
-        addCardToCollection(save, pulled.id);
-        app.screen.revealed = revealed + 1;
-        app.screen.viewing = revealed + 1;
-        // He is yours already. He is just not on the screen yet.
-        if (isLegend(pulled)) app.screen.curtain = (app.screen.curtain ?? 0) + revealed + 1;
-        persistSave(save);
-      } else {
-        save.pendingPacks.shift();
-        persistSave(save);
-        if (save.pendingPacks.length) {
-          app.screen.revealed = 0;
-          app.screen.viewing = 0;
-        } else {
-          app.go(app.screen.returnTo ?? "map");
-        }
+        app.screen.menuIndex = 0;
       }
+    } else if (key === "a") {
+      const item = items[clampIndex(app.screen.menuIndex ?? 0, items.length)];
+      if (item && !item.disabled) item.run();
+    } else if (key === "b") {
+      // X backs out of the question, and otherwise does what it always did on
+      // this screen: turns the card over.
+      if (app.screen.confirmSell) app.screen.confirmSell = null;
+      else advancePack(app, cards);
     } else {
       return;
     }

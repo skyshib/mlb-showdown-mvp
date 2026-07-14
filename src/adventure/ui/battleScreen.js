@@ -11,16 +11,17 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260713-x";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260713-x";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260713-x";
-import { cardById } from "../packs.js?v=20260713-x";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds } from "../../rules/game.js?v=20260713-x";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260713-x";
-import { gameFeats } from "../feats.js?v=20260713-x";
-import { buildNpcTeam } from "../npcTeams.js?v=20260713-x";
-import { positionsOverlap } from "../../rules/cards.js?v=20260713-x";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260713-x";
+} from "./helpers.js?v=20260714-x";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-x";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260714-x";
+import { longestHitStreak } from "../records.js?v=20260714-x";
+import { cardById } from "../packs.js?v=20260714-x";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds } from "../../rules/game.js?v=20260714-x";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-x";
+import { gameFeats } from "../feats.js?v=20260714-x";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-x";
+import { positionsOverlap } from "../../rules/cards.js?v=20260714-x";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-x";
 import {
   persistSave,
   deriveSeed,
@@ -42,7 +43,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260713-x";
+} from "../state.js?v=20260714-x";
 import {
   createBattle,
   battlePhase,
@@ -59,7 +60,7 @@ import {
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260713-x";
+} from "../../rules/battle/controller.js?v=20260714-x";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -242,6 +243,11 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
     playerSide,
     innings,
     feats,
+    // The record book wants a run of hits back to back, and that is a fact about
+    // the PLAY-BY-PLAY, which nothing keeps. The box score has how many hits;
+    // only the sequence knows they came one after another. So it is counted here,
+    // at the final out, while the sequence still exists, and filed with the game.
+    hitStreak: longestHitStreak(events, boxScore[playerSide]?.team),
     boxScore,
     // Games played before the board existed have no frames to hang; the box
     // score simply leaves the wall bare rather than inventing them.

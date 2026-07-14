@@ -495,7 +495,7 @@ test("starter covers innings not covered by bullpen and gets tired past his IP",
   assert.equal(event.controlTotal, 28);
 });
 
-test("bullpen follows low-control to high-control order after starter target", () => {
+test("the pen sends its BEST arm, not the next man along the bench", () => {
   const orderedStaff = {
     name: "Ordered Staff",
     lineup: teamB.lineup,
@@ -507,14 +507,19 @@ test("bullpen follows low-control to high-control order after starter target", (
     ]
   };
   const state = createInitialState(teamA, orderedStaff);
-  // The simulator goes to the pen when the arm is TIRED, not when a plan says
-  // so: the IP 5 starter's tank is 20 batters, and he is pulled once he is two
-  // points into fatigue. Outs recorded do not enter into it.
-  state.pitching.home.battersFaced = 24;
+  // The IP 5 starter's tank is 20 batters; at 32 faced he is four points into
+  // fatigue, so a control 9 is really a control 5 — well behind the control 8
+  // sitting in the pen. A man that deep is deep in the GAME too, the eighth, and
+  // the innings left are what tell the skipper he can afford the arm.
+  state.pitching.home.battersFaced = 32;
+  state.inning = 8;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
 
-  assert.equal(event.pitcher, "Low RP");
+  // The old skipper took the next man in a list sorted worst-first, and handed a
+  // tight game to a control-2 mop-up arm. The hook picks the MAN now, not the
+  // next seat on the bench.
+  assert.equal(event.pitcher, "High RP");
   assert.equal(event.fatiguePenalty, 0);
 });
 
@@ -547,10 +552,13 @@ test("a starter is pulled on his own IP, not on a fixed seven innings", () => {
   const long = facedWhenPulled(8);
   assert.ok(short !== null && long !== null, "both starters come out eventually");
   assert.ok(long > short, `the IP 8 arm goes deeper (${long} BF) than the IP 5 arm (${short} BF)`);
-  // A card's IP is a tank of four batters an inning, and he is pulled two
-  // points into fatigue — four batters past it.
-  assert.equal(short, 5 * 4 + 4);
-  assert.equal(long, 8 * 4 + 4);
+  // The hook is a comparison now, not a fixed number of batters past the tank —
+  // so what is pinned here is the thing the card actually promises: a man is not
+  // pulled while he is still FRESH, and the bigger tank buys more of the game.
+  // (These arms and the pen are the same control 5, so the only thing that can
+  // make the pen better than him is his own fatigue.)
+  assert.ok(short >= 5 * 4, `the IP 5 arm empties his tank first (pulled at ${short} BF, tank is ${5 * 4})`);
+  assert.ok(long >= 8 * 4, `the IP 8 arm empties his tank first (pulled at ${long} BF, tank is ${8 * 4})`);
 });
 
 test("last bullpen pitcher keeps pitching in extras and becomes tired", () => {
@@ -1509,4 +1517,96 @@ test("a room replays its clock: same actions, same timestamps, same banks", () =
   for (const action of log) applyDraftAction(replayed, action);
   assert.deepEqual(replayed.clock.banks, live.clock.banks, "the banks land where they landed");
   assert.equal(replayed.pickNumber, live.pickNumber, "off the same picks");
+});
+
+// The 1B+ auto-advance is settled at the END of the play, not the start of it.
+// With a man on first, he is standing on second the instant the ball lands, so
+// asking "is second open?" before the throw is resolved always said no — and the
+// batter was pinned to first even when that runner carried on to third and left
+// second empty behind him.
+test("1B+ takes second after the lead runner vacates it, not before", () => {
+  const state = createInitialState(teamA, weakDefense);
+  const batter = makeHitter({ id: "plus-h", name: "Plus Hitter", chart: [{ from: 1, to: 20, result: RESULTS.SINGLE_PLUS }] });
+  state.away.lineup[0] = batter;
+  // A fast man on first, against a defense that cannot throw him out at third.
+  state.bases = [makeHitter({ id: "lead-r", name: "Lead Runner", speed: 20 }), null, null];
+
+  const event = playPlateAppearance(state, repeatingRng(1, 1, 1));
+
+  assert.equal(event.result, RESULTS.SINGLE_PLUS);
+  assert.equal(state.bases[2]?.name, "Lead Runner", "the man on first took third on the hit");
+  assert.equal(
+    state.bases[1]?.name,
+    "Plus Hitter",
+    "and the 1B+ batter takes the second base that the play itself opened up"
+  );
+  assert.equal(state.bases[0], null, "so nobody is left standing on first");
+});
+
+// ---- The hook -----------------------------------------------------------------
+// The two ways a skipper embarrasses himself, one test each.
+
+test("a tired ace keeps the ball when the pen is worse than he is", () => {
+  const aceAndRubbish = {
+    name: "Ace And Rubbish",
+    lineup: teamB.lineup,
+    pitchers: [
+      makePitcher({ id: "ace", name: "Ace", control: 9, ip: 5 }),
+      makePitcher({ id: "mop-1", name: "Mop Up", control: 1, ip: 2 }),
+      makePitcher({ id: "mop-2", name: "Mop Up Two", control: 1, ip: 2 })
+    ]
+  };
+  const state = createInitialState(teamA, aceAndRubbish);
+  // Two points past his tank: a control 9 who is really a 7 tonight. Still the
+  // best arm in the building, and the old rule pulled him for a control 1.
+  state.pitching.home.battersFaced = 24;
+  state.inning = 7;
+
+  const event = playPlateAppearance(state, repeatingRng(20, 1));
+
+  assert.equal(event.pitcher, "Ace", "he is tired, not finished — nobody out there is better");
+  assert.equal(event.fatiguePenalty, 2, "and he wears the fatigue while he does it");
+});
+
+test("a starter getting hit around comes out early, tired or not", () => {
+  const batteringPractice = {
+    name: "Batting Practice",
+    lineup: teamB.lineup,
+    pitchers: [
+      // Fresh as a daisy and utterly hittable.
+      makePitcher({ id: "bp", name: "Batting Practice Guy", control: 0, ip: 7 }),
+      makePitcher({ id: "good-1", name: "Good Arm", control: 9, ip: 3 }),
+      makePitcher({ id: "good-2", name: "Good Arm Two", control: 8, ip: 3 })
+    ]
+  };
+  const state = createInitialState(teamA, batteringPractice);
+  // Nobody is tired. The old rule would have let him throw into the seventh.
+  state.pitching.home.battersFaced = 0;
+
+  const event = playPlateAppearance(state, repeatingRng(20, 1));
+
+  assert.equal(event.pitcher, "Good Arm", "quality innings in the pen do not sit idle behind a bad start");
+  assert.equal(event.fatiguePenalty, 0);
+});
+
+test("the hook holds when the pen has no innings left to give", () => {
+  const shortPen = {
+    name: "Short Pen",
+    lineup: teamB.lineup,
+    pitchers: [
+      makePitcher({ id: "meh", name: "Journeyman", control: 3, ip: 7 }),
+      // Clearly better than him — three points of control — but with one out in
+      // the tank. Good enough to want, nowhere near enough to finish: pulling in
+      // the first would mean somebody throws the other eight innings on fumes.
+      // Only a DREADFUL start (the desperation gap) is worth that, and a
+      // journeyman is not dreadful.
+      makePitcher({ id: "sliver", name: "One Out Guy", control: 6, ip: 0.3 })
+    ]
+  };
+  const state = createInitialState(teamA, shortPen);
+  state.pitching.home.battersFaced = 0;
+
+  const event = playPlateAppearance(state, repeatingRng(20, 1));
+
+  assert.equal(event.pitcher, "Journeyman", "a slightly better arm is not worth burning the last one in the first");
 });

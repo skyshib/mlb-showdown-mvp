@@ -1,5 +1,5 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260713-x";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260713-x";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260714-x";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260714-x";
 import {
   createSave,
   persistSave,
@@ -12,7 +12,7 @@ import {
   exportSaveCode,
   importSaveCode,
   saveFileName
-} from "../state.js?v=20260713-x";
+} from "../state.js?v=20260714-x";
 
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],
@@ -57,6 +57,9 @@ function titleItems(app) {
   if (app.save) items.push({ label: "EXPORT SAVE", run: (a) => a.go("exportSave") });
   items.push({ label: "IMPORT SAVE", run: (a) => a.go("importSave") });
   items.push({ label: "HALL OF FAME", run: (a) => a.go("hallOfFame", { index: 0 }) });
+  // The hall ranks finished RUNS. The book ranks single feats, and it is the
+  // whole league's — so it stands next to the hall, where the global things are.
+  items.push({ label: "WORLD RECORDS", run: (a) => a.go("records", { index: 0 }) });
   if (app.save) {
     items.push({
       label: "DELETE SAVE",

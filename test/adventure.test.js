@@ -3696,3 +3696,185 @@ test("the hall of fame screens list champions and open the team page", async () 
   hofTeamScreen.key(app, "b");
   assert.equal(app.screen.name, "hallOfFame", "X returns to the leaderboard");
 });
+
+// A Showdown-set card says who the man is on its FACE, not in its id. The era
+// rule used to ask the id and get "nobody" back for every card in the classic
+// league, so it never fired there: Rival Cam fielded two Brant Browns, a pair of
+// Pedro Martinezes, and would have run two Sammy Sosas out at the summit.
+test("one man per roster holds in the classic league, where the id doesn't name him", async () => {
+  const { personConflict, cardPerson } = await import("../src/rules/cards.js");
+  setUniverseSeed("one-man-test", "classic");
+  const pool = adventurePool();
+
+  const sosas = pool.filter((card) => cardPerson(card) === "name:sammy sosa");
+  assert.ok(sosas.length > 2, "the classic pool prints the same man many times over");
+  const [first, second] = sosas;
+  assert.ok(personConflict([first], second), "two printings of one man conflict, whatever the season on the face");
+  const someoneElse = pool.find((card) => cardPerson(card) !== cardPerson(first));
+  assert.equal(personConflict([first], someoneElse), null, "two different men do not");
+  assert.equal(personConflict([first], second, first.id), null, "and a card may still replace itself in a swap");
+
+  // The rule is only worth having if the teams it governs obey it.
+  const save = { mode: "budget", saveSeed: "one-man-test", universe: "classic" };
+  for (const trainer of TRAINERS) {
+    const roster = buildNpcTeam(trainer, save).roster;
+    const men = roster.map((card) => cardPerson(card));
+    assert.equal(new Set(men).size, men.length, `${trainer.id} fields ${men.length} distinct men`);
+  }
+});
+
+// The pack screen used to be a single instruction — Z, next card — and anything
+// you wanted to DO with the man you had just pulled meant walking to another
+// screen to do it. The menu brings the two things you were going to do anyway to
+// where he already is.
+test("the pulled card carries a menu: next, sell, add to team — cursor on next", async () => {
+  const { packOpenScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const seed = "menu-pack";
+  const cards = openPack("booster", seed);
+  save.pendingPacks = [{ packId: "booster", seed }];
+  save.player.coins = 0;
+  const app = { save, screen: { name: "packOpen", revealed: 0, viewing: 0 }, go() {}, rerender() {} };
+
+  // Sealed: no menu, just the one instruction.
+  assert.ok(packOpenScreen.render(app).includes("RIP IT OPEN"), "a sealed pack has nothing to decide");
+
+  packOpenScreen.key(app, "a");
+  if (app.screen.curtain) app.screen.curtain = null;   // legends glow first; not what this is about
+  const pulled = cards[0];
+  const shown = packOpenScreen.render(app);
+  assert.ok(shown.includes("NEXT CARD"), "the menu is up");
+  assert.ok(shown.includes("SELL"), "and he can be sold");
+  assert.ok(shown.includes("ADD TO TEAM"), "and he can be signed");
+  assert.equal(app.screen.menuIndex ?? 0, 0, "the cursor sits on NEXT CARD, which is what you came here to press");
+
+  // Selling never happens on one keypress: the pack asks, like the shop asks.
+  app.screen.menuIndex = 1;
+  packOpenScreen.key(app, "a");
+  assert.equal(app.screen.confirmSell, pulled.id, "it asks first");
+  assert.ok(packOpenScreen.render(app).includes("YES"), "and shows the question");
+  const owned = ownedCount(save, pulled.id);
+  packOpenScreen.key(app, "a");                         // YES
+  assert.equal(ownedCount(save, pulled.id), owned - 1, "the copy is gone");
+  assert.ok(save.player.coins > 0, "and it was paid for");
+  assert.equal(app.screen.menuIndex, 0, "the cursor goes home to NEXT CARD");
+});
+
+test("adding from the pack asks who sits, and the man he replaces comes off", async () => {
+  const { packOpenScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  // A pack whose first pull is a HITTER, so there is somebody for him to replace.
+  let seed = null;
+  for (let i = 0; i < 200 && !seed; i += 1) {
+    if (openPack("booster", `hitter-${i}`)[0].kind === "hitter") seed = `hitter-${i}`;
+  }
+  assert.ok(seed, "some booster leads with a bat");
+  const pulled = openPack("booster", seed)[0];
+  save.pendingPacks = [{ packId: "booster", seed }];
+  const app = { save, screen: { name: "packOpen", revealed: 0, viewing: 0 }, go() {}, rerender() {} };
+
+  packOpenScreen.key(app, "a");
+  if (app.screen.curtain) app.screen.curtain = null;
+  app.screen.menuIndex = 2;                             // ADD TO TEAM
+  packOpenScreen.key(app, "a");
+  assert.equal(app.screen.mode, "team-swap", "it asks who sits");
+  const benched = rosterCards(save)[app.screen.pickIndex ?? 0];
+  assert.ok(packOpenScreen.render(app).includes("WHO SITS"), "and says so");
+
+  packOpenScreen.key(app, "a");                         // bench him
+  const roster = rosterCards(save).map((card) => card.id);
+  assert.ok(roster.includes(pulled.id), "the new man is on the team");
+  assert.ok(!roster.includes(benched.id), "and the man he replaced is off it");
+  assert.equal(app.screen.mode, null, "the question is closed");
+  assert.equal(app.screen.menuIndex, 0, "and the cursor is back on NEXT CARD");
+});
+
+// Thirteen men in one column put the arms below the fold: changing who starts
+// game 1 meant scrolling past nine bats to reach him. They are two jobs asked in
+// two vocabularies, so they are two pages, and left/right turns between them.
+test("the team screen files the bats and the arms on separate pages", async () => {
+  const { teamScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go() {}, rerender() {} };
+
+  const bats = rosterCards(save).filter((card) => card.kind === "hitter");
+  const arms = rosterCards(save).filter((card) => card.kind === "pitcher");
+  assert.ok(bats.length && arms.length, "the club has both");
+
+  // Bats lead, because a roster is a lineup card first. A bat's row reads OB and
+  // SPD; an arm's reads CTRL and IP. Neither vocabulary shows up on the other's
+  // page — not in the list, and not in the card standing beside it.
+  const batsPage = teamScreen.render(app);
+  assert.ok(batsPage.includes(`${bats.length} BATS`), "the banner counts the bats");
+  assert.ok(!batsPage.includes("CTRL"), "no arm is filed among the bats");
+  assert.equal(teamScreen.hoverCard(app, 0).kind, "hitter", "and the cursor is on one");
+
+  // Right turns to the arms.
+  teamScreen.key(app, "right");
+  const armsPage = teamScreen.render(app);
+  assert.ok(armsPage.includes(`${arms.length} ARMS`), "the banner counts the arms");
+  assert.ok(!armsPage.includes("SPD"), "no bat is filed among the arms");
+  assert.equal(app.screen.index, 0, "the cursor starts at the top of the page you land on");
+  assert.equal(teamScreen.hoverCard(app, 0).kind, "pitcher", "and the card panel follows it");
+
+  // And left turns back.
+  teamScreen.key(app, "left");
+  assert.ok(teamScreen.render(app).includes(`${bats.length} BATS`), "left goes home to the bats");
+});
+
+// ---- The record book ---------------------------------------------------------
+
+test("consecutive hits counts a RUN of hits, and a walk breaks it", async () => {
+  const { longestHitStreak } = await import("../src/adventure/records.js");
+  const pa = (battingTeam, result) => ({ battingTeam, result });
+  const events = [
+    pa("US", "1B"), pa("US", "2B"), pa("US", "BB"),        // two, then the walk ends it
+    pa("THEM", "HR"), pa("THEM", "HR"), pa("THEM", "HR"),  // the other lot don't count at all
+    pa("US", "1B"), pa("US", "HR"), pa("US", "1B+"),       // three in a row
+    { battingTeam: "US", type: "steal" },                  // not a plate appearance: neither makes nor breaks
+    pa("US", "SO")
+  ];
+  assert.equal(longestHitStreak(events, "US"), 3, "the best run of hits, back to back");
+  assert.equal(longestHitStreak(events, "THEM"), 3, "read from the other dugout, it is theirs");
+  assert.equal(longestHitStreak([], "US"), 0, "a game with no hits has no run of them");
+});
+
+test("the record book ranks each record the right way round, and folds you in", async () => {
+  const { RECORDS, leaderboard } = await import("../src/adventure/records.js");
+  const runsGame = RECORDS.find((record) => record.key === "runs-game");
+  const fewestHits = RECORDS.find((record) => record.key === "hits-allowed-win");
+  assert.equal(runsGame.better, "max");
+  assert.equal(fewestHits.better, "min", "fewest hits is a record you win by going LOW");
+
+  const save = testSave();
+  save.saveSeed = "sq-me";
+  save.player.name = "ME";
+  // One game on the almanac: eight runs, and a two-hit win.
+  save.almanac = [{
+    day: 3, opponent: "JOJO", won: true, innings: 9, playerSide: "away",
+    score: { away: 8, home: 1 },
+    boxScore: { away: { team: "ME", hitters: [{ hr: 1 }], pitchers: [{ h: 2, so: 9 }] }, home: { team: "JOJO", hitters: [], pitchers: [] } }
+  }];
+
+  const globals = {
+    "runs-game": [
+      { value: 24, name: "ANA", saveSeed: "sq-a", day: 20, opponent: "OKABE" },
+      { value: 3, name: "BO", saveSeed: "sq-b", day: 2, opponent: "MABEL" }
+    ],
+    "hits-allowed-win": [{ value: 5, name: "ANA", saveSeed: "sq-a", day: 4, opponent: "PETRA" }]
+  };
+
+  const runs = leaderboard(runsGame, globals, save);
+  assert.deepEqual(runs.top.map((row) => row.value), [24, 8, 3], "highest first");
+  assert.equal(runs.top[1].you, true, "and you are in it where you belong");
+  assert.equal(runs.yourRank, 2);
+
+  const hits = leaderboard(fewestHits, globals, save);
+  assert.deepEqual(hits.top.map((row) => row.value), [2, 5], "LOWEST first for this one");
+  assert.equal(hits.yourRank, 1, "two hits beats five");
+
+  // A record nobody has set stays empty rather than inventing a zero.
+  const untouched = leaderboard(RECORDS.find((r) => r.key === "hit-streak"), {}, save);
+  assert.equal(untouched.top.length, 0);
+  assert.equal(untouched.you, null, "never having done it is not the same as having done it badly");
+});

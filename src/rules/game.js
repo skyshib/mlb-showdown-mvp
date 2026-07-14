@@ -1,5 +1,6 @@
-import { RESULTS, resolveChart } from "./cards.js?v=20260713-x";
-import { createRng } from "./rng.js?v=20260713-x";
+import { RESULTS, resolveChart } from "./cards.js?v=20260714-x";
+import { reliefDecision, lineupProfile } from "./pitching.js?v=20260714-x";
+import { createRng } from "./rng.js?v=20260714-x";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 
@@ -726,19 +727,51 @@ export function pitcherStatus(state, side) {
   };
 }
 
-// The skipper the simulator runs on: he goes to the pen when the arm on the
-// mound is tired, and not before. This is the same call the adventure's
-// balanced NPC makes (see AI_PROFILES.pullAtFatigue) and the same one the
-// autopilot makes for the player's own pen — one rule, three places.
+// The skipper the simulator runs on. He goes to the pen when the pen holds a
+// better arm than the one he has — see reliefDecision, which is the whole rule.
+// This is the same call the adventure's NPC makes (bent by his temperament, see
+// AI_PROFILES.pullMargin) and the same one the autopilot makes for the player's
+// own pen — one rule, three places.
 //
-// It replaced a pitching PLAN, which scripted the starter to cover whatever
-// outs the bullpen's printed IP did not: two one-inning relievers meant the
-// starter was down for 27 - 6 = 21 outs, so EVERY starter threw exactly 7.0
-// innings whatever his card said. An IP 6 arm was pushed a full inning past
-// his tank, every game, and an IP 8 arm was taken out with gas left in it.
-// The card's IP is the whole point of the card; now it decides when he comes
-// out, the way it decides everything else about him.
-export const AUTO_PULL_AT_FATIGUE = 2;
+// It replaced "pull at fatigue 2", which was blind in both directions: it left a
+// batting-practice starter in because he was not tired yet, and it took a tired
+// ace out and handed the ball to a man two runs an inning worse. Tired is a
+// reason to be WORSE. It was never the reason to leave.
+//
+// How hard the balanced skipper has to be beaten before he moves, in CONTROL
+// POINTS. Not zero, and not small: a hook costs you the arm for the night, and
+// the pen behind him is three innings deep. Tuned against the balance simulator
+// along with the rest of the rule — see MARGIN in pitching.js.
+export const AUTO_PULL_MARGIN = 2;
+
+// The outs still to be recorded in a regulation game. What is left to cover is
+// what decides whether the pen can afford to be spent now.
+function outsRemainingToPitch(state) {
+  const recorded = (state.inning - 1) * 3 + state.outs;
+  return Math.max(3, 27 - recorded);
+}
+
+// Go to the pen if the pen is better. Returns the new pitcher, or null. Exported
+// so the NPC skipper and the autopilot run the identical decision.
+export function autoRelieve(state, side, margin = AUTO_PULL_MARGIN) {
+  const runtime = state.pitching[side];
+  const team = state[side];
+  if (runtime.pitcherIndex >= team.pitchers.length - 1) return null;
+  const onMound = team.pitchers[runtime.pitcherIndex];
+  const decision = reliefDecision({
+    current: onMound,
+    currentFatigue: pitcherFatigue(runtime, onMound),
+    bullpen: team.pitchers.slice(runtime.pitcherIndex + 1),
+    batters: lineupProfile(state[side === "home" ? "away" : "home"].lineup),
+    outsRemaining: outsRemainingToPitch(state),
+    margin
+  });
+  if (!decision.pull) return null;
+  // Bring in THAT arm — the best one out there — not merely the next man along
+  // the bench. changePitcher pulls him to the front and leaves the arms he
+  // jumped available for later.
+  return changePitcher(state, side, runtime.pitcherIndex + 1 + decision.index);
+}
 
 function currentPitcher(state, side) {
   const runtime = state.pitching[side];
@@ -747,13 +780,7 @@ function currentPitcher(state, side) {
   // "both" puts every mound under manual control (the adventure's NPC skipper
   // makes its own calls); a single side string covers just that side.
   if (state.manualPitchingFor !== side && state.manualPitchingFor !== "both") {
-    while (runtime.pitcherIndex < team.pitchers.length - 1) {
-      const pitcher = team.pitchers[runtime.pitcherIndex];
-      if (pitcherFatigue(runtime, pitcher) < AUTO_PULL_AT_FATIGUE) break;
-      runtime.pitcherIndex += 1;
-      runtime.outsRecorded = 0;
-      runtime.battersFaced = 0;
-    }
+    autoRelieve(state, side);
   }
   return team.pitchers[runtime.pitcherIndex] ?? team.pitchers[team.pitchers.length - 1];
 }
@@ -928,12 +955,6 @@ export function applySingle(state, batter, battingSide, pitchingSide = null, rng
   state.bases[2] = second;
   state.bases[1] = first;
   state.bases[0] = runnerFor(batter, pitcher);
-  // 1B+: the real cards' auto-advance — if second is open after the routine
-  // shift above, the batter takes it uncontested, no roll, no decision.
-  if (extraBase && !state.bases[1]) {
-    state.bases[1] = state.bases[0];
-    state.bases[0] = null;
-  }
   runs += resolveHitExtraBaseAttempts({
     state,
     batter,
@@ -946,6 +967,22 @@ export function applySingle(state, batter, battingSide, pitchingSide = null, rng
       first ? { runner: first, fromIndex: 1, toIndex: 2 } : null
     ]
   });
+  // 1B+: the real cards' auto-advance — the batter takes second uncontested, no
+  // roll, no decision, PROVIDED second is open.
+  //
+  // Open WHEN is the whole question, and it is asked here, at the end, because
+  // the play is what opens the base. The man who was on first is standing on
+  // second the moment the ball lands, so asking before the throw is settled
+  // said "occupied" and pinned the batter to first — even when that runner then
+  // went on to third, or was thrown out there, and left second empty behind him.
+  // The extra base is taken once the dust settles, on the base as it then is.
+  //
+  // A third out ends the half before anyone can trot anywhere, so a dead inning
+  // moves nobody.
+  if (extraBase && state.bases[0] && !state.bases[1] && state.outs < 3) {
+    state.bases[1] = state.bases[0];
+    state.bases[0] = null;
+  }
   return runs;
 }
 

@@ -126,6 +126,7 @@ const A5 = 880;
 const C6 = 1046.5;
 const D6 = 1174.66;
 const E6 = 1318.51;
+const G6 = 1567.98;
 
 // It is your turn. Two bright notes — the sound the room already used, kept, so
 // a draft that was in progress does not suddenly start speaking a new language.
@@ -198,6 +199,31 @@ export function playVictory() {
   phrase(
     [[C5, 0, 0.18], [E5, 0.12, 0.18], [G5, 0.24, 0.2], [C6, 0.36, 0.22], [G5, 0.52, 0.16], [C6, 0.62, 0.3], [E6, 0.78, 1]],
     { level: 0.46, shimmer: true, tail: 1 }
+  );
+}
+
+// A legend is out of the pack. The curtain has already flashed and held the
+// room for most of a second promising something, so this fires on the frame the
+// card actually lands, and it has to pay that promise off.
+//
+// It is the same C-major climb the kit uses when something good happens, with
+// two things nothing else here is allowed: a low bell struck underneath the
+// first note — the weight, the thing you feel rather than hear — and a top note
+// a full octave above where victory stops, held until it rings out. Victory is
+// the sound of a thing being FINISHED. This is the sound of a thing ARRIVING,
+// and it is the rarest noise in the game.
+export function playLegend() {
+  phrase(
+    [
+      [G3, 0, 0.55],
+      [C5, 0.02, 0.2],
+      [E5, 0.12, 0.2],
+      [G5, 0.22, 0.22],
+      [C6, 0.34, 0.24],
+      [E6, 0.46, 0.3],
+      [G6, 0.6, 1.5]
+    ],
+    { level: 0.5, shimmer: true, tail: 1.4 }
   );
 }
 

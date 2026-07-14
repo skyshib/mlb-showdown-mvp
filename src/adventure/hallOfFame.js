@@ -6,7 +6,7 @@ import {
   rosterPoints,
   seasonHitters,
   seasonPitchers
-} from "./state.js?v=20260713-x";
+} from "./state.js?v=20260714-x";
 
 // The hall of fame outlives any single save: it keeps its own storage key, so
 // deleting or replacing a campaign never erases the plaques it earned.
@@ -14,8 +14,13 @@ const HOF_KEY = "showdown-quest-hall-of-fame";
 
 export const MODE_LABELS = { budget: "BUDGET LEAGUE", uncapped: "UNCAPPED" };
 
+// "Is there a localStorage?" is not the same question as "is there a localStorage
+// I can READ", and on modern Node it is not the same answer: Node defines the
+// global and then throws on it unless the runtime was started with web storage
+// enabled. Ask for the method, not the name.
 function defaultStorage() {
-  return typeof localStorage === "undefined" ? null : localStorage;
+  const store = typeof localStorage === "undefined" ? null : localStorage;
+  return typeof store?.getItem === "function" ? store : null;
 }
 
 export function loadHallOfFame(storage = defaultStorage()) {

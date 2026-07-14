@@ -45,13 +45,26 @@ export function cardPerson(card) {
 // This is a COLLECTION rule — adventure packs, NPC teams, roster swaps. Draft
 // rooms don't need it: their board deals each person once (see cardPerson),
 // so a drafting manager cannot reach a second era of a man he already owns.
+//
+// The man is named by cardPerson, not by the id alone. Only the MLB pools spell
+// him out in the id; a Showdown-set card says who he is on its FACE ("Sammy
+// Sosa '00"), and asking the id was answering "nobody" for every card in the
+// classic league — which switched this whole rule off there and let a club field
+// two Brant Browns and a pair of Pedro Martinezes.
+//
+// The same-era pass is the two-way exemption and nothing else: a man's bat and
+// his arm are one card in two halves, same person, same slice, and the one legal
+// pairing. It only applies where both cards carry an era in the id, because that
+// is the only pool that cuts a player in half. Elsewhere a man is himself, once.
 export function personConflict(roster, player, excludeId = null) {
+  const person = cardPerson(player);
+  if (!person) return null;
   const identity = playerIdentity(player?.id);
-  if (!identity) return null;
   return roster.find((rostered) => {
     if (rostered.id === player.id || rostered.id === excludeId) return false;
+    if (cardPerson(rostered) !== person) return false;
     const other = playerIdentity(rostered.id);
-    return other && other.person === identity.person && other.slice !== identity.slice;
+    return identity && other ? other.slice !== identity.slice : true;
   }) ?? null;
 }
 

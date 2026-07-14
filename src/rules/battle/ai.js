@@ -1,13 +1,21 @@
-import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, changePitcher } from "../game.js?v=20260713-x";
+import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, autoRelieve, AUTO_PULL_MARGIN } from "../game.js?v=20260714-x";
 
 // Profiles bend the two NPC decisions: stealBias shifts the league's
-// advance-decision matrix (negative = greener lights) rather than replacing
-// it, and pullAtFatigue is how much tiredness the skipper tolerates before
-// going to the pen.
+// advance-decision matrix (negative = greener lights) rather than replacing it,
+// and pullMargin is how much BETTER the pen has to be before the skipper walks
+// out there — measured in runs per plate appearance, the currency reliefDecision
+// thinks in.
+//
+// It used to be pullAtFatigue, a tiredness threshold, and a temperament
+// expressed that way could only ever choose between two wrong answers. This one
+// says the true thing about a manager: not how tired he lets a man get, but how
+// sure he has to be that the other guy is better. The aggressive skipper trusts
+// his starter and wants a real upgrade before he moves; the conservative one has
+// a quick hook and takes any upgrade going.
 export const AI_PROFILES = {
-  balanced: { stealBias: 0, pullAtFatigue: 2 },
-  aggressive: { stealBias: -0.12, pullAtFatigue: 3 },
-  conservative: { stealBias: 0.1, pullAtFatigue: 1 }
+  balanced: { stealBias: 0, pullMargin: AUTO_PULL_MARGIN },
+  aggressive: { stealBias: -0.12, pullMargin: 3 },
+  conservative: { stealBias: 0.1, pullMargin: 1 }
 };
 
 export function profileFor(name) {
@@ -27,10 +35,11 @@ export function npcMaybeSteal(state, rng, profile) {
 }
 
 // Called before the NPC's pitcher faces a batter. Returns the new pitcher if
-// the NPC makes a change, else null.
+// the NPC makes a change, else null. The mound is under manual control for the
+// NPC (see currentPitcher), so the skipper has to make this call himself — but
+// he makes it with the same head the simulator uses, only more or less patient.
 export function npcMaybePullPitcher(state, npcSide, profile) {
   const status = pitcherStatus(state, npcSide);
   if (!status.hasReliefAvailable) return null;
-  if (status.fatiguePenalty < profile.pullAtFatigue) return null;
-  return changePitcher(state, npcSide);
+  return autoRelieve(state, npcSide, profile.pullMargin ?? AUTO_PULL_MARGIN);
 }
