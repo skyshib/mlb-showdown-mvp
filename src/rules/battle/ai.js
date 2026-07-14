@@ -16,10 +16,16 @@ import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, a
 // every skipper gets quicker with the hook as the outs run out (see pullMargin).
 // What separates them is how much patience they bring to that slide, which is
 // the thing that stays true about a man from the first inning to the ninth.
+// Half a control point, and not a whole one. A temperament is a thumb on the
+// scale, not a second opinion — and the place it was doing damage was the end of
+// the game, where the sliding bar has come down to half a point and a full point
+// of aggression is bigger than the bar it is bending. That is how an eleventh
+// inning ends up with a control 2 arm on the mound and a control 4 arm warm: not
+// because the skipper judged it, but because his personality outweighed the rule.
 export const AI_PROFILES = {
   balanced: { stealBias: 0, pullBias: AUTO_PULL_BIAS },
-  aggressive: { stealBias: -0.12, pullBias: 1 },
-  conservative: { stealBias: 0.1, pullBias: -1 }
+  aggressive: { stealBias: -0.12, pullBias: 0.5 },
+  conservative: { stealBias: 0.1, pullBias: -0.5 }
 };
 
 export function profileFor(name) {
