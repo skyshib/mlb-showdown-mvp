@@ -530,13 +530,28 @@ function fullHaul(save, spareStarred) {
   );
 }
 
+// What is about to be sold, said out loud with the money on it. A confirm that
+// does not name what it is confirming is a confirm nobody reads.
+function sellPrompt(app, pending) {
+  if (pending.kind === "card") {
+    const card = cardById(pending.id);
+    return `SELL ${escapeHtml(shortName(card?.name ?? "THIS CARD"))} FOR $${pending.value}?`;
+  }
+  if (pending.kind === "duplicates") return `SELL EVERY SPARE COPY FOR $${pending.value}?`;
+  return `SELL THE WHOLE BINDER FOR $${pending.value}?`;
+}
+
 export const sellScreen = {
   render(app) {
     const rows = sellableCards(app.save);
     const spare = app.screen.spareStarred ?? true;
     const index = clampIndex(app.screen.index ?? 0, rows.length + (rows.length ? 3 : 0) + 1);
     const selected = rows[index]?.card ?? null;
-    const confirming = Boolean(app.screen.confirmSellAll);
+    // NOTHING on this screen sells on one keypress. A card sold is gone — the
+    // shop pays pawn rates and will not sell it back — and the cursor sits on a
+    // row you may only have been reading. The whole binder always asked; a single
+    // card, which is the thing you actually lose by accident, did not.
+    const pending = app.screen.confirmSell ?? null;
     const items = [
       ...rows.map(({ card, count, locked, value }) => ({
         html: `${cardLine(card)} <span class="gq-dim">x${count}${locked ? " SPARE" : ""} &#8594; $${value}</span>${starMark(app.save, card)}`
@@ -559,8 +574,8 @@ export const sellScreen = {
         <div class="gq-card-side">${selected ? cardPanelHtml(selected, { count: ownedCount(app.save, selected.id) }) : ""}</div>
       </div></div>
       <div class="gq-textbox">${
-        confirming
-          ? `<p class="gq-blink"><b>SELL THE WHOLE BINDER? Z again to confirm. X keeps it.</b></p>`
+        pending
+          ? `<p class="gq-blink"><b>${sellPrompt(app, pending)}</b></p><p class="gq-dim">Z AGAIN TO SELL &middot; X KEEPS IT.</p>`
           : `<p>Z sells one copy. Roster cards are never for sale — only their spares list here. &#9733; keepers dodge the sweeps while PROTECT is on.</p>`
       }</div>
     </div>`;
@@ -575,43 +590,55 @@ export const sellScreen = {
     const sellAllIndex = rows.length + 1;
     const protectIndex = rows.length + 2;
     const spare = app.screen.spareStarred ?? true;
-    const wasConfirming = Boolean(app.screen.confirmSellAll);
-    if (key !== "a") app.screen.confirmSellAll = false;
+    const pending = app.screen.confirmSell ?? null;
+    // Moving off the row you were asked about drops the question with it.
+    if (key !== "a") app.screen.confirmSell = null;
     if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), total);
     } else if (key === "a") {
       const index = clampIndex(app.screen.index ?? 0, total);
-      if (index !== sellAllIndex || !extras) app.screen.confirmSellAll = false;
-      if (index < rows.length) {
-        const { card, value } = rows[index];
-        if (removeCardFromCollection(app.save, card.id)) {
-          grantCoins(app.save, value);
+      // The second Z, on the row that was asked about, is the one that sells.
+      if (pending && pending.index === index) {
+        app.screen.confirmSell = null;
+        if (pending.kind === "card") {
+          const row = rows[index];
+          if (row && removeCardFromCollection(app.save, row.card.id)) {
+            grantCoins(app.save, row.value);
+            addLog(app.save, `Sold ${row.card.name} (+$${row.value}).`);
+            persistSave(app.save);
+          }
+        } else if (pending.kind === "duplicates") {
+          const coins = sellAllDuplicates(app.save, { spareStarred: spare });
+          addLog(app.save, `Sold the duplicate pile (+$${coins}).`);
           persistSave(app.save);
-        }
-      } else if (extras && index === rows.length) {
-        const coins = sellAllDuplicates(app.save, { spareStarred: spare });
-        addLog(app.save, `Sold the duplicate pile (+${coins} coins).`);
-        persistSave(app.save);
-        app.screen.index = 0;
-      } else if (extras && index === sellAllIndex) {
-        // The whole binder wants a second Z: too much to lose to a slip.
-        if (!app.screen.confirmSellAll) {
-          app.screen.confirmSellAll = true;
+          app.screen.index = 0;
         } else {
-          app.screen.confirmSellAll = false;
           const coins = sellAllCards(app.save, { spareStarred: spare });
-          addLog(app.save, `Sold the whole binder (+${coins} coins).`);
+          addLog(app.save, `Sold the whole binder (+$${coins}).`);
           persistSave(app.save);
           app.screen.index = 0;
         }
+        app.rerender();
+        return;
+      }
+      app.screen.confirmSell = null;
+      // The first Z on anything that sells only ASKS. A card is gone once it is
+      // gone — the shop pays pawn rates and will not sell it back — and the
+      // cursor is often sitting on a row you were only reading.
+      if (index < rows.length) {
+        app.screen.confirmSell = { kind: "card", index, id: rows[index].card.id, value: rows[index].value };
+      } else if (extras && index === rows.length) {
+        app.screen.confirmSell = { kind: "duplicates", index, value: duplicateHaul(app.save, spare) };
+      } else if (extras && index === sellAllIndex) {
+        app.screen.confirmSell = { kind: "binder", index, value: fullHaul(app.save, spare) };
       } else if (extras && index === protectIndex) {
         app.screen.spareStarred = !spare;
       } else {
         app.go("shop", { menuIndex: 0 });
       }
     } else if (key === "b") {
-      // X cancels a pending sell-all confirm; otherwise it leaves the shop.
-      if (!wasConfirming) app.go("shop", { menuIndex: 0 });
+      // X takes back the question; with nothing pending it leaves the shop.
+      if (!pending) app.go("shop", { menuIndex: 0 });
     }
     app.rerender();
   }

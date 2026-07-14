@@ -761,16 +761,41 @@ test("the shop never lists roster cards, hovers its rows, and sell-all wants a c
   assert.deepEqual(new Set(listed), new Set([rosterCard, spare.id]), "only the spare and the bench card list");
   assert.equal(sellScreen.hoverCard(app, 2), null, "action rows hover nothing");
 
-  // SELL ALL CARDS asks twice, X backs out without selling or leaving.
+  // NOTHING here sells on one keypress. A card sold is gone — the shop pays pawn
+  // rates and will not sell it back — and the cursor is often sitting on a row you
+  // were only reading.
   const rows = 2;
+  app.screen.index = 0; // a single card
+  sellScreen.key(app, "a");
+  assert.equal(app.screen.confirmSell?.kind, "card", "one Z on a card only ASKS");
+  assert.ok(/SELL .+ FOR \$\d+\?/.test(sellScreen.render(app)), "and it names the man and the money");
+  sellScreen.key(app, "b");
+  assert.equal(app.screen.confirmSell, null, "X takes the question back");
+  assert.equal(app.screen.name, "sell", "without leaving the shop");
+  const held = ownedCount(save, save.roster.cardIds[0]) + ownedCount(save, spare.id);
+  sellScreen.key(app, "a");
+  sellScreen.key(app, "a");
+  assert.equal(
+    ownedCount(save, save.roster.cardIds[0]) + ownedCount(save, spare.id),
+    held - 1,
+    "and the second Z is the one that sells"
+  );
+
+  // The duplicate sweep asks too.
+  app.screen.index = rows;
+  sellScreen.key(app, "a");
+  assert.equal(app.screen.confirmSell?.kind, "duplicates", "so does the duplicate pile");
+  sellScreen.key(app, "b");
+
+  // SELL ALL CARDS asks twice, X backs out without selling or leaving.
   app.screen.index = rows + 1; // SELL ALL CARDS
   sellScreen.key(app, "a");
-  assert.equal(app.screen.confirmSellAll, true, "first Z arms the confirm");
-  assert.ok(sellScreen.render(app).includes("Z again to confirm"), "and says so");
+  assert.equal(app.screen.confirmSell?.kind, "binder", "first Z arms the confirm");
+  assert.ok(sellScreen.render(app).includes("SELL THE WHOLE BINDER"), "and says what it will take");
   sellScreen.key(app, "b");
-  assert.equal(app.screen.confirmSellAll, false, "X disarms it");
+  assert.equal(app.screen.confirmSell, null, "X disarms it");
   assert.equal(app.screen.name, "sell", "without leaving the shop");
-  assert.equal(ownedCount(save, spare.id), 2, "nothing sold");
+  assert.ok(ownedCount(save, spare.id) >= 1, "nothing swept");
 
   // Confirmed: everything sellable goes, roster copies survive.
   app.screen.index = rows + 1;
