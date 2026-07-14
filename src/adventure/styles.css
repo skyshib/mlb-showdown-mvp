@@ -540,6 +540,9 @@ h1.gq-logo {
   color: var(--gb-dark);
   white-space: nowrap;
 }
+/* The opponent's strip hangs on the right edge of the screen, so its summary
+   reads that way too: flush to HIS outside, not to yours. */
+.gq-hud-strip-away .gq-strip-def { text-align: right; }
 
 /* The 45deg turn swings every corner (12cqw * sqrt2 - 12cqw) / 2 outside the
    box layout reserved for it. The vertical margin buys that overhang back, so

@@ -1524,7 +1524,9 @@ test("the battle screen tags batter, pitcher, and runners with hoverable card id
   // Both clubs' orders run down the outside edges: surname and on-base, nine
   // deep, every man hoverable. ON DECK is gone — the whole order is right there.
   assert.ok(!html.includes("ON DECK"), "the on-deck line is retired");
-  const strips = [...html.matchAll(/<ul class="gq-hud-strip">([\s\S]*?)<\/ul>/g)].map((m) => m[1]);
+  // The away club's strip carries a modifier class (its summary reads to the
+  // right edge), so the two are not spelled identically.
+  const strips = [...html.matchAll(/<ul class="gq-hud-strip[^"]*">([\s\S]*?)<\/ul>/g)].map((m) => m[1]);
   assert.equal(strips.length, 2, "one strip per club");
   for (const [index, side] of [battle.playerSide, battle.npcSide].entries()) {
     const lineup = battle.state[side].lineup;

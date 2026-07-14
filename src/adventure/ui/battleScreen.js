@@ -963,7 +963,8 @@ function renderHud(battle, phase) {
     return lineupStripHtml(state[side], {
       litId: batting ? matchup.batter.id : null,
       nextId: batting || !matchup ? null : lineup[state.lineupIndex[side] % lineup.length].id,
-      mound: pitcherStatus(state, side)
+      mound: pitcherStatus(state, side),
+      mine: side === battle.playerSide
     });
   };
   // Your men stand on your side of the screen and theirs on theirs, whichever
@@ -989,7 +990,7 @@ function renderHud(battle, phase) {
 // — then the arm behind them, set off by a gap and marked P, reading his
 // control where the hitters read their on-base, with his workload under his
 // name. Every row carries its card id, so the whole club is hoverable.
-function lineupStripHtml(team, { litId, nextId, mound }) {
+function lineupStripHtml(team, { litId, nextId, mound, mine = true }) {
   const line = (spot, player, value) => `
       <span class="gq-strip-spot">${spot}</span>
       <span class="gq-strip-name">${escapeHtml(surname(player.name))}</span>
@@ -1008,7 +1009,10 @@ function lineupStripHtml(team, { litId, nextId, mound }) {
         <span class="gq-strip-def">${defenseLine(team)}</span>
       </li>`
     : "";
-  return `<ul class="gq-hud-strip">${bats}${arm}</ul>`;
+  // Each club's summary line runs to ITS OWN outside edge — yours left, theirs
+  // right — so the two strips read outward from the field between them instead
+  // of both pointing the same way.
+  return `<ul class="gq-hud-strip${mine ? "" : " gq-hud-strip-away"}">${bats}${arm}</ul>`;
 }
 
 // A card small enough to flank the diamond, with the state its face can't
