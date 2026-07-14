@@ -566,13 +566,15 @@ h1.gq-logo {
   position: relative;
   width: 100%;
   overflow: hidden;
-  padding: 1.5cqw 0 2.5cqw;
+  padding: 1cqw 0 1.5cqw;
   flex: none;
 }
 
 .gq-versus-row {
+  position: relative;
+  z-index: 1;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 2cqw;
   padding: 0 3cqw;
 }
@@ -581,13 +583,52 @@ h1.gq-logo {
    your side of the field and yours over his, which is what makes the two rows
    read as one stare across a ballpark rather than two labels. */
 .gq-versus-them { justify-content: space-between; }
-.gq-versus-you { justify-content: space-between; margin-top: 1.2cqw; }
+.gq-versus-you { justify-content: space-between; margin-top: 0.8cqw; }
 
+/* The man himself. The portrait sits on top of his initials, so a face that
+   never loads leaves a name plate exactly its size and nothing shifts. */
 .gq-versus-sprite {
-  font-size: 6cqw;
+  position: relative;
+  flex: none;
+  width: 15cqw;
+  height: 15cqw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.5cqw solid var(--gb-darkest);
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--gb-light);
+}
+
+.gq-versus-initials {
+  font-size: 4.6cqw;
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.08em;
+}
+
+.gq-versus-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The ground moving under them. In the handheld the whole FIELD slides while
+   the two of you come in — that is what makes it a pan rather than two labels
+   sliding about on a still page. */
+.gq-versus-field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 6cqw,
+    rgba(27, 58, 99, 0.07) 6cqw 12cqw
+  );
 }
 
 /* The bracket of balls: one lamp per card on the club, hung under a rule with a
@@ -635,12 +676,26 @@ h1.gq-logo {
   to { transform: translateX(320%); opacity: 0; }
 }
 
+/* Slower and flatter than a bounce: the handheld's pan is a steady slide that
+   arrives and stops, and the two of you travel the same distance in the same
+   time from opposite edges. */
 .gq-versus-in .gq-versus-them {
-  animation: gq-versus-from-right 620ms cubic-bezier(0.16, 0.9, 0.3, 1) both;
+  animation: gq-versus-from-right 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
 }
 
 .gq-versus-in .gq-versus-you {
-  animation: gq-versus-from-left 620ms cubic-bezier(0.16, 0.9, 0.3, 1) 90ms both;
+  animation: gq-versus-from-left 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+
+/* The ground runs the other way under the man crossing it, which is the whole
+   trick: it is the FIELD that is moving, and they are being carried in on it. */
+.gq-versus-in .gq-versus-field {
+  animation: gq-versus-ground 900ms cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+
+@keyframes gq-versus-ground {
+  from { background-position: 24cqw 0; }
+  to { background-position: 0 0; }
 }
 
 .gq-versus-in::after {
@@ -648,15 +703,17 @@ h1.gq-logo {
   position: absolute;
   inset: 0;
   width: 40%;
+  z-index: 2;
   background: linear-gradient(90deg, transparent, var(--gb-light), transparent);
   opacity: 0.75;
-  animation: gq-versus-pan 620ms ease-out both;
+  animation: gq-versus-pan 900ms ease-out both;
   pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .gq-versus-in .gq-versus-them,
   .gq-versus-in .gq-versus-you,
+  .gq-versus-in .gq-versus-field,
   .gq-versus-in::after { animation: none; }
   .gq-versus-in::after { display: none; }
 }

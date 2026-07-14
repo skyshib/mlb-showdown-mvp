@@ -187,11 +187,29 @@ function teamDots(count) {
   return `<span class="gq-versus-dots">${"<i></i>".repeat(Math.max(0, count))}</span>`;
 }
 
-// Two letters is what a Game Boy had room for, and it is what the trainers
-// carry. The player's plate is read off his own name the same way.
-function playerSprite(save) {
+// A face, not a name tag. The cards in this game are already drawn by a seeded
+// portrait service, so the men holding the cards are drawn by the same one and
+// belong to the same world. The seed is the person, so a trainer looks like
+// himself every time you meet him — and looks like nobody else.
+//
+// The initials sit UNDER the portrait and are what you see if the portrait never
+// arrives (offline, blocked, slow): the sprite is a face when it can be and a
+// name plate when it can't, and the layout does not move either way.
+function versusSprite(seed, initials) {
+  const url = `https://api.dicebear.com/10.x/micah/svg?seed=${encodeURIComponent(seed)}&clothesVariant=crew`;
+  return `<span class="gq-versus-sprite">
+    <b class="gq-versus-initials">${escapeHtml(initials)}</b>
+    <img class="gq-versus-face" src="${url}" alt="" loading="eager" referrerpolicy="no-referrer" onerror="this.remove()">
+  </span>`;
+}
+
+function playerInitials(save) {
   const name = String(save?.player?.name ?? "YOU").trim();
-  return (name.slice(0, 2) || "YO").toUpperCase();
+  const words = name.split(/\s+/).filter(Boolean);
+  const letters = words.length > 1
+    ? words.slice(0, 2).map((word) => word[0]).join("")
+    : name.slice(0, 2);
+  return (letters || "YO").toUpperCase();
 }
 
 function versusHtml(app, trainer) {
@@ -202,12 +220,13 @@ function versusHtml(app, trainer) {
   // rerenders this markup, and a slide that replayed under every line of
   // trash talk would stop being an entrance.
   return `<div class="gq-versus${app.screen.introPlayed ? "" : " gq-versus-in"}">
+    <span class="gq-versus-field"></span>
     <div class="gq-versus-row gq-versus-them">
       ${teamDots(theirs)}
-      <span class="gq-versus-sprite">[${escapeHtml(trainer.sprite)}]</span>
+      ${versusSprite(`${trainer.id}-${trainer.name}`, trainer.sprite)}
     </div>
     <div class="gq-versus-row gq-versus-you">
-      <span class="gq-versus-sprite">[${escapeHtml(playerSprite(save))}]</span>
+      ${versusSprite(`manager-${save.saveSeed}-${save.player.name}`, playerInitials(save))}
       ${teamDots(yours)}
     </div>
   </div>`;
