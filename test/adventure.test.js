@@ -2172,6 +2172,39 @@ test("closing the tab mid-inning does not cost you the game", async () => {
   assert.equal(reloaded.activeBattle, null, "and once it pays out, the book is closed");
 });
 
+test("walking out to the main menu mid-inning does not cost you the game either", async () => {
+  const { startTrainerBattle, battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { titleScreen } = await import("../src/adventure/ui/titleScreens.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const app = { save, screen: {}, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  startTrainerBattle(app, trainer);
+  for (let i = 0; i < 8; i += 1) {
+    if (battlePhase(app.screen.battle).type === "over") break;
+    battleScreen.key(app, "a");
+  }
+  const left = app.screen.battle;
+
+  // The MAIN MENU button: straight to the front door, nothing written on the way.
+  app.go("title", { menuIndex: 0 });
+  assert.match(titleScreen.render(app), /CONTINUE/, "which offers to give the game back");
+
+  // CONTINUE (the first row) hands back the game, not the map.
+  titleScreen.key(app, "a");
+  assert.equal(app.screen.name, "battle", "and CONTINUE puts you back at the plate");
+  assert.equal(app.screen.trainerId, trainer.id, "against the same manager");
+  assert.deepEqual(app.screen.battle.state.score, left.state.score, "same score");
+  assert.equal(app.screen.battle.state.inning, left.state.inning, "same inning");
+  assert.equal(app.screen.battle.state.outs, left.state.outs, "same outs");
+  assert.equal(app.screen.battle.events.length, left.events.length, "the same plays in the book");
+
+  // With no game on the books, CONTINUE means the map, the way it always did.
+  save.activeBattle = null;
+  app.go("title", { menuIndex: 0 });
+  titleScreen.key(app, "a");
+  assert.equal(app.screen.name, "map", "and with nothing to come back to, the map");
+});
+
 test("a tiring arm rings the bullpen phone — once per step down, and never for the new man", async () => {
   const { fatigueAlarm } = await import("../src/adventure/ui/battleScreen.js");
   const { player, npc } = hookTeams();

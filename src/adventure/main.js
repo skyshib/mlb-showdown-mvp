@@ -86,6 +86,23 @@ const KEY_MAP = {
 // the new league is picked, and these are the screens where you pick it.
 const SETUP_SCREENS = new Set(["intro", "nameEntry", "leagueSelect", "modeSelect"]);
 
+// Screens in the middle of handing something over. A game in progress is written
+// to the save after every decision, so walking out of one costs nothing — but
+// these are the screens where the game has ended and the winnings have not all
+// landed yet: a card to claim off the roster you just beat, a pack still sealed,
+// a box score on its way to either. None of that is in the save, so there is no
+// door on these screens; they are a few keypresses long and they end at the map.
+const NO_EXIT_SCREENS = new Set([
+  "gameStats",
+  "seriesBreak",
+  "battleResult",
+  "simSeries",
+  "claimCard",
+  "packOpen",
+  "starterReveal",
+  "championship"
+]);
+
 const app = {
   save: loadSave(),
   screen: { name: "title", menuIndex: 0 },
@@ -106,10 +123,15 @@ const app = {
     // Mariners page. Setting up a game belongs to no club, so it is shown in none.
     applyFranchisePalette(SETUP_SCREENS.has(this.screen.name) ? null : this.save?.universe);
     const screen = SCREENS[this.screen.name] ?? titleScreen;
-    // The way out of the game is offered where you are not yet in it. Once a
-    // save is open the link stands down: a door back to the draft room has no
-    // business hanging over a man at the plate.
-    document.querySelector(".gq-exit")?.toggleAttribute("hidden", this.screen.name !== "title");
+    // Two doors, one shelf. On the title screen the way out is out of the PAGE,
+    // back to the draft room — a browser link, which is exactly what it should
+    // be there and has no business hanging over a man at the plate. In a game it
+    // is the way out of the GAME: back to the front door, with the inning you
+    // were in kept in the save and CONTINUE standing ready to put you back in it.
+    const inGame = this.screen.name !== "title";
+    document.querySelector(".gq-exit:not(.gq-quit)")?.toggleAttribute("hidden", inGame);
+    document.querySelector(".gq-quit")?.toggleAttribute("hidden", !inGame);
+    document.querySelector(".gq-corner")?.toggleAttribute("hidden", NO_EXIT_SCREENS.has(this.screen.name));
     root.innerHTML = screen.render(this);
     screen.mounted?.(this);
     // Real-player cards get their Wikipedia headshots filled in.
@@ -134,9 +156,22 @@ if (app.save) {
   if (resumed) app.screen = resumed;
 }
 
+// The way out of a game, from inside it. Nothing is saved on the way through
+// because there is nothing left to save: a game in progress is written to the
+// save after every decision (see stashBattle), and every other screen writes as
+// it changes things. So the front door is one press away, and so is the way back
+// — CONTINUE re-deals the exact inning you walked out of.
+document.querySelector(".gq-quit")?.addEventListener("click", () => {
+  app.go("title", { menuIndex: 0 });
+});
+
 document.addEventListener("keydown", (event) => {
   const inInput = event.target instanceof HTMLInputElement;
   if (inInput && event.key !== "Enter" && event.key !== "Escape") return;
+  // ENTER is the A button — but not while the shelf's own button has the focus,
+  // where it is the button being pressed. Swallowing it there (A is preventDefault'd
+  // below) would leave a control you can tab to and never fire.
+  if (event.key === "Enter" && event.target.closest?.(".gq-corner")) return;
   const screen = SCREENS[app.screen.name];
   // Searchable screens (binder, catalog): while the search prompt is OPEN,
   // printable keys type into the name filter — including Z and X, so names

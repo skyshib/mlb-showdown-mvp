@@ -1,4 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260714-d";
+import { resumeBattle } from "./battleScreen.js?v=20260714-d";
 import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260714-d";
 import {
   createSave,
@@ -50,9 +51,21 @@ export const titleScreen = {
   }
 };
 
+// CONTINUE means continue — not "go to the map". A game left on the books is a
+// game you are still in the middle of, and the front door has to hand you back
+// the one you walked out of: the same inning, the same arm, the same men on. It
+// is the same recording a reloaded tab comes back to (see resumeBattle), so
+// leaving through the MAIN MENU button costs a manager exactly what closing the
+// tab costs him, which is nothing. With no game on the books, the map it is.
+function continueGame(app) {
+  const resumed = resumeBattle(app);
+  if (resumed) app.screen = resumed;
+  else app.go("map");
+}
+
 function titleItems(app) {
   const items = [];
-  if (app.save) items.push({ label: "CONTINUE", run: (a) => a.go("map") });
+  if (app.save) items.push({ label: "CONTINUE", run: continueGame });
   items.push({ label: "NEW GAME", run: (a) => a.go("intro", { page: 0 }) });
   if (app.save) items.push({ label: "EXPORT SAVE", run: (a) => a.go("exportSave") });
   items.push({ label: "IMPORT SAVE", run: (a) => a.go("importSave") });

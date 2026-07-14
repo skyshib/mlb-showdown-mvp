@@ -64,10 +64,17 @@ html, body {
    off the viewport (96vw, or the height, whichever runs out first), so on a tall
    window it grows until it reaches into the corner a fixed link would be pinned
    to, and the two collide. Standing in the layout costs the console the height
-   of this link, which is what the calc below hands back. */
-.gq-exit {
+   of this link, which is what the calc below hands back.
+
+   One shelf, one control on it: the way out of the PAGE on the title screen,
+   the way out of the GAME everywhere else. They are never both up, so the shelf
+   is always exactly one button tall and the console never jumps. */
+.gq-corner {
   align-self: flex-start;
+  display: flex;
   margin: 0 0 0.9rem 1.6rem;
+}
+.gq-exit {
   font-family: "Courier New", ui-monospace, monospace;
   font-size: 0.85rem;
   letter-spacing: 0.08em;
@@ -77,6 +84,7 @@ html, body {
   background: rgba(27, 58, 99, 0.55);
   border: 1px solid var(--gb-dark);
   padding: 0.45rem 0.8rem;
+  cursor: pointer;
   opacity: 0.75;
   transition: opacity 120ms linear, background 120ms linear;
 }
@@ -87,12 +95,19 @@ html, body {
   color: var(--gb-lightest);
 }
 
-/* Stood down once a save is open — but its room is kept. The console is sized
-   off the height this link takes (see #app), so collapsing it outright would
-   make the handheld jump the moment you pressed CONTINUE. Invisible also means
-   out of the tab order, which is the point: it is not offered mid-game. */
+/* Whichever of the two is not the one for this screen simply goes — its partner
+   is holding the shelf up. */
 .gq-exit[hidden] {
-  display: block;
+  display: none;
+}
+
+/* On the handful of screens that are handing something over — a box score, a
+   pack, a card off a beaten roster — there is no way out at all, because none of
+   it is in the save yet and walking out would drop it. The shelf keeps its room
+   (the console is sized off it, see #app) and empties. Invisible also means out
+   of the tab order, which is the point: it is not offered here. */
+.gq-corner[hidden] {
+  display: flex;
   visibility: hidden;
 }
 
@@ -1402,7 +1417,7 @@ h1.gq-logo {
      goes to the floor below both rather than standing between them — which is
      where it would land on DOM order alone, since the controls are appended to
      the body after it. */
-  .gq-exit {
+  .gq-corner {
     order: 3;
     align-self: center;
     margin: auto 0 0;
