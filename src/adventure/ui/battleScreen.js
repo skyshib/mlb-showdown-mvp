@@ -20,7 +20,7 @@ import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=2026071
 import { gameFeats } from "../feats.js?v=20260713-x";
 import { buildNpcTeam } from "../npcTeams.js?v=20260713-x";
 import { positionsOverlap } from "../../rules/cards.js?v=20260713-x";
-import { playArmTiring, playArmSpent } from "../../ui/sounds.js?v=20260713-x";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260713-x";
 import {
   persistSave,
   deriveSeed,
@@ -631,6 +631,15 @@ export const gameOverScreen = {
       </div>
       <div class="gq-textbox"><p class="gq-blink">Z — BOX SCORE</p></div>
     </div>`;
+  },
+  // The last out is in the book, and the room finds out how it feels about it.
+  // Once: this screen rerenders, and a fanfare that fired on every one of them
+  // would turn the best moment in the game into a stuck record.
+  mounted(app) {
+    if (app.screen.calledIt) return;
+    app.screen.calledIt = true;
+    if (app.screen.phase?.playerWon) playVictory();
+    else playDefeat();
   },
   key(app, key) {
     if (key !== "a" && key !== "b") return;

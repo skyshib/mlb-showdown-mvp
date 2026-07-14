@@ -190,6 +190,23 @@ export function playFootfall() {
   phrase([[D3, 0, 0.1], [D3, 0.05, 0.16]], { level: 0.4, type: "square", tail: 0.12 });
 }
 
+// You won the ballgame. The longest thing in this kit and the only one allowed to
+// be loud: it climbs an octave and a half and lands on the top note with the
+// shimmer on, which is the sound of a thing being finished rather than a thing
+// happening.
+export function playVictory() {
+  phrase(
+    [[C5, 0, 0.18], [E5, 0.12, 0.18], [G5, 0.24, 0.2], [C6, 0.36, 0.22], [G5, 0.52, 0.16], [C6, 0.62, 0.3], [E6, 0.78, 1]],
+    { level: 0.46, shimmer: true, tail: 1 }
+  );
+}
+
+// And you lost it. Two notes down, quiet, and quickly over — a loss costs you
+// nothing now, and the game should not stand there rubbing it in.
+export function playDefeat() {
+  phrase([[E5, 0, 0.22], [G4, 0.16, 0.5]], { level: 0.26, type: "triangle", tail: 0.4 });
+}
+
 // An arm has started to labour. Everything else in this kit rises or rings; this
 // one SAGS — two notes falling a step, low and dry, with no shimmer on them. It
 // is the sound of a man who has thrown enough, and it should feel like the game

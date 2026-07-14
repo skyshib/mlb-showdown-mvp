@@ -2020,6 +2020,17 @@ test("games land on a FINAL screen naming the winner and the last play", async (
   assert.ok(html.includes("YOU WIN!") || html.includes("YOU LOSE"), "the outcome is stated plainly");
   assert.ok(html.includes("THE FINAL PLAY:"), "the last play is shown");
   assert.match(html.replace(/<[^>]+>/g, " "), /YOU \d+ .* THEM \d+/, "the final score reads from your side");
+
+  // The room calls the result out loud — once. This screen rerenders, and a
+  // fanfare on every one of them would turn the best moment in the game into a
+  // stuck record.
+  assert.ok(!app.screen.calledIt, "nothing has been called yet");
+  gameOverScreen.mounted(app);
+  assert.ok(app.screen.calledIt, "the call is made");
+  gameOverScreen.mounted(app);
+  gameOverScreen.mounted(app);
+  assert.ok(app.screen.calledIt, "and not made again");
+
   gameOverScreen.key(app, "a");
   assert.equal(app.screen.name, "gameStats", "Z continues to the box score");
 });
