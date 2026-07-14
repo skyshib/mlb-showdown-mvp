@@ -3001,6 +3001,53 @@ test("finished games write the almanac and rare feats fill the trophy room", asy
   assert.ok(caseHtml.includes("DAY 2"), "with its date");
 });
 
+test("a glove's die is announced before it is thrown, and the bat's answer is read first", async () => {
+  const { dramaStages } = await import("../src/adventure/ui/battleScreen.js");
+
+  // Two dice thrown at the same moment are one roll with two numbers on it. These
+  // are a sequence: the ball is put in play, and THEN a glove has to do something
+  // about it. Watching a die decide a double play before anybody has told you
+  // there is a ground ball is watching a die for no reason.
+  const grounder = {
+    controlRoll: 4,
+    controlTotal: 8,
+    onBase: 10,
+    chartOwner: "hitter",
+    resultRoll: 11,
+    result: "GB",
+    playDetails: { doublePlayAttempt: { batterOut: true, roll: 17 } }
+  };
+  const [pitch, swing, pivot] = dramaStages([grounder]);
+
+  assert.match(swing.caption, /GB — GROUND BALL/, "the swing says what the bat did");
+  assert.match(pivot.lead, /THEY GO FOR TWO/, "and the glove says what it is about to do — before it does it");
+  assert.match(pivot.caption, /TWO DOWN/, "and what it did, after");
+  assert.ok(pivot.late, "the pivot is late, so the screen holds a beat for it");
+  assert.ok(!swing.late && !pitch.late, "the duel's own dice are not");
+
+  // A throw names the man being run at, and it does so BEFORE the die tumbles.
+  const thrown = { runner: "Lead Man '99", to: "home", safe: false, roll: 6 };
+  const single = {
+    controlRoll: 9,
+    controlTotal: 12,
+    onBase: 14,
+    chartOwner: "hitter",
+    resultRoll: 15,
+    result: "1B",
+    playDetails: { thrownAttempt: thrown, attempts: [thrown] }
+  };
+  const stages = dramaStages([single]);
+  assert.match(stages[1].caption, /1B — BASE HIT/, "the base hit is called");
+  assert.match(stages[2].lead, /L\.MAN IS SENT TO HOME/, "and the runner is sent, before the throw is rolled");
+
+  // A swing with no glove to answer it says nothing extra — the play is about to
+  // read out in the textbox anyway, and calling it twice steps on it.
+  const strikeout = { controlRoll: 3, controlTotal: 7, onBase: 9, chartOwner: "pitcher", resultRoll: 2, result: "SO" };
+  const quiet = dramaStages([strikeout]);
+  assert.equal(quiet.length, 2, "pitch and swing, and nothing else");
+  assert.equal(quiet[1].caption, null, "and the swing keeps quiet");
+});
+
 test("the suspense screen stages every die the play threw, gloves included", async () => {
   const { dramaStages } = await import("../src/adventure/ui/battleScreen.js");
 

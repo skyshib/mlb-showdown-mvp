@@ -376,6 +376,28 @@ function resolveWithDrama(app, act) {
 // the ninth cut to black and came back as a double play, and the die that turned
 // it — the one you were actually sweating — was never shown. A ball in play is
 // checked by a glove, and the glove rolls too.
+// What the bat did, in a few words, so the fielding die that follows has something
+// to follow. A die that starts tumbling for a double play before you have been
+// told there IS a ground ball is a die you are watching for no reason.
+const SWING_CALL = {
+  SO: "STRUCK HIM OUT",
+  GB: "GROUND BALL",
+  FB: "FLY BALL",
+  PU: "POPPED IT UP",
+  BB: "BALL FOUR",
+  HBP: "WEARS ONE",
+  "1B": "BASE HIT",
+  "1B+": "BASE HIT",
+  "2B": "INTO THE GAP",
+  "3B": "OFF THE WALL",
+  HR: "GONE"
+};
+
+function swingCall(event) {
+  const call = SWING_CALL[event.result];
+  return call ? `${escapeHtml(event.result)} — ${call}` : escapeHtml(String(event.result ?? "IN PLAY"));
+}
+
 function fieldingStages(event) {
   const details = event.playDetails ?? {};
   const stages = [];
@@ -384,6 +406,8 @@ function fieldingStages(event) {
     stages.push({
       label: "THE PIVOT",
       roll: dp.roll,
+      // Said BEFORE the die tumbles, so you know what you are watching.
+      lead: "THEY GO FOR TWO&hellip;",
       // LATE: a glove only has something to do if the ball is in play, so a die
       // that says THE PIVOT sitting on the screen while the swing is still
       // tumbling has already told you the swing was a ball in play. It is not
@@ -408,6 +432,7 @@ function fieldingStages(event) {
     stages.push({
       label: `THROW TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}`,
       roll: attempt.roll,
+      lead: `${escapeHtml(shortName(stripCardYear(attempt.runner ?? "")))} IS SENT TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}&hellip;`,
       // Late, and for the same reason: THROW TO HOME on the screen is a hit,
       // announced before the bat has even been swung.
       late: true,
@@ -443,8 +468,12 @@ export function dramaStages(events) {
           caption: `${event.controlTotal} VS OB ${event.onBase} — ${event.chartOwner === "pitcher" ? "PITCHER'S" : "BATTER'S"} CHART`
         });
       }
-      stages.push({ label: "SWING", roll: event.resultRoll });
-      return [...stages, ...fieldingStages(event)];
+      const gloves = fieldingStages(event);
+      // The swing says what it DID, but only when a glove is about to answer it:
+      // with nothing following, the play is about to read out in the textbox
+      // anyway, and calling it twice steps on it.
+      stages.push({ label: "SWING", roll: event.resultRoll, caption: gloves.length ? swingCall(event) : null });
+      return [...stages, ...gloves];
     }
     // A deferred send throws no pitch and takes no swing — the whole play is the
     // throw, and it is the most suspenseful die in the game.
@@ -509,18 +538,36 @@ function d20FaceHtml() {
   </svg>`;
 }
 
-// The browser-side animation, one die at a time: cycle faces, land on the
-// real roll (posting the pitch verdict under the dice), move to the next,
-// hold a beat, then reveal. Tests drive reveal through the key handler.
+// The browser-side animation, one die at a time: cycle faces, land on the real
+// roll (posting the verdict under the dice), move to the next, hold a beat, then
+// reveal. Tests drive reveal through the key handler.
+//
+// Two dice thrown at the same moment are one roll with two numbers on it. These
+// are a SEQUENCE — the ball is put in play, and THEN a glove has to do something
+// about it — so the screen is made to say the first thing before it throws the
+// second. The swing lands and calls what it was (GB — GROUND BALL); the game
+// waits long enough to be read; the pivot is announced (THEY GO FOR TWO...); and
+// only then does that die start to tumble. Watching a die decide a double play
+// before anybody has told you there is a ground ball is watching a die for no
+// reason.
+const DIE_HOLD_MS = 350;      // between two dice of the same roll: pitch, swing
+const READ_THE_PLAY_MS = 1250; // between the bat's answer and the glove's question
+
 function mountDrama(app) {
   stopDramaTimer();
   const stages = app.screen.drama?.stages ?? [];
+  const say = (text) => {
+    const caption = document.querySelector("[data-die-caption]");
+    if (caption && text) caption.innerHTML = text;
+  };
   const spin = (index) => {
     const die = document.querySelector(`[data-die="${index}"]`);
     if (!die || !app.screen.drama) return stopDramaTimer();
-    // A die that has not been thrown is not on the table. The gloves' dice
-    // appear at the moment they are thrown, and not one beat sooner.
+    // A die that has not been thrown is not on the table. The gloves' dice appear
+    // at the moment they are thrown, and not one beat sooner — and they announce
+    // themselves as they arrive, so the roll has a reason before it has a number.
     document.querySelector(`[data-die-stage="${index}"]`)?.classList.remove("gq-die-unthrown");
+    say(stages[index].lead);
     let ticks = 0;
     dramaTimer = setInterval(() => {
       if (!die.isConnected || !app.screen.drama) return stopDramaTimer();
@@ -532,10 +579,15 @@ function mountDrama(app) {
       stopDramaTimer();
       die.textContent = String(stages[index].roll);
       die.closest(".gq-die")?.classList.add("gq-die-landed");
-      const caption = document.querySelector("[data-die-caption]");
-      if (stages[index].caption && caption) caption.textContent = stages[index].caption;
-      if (index + 1 < stages.length) dramaTimer = setTimeout(() => spin(index + 1), 350);
-      else dramaTimer = setTimeout(() => revealDrama(app), 700);
+      say(stages[index].caption);
+      const next = stages[index + 1];
+      if (!next) {
+        dramaTimer = setTimeout(() => revealDrama(app), 700);
+        return;
+      }
+      // A glove answering the bat gets a beat to be read into; a second die of
+      // the same roll does not need one.
+      dramaTimer = setTimeout(() => spin(index + 1), next.late ? READ_THE_PLAY_MS : DIE_HOLD_MS);
     }, 85);
   };
   spin(0);
