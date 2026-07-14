@@ -5,9 +5,10 @@ const SAVE_KEY = "showdown-quest-save";
 // at the old shared universe, so they don't migrate.
 export const SAVE_VERSION = 2;
 
-// The roster budget in BUDGET mode scales with the pool like the whole NPC
-// ladder does: 3500 in the fictional reference league (1.4x the first
-// scout's rung), proportionally less in thinner pools. Getting ahead means
+// The roster budget in BUDGET mode is what an average legal roster costs in
+// the save's pool: the mean price at each of the thirteen slots, summed. So
+// every universe — the fictional league, the all-time set, a thin franchise
+// — hands you the same kind of team, a middling one. Getting ahead means
 // finding bargains, not raising the cap. UNCAPPED saves have no limit at
 // all — and face far richer bosses.
 

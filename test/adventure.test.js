@@ -287,13 +287,71 @@ test("the starter pack is a legal 13-card roster: two rares, eleven commons, und
   );
 });
 
-test("the budget-mode point cap scales with the pool: 1.4x the first scout's rung", async () => {
-  const { poolCeiling, LADDER_REFERENCE } = await import("../src/adventure/packs.js");
+test("the budget-mode point cap buys at least an average roster out of the pool", async () => {
+  const { poolMean, poolCeiling, REFERENCE_CAP, LADDER_REFERENCE } = await import("../src/adventure/packs.js");
   const save = testSave();
-  const expected = Math.round((3500 * poolCeiling() / LADDER_REFERENCE) / 50) * 50;
-  assert.equal(pointCap(save), expected, "3500 in the reference league, the same fraction elsewhere");
+  const floor = poolCeiling() * REFERENCE_CAP / LADDER_REFERENCE;
+  const expected = Math.round(Math.max(poolMean(), floor) / 50) * 50;
+  assert.equal(pointCap(save), expected, "the mean legal roster, or a third of the ceiling, whichever is more");
   save.player.badges = ["ironwood", "galehook", "cascade", "pennant", "trophy"];
   assert.equal(pointCap(save), expected, "badges do not move the cap");
+  // An average team, not a great one: the cap sits well under what the pool's
+  // best thirteen would cost, and well over its cheapest.
+  assert.ok(pointCap(save) < poolCeiling(), "under the pool's best-13 ceiling");
+  assert.ok(pointCap(save) > poolCeiling() / 5, "and not a scrapheap");
+});
+
+test("the mean floor lifts the thin pools and leaves the deep ones where they were tuned", async () => {
+  const { poolMean, poolCeiling, budgetCap, REFERENCE_CAP, LADDER_REFERENCE } = await import("../src/adventure/packs.js");
+  const third = () => Math.round((poolCeiling() * REFERENCE_CAP / LADDER_REFERENCE) / 50) * 50;
+  try {
+    // A franchise pool is thin — a few hundred cards, a short superstar tail —
+    // so its middle sits high against its own ceiling and the old third-of-the-
+    // ceiling cap bought a bottom-fifth team. The mean is what rescues it.
+    setUniverseSeed("cap-shape", "franchise-TBD");
+    assert.ok(poolMean() > third(), "the thin pool's mean roster outruns a third of its ceiling");
+    assert.equal(budgetCap(), Math.round(poolMean() / 50) * 50, "so a franchise save caps at the mean");
+    assert.ok(poolMean() / poolCeiling() > 0.4, "its middle really does sit near its ceiling");
+
+    // The deep leagues have the tail, so the third still wins and their caps do
+    // not move: the mean is a floor under the cap, never a ceiling on it.
+    for (const universe of ["fictional", "mlb-history"]) {
+      setUniverseSeed("cap-shape", universe);
+      assert.ok(poolMean() < third(), `${universe}: the deep pool's mean sits below a third of its ceiling`);
+      assert.equal(budgetCap(), third(), `${universe}: so the cap stays where it was tuned`);
+    }
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
+});
+
+test("the ladder brackets the cap in every pool, thin or deep", async () => {
+  const { poolCeiling, budgetCap } = await import("../src/adventure/packs.js");
+  const { npcBudget, TRAINERS } = await import("../src/adventure/region.js");
+  const jojo = trainerById("scout-jojo");
+  const worldSeries = trainerById("post-worldseries");
+  try {
+    // The old ceiling-scaled ladder put the Rays' first scout at 950 against a
+    // 1350 cap — the whole climb squeezed into the bottom of a thin pool. Hung
+    // off the cap instead, the shape holds wherever you play.
+    for (const universe of ["fictional", "classic", "franchise-TBD", "decade-1910"]) {
+      setUniverseSeed("ladder-shape", universe);
+      const save = testSave();
+      const cap = budgetCap();
+      assert.ok(npcBudget(save, jojo) < cap, `${universe}: the first scout comes in under your cap`);
+      assert.ok(npcBudget(save, worldSeries) > cap, `${universe}: the summit outspends you`);
+      assert.ok(npcBudget(save, worldSeries) < poolCeiling(), `${universe}: but cannot outspend the pool`);
+      const ladder = [...TRAINERS].sort((a, b) => a.pointBudget - b.pointBudget);
+      for (let i = 1; i < ladder.length; i += 1) {
+        assert.ok(
+          npcBudget(save, ladder[i]) >= npcBudget(save, ladder[i - 1]),
+          `${universe}: the climb stays monotone`
+        );
+      }
+    }
+  } finally {
+    setUniverseSeed("test-seed", "fictional");
+  }
 });
 
 test("uncapped mode drops the player's cap and swells boss budgets", async () => {
@@ -304,15 +362,17 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
 
   const jojo = trainerById("scout-jojo");
   const worldSeries = trainerById("post-worldseries");
-  // Budget mode reads the printed ladder RESCALED to this pool's best-13
-  // ceiling: same shape, sized to what the pool can actually field.
-  const { poolCeiling, LADDER_REFERENCE } = await import("../src/adventure/packs.js");
-  const scale = poolCeiling() / LADDER_REFERENCE;
+  // Budget mode hangs the printed ladder off the CAP: the summit shops 76% of
+  // the room between the player's cap and what the pool can actually field.
+  const { poolCeiling, budgetCap, LADDER_REFERENCE, REFERENCE_CAP } = await import("../src/adventure/packs.js");
+  const cap = budgetCap();
+  const share = (worldSeries.pointBudget - REFERENCE_CAP) / (LADDER_REFERENCE - REFERENCE_CAP);
   assert.equal(
     npcBudget(testSave(), worldSeries),
-    Math.round((worldSeries.pointBudget * scale) / 50) * 50,
-    "budget mode reads the pool-scaled ladder"
+    Math.round((cap + share * (poolCeiling() - cap)) / 50) * 50,
+    "budget mode reads the cap-anchored ladder"
   );
+  const scale = poolCeiling() / LADDER_REFERENCE;
   assert.ok(Math.abs(npcBudget(save, jojo) - jojo.pointBudget * scale) <= 50, "the first scout stays winnable");
   // The summit swells to the POOL's best-13 ceiling (within rounding), not an
   // absolute figure: small universes escalate all the way up instead of every

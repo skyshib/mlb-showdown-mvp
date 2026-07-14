@@ -74,26 +74,51 @@ function scaledOdds(odds) {
 
 // The most a legal 13-card roster can cost in this universe: greedy
 // best-per-slot at TRUE (noiseless) prices, so the number is a stable fact
-// of the pool rather than of one save's price noise. The whole budget
-// economy rescales against this — NPC ladder and player cap alike — so a
-// thin expansion franchise and the all-time pool each field teams sized to
-// what their pool can actually print.
+// of the pool rather than of one save's price noise. The NPC ladder rescales
+// against this — a thin expansion franchise and the all-time pool each field
+// teams sized to what their pool can actually print.
 // LADDER_REFERENCE is the fictional league's ceiling, the pool everything
-// was originally tuned against: scale = poolCeiling() / LADDER_REFERENCE.
+// was originally tuned against; REFERENCE_CAP is the cap that league was
+// tuned to carry. Together they place every printed rung: the ladder runs
+// from below the cap (the first scouts) to 76% of the room between the cap
+// and the ceiling (the World Series). That geometry is what npcBudget()
+// replays in any pool — see region.js.
 export const LADDER_REFERENCE = 10500;
+export const REFERENCE_CAP = 3500;
 
-// The budget-mode roster cap: 3500 in the fictional reference league (1.4x
-// the first scout's 2500 rung), and the same fraction of any other pool's
-// ceiling. Lives here rather than state.js so the starter pack can deal
-// under it.
+// The budget-mode roster cap: enough to field an AVERAGE legal roster — the
+// mean true price at each of the thirteen slots, summed — but never less than
+// the third-of-ceiling the deep leagues were tuned to carry.
+//
+// The cap used to be that third alone, which reads as "a median team" only in
+// a pool with a long superstar tail. Thin pools have no such tail: their
+// ceiling sits close to their middle, so a third of it bought a bottom-fifth
+// team and a franchise run could never afford its own stars — the Rays' cap
+// came to 1350 against a 4042 ceiling. Taking the larger of the two lifts
+// exactly those pools and leaves every other one where it was tuned: the
+// fictional league still carries 3500, the all-time set 3400. Simulated
+// against the World Series boss, that is the difference between a 37% climb
+// and a 19% one in a franchise, with the deep leagues untouched at ~10%.
+//
+// Lives here rather than state.js so the starter pack can deal under it.
 export function budgetCap() {
-  return Math.round((3500 * poolCeiling() / LADDER_REFERENCE) / 50) * 50;
+  return Math.round(exactCap() / 50) * 50;
+}
+
+// The cap before it is rounded off. The ladder hangs every rung off THIS, not
+// off the rounded figure: round the cap first and each rung inherits the error
+// magnified — a 23-point rounding on the cap moved the first scout 50 points
+// and bought him a different pitching staff.
+export function exactCap() {
+  return Math.max(poolMean(), poolCeiling() * REFERENCE_CAP / LADDER_REFERENCE);
 }
 
 // Keyed on the pool itself: a new universe — or the same one under a new
-// save seed — rebuilds the pool, and a fresh array means a stale ceiling.
+// save seed — rebuilds the pool, and a fresh array means a stale number.
 let poolCeilingCache = null;
 let poolCeilingFor = null;
+let poolMeanCache = null;
+let poolMeanFor = null;
 const CEILING_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER", "SP", "SP", "RP", "RP"];
 
 export function poolCeiling() {
@@ -113,6 +138,33 @@ export function poolCeiling() {
     poolCeilingFor = pool;
   }
   return poolCeilingCache;
+}
+
+// What an average legal 13-card roster costs: the mean TRUE price of every
+// card eligible at each slot, summed over the slots. Slots that appear twice
+// (corners, the rotation, the pen) count twice — the roster buys two of them.
+// Unlike the ceiling this draws no cards, so a slot's mean is the mean of its
+// whole shelf: a card that qualifies at two positions is priced into both,
+// which is right, since either is a roster it could fill.
+export function poolMean() {
+  const pool = adventurePool();
+  if (poolMeanCache == null || poolMeanFor !== pool) {
+    const means = new Map();
+    let total = 0;
+    for (const slot of CEILING_SLOTS) {
+      if (!means.has(slot)) {
+        const shelf = pool.filter((card) => slotMatches(slot, card));
+        const mean = shelf.length
+          ? shelf.reduce((sum, card) => sum + card.truePoints, 0) / shelf.length
+          : 0;
+        means.set(slot, mean);
+      }
+      total += means.get(slot);
+    }
+    poolMeanCache = total;
+    poolMeanFor = pool;
+  }
+  return poolMeanCache;
 }
 
 function cardsOfRarity(rarity) {

@@ -1,5 +1,5 @@
 import { timesBeaten } from "./state.js?v=20260714-k";
-import { poolCeiling, LADDER_REFERENCE } from "./packs.js?v=20260714-k";
+import { poolCeiling, exactCap, LADDER_REFERENCE, REFERENCE_CAP } from "./packs.js?v=20260714-k";
 
 // The Cascade League: one town so far, with routes climbing past it. Trainers
 // are pure data — teams build deterministically from teamSeed + pointBudget.
@@ -404,23 +404,52 @@ export function isTrainerAvailable(save, trainer) {
 // What a rematch pays: a tenth of the printed purse.
 export const REMATCH_RATE = 0.1;
 
-// The NPC budget a save actually faces. The printed ladder (2500 -> 8800)
-// was tuned against the fictional league, whose best legal 13-card roster
-// prices near LADDER_REFERENCE — but pools print very different ceilings
-// (a thin expansion franchise ~4k, the all-time MLB pool ~8.8k), so the
-// ladder keeps its SHAPE and rescales to the pool: the World Series boss
-// always shops the same fraction of what this pool can actually field.
+// The NPC budget a save actually faces. The printed ladder (2500 -> 8800) was
+// tuned against the fictional league — REFERENCE_CAP to carry, LADDER_REFERENCE
+// to climb — so every rung reads as a position relative to the PLAYER'S CAP,
+// and that is what carries across to a pool of any depth:
+//
+//   under the cap  (2500..3500)  a fraction of the cap  — the early scouts,
+//                                who field a team a little short of yours
+//   over it        (3650..8800)  a fraction of the room between the cap and
+//                                the pool ceiling — 76% of it at the summit
+//
+// Anchoring on the cap rather than on the ceiling is what keeps the ladder
+// honest in a thin pool. The old formula scaled every rung by the ceiling
+// alone, which in a 271-card franchise put the first scout at 950 against a
+// 1350 cap: the ladder was squeezed flat because the CAP was squeezed flat.
+// Fix the cap (it prices off the pool's middle now — see budgetCap) and the
+// ladder has something to hang from.
+//
+// A thin pool is still an easier pool, and no budget can change that: the
+// Rays' whole card set spans 633 points at the floor to 4042 at the ceiling,
+// so its champion can outclass a capped roster by at most ~260 points a slot
+// where the fictional league's manages 400+. Franchise runs are the mode
+// where you get to field your own stars; the deep leagues are where the
+// difficulty lives.
+//
 // Uncapped saves still swing harder: budgets grow on a power-1.5 curve
 // anchored at the first scout's rung, capped at the pool ceiling scaled to
 // the trainer's rung so mid-ladder bosses don't max out small universes.
 export function npcBudget(save, trainer) {
-  const scale = poolCeiling() / LADDER_REFERENCE;
-  const printed = Math.round((trainer.pointBudget * scale) / 50) * 50;
+  const printed = laddered(trainer.pointBudget);
   if (save?.mode !== "uncapped") return printed;
+  const scale = poolCeiling() / LADDER_REFERENCE;
   const curve = Math.round((2500 * scale * Math.pow(trainer.pointBudget / 2500, 1.5)) / 50) * 50;
   const maxPrinted = Math.max(...TRAINERS.map((t) => t.pointBudget));
   const rung = Math.round((poolCeiling() * trainer.pointBudget / maxPrinted) / 50) * 50;
   return Math.max(printed, Math.min(curve, rung));
+}
+
+// One printed rung, placed in this pool. Continuous at REFERENCE_CAP (both
+// arms hand back the cap itself) and monotone in the rung, so the ladder
+// climbs in the same order it always did.
+function laddered(rung) {
+  const cap = exactCap();
+  if (rung <= REFERENCE_CAP) return Math.round((cap * rung / REFERENCE_CAP) / 50) * 50;
+  const headroom = Math.max(0, poolCeiling() - cap);
+  const share = (rung - REFERENCE_CAP) / (LADDER_REFERENCE - REFERENCE_CAP);
+  return Math.round((cap + share * headroom) / 50) * 50;
 }
 
 // The first win over a man is the win. Every one after it is a day's work: a
