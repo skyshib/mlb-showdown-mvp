@@ -11,17 +11,18 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260714-d";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-d";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260714-d";
-import { longestHitStreak } from "../records.js?v=20260714-d";
-import { cardById } from "../packs.js?v=20260714-d";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-d";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-d";
-import { gameFeats } from "../feats.js?v=20260714-d";
-import { buildNpcTeam } from "../npcTeams.js?v=20260714-d";
-import { positionsOverlap } from "../../rules/cards.js?v=20260714-d";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-d";
+} from "./helpers.js?v=20260714-e";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260714-e";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260714-e";
+import { longestHitStreak } from "../records.js?v=20260714-e";
+import { compactGame } from "../gameLog.js?v=20260714-e";
+import { cardById } from "../packs.js?v=20260714-e";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260714-e";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260714-e";
+import { gameFeats } from "../feats.js?v=20260714-e";
+import { buildNpcTeam } from "../npcTeams.js?v=20260714-e";
+import { positionsOverlap } from "../../rules/cards.js?v=20260714-e";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260714-e";
 import {
   persistSave,
   deriveSeed,
@@ -43,7 +44,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260714-d";
+} from "../state.js?v=20260714-e";
 import {
   createBattle,
   battlePhase,
@@ -61,7 +62,7 @@ import {
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260714-d";
+} from "../../rules/battle/controller.js?v=20260714-e";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -245,10 +246,13 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
     innings,
     feats,
     // The record book wants a run of hits back to back, and that is a fact about
-    // the PLAY-BY-PLAY, which nothing keeps. The box score has how many hits;
-    // only the sequence knows they came one after another. So it is counted here,
-    // at the final out, while the sequence still exists, and filed with the game.
+    // the PLAY-BY-PLAY. The box score has how many hits; only the sequence knows
+    // they came one after another.
     hitStreak: longestHitStreak(events, boxScore[playerSide]?.team),
+    // And the play-by-play itself, trimmed to what the log and the chart render
+    // (see gameLog.js). The game used to be thrown away at the final out, which
+    // is why an almanac game opened with a box score and an empty log.
+    events: compactGame(events),
     boxScore,
     // Games played before the board existed have no frames to hang; the box
     // score simply leaves the wall bare rather than inventing them.

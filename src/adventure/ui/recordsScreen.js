@@ -1,12 +1,15 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-d";
-import { sectionedMenu } from "./statsScreens.js?v=20260714-d";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-e";
+import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260714-e";
+import { ensureAlmanac } from "../state.js?v=20260714-e";
+import { expandGame } from "../gameLog.js?v=20260714-e";
+import { fetchGames } from "../gameArchive.js?v=20260714-e";
 import {
   RECORDS,
   leaderboard,
   cachedGlobalRecords,
   fetchGlobalRecords,
   submitRecords
-} from "../records.js?v=20260714-d";
+} from "../records.js?v=20260714-e";
 
 // ---- World records ----------------------------------------------------------
 //
@@ -82,7 +85,13 @@ function ordinal(place) {
 
 // The top five for the record under the cursor, with you marked wherever you
 // stand in it — and appended below if you are not in it at all.
-function boardHtml(row) {
+//
+// It is a MENU when you step into it (Z), because every line of it is an
+// afternoon somebody had, and an afternoon you cannot open is just a number with
+// a name stuck to it. Yours open out of your own almanac, with the play-by-play.
+// A stranger's opens out of the copy they sent up when they finished — the box
+// score and the players who won it, which is what they sent.
+function boardHtml(row, app, active) {
   const { record, board } = row;
   if (!board.top.length) {
     return `<div class="gq-frame">
@@ -90,12 +99,16 @@ function boardHtml(row) {
       <p class="gq-dim">NOBODY HAS DONE IT YET. THE FIRST MANAGER TO DO IT OWNS IT.</p>
     </div>`;
   }
-  const lines = board.top.map((entry, place) => `<p class="${entry.you ? "" : "gq-dim"}">${place + 1}. ${
-    `<b>${valueText(record, entry.value)}</b>`
-  } ${escapeHtml(entry.name)}${entry.you ? " &#9664; YOU" : ""}${
-    entry.day ? ` <span class="gq-dim">DAY ${entry.day}${entry.opponent ? ` VS ${escapeHtml(entry.opponent)}` : ""}</span>` : ""
-  }</p>`).join("");
-  // You, when the top five does not reach you.
+  const cursor = clampIndex(app.screen.boardIndex ?? 0, board.top.length);
+  const lines = board.top.map((entry, place) => {
+    const text = `${place + 1}. <b>${valueText(record, entry.value)}</b> ${escapeHtml(entry.name)}${
+      entry.you ? " &#9664; YOU" : ""
+    }${entry.day ? ` <span class="gq-dim">DAY ${entry.day}${entry.opponent ? ` VS ${escapeHtml(entry.opponent)}` : ""}</span>` : ""}`;
+    if (!active) return `<p class="${entry.you ? "" : "gq-dim"}">${text}</p>`;
+    return `<p class="gq-board-row${place === cursor ? " gq-cursor" : ""}" data-menu-index="${place}">${
+      place === cursor ? "&#9654; " : "&nbsp;&nbsp;"
+    }${text}</p>`;
+  }).join("");
   const below = board.you && !board.top.some((entry) => entry.you)
     ? `<p>${board.yourRank ? `${board.yourRank}.` : ""} <b>${valueText(record, board.you.value)}</b> ${escapeHtml(board.you.name)} &#9664; YOU</p>`
     : "";
@@ -106,21 +119,55 @@ function boardHtml(row) {
   </div>`;
 }
 
+// Open the afternoon behind one line of the board. Yours comes out of the
+// almanac, whole, with the play-by-play. Somebody else's is fetched — they are
+// not on this machine — and comes back as the box score they sent up.
+async function openBoardGame(app, record, entry, back) {
+  const save = app.save;
+  const mine = save && entry.saveSeed === save.saveSeed;
+  const game = mine
+    ? ensureAlmanac(save).find((played) => played.day === entry.day && played.opponent === entry.opponent)
+    : (await fetchGames(entry.saveSeed)).find((played) => played.day === entry.day);
+  if (!game) {
+    app.screen.missing = true;
+    app.rerender();
+    return;
+  }
+  app.go("gameStats", {
+    trainerId: game.trainerId,
+    opponent: game.opponent,
+    boxScore: game.boxScore,
+    stars: gameStars(game.boxScore, game.playerSide),
+    feats: game.feats ?? [],
+    events: mine ? expandGame(game.events) : [],
+    score: game.score,
+    lineScore: game.lineScore ?? null,
+    playerSide: game.playerSide,
+    index: 0,
+    next: { name: "records", data: back }
+  });
+}
+
 export const recordsScreen = {
   render(app) {
     const rows = recordRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const selected = rows[index];
+    const inBoard = app.screen.mode === "board" && selected?.board.top.length;
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>WORLD RECORDS</span><span>${statusLabel()}</span></div>
       <div class="gq-body"><div class="gq-columns gq-columns-records">
         <div class="gq-frame gq-scroll">${sectionedMenu(rows, index)}</div>
-        <div class="gq-scroll">${boardHtml(selected)}</div>
+        <div class="gq-scroll">${boardHtml(selected, app, Boolean(inBoard))}</div>
       </div></div>
       <div class="gq-textbox"><p class="gq-dim">${
-        app.save
-          ? "Every manager, everywhere. Your own marks go up when you open the book. X to leave."
-          : "Every manager, everywhere. Start a game and your marks join them. X to leave."
+        app.screen.missing
+          ? "THAT GAME NEVER CAME UP FROM THAT MANAGER'S MACHINE. THE NUMBER STANDS; THE AFTERNOON IS GONE."
+          : inBoard
+            ? "&#9650;/&#9660; walks the board &middot; Z opens that afternoon &mdash; the box score, and the men who won it. X backs out."
+            : selected?.board.top.length
+              ? "&#9650;/&#9660; moves &middot; Z steps into the board and opens the games behind it. X to leave."
+              : "&#9650;/&#9660; moves. Nobody has set this one yet. X to leave."
       }</p></div>
     </div>`;
   },
@@ -133,8 +180,37 @@ export const recordsScreen = {
   },
   key(app, key) {
     const rows = recordRows(app);
+    const index = clampIndex(app.screen.index ?? 0, rows.length);
+    const selected = rows[index];
+    const top = selected?.board.top ?? [];
+    app.screen.missing = false;
+
+    // Inside the board: every line is an afternoon, and Z opens it.
+    if (app.screen.mode === "board" && top.length) {
+      const cursor = clampIndex(app.screen.boardIndex ?? 0, top.length);
+      if (key === "up" || key === "down") {
+        app.screen.boardIndex = clampIndex(cursor + (key === "down" ? 1 : -1), top.length);
+      } else if (key === "a") {
+        openBoardGame(app, selected.record, top[cursor], { index, mode: "board", boardIndex: cursor });
+        return;
+      } else if (key === "b") {
+        app.screen.mode = null;
+      } else {
+        return;
+      }
+      app.rerender();
+      return;
+    }
+
     if (key === "up" || key === "down") {
-      app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
+      app.screen.index = clampIndex(index + (key === "down" ? 1 : -1), rows.length);
+    } else if (key === "a") {
+      // Step into the board. A record with nobody on it has nothing to step into.
+      if (!top.length) return;
+      app.screen.mode = "board";
+      // Open on YOUR line if you are on the board — that is the one you came to
+      // look at — and on the record holder if you are not.
+      app.screen.boardIndex = Math.max(0, top.findIndex((entry) => entry.you));
     } else if (key === "b") {
       app.go("title", { menuIndex: 0 });
     } else {

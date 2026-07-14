@@ -1,10 +1,9 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260714-d";
-import { resumeBattle } from "./battleScreen.js?v=20260714-d";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260714-d";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260714-e";
+import { resumeBattle } from "./battleScreen.js?v=20260714-e";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260714-e";
 import {
   createSave,
   persistSave,
-  clearSave,
   addCardToCollection,
   setRoster,
   rosterCards,
@@ -13,7 +12,7 @@ import {
   exportSaveCode,
   importSaveCode,
   saveFileName
-} from "../state.js?v=20260714-d";
+} from "../state.js?v=20260714-e";
 
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],
@@ -29,11 +28,16 @@ const STARTING_COINS = 250;
 export const titleScreen = {
   render(app) {
     const items = titleItems(app);
-    return `<div class="gq-screen">
+    // The menu grew — a hall, a record book — and grew straight off the bottom of
+    // the screen: DELETE SAVE went under the fold and WORLD RECORDS was sliced in
+    // half by the edge of it. The front door has to show every door it opens, so
+    // the spacing is the title screen's own (gq-title-screen) and it is measured
+    // against the longest menu the screen can have.
+    return `<div class="gq-screen gq-title-screen">
       <div class="gq-body gq-center">
         <h1 class="gq-logo">SHOWDOWN<br>QUEST</h1>
         <p class="gq-sub">CASCADE LEAGUE &middot; SERIES 2</p>
-        <div class="gq-mt" style="max-width:60%;margin:4cqw auto 0;text-align:left">
+        <div class="gq-title-menu">
           ${menuHtml(items.map((item) => ({ label: item.label })), app.screen.menuIndex ?? 0)}
         </div>
       </div>
@@ -73,16 +77,11 @@ function titleItems(app) {
   // The hall ranks finished RUNS. The book ranks single feats, and it is the
   // whole league's — so it stands next to the hall, where the global things are.
   items.push({ label: "WORLD RECORDS", run: (a) => a.go("records", { index: 0 }) });
-  if (app.save) {
-    items.push({
-      label: "DELETE SAVE",
-      run: (a) => {
-        clearSave();
-        a.save = null;
-        a.screen.menuIndex = 0;
-      }
-    });
-  }
+  // There is no DELETE SAVE. There was, and it wiped a campaign on ONE keypress
+  // with nothing asked and nothing to undo — in a game where the shop will not
+  // sell a single card without checking you meant it. It was not even a way out
+  // of anything: NEW GAME already replaces the save, and EXPORT SAVE means a run
+  // you are done with can be kept rather than shot.
   return items;
 }
 

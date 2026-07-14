@@ -4040,3 +4040,91 @@ test("the tired-arm alarm keeps quiet on the play that ends the game", async () 
   // The book is still kept, so nothing is double-counted if anybody asks later.
   assert.deepEqual(final.now, midGame.now, "what was heard is still tracked, it is simply not sounded");
 });
+
+// The game used to be thrown away at the final out: the almanac kept the box
+// score and the board, and the play-by-play — the actual game — went in the bin.
+// Reopening a game gave you an empty GAME LOG and a win-probability chart with
+// nothing to draw.
+test("a finished game files its play-by-play, and the book hands it back", async () => {
+  const { recordFinishedGame } = await import("../src/adventure/ui/battleScreen.js");
+  const { expandGame, compactGame } = await import("../src/adventure/gameLog.js");
+  const { simulateGame } = await import("../src/rules/game.js");
+  const { ensureAlmanac, ensureSeasonStats } = await import("../src/adventure/state.js");
+  const { player, npc } = hookTeams();
+  const trainer = trainerById("scout-jojo");
+  const save = testSave();
+
+  const teamOf = (manager) => ({
+    name: manager.name ?? "TEAM",
+    lineup: manager.lineup ?? manager.roster.filter((c) => c.kind === "hitter").slice(0, 9),
+    pitchers: manager.pitchers ?? manager.roster.filter((c) => c.kind === "pitcher")
+  });
+  const game = simulateGame(teamOf(player), teamOf(npc), "log-seed");
+  ensureSeasonStats(save).games = 1;
+
+  recordFinishedGame(save, {
+    trainer,
+    boxScore: game.boxScore,
+    playerSide: "away",
+    events: game.events,
+    score: { away: game.away.runs, home: game.home.runs },
+    innings: game.innings,
+    won: game.away.runs > game.home.runs,
+    lineScore: game.lineScore
+  });
+
+  const filed = ensureAlmanac(save)[0];
+  assert.ok(filed.events, "the game is kept");
+  assert.ok(filed.events.cast?.length, "as a cast and a script — the men once, the plays pointing at them");
+
+  const back = expandGame(filed.events);
+  assert.equal(back.length, game.events.length, "every play comes back");
+  // The fields the log and the chart actually render must survive the filing —
+  // a compression that drops the one field the log needed is a log with a hole.
+  const first = back.find((event) => event.result);
+  const live = game.events.find((event) => event.result);
+  for (const field of ["inning", "half", "batter", "batterId", "pitcher", "pitcherId", "result", "resultRoll", "controlRoll", "outsBefore", "basesBefore", "scoreAfter"]) {
+    assert.deepEqual(first[field] ?? null, live[field] ?? null, `${field} survives`);
+  }
+  assert.ok(Math.abs(first.wpAfter - live.wpAfter) < 0.001, "and the win odds, to the percent the chart draws");
+
+  // It is smaller than what it came from, which is the whole point of the cast.
+  const filedSize = JSON.stringify(compactGame(game.events)).length;
+  assert.ok(filedSize < JSON.stringify(game.events).length * 0.7, "and it is filed at well under the raw size");
+});
+
+// A rate cannot be added to a rate. Three games at .300 is not a .900 hitter, and
+// an ERA is not a running total — so folding an opponent's games has to fold the
+// COUNTS and work the rates out again at the bottom.
+test("an opponent's book folds counts and reckons the rates fresh", async () => {
+  const { opposingLines, opponentsOf } = await import("../src/adventure/gameArchive.js");
+  const bat = (h, ab, hr) => ({ id: "o1", name: "Their Slugger", pa: ab, ab, h, hr, d: 0, t: 0, bb: 0, wpa: 0.1, avg: h / ab, ops: 1.2 });
+  const arm = (r, outs, so) => ({ id: "o2", name: "Their Arm", outs, r, so, h: 5, bb: 1, wpa: -0.2, runsPerNine: 9 });
+  const game = (day, won, mine, theirs, hitter, pitcher) => ({
+    day, trainerId: "gym-garrick", opponent: "BENCH BOSS GARRICK", won, playerSide: "away",
+    score: { away: mine, home: theirs },
+    boxScore: { away: { team: "ME", hitters: [], pitchers: [] }, home: { team: "THEM", hitters: [hitter], pitchers: [pitcher] } }
+  });
+  const games = [
+    game(3, true, 5, 2, bat(1, 4, 0), arm(5, 27, 4)),
+    game(6, false, 1, 4, bat(3, 4, 2), arm(1, 27, 8))
+  ];
+
+  const { hitters, pitchers } = opposingLines(games);
+  assert.equal(hitters[0].h, 4, "the hits add up");
+  assert.equal(hitters[0].ab, 8);
+  assert.ok(Math.abs(hitters[0].avg - 0.5) < 1e-9, "and the average is 4-for-8, not the two averages added together");
+  assert.ok(hitters[0].ops < 2, "the OPS is reckoned, not summed into nonsense");
+
+  assert.equal(pitchers[0].outs, 54, "the outs add up");
+  assert.ok(Math.abs(pitchers[0].runsPerNine - 3) < 1e-9, "six runs in eighteen innings is a 3.00, not an 18.00");
+  assert.ok(Math.abs(pitchers[0].strikeoutsPerNine - 6) < 1e-9);
+
+  // And the road itself: who he played, and how it went.
+  const [foe] = opponentsOf(games);
+  assert.equal(foe.opponent, "BENCH BOSS GARRICK");
+  assert.equal(foe.wins, 1);
+  assert.equal(foe.losses, 1);
+  assert.equal(foe.runsFor, 6);
+  assert.equal(foe.runsAgainst, 6);
+});

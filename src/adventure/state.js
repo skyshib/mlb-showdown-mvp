@@ -1,4 +1,4 @@
-import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260714-d";
+import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260714-e";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
@@ -64,9 +64,35 @@ export function loadSave(storage = defaultStorage()) {
   }
 }
 
+// The save is written after every decision, and now it carries the play-by-play
+// of every game ever played. That is bounded — a long run is a couple of
+// megabytes against a browser's five — but "bounded" and "impossible" are not the
+// same word, and the failure mode here was appalling: setItem throws when the
+// disk is full, and it was throwing straight up through the middle of a ballgame,
+// after every pitch, with nothing caught and nothing saved.
+//
+// So a full disk costs you the OLDEST GAME'S LOG, and then the next oldest, and
+// so on until the save fits. Losing an old play-by-play is a shame. Losing the
+// campaign is not a shame, it is a bug, and this is the difference between them.
 export function persistSave(save, storage = defaultStorage()) {
-  storage?.setItem(SAVE_KEY, JSON.stringify(save));
-  return save;
+  if (!storage) return save;
+  const logged = () => ensureAlmanac(save).filter((game) => game.events);
+  for (;;) {
+    try {
+      storage.setItem(SAVE_KEY, JSON.stringify(save));
+      return save;
+    } catch (error) {
+      const games = logged();
+      if (!games.length) {
+        // Nothing left to give: the save itself no longer fits. Say so rather
+        // than pretending, and leave what is already on the disk alone.
+        console.error(`The save no longer fits in this browser: ${error.message}`);
+        return save;
+      }
+      // Oldest first — the almanac is in the order it was played.
+      delete games[0].events;
+    }
+  }
 }
 
 export function clearSave(storage = defaultStorage()) {

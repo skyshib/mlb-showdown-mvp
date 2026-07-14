@@ -1310,6 +1310,14 @@ h1.gq-logo {
 .gq-center { text-align: center; }
 .gq-mt { margin-top: 1.5cqw; }
 
+/* The title screen has to fit its whole menu, and the menu is seven doors now.
+   The room comes out of the white space, not out of the logo: a tighter gap above
+   and below the sign, and the hint band down to what one line of hint actually
+   needs — it was reserving a quarter of the screen to say "arrows move". */
+.gq-title-screen h1.gq-logo { margin: 2cqw 0 0.5cqw; }
+.gq-title-screen .gq-title-menu { max-width: 60%; margin: 2cqw auto 0; text-align: left; }
+.gq-title-screen .gq-textbox { min-height: 0; }
+
 /* Scrollbars: keep them chunky and monochrome */
 .gq-screen ::-webkit-scrollbar, .gq-screen::-webkit-scrollbar { width: 1.4cqw; }
 .gq-screen ::-webkit-scrollbar-thumb { background: var(--gb-darkest); }
@@ -1440,3 +1448,10 @@ html.club .gq-exit:focus-visible {
   color: var(--gq-lead-ink);
   border-color: var(--gq-lead);
 }
+
+/* A line of the record board, once you have stepped into it: every one is an
+   afternoon somebody had, and it opens. The rows are <p>, not menu <li>, so the
+   cursor fill has to be said again here rather than inherited from .gq-menu. */
+.gq-board-row { padding: 0.2cqw 0.6cqw; cursor: pointer; }
+.gq-board-row.gq-cursor { background: var(--gq-lead); color: var(--gq-lead-ink); }
+.gq-board-row.gq-cursor .gq-dim { color: var(--gb-light); }

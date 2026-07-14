@@ -1,3 +1,4 @@
+import { uploadRun } from "./gameArchive.js?v=20260714-e";
 import {
   catalogProgress,
   ensureAlmanac,
@@ -6,7 +7,7 @@ import {
   rosterPoints,
   seasonHitters,
   seasonPitchers
-} from "./state.js?v=20260714-d";
+} from "./state.js?v=20260714-e";
 
 // The hall of fame outlives any single save: it keeps its own storage key, so
 // deleting or replacing a campaign never erases the plaques it earned.
@@ -70,6 +71,10 @@ export function recordCompletedRun(save, storage = defaultStorage()) {
   // Best effort: the run also goes up to the shared board. If the network is
   // down it stays local, and the leaderboard screen resubmits it next visit.
   submitRun(entry);
+  // And the games under it — the afternoons that got him there. One request each
+  // (see gameArchive), quietly, so a plaque somebody opens has something behind
+  // it besides a roster.
+  uploadRun(save);
   return entry;
 }
 

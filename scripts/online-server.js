@@ -10,6 +10,7 @@ import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
 import { buildDraftPool, deckEntry, deckFromIds, universeConfig } from "../src/data/universes.js";
+import { flushTraffic, loadTrafficFile, recordView, trafficSummary } from "./traffic.js";
 import {
   applyDraftAction,
   auctionReviewComplete,
@@ -70,7 +71,8 @@ export function createOnlineServer(options = {}) {
     dataDir,
     rooms: loadRooms(dataDir),
     hallOfFame: loadHallOfFameFile(dataDir),
-    records: loadRecordsFile(dataDir)
+    records: loadRecordsFile(dataDir),
+    traffic: loadTrafficFile(dataDir)
   };
   for (const room of store.rooms.values()) {
     scheduleRoomTimer(store, room);
@@ -86,7 +88,7 @@ export function createOnlineServer(options = {}) {
       if (url.pathname.startsWith("/api/")) {
         await handleApi(store, request, response, url);
       } else {
-        await serveStatic(request, response, url);
+        await serveStatic(store, request, response, url);
       }
     } catch (error) {
       if (!response.headersSent) sendJson(response, 500, { error: error.message });
@@ -119,7 +121,10 @@ export function createOnlineServer(options = {}) {
 export async function flushSaves(store) {
   await Promise.allSettled([
     ...[...store.rooms.values()].map((room) => room.saveChain ?? Promise.resolve()),
-    store.hofSaveChain ?? Promise.resolve()
+    store.hofSaveChain ?? Promise.resolve(),
+    // Pageviews are batched rather than written one at a time, so on the way down
+    // there is almost always a few seconds of them still only in memory.
+    flushTraffic(store)
   ]);
 }
 
@@ -354,11 +359,15 @@ function sanitizeCard(card) {
   return clean;
 }
 
+// Every stat key, always, zero if it wasn't sent. A line that arrives without a
+// walk count is not a line with no walks — it is a line with a HOLE, and the
+// renderer prints the hole: "9.0 IP, 4 H, UNDEFINED BB, 11 K". The line is the
+// league's now, so the league fills it in.
 function sanitizeStatLine(line) {
   if (!line || typeof line !== "object") return null;
   const clean = { id: hofString(line.id, 60), name: hofString(line.name, 40) };
   for (const key of HOF_STAT_KEYS) {
-    if (line[key] !== undefined) clean[key] = hofNumber(line[key], 1e7);
+    clean[key] = hofNumber(line[key] ?? 0, 1e7);
   }
   return clean;
 }
@@ -417,6 +426,102 @@ function trimHallOfFame(entries) {
 // because a client is a thing a stranger can rewrite. An unknown key is dropped
 // rather than stored; a record that is better when lower is sorted that way here,
 // not wherever the submitter says.
+// ---- The games ---------------------------------------------------------------
+//
+// A record is a number and a plaque is a roster. Neither tells you HOW: which
+// afternoons, against whom, who carried it. The games do, and they are the one
+// thing the server never had.
+//
+// They live one file per campaign — games/<saveSeed>.json — rather than one big
+// book, because a book gets fetched whole and a campaign gets fetched when
+// somebody opens THAT campaign. And they arrive one game at a time: a run's worth
+// of box scores is a couple of hundred kilobytes, and the request body caps at 64.
+//
+// Box scores only. No play-by-play: a log is 24 KB a game and is the one thing
+// that is genuinely yours, sitting in your own save. What travels is what another
+// manager wants to see — the score, the lines, the men who won it.
+const GAMES_DIR = "games";
+const GAMES_MAX_PER_SAVE = 200;
+
+function gamesPath(store, saveSeed) {
+  return join(store.dataDir, GAMES_DIR, `${saveSeed}.json`);
+}
+
+function loadGames(store, saveSeed) {
+  try {
+    const games = JSON.parse(readFileSync(gamesPath(store, saveSeed), "utf8"));
+    return Array.isArray(games) ? games : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistGames(store, saveSeed, games) {
+  if (!store.dataDir) return;
+  mkdirSync(join(store.dataDir, GAMES_DIR), { recursive: true });
+  const target = gamesPath(store, saveSeed);
+  const tmp = `${target}.tmp`;
+  store.gamesSaveChain = (store.gamesSaveChain ?? Promise.resolve())
+    .then(() => writeFile(tmp, JSON.stringify(games)))
+    .then(() => rename(tmp, target))
+    .catch((error) => console.error(`Failed to save games for ${saveSeed}: ${error.message}`));
+}
+
+function sanitizeBoxSide(side) {
+  if (!side || typeof side !== "object") return { team: "", hitters: [], pitchers: [] };
+  return {
+    team: hofString(side.team, 40),
+    hitters: Array.isArray(side.hitters) ? side.hitters.slice(0, 20).map(sanitizeStatLine).filter(Boolean) : [],
+    pitchers: Array.isArray(side.pitchers) ? side.pitchers.slice(0, 20).map(sanitizeStatLine).filter(Boolean) : []
+  };
+}
+
+function sanitizeGame(body) {
+  if (!body || typeof body !== "object") return null;
+  const day = hofNumber(body.day, 1e5);
+  if (!(day > 0)) return null;
+  const side = body.playerSide === "home" ? "home" : "away";
+  return {
+    day,
+    trainerId: hofString(body.trainerId, 40),
+    opponent: hofString(body.opponent, 40),
+    won: Boolean(body.won),
+    innings: hofNumber(body.innings, 100),
+    playerSide: side,
+    score: {
+      away: hofNumber(body.score?.away, 1000),
+      home: hofNumber(body.score?.home, 1000)
+    },
+    feats: Array.isArray(body.feats)
+      ? body.feats.slice(0, 6).map((feat) => ({ title: hofString(feat?.title, 60), blurb: hofString(feat?.blurb, 120) }))
+      : [],
+    boxScore: {
+      away: sanitizeBoxSide(body.boxScore?.away),
+      home: sanitizeBoxSide(body.boxScore?.home)
+    },
+    lineScore: body.lineScore && typeof body.lineScore === "object"
+      ? {
+        away: Array.isArray(body.lineScore.away) ? body.lineScore.away.slice(0, 30).map((n) => hofNumber(n, 100)) : [],
+        home: Array.isArray(body.lineScore.home) ? body.lineScore.home.slice(0, 30).map((n) => hofNumber(n, 100)) : []
+      }
+      : null
+  };
+}
+
+async function postGame(store, request, response) {
+  const body = await readJsonBody(request);
+  const saveSeed = hofString(body?.saveSeed, 60);
+  const game = sanitizeGame(body?.game);
+  if (!saveSeed || !game) return sendJson(response, 400, { error: "Malformed game" });
+  const games = loadGames(store, saveSeed);
+  // One page per day: a resubmitted game replaces itself rather than doubling.
+  const kept = games.filter((existing) => existing.day !== game.day);
+  kept.push(game);
+  kept.sort((a, b) => a.day - b.day);
+  persistGames(store, saveSeed, kept.slice(0, GAMES_MAX_PER_SAVE));
+  sendJson(response, 201, { ok: true, games: kept.length });
+}
+
 const RECORDS_FILE = "records.json";
 const RECORDS_MAX_PER_KEY = 25;
 const RECORD_DIRECTIONS = {
@@ -524,6 +629,26 @@ async function handleApi(store, request, response, url) {
     if (request.method === "GET") return sendJson(response, 200, { records: store.records });
     if (request.method === "POST") return postRecords(store, request, response);
     return sendJson(response, 404, { error: "Unknown API route" });
+  }
+  // /api/games — one campaign's games. POST files one; GET reads a campaign's.
+  if (segments[1] === "games") {
+    if (request.method === "POST" && !segments[2]) return postGame(store, request, response);
+    if (request.method === "GET" && segments[2]) {
+      return sendJson(response, 200, { games: loadGames(store, decodeURIComponent(segments[2])) });
+    }
+    return sendJson(response, 404, { error: "Unknown API route" });
+  }
+  // /api/stats — who has been here. The site is public, so unless a token is set
+  // this is public too; STATS_TOKEN is what makes it ours. Compared plainly
+  // rather than in constant time on purpose: the thing behind the door is a
+  // pageview count, and pretending otherwise would be security theatre.
+  if (segments[1] === "stats" && !segments[2]) {
+    if (request.method !== "GET") return sendJson(response, 404, { error: "Unknown API route" });
+    const required = process.env.STATS_TOKEN;
+    if (required && url.searchParams.get("token") !== required) {
+      return sendJson(response, 401, { error: "Stats are private. Add ?token=… to see them." });
+    }
+    return sendJson(response, 200, trafficSummary(store.traffic));
   }
   // /api/rooms | /api/rooms/:id | /api/rooms/:id/(join|actions|stream)
   if (segments[1] !== "rooms") return sendJson(response, 404, { error: "Unknown API route" });
@@ -1153,7 +1278,7 @@ function sendJson(response, status, payload) {
 const HELD_ASSETS = /^\/(assets|vendor)\//;
 const ASSET_MAX_AGE_SECONDS = 86400;
 
-async function serveStatic(request, response, url) {
+async function serveStatic(store, request, response, url) {
   try {
     const pathname = decodeURIComponent(url.pathname);
     const filePath = normalize(join(root, pathname));
@@ -1168,6 +1293,14 @@ async function serveStatic(request, response, url) {
     const cacheControl = HELD_ASSETS.test(pathname)
       ? `public, max-age=${ASSET_MAX_AGE_SECONDS}`
       : "no-cache";
+    // Counted before the 304 branch, not after, and only for a page. The entry
+    // points go out `no-cache`, which means a browser that already has one still
+    // asks — and is told 304 — every single time somebody opens it. So a repeat
+    // visit is a 304, and counting only the 200s would show every returning
+    // player as having never come back.
+    if (request.method === "GET" && extname(target).toLowerCase() === ".html") {
+      recordView(store, request, info.isDirectory() ? `${pathname.replace(/\/$/, "")}/` : pathname);
+    }
     // Size and mtime, which a rebuilt image restamps — so shipping a new module
     // invalidates it on its own, without anyone having to remember to bump a query.
     const etag = `W/"${targetInfo.size.toString(16)}-${Math.floor(targetInfo.mtimeMs).toString(16)}"`;

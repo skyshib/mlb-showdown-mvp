@@ -1,6 +1,7 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-d";
-import { sectionedMenu, statLineHtml } from "./statsScreens.js?v=20260714-d";
-import { universeConfig } from "../packs.js?v=20260714-d";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-e";
+import { sectionedMenu, statLineHtml, gameStars } from "./statsScreens.js?v=20260714-e";
+import { cachedGames, fetchGames, opponentsOf, opposingLines } from "../gameArchive.js?v=20260714-e";
+import { universeConfig } from "../packs.js?v=20260714-e";
 import {
   loadHallOfFame,
   hallOfFameByMode,
@@ -10,7 +11,7 @@ import {
   submitRun,
   syncRunProgress,
   mergeEntries
-} from "../hallOfFame.js?v=20260714-d";
+} from "../hallOfFame.js?v=20260714-e";
 
 // ---- Hall of fame ----------------------------------------------------------
 //
@@ -22,6 +23,7 @@ import {
 // readable.
 
 let syncStatus = "idle"; // idle | syncing | online | offline
+let gamesStatus = "idle"; // idle | loading | ready
 
 async function syncGlobal(app) {
   syncStatus = "syncing";
@@ -137,38 +139,143 @@ function teamRows(entry) {
   ];
 }
 
+// A plaque used to be a roster and a number of days, and it never said the one
+// thing you actually want to know about a champion: HOW. Who did they have to
+// beat, how close was it, who did the beating.
+//
+// So the plaque pages sideways. THE CLUB is the champion's team, as before. THE
+// LEAGUE is everybody who tried to stop them, folded into one book. And then one
+// page per opponent — the club, the record against them, their men, and the
+// afternoons themselves, which open into the box score.
+//
+// The games come off the server (see gameArchive) and none of them are local: a
+// stranger's campaign lives on a stranger's machine, and this is the copy they
+// sent up when they won. A run finished before the games went up has none, and
+// the plaque simply reads as it always did.
+function hofPages(app) {
+  const entry = app.screen.entry;
+  const games = cachedGames(entry.saveSeed) ?? [];
+  const pages = [{ key: "club", title: "THE CLUB" }];
+  if (games.length) {
+    pages.push({ key: "league", title: "THE LEAGUE", games });
+    for (const foe of opponentsOf(games)) {
+      pages.push({ key: `foe:${foe.trainerId || foe.opponent}`, title: foe.opponent, foe, games: foe.games });
+    }
+  }
+  return pages;
+}
+
+// One page's rows. The club page is the roster; every other page is a book of
+// somebody else's men and the games they lost.
+function pageRows(app, page) {
+  if (page.key === "club") return teamRows(app.screen.entry);
+  const lines = opposingLines(page.games);
+  // The club has a name. On an opponent's page it is theirs; on the league page
+  // it is every club at once, which is what the league IS.
+  const club = page.foe ? page.foe.opponent.toUpperCase() : "THE LEAGUE";
+  const rows = [];
+  for (const line of lines.hitters) rows.push({ section: `${escapeHtml(club)} &middot; BATS`, html: statLineHtml(line, "hitters") });
+  for (const line of lines.pitchers) rows.push({ section: `${escapeHtml(club)} &middot; ARMS`, html: statLineHtml(line, "pitchers") });
+  // The afternoons. These OPEN — a box score and the men who won it.
+  for (const game of [...page.games].sort((a, b) => a.day - b.day)) {
+    const theirs = game.playerSide === "away" ? "home" : "away";
+    rows.push({
+      section: "THE GAMES",
+      game,
+      html: `<span class="gq-dim">DAY ${game.day}</span> <b>${game.won ? "W" : "L"} ${game.score[game.playerSide]}-${game.score[theirs]}</b> <span class="gq-dim">VS ${escapeHtml(game.opponent)}</span>`
+    });
+  }
+  return rows;
+}
+
 export const hofTeamScreen = {
   render(app) {
     const entry = app.screen.entry;
-    const rows = teamRows(entry);
+    const pages = hofPages(app);
+    const pageIndex = clampIndex(app.screen.page ?? 0, pages.length);
+    const page = pages[pageIndex];
+    const rows = pageRows(app, page);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const finished = new Date(entry.finishedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    const foe = page.foe;
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>${escapeHtml(entry.name)} &middot; ${MODE_LABELS[entry.mode] ?? escapeHtml(entry.mode.toUpperCase())}</span><span>DAY ${entry.days}</span></div>
+      <div class="gq-topbar"><span>${escapeHtml(entry.name)} &middot; ${MODE_LABELS[entry.mode] ?? escapeHtml(entry.mode.toUpperCase())}</span><span>${escapeHtml(page.title)}${pages.length > 1 ? ` &middot; ${pageIndex + 1}/${pages.length}` : ""}</span></div>
       <div class="gq-body">
         <div class="gq-frame gq-title-frame">
-          <b>&#9733; WORLD SERIES CHAMPION &#9733;</b>
-          <p class="gq-mt">THE TROPHY IN <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> &middot; WENT <b>${entry.wins}-${entry.losses}</b> ON THE FIELD.</p>
-          <p class="gq-dim">BATTLES ${entry.battlesWon}-${entry.battlesLost} &middot; ${entry.badges.length} BADGES &middot; ${entry.rosterPoints} PT ROSTER &middot; ${escapeHtml(leagueName(entry))} &middot; ${escapeHtml(finished.toUpperCase())}</p>
-          ${entry.catalogComplete
-            ? `<p><b>&#9733; THE COMPLETE CATALOG &#9733;</b><br><span class="gq-dim">EVERY CARD IN THE LEAGUE${entry.catalogCompletedOn ? ` &middot; DAY ${entry.catalogCompletedOn}` : ""}</span></p>`
-            : entry.cardsTotal
-              ? `<p class="gq-dim">COLLECTED ${entry.cardsOwned}/${entry.cardsTotal} CARDS</p>`
-              : ""}
+          ${page.key === "club"
+            ? `<b>&#9733; WORLD SERIES CHAMPION &#9733;</b>
+              <p class="gq-mt">THE TROPHY IN <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> &middot; WENT <b>${entry.wins}-${entry.losses}</b> ON THE FIELD.</p>
+              <p class="gq-dim">BATTLES ${entry.battlesWon}-${entry.battlesLost} &middot; ${entry.badges.length} BADGES &middot; ${entry.rosterPoints} PT ROSTER &middot; ${escapeHtml(leagueName(entry))} &middot; ${escapeHtml(finished.toUpperCase())}</p>
+              ${entry.catalogComplete
+                ? `<p><b>&#9733; THE COMPLETE CATALOG &#9733;</b><br><span class="gq-dim">EVERY CARD IN THE LEAGUE${entry.catalogCompletedOn ? ` &middot; DAY ${entry.catalogCompletedOn}` : ""}</span></p>`
+                : entry.cardsTotal
+                  ? `<p class="gq-dim">COLLECTED ${entry.cardsOwned}/${entry.cardsTotal} CARDS</p>`
+                  : ""}`
+            : foe
+              ? `<b>VS ${escapeHtml(foe.opponent)}</b>
+                <p class="gq-mt">${escapeHtml(entry.name)} WENT <b>${foe.wins}-${foe.losses}</b> AGAINST THEM &middot; <span class="gq-dim">${foe.runsFor}-${foe.runsAgainst} ON RUNS</span></p>`
+              : `<b>THE LEAGUE ${escapeHtml(entry.name)} BEAT</b>
+                <p class="gq-mt"><b>${page.games.length} GAME${page.games.length === 1 ? "" : "S"}</b> &middot; <span class="gq-dim">EVERYONE WHO TRIED TO STOP THEM, IN ONE BOOK</span></p>`}
         </div>
-        <div class="gq-frame gq-scroll gq-map-node">${sectionedMenu(rows, index)}</div>
+        <div class="gq-frame gq-scroll gq-map-node">${
+          rows.length
+            ? sectionedMenu(rows, index)
+            : `<p class="gq-dim">${gamesStatus === "loading" ? "SENDING FOR THE GAMES&#8230;" : "THIS RUN FINISHED BEFORE THE LEAGUE KEPT ITS GAMES."}</p>`
+        }</div>
       </div>
-      <div class="gq-textbox"><p class="gq-dim">% IS SEASON WPA. Hover a row to read the card. X back to the leaderboard.</p></div>
+      <div class="gq-textbox"><p class="gq-dim">${
+        pages.length > 1
+          ? `&#9664;/&#9654; ${escapeHtml(pages[(pageIndex + 1) % pages.length].title)} &middot; `
+          : ""
+      }${page.key === "club" ? "% IS SEASON WPA. Hover a row to read the card." : "Z opens a game. % is WPA against this club."} X back to the leaderboard.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
-    return teamRows(app.screen.entry)[index]?.card ?? null;
+    const pages = hofPages(app);
+    const page = pages[clampIndex(app.screen.page ?? 0, pages.length)];
+    return pageRows(app, page)[index]?.card ?? null;
+  },
+  mounted(app) {
+    // The games come down once per plaque, and the plaque redraws when they land.
+    const seed = app.screen.entry?.saveSeed;
+    if (!seed || app.screen.gamesAsked) return;
+    app.screen.gamesAsked = true;
+    gamesStatus = "loading";
+    fetchGames(seed).then(() => {
+      gamesStatus = "ready";
+      app.rerender();
+    });
   },
   key(app, key) {
+    const pages = hofPages(app);
+    const pageIndex = clampIndex(app.screen.page ?? 0, pages.length);
+    const rows = pageRows(app, pages[pageIndex]);
     if (key === "up" || key === "down") {
-      const rows = teamRows(app.screen.entry);
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
-    } else if (key === "a" || key === "b") {
+    } else if (key === "left" || key === "right") {
+      // Sideways through the run: his club, then the league, then the clubs he
+      // had to get past, one at a time.
+      app.screen.page = clampIndex(pageIndex + (key === "right" ? 1 : -1), pages.length);
+      app.screen.index = 0;
+    } else if (key === "a") {
+      const game = rows[clampIndex(app.screen.index ?? 0, rows.length)]?.game;
+      if (!game) return app.go("hallOfFame", { index: app.screen.from ?? 0 });
+      // Somebody else's afternoon: the box score and the men who won it. No
+      // play-by-play — that stayed on the machine it was played on.
+      return app.go("gameStats", {
+        trainerId: game.trainerId,
+        opponent: game.opponent,
+        boxScore: game.boxScore,
+        stars: gameStars(game.boxScore, game.playerSide),
+        feats: game.feats ?? [],
+        events: [],
+        score: game.score,
+        lineScore: game.lineScore ?? null,
+        playerSide: game.playerSide,
+        index: 0,
+        next: { name: "hofTeam", data: { entry: app.screen.entry, from: app.screen.from ?? 0, page: pageIndex, index: app.screen.index ?? 0 } }
+      });
+    } else if (key === "b") {
       return app.go("hallOfFame", { index: app.screen.from ?? 0 });
     }
     app.rerender();

@@ -1,7 +1,8 @@
-import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260714-d";
-import { trainerById } from "../region.js?v=20260714-d";
-import { cardById } from "../packs.js?v=20260714-d";
-import { seasonHitters, seasonPitchers, seasonTeam, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260714-d";
+import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260714-e";
+import { trainerById } from "../region.js?v=20260714-e";
+import { cardById } from "../packs.js?v=20260714-e";
+import { seasonHitters, seasonPitchers, seasonTeam, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260714-e";
+import { expandGame } from "../gameLog.js?v=20260714-e";
 
 // ---- Formatting --------------------------------------------------------------
 
@@ -159,26 +160,37 @@ function gameStatRows(app) {
       html: `<b>${escapeHtml(feat.title)}</b> <span class="gq-dim">${escapeHtml(feat.blurb)}</span>`
     });
   }
+  // The clubs have NAMES, and the board above this already uses them. A box score
+  // that files the same men under YOUR BATS and THEIRS is a box score written for
+  // one of the two people who can read it — and this one gets read by a stranger
+  // opening somebody else's afternoon out of the hall of fame, where "yours" is
+  // nobody's and "theirs" is everybody's.
+  const clubs = {
+    [playerSide]: boxScore[playerSide]?.team || "YOU",
+    [npcSide]: boxScore[npcSide]?.team || "THEM"
+  };
   stars.forEach((star, index) => rows.push({
     section: "STARS OF THE GAME",
     id: star.id,
-    html: `${"&#9733;".repeat(3 - index)} ${escapeHtml(shortName(star.name))}${star.yours ? "" : " (THEM)"} ${wpaHtml(star.wpa)} <span class="gq-dim">${escapeHtml(star.summary)}</span>`
+    html: `${"&#9733;".repeat(3 - index)} ${escapeHtml(shortName(star.name))} <span class="gq-dim">${
+      escapeHtml(shortName(star.yours ? clubs[playerSide] : clubs[npcSide]))
+    }</span> ${wpaHtml(star.wpa)} <span class="gq-dim">${escapeHtml(star.summary)}</span>`
   }));
   const sides = [
-    { box: boxScore[playerSide], tag: "YOUR" },
-    { box: boxScore[npcSide], tag: "THEIR" }
+    { box: boxScore[playerSide], club: clubs[playerSide] },
+    { box: boxScore[npcSide], club: clubs[npcSide] }
   ];
-  for (const { box, tag } of sides) {
+  for (const { box, club } of sides) {
     for (const line of box.hitters) {
       rows.push({
-        section: `${tag} BATS`,
+        section: `${escapeHtml(club.toUpperCase())} &middot; BATS`,
         id: line.id,
         html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${escapeHtml(hitterGameLine(line))}</span>`
       });
     }
     for (const line of box.pitchers) {
       rows.push({
-        section: `${tag} ARMS`,
+        section: `${escapeHtml(club.toUpperCase())} &middot; ARMS`,
         id: line.id,
         html: `${escapeHtml(shortName(line.name))} ${wpaHtml(line.wpa)} <span class="gq-dim">${escapeHtml(pitcherGameLine(line))}</span>`
       });
@@ -437,7 +449,10 @@ export const almanacScreen = {
         boxScore: entry.boxScore,
         stars: gameStars(entry.boxScore, entry.playerSide),
         feats: entry.feats ?? [],
-        events: [],
+        // The game itself, when the book has it. Games filed before the log was
+        // kept have none, and the GAME LOG simply isn't offered for them — an
+        // empty log is worse than no log, because you go looking for the play.
+        events: expandGame(entry.events),
         score: entry.score,
         // Games filed before the board existed carry none, and the wall stays
         // bare rather than inventing frames that were never hung.
