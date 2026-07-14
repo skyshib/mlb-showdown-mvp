@@ -670,6 +670,10 @@ h1.gq-logo {
 .gq-versus-back svg { width: 100%; height: 100%; display: block; }
 .gq-back-body,
 .gq-back-head { fill: var(--gq-figure); }
+/* The brim points AWAY from you — he is facing the field — so all you see of it
+   is the sliver that clears the side of his head. It is drawn BEHIND the head
+   and clipped to one side: on top of the head it was a red ring straight across
+   his skull, which is a halo, not a hat. */
 .gq-back-brim {
   fill: var(--gq-flare);
   stroke: var(--gb-darkest);
