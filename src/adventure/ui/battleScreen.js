@@ -481,11 +481,16 @@ function renderDrama(app, trainer) {
   </div>`;
 }
 
-// The die is a D20, so it is drawn as one: an icosahedron seen head-on is a
-// hexagon with a triangle facing you, and the number is thrown on that triangle.
-// A square with a number in it is not a die, it is a tile — and this game is a
-// tabletop game, so the thing you are made to stare at while the game hangs in
-// the balance should be the thing you would actually be staring at.
+// The die is a D20, so it is drawn as one: an icosahedron seen head-on reads as a
+// hexagon, and the outline alone is enough to say so. A square with a number in
+// it is not a die, it is a tile — and this game is a tabletop game, so the thing
+// you are made to stare at while the game hangs in the balance should be the
+// thing you would actually be staring at.
+//
+// The shape and nothing else. The faceting lines that make a d20 icon a d20 icon
+// are drawn for people looking at an icon; here the die is a foot tall and the
+// number thrown on it is the point, and a triangle ruled through the middle of
+// it is just something else for the number to collide with.
 //
 // The face is drawn once and the ROLL is a separate element on top of it: the
 // tumble rewrites the number many times a second, and it must not be rewriting
@@ -493,10 +498,6 @@ function renderDrama(app, trainer) {
 function d20FaceHtml() {
   return `<svg class="gq-die-face" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
     <polygon class="gq-die-body" points="50,3 93,27 93,73 50,97 7,73 7,27" />
-    <polygon class="gq-die-top" points="50,18 82,71 18,71" />
-    <line class="gq-die-edge" x1="50" y1="3" x2="50" y2="18" />
-    <line class="gq-die-edge" x1="93" y1="73" x2="82" y2="71" />
-    <line class="gq-die-edge" x1="7" y1="73" x2="18" y2="71" />
   </svg>`;
 }
 

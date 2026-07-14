@@ -874,13 +874,13 @@ h1.gq-logo {
   width: 13cqw;
   height: 13cqw;
 }
-.gq-die-row:has(.gq-die-stage:nth-child(3)) .gq-die-roll { font-size: 3.9cqw; }
+.gq-die-row:has(.gq-die-stage:nth-child(3)) .gq-die-roll { font-size: 5.4cqw; }
 .gq-die-row:has(.gq-die-stage:nth-child(4)) { gap: 2cqw; }
 .gq-die-row:has(.gq-die-stage:nth-child(4)) .gq-die {
   width: 10.5cqw;
   height: 10.5cqw;
 }
-.gq-die-row:has(.gq-die-stage:nth-child(4)) .gq-die-roll { font-size: 3.1cqw; }
+.gq-die-row:has(.gq-die-stage:nth-child(4)) .gq-die-roll { font-size: 4.4cqw; }
 
 .gq-die-stage {
   display: flex;
@@ -918,37 +918,22 @@ h1.gq-logo {
   stroke-linejoin: round;
 }
 
-.gq-die-top {
-  fill: none;
-  stroke: var(--gb-darkest);
-  stroke-width: 3;
-  stroke-linejoin: round;
-}
-
-.gq-die-edge {
-  stroke: var(--gb-darkest);
-  stroke-width: 3;
-}
-
-/* The number rides ON the face it was thrown on, so it has to FIT on it: a
-   triangle is at its narrowest where a box is at its widest, and a two-digit roll
-   set to the die's own size ran straight off the sides of it. Sized to the face,
-   and dropped toward the base where the face has room — nudged UP, a 20 sat in
-   the apex and collided with both edges at once. */
+/* With the shape empty, the number sits where it belongs: dead centre, and big —
+   a hexagon is widest across the middle, which is the one thing a triangle was
+   not. */
 .gq-die-roll {
   position: relative;
   z-index: 1;
-  transform: translateY(9%);
-  font-size: 5cqw;
+  font-size: 7cqw;
   line-height: 1;
 }
 
-/* It lands: the face it landed on fills in, and the number reads out of it. */
+/* It lands: the die fills in, and the number reads out of it. */
 .gq-die-landed {
   animation: none;
   transform: scale(1.12);
 }
-.gq-die-landed .gq-die-top { fill: var(--gb-darkest); }
+.gq-die-landed .gq-die-body { fill: var(--gb-darkest); }
 .gq-die-landed .gq-die-roll { color: var(--gb-lightest); }
 
 @keyframes gq-die-tumble {
