@@ -303,6 +303,11 @@ h1.gq-logo {
    view) shrink it a quarter and center it; the catalog goes a notch
    smaller still. */
 .gq-card-side .gq-card { width: 75%; margin-inline: auto; }
+/* Compare shows both cards as big as they will go — that is the point of the
+   screen — but "as big as they will go" is not "bigger than the box". At full
+   width the pair stood a chart taller than the column and the thing you came here
+   to read was the thing hanging off the bottom of it. */
+.gq-compare-side .gq-card { width: 86%; margin-inline: auto; }
 .gq-card-side-sm .gq-card { width: 70%; }
 
 /* ---- Battle screen ---- */

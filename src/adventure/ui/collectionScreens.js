@@ -167,8 +167,8 @@ export const compareScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>COMPARE</span><span>${escapeHtml(shortName(a?.name ?? "?"))} &middot; ${escapeHtml(shortName(b?.name ?? "?"))}</span></div>
       <div class="gq-body"><div class="gq-columns">
-        <div>${a ? cardPanelHtml(a, { count: owned(a) }) : ""}</div>
-        <div>${b ? cardPanelHtml(b, { count: owned(b) }) : ""}</div>
+        <div class="gq-compare-side">${a ? cardPanelHtml(a, { count: owned(a) }) : ""}</div>
+        <div class="gq-compare-side">${b ? cardPanelHtml(b, { count: owned(b) }) : ""}</div>
       </div></div>
       <div class="gq-textbox"><p class="gq-dim">Side by side, warts and all. Z or X to go back.</p></div>
     </div>`;
