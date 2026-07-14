@@ -441,8 +441,19 @@ h1.gq-logo {
 }
 /* The choices get the wider half — a steal option names a runner and his odds,
    and it should not wrap to read it. */
-.gq-battle-menu { flex: 1.35; min-width: 0; max-height: 100%; overflow-y: auto; }
-.gq-battle-lines { flex: 1; min-width: 0; max-height: 100%; overflow-y: auto; }
+/* The menu gives a little of its width back to the call of the play: the menu is
+   a short list of short things, and the call is prose. And the menu alone sits
+   centred in the band — a four-item list hung from the top of a tall box leaves a
+   hole under it, and the hole is not a design, it is the leftovers. The call
+   still hangs from the top, because prose reads from the top. */
+.gq-battle-menu {
+  flex: 1.15;
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  align-self: center;
+}
+.gq-battle-lines { flex: 1.3; min-width: 0; max-height: 100%; overflow-y: auto; }
 /* Fielding: the menu crosses to the other dugout, and the call follows it. */
 .gq-textbox-fielding .gq-battle-menu { order: 2; }
 .gq-textbox-fielding .gq-battle-lines { order: 1; text-align: right; }
