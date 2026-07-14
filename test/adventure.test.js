@@ -623,13 +623,15 @@ test("WHO SITS names each man by the spot he is standing in", async () => {
     const slot = lineupSlotOf(save, bat);
     if (!slot) continue;
     assert.ok(
-      html.includes(`<span class="gq-dim">${slot}</span>`),
+      html.includes(`<span class="gq-swap-spot">${slot}</span>`),
       `somebody is offered at ${slot}`
     );
     checked += 1;
   }
   assert.ok(checked >= 8, "every man in the order is named by where he is standing");
-  assert.ok(html.includes('<span class="gq-dim">DH</span>'), "the DH reads DH, not the glove on his card");
+  assert.ok(html.includes('<span class="gq-swap-spot">DH</span>'), "the DH reads DH, not the glove on his card");
+  // The spot leads the row: it is what you are scanning for.
+  assert.match(html, /<span class="gq-swap-spot">C<\/span>A\.CHOUDHURY|<span class="gq-swap-spot">[A-Z0-9 \/]+<\/span>[A-Z]/, "the spot reads before the man");
   void rotationSlotOf;
 });
 

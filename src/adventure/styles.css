@@ -273,6 +273,10 @@ h1.gq-logo {
    on both sides, so the two cards hang level. */
 .gq-columns-pen,
 .gq-columns-swap { grid-template-columns: 1.25fr 1fr 1fr; }
+/* The swap list carries a position AND a name on every row, which is wider than
+   the pen's bare names: it takes the room out of the cards, which have it. */
+.gq-columns-swap { grid-template-columns: 1.75fr 1fr 1fr; }
+.gq-columns-swap .gq-menu { font-size: 2.7cqw; }
 .gq-columns-pen .gq-card-side > p,
 .gq-columns-swap .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
 .gq-columns-pen .gq-card-side > p:last-child { margin: 0.6cqw 0 0; }
@@ -280,6 +284,20 @@ h1.gq-logo {
    of it back — there is height to spare and the chart has to be readable. */
 .gq-columns-pen .gq-card-side .gq-card,
 .gq-columns-swap .gq-card-side .gq-card { width: 100%; }
+
+/* The spot reads first and the names line up behind it, so the list scans as a
+   lineup card rather than as prose. The column is only as wide as a POSITION —
+   sized to GAME 1 it was wider than the list, and every row folded in half. An
+   arm's GAME 1 simply pushes his own name across; the nine bats still line up,
+   which is where the scanning happens. */
+.gq-swap-spot {
+  display: inline-block;
+  min-width: 3.5ch;
+  margin-right: 0.8ch;
+  white-space: nowrap;
+  color: var(--gb-dark);
+}
+.gq-cursor .gq-swap-spot { color: var(--gb-light); }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
 /* Screens that want the whole card visible without scrolling (the Team
    view) shrink it a quarter and center it; the catalog goes a notch

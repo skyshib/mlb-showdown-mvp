@@ -701,14 +701,14 @@ export const binderScreen = {
     if (app.screen.actionMenu) {
       list = actionMenuHtml(actionMenuTitle(app, selected?.card), menuActions(app, selected?.card, binderActions), app.screen.actionIndex);
     } else if (swapping) {
-      // The name and the spot he is standing in, and nothing else. Which man to
-      // bench is a question about WHERE they play — you are not scanning this
-      // list for points, you are looking for the hole your card fills — and the
-      // cards themselves are right there for everything else.
+      // The spot LEADS, then the man in it. Which man to bench is a question about
+      // WHERE they play — you are looking for the hole your card fills, not
+      // scanning for points — so the thing you are scanning for is what the eye
+      // hits first, in a column, the way a lineup card is written.
       list = `<h3>WHO SITS FOR ${escapeHtml(shortName(selected.card.name))}?</h3>${menuHtml(
         [
           ...targets.map((target) => ({
-            html: `${escapeHtml(shortName(target.name))} <span class="gq-dim">${escapeHtml(currentSpot(app.save, target))}</span>`
+            html: `<span class="gq-swap-spot">${escapeHtml(currentSpot(app.save, target))}</span>${escapeHtml(shortName(target.name))}`
           })),
           { label: "CANCEL" }
         ],
