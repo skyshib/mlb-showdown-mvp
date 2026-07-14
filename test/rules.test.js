@@ -401,7 +401,7 @@ test("flyout can score a runner from third on a successful tag-up", () => {
   const state = createInitialState(teamA, weakDefense);
   state.bases = [null, null, { name: "Runner 3", speed: 12 }];
 
-  const runs = applyFlyout(state, "away", "home", { d20: () => 17 });
+  const runs = applyFlyout(state, makeHitter({ id: "fly-b", name: "Fly Batter" }), "away", "home", { d20: () => 17 });
 
   assert.equal(runs, 1);
   assert.equal(state.score.away, 1);
@@ -416,7 +416,7 @@ test("flyout tag-up uses the outs after the catch for the decision matrix", () =
   state.outs = 1;
   state.bases = [null, null, { name: "Runner 3", speed: 6 }];
 
-  const runs = applyFlyout(state, "away", "home", { d20: () => 11 });
+  const runs = applyFlyout(state, makeHitter({ id: "fly-b", name: "Fly Batter" }), "away", "home", { d20: () => 11 });
 
   assert.equal(runs, 1);
   assert.equal(state.outs, 2);
@@ -429,7 +429,7 @@ test("flyout does not allow tag-up when the catch is the third out", () => {
   state.outs = 2;
   state.bases = [null, null, { name: "Runner 3", speed: 20 }];
 
-  const runs = applyFlyout(state, "away", "home", { d20: () => 1 });
+  const runs = applyFlyout(state, makeHitter({ id: "fly-b", name: "Fly Batter" }), "away", "home", { d20: () => 1 });
 
   assert.equal(runs, 0);
   assert.equal(state.outs, 3);
@@ -445,7 +445,7 @@ test("failed flyout tag-up records the extra out and clears the runner", () => {
   state.outs = 1;
   state.bases = [null, null, { name: "Runner 3", speed: 12 }];
 
-  const runs = applyFlyout(state, "away", "home", { d20: () => 20 });
+  const runs = applyFlyout(state, makeHitter({ id: "fly-b", name: "Fly Batter" }), "away", "home", { d20: () => 20 });
 
   assert.equal(runs, 0);
   assert.equal(state.outs, 3);
@@ -461,7 +461,7 @@ test("runner tagging home scores when defense throws out another tag-up for the 
   // shakiest runner, so the forced-20 throw cuts him down while home scores.
   state.bases = [null, { name: "Runner 2", speed: 18 }, { name: "Runner 3", speed: 20 }];
 
-  const runs = applyFlyout(state, "away", "home", { d20: () => 20 });
+  const runs = applyFlyout(state, makeHitter({ id: "fly-b", name: "Fly Batter" }), "away", "home", { d20: () => 20 });
 
   assert.equal(runs, 1);
   assert.equal(state.score.away, 1);

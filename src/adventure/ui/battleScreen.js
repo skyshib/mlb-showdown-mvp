@@ -11,7 +11,7 @@ import {
   cardPanelHtml,
   cardLine
 } from "./helpers.js?v=20260713-x";
-import { gameStars, gameLogLine, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260713-x";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260713-x";
 import { recordCompletedRun } from "../hallOfFame.js?v=20260713-x";
 import { cardById } from "../packs.js?v=20260713-x";
 import { buildBoxScore, inningsPlayed, pitcherStatus } from "../../rules/game.js?v=20260713-x";
@@ -325,7 +325,7 @@ function gameLogItem() {
 // Every play so far with its WPA, newest at the bottom (the cursor starts
 // there — you usually want to reread what just happened).
 function renderGameLog(app, battle, trainer) {
-  const rows = battle.events.map((event) => ({ html: gameLogLine(event, battle.playerSide) }));
+  const rows = gameLogRows(battle.events, battle.playerSide);
   const index = clampIndex(app.screen.logIndex ?? rows.length - 1, rows.length);
   return `<div class="gq-screen">
     <div class="gq-topbar"><span>GAME LOG &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>

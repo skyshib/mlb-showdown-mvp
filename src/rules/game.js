@@ -272,6 +272,10 @@ function performStealAttempt(state, stealAttempt, rng) {
     pitchingTeam: pitchingTeam.name,
     batter: batter.name,
     batterId: batter.id ?? null,
+    // Whose base it is. The row shows the RUNNER's name, and without his id it
+    // was hovering the man standing at the plate — who had nothing to do with it.
+    runner: runner.name,
+    runnerId: runner.id ?? null,
     pitcher: pitcher.name,
     pitcherId: pitcher.id ?? null,
     controlRoll: null,
@@ -534,9 +538,26 @@ export function resolveAdvanceDecision(state, sendCount, rng) {
 
   const wpAfter = winProbabilityHome(state);
   const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
-  ensureHitterLine(state, { id: lead.id, name: lead.name }).wpa += battingWpa;
+  // An extra base taken on a ball in play is TWO men's doing, so they split it:
+  // the hitter put the ball where a base could be had, and the runner is the one
+  // who went and got it. Half each.
+  //
+  // A steal is not that. Nobody swung — the runner took the base off nobody's
+  // bat — so performStealAttempt gives him the whole swing, and this is the line
+  // between the two.
+  const hitter = batter?.id ? { id: batter.id, name: batter.name } : null;
+  const taker = { id: lead.id, name: lead.name };
+  if (hitter && hitter.id !== taker.id) {
+    ensureHitterLine(state, hitter).wpa += battingWpa / 2;
+    ensureHitterLine(state, taker).wpa += battingWpa / 2;
+  } else {
+    // The batter who took the extra base himself is both men, and gets both
+    // halves — which is the whole swing, credited once.
+    ensureHitterLine(state, hitter ?? taker).wpa += battingWpa;
+  }
   ensurePitcherLine(state, pitcher).wpa -= battingWpa;
-  trackTopSwing(state, lead, battingWpa, attemptResult.thrownAttempt?.safe === false ? "ADV-OUT" : "ADV");
+  // The play itself, for the biggest-swing record, belongs to the man who hit it.
+  trackTopSwing(state, hitter ?? taker, battingWpa, attemptResult.thrownAttempt?.safe === false ? "ADV-OUT" : "ADV");
 
   state.lastPlayDetails = {
     kind: kind === "tagup" ? "tagup" : "advance",
@@ -757,7 +778,7 @@ function applyResult(state, result, batter, battingSide, pitchingSide, rng, pitc
       state.outs += 1;
       return 0;
     case RESULTS.FB:
-      return applyFlyout(state, battingSide, pitchingSide, rng);
+      return applyFlyout(state, batter, battingSide, pitchingSide, rng);
     case RESULTS.GB:
       return applyGroundout(state, batter, battingSide, pitchingSide, rng);
     case RESULTS.BB:
@@ -777,7 +798,7 @@ function applyResult(state, result, batter, battingSide, pitchingSide, rng, pitc
   }
 }
 
-export function applyFlyout(state, battingSide, pitchingSide, rng) {
+export function applyFlyout(state, batter, battingSide, pitchingSide, rng) {
   const outsBefore = state.outs;
   let runs = 0;
   state.outs += 1;
@@ -785,7 +806,7 @@ export function applyFlyout(state, battingSide, pitchingSide, rng) {
   if (state.deferAdvancesFor === battingSide && state.outs < 3) {
     const candidates = tagUpCandidates(state, pitchingSide, state.outs);
     if (candidates.length) {
-      state.pendingAdvance = { kind: "tagup", battingSide, pitchingSide, outsBefore, candidates };
+      state.pendingAdvance = { kind: "tagup", battingSide, pitchingSide, outsBefore, candidates, batter };
     }
     state.lastPlayDetails = {
       kind: "flyout",
@@ -891,6 +912,7 @@ export function applySingle(state, batter, battingSide, pitchingSide = null, rng
   }
   runs += resolveHitExtraBaseAttempts({
     state,
+    batter,
     battingSide,
     pitchingSide,
     rng,
@@ -914,6 +936,7 @@ export function applyDouble(state, batter, battingSide, pitchingSide = null, rng
   state.bases[0] = null;
   runs += resolveHitExtraBaseAttempts({
     state,
+    batter,
     battingSide,
     pitchingSide,
     rng,
@@ -1092,7 +1115,7 @@ function resolveStealAttempt(state, candidate, rng) {
   });
 }
 
-function resolveHitExtraBaseAttempts({ state, battingSide, pitchingSide, rng, outsBefore, candidates }) {
+function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide, rng, outsBefore, candidates }) {
   if (!pitchingSide || !rng || state.outs >= 3) return 0;
   const fielding = totalOutfieldFielding(state[pitchingSide]);
   const twoOutBonus = outsBefore >= 2 ? 5 : 0;
@@ -1107,7 +1130,7 @@ function resolveHitExtraBaseAttempts({ state, battingSide, pitchingSide, rng, ou
     .sort((a, b) => b.toIndex - a.toIndex);
 
   if (state.deferAdvancesFor === battingSide && allCandidates.length) {
-    state.pendingAdvance = { kind: "hit", battingSide, pitchingSide, outsBefore, candidates: allCandidates };
+    state.pendingAdvance = { kind: "hit", battingSide, pitchingSide, outsBefore, candidates: allCandidates, batter };
     state.lastPlayDetails = {
       kind: "hit",
       outsBefore,

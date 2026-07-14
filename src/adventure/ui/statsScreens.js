@@ -97,7 +97,10 @@ export function gameLogLine(event, playerSide) {
   const scoreText = event.scoreAfter ? `${event.scoreAfter[playerSide]}-${event.scoreAfter[npcSide]}` : "";
   const score = scoreText ? (event.runs > 0 ? ` <b>${scoreText}</b>` : ` <span class="gq-dim">${scoreText}</span>`) : "";
   const duel = isSteal
-    ? manTag(actor, event.batterId, steal?.roll)
+    // The base is the RUNNER's, so the row hovers the runner's card. It used to
+    // carry the batter's id under the runner's name — a man who had nothing to
+    // do with the play. (Older games carry no runner id; they hover nothing.)
+    ? manTag(actor, event.runnerId ?? null, steal?.roll)
     : `${manTag(event.pitcher, event.pitcherId, event.controlRoll)} <span class="gq-dim">v</span> ${
         manTag(actor, event.batterId, event.resultRoll)
       }`;
@@ -185,7 +188,23 @@ export function sectionedMenu(rows, index) {
 }
 
 function gameLogMenuRows(app) {
-  return (app.screen.events ?? []).map((event) => ({ html: gameLogLine(event, app.screen.playerSide) }));
+  return gameLogRows(app.screen.events, app.screen.playerSide);
+}
+
+// The log as rows, with a rule drawn where the sides change. A game is read in
+// half-innings, and a wall of plays with nothing between them makes you count
+// the T3s to find where the third ended. The line is the break.
+export function gameLogRows(events, playerSide) {
+  let last = null;
+  return (events ?? []).map((event) => {
+    const half = `${event.half}${event.inning}`;
+    const opens = half !== last;
+    last = half;
+    return {
+      html: gameLogLine(event, playerSide),
+      className: opens ? "gq-log-break" : ""
+    };
+  });
 }
 
 // ---- The win-probability line ------------------------------------------------

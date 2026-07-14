@@ -209,6 +209,12 @@ h1.gq-logo {
    At 1.9cqw that pair still folds; at 1.8 it holds. */
 .gq-log-list { font-size: 1.8cqw; letter-spacing: 0; }
 .gq-log-list li { padding: 0.5cqw 0.8cqw; }
+/* Where the sides change. A wall of plays with nothing between them makes you
+   count the T3s to find where the third ended; a light rule does it for you.
+   The first row opens a half-inning too, and needs no line above the top of the
+   list. */
+.gq-log-list li.gq-log-break { border-top: 0.25cqw solid var(--gb-light); padding-top: 0.9cqw; }
+.gq-log-list li.gq-log-break:first-child { border-top: 0; padding-top: 0.5cqw; }
 /* The row is a row: two names, two dice, the call, the score and the odds. It
    is sized to survive the worst of them without folding onto a second line. */
 .gq-log-list .gq-outs { margin-right: 0.4cqw; }

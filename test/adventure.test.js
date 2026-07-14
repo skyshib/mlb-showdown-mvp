@@ -1057,6 +1057,53 @@ test("hits defer the extra-base call to the player, who can hold or send", () =>
   assert.ok(scoredOrOut, "the send either scores or costs an out");
 });
 
+test("an extra base is split between the man who hit it and the man who took it; a steal is all his", async () => {
+  const { attemptSteal } = await import("../src/rules/game.js");
+  const { player, npc } = hookTeams();
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "credit-seed" });
+  const state = battle.state;
+  const batter = state.away.lineup[0];
+  const pitcher = pitcherStatus(state, "home").pitcher;
+
+  // A single with a man on second: the runner is sent, and the play is two
+  // men's doing — the hitter put the ball out there, the runner went and got it.
+  state.bases[1] = { id: "r2", name: "Runner Two", speed: 18 };
+  applySingle(state, batter, "away", "home", createRng("split-roll"), pitcher);
+  const event = resolveAdvanceDecision(state, 1, createRng("send"));
+  assert.equal(event.type, "advance");
+
+  const hitterLine = state.stats.hitters.get(`away:${batter.id}`);
+  const runnerLine = state.stats.hitters.get("away:r2");
+  const half = event.wpa / 2;
+  assert.ok(Math.abs(hitterLine.wpa - half) < 1e-9, "the hitter takes half the swing");
+  assert.ok(Math.abs(runnerLine.wpa - half) < 1e-9, "and the runner takes the other half");
+  assert.ok(
+    Math.abs((hitterLine.wpa + runnerLine.wpa) - event.wpa) < 1e-9,
+    "and between them they take all of it — the play is not paid for twice"
+  );
+  // The pending play never carried the batter at all, so the RBI credit on a
+  // deferred send was dead code: a run driven in by sending a man home went in
+  // nobody's column.
+  assert.equal(hitterLine.rbi, event.runs, "and the runs he drove in are his");
+
+  // A steal is nobody's bat. The runner takes the whole swing, and the man at
+  // the plate takes none of it.
+  const fresh = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "steal-credit" });
+  const stealState = fresh.state;
+  const atThePlate = stealState.away.lineup[stealState.lineupIndex.away];
+  stealState.bases[0] = { id: "r1", name: "Runner One", speed: 20 };
+  const steal = attemptSteal(stealState, 0, createRng("steal-roll"));
+  assert.ok(steal, "he goes");
+  assert.equal(steal.runnerId, "r1", "and the row can hover his card, not the batter's");
+  const thief = stealState.stats.hitters.get("away:r1");
+  assert.ok(Math.abs(thief.wpa - steal.wpa) < 1e-9, "the base is all his");
+  assert.equal(
+    stealState.stats.hitters.get(`away:${atThePlate.id}`)?.wpa ?? 0,
+    0,
+    "the man holding the bat did nothing and is credited with nothing"
+  );
+});
+
 test("auto play never defers: simulated games leave no pending decisions", () => {
   const { player, npc } = hookTeams();
   const result = simulateGame(buildTeam(player), buildTeam(npc), "no-defer-seed");

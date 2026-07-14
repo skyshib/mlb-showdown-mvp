@@ -22,7 +22,7 @@ export function menuHtml(items, selectedIndex, { className = "", offset = 0 } = 
       // The row's content is one flex item, not several: a label with a dim
       // tail ("STEAL 3B — A.CHOUDHURY  40% SAFE") would otherwise break into
       // separate items and wrap against each other.
-      return `<li class="${selected ? "gq-cursor" : ""} ${item.disabled ? "gq-disabled" : ""}" data-menu-index="${offset + index}">
+      return `<li class="${selected ? "gq-cursor" : ""} ${item.disabled ? "gq-disabled" : ""} ${item.className ?? ""}" data-menu-index="${offset + index}">
           <span class="gq-caret">${selected ? "&#9654;" : "&nbsp;"}</span><span class="gq-menu-text">${item.html ?? escapeHtml(item.label)}</span>
         </li>`;
     })
