@@ -254,17 +254,23 @@ h1.gq-logo {
 }
 
 .gq-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2cqw; height: 100%; min-height: 0; }
-/* The pen is a comparison: the list, the arm you're warming, and the arm he
-   would replace, all three readable without scrolling anything. The list is
-   given the wider share — a name that wraps is harder to read than a card
-   that is a few percent smaller. The label above each card and the note below
-   it are single lines on both sides, so the two cards hang level. */
-.gq-columns-pen { grid-template-columns: 1.25fr 1fr 1fr; }
-.gq-columns-pen .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
+/* A choice between two men is shown as two men: the list, and both cards. The
+   pen warms an arm against the arm on the mound; the binder benches a man for
+   the man you are holding. Same shape, same problem, same answer — all three
+   readable without scrolling anything.
+
+   The list is given the wider share — a name that wraps is harder to read than a
+   card that is a few percent smaller. The label above each card is a single line
+   on both sides, so the two cards hang level. */
+.gq-columns-pen,
+.gq-columns-swap { grid-template-columns: 1.25fr 1fr 1fr; }
+.gq-columns-pen .gq-card-side > p,
+.gq-columns-swap .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
 .gq-columns-pen .gq-card-side > p:last-child { margin: 0.6cqw 0 0; }
 /* Two cards to a row means each column is already narrow; the card takes all
    of it back — there is height to spare and the chart has to be readable. */
-.gq-columns-pen .gq-card-side .gq-card { width: 100%; }
+.gq-columns-pen .gq-card-side .gq-card,
+.gq-columns-swap .gq-card-side .gq-card { width: 100%; }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
 /* Screens that want the whole card visible without scrolling (the Team
    view) shrink it a quarter and center it; the catalog goes a notch

@@ -679,14 +679,24 @@ export const binderScreen = {
     const rows = binderVisibleRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const selected = rows[index];
+    // Benching a man for another man is a comparison, and it was being asked
+    // with only ONE of them on the screen — and the one it showed was the card
+    // you had already chosen. Both go up, side by side, the way the compare
+    // window does it: the man who sits, and the man he sits for.
+    const swapping = app.screen.mode === "team-swap" && Boolean(selected);
+    const targets = swapping ? swapTargets(app.save, selected.card) : [];
+    const pickIndex = swapping ? clampIndex(app.screen.pickIndex ?? 0, targets.length + 1) : 0;
+    const outgoing = swapping ? targets[pickIndex] ?? null : null;
     let list;
     if (app.screen.actionMenu) {
       list = actionMenuHtml(actionMenuTitle(app, selected?.card), menuActions(app, selected?.card, binderActions), app.screen.actionIndex);
-    } else if (app.screen.mode === "team-swap" && selected) {
-      const targets = swapTargets(app.save, selected.card);
-      list = `<h3>WHO SITS FOR ${escapeHtml(selected.card.name.toUpperCase())}?</h3>${menuHtml(
-        [...targets.map((target) => ({ html: cardLine(target) })), { label: "CANCEL" }],
-        clampIndex(app.screen.pickIndex ?? 0, targets.length + 1)
+    } else if (swapping) {
+      // Names only. The cards are RIGHT THERE, both of them — repeating a man's
+      // position and points in the row is telling you what you are already
+      // looking at, and it costs the column the width the two cards need.
+      list = `<h3>WHO SITS FOR ${escapeHtml(shortName(selected.card.name))}?</h3>${menuHtml(
+        [...targets.map((target) => ({ html: escapeHtml(shortName(target.name)) })), { label: "CANCEL" }],
+        pickIndex
       )}`;
     } else {
       list = rows.length
@@ -702,13 +712,22 @@ export const binderScreen = {
     }
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>BINDER &middot; ${escapeHtml(filter)}</span><span>${rows.length} CARDS &middot; ${rows.reduce((sum, row) => sum + row.count, 0)} TOTAL</span></div>
-      <div class="gq-body"><div class="gq-columns">
+      <div class="gq-body"><div class="gq-columns${swapping ? " gq-columns-swap" : ""}">
         <div class="gq-frame gq-scroll">${list}</div>
-        <div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>
+        ${swapping
+          ? `<div class="gq-card-side">
+              <p class="gq-dim">${outgoing ? "SITS" : "&nbsp;"}</p>
+              ${outgoing ? cardPanelHtml(outgoing) : ""}
+            </div>
+            <div class="gq-card-side">
+              <p class="gq-dim">STARTS</p>
+              ${cardPanelHtml(selected.card, { count: selected.count })}
+            </div>`
+          : `<div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>`}
       </div></div>
       <div class="gq-textbox">${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">${
         app.screen.actionMenu ? "Z picks an action. X closes."
-          : app.screen.mode === "team-swap" ? "Z benches him for your card. X cancels."
+          : swapping ? "Z benches him for your card. X cancels."
           : "Z/ENTER opens card actions &middot; F finds &middot; &#9664;/&#9654; page by position &middot; &#9670; = on team &middot; &#9733; = keeper. X to leave."
       }</p></div>
     </div>`;

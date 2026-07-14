@@ -1615,6 +1615,17 @@ test("every run reaches the board, in the inning it was scored", async () => {
   assert.ok(state.lineScore.home.length <= state.inning);
 });
 
+test("the scoreboard puts up the man, not his suffix", async () => {
+  const { surname } = await import("../src/ui/cardFace.js");
+  assert.equal(surname("Ken Griffey Jr."), "GRIFFEY", "the lineup strip had a JR. batting third");
+  assert.equal(surname("Ken Griffey Jr. '97"), "GRIFFEY", "card year and suffix both come off");
+  assert.equal(surname("Cal Ripken Jr."), "RIPKEN");
+  assert.equal(surname("Bob Smith III"), "SMITH");
+  assert.equal(surname("A.J. Pierzynski '03"), "PIERZYNSKI", "an initialed first name is still not the surname");
+  assert.equal(surname("Ichiro Suzuki"), "SUZUKI");
+  assert.equal(surname("Ichiro"), "ICHIRO", "a one-word man is his own surname");
+});
+
 test("the diamond acts out the play: a lap for a homer, a shake for a man cut down", async () => {
   const { playMotion } = await import("../src/adventure/ui/battleScreen.js");
 

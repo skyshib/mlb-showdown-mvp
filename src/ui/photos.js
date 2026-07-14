@@ -4,6 +4,8 @@
 // a thumbnail by player name, and misses are cached so we only ask once.
 // v2: the lookup grew a search-API second pass — retire v1's cached misses
 // so the old-timers get their retry.
+import { surname as cardSurname } from "./cardFace.js?v=20260713-x";
+
 const CACHE_KEY = "sq-photo-cache-v2";
 const MISS = "none";
 
@@ -83,10 +85,12 @@ async function searchLookup(name) {
   if (!response.ok) return null;
   const data = await response.json();
   const pages = Object.values(data?.query?.pages ?? {}).sort((a, b) => a.index - b.index);
-  const surname = name.trim().split(" ").pop().toLowerCase();
+  // The man's name, not his suffix: matching Wikipedia titles on "jr." would
+  // accept any junior in the search results.
+  const family = cardSurname(name).toLowerCase();
   for (const page of pages) {
     if (!page.thumbnail?.source) continue;
-    if (!page.title.toLowerCase().includes(surname)) continue;
+    if (!page.title.toLowerCase().includes(family)) continue;
     const description = (page.description ?? "").toLowerCase();
     if (description && !description.includes("baseball")) continue;
     return page.thumbnail.source;

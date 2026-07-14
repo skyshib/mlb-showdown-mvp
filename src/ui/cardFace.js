@@ -30,6 +30,19 @@ export function stripCardYear(name) {
   return String(name).replace(/\s*'\d\d$/, "");
 }
 
+// The name a scoreboard puts up: the last word of a man's name is USUALLY his
+// surname, and for Ken Griffey Jr. it is "Jr." — which is how the lineup strip
+// came to have a JR. batting third. The suffix is not the man.
+const NAME_SUFFIXES = new Set(["JR", "SR", "II", "III", "IV"]);
+
+export function surname(name) {
+  const words = stripCardYear(String(name)).trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return String(name).toUpperCase();
+  let last = words.length - 1;
+  while (last > 0 && NAME_SUFFIXES.has(words[last].replace(/\./g, "").toUpperCase())) last -= 1;
+  return words[last].toUpperCase();
+}
+
 // The card's first active year, for era-styling the generated pixel
 // portraits (pillbox caps and handlebars before the war). MLB set tags read
 // "1989-2010"; classic tags read "'04 PR1".

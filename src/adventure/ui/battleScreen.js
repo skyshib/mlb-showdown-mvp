@@ -7,7 +7,7 @@ import {
   diamondHtml,
   outsHtml,
   shortName,
-  stripCardYear,
+  surname,
   cardPanelHtml,
   cardLine
 } from "./helpers.js?v=20260713-x";
@@ -1038,13 +1038,6 @@ function lineupStripHtml(team, { litId, nextId, mound }) {
       </li>`
     : "";
   return `<ul class="gq-hud-strip">${bats}${arm}</ul>`;
-}
-
-// The strip is too narrow for "A.J. PIERZYNSKI '03" — the year comes off and
-// the surname stands alone. Hyphenated names survive intact.
-function surname(name) {
-  const words = stripCardYear(name).trim().split(/\s+/);
-  return (words[words.length - 1] ?? name).toUpperCase();
 }
 
 // A card small enough to flank the diamond, with the state its face can't
