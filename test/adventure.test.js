@@ -194,6 +194,66 @@ test("pack pulls are deterministic per seed, varied, with one guaranteed hit", (
   assert.deepEqual([...rarities].sort(), ["common", "legend", "rare", "uncommon"], "packs span every tier");
 });
 
+test("a pack deals each man once — no player twice out of one wrapper", async () => {
+  const { cardPerson } = await import("../src/rules/cards.js");
+  for (let i = 0; i < 200; i += 1) {
+    const cards = openPack("booster", `dupe-${i}`);
+    const people = cards.map((card) => cardPerson(card));
+    assert.equal(new Set(people).size, cards.length, `pack dupe-${i} dealt the same man twice`);
+    // The redraw must not cost the slot its rarity — the hit slot is still a hit.
+    assert.ok(["uncommon", "rare", "legend"].includes(cards[4].rarity), "the redraw keeps the slot's tier");
+  }
+});
+
+test("a legend does not just turn over: the pack glows first, then he lands", async () => {
+  const { packOpenScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = testSave();
+  // Find a booster whose FIRST pull is a legend, so one Z gets us there.
+  let seed = null;
+  for (let i = 0; i < 400 && !seed; i += 1) {
+    if (openPack("booster", `legend-${i}`)[0].rarity === "legend") seed = `legend-${i}`;
+  }
+  assert.ok(seed, "some booster leads with a legend");
+  const legend = openPack("booster", seed)[0];
+  save.pendingPacks = [{ packId: "booster", seed }];
+  const app = { save, screen: { name: "packOpen", revealed: 0, viewing: 0 }, go() {}, rerender() {} };
+
+  assert.ok(packOpenScreen.render(app).includes("RIP IT OPEN"), "sealed to start");
+  packOpenScreen.key(app, "a");
+
+  // The curtain: he is yours, and he is not on the screen.
+  const curtain = packOpenScreen.render(app);
+  assert.ok(app.screen.curtain, "the pack is glowing");
+  assert.ok(curtain.includes("GLOWING"), "and says so");
+  assert.ok(curtain.includes("gq-legend-rays"), "with the rays behind it");
+  assert.ok(!curtain.includes(legend.name.toUpperCase()), "but it does not name him yet");
+  assert.equal(ownedCount(save, legend.id), 1, "he is already in the collection, though");
+
+  // Nothing you can press hurries it.
+  packOpenScreen.key(app, "a");
+  packOpenScreen.key(app, "right");
+  assert.ok(app.screen.curtain, "the room waits");
+  assert.equal(app.screen.revealed, 1, "and the pack does not run on without you");
+
+  // The curtain drops on its own.
+  app.screen.curtain = null;
+  const landed = packOpenScreen.render(app);
+  assert.ok(landed.includes("&#9733; LEGEND &#9733;"), "he is called out");
+  assert.ok(landed.includes(legend.name.toUpperCase()), "by name");
+  assert.ok(landed.includes("gq-legend-reveal"), "and lands big, on the rays");
+
+  // Leafing back through the pulls afterwards shows the card plainly: the event
+  // was the pull, not the card.
+  const commonIndex = openPack("booster", seed).findIndex((card) => card.rarity !== "legend");
+  if (commonIndex > 0) {
+    app.screen.revealed = commonIndex + 1;
+    app.screen.viewing = 1;
+    const rewound = packOpenScreen.render(app);
+    assert.ok(!rewound.includes("gq-legend-reveal"), "no rays on a second look");
+    assert.ok(!rewound.includes("&#9733; LEGEND &#9733;"), "and no second curtain call");
+  }
+});
+
 test("shop stock is deterministic and restocks by cycle", () => {
   const a = shopStock("s", "town", 0);
   const b = shopStock("s", "town", 0);

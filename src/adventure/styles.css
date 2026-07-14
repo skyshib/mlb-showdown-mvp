@@ -803,7 +803,10 @@ h1.gq-logo {
 
 /* ---- Pack opening ---- */
 
-.gq-pack-stage { display: flex; flex-direction: column; align-items: stretch; justify-content: center; height: 100%; padding: 2cqw 6cqw; }
+/* min-height:0 and the clip are load-bearing: the stage is the flexible row, and
+   a card taller than it (a legend, standing bigger than the rest) would grow the
+   row and shove the textbox clean off the bottom of the Game Boy. */
+.gq-pack-stage { display: flex; flex-direction: column; align-items: stretch; justify-content: center; height: 100%; min-height: 0; overflow: hidden; padding: 2cqw 6cqw; }
 .gq-pack-count { text-align: center; margin-bottom: 1.5cqw; }
 /* The pulled card stands at 44% width so the whole 5:7 face fits the
    stage with the count line above it. */
@@ -812,6 +815,104 @@ h1.gq-logo {
 @keyframes gq-reveal {
   from { transform: scale(0.2); }
   to { transform: scale(1); }
+}
+
+/* ---- Legends ---- */
+
+/* A legend gets a moment. First the pack catches the light and the whole screen
+   knows what is coming before you do; then he lands, bigger than the others,
+   with the rays turning behind him and his name called out over the top. */
+.gq-legend-curtain {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  animation: gq-legend-flash 260ms steps(1) 4;
+}
+
+.gq-legend-bang {
+  font-size: 16cqw;
+  line-height: 1;
+  color: var(--gq-flare);
+}
+
+/* The rays: a fan of wedges, turning slowly. A conic gradient with hard stops
+   is the cheapest starburst there is, and it reads on a four-tone screen. */
+.gq-legend-rays {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 150%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    var(--gq-flare) 0 6deg, transparent 6deg 30deg,
+    var(--gq-flare) 30deg 36deg, transparent 36deg 60deg,
+    var(--gq-flare) 60deg 66deg, transparent 66deg 90deg,
+    var(--gq-flare) 90deg 96deg, transparent 96deg 120deg,
+    var(--gq-flare) 120deg 126deg, transparent 126deg 150deg,
+    var(--gq-flare) 150deg 156deg, transparent 156deg 180deg,
+    var(--gq-flare) 180deg 186deg, transparent 186deg 210deg,
+    var(--gq-flare) 210deg 216deg, transparent 216deg 240deg,
+    var(--gq-flare) 240deg 246deg, transparent 246deg 270deg,
+    var(--gq-flare) 270deg 276deg, transparent 276deg 300deg,
+    var(--gq-flare) 300deg 306deg, transparent 306deg 330deg,
+    var(--gq-flare) 330deg 336deg, transparent 336deg 360deg
+  );
+  opacity: 0.22;
+  animation: gq-legend-turn 9s linear infinite;
+}
+
+/* The card sits ON the rays, not under them. */
+/* He stands bigger than the others, but the stage is what it is: the card is
+   sized off the HEIGHT it has to live in, so the call above him and the prompt
+   below him both keep their place. */
+.gq-legend-reveal { position: relative; width: auto; height: 100%; min-height: 0; align-self: center; animation: gq-legend-land 520ms cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+.gq-legend-reveal .gq-card { height: 100%; width: auto; aspect-ratio: 5 / 7; }
+.gq-legend-reveal .gq-card { position: relative; z-index: 1; }
+
+/* The call is made in the TEXTBOX, which is where this game has always spoken.
+   Given a line of its own on the stage it ate the height the card needed, and a
+   legend ended up standing smaller than the commons he was supposed to tower
+   over; hung over the stage instead, it landed on his face. The box was empty
+   anyway. */
+.gq-legend-call {
+  color: var(--gq-flare);
+  letter-spacing: 0.1em;
+  animation: gq-legend-call-in 520ms ease-out both;
+}
+
+.gq-legend-screen .gq-topbar { background: var(--gq-flare); color: var(--gb-lightest); }
+
+@keyframes gq-legend-turn {
+  to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes gq-legend-flash {
+  0%, 100% { background: transparent; }
+  50% { background: var(--gq-flare); }
+}
+
+@keyframes gq-legend-land {
+  from { transform: scale(0.1); }
+  to { transform: scale(1); }
+}
+
+@keyframes gq-legend-call-in {
+  from { opacity: 0; transform: translateY(-1.5cqw); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gq-legend-curtain,
+  .gq-legend-rays,
+  .gq-legend-reveal,
+  .gq-legend-call { animation: none; }
 }
 
 .gq-scroll { overflow-y: auto; min-height: 0; }

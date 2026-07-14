@@ -1,5 +1,5 @@
 import { createRng } from "../rules/rng.js?v=20260713-x";
-import { personConflict, playsPosition } from "../rules/cards.js?v=20260713-x";
+import { cardPerson, personConflict, playsPosition } from "../rules/cards.js?v=20260713-x";
 import { RARITY_REFERENCE, setUniverse, universePool } from "../data/universes.js";
 
 // The adventure's economy on top of the shared card universes: what a card
@@ -124,15 +124,35 @@ function rollRarity(rng, odds) {
   return odds.find(([, cumulative]) => roll < cumulative)[0];
 }
 
+// A pack deals each MAN once. Pulling the same player twice out of one wrapper
+// is the flattest possible result — a slot that was going to be a card and
+// turned out to be a duplicate you already have in your hand — and it is not
+// even a duplicate of the CARD necessarily: in a multi-decade pool the same
+// human is printed once per era, so two slots could deal you two Griffeys and
+// neither is a copy. cardPerson is the human, however the league spells him.
+//
+// The redraw is per slot and keeps the slot's rarity: a legend slot deals
+// another legend. If a tier is so thin that it cannot find anybody new (a
+// franchise pool with three legends in it, say), the pack takes the duplicate
+// rather than deal nothing — a card in the wrapper beats an empty slot.
 export function openPack(packId, seed) {
   const pack = PACKS[packId];
   if (!pack) throw new Error(`Unknown pack ${packId}`);
   const rng = createRng(seed);
+  const dealt = new Set();
   return pack.slots.map((slot) => {
     const rarity = slot === "wild" ? rollRarity(rng, scaledOdds(WILD_ODDS))
       : slot === "hit" ? rollRarity(rng, scaledOdds(HIT_ODDS))
       : slot;
-    return rng.pick(cardsOfRarity(rarity));
+    const tier = cardsOfRarity(rarity);
+    let card = rng.pick(tier);
+    let guard = 24;
+    while (guard > 0 && dealt.has(cardPerson(card))) {
+      card = rng.pick(tier);
+      guard -= 1;
+    }
+    dealt.add(cardPerson(card));
+    return card;
   });
 }
 

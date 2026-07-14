@@ -1248,6 +1248,22 @@ export const lineupScreen = {
 
 // Reveals walk forward with Z; the left arrow rewinds to reread earlier pulls
 // (right walks back up). A new card only rips once the view is at the front.
+// ---- Legends -----------------------------------------------------------------
+//
+// A legend does not just turn over. The pack catches the light first — a beat
+// where the screen knows what is coming and you don't yet — and then he lands,
+// full width, with the rays behind him and his name called out. It is the one
+// moment in the game worth stopping for, and it should feel like it is being
+// taken away from you if you blink.
+//
+// Only on the way OUT of the pack: leafing back through the pulls with the arrow
+// keys shows the card plainly. The event is the pull, not the card.
+const LEGEND_CURTAIN_MS = 1400;
+
+function isLegend(card) {
+  return card?.rarity === "legend";
+}
+
 export const packOpenScreen = {
   render(app) {
     const save = app.save;
@@ -1258,20 +1274,46 @@ export const packOpenScreen = {
     const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
     const current = viewing > 0 ? cards[viewing - 1] : null;
     const rewound = viewing < revealed;
-    return `<div class="gq-screen">
+    // The curtain: he has been pulled, but he has not been shown.
+    const curtain = Boolean(app.screen.curtain) && !rewound;
+    const landed = isLegend(current) && !rewound && !curtain;
+    return `<div class="gq-screen${landed ? " gq-legend-screen" : ""}">
       <div class="gq-topbar"><span>${escapeHtml(PACKS[pending.packId].name.toUpperCase())}</span><span>${revealed}/${cards.length}</span></div>
       <div class="gq-pack-stage">
-        ${revealed === 0 ? `<p class="gq-pack-count">&#9993; RIP IT OPEN!</p>` : rewound ? `<p class="gq-pack-count"><span class="gq-dim">CARD ${viewing} OF ${revealed}</span></p>` : ""}
-        ${current ? `<div class="gq-pack-reveal">${cardPanelHtml(current, { count: ownedCount(save, current.id) })}</div>` : ""}
+        ${curtain
+          ? `<div class="gq-legend-curtain">
+              <span class="gq-legend-rays"></span>
+              <p class="gq-legend-bang gq-blink">&#9733;</p>
+              <p class="gq-pack-count"><b>SOMETHING IN THERE IS GLOWING&hellip;</b></p>
+            </div>`
+          : `${revealed === 0 ? `<p class="gq-pack-count">&#9993; RIP IT OPEN!</p>` : rewound ? `<p class="gq-pack-count"><span class="gq-dim">CARD ${viewing} OF ${revealed}</span></p>` : ""}
+            ${current ? `<div class="gq-pack-reveal${landed ? " gq-legend-reveal" : ""}">${
+              landed ? `<span class="gq-legend-rays"></span>` : ""
+            }${cardPanelHtml(current, { count: ownedCount(save, current.id) })}</div>` : ""}`}
       </div>
       <div class="gq-textbox">
-        ${revealed === cards.length && !rewound
+        ${landed
+          ? `<p class="gq-legend-call"><b>&#9733; LEGEND &#9733;</b> ${escapeHtml(current.name.toUpperCase())}</p>`
+          : ""}
+        ${revealed === cards.length && !rewound && !curtain
           ? packEggs(cards, (id) => ownedCount(save, id)).map((egg) => `<p><b>${egg}</b></p>`).join("")
           : ""}
-        ${revealed > 1 ? `<p class="gq-dim">&#9664;/&#9654; LOOK BACK THROUGH THE PULLS</p>` : ""}
-        <p class="gq-blink">${rewound ? "Z — FORWARD" : revealed < cards.length ? "Z — NEXT CARD" : "Z — DONE"}</p>
+        ${curtain ? `<p class="gq-blink">&#9733; &#9733; &#9733;</p>` : `
+          ${revealed > 1 ? `<p class="gq-dim">&#9664;/&#9654; LOOK BACK THROUGH THE PULLS</p>` : ""}
+          <p class="gq-blink">${rewound ? "Z — FORWARD" : revealed < cards.length ? "Z — NEXT CARD" : "Z — DONE"}</p>`}
       </div>
     </div>`;
+  },
+  // The curtain drops on its own. Nothing the player can press hurries it, and
+  // nothing it does can be pressed through — the whole point is the wait.
+  mounted(app) {
+    if (!app.screen.curtain || app.screen.curtainRunning === app.screen.curtain) return;
+    app.screen.curtainRunning = app.screen.curtain;
+    setTimeout(() => {
+      if (app.screen.curtain !== app.screen.curtainRunning) return;
+      app.screen.curtain = null;
+      app.rerender();
+    }, LEGEND_CURTAIN_MS);
   },
   key(app, key) {
     const save = app.save;
@@ -1284,6 +1326,8 @@ export const packOpenScreen = {
     const cards = openPack(pending.packId, pending.seed);
     const revealed = app.screen.revealed ?? 0;
     const viewing = Math.min(app.screen.viewing ?? revealed, revealed);
+    // While the pack is glowing, the room waits.
+    if (app.screen.curtain) return;
     if (key === "left") {
       if (viewing > 1) app.screen.viewing = viewing - 1;
     } else if (key === "right") {
@@ -1292,9 +1336,12 @@ export const packOpenScreen = {
       if (viewing < revealed) {
         app.screen.viewing = viewing + 1;
       } else if (revealed < cards.length) {
-        addCardToCollection(save, cards[revealed].id);
+        const pulled = cards[revealed];
+        addCardToCollection(save, pulled.id);
         app.screen.revealed = revealed + 1;
         app.screen.viewing = revealed + 1;
+        // He is yours already. He is just not on the screen yet.
+        if (isLegend(pulled)) app.screen.curtain = (app.screen.curtain ?? 0) + revealed + 1;
         persistSave(save);
       } else {
         save.pendingPacks.shift();
