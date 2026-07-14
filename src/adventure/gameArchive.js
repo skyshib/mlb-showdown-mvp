@@ -1,4 +1,4 @@
-import { ensureAlmanac } from "./state.js?v=20260714-g";
+import { ensureAlmanac } from "./state.js?v=20260714-h";
 
 // Other people's afternoons.
 //

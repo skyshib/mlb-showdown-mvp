@@ -3919,6 +3919,97 @@ test("the record book ranks each record the right way round, and folds you in", 
   assert.equal(untouched.you, null, "never having done it is not the same as having done it badly");
 });
 
+// A campaign in the hands of two bats and two arms: MAYA slugs, JOJO runs, OKABE
+// gives up a run a game and PIP gives up none at all. `games` of them, so the
+// qualifiers (40 PA, 15 IP) are actually cleared.
+function sluggerSave(games = 8) {
+  const save = testSave();
+  save.saveSeed = "sq-me";
+  save.player.name = "ME";
+  delete save.seasonStats;
+  for (let game = 0; game < games; game += 1) {
+    recordGameStats(save, {
+      hitters: [
+        { id: "h1", name: "MAYA", pa: 5, ab: 4, h: 2, d: 0, t: 0, hr: 2, bb: 1, so: 1, r: 2, rbi: 4, sb: 0, cs: 0, gidp: 0, wpa: 0.4 },
+        { id: "h2", name: "JOJO", pa: 5, ab: 5, h: 1, d: 1, t: 0, hr: 0, bb: 0, so: 2, r: 0, rbi: 1, sb: 2, cs: 0, gidp: 0, wpa: 0.1 }
+      ],
+      pitchers: [
+        { id: "p1", name: "OKABE", bf: 20, outs: 18, h: 4, bb: 1, so: 11, hr: 0, r: 1, wpa: 0.5 },
+        { id: "p2", name: "PIP", bf: 10, outs: 9, h: 1, bb: 0, so: 3, hr: 0, r: 0, wpa: 0.2 }
+      ]
+    });
+  }
+  return save;
+}
+
+test("a player record belongs to the MAN, and reads out of the campaign, not the afternoon", async () => {
+  const { RECORDS, recordsOnPage, leaderboard, personalBests } = await import("../src/adventure/records.js");
+  const record = (key) => RECORDS.find((row) => row.key === key);
+  const save = sluggerSave();
+
+  assert.ok(recordsOnPage("player").length, "the book has a player half");
+  assert.ok(
+    recordsOnPage("player").every((row) => row.page === "player") &&
+    recordsOnPage("manager").every((row) => row.page === "manager"),
+    "and the two halves do not leak into each other"
+  );
+
+  // The best man on the club for the measure — which is not the same man twice.
+  assert.deepEqual(record("player-homers").read(save), { value: 16, player: "MAYA" }, "eight games, two a game");
+  assert.equal(record("player-steals").read(save).player, "JOJO", "the thief owns the steals, not the slugger");
+  assert.equal(record("player-strikeouts").read(save).player, "OKABE");
+
+  // A rate needs a season behind it. One perfect afternoon is not a season.
+  assert.equal(record("player-ops").read(save).player, "MAYA", "forty plate appearances clears the bar");
+  assert.equal(record("player-ops").read(sluggerSave(2)), null, "ten of them does not");
+
+  // The trap: a man who has allowed NO runs has an RA9 of nought, and nought is a
+  // number he earned — not a measure he never took.
+  const ra9 = record("player-ra9").read(save);
+  assert.equal(record("player-ra9").better, "min", "you win this one by going low");
+  assert.deepEqual(ra9, { value: 0, player: "PIP" }, "the shutout arm owns it, and a zero is not a missing number");
+
+  // What goes up to the league carries his name with it.
+  assert.equal(personalBests(save)["player-homers"].player, "MAYA");
+
+  // And the board reads back with both names on the line: the man, then his club.
+  const board = leaderboard(record("player-homers"), {
+    "player-homers": [{ value: 40, name: "ANA", player: "PETRA", saveSeed: "sq-a" }]
+  }, save);
+  assert.deepEqual(
+    board.top.map((row) => [row.value, row.player, row.name]),
+    [[40, "PETRA", "ANA"], [16, "MAYA", "ME"]],
+    "the record holder, then you"
+  );
+  assert.equal(board.top[1].you, true);
+});
+
+test("the record book has two pages, and left/right turns it", async () => {
+  const { recordsScreen } = await import("../src/adventure/ui/recordsScreen.js");
+  const save = sluggerSave();
+  // `synced` short-circuits the network call the screen makes on arrival.
+  const app = { save, screen: { name: "records", index: 0, synced: true }, go() {}, rerender() {} };
+
+  const managers = recordsScreen.render(app);
+  assert.ok(managers.includes("MANAGER RECORDS"), "it opens on the afternoons");
+  assert.ok(managers.includes("MOST RUNS IN A GAME"));
+  assert.ok(!managers.includes("MOST HOMERS, ONE PLAYER"), "the men are on the other page");
+
+  recordsScreen.key(app, "right");
+  const players = recordsScreen.render(app);
+  assert.ok(players.includes("PLAYER RECORDS"));
+  assert.ok(players.includes("MOST HOMERS, ONE PLAYER"));
+  assert.ok(!players.includes("MOST RUNS IN A GAME"), "and the afternoons are on the other one");
+  assert.ok(players.includes("MAYA") && players.includes("ME"), "the man who did it, and the club he did it for");
+
+  // There is no single afternoon behind a campaign, so there is nothing to open.
+  recordsScreen.key(app, "a");
+  assert.notEqual(app.screen.mode, "board", "Z does not step into a career");
+
+  recordsScreen.key(app, "left");
+  assert.ok(recordsScreen.render(app).includes("MANAGER RECORDS"), "and left turns back");
+});
+
 // The drama screen always KNEW how to stage a steal (see the THE THROW test
 // above). The man breaking for second was simply never asked: the swing asked,
 // the pitch asked, the runner sent on a hit asked, and the steal went straight

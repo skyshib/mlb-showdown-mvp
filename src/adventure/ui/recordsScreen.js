@@ -1,15 +1,16 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-g";
-import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260714-g";
-import { ensureAlmanac } from "../state.js?v=20260714-g";
-import { expandGame } from "../gameLog.js?v=20260714-g";
-import { fetchGames } from "../gameArchive.js?v=20260714-g";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260714-h";
+import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260714-h";
+import { ensureAlmanac } from "../state.js?v=20260714-h";
+import { expandGame } from "../gameLog.js?v=20260714-h";
+import { fetchGames } from "../gameArchive.js?v=20260714-h";
 import {
-  RECORDS,
+  RECORD_PAGES,
+  recordsOnPage,
   leaderboard,
   cachedGlobalRecords,
   fetchGlobalRecords,
   submitRecords
-} from "../records.js?v=20260714-g";
+} from "../records.js?v=20260714-h";
 
 // ---- World records ----------------------------------------------------------
 //
@@ -21,6 +22,11 @@ import {
 // A record you have never set reads as a dash rather than a zero. Nought runs in
 // a game is a thing that can happen; never having played a game is not the same
 // thing, and a leaderboard that cannot tell them apart is lying.
+//
+// The book has two pages and &#9664;/&#9654; turns them: the MANAGER records, which are
+// afternoons you had, and the PLAYER records, which are campaigns your men had.
+// A player's line names him first and his manager after, because that is whose
+// record it is — the manager only signed the cheque.
 
 let syncStatus = "idle"; // idle | syncing | online | offline
 
@@ -46,13 +52,27 @@ function statusLabel() {
 }
 
 function valueText(record, value) {
-  return `${value} ${record.unit.toUpperCase()}`;
+  const number = record.format ? record.format(value) : value;
+  return `${number} ${record.unit.toUpperCase()}`;
 }
 
-// The rows: every record, whether or not anybody has set it.
+// Whose record it is. On the manager page that is one name. On the player page it
+// is two, and the order matters: the man who did it, then the club he did it for.
+function holderText(record, entry) {
+  const manager = escapeHtml(entry.name);
+  if (record.page !== "player" || !entry.player) return manager;
+  return `${escapeHtml(entry.player)} <span class="gq-dim">&middot; ${manager}</span>`;
+}
+
+// The current page of the book, and the records on it.
+function currentPage(app) {
+  return RECORD_PAGES[clampIndex(app.screen.pageIndex ?? 0, RECORD_PAGES.length)];
+}
+
+// The rows: every record on this page, whether or not anybody has set it.
 function recordRows(app) {
   const globals = cachedGlobalRecords();
-  return RECORDS.map((record) => {
+  return recordsOnPage(currentPage(app).key).map((record) => {
     const board = leaderboard(record, globals, app.save);
     const holder = board.top[0] ?? null;
     const mine = board.you ?? null;
@@ -67,7 +87,7 @@ function recordRows(app) {
       board,
       html: `${escapeHtml(record.title)} &mdash; ${
         holder
-          ? `<b>${valueText(record, holder.value)}</b> <span class="gq-dim">${escapeHtml(holder.name)}</span>`
+          ? `<b>${valueText(record, holder.value)}</b> <span class="gq-dim">${holderText(record, holder)}</span>`
           : `<span class="gq-dim">UNSET</span>`
       } ${standing}`
     };
@@ -101,16 +121,14 @@ function boardHtml(row, app, active) {
   }
   const cursor = clampIndex(app.screen.boardIndex ?? 0, board.top.length);
   const lines = board.top.map((entry, place) => {
-    const text = `${place + 1}. <b>${valueText(record, entry.value)}</b> ${escapeHtml(entry.name)}${
-      entry.you ? " &#9664; YOU" : ""
-    }${entry.day ? ` <span class="gq-dim">DAY ${entry.day}${entry.opponent ? ` VS ${escapeHtml(entry.opponent)}` : ""}</span>` : ""}`;
+    const text = `${place + 1}. <b>${valueText(record, entry.value)}</b> ${holderText(record, entry)}`;
     if (!active) return `<p class="${entry.you ? "" : "gq-dim"}">${text}</p>`;
     return `<p class="gq-board-row${place === cursor ? " gq-cursor" : ""}" data-menu-index="${place}">${
       place === cursor ? "&#9654; " : "&nbsp;&nbsp;"
     }${text}</p>`;
   }).join("");
   const below = board.you && !board.top.some((entry) => entry.you)
-    ? `<p>${board.yourRank ? `${board.yourRank}.` : ""} <b>${valueText(record, board.you.value)}</b> ${escapeHtml(board.you.name)} &#9664; YOU</p>`
+    ? `<p>${board.yourRank ? `${board.yourRank}.` : ""} <b>${valueText(record, board.you.value)}</b> ${holderText(record, board.you)} &#9664; YOU</p>`
     : "";
   const yourNone = !board.you ? `<p class="gq-dim">YOU HAVE NOT SET THIS ONE.</p>` : "";
   return `<div class="gq-frame">
@@ -148,14 +166,23 @@ async function openBoardGame(app, record, entry, back) {
   });
 }
 
+// A manager record is an afternoon and you can open it. A player record is a
+// campaign — five months in one man's hands, and no single box score behind it —
+// so there is nothing to step into, and the screen does not pretend there is.
+function openable(record) {
+  return record?.page !== "player";
+}
+
 export const recordsScreen = {
   render(app) {
+    const page = currentPage(app);
     const rows = recordRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const selected = rows[index];
     const inBoard = app.screen.mode === "board" && selected?.board.top.length;
+    const turn = "&#9664;/&#9654; turns the book";
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>WORLD RECORDS</span><span>${statusLabel()}</span></div>
+      <div class="gq-topbar"><span>WORLD RECORDS &middot; ${page.title}</span><span>${statusLabel()}</span></div>
       <div class="gq-body"><div class="gq-columns gq-columns-records">
         <div class="gq-frame gq-scroll">${sectionedMenu(rows, index)}</div>
         <div class="gq-scroll">${boardHtml(selected, app, Boolean(inBoard))}</div>
@@ -165,9 +192,11 @@ export const recordsScreen = {
           ? "THAT GAME NEVER CAME UP FROM THAT MANAGER'S MACHINE. THE NUMBER STANDS; THE AFTERNOON IS GONE."
           : inBoard
             ? "&#9650;/&#9660; walks the board &middot; Z opens that afternoon &mdash; the box score, and the men who won it. X backs out."
-            : selected?.board.top.length
-              ? "&#9650;/&#9660; moves &middot; Z steps into the board and opens the games behind it. X to leave."
-              : "&#9650;/&#9660; moves. Nobody has set this one yet. X to leave."
+            : !openable(selected?.record)
+              ? `&#9650;/&#9660; moves &middot; ${turn}. A season is not an afternoon: there is no one game to open. X to leave.`
+              : selected?.board.top.length
+                ? `&#9650;/&#9660; moves &middot; ${turn} &middot; Z steps into the board and opens the games behind it. X to leave.`
+                : `&#9650;/&#9660; moves &middot; ${turn}. Nobody has set this one yet. X to leave.`
       }</p></div>
     </div>`;
   },
@@ -179,6 +208,7 @@ export const recordsScreen = {
     syncGlobal(app);
   },
   key(app, key) {
+    const pageIndex = clampIndex(app.screen.pageIndex ?? 0, RECORD_PAGES.length);
     const rows = recordRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
     const selected = rows[index];
@@ -191,7 +221,7 @@ export const recordsScreen = {
       if (key === "up" || key === "down") {
         app.screen.boardIndex = clampIndex(cursor + (key === "down" ? 1 : -1), top.length);
       } else if (key === "a") {
-        openBoardGame(app, selected.record, top[cursor], { index, mode: "board", boardIndex: cursor });
+        openBoardGame(app, selected.record, top[cursor], { pageIndex, index, mode: "board", boardIndex: cursor });
         return;
       } else if (key === "b") {
         app.screen.mode = null;
@@ -204,9 +234,18 @@ export const recordsScreen = {
 
     if (key === "up" || key === "down") {
       app.screen.index = clampIndex(index + (key === "down" ? 1 : -1), rows.length);
+    } else if (key === "left" || key === "right") {
+      // Turn the page. The other half of the book is a different set of records,
+      // so the cursor starts at the top of it rather than wherever this one left
+      // off.
+      app.screen.pageIndex = clampIndex(pageIndex + (key === "right" ? 1 : -1), RECORD_PAGES.length);
+      app.screen.index = 0;
+      app.screen.boardIndex = 0;
+      app.screen.mode = null;
     } else if (key === "a") {
-      // Step into the board. A record with nobody on it has nothing to step into.
-      if (!top.length) return;
+      // Step into the board. A record with nobody on it has nothing to step into,
+      // and neither has a career.
+      if (!top.length || !openable(selected.record)) return;
       app.screen.mode = "board";
       // Open on YOUR line if you are on the board — that is the one you came to
       // look at — and on the record holder if you are not.

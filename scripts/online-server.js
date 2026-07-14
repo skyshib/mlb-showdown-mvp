@@ -524,6 +524,9 @@ async function postGame(store, request, response) {
 
 const RECORDS_FILE = "records.json";
 const RECORDS_MAX_PER_KEY = 25;
+// The book the clients keep (see src/adventure/records.js), in the only terms the
+// server needs: which way is better. The manager records are afternoons; the
+// player-* ones are a campaign in one man's hands, and they carry his name.
 const RECORD_DIRECTIONS = {
   "runs-game": "max",
   "margin-game": "max",
@@ -532,7 +535,14 @@ const RECORD_DIRECTIONS = {
   "hits-allowed-win": "min",
   "hit-streak": "max",
   "win-streak": "max",
-  "fastest-title": "min"
+  "fastest-title": "min",
+  "player-homers": "max",
+  "player-hits": "max",
+  "player-rbi": "max",
+  "player-steals": "max",
+  "player-ops": "max",
+  "player-strikeouts": "max",
+  "player-ra9": "min"
 };
 
 function loadRecordsFile(dataDir) {
@@ -592,6 +602,9 @@ async function postRecords(store, request, response) {
       name,
       saveSeed,
       mode,
+      // A player record names the man; a manager record names the afternoon. Each
+      // sends what it has, and the empty half costs nothing.
+      player: hofString(entry.player, 40),
       day: hofNumber(entry.day, 1e6),
       opponent: hofString(entry.opponent, 40),
       at: Date.now()

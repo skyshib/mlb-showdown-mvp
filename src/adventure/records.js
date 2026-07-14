@@ -1,5 +1,5 @@
-import { ensureAlmanac } from "./state.js?v=20260714-g";
-import { loadHallOfFame } from "./hallOfFame.js?v=20260714-g";
+import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260714-h";
+import { loadHallOfFame } from "./hallOfFame.js?v=20260714-h";
 
 // The record book, and it is the whole league's, not yours.
 //
@@ -14,6 +14,13 @@ import { loadHallOfFame } from "./hallOfFame.js?v=20260714-g";
 // and filed on the almanac page (see recordFinishedGame). Games played before
 // today have no streak on them and simply do not compete for it: an empty record
 // is honest, and a fabricated one is not.
+//
+// The book has two halves, because it is keeping two different kinds of score.
+// A MANAGER record is a thing you did on an afternoon: nine runs, a two-hit
+// shutout, six in a row. A PLAYER record is a thing one of your men did over a
+// whole campaign, and it belongs to HIM — the manager who owned him goes on the
+// line too, the way a record is always read out. They rank separately, because
+// ranking them together would be asking whether a slugger beat a Tuesday.
 
 const HIT_RESULTS = new Set(["1B", "1B+", "2B", "3B", "HR"]);
 
@@ -35,12 +42,30 @@ export function longestHitStreak(events, teamName) {
 
 const sum = (lines, field) => (lines ?? []).reduce((total, line) => total + (Number(line[field]) || 0), 0);
 
-// Every record: what it is called, which way is better, and how to read it out
-// of a save. `read` returns the best game for it, or null when the save has
-// never done the thing.
+// The two halves of the book, in the order you page through them.
+export const RECORD_PAGES = [
+  { key: "manager", title: "MANAGER RECORDS" },
+  { key: "player", title: "PLAYER RECORDS" }
+];
+
+// A rate is not a count, and printing it as one ("0.8421052631578947 OPS") is
+// how you lose a reader. Three decimals, no leading nought, the way it is
+// printed on the back of the card.
+const rate = (value) => value.toFixed(3).replace(/^0\./, ".");
+
+// A man has to have played enough to have a rate at all. One perfect afternoon
+// is not a season, and a board that cannot tell the difference belongs to
+// whoever went 1-for-1 in September.
+const QUALIFIED_PA = 40;
+const QUALIFIED_OUTS = 45; // fifteen innings
+
+// Every record: what it is called, which half of the book it is in, which way is
+// better, and how to read it out of a save. `read` returns the best mark for it,
+// or null when the save has never done the thing.
 export const RECORDS = [
   {
     key: "runs-game",
+    page: "manager",
     group: "AT THE PLATE",
     title: "MOST RUNS IN A GAME",
     better: "max",
@@ -49,6 +74,7 @@ export const RECORDS = [
   },
   {
     key: "margin-game",
+    page: "manager",
     group: "AT THE PLATE",
     title: "BIGGEST WIN MARGIN",
     better: "max",
@@ -61,6 +87,7 @@ export const RECORDS = [
   },
   {
     key: "homers-game",
+    page: "manager",
     group: "AT THE PLATE",
     title: "MOST HOMERS IN A GAME",
     better: "max",
@@ -69,6 +96,7 @@ export const RECORDS = [
   },
   {
     key: "strikeouts-game",
+    page: "manager",
     group: "ON THE MOUND",
     title: "MOST STRIKEOUTS IN A GAME",
     better: "max",
@@ -77,6 +105,7 @@ export const RECORDS = [
   },
   {
     key: "hits-allowed-win",
+    page: "manager",
     group: "ON THE MOUND",
     title: "FEWEST HITS ALLOWED IN A WIN",
     better: "min",
@@ -89,6 +118,7 @@ export const RECORDS = [
   },
   {
     key: "hit-streak",
+    page: "manager",
     group: "STREAKS",
     title: "MOST CONSECUTIVE HITS",
     better: "max",
@@ -97,6 +127,7 @@ export const RECORDS = [
   },
   {
     key: "win-streak",
+    page: "manager",
     group: "STREAKS",
     title: "LONGEST WINNING STREAK",
     better: "max",
@@ -105,15 +136,90 @@ export const RECORDS = [
   },
   {
     key: "fastest-title",
+    page: "manager",
     group: "THE LONG HAUL",
     title: "FASTEST CHAMPIONSHIP",
     better: "min",
     unit: "days",
     read: (save) => fastestTitle(save)
+  },
+
+  // The other half. Every one of these is a campaign total for ONE man, and the
+  // man is named on the line — the manager is only the club he did it for.
+  {
+    key: "player-homers",
+    page: "player",
+    group: "AT THE PLATE",
+    title: "MOST HOMERS, ONE PLAYER",
+    better: "max",
+    unit: "HR",
+    read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.hr || null)
+  },
+  {
+    key: "player-hits",
+    page: "player",
+    group: "AT THE PLATE",
+    title: "MOST HITS, ONE PLAYER",
+    better: "max",
+    unit: "hits",
+    read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.h || null)
+  },
+  {
+    key: "player-rbi",
+    page: "player",
+    group: "AT THE PLATE",
+    title: "MOST RBI, ONE PLAYER",
+    better: "max",
+    unit: "RBI",
+    read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.rbi || null)
+  },
+  {
+    key: "player-steals",
+    page: "player",
+    group: "AT THE PLATE",
+    title: "MOST STOLEN BASES, ONE PLAYER",
+    better: "max",
+    unit: "SB",
+    read: (save) => bestPlayer(seasonHitters(save), "max", (line) => line.sb || null)
+  },
+  {
+    key: "player-ops",
+    page: "player",
+    group: "AT THE PLATE",
+    title: `BEST OPS (${QUALIFIED_PA} PA)`,
+    better: "max",
+    unit: "OPS",
+    format: rate,
+    read: (save) => bestPlayer(seasonHitters(save), "max", (line) => (line.pa >= QUALIFIED_PA ? line.ops : null))
+  },
+  {
+    key: "player-strikeouts",
+    page: "player",
+    group: "ON THE MOUND",
+    title: "MOST STRIKEOUTS, ONE PITCHER",
+    better: "max",
+    unit: "K",
+    read: (save) => bestPlayer(seasonPitchers(save), "max", (line) => line.so || null)
+  },
+  {
+    key: "player-ra9",
+    page: "player",
+    group: "ON THE MOUND",
+    // A shutout arm reads 0.000 here, and that is a real number, not a missing
+    // one — so this measure must never be filtered on truthiness.
+    title: `LOWEST RUNS PER 9 (${QUALIFIED_OUTS / 3} IP)`,
+    better: "min",
+    unit: "RA9",
+    format: rate,
+    read: (save) => bestPlayer(seasonPitchers(save), "min", (line) => (line.outs >= QUALIFIED_OUTS ? line.runsPerNine : null))
   }
 ];
 
 export const RECORD_KEYS = RECORDS.map((record) => record.key);
+
+export function recordsOnPage(page) {
+  return RECORDS.filter((record) => record.page === page);
+}
 
 function mine(game) {
   return game?.boxScore?.[game.playerSide] ?? null;
@@ -127,6 +233,27 @@ function bestGame(save, better, measure) {
     if (value === null || value === undefined || !Number.isFinite(value)) continue;
     if (!best || (better === "max" ? value > best.value : value < best.value)) {
       best = { value, day: game.day, opponent: game.opponent };
+    }
+  }
+  return best;
+}
+
+// The best man on the club for one measure, and his name, which is the whole
+// point of this half of the book.
+//
+// Every line in the season stats is a man who has actually played FOR you — that
+// is the only way a line gets written (see recordGameStats) — so "a player you
+// own" needs no further test. He is not filtered against the roster you happen
+// to be carrying today, either: a man you cut in August still hit the homers he
+// hit in July, and a record book that forgets them the moment he clears waivers
+// is not a record book.
+function bestPlayer(lines, better, measure) {
+  let best = null;
+  for (const line of lines ?? []) {
+    const value = measure(line);
+    if (value === null || value === undefined || !Number.isFinite(value)) continue;
+    if (!best || (better === "max" ? value > best.value : value < best.value)) {
+      best = { value, player: line.name };
     }
   }
   return best;
