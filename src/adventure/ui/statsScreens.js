@@ -1,7 +1,7 @@
 import { escapeHtml, menuHtml, clampIndex, shortName, cardPanelHtml, miniDiamondHtml, outsHtml } from "./helpers.js?v=20260713-x";
 import { trainerById } from "../region.js?v=20260713-x";
 import { cardById } from "../packs.js?v=20260713-x";
-import { seasonHitters, seasonPitchers, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260713-x";
+import { seasonHitters, seasonPitchers, seasonTeam, ensureSeasonStats, ensureAlmanac, ensureTrophies, recordGameStats } from "../state.js?v=20260713-x";
 
 // ---- Formatting --------------------------------------------------------------
 
@@ -563,6 +563,27 @@ function championshipRows(save) {
 
 // ---- Season stats screen -------------------------------------------------------
 
+// The CLUB, which had no page. Every man had a line and the team they add up to
+// had none — and a manager's whole job is the team. Rows, not a sortable table:
+// there is one club and nothing to sort it against.
+function teamStatRows(save) {
+  const team = seasonTeam(save);
+  const record = `${team.wins}-${team.losses}`;
+  const diff = `${team.runDiff >= 0 ? "+" : "\u2212"}${Math.abs(team.runDiff)}`;
+  const row = (label, value, note = "") =>
+    ({ html: `${label} <b>${value}</b>${note ? ` <span class="gq-dim">${note}</span>` : ""}` });
+  return [
+    { section: "THE CLUB", ...row("RECORD", record, `${rateText(team.winPct)} &middot; ${team.games} GAME${team.games === 1 ? "" : "S"}`) },
+    { section: "THE CLUB", ...row("RUNS", `${team.runsFor}-${team.runsAgainst}`, `${diff} DIFF`) },
+    { section: "THE CLUB", ...row("PER GAME", team.runsPerGame.toFixed(1), `SCORED &middot; ${team.runsAllowedPerGame.toFixed(1)} ALLOWED`) },
+    { section: "AT THE PLATE", ...row("AVG", rateText(team.avg), `${rateText(team.obp)} OBP &middot; ${rateText(team.slg)} SLG`) },
+    { section: "AT THE PLATE", ...row("OPS", rateText(team.ops)) },
+    { section: "AT THE PLATE", ...row("POWER", `${team.hr} HR`, `${team.rbi} RBI &middot; ${team.sb} SB`) },
+    { section: "ON THE MOUND", ...row("RA9", team.runsPerNine.toFixed(2), `${ipText(team.outs)} IP`) },
+    { section: "ON THE MOUND", ...row("K/9", team.strikeoutsPerNine.toFixed(2), `${team.so} K`) }
+  ];
+}
+
 // The sortable columns per view, keyed 1-9 on the keyboard. Pressing the
 // same number again flips the direction. RA9 defaults ascending (lower is
 // better); everything else descending.
@@ -631,10 +652,21 @@ export function seriesStatLines(save) {
 export const seasonStatsScreen = {
   render(app) {
     const save = app.save;
+    const games = ensureSeasonStats(save).games;
+    if ((app.screen.view ?? "hitters") === "team") {
+      const rows = teamStatRows(save);
+      const index = clampIndex(app.screen.index ?? 0, rows.length);
+      return `<div class="gq-screen">
+        <div class="gq-topbar"><span>SEASON STATS &middot; THE CLUB</span><span>${games} GAME${games === 1 ? "" : "S"}</span></div>
+        <div class="gq-body"><div class="gq-frame gq-scroll gq-map-node">${
+          games ? sectionedMenu(rows, index) : `<p class="gq-dim">NO GAMES ON RECORD YET. GO PLAY SOMEBODY.</p>`
+        }</div></div>
+        <div class="gq-textbox"><p class="gq-dim">THE TEAM YOUR MEN ADD UP TO. Z FOR BATS. X to leave.</p></div>
+      </div>`;
+    }
     const { view, sorts, sort, dir, lines } = seasonLines(app);
     const scope = app.screen.scope ?? "roster";
     const index = clampIndex(app.screen.index ?? 0, lines.length);
-    const games = ensureSeasonStats(save).games;
     const sortBar = sorts
       .map((item, at) => (sort?.key === item.key
         ? `<b>${at + 1} ${item.label}${dir === "desc" ? "&#9660;" : "&#9650;"}</b>`
@@ -652,13 +684,18 @@ export const seasonStatsScreen = {
       </div>
       <div class="gq-textbox">${
         app.screen.query ? `<p>SEARCH: <b>${escapeHtml(app.screen.query)}</b>_ <span class="gq-dim">X CLEARS</span></p>` : ""
-      }<p class="gq-dim">W/162 IS WINS ADDED PER 162 GAMES &mdash; WHAT HE IS WORTH, NOT HOW LONG HE HAS BEEN HERE. &#8592;/&#8594; ROSTER &middot; EVERYONE. Z BATS/ARMS. Type a name to search &middot; 1-${sorts.length} sorts (again flips). X to leave.</p></div>
+      }<p class="gq-dim">W/162 IS WINS ADDED PER 162 GAMES &mdash; WHAT HE IS WORTH, NOT HOW LONG HE HAS BEEN HERE. &#8592;/&#8594; ROSTER &middot; EVERYONE. Z ${
+        view === "pitchers" ? "THE CLUB" : "ARMS"
+      }. Type a name to search &middot; 1-${sorts.length} sorts (again flips). X to leave.</p></div>
     </div>`;
   },
   hoverCard(app, index) {
+    if ((app.screen.view ?? "hitters") === "team") return null;
     return cardById(seasonLines(app).lines[index]?.id) ?? null;
   },
   typed(app, char) {
+    // The club's page has nothing to search and nothing to sort.
+    if ((app.screen.view ?? "hitters") === "team") return;
     if (/\d/.test(char)) {
       const { sorts } = seasonLines(app);
       const pick = sorts[Number(char) - 1];
@@ -679,6 +716,20 @@ export const seasonStatsScreen = {
     app.rerender();
   },
   key(app, key) {
+    const view = app.screen.view ?? "hitters";
+    if (view === "team") {
+      const rows = teamStatRows(app.save);
+      if (key === "up" || key === "down") {
+        app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), rows.length);
+      } else if (key === "a") {
+        app.screen.view = "hitters";
+        app.screen.index = 0;
+      } else if (key === "b") {
+        return app.go("map", { menuIndex: 0 });
+      }
+      app.rerender();
+      return;
+    }
     if (key === "left" || key === "right") {
       app.screen.scope = (app.screen.scope ?? "roster") === "roster" ? "all" : "roster";
       app.screen.index = 0;
@@ -686,8 +737,9 @@ export const seasonStatsScreen = {
       const { lines } = seasonLines(app);
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), lines.length);
     } else if (key === "a") {
-      // Different view, different columns: the sort resets with it.
-      app.screen.view = (app.screen.view ?? "hitters") === "hitters" ? "pitchers" : "hitters";
+      // Bats, then arms, then the team they add up to. Different view, different
+      // columns: the sort resets with it.
+      app.screen.view = view === "hitters" ? "pitchers" : "team";
       app.screen.sortKey = null;
       app.screen.sortDir = null;
       app.screen.index = 0;

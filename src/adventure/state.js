@@ -280,6 +280,75 @@ export function seasonHitters(save) {
     .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
 }
 
+// The CLUB's season, which is the one number nobody could read: the men each had
+// their line, and the team they add up to had none. Nine bats and four arms are a
+// team, and a team has a record, runs for and against, and rates of its own.
+//
+// The record and the runs come from the almanac — the games themselves — because
+// a box score knows who won and a stat line does not.
+export function seasonTeam(save) {
+  const games = ensureSeasonStats(save).games;
+  const bats = seasonHitters(save);
+  const arms = seasonPitchers(save);
+  const sum = (lines, key) => lines.reduce((total, line) => total + (Number(line[key]) || 0), 0);
+
+  const ab = sum(bats, "ab");
+  const h = sum(bats, "h");
+  const bb = sum(bats, "bb");
+  const pa = sum(bats, "pa");
+  const doubles = sum(bats, "d");
+  const triples = sum(bats, "t");
+  const hr = sum(bats, "hr");
+  const singles = h - doubles - triples - hr;
+  const totalBases = singles + doubles * 2 + triples * 3 + hr * 4;
+  const obp = pa ? (h + bb) / pa : 0;
+  const slg = ab ? totalBases / ab : 0;
+
+  const outs = sum(arms, "outs");
+  const runsAllowedByArms = sum(arms, "r");
+
+  let wins = 0;
+  let losses = 0;
+  let runsFor = 0;
+  let runsAgainst = 0;
+  for (const game of ensureAlmanac(save)) {
+    if (!game?.score || !game.playerSide) continue;
+    const mine = game.score[game.playerSide];
+    const theirs = game.score[game.playerSide === "home" ? "away" : "home"];
+    if (typeof mine !== "number" || typeof theirs !== "number") continue;
+    runsFor += mine;
+    runsAgainst += theirs;
+    if (game.won) wins += 1;
+    else losses += 1;
+  }
+
+  return {
+    games,
+    wins,
+    losses,
+    winPct: wins + losses > 0 ? wins / (wins + losses) : 0,
+    runsFor,
+    runsAgainst,
+    runDiff: runsFor - runsAgainst,
+    runsPerGame: games ? runsFor / games : 0,
+    runsAllowedPerGame: games ? runsAgainst / games : 0,
+    avg: ab ? h / ab : 0,
+    obp,
+    slg,
+    ops: obp + slg,
+    hr,
+    rbi: sum(bats, "rbi"),
+    sb: sum(bats, "sb"),
+    so: sum(arms, "so"),
+    outs,
+    // The arms' own runs allowed, per nine, which is not the same as the runs the
+    // CLUB gave up: a run that scores on a fielding play is charged to the game,
+    // not to the man on the mound.
+    runsPerNine: outs ? (runsAllowedByArms * 27) / outs : 0,
+    strikeoutsPerNine: outs ? (sum(arms, "so") * 27) / outs : 0
+  };
+}
+
 export function seasonPitchers(save) {
   return Object.values(ensureSeasonStats(save).pitchers)
     .map((line) => ({

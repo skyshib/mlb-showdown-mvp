@@ -1296,6 +1296,71 @@ test("game box scores fold into rolling season stats with batch-style rates", as
   assert.ok(stars.every((star) => star.summary.length > 0));
 });
 
+test("the club has a page of its own", async () => {
+  const { seasonStatsScreen } = await import("../src/adventure/ui/statsScreens.js");
+  const { seasonTeam } = await import("../src/adventure/state.js");
+  const { recordFinishedGame } = await import("../src/adventure/ui/battleScreen.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const { player, npc } = hookTeams();
+
+  // Every man had a line and the team they add up to had none, which is odd, since
+  // the team is the manager's whole job.
+  const empty = seasonTeam(save);
+  assert.equal(empty.games, 0);
+  assert.equal(empty.wins + empty.losses, 0, "no games, no record");
+
+  let wins = 0;
+  let runsFor = 0;
+  let runsAgainst = 0;
+  for (const seed of ["club-1", "club-2", "club-3"]) {
+    const result = simulateGame(buildTeam(player), buildTeam(npc), seed);
+    const score = { away: result.away.runs, home: result.home.runs };
+    const won = score.away > score.home;
+    recordGameStats(save, result.boxScore.away);
+    recordFinishedGame(save, {
+      trainer,
+      boxScore: result.boxScore,
+      playerSide: "away",
+      events: result.events,
+      score,
+      innings: result.innings,
+      won,
+      lineScore: result.lineScore
+    });
+    if (won) wins += 1;
+    runsFor += score.away;
+    runsAgainst += score.home;
+  }
+
+  const team = seasonTeam(save);
+  // The record and the runs come from the GAMES — a box score knows who won and a
+  // stat line does not.
+  assert.equal(team.games, 3);
+  assert.equal(team.wins, wins, "the club's record is the games it actually won");
+  assert.equal(team.losses, 3 - wins);
+  assert.equal(team.runsFor, runsFor, "runs scored");
+  assert.equal(team.runsAgainst, runsAgainst, "and runs given up");
+  assert.equal(team.runDiff, runsFor - runsAgainst);
+  assert.ok(team.ops > 0 && team.ops === team.obp + team.slg, "the club has a slash line");
+  assert.ok(team.runsPerNine > 0, "and the staff has a rate");
+
+  // Z walks bats -> arms -> the club, and the club's page is rows, not a table:
+  // there is one club and nothing to sort it against.
+  const app = { save, screen: { name: "seasonStats", view: "hitters", index: 0 }, go() {}, rerender() {} };
+  seasonStatsScreen.key(app, "a");
+  assert.equal(app.screen.view, "pitchers");
+  seasonStatsScreen.key(app, "a");
+  assert.equal(app.screen.view, "team", "and then the team they add up to");
+  const html = seasonStatsScreen.render(app);
+  assert.match(html, /SEASON STATS &middot; THE CLUB/);
+  assert.match(html, new RegExp(`RECORD <b>${team.wins}-${team.losses}</b>`));
+  assert.match(html, /RUNS <b>\d+-\d+<\/b>/, "the runs, both ways");
+  assert.equal(seasonStatsScreen.hoverCard(app, 0), null, "no card hovers off a club row");
+  seasonStatsScreen.key(app, "a");
+  assert.equal(app.screen.view, "hitters", "and round again to the bats");
+});
+
 test("the season page rates a man per 162, not by how long he has been here", async () => {
   const { seasonStatsScreen, seasonLines, statLineHtml } = await import("../src/adventure/ui/statsScreens.js");
   const { seasonHitters } = await import("../src/adventure/state.js");
