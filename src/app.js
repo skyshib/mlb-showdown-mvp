@@ -14,7 +14,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260715-a";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260715-b";
 import {
   isMuted,
   playClockWarning,
@@ -26,10 +26,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260715-a";
-import { hydratePhotos } from "./ui/photos.js?v=20260715-a";
-import { createBattle } from "./rules/battle/controller.js?v=20260715-a";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260715-a";
+} from "./ui/sounds.js?v=20260715-b";
+import { hydratePhotos } from "./ui/photos.js?v=20260715-b";
+import { createBattle } from "./rules/battle/controller.js?v=20260715-b";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260715-b";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -68,6 +68,7 @@ import {
   cpuSealedBid,
   createDraft,
   currentManager,
+  currentManagerMustReplace,
   draftHistory,
   getRosterNeeds,
   hasUnlimitedRoster,
@@ -108,7 +109,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260715-a";
+} from "./rules/draft.js?v=20260715-b";
 import {
   createRoom,
   fetchRoom,
@@ -117,7 +118,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260715-a";
+} from "./onlineClient.js?v=20260715-b";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -126,12 +127,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260715-a";
-import { computeAwards } from "./rules/awards.js?v=20260715-a";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260715-a";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260715-a";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260715-a";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260715-a";
+} from "./rules/batch.js?v=20260715-b";
+import { computeAwards } from "./rules/awards.js?v=20260715-b";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260715-b";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260715-b";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260715-b";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260715-b";
 import {
   basesText,
   cardRarity,
@@ -146,7 +147,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260715-a";
+} from "./ui/render.js?v=20260715-b";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -745,8 +746,8 @@ function defaultState() {
     selectedGameIndex: 0,
     selectedTeamName: null,
     // Each manager's watchlist, keyed by manager id: the cards they are keeping
-    // an eye on. It belongs to whoever is on the clock, so the list follows the
-    // draft around the table.
+    // an eye on. It belongs to your own seat when you have one; only an
+    // anonymous hotseat lets it follow the clock around the table.
     starred: {},
     // Up to three cards pinned side by side.
     compare: [],
@@ -2155,7 +2156,10 @@ function renderAuctionLotPanel(draft) {
   if (!player || !lot) return "";
   const online = state.online;
   const nominator = draft.managers.find((manager) => manager.id === lot.nominatorId);
-  const canEnterFor = (manager) => !online || online.host || manager.id === online.managerId;
+  // Your own seat only — being host does not put you at everyone's keyboard.
+  // A seat that goes quiet is covered by its own clock (a stalled bid auto-bids)
+  // or by the host closing the lot with Auto-run, not by a box you never wanted.
+  const canEnterFor = (manager) => !online || manager.id === online.managerId;
   const participants = draft.managers.filter((manager) =>
     lot.round === 2 ? lot.tie.managerIds.includes(manager.id) : manager.id in lot.bids || lot.pending.includes(manager.id)
   );
@@ -2181,10 +2185,9 @@ function renderAuctionLotPanel(draft) {
   // only onto the same card in the same round — never onto the next one.
   const lotKey = sealedBidLotKey(lot);
   // The bids are sealed, so nobody waits their turn: every manager this
-  // screen speaks for — your seat online, the whole table on a hotseat, any
-  // stalled seat if you host — gets their own box, and they can be filled in
-  // any order. The lot resolves on the last one in, whoever that turns out
-  // to be.
+  // screen speaks for — your seat online, the whole table on a hotseat — gets
+  // their own box, and they can be filled in any order. The lot resolves on the
+  // last one in, whoever that turns out to be.
   // A paused room takes no bids, so it offers nobody a box to put one in.
   const mine = isAuctionPaused(draft)
     ? []
@@ -4907,6 +4910,12 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
   const remaining = queued && !draft.complete
     ? `<p class="next-up">${nominationQueueRemaining(draft)} cards still to come up &middot; anyone short at the buzzer gets filled out free from the board</p>`
     : "";
+  // The board can run dry on a scarce slot — the last catcher taken while this
+  // seat still needs one. There is nothing legal left to pick, so tell him the
+  // one move he has: Auto-pick prints a replacement-level fill-in for the hole.
+  const stallNotice = !auction && !draft.complete && currentManagerMustReplace(draft)
+    ? `<p class="next-up stall-notice">The board is out of cards for ${escapeHtml(clockManager.name)}'s open ${escapeHtml(dockNeedsSummary(clockManager) || "slot")} &mdash; Auto-pick hands out a replacement-level fill-in.</p>`
+    : "";
   return `<section class="panel draft-focus">
     <div class="draft-focus-main">
       <p class="eyebrow">${eyebrow}</p>
@@ -4920,6 +4929,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
       </div>
       ${remaining}
+      ${stallNotice}
       ${snakeClocksHtml(draft)}
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
     </div>
@@ -5394,7 +5404,11 @@ function watchlistOwner() {
     if (!state.online.managerId) return null;
     return draft.managers.find((manager) => manager.id === state.online.managerId) ?? null;
   }
-  return currentManager(draft);
+  // The board is yours whenever you have a seat, so you can build your own list
+  // while another manager is up — being the one running the room does not hand
+  // you their watchlist. Only an anonymous hotseat (no seat picked, more than
+  // one human) lets it follow whoever is on the clock around the table.
+  return viewerManager(draft) ?? currentManager(draft);
 }
 
 function starredIds() {

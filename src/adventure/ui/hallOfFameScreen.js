@@ -1,7 +1,7 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260715-a";
-import { sectionedMenu, statLineHtml, gameStars } from "./statsScreens.js?v=20260715-a";
-import { cachedGames, fetchGames, opponentsOf, opposingLines } from "../gameArchive.js?v=20260715-a";
-import { universeConfig } from "../packs.js?v=20260715-a";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260715-b";
+import { sectionedMenu, statLineHtml, gameStars } from "./statsScreens.js?v=20260715-b";
+import { cachedGames, fetchGames, opponentsOf, opposingLines } from "../gameArchive.js?v=20260715-b";
+import { universeConfig } from "../packs.js?v=20260715-b";
 import {
   loadHallOfFame,
   hallOfFameByMode,
@@ -11,7 +11,7 @@ import {
   submitRun,
   syncRunProgress,
   mergeEntries
-} from "../hallOfFame.js?v=20260715-a";
+} from "../hallOfFame.js?v=20260715-b";
 
 // ---- Hall of fame ----------------------------------------------------------
 //

@@ -1,6 +1,6 @@
-import { createRng } from "./rng.js?v=20260715-a";
-import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js?v=20260715-a";
-import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260715-a";
+import { createRng } from "./rng.js?v=20260715-b";
+import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js?v=20260715-b";
+import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260715-b";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -1100,6 +1100,12 @@ export function undoLastPick(draft) {
   if (!manager || !player) return null;
 
   draft.pickedIds.delete(player.id);
+  // A replacement exists only because a stalled turn printed it. Undo that turn
+  // and it must leave the pool too, or it comes back as a pickable card on the
+  // board and the next stall prints its twin under the same id.
+  if (player.replacement) {
+    draft.pool = draft.pool.filter((item) => !(item.replacement && item.id === player.id));
+  }
   draft.pickNumber -= 1;
   draft.complete = false;
   if (manager.lineupAssignments) {
@@ -1296,8 +1302,77 @@ export function draftHistory(draft) {
 
 export function autopick(draft, now = Date.now()) {
   if (isAuctionDraft(draft)) return autoRunAuctionLot(draft, now);
+  // The board can corner a manager: the last catcher goes elsewhere and his C
+  // slot has nothing left to fill it. Auction closes that hole with a sweep;
+  // snake has no sweep, so hand him a replacement here rather than let
+  // bestAutopickTarget throw on an empty board.
+  if (currentManagerMustReplace(draft)) return pickReplacement(draft, now);
   const best = bestAutopickTarget(draft, currentManager(draft));
   return pickPlayer(draft, best.id, now);
+}
+
+// SNAKE STALL — replacement level. A manager the board has stranded, forced to
+// fill a slot the pool can no longer supply, cannot make a legal pick. Auction
+// covers this with its closing sweep; snake covers it one turn at a time, right
+// here, so a stranded roster is finished instead of throwing or softlocking.
+export function currentManagerMustReplace(draft) {
+  if (!draft || draft.complete || isAuctionDraft(draft)) return false;
+  const manager = currentManager(draft);
+  if (!manager || manager.roster.length >= draft.rosterSize) return false;
+  if (!neediestGap(manager.roster)) return false;
+  return !availablePlayers(draft).some((player) => canPickPlayer(draft, manager, player).ok);
+}
+
+// Fills the current manager's neediest hole with a replacement and passes the
+// turn, exactly as a real pick would — the clock is charged, the pick counts.
+export function pickReplacement(draft, now = Date.now()) {
+  if (draft.complete) return draft;
+  if (isAuctionDraft(draft)) throw new Error("Auction rosters are filled by the closing sweep");
+  const manager = currentManager(draft);
+  const gap = neediestGap(manager.roster);
+  if (!gap) throw new Error("Roster has no hole to fill");
+  const replacement = makeReplacementPlayer(
+    draft, manager, gap.kind, gap.role, gap.position, lastPickedEligible(draft, gap)
+  );
+  chargeSnakeClock(draft, now);
+  manager.roster.push(replacement);
+  draft.pickedIds.add(replacement.id);
+  draft.pickNumber += 1;
+  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  return draft;
+}
+
+// The hole to fill first: a missing fielding position (a catcher before a bat),
+// then a bare bat, then the rotation, then the bullpen. 1B never appears here —
+// any glove covers the bag, so activeRosterGaps folds it into the bat count.
+function neediestGap(roster) {
+  const gaps = activeRosterGaps(roster);
+  if (gaps.positions.length) return { kind: "hitter", role: null, position: gaps.positions[0] };
+  if (gaps.hitter > 0) return { kind: "hitter", role: null, position: null };
+  if (gaps.starter > 0) return { kind: "pitcher", role: "SP", position: null };
+  if (gaps.bullpen > 0) return { kind: "pitcher", role: "RP", position: null };
+  return null;
+}
+
+// The last real card drafted anywhere in the room that could fill this hole,
+// walking the snake order oldest-to-newest and keeping the latest match. That
+// is the card whose drafting usually drained the pool, and the one the
+// replacement copies.
+function lastPickedEligible(draft, gap) {
+  const counters = new Map();
+  let found = null;
+  for (let pick = 0; pick < draft.pickNumber; pick += 1) {
+    const manager = managerForPickNumber(draft, pick);
+    const index = counters.get(manager.id) ?? 0;
+    counters.set(manager.id, index + 1);
+    const player = manager.roster[index];
+    if (!player || player.replacement) continue;
+    if (player.kind !== gap.kind) continue;
+    if (gap.role && pitcherRole(player) !== gap.role) continue;
+    if (gap.position && !positionMatchesSlot(player, gap.position)) continue;
+    found = player;
+  }
+  return found;
 }
 
 function bestAutopickTarget(draft, manager) {
@@ -2043,7 +2118,7 @@ function leagueSupply(players) {
 // The card it copies is the CHEAPEST that plays the slot, owned or not, which
 // is the honest floor. The old fabricated card was a 180-point invention on a
 // board whose worst center fielder went for 20 — being swept was a reward.
-function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition) {
+function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition, preferredSource = null) {
   const slot = replacementSlot(neededKind, neededRole, neededPosition);
   const priorAtSlot = manager.roster.filter((player) => player.replacement && player.slot === slot).length;
   // "Replacement LF/RF", then "Replacement LF/RF #2" — the corner slots are the
@@ -2052,7 +2127,12 @@ function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPos
   // them apart is a roster nobody can read.
   const name = priorAtSlot === 0 ? `Replacement ${slot}` : `Replacement ${slot} #${priorAtSlot + 1}`;
   const id = `replacement-${manager.id}-${slot.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${priorAtSlot + 1}`;
-  const source = replacementSource(draft, neededKind, neededRole, neededPosition);
+  // The caller may hand in the card to copy — the snake stall copies the last
+  // real card drafted at the slot. Otherwise fall back to the cheapest on the
+  // board, which is the auction sweep's honest floor.
+  const source = preferredSource && !preferredSource.replacement
+    ? preferredSource
+    : replacementSource(draft, neededKind, neededRole, neededPosition);
   const replacement = source
     ? copyAsReplacement(source, { id, name, slot, kind: neededKind })
     : fabricateReplacement({ id, name, slot, kind: neededKind });

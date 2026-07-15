@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, draftHistory, managerValuation, normalizeCardPosition, pauseSnake, pickPlayer, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, managerValuation, normalizeCardPosition, pauseSnake, pickPlayer, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
   applyDouble,
@@ -1213,6 +1213,120 @@ test("draft blocks picks that would consume another manager's only required posi
   assert.equal(greedyPick.ok, false);
   assert.match(greedyPick.reason, /3B/);
   assert.equal(safePick.ok, true);
+});
+
+test("snake hands a stalled manager a replacement copy of the last card drafted at the slot", () => {
+  const makeBat = (id, position, extra = {}) =>
+    makeHitter({ id, position, positions: [{ pos: position, fielding: 2 }], ...extra });
+  const teamOne = [
+    makeBat("stall-one-1b", "1B"),
+    makeBat("stall-one-2b", "2B"),
+    makeBat("stall-one-3b", "3B"),
+    makeBat("stall-one-ss", "SS"),
+    makeBat("stall-one-lf", "LF"),
+    makeBat("stall-one-cf", "CF"),
+    makeBat("stall-one-rf", "RF"),
+    makeBat("stall-one-dh", "1B"),
+    makePitcher({ id: "stall-one-sp-1", role: "SP" }),
+    makePitcher({ id: "stall-one-sp-2", role: "SP" }),
+    makePitcher({ id: "stall-one-rp-1", role: "RP", ip: 1 }),
+    makePitcher({ id: "stall-one-rp-2", role: "RP", ip: 1 })
+  ];
+  const catcher = makeHitter({
+    id: "stall-two-c",
+    name: "Last Catcher",
+    position: "C",
+    onBase: 11,
+    points: 175,
+    positions: [{ pos: "C", fielding: 4 }]
+  });
+  const teamTwo = [
+    catcher,
+    makeBat("stall-two-1b", "1B"),
+    makeBat("stall-two-2b", "2B"),
+    makeBat("stall-two-3b", "3B"),
+    makeBat("stall-two-ss", "SS"),
+    makeBat("stall-two-lf", "LF"),
+    makeBat("stall-two-cf", "CF"),
+    makeBat("stall-two-rf", "RF"),
+    makePitcher({ id: "stall-two-sp-1", role: "SP" }),
+    makePitcher({ id: "stall-two-sp-2", role: "SP" }),
+    makePitcher({ id: "stall-two-rp-1", role: "RP", ip: 1 }),
+    makePitcher({ id: "stall-two-rp-2", role: "RP", ip: 1 })
+  ];
+  // A spare bat and a spare arm sit unowned on the board: legal-looking cards,
+  // but neither can fill Team One's one open slot, which is a catcher.
+  const spareBat = makeBat("stall-spare-bat", "SS");
+  const spareArm = makePitcher({ id: "stall-spare-arm", role: "RP", ip: 1 });
+  const pool = [...teamOne, ...teamTwo, spareBat, spareArm];
+  const draft = createDraft(["One", "Two"], pool, 13, "snake-stall");
+  draft.managers[0].roster = [...teamOne];
+  draft.managers[1].roster = [...teamTwo];
+  draft.pickedIds = new Set([...teamOne, ...teamTwo].map((player) => player.id));
+  draft.pickNumber = 24; // round 12, snake turns back to Team One
+
+  assert.equal(currentManager(draft).id, draft.managers[0].id);
+  assert.equal(currentManagerMustReplace(draft), true, "no legal pick fills Team One's open catcher slot");
+
+  autopick(draft);
+
+  const printed = draft.managers[0].roster.find((player) => player.replacement);
+  assert.ok(printed, "the stall is filled rather than throwing");
+  assert.equal(printed.name, "Replacement C");
+  assert.equal(printed.sourceId, "stall-two-c", "copies the last real catcher drafted");
+  assert.equal(printed.onBase, 11, "his numbers come across");
+  assert.equal(printed.points, 175);
+  assert.deepEqual(printed.positions, [{ pos: "C", fielding: 4 }]);
+  assert.deepEqual(validateRoster(draft.managers[0]).filter((issue) => issue.includes("C")), []);
+
+  // Undo the forced pick and the printed card leaves the pool too, or it would
+  // return as a pickable card on the board.
+  undoLastPick(draft);
+  assert.deepEqual(draft.pool.filter((player) => player.replacement), []);
+  assert.equal(draft.managers[0].roster.some((player) => player.replacement), false);
+});
+
+test("a catcher-short snake league finishes on a replacement instead of stalling", () => {
+  const bats = [];
+  for (const position of ["1B", "2B", "3B", "SS", "LF", "CF", "RF"]) {
+    for (let n = 0; n < 3; n += 1) {
+      bats.push(makeHitter({
+        id: `short-${position}-${n}`,
+        position,
+        positions: [{ pos: position, fielding: 1 }],
+        points: 200 - n
+      }));
+    }
+  }
+  const pitchers = [];
+  for (let n = 0; n < 5; n += 1) {
+    pitchers.push(makePitcher({ id: `short-sp-${n}`, role: "SP", points: 150 - n }));
+    pitchers.push(makePitcher({ id: `short-rp-${n}`, role: "RP", ip: 1, points: 140 - n }));
+  }
+  // One catcher, two teams that each need one. The league-finish guard blocks
+  // the pick that would strand the other team, so the lone catcher cannot be
+  // taken until a replacement has relieved one seat.
+  const onlyCatcher = makeHitter({ id: "short-only-c", position: "C", positions: [{ pos: "C", fielding: 3 }], points: 300 });
+  const pool = [onlyCatcher, ...bats, ...pitchers];
+  const draft = createDraft(["One", "Two"], pool, 13, "catcher-short");
+
+  let guard = 0;
+  while (!draft.complete && guard < 100) {
+    autopick(draft);
+    guard += 1;
+  }
+
+  assert.ok(draft.complete, "the draft finishes rather than throwing on the last catcher");
+  for (const manager of draft.managers) {
+    assert.deepEqual(validateRoster(manager), [], `${manager.name} fields a legal roster`);
+  }
+  // Exactly one C slot in the room must be a replacement — there is only one
+  // real catcher for two seats — and the real one is taken once a replacement
+  // frees the block.
+  const printed = draft.managers.flatMap((manager) => manager.roster).filter((player) => player.replacement);
+  assert.equal(printed.length, 1, "one hole, one replacement");
+  assert.equal(printed[0].slot, "C");
+  assert.equal(draft.pickedIds.has("short-only-c"), true, "the real catcher is drafted once the block lifts");
 });
 
 test("autopick keeps rosters legal", () => {
