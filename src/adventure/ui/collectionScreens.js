@@ -1506,6 +1506,16 @@ function packActions(app, card, cards) {
       app.screen.pickIndex = defaultSwapIndex(save, card, targets);
     }
   });
+
+  // Flag him a keeper right out of the wrapper, so the bulk-sells spare him.
+  // Meaningless once he's sold — there's no copy left to shield.
+  const starred = isStarred(save, card.id);
+  actions.push({
+    label: sold ? `&#9733; STAR AS KEEPER <span class="gq-dim">SOLD</span>`
+      : starred ? "&#9733; UNSTAR KEEPER" : "&#9733; STAR AS KEEPER",
+    disabled: sold,
+    run: () => { toggleStar(save, card.id); persistSave(save); }
+  });
   return actions;
 }
 
