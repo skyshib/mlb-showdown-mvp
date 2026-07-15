@@ -1,8 +1,8 @@
-import { escapeHtml, clampIndex } from "./helpers.js?v=20260715-b";
-import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260715-b";
-import { ensureAlmanac } from "../state.js?v=20260715-b";
-import { expandGame } from "../gameLog.js?v=20260715-b";
-import { fetchGames } from "../gameArchive.js?v=20260715-b";
+import { escapeHtml, clampIndex } from "./helpers.js?v=20260715-c";
+import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260715-c";
+import { ensureAlmanac } from "../state.js?v=20260715-c";
+import { expandGame } from "../gameLog.js?v=20260715-c";
+import { fetchGames } from "../gameArchive.js?v=20260715-c";
 import {
   RECORD_PAGES,
   recordsOnPage,
@@ -10,7 +10,7 @@ import {
   cachedGlobalRecords,
   fetchGlobalRecords,
   submitRecords
-} from "../records.js?v=20260715-b";
+} from "../records.js?v=20260715-c";
 
 // ---- World records ----------------------------------------------------------
 //

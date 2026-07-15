@@ -130,7 +130,10 @@ export function positionFieldingLabel(card) {
 }
 
 export function resolveChart(chart, roll) {
-  const match = chart.find((entry) => roll >= entry.from && roll <= entry.to);
+  // Open-ended top ranges are held as `to: Infinity`, but JSON.stringify turns
+  // that into null when a save round-trips through localStorage. Treat any
+  // non-finite upper bound as open-ended so a rehydrated chart still resolves.
+  const match = chart.find((entry) => roll >= entry.from && roll <= (Number.isFinite(entry.to) ? entry.to : Infinity));
   if (!match) {
     throw new Error(`No chart result for roll ${roll}`);
   }

@@ -134,6 +134,20 @@ test("resolveChart finds the matching d20 range", () => {
   assert.equal(resolveChart(hitter.chart, 20), RESULTS.HR);
 });
 
+test("resolveChart resolves open-ended top ranges after a JSON round-trip", () => {
+  // Open-ended ranges hold `to: Infinity`; JSON.stringify turns that into null
+  // when a save round-trips through localStorage. Both must still resolve.
+  const chart = [
+    { from: 1, to: 18, result: RESULTS.SINGLE },
+    { from: 19, to: Infinity, result: RESULTS.HR }
+  ];
+  assert.equal(resolveChart(chart, 19), RESULTS.HR);
+  const rehydrated = JSON.parse(JSON.stringify(chart));
+  assert.equal(rehydrated[1].to, null);
+  assert.equal(resolveChart(rehydrated, 19), RESULTS.HR);
+  assert.equal(resolveChart(rehydrated, 20), RESULTS.HR);
+});
+
 test("compactChart uses single numbers for one-roll ranges", () => {
   assert.equal(
     compactChart([

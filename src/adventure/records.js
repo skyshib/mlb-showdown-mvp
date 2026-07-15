@@ -1,5 +1,5 @@
-import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260715-b";
-import { loadHallOfFame } from "./hallOfFame.js?v=20260715-b";
+import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260715-c";
+import { loadHallOfFame } from "./hallOfFame.js?v=20260715-c";
 
 // The record book, and it is the whole league's, not yours.
 //
