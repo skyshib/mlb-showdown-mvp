@@ -9,9 +9,11 @@ import { personConflict, playsPosition } from "../rules/cards.js?v=20260714-k";
 const HITTER_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER"];
 const PITCHER_SLOTS = ["SP", "SP", "RP", "RP"];
 
-// Archetype scoring biases which card wins a slot; the greedy budget keeps
-// the roster legal and affordable either way. Scoring reads TRUE value, not
-// the noisy printed price — trainers scout talent, then pay the sticker.
+// Archetype scoring biases which card wins a slot; the budget keeps the roster
+// legal and affordable either way. Scoring reads the PRINTED price the trainer
+// actually pays — not the hidden true value — so a card the market underpriced
+// this season is valued at its bargain sticker, not adored as a discounted star
+// that every rival stacks onto the same slot.
 const ARCHETYPES = {
   balanced: (card) => worth(card),
   contact: (card) => (card.kind === "hitter" ? card.onBase * 30 + worth(card) * 0.2 : worth(card)),
@@ -21,7 +23,7 @@ const ARCHETYPES = {
 };
 
 function worth(card) {
-  return card.truePoints ?? card.points;
+  return card.points;
 }
 
 function chartSlots(card, result) {
@@ -56,6 +58,14 @@ export function buildNpcTeam(trainer, save = null) {
   };
 }
 
+// How sharply the climb favors a weak slot over a strong one: the odds a slot
+// is picked next scale with (1 - its card's positional percentile) raised to
+// this power. Higher means the cheapest slots almost always go first.
+const WEAK_SLOT_BIAS = 4;
+// The climb stops after this many draws in a row overshoot the budget — a
+// stochastic stop, so two trainers with the same budget settle differently.
+const REJECT_LIMIT = 25;
+
 // The roster in fill order, alongside the slot each card was bought for — an
 // heir needs that pairing to keep shopping where his predecessor stopped.
 function assembleRoster(trainer, save) {
@@ -63,53 +73,19 @@ function assembleRoster(trainer, save) {
   const pointBudget = npcBudget(save, trainer);
   const score = ARCHETYPES[trainer.archetype] ?? ARCHETYPES.balanced;
   // A trainer who INHERITS doesn't hold a draft: he keeps the binder he already
-  // owns and spends the season's new money on it. Everything he can't afford to
-  // improve, he keeps — so the rival you meet at the summit is the rival from
-  // Route 1, three trades later, not a stranger wearing his sprite.
+  // owns and spends the season's new money on it — so RIVAL CAM at the summit is
+  // the Cam from Route 1, several trades richer, not a stranger wearing his
+  // sprite. He opens from last round's roster and climbs it with the new budget.
   const heirloom = trainer.inherits ? assembleRoster(trainerById(trainer.inherits), save) : null;
-  // One stream feeds the slot order, the weights, and the picks, in that order.
-  const rng = heirloom ? null : createRng(`npc-team:${trainer.teamSeed}`);
+  // One seeded stream feeds the slot order, the baseline fill, and every upgrade
+  // draw — so a save always rebuilds the same rival, round after round.
+  const rng = createRng(`npc-team:${trainer.teamSeed}`);
   const slots = heirloom ? heirloom.slots : draftSlots(trainer, rng);
-  const roster = heirloom ? [...heirloom.roster] : [];
+  // A fresh trainer opens from the cheapest legal roster; an heir from his
+  // inherited binder. The same climb spends the budget up from whichever floor.
+  const roster = heirloom ? [...heirloom.roster] : minimumRoster(pool, slots, trainer);
   const used = new Set(roster.map((card) => card.id));
-  let spent = roster.reduce((total, card) => total + card.points, 0);
-
-  if (!heirloom) ({ spent } = greedyFill({ pool, pointBudget, score, slots, roster, used, rng, trainer }));
-
-  // Upgrade pass: roll unspent budget into the roster instead of leaving it
-  // on the table. Keep taking the single best swap — same slot, unused card,
-  // better archetype fit — until the leftover can't buy one. Every swap must
-  // spend MORE (this is budget-filling, not sidegrade-shopping), so the loop
-  // is bounded by the leftover and the team lands close to the limit. For an
-  // heir this pass IS the build: his whole roster is the leftover's shopping
-  // list, and the budget he grew by is what he trades up with.
-  let swapped = true;
-  while (swapped) {
-    swapped = false;
-    let best = null;
-    for (let index = 0; index < roster.length; index += 1) {
-      const current = roster[index];
-      const ceiling = pointBudget - spent + current.points;
-      for (const card of pool) {
-        if (used.has(card.id) || card.points > ceiling || card.points <= current.points) continue;
-        if (!slotMatches(slots[index], card)) continue;
-        if (personConflict(roster, card, current.id)) continue;
-        const gain = score(card) - score(current);
-        if (gain <= 0) continue;
-        if (!best || gain > best.gain || (gain === best.gain && card.points < best.card.points)) {
-          best = { index, card, gain };
-        }
-      }
-    }
-    if (best) {
-      const outgoing = roster[best.index];
-      used.delete(outgoing.id);
-      used.add(best.card.id);
-      roster[best.index] = best.card;
-      spent += best.card.points - outgoing.points;
-      swapped = true;
-    }
-  }
+  const spent = climb({ pool, pointBudget, score, slots, roster, used, rng });
 
   return { roster, slots, spent };
 }
@@ -124,62 +100,114 @@ function draftSlots(trainer, rng) {
     : shuffled([...HITTER_SLOTS, ...PITCHER_SLOTS], rng);
 }
 
-// Greedy under budget: fill slots one at a time, always leaving enough budget
-// to cover the remaining slots with the cheapest unused fits, and spend most of
-// the room on the best archetype fit.
-function greedyFill({ pool, pointBudget, score, slots, roster, used, rng, trainer }) {
-  let spent = 0;
-
-  // One era of a player per team: a slot never fills with a second decade
-  // of someone already on the roster.
-  const unusedFits = (slot) => pool.filter((card) => !used.has(card.id) && !personConflict(roster, card) && slotMatches(slot, card));
-
-  const reserveFor = (remainingSlots) => {
-    const reserved = new Set();
-    let total = 0;
-    for (const slot of remainingSlots) {
-      const cheapest = pool
-        .filter((card) => !used.has(card.id) && !reserved.has(card.id) && slotMatches(slot, card))
-        .sort((a, b) => a.points - b.points)[0];
-      if (!cheapest) return Infinity;
-      reserved.add(cheapest.id);
-      total += cheapest.points;
-    }
-    return total;
-  };
-
-  // Every slot gets its own share of the budget up front, drawn from a
-  // bounded band (~0.7-1.6x an even split) so rosters read like real teams —
-  // a couple of headliners, a solid middle, role players — instead of one
-  // mega star and twelve minimum bids. Unspent allocation rolls forward.
-  const weights = slots.map(() => 0.7 + rng.next() * 0.9);
-  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
-  let carry = 0;
-
-  for (let index = 0; index < slots.length; index += 1) {
-    const slot = slots[index];
-    const reserve = reserveFor(slots.slice(index + 1));
-    const room = pointBudget - spent - reserve;
-    const allocation = (pointBudget * weights[index]) / weightTotal + carry;
-    const target = Math.max(0, Math.min(allocation, room));
-    const fits = unusedFits(slot);
-    // Shop near the slot's allocation first; widen to anything affordable,
-    // then to the cheapest legal fill, only if the band comes up empty.
-    let candidates = fits.filter((card) => card.points <= Math.min(room, target * 1.25) && card.points >= target * 0.5);
-    if (!candidates.length) candidates = fits.filter((card) => card.points <= room);
-    if (!candidates.length) candidates = [...fits].sort((a, b) => a.points - b.points).slice(0, 1);
-    candidates = [...candidates].sort((a, b) => score(b) - score(a) || a.points - b.points || a.name.localeCompare(b.name));
-    // A pinch of seeded variety among near-equal picks so trainers sharing an
-    // archetype don't field carbon-copy teams.
-    const pick = candidates[Math.min(candidates.length - 1, rng.int(0, Math.min(2, candidates.length - 1)))];
-    if (!pick) throw new Error(`NPC team for ${trainer.id} cannot fill ${slot}`);
-    used.add(pick.id);
-    roster.push(pick);
-    spent += pick.points;
-    carry = allocation - pick.points;
+// The cheapest legal roster: fill every slot with the least-expensive unused
+// card that fits, one era of a player per team. This floor is what the climb
+// trades up from.
+function minimumRoster(pool, slots, trainer) {
+  const roster = [];
+  const used = new Set();
+  for (const slot of slots) {
+    const cheapest = pool
+      .filter((card) => !used.has(card.id) && !personConflict(roster, card) && slotMatches(slot, card))
+      .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name))[0];
+    if (!cheapest) throw new Error(`NPC team for ${trainer.id} cannot fill ${slot}`);
+    used.add(cheapest.id);
+    roster.push(cheapest);
   }
+  return roster;
+}
 
-  return { spent };
+// The climb: from the starting roster, keep upgrading a slot at a time. The slot
+// to raise is drawn at random but weighted toward whichever holds the weakest
+// card FOR ITS POSITION — a scrub shortstop is far likelier to get the next
+// upgrade than a slot already fielding a star, so the budget spreads and the
+// floor lifts, yet a lucky slot can still climb twice into a genuine headliner.
+// Within the chosen slot the replacement is weighted by archetype fit, keeping a
+// power squad's bats and an ace's arm. A pick that would breach the budget is
+// rejected; REJECT_LIMIT rejections in a row end the climb.
+function climb({ pool, pointBudget, score, slots, roster, used, rng }) {
+  let spent = roster.reduce((total, card) => total + card.points, 0);
+  const percentileOf = positionalPercentile(pool, slots);
+  let rejects = 0;
+  while (rejects < REJECT_LIMIT) {
+    const openSlots = [];
+    for (let index = 0; index < roster.length; index += 1) {
+      const upgrades = slotUpgrades({ pool, score, slots, roster, used, index });
+      if (!upgrades.length) continue;
+      const weakness = 1 - percentileOf(slots[index], roster[index].points);
+      openSlots.push({ index, upgrades, weight: Math.max(weakness ** WEAK_SLOT_BIAS, 1e-6) });
+    }
+    if (!openSlots.length) break;
+    const slotPick = weightedPick(openSlots, rng);
+    const cardPick = weightedPick(slotPick.upgrades, rng);
+    const delta = cardPick.card.points - roster[slotPick.index].points;
+    if (spent + delta > pointBudget) {
+      rejects += 1;
+      continue;
+    }
+    applySwap(roster, used, slotPick.index, cardPick.card);
+    spent += delta;
+    rejects = 0;
+  }
+  return spent;
+}
+
+// Every legal upgrade for one slot: an unused card that costs MORE than the
+// incumbent and fits the archetype BETTER. The weight is the fit gain, which
+// biases card choice toward the trainer's strengths.
+function slotUpgrades({ pool, score, slots, roster, used, index }) {
+  const current = roster[index];
+  const slot = slots[index];
+  const moves = [];
+  for (const card of pool) {
+    if (used.has(card.id) || card.points <= current.points) continue;
+    if (!slotMatches(slot, card)) continue;
+    if (personConflict(roster, card, current.id)) continue;
+    const gain = score(card) - score(current);
+    if (gain <= 0) continue;
+    moves.push({ card, weight: gain });
+  }
+  return moves;
+}
+
+function applySwap(roster, used, index, card) {
+  used.delete(roster[index].id);
+  used.add(card.id);
+  roster[index] = card;
+}
+
+// For each distinct slot label, the sorted prices of every card that can fill
+// it — enough to place any card in its positional pecking order. A card at the
+// 10th percentile is a bargain-bin fit; one at the 90th is a headliner.
+function positionalPercentile(pool, slots) {
+  const prices = new Map();
+  for (const slot of new Set(slots)) {
+    prices.set(slot, pool.filter((card) => slotMatches(slot, card)).map((card) => card.points).sort((a, b) => a - b));
+  }
+  return (slot, points) => {
+    const sorted = prices.get(slot);
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] < points) lo = mid + 1;
+      else hi = mid;
+    }
+    return sorted.length ? lo / sorted.length : 0;
+  };
+}
+
+// Draw one item with probability proportional to its weight, so favorites go
+// more often but the standout is never a lock — the reason rivals diverge
+// instead of fielding the same binder.
+function weightedPick(items, rng) {
+  const total = items.reduce((sum, item) => sum + item.weight, 0);
+  let roll = rng.next() * total;
+  for (const item of items) {
+    roll -= item.weight;
+    if (roll <= 0) return item;
+  }
+  return items[items.length - 1];
 }
 
 function shuffled(slots, rng) {
