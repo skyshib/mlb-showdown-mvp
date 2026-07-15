@@ -337,6 +337,24 @@ h1.gq-logo {
   color: var(--gb-dark);
 }
 .gq-cursor .gq-swap-spot { color: var(--gb-light); }
+/* The roster book stands both dugouts up at once — your lineup over your arms
+   on the left, theirs on the right, the hovered card read large down the third
+   column. Each dugout is its own frame and scrolls on its own, so a deep
+   bullpen on one side never shoves the other's nine off the screen. The rows
+   carry a POSITION and a name and a stat tail, so the menu reads a size down to
+   fit two lists where one used to sit. */
+.gq-columns-rosters { grid-template-columns: 1.1fr 1.1fr 1fr; }
+/* A dugout column is a third of a screen wide and every man carries a spot, a
+   name, a year, and two stats — too much for one line at the screen's usual
+   size and spacing. Tightened to fit the man on one line, the row reads as a
+   card does: the name up top, his numbers dimmed on the line underneath. */
+.gq-columns-rosters .gq-menu { font-size: 2cqw; letter-spacing: 0; }
+.gq-columns-rosters .gq-menu .gq-dim { display: block; }
+.gq-columns-rosters .gq-menu li { padding-block: 0.5cqw; }
+.gq-columns-rosters .gq-caret { width: 1.8cqw; }
+.gq-columns-rosters .gq-card-side .gq-card { width: 96%; }
+.gq-roster-team h3 { font-size: 2.6cqw; margin: 1.2cqw 0 0.4cqw; }
+.gq-roster-team > h3:first-child { margin-top: 0; }
 .gq-columns > div { min-height: 0; overflow-y: auto; }
 /* Screens that want the whole card visible without scrolling (the Team
    view) shrink it a quarter and center it; the catalog goes a notch

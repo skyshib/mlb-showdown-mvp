@@ -914,23 +914,25 @@ function resolveGameEnd(app, phase) {
 }
 
 // Every card in the game, sectioned: your lineup in batting order, your
-// staff, then theirs. The &#9679; marks the arm currently on the mound.
+// staff, then theirs. The &#9679; marks the arm currently on the mound. The
+// four sections come out in dugout order — yours (lineup, arms) then theirs —
+// which is the order renderRosters stands them up in its two columns.
 function rosterRows(battle) {
   const rows = [];
   const sides = [
-    { key: battle.playerSide, tag: "YOU" },
-    { key: battle.npcSide, tag: "THEM" }
+    { key: battle.playerSide, tag: "YOUR" },
+    { key: battle.npcSide, tag: "THEIR" }
   ];
   for (const side of sides) {
     const team = battle.state[side.key];
     const onMound = battle.state.pitching[side.key].pitcherIndex;
     team.lineup.forEach((player, index) => rows.push({
-      section: `${side.tag} — LINEUP`,
+      section: `${side.tag} LINEUP`,
       html: `${index + 1}. ${escapeHtml(player.assignedPosition ?? player.position)} ${escapeHtml(shortName(player.name))} <span class="gq-dim">OB${player.onBase} SPD${player.speed}</span>`,
       card: player
     }));
     team.pitchers.forEach((pitcher, index) => rows.push({
-      section: `${side.tag} — ARMS`,
+      section: `${side.tag} ARMS`,
       html: `${index === onMound ? "&#9679; " : ""}${escapeHtml(pitcher.role)} ${escapeHtml(shortName(pitcher.name))} <span class="gq-dim">CTRL${pitcher.control} IP${pitcher.ip}</span>`,
       card: pitcher
     }));
@@ -938,6 +940,11 @@ function rosterRows(battle) {
   return rows;
 }
 
+// Both dugouts, side by side: your lineup over your arms on the left, theirs on
+// the right, and whichever card the cursor rests on read large down the third
+// column. rosterIndex still walks one flat list top to bottom — down the left
+// dugout, then down the right — so the keyboard and the D-pad don't have to know
+// there are two columns now.
 function renderRosters(app, battle, trainer) {
   const rows = rosterRows(battle);
   const index = clampIndex(app.screen.rosterIndex ?? 0, rows.length);
@@ -946,19 +953,23 @@ function renderRosters(app, battle, trainer) {
   rows.forEach((row, rowIndex) => {
     if (row.section !== rows[rowIndex - 1]?.section) sections.push({ header: row.section, start: rowIndex });
   });
-  let listHtml = "";
-  for (const [sectionIndex, section] of sections.entries()) {
+  // One section drawn as a heading plus its slice of the flat row list, with
+  // every row still carrying its global index so hover and clicks land right.
+  const sectionHtml = (sectionIndex) => {
+    const section = sections[sectionIndex];
+    if (!section) return "";
     const end = sections[sectionIndex + 1]?.start ?? rows.length;
-    listHtml += `<h3>${section.header}</h3>${menuHtml(
+    return `<h3>${section.header}</h3>${menuHtml(
       rows.slice(section.start, end).map((row) => ({ html: row.html })),
       index - section.start,
       { offset: section.start }
     )}`;
-  }
+  };
   return `<div class="gq-screen">
     <div class="gq-topbar"><span>ROSTERS &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
-    <div class="gq-body"><div class="gq-columns">
-      <div class="gq-frame gq-scroll">${listHtml}</div>
+    <div class="gq-body"><div class="gq-columns gq-columns-rosters">
+      <div class="gq-frame gq-roster-team">${sectionHtml(0)}${sectionHtml(1)}</div>
+      <div class="gq-frame gq-roster-team">${sectionHtml(2)}${sectionHtml(3)}</div>
       <div class="gq-card-side">${selected ? cardPanelHtml(selected.card) : ""}</div>
     </div></div>
     <div class="gq-textbox"><p class="gq-dim">Hover or move the cursor to read a card. X to go back.</p></div>
