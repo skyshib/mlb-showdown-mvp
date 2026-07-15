@@ -9,10 +9,10 @@ import {
   battlePhase,
   fastForward,
   npcMoundVisit
-} from "../rules/battle/controller.js?v=20260715-c";
-import { describeEvent, halfLabel } from "./playByPlay.js?v=20260715-c";
-import { cardPanelHtml, escapeHtml, shortName, stripCardYear } from "./cardFace.js?v=20260715-c";
-import { hydratePhotos } from "./photos.js?v=20260715-c";
+} from "../rules/battle/controller.js?v=20260715-d";
+import { describeEvent, halfLabel } from "./playByPlay.js?v=20260715-d";
+import { cardPanelHtml, escapeHtml, shortName, stripCardYear } from "./cardFace.js?v=20260715-d";
+import { hydratePhotos } from "./photos.js?v=20260715-d";
 
 // The interactive game: the same engine the adventure's battles run on, in
 // the draft app's clothes. You manage one drafted roster against another —

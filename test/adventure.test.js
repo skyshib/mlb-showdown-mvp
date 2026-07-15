@@ -2471,6 +2471,9 @@ test("the NPC mound visit is its own event, never smuggled into the swing", asyn
   battle.state.inning = 8;
   const starter = battle.state.home.pitchers[0];
   battle.state.pitching.home.battersFaced = starter.ip * 4 + 4;
+  // Deep into the game — his four-inning floor is long spent, so the only thing
+  // deciding the hook is the fatigue math the test is about.
+  battle.state.pitching.home.outsRecorded = 21;
 
   // The visit fires as its own event before the batter decision.
   const visit = npcMoundVisit(battle);

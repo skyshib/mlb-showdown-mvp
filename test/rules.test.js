@@ -11,12 +11,14 @@ import {
   applySingle,
   applyWalk,
   attemptSteal,
+  autoRelieve,
   createInitialState,
   pitcherStatus,
   playGameEvent,
   playPlateAppearance,
   playStealAttempt,
-  simulateGame
+  simulateGame,
+  STARTER_MIN_OUTS
 } from "../src/rules/game.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
@@ -575,6 +577,7 @@ test("the pen sends its BEST arm, not the next man along the bench", () => {
   // sitting in the pen. A man that deep is deep in the GAME too, the eighth, and
   // the innings left are what tell the skipper he can afford the arm.
   state.pitching.home.battersFaced = 32;
+  state.pitching.home.outsRecorded = 21;
   state.inning = 8;
 
   const event = playPlateAppearance(state, repeatingRng(20, 1));
@@ -611,13 +614,17 @@ test("the hook gets quicker as the outs run out — the same gap rides in the fi
   const moundIn = (inning) => {
     const state = createInitialState(teamA, staff);
     state.inning = inning;
+    // Outs in the book that match the inning, so the four-inning floor is spent
+    // by the time the sliding hook is the thing being asked about.
+    state.pitching.home.outsRecorded = (inning - 1) * 3;
     return pitcherStatus(state, "home").pitcher.name;
   };
 
   // Fresh, first batter of the game, nothing has happened yet.
   assert.equal(moundIn(1), "Weak Starter", "he is not pulled before he has thrown a pitch");
   assert.equal(moundIn(2), "Weak Starter", "nor in the second");
-  // Same staff, same gap, same fatigue — but now his outs are worth nothing.
+  // Same staff, same gap, same fatigue — but now his floor is up and his outs are
+  // worth nothing.
   assert.equal(moundIn(8), "Ace Reliever", "and in the eighth the pen is worth going to get");
 });
 
@@ -641,6 +648,10 @@ test("a starter is pulled on his own IP, not on a fixed seven innings", () => {
     for (let faced = 0; faced <= 60; faced += 1) {
       const state = createInitialState(teamA, staffOf(ip));
       state.pitching.home.battersFaced = faced;
+      // Outs track batters faced closely enough here; the point is that by the
+      // time fatigue makes the pen better (deep past his tank), his four-inning
+      // floor is long gone and cannot be what pulls him.
+      state.pitching.home.outsRecorded = faced;
       if (pitcherStatus(state, "home").pitcher.name !== "Starter") return faced;
     }
     return null;
@@ -1780,25 +1791,78 @@ test("a tired ace keeps the ball when the pen is worse than he is", () => {
   assert.equal(event.fatiguePenalty, 2, "and he wears the fatigue while he does it");
 });
 
-test("a starter getting hit around comes out early, tired or not", () => {
+test("a starter getting hit around comes out the moment his four-inning floor is up, tired or not", () => {
   const batteringPractice = {
     name: "Batting Practice",
     lineup: teamB.lineup,
     pitchers: [
-      // Fresh as a daisy and utterly hittable.
+      // Utterly hittable, but the four-inning floor is a hard rule: he wears the
+      // first four whatever the pen holds — see STARTER_MIN_OUTS.
       makePitcher({ id: "bp", name: "Batting Practice Guy", control: 0, ip: 7 }),
       makePitcher({ id: "good-1", name: "Good Arm", control: 9, ip: 3 }),
       makePitcher({ id: "good-2", name: "Good Arm Two", control: 8, ip: 3 })
     ]
   };
-  const state = createInitialState(teamA, batteringPractice);
-  // Nobody is tired. The old rule would have let him throw into the seventh.
-  state.pitching.home.battersFaced = 0;
+  // One out shy of the floor: the pen sits, however hittable he is.
+  const early = createInitialState(teamA, batteringPractice);
+  early.pitching.home.battersFaced = 11;
+  early.pitching.home.outsRecorded = 11;
+  assert.equal(playPlateAppearance(early, repeatingRng(20, 1)).pitcher, "Batting Practice Guy",
+    "the floor holds the ball even in the hands of a batting-practice arm");
 
-  const event = playPlateAppearance(state, repeatingRng(20, 1));
-
-  assert.equal(event.pitcher, "Good Arm", "quality innings in the pen do not sit idle behind a bad start");
+  // Twelve outs in the book (his floor is up) and still nobody is tired: the
+  // instant the floor lifts, the good arm comes in.
+  const atFloor = createInitialState(teamA, batteringPractice);
+  atFloor.pitching.home.battersFaced = 12;
+  atFloor.pitching.home.outsRecorded = 12;
+  const event = playPlateAppearance(atFloor, repeatingRng(20, 1));
+  assert.equal(event.pitcher, "Good Arm", "quality innings in the pen do not sit idle behind a bad start past its floor");
   assert.equal(event.fatiguePenalty, 0);
+});
+
+test("a starter gets his four innings before any hook, however good the pen behind him", () => {
+  // The bug: an elite short reliever (a lights-out closer) read as such a big
+  // upgrade over a perfectly fine starter that the skipper pulled the starter on
+  // the first batter — the closer then threw eight innings he was never built
+  // for. The four-inning floor answers it from outside the relief math.
+  const stackedPen = {
+    name: "Great Closer, Short Pen",
+    lineup: teamB.lineup,
+    pitchers: [
+      makePitcher({ id: "sp", name: "Solid Starter", role: "SP", control: 2, ip: 6 }),
+      makePitcher({ id: "closer", name: "Lights Out", role: "RP", control: 8, ip: 1 }),
+      makePitcher({ id: "setup", name: "Setup Man", role: "RP", control: 7, ip: 1 })
+    ]
+  };
+  assert.equal(STARTER_MIN_OUTS, 12, "the floor is four full innings");
+
+  // One out short of the floor: the skipper's hands are tied, elite pen or not.
+  const early = createInitialState(teamA, stackedPen);
+  early.inning = 4;
+  early.pitching.home.outsRecorded = STARTER_MIN_OUTS - 1;
+  assert.equal(autoRelieve(early, "home"), null, "eleven outs is not four innings; the starter stays");
+  assert.equal(early.pitching.home.pitcherIndex, 0, "and he is still the man on the mound");
+
+  // Twelve outs in the book: the floor lifts and the hook is live again.
+  const atFloor = createInitialState(teamA, stackedPen);
+  atFloor.inning = 5;
+  atFloor.pitching.home.outsRecorded = STARTER_MIN_OUTS;
+  const pulled = autoRelieve(atFloor, "home");
+  assert.ok(pulled, "four innings in, the skipper is free to go get him");
+  assert.equal(pulled.name, "Lights Out", "and he sends the best arm he has");
+
+  // A reliever who inherited the game carries no floor of his own. The pen is
+  // ordered worst-arm-first, so index 1 is the setup man; in for barely an inning
+  // (two outs, well under the floor) but gassed past his one-inning tank, he
+  // gives way to the fresher closer waiting behind him.
+  const reliever = createInitialState(teamA, stackedPen);
+  reliever.inning = 6;
+  reliever.pitching.home.pitcherIndex = 1;
+  reliever.pitching.home.outsRecorded = 2;
+  reliever.pitching.home.battersFaced = 24;
+  const swapped = autoRelieve(reliever, "home");
+  assert.ok(swapped, "a reliever under the floor's out count is still not held by it");
+  assert.equal(swapped.name, "Lights Out", "the tiring setup man gives way to the fresher arm");
 });
 
 test("the hook holds when the pen has no innings left to give", () => {

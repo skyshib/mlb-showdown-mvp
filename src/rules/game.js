@@ -1,6 +1,6 @@
-import { RESULTS, resolveChart } from "./cards.js?v=20260715-c";
-import { reliefDecision, lineupProfile } from "./pitching.js?v=20260715-c";
-import { createRng } from "./rng.js?v=20260715-c";
+import { RESULTS, resolveChart } from "./cards.js?v=20260715-d";
+import { reliefDecision, lineupProfile } from "./pitching.js?v=20260715-d";
+import { createRng } from "./rng.js?v=20260715-d";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 
@@ -749,6 +749,19 @@ export function pitcherStatus(state, side) {
 // none.
 export const AUTO_PULL_BIAS = 0;
 
+// A starter's hard floor: twelve outs — four full innings — in the book before
+// any skipper's arm goes up. It sits ABOVE the whole relief calculus on purpose.
+// The math rates a pen arm at his fresh number, which is the right number for the
+// batter in front of him and the wrong one for the game behind it: a great short
+// reliever reads as a big upgrade in the first, then throws six innings he was
+// never built for. The gap he shows fresh is real for four batters and a lie for
+// the rest, and no threshold inside the calculus untangles "the reliever is great"
+// from "the starter is bad." So the floor answers it from outside: the man you
+// named to start gets his four innings, and only then does the skipper get to
+// think. Same rule in a batch sim, an adventure game, and the autopilot, because
+// every one of them comes through autoRelieve.
+export const STARTER_MIN_OUTS = 12;
+
 // The outs still to be recorded in a regulation game. What is left to cover is
 // what decides whether the pen can afford to be spent now.
 //
@@ -767,6 +780,12 @@ export function autoRelieve(state, side, bias = AUTO_PULL_BIAS) {
   const team = state[side];
   if (runtime.pitcherIndex >= team.pitchers.length - 1) return null;
   const onMound = team.pitchers[runtime.pitcherIndex];
+  // The starter's four-inning floor: while the man on the mound is the one who
+  // started (index 0) and an SP, he stays until he has twelve outs, whatever the
+  // pen holds. A reliever who inherited the game carries no such floor.
+  if (runtime.pitcherIndex === 0 && onMound?.role === "SP" && (runtime.outsRecorded ?? 0) < STARTER_MIN_OUTS) {
+    return null;
+  }
   const decision = reliefDecision({
     current: onMound,
     currentFatigue: pitcherFatigue(runtime, onMound),
