@@ -10,3 +10,4 @@ scripts/mlbPools.js
 scripts/mlbTeams.js
 scripts/classic-raw.json
 scripts/classicCards.js
+scripts/mlbSeasonPools.js

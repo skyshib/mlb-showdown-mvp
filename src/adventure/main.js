@@ -1,9 +1,9 @@
 import { loadSave } from "./state.js?v=20260714-k";
-import { setUniverseSeed, cardById } from "./packs.js?v=20260714-k";
+import { setUniverseSeed, cardById, preloadSeasonRows } from "./packs.js?v=20260714-k";
 import { hydratePhotos } from "../ui/photos.js?v=20260714-k";
 import { applyFranchisePalette } from "../ui/franchisePalette.js?v=20260714-k";
 import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260714-k";
-import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260714-k";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, ratingSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260714-k";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260714-k";
 import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen, resumeBattle } from "./ui/battleScreen.js?v=20260714-k";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260714-k";
@@ -38,6 +38,7 @@ const SCREENS = {
   nameEntry: nameEntryScreen,
   leagueSelect: leagueSelectScreen,
   modeSelect: modeSelectScreen,
+  ratingSelect: ratingSelectScreen,
   starterReveal: starterRevealScreen,
   exportSave: exportSaveScreen,
   importSave: importSaveScreen,
@@ -84,7 +85,7 @@ const KEY_MAP = {
 
 // Setting up a new game belongs to no club: the old save is still loaded until
 // the new league is picked, and these are the screens where you pick it.
-const SETUP_SCREENS = new Set(["intro", "nameEntry", "leagueSelect", "modeSelect"]);
+const SETUP_SCREENS = new Set(["intro", "nameEntry", "leagueSelect", "modeSelect", "ratingSelect"]);
 
 // Screens in the middle of handing something over. A game in progress is written
 // to the save after every decision, so walking out of one costs nothing — but
@@ -146,8 +147,14 @@ const app = {
 // Point the pool at the loaded save before anything renders a card.
 // Uncapped saves print honest stickers — no bargain noise on points.
 if (app.save) {
+  // Single-season saves rate cards from the lazily-loaded season chunk; pull it
+  // in before the pool is first built (resumeBattle below renders immediately).
+  // Career saves never touch it, so the 14MB chunk stays undownloaded for them.
+  const season = app.save.rating === "season";
+  if (season) await preloadSeasonRows();
   setUniverseSeed(app.save.saveSeed, app.save.universe ?? "fictional", {
-    priceNoise: app.save.mode !== "uncapped"
+    priceNoise: app.save.mode !== "uncapped",
+    season
   });
   // A game left running is a game you are still in the middle of. Reloading the
   // tab — or closing it and coming back tomorrow — puts you back at the plate,

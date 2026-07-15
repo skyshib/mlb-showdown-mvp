@@ -17,6 +17,8 @@ export {
   dualPartnerCard,
   dualPartnerId,
   dualPrimaryId,
+  preloadSeasonRows,
+  seasonRatingAvailable,
   universeConfig,
   universeKey
 } from "../data/universes.js";

@@ -587,6 +587,61 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
     disambiguate_names(metas)
     return pool
 
+def build_season_slice(tag_fn, bat_slice, pit_slice, pos_slice, min_pa, min_ipouts):
+    """Single-season cards: one card per (player, season) that clears a
+    per-season volume gate, each rated on that YEAR alone. peak_blend on a
+    one-element {year: totals} dict still applies the small-sample pad, so a
+    300-PA season regresses toward league harder than a 650-PA one.
+
+    tag_fn(year) puts the season year in the era tag, so the card id reads
+    mlb-<tag>-<pid> with the year baked in. That is what makes personConflict
+    treat two seasons of one man as different eras (one per roster) while a
+    same-season two-way bat/arm pair — same tag, differing only by -bat —
+    stays the one legal same-person pairing. Names carry the year ('97) so
+    text lists can tell a man's seasons apart; no disambiguate pass is needed
+    (each card already names its own year, and namesakes differ by pid in the
+    id regardless)."""
+    pool = []
+    for key, years in bat_slice.items():
+        pid = key if isinstance(key, str) else key[0]
+        if pid not in people:
+            continue
+        pit_years = pit_slice.get(key)
+        positions = position_list(pos_slice.get(key))
+        for year, t in years.items():
+            pa = t["AB"] + t["BB"]
+            if pa < min_pa:
+                continue
+            ip_year = pit_years[year]["IPouts"] if pit_years and year in pit_years else 0
+            if ip_year >= pa:  # a pitcher who merely batted that year: no hitter card
+                continue
+            bt, bL = peak_blend_hitter({year: t}, fixed_league=league_of_year(year))
+            card = build_hitter(pid, bt, positions, bL) if bt else None
+            if not card:
+                continue
+            two_way = ip_year >= min_ipouts
+            finish(card, pid, [year, year], [], tag_fn(year), "bats",
+                   id_suffix="-bat" if two_way else "")
+            card[1] = f"{people[pid]['name']} '{str(year)[2:]}"
+            card[2] = str(year)
+            pool.append(card)
+    for key, years in pit_slice.items():
+        pid = key if isinstance(key, str) else key[0]
+        if pid not in people:
+            continue
+        for year, t in years.items():
+            if t["IPouts"] < min_ipouts:
+                continue
+            pt, pL = peak_blend_pitcher({year: t}, fixed_league=league_of_year(year))
+            card = build_pitcher(pid, pt, pL, year) if pt else None
+            if not card:
+                continue
+            finish(card, pid, [year, year], [], tag_fn(year), "throws")
+            card[1] = f"{people[pid]['name']} '{str(year)[2:]}"
+            card[2] = str(year)
+            pool.append(card)
+    return pool
+
 print("accumulating batting...", file=sys.stderr)
 bat_career, bat_franch, bat_decade, bat_lg_totals, bat_spans = accumulate("Batting.csv", BAT_KEYS)
 print("accumulating pitching...", file=sys.stderr)
@@ -751,6 +806,27 @@ print("two-way windows: " + ", ".join(
     f"{people[p]['name']} ({'merged pair' if TWO_WAY[p][1] else 'tw card'})"
     for p in sorted(TWO_WAY)), file=sys.stderr)
 
+# ---- Single-season pools (opt-in "Rating: Single season") ---------------------
+#
+# One card per player-season instead of a peak-weighted career blend, so the
+# weak, cheap tail the blend shears off comes back (a Control-1 disaster year
+# prices like one). Big and duplicate-heavy, so these ship in their own file
+# (mlbSeasonPools.js), loaded lazily only when a season save is active. Gate is
+# ~300 PA / ~150 IPouts per season — loose, since peak_blend's one-season pad
+# regresses short years toward league. Franchise season pools are kept only
+# where they can still stock a legal starter pack (pool_ok).
+print("building single-season pools...", file=sys.stderr)
+history_seasons = build_season_slice(lambda y: f"sall{y}", bat_career, pit_career, pos_career, 300, 150)
+print(f"history seasons: {len(history_seasons)}", file=sys.stderr)
+franchise_seasons = {}
+for fid in sorted(franchises):
+    fbat = {k: v for k, v in bat_franch.items() if k[1] == fid}
+    fpit = {k: v for k, v in pit_franch.items() if k[1] == fid}
+    fpool = build_season_slice(lambda y, fid=fid: f"sf{fid}{y}", fbat, fpit, pos_franch, 300, 150)
+    if pool_ok(fpool):
+        franchise_seasons[fid] = fpool
+print(f"franchise season pools kept: {len(franchise_seasons)} of {len(franchises)}", file=sys.stderr)
+
 header = """// Real-MLB card pools built from the Baseball Databank (Chadwick Baseball
 // Bureau / Sean Lahman, CC BY-SA 3.0 — https://github.com/chadwickbureau/baseballdatabank).
 // Cards derive from each player's real rates (career, decade window, or
@@ -794,4 +870,27 @@ with open(os.path.join(SP, "mlbPools.js"), "w") as f:
     f.write("export const MLB_DUAL_PERSONS = ")
     f.write(json.dumps(DUAL_PERSONS))
     f.write(";\n")
+    # Which franchises have a legal single-season pool — small enough to stay
+    # eager so the new-game menu can offer the "Single season" toggle without
+    # pulling in the heavy season chunk (mlbSeasonPools.js).
+    f.write("// Franchises with a legal single-season pool (for the Rating toggle).\n")
+    f.write("export const MLB_FRANCHISE_SEASON_IDS = ")
+    f.write(json.dumps(sorted(franchise_seasons)))
+    f.write(";\n")
 print("wrote mlbPools.js", file=sys.stderr)
+
+# Season pools live in their own lazily-imported chunk.
+with open(os.path.join(SP, "mlbSeasonPools.js"), "w") as f:
+    f.write("// Single-season MLB card pools (one card per player-season) — the opt-in\n")
+    f.write("// \"Rating: Single season\" variant of the history and franchise pools.\n")
+    f.write("// Loaded lazily (dynamic import) only for season saves; see universes.js.\n")
+    f.write("// Generated by scripts/build-mlb-pools.py; do not hand-edit.\n")
+    dump(f, "MLB_HISTORY_SEASON_ROWS", history_seasons)
+    f.write("export const MLB_FRANCHISE_SEASON_ROWS = {\n")
+    for fid, pool in sorted(franchise_seasons.items()):
+        f.write(f'"{fid}": [\n')
+        for card in pool:
+            f.write(json.dumps(card, separators=(",", ":")) + ",\n")
+        f.write("],\n")
+    f.write("};\n")
+print("wrote mlbSeasonPools.js", file=sys.stderr)

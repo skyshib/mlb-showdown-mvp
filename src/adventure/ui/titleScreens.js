@@ -1,6 +1,6 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260714-k";
 import { resumeBattle } from "./battleScreen.js?v=20260714-k";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260714-k";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig, seasonRatingAvailable, preloadSeasonRows } from "../packs.js?v=20260714-k";
 import {
   createSave,
   persistSave,
@@ -131,7 +131,7 @@ export const exportSaveScreen = {
 
 // A save file is the code as text, so the same reader takes either one: the
 // downloaded .sav, or a code pasted from an older backup.
-function restoreSave(app, code) {
+async function restoreSave(app, code) {
   const save = importSaveCode(code ?? "");
   if (!save) {
     app.screen.error = true;
@@ -139,7 +139,9 @@ function restoreSave(app, code) {
     return;
   }
   app.save = persistSave(save);
-  setUniverseSeed(save.saveSeed, save.universe ?? "fictional", { priceNoise: save.mode !== "uncapped" });
+  const season = save.rating === "season";
+  if (season) await preloadSeasonRows();
+  setUniverseSeed(save.saveSeed, save.universe ?? "fictional", { priceNoise: save.mode !== "uncapped", season });
   app.go("map");
 }
 
@@ -384,7 +386,13 @@ export const modeSelectScreen = {
       app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), MODES.length);
     } else if (key === "a") {
       const mode = MODES[clampIndex(app.screen.menuIndex ?? 0, MODES.length)];
-      finishNewGame(app, app.screen.playerName, app.screen.universe, mode.key);
+      // Only the all-time and franchise pools have a single-season variant;
+      // for everyone else skip the extra screen and rate on the career blend.
+      if (seasonRatingAvailable(app.screen.universe)) {
+        app.go("ratingSelect", { playerName: app.screen.playerName, universe: app.screen.universe, mode: mode.key, menuIndex: 0 });
+      } else {
+        finishNewGame(app, app.screen.playerName, app.screen.universe, mode.key);
+      }
     } else if (key === "b") {
       app.go("leagueSelect", { playerName: app.screen.playerName, menuIndex: 0 });
     }
@@ -392,12 +400,58 @@ export const modeSelectScreen = {
   }
 };
 
+// How a player's real numbers become a card. Career blends a man's best
+// seasons into one card (few weak arms, prices sit high); Single season cuts
+// one card per year he played, so a bad year is a cheap card — a bigger, more
+// bargain-rich pool where the same man appears many times (you may field only
+// one of him).
+const RATINGS = [
+  {
+    key: "career",
+    label: "CAREER PEAK",
+    blurb: "One card per player, rated on his best seasons. The tight, familiar pool — every star at his peak."
+  },
+  {
+    key: "season",
+    label: "SINGLE SEASON",
+    blurb: "One card per player-season — 1998 Griffey and 2001 Griffey are different cards. Far more cards, real bargains, and off-years priced like off-years."
+  }
+];
+
+export const ratingSelectScreen = {
+  render(app) {
+    const index = clampIndex(app.screen.menuIndex ?? 0, RATINGS.length);
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CHOOSE YOUR RATINGS</span><span>${index + 1}/${RATINGS.length}</span></div>
+      <div class="gq-body">
+        <div class="gq-frame">${menuHtml(RATINGS.map((rating) => ({ label: rating.label })), index)}</div>
+        <div class="gq-frame"><p class="gq-dim">${escapeHtml(RATINGS[index].blurb)}</p></div>
+      </div>
+      <div class="gq-textbox"><p>Z picks. X backs out to the rules.</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key === "up" || key === "down") {
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), RATINGS.length);
+    } else if (key === "a") {
+      const rating = RATINGS[clampIndex(app.screen.menuIndex ?? 0, RATINGS.length)];
+      finishNewGame(app, app.screen.playerName, app.screen.universe, app.screen.mode, rating.key);
+    } else if (key === "b") {
+      app.go("modeSelect", { playerName: app.screen.playerName, universe: app.screen.universe, menuIndex: 0 });
+    }
+    app.rerender();
+  }
+};
+
 // A new save is a whole new universe: fresh seed, the chosen league's card
 // pool, fresh sealed starter pack. Nothing carries over but the player's wits.
-function finishNewGame(app, playerName, universe, mode = "budget") {
+async function finishNewGame(app, playerName, universe, mode = "budget", rating = "career") {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
-  const save = createSave({ name: playerName, saveSeed, universe, mode });
-  setUniverseSeed(saveSeed, universe, { priceNoise: mode !== "uncapped" });
+  const season = rating === "season";
+  // The season chunk must be resident before starterPack() builds the pool.
+  if (season) await preloadSeasonRows();
+  const save = createSave({ name: playerName, saveSeed, universe, mode, rating });
+  setUniverseSeed(saveSeed, universe, { priceNoise: mode !== "uncapped", season });
   const roster = starterPack(saveSeed);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));
