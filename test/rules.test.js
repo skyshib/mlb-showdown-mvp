@@ -490,6 +490,36 @@ test("a base nobody can defend draws no throw, and no die", () => {
   assert.equal(attempt.total, null);
 });
 
+test("a runner dead to rights is thrown out on no die either", async () => {
+  const { resolveAdvanceDecision, certainOut } = await import("../src/rules/game.js");
+  const { describeEvent } = await import("../src/ui/playByPlay.js");
+  const state = createInitialState(teamA, weakDefense);
+
+  // The player sends a plodder into gloves that beat even his best roll: 2nd to
+  // 3rd, target 3, fielding 5. He is out on every face, so the throw is a
+  // formality — a die tumbling toward a foregone answer.
+  const runner = { id: "plodder", name: "Plodder", speed: 3 };
+  state.bases = [null, runner, null];
+  const candidate = { runner, fromIndex: 1, toIndex: 2, outsForDecision: 0, fielding: 5, target: 3, safeChance: 0, destination: "third" };
+  assert.equal(certainOut(candidate), true);
+  state.pendingAdvance = { kind: "hit", battingSide: "away", pitchingSide: "home", outsBefore: 0, candidates: [candidate], batter: null, autoSend: 0 };
+  const rng = { d20: () => assert.fail("a settled throw rolled a die") };
+
+  const event = resolveAdvanceDecision(state, 1, rng);
+
+  assert.equal(event.result, "ADV-OUT");
+  assert.equal(state.outs, 1, "he is out all the same");
+  const attempt = event.playDetails.thrownAttempt;
+  assert.equal(attempt.safe, false);
+  assert.equal(attempt.thrown, false, "but no throw was staged");
+  assert.equal(attempt.roll, null, "and there is no roll to report");
+
+  const called = describeEvent(event, "away").join(" ");
+  assert.match(called, /PLODDER is cut down at 3B!/);
+  assert.doesNotMatch(called, /rolled/, "no die, no roll in the booth");
+  assert.doesNotMatch(called, /No throw/, "a throw WAS made — it just needed no die");
+});
+
 test("starter covers innings not covered by bullpen and gets tired past his IP", () => {
   const tiredStaff = {
     name: "Tired Staff",

@@ -3402,6 +3402,23 @@ test("a throw that cannot be made is not staged as a die, and the booth says so"
   const read = describeEvent({ ...conceded, inning: 3, half: "top", batter: "Hitter", runs: 0, outsAfter: 1 }, "away").join(" ");
   assert.match(read, /F\.FOOT takes 3B\./);
   assert.match(read, /The defense holds the ball\. No throw\./);
+
+  // The other end of the same coin: a man so plainly beaten that even his kindest
+  // roll is out. The throw IS made and beats him — but the die was never in doubt,
+  // so it is not staged, and the booth cuts him down without a roll and without
+  // pretending nobody threw.
+  const doomed = { runner: "Slow Poke '77", from: "1B", to: "2B", safe: false, thrown: false, roll: null, fielding: 8, target: 4 };
+  const gunned = {
+    type: "advance",
+    resultRoll: null,
+    controlRoll: null,
+    playDetails: { thrownAttempt: doomed, attempts: [doomed] }
+  };
+  assert.equal(dramaStages([gunned]), null, "a foregone out rolls nothing to watch");
+  const out = describeEvent({ ...gunned, inning: 3, half: "top", batter: "Hitter", runs: 0, outsAfter: 1 }, "away").join(" ");
+  assert.match(out, /S\.POKE is cut down at 2B!/);
+  assert.doesNotMatch(out, /rolled/, "no die, no roll");
+  assert.doesNotMatch(out, /No throw/, "and no lie that nobody threw");
 });
 
 test("the suspense screen stages every die the play threw, gloves included", async () => {

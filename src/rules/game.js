@@ -1281,21 +1281,23 @@ function shouldAttemptAdvance(candidate) {
   return candidate.safeChance >= advanceDecisionMinimum(candidate.outsForDecision, candidate.destination);
 }
 
-// A throw is a decision the defense gets to make too, and there is one man on the
-// field who has already made it: the one holding the ball, watching a runner he
-// cannot get. `chooseThrowTarget` hands back the most gettable man on the play,
-// so if even HE cannot be thrown out, nobody on the play can, and the ball goes
-// back to the pitcher. No die is thrown, because nothing threw it.
-//
-// This is the same fact the menu already tells the player — GOES FREE — arriving
-// at the other end of the play. It used to arrive as a d20 tumbling toward a
-// number it could not reach, which is a magic trick with no card in it.
+// A die is worth throwing only when it could land on either side of the target.
+// Two runners on a play take that away. `chooseThrowTarget` hands back the most
+// gettable man: if even HE cannot be thrown out, nobody on the play can, the ball
+// goes back to the pitcher, and no die is thrown because nothing threw it. And at
+// the other end, a man so plainly beaten that even his kindest roll is out is out
+// on the throw the same way every time — the die is a formality with a foregone
+// answer. Either way the outcome is settled before the die leaves the hand, and a
+// d20 tumbling toward a number it must hit, or cannot, is a magic trick with no
+// card in it. It is only staged when the roll is the thing that decides.
 function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rng) {
   const throwTarget = chooseThrowTarget(candidates);
-  const conceded = certainSafe(throwTarget);
-  const roll = conceded ? null : rng.d20();
-  const total = conceded ? null : roll + throwTarget.fielding;
-  const safe = conceded ? true : total <= throwTarget.target;
+  const alwaysSafe = certainSafe(throwTarget);
+  const alwaysOut = certainOut(throwTarget);
+  const settled = alwaysSafe || alwaysOut;
+  const roll = settled ? null : rng.d20();
+  const total = settled ? null : roll + throwTarget.fielding;
+  const safe = settled ? alwaysSafe : total <= throwTarget.target;
   let runs = 0;
 
   for (const candidate of candidates) {
@@ -1401,6 +1403,19 @@ function splitAutoAdvanceCredit(state, battingSide, batter, taker, wpBefore) {
 // gamble with good numbers, and the gamble is the player's to take.
 export function certainSafe(candidate) {
   return Number(candidate?.safeChance) >= 1;
+}
+
+// The mirror of certainSafe: a base he cannot help but be thrown out taking. The
+// die is kindest to the runner on its lowest face — the smaller the roll, the
+// nearer the throw comes in under his target — so if even a 1 puts the throw past
+// him, every face does, and the out is settled before it is thrown. Asked of the
+// numbers themselves for the same reason certainSafe is: "the defense needs a 1"
+// is a proxy that a half-point of arm turns into a lie.
+export function certainOut(candidate) {
+  const fielding = Number(candidate?.fielding);
+  const target = Number(candidate?.target);
+  if (!Number.isFinite(fielding) || !Number.isFinite(target)) return false;
+  return 1 + fielding > target;
 }
 
 // How many of the lead runners are going for FREE. Runners are asked about lead

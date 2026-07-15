@@ -30,15 +30,19 @@ function rolled(attempt) {
   return typeof attempt?.roll === "number" ? ` (rolled ${attempt.roll})` : "";
 }
 
-// The defense had a man to throw at and never threw. `thrownAttempt` is the most
-// gettable runner on the play, so a die missing from HIM means the play could not
-// be defended at all and the ball stayed in the glove.
+// The defense had a man to throw at and never threw, because he was taking the
+// base no matter what. `thrownAttempt` is the most gettable runner on the play,
+// so a die missing from HIM — and him safe — means the play could not be defended
+// at all and the ball stayed in the glove.
 //
 // Not the same thing as a trailing runner with no die of his own: a throw did go
-// out on that play, just not at him, and "no throw" would be a lie about it.
-function concededPlay(event) {
+// out on that play, just not at him, and "no throw" would be a lie about it. Nor
+// the same as a man thrown out without a die — dead to rights, the throw a
+// formality — where a throw was made and beat him and "no throw" is a lie the
+// other way.
+function concededSafe(event) {
   const thrown = event.playDetails?.thrownAttempt;
-  return Boolean(thrown) && typeof thrown.roll !== "number";
+  return Boolean(thrown) && typeof thrown.roll !== "number" && thrown.safe === true;
 }
 
 // The two dice that decided the at-bat, called before the call itself: the
@@ -81,11 +85,15 @@ export function describeEvent(event, playerSide = "away") {
         lines.push(attempt.safe
           ? `${playName(attempt.runner)} beats the throw to ${attempt.to}!${rolled(attempt)}`
           : `${playName(attempt.runner)} is cut down at ${attempt.to}!${rolled(attempt)}`);
-      } else {
+      } else if (attempt.safe) {
         lines.push(`${playName(attempt.runner)} takes ${attempt.to}.`);
+      } else {
+        // Dead to rights: the throw was a formality, so no die was rolled, but he
+        // is out all the same.
+        lines.push(`${playName(attempt.runner)} is cut down at ${attempt.to}!`);
       }
     }
-    if (concededPlay(event)) lines.push("The defense holds the ball. No throw.");
+    if (concededSafe(event)) lines.push("The defense holds the ball. No throw.");
     if (event.runs > 0) {
       lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} ${scoreCall(event, playerSide)}`);
     }
@@ -119,7 +127,7 @@ export function describeEvent(event, playerSide = "away") {
   const doublePlay = event.playDetails?.doublePlayAttempt;
   if (doublePlay?.batterOut) lines.push(`Double play! Two gone.${rolled(doublePlay)}`);
   const thrown = event.playDetails?.thrownAttempt;
-  if (concededPlay(event)) {
+  if (concededSafe(event)) {
     lines.push(`${playName(thrown.runner)} takes ${thrown.to} on no throw.`);
   } else if (thrown) {
     lines.push(
