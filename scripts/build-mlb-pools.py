@@ -102,21 +102,33 @@ def accumulate(source, keys):
 
 def accumulate_positions():
     """Full games-by-position tables per slice; position_list() reduces each
-    to an eligibility list at build time."""
+    to an eligibility list at build time. Also per-(pid, year) position games
+    and each (pid, year)'s primary franchise, both for the single-season cards."""
     career, by_franch, by_decade = (defaultdict(lambda: defaultdict(int)) for _ in range(3))
+    by_year = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # pid -> year -> pos -> G
+    team_games = defaultdict(lambda: defaultdict(int))                    # (pid, year) -> teamID -> G
     for r in rows("Appearances.csv"):
         year = num(r, "yearID")
         pid = r["playerID"]
-        fid = franch_of.get((year, r.get("teamID", "")), None)
+        tid = r.get("teamID", "")
+        fid = franch_of.get((year, tid), None)
+        team_games[(pid, year)][tid] += num(r, "G_all")
         for col, pos in POS_COLS.items():
             g = num(r, col)
             if not g:
                 continue
             career[pid][pos] += g
+            by_year[pid][year][pos] += g
             by_decade[(pid, decade_of(year))][pos] += g
             if fid:
                 by_franch[(pid, fid)][pos] += g
-    return career, by_franch, by_decade
+    team_year = defaultdict(dict)  # pid -> year -> franchID of the club he played the most for
+    for (pid, year), tids in team_games.items():
+        best = max(tids, key=lambda t: (tids[t], t))
+        fid = franch_of.get((year, best))
+        if fid:
+            team_year[pid][year] = fid
+    return career, by_franch, by_decade, by_year, team_year
 
 def position_list(games, floor=30, share=0.25, cap=3):
     """A card's defensive eligibility, like the real Showdown multi-position
@@ -587,7 +599,18 @@ def build_slice(tag, bat_slice, pit_slice, pos_slice, spans, min_pa, min_ipouts,
     disambiguate_names(metas)
     return pool
 
-def build_season_slice(tag_fn, bat_slice, pit_slice, pos_slice, min_pa, min_ipouts):
+def windowed_position_games(by_year, year):
+    """Games-by-position around a season: the year itself counts double, the
+    seasons on either side once. A single season's glove reflects that year,
+    but a short or injury-thinned year won't drop a position the man really
+    plays — the neighbours keep it alive."""
+    games = defaultdict(int)
+    for y, w in ((year, 2), (year - 1, 1), (year + 1, 1)):
+        for pos, g in by_year.get(y, {}).items():
+            games[pos] += g * w
+    return games
+
+def build_season_slice(tag_fn, bat_slice, pit_slice, pos_by_year, team_year, min_pa, min_ipouts, fid=None):
     """Single-season cards: one card per (player, season) that clears a
     per-season volume gate, each rated on that YEAR alone. peak_blend on a
     one-element {year: totals} dict still applies the small-sample pad, so a
@@ -598,16 +621,22 @@ def build_season_slice(tag_fn, bat_slice, pit_slice, pos_slice, min_pa, min_ipou
     treat two seasons of one man as different eras (one per roster) while a
     same-season two-way bat/arm pair — same tag, differing only by -bat —
     stays the one legal same-person pairing. Names carry the year ('97) so
-    text lists can tell a man's seasons apart; no disambiguate pass is needed
-    (each card already names its own year, and namesakes differ by pid in the
-    id regardless)."""
+    text lists can tell a man's seasons apart; no disambiguate pass is needed.
+
+    Positions come from that season (± the neighbours, downweighted), so a
+    man's seasons differ where he actually moved around; fielding follows the
+    primary spot (the defensive rating itself is a career figure — there is no
+    per-season defensive data). The club he played most that year rides in the
+    year label ("SEA 1996") — the fid for a franchise pool, else looked up."""
+    def team_label(pid, year):
+        team = fid or team_year.get(pid, {}).get(year)
+        return f"{team} {year}" if team else str(year)
     pool = []
     for key, years in bat_slice.items():
         pid = key if isinstance(key, str) else key[0]
         if pid not in people:
             continue
         pit_years = pit_slice.get(key)
-        positions = position_list(pos_slice.get(key))
         for year, t in years.items():
             pa = t["AB"] + t["BB"]
             if pa < min_pa:
@@ -615,6 +644,7 @@ def build_season_slice(tag_fn, bat_slice, pit_slice, pos_slice, min_pa, min_ipou
             ip_year = pit_years[year]["IPouts"] if pit_years and year in pit_years else 0
             if ip_year >= pa:  # a pitcher who merely batted that year: no hitter card
                 continue
+            positions = position_list(windowed_position_games(pos_by_year.get(pid, {}), year))
             bt, bL = peak_blend_hitter({year: t}, fixed_league=league_of_year(year))
             card = build_hitter(pid, bt, positions, bL) if bt else None
             if not card:
@@ -623,7 +653,7 @@ def build_season_slice(tag_fn, bat_slice, pit_slice, pos_slice, min_pa, min_ipou
             finish(card, pid, [year, year], [], tag_fn(year), "bats",
                    id_suffix="-bat" if two_way else "")
             card[1] = f"{people[pid]['name']} '{str(year)[2:]}"
-            card[2] = str(year)
+            card[2] = team_label(pid, year)
             pool.append(card)
     for key, years in pit_slice.items():
         pid = key if isinstance(key, str) else key[0]
@@ -638,7 +668,7 @@ def build_season_slice(tag_fn, bat_slice, pit_slice, pos_slice, min_pa, min_ipou
                 continue
             finish(card, pid, [year, year], [], tag_fn(year), "throws")
             card[1] = f"{people[pid]['name']} '{str(year)[2:]}"
-            card[2] = str(year)
+            card[2] = team_label(pid, year)
             pool.append(card)
     return pool
 
@@ -647,7 +677,7 @@ bat_career, bat_franch, bat_decade, bat_lg_totals, bat_spans = accumulate("Batti
 print("accumulating pitching...", file=sys.stderr)
 pit_career, pit_franch, pit_decade, _, pit_spans = accumulate("Pitching.csv", PIT_KEYS)
 print("accumulating positions...", file=sys.stderr)
-pos_career, pos_franch, pos_decade = accumulate_positions()
+pos_career, pos_franch, pos_decade, pos_by_year, team_year = accumulate_positions()
 spans_all = {**bat_spans, **pit_spans}
 for key, span in bat_spans.items():
     if key in pit_spans:
@@ -816,13 +846,13 @@ print("two-way windows: " + ", ".join(
 # regresses short years toward league. Franchise season pools are kept only
 # where they can still stock a legal starter pack (pool_ok).
 print("building single-season pools...", file=sys.stderr)
-history_seasons = build_season_slice(lambda y: f"sall{y}", bat_career, pit_career, pos_career, 300, 150)
+history_seasons = build_season_slice(lambda y: f"sall{y}", bat_career, pit_career, pos_by_year, team_year, 300, 150)
 print(f"history seasons: {len(history_seasons)}", file=sys.stderr)
 franchise_seasons = {}
 for fid in sorted(franchises):
     fbat = {k: v for k, v in bat_franch.items() if k[1] == fid}
     fpit = {k: v for k, v in pit_franch.items() if k[1] == fid}
-    fpool = build_season_slice(lambda y, fid=fid: f"sf{fid}{y}", fbat, fpit, pos_franch, 300, 150)
+    fpool = build_season_slice(lambda y, fid=fid: f"sf{fid}{y}", fbat, fpit, pos_by_year, team_year, 300, 150, fid=fid)
     if pool_ok(fpool):
         franchise_seasons[fid] = fpool
 print(f"franchise season pools kept: {len(franchise_seasons)} of {len(franchises)}", file=sys.stderr)
