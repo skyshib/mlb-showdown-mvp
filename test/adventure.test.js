@@ -3365,6 +3365,45 @@ test("a glove's die is announced before it is thrown, and the bat's answer is re
   assert.equal(quiet[1].caption, null, "and the swing keeps quiet");
 });
 
+test("a throw that cannot be made is not staged as a die, and the booth says so", async () => {
+  const { dramaStages } = await import("../src/adventure/ui/battleScreen.js");
+  const { describeEvent } = await import("../src/ui/playByPlay.js");
+
+  // The engine never threw at him — the gloves would have needed a 21 — so the
+  // attempt comes through with no roll. Watching a d20 tumble toward a number it
+  // cannot reach is a magic trick with no card in it.
+  const free = { runner: "Fleet Foot '01", from: "2B", to: "3B", safe: true, thrown: false, roll: null, fielding: 1, target: 22 };
+  const single = {
+    controlRoll: 9,
+    controlTotal: 12,
+    onBase: 14,
+    chartOwner: "hitter",
+    resultRoll: 15,
+    result: "1B",
+    playDetails: { thrownAttempt: free, extraBaseAttempts: [free] }
+  };
+  const stages = dramaStages([single]);
+  assert.deepEqual(stages.map((stage) => stage.label), ["PITCH", "SWING"], "the throw that never happened is not staged");
+  assert.equal(stages[1].caption, null, "and with no glove to answer it, the swing keeps quiet");
+
+  const called = describeEvent({ ...single, inning: 3, half: "top", batter: "Hitter", runs: 0, outsAfter: 1 }, "away").join(" ");
+  assert.match(called, /F\.FOOT takes 3B on no throw\./, "the booth says he took it on no throw");
+  assert.doesNotMatch(called, /rolled/, "and reports no roll, because there was none");
+
+  // A deferred send with nobody to throw at is the same fact: no die, so no
+  // suspense screen at all — the play simply reads out.
+  const conceded = {
+    type: "advance",
+    resultRoll: null,
+    controlRoll: null,
+    playDetails: { thrownAttempt: free, attempts: [free] }
+  };
+  assert.equal(dramaStages([conceded]), null, "a send nobody can defend rolls nothing to watch");
+  const read = describeEvent({ ...conceded, inning: 3, half: "top", batter: "Hitter", runs: 0, outsAfter: 1 }, "away").join(" ");
+  assert.match(read, /F\.FOOT takes 3B\./);
+  assert.match(read, /The defense holds the ball\. No throw\./);
+});
+
 test("the suspense screen stages every die the play threw, gloves included", async () => {
   const { dramaStages } = await import("../src/adventure/ui/battleScreen.js");
 

@@ -30,6 +30,17 @@ function rolled(attempt) {
   return typeof attempt?.roll === "number" ? ` (rolled ${attempt.roll})` : "";
 }
 
+// The defense had a man to throw at and never threw. `thrownAttempt` is the most
+// gettable runner on the play, so a die missing from HIM means the play could not
+// be defended at all and the ball stayed in the glove.
+//
+// Not the same thing as a trailing runner with no die of his own: a throw did go
+// out on that play, just not at him, and "no throw" would be a lie about it.
+function concededPlay(event) {
+  const thrown = event.playDetails?.thrownAttempt;
+  return Boolean(thrown) && typeof thrown.roll !== "number";
+}
+
 // The two dice that decided the at-bat, called before the call itself: the
 // pitch that set the chart, then the swing rolled off it. Plays that aren't a
 // duel (a bunt, a walk, a trot around on someone else's hit) have no such pair
@@ -74,6 +85,7 @@ export function describeEvent(event, playerSide = "away") {
         lines.push(`${playName(attempt.runner)} takes ${attempt.to}.`);
       }
     }
+    if (concededPlay(event)) lines.push("The defense holds the ball. No throw.");
     if (event.runs > 0) {
       lines.push(`${event.runs === 1 ? "A run scores!" : `${event.runs} runs score!`} ${scoreCall(event, playerSide)}`);
     }
@@ -107,7 +119,9 @@ export function describeEvent(event, playerSide = "away") {
   const doublePlay = event.playDetails?.doublePlayAttempt;
   if (doublePlay?.batterOut) lines.push(`Double play! Two gone.${rolled(doublePlay)}`);
   const thrown = event.playDetails?.thrownAttempt;
-  if (thrown) {
+  if (concededPlay(event)) {
+    lines.push(`${playName(thrown.runner)} takes ${thrown.to} on no throw.`);
+  } else if (thrown) {
     lines.push(
       thrown.safe
         ? `${playName(thrown.runner)} takes ${thrown.to} on the throw!${rolled(thrown)}`

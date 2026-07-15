@@ -471,6 +471,25 @@ test("runner tagging home scores when defense throws out another tag-up for the 
   assert.equal(state.lastPlayDetails.thrownAttempt.safe, false);
 });
 
+test("a base nobody can defend draws no throw, and no die", () => {
+  const state = createInitialState(teamA, weakDefense);
+  state.outs = 1;
+  // SPD 20 tagging home in front of a butcher's outfield: target 25, gloves 0,
+  // and the throw would need a 21. The ball stays in the glove.
+  state.bases = [null, null, { name: "Runner 3", speed: 20 }];
+  const rng = { d20: () => assert.fail("the defense threw a die it had no throw to make") };
+
+  const runs = applyFlyout(state, makeHitter({ id: "fly-b", name: "Fly Batter" }), "away", "home", rng);
+
+  assert.equal(runs, 1);
+  assert.equal(state.outs, 2);
+  const attempt = state.lastPlayDetails.thrownAttempt;
+  assert.equal(attempt.safe, true);
+  assert.equal(attempt.thrown, false, "nobody threw");
+  assert.equal(attempt.roll, null, "so there is no roll to report");
+  assert.equal(attempt.total, null);
+});
+
 test("starter covers innings not covered by bullpen and gets tired past his IP", () => {
   const tiredStaff = {
     name: "Tired Staff",

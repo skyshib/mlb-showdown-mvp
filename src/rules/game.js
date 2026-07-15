@@ -1281,11 +1281,21 @@ function shouldAttemptAdvance(candidate) {
   return candidate.safeChance >= advanceDecisionMinimum(candidate.outsForDecision, candidate.destination);
 }
 
+// A throw is a decision the defense gets to make too, and there is one man on the
+// field who has already made it: the one holding the ball, watching a runner he
+// cannot get. `chooseThrowTarget` hands back the most gettable man on the play,
+// so if even HE cannot be thrown out, nobody on the play can, and the ball goes
+// back to the pitcher. No die is thrown, because nothing threw it.
+//
+// This is the same fact the menu already tells the player — GOES FREE — arriving
+// at the other end of the play. It used to arrive as a d20 tumbling toward a
+// number it could not reach, which is a magic trick with no card in it.
 function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rng) {
   const throwTarget = chooseThrowTarget(candidates);
-  const roll = rng.d20();
-  const total = roll + throwTarget.fielding;
-  const safe = total <= throwTarget.target;
+  const conceded = certainSafe(throwTarget);
+  const roll = conceded ? null : rng.d20();
+  const total = conceded ? null : roll + throwTarget.fielding;
+  const safe = conceded ? true : total <= throwTarget.target;
   let runs = 0;
 
   for (const candidate of candidates) {
