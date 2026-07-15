@@ -19,15 +19,12 @@ export const SAVE_VERSION = 2;
 // against something honest.
 export const LOSS_FEE = 0;
 
-export function createSave({ name, saveSeed, universe = "fictional", mode = "budget", rating = "career" }) {
+export function createSave({ name, saveSeed, universe = "fictional", mode = "budget" }) {
   return {
     version: SAVE_VERSION,
     saveSeed,
     universe,
     mode,
-    // "career" = peak-weighted career/franchise blend (default). "season" =
-    // one card per player-season. Older saves lack the field and read "career".
-    rating,
     player: {
       name,
       coins: 0,

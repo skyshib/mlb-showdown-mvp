@@ -2,7 +2,7 @@ import { generatePlayerPool } from "./playerGeneration.js";
 import { createRng } from "../rules/rng.js?v=20260714-k";
 import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
-import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS, MLB_FRANCHISE_SEASON_IDS } from "./mlbPools.js";
+import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260714-k";
 import { poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260714-k";
 import { authenticPoints } from "../rules/pricing.js?v=20260714-k";
@@ -132,43 +132,20 @@ const DUAL_PERSONS = new Set(MLB_DUAL_PERSONS);
 let universeSeed = DEFAULT_UNIVERSE_SEED;
 let universeMode = "fictional";
 let universeNoise = true;
-let universeSeason = false;
 let poolCache = null;
 let poolIndexCache = null;
-
-// The single-season row chunk (mlbSeasonPools.js) — big and duplicate-heavy,
-// so it loads lazily via preloadSeasonRows() only when a season save is active
-// and stays null (never downloaded) for everyone else.
-let seasonRows = null;
-export async function preloadSeasonRows() {
-  if (!seasonRows) seasonRows = await import("./mlbSeasonPools.js");
-  return seasonRows;
-}
-
-// Whether a universe supports the single-season rating: all-time always does,
-// a franchise only if it stocked a legal season pool (small enough historical
-// clubs don't). Checked from eager metadata so the menu never loads the chunk.
-const FRANCHISE_SEASON_SET = new Set(MLB_FRANCHISE_SEASON_IDS);
-export function seasonRatingAvailable(mode) {
-  if (mode === "mlb-history") return true;
-  const franchise = /^franchise-([A-Z]{2,3})$/.exec(mode ?? "");
-  return franchise ? FRANCHISE_SEASON_SET.has(franchise[1]) : false;
-}
 
 // Point the games at a universe. Same seed+mode+pricing is a no-op; any
 // change drops the cache so the next universePool() call rebuilds.
 // priceNoise: false prints honest stickers (uncapped saves, draft rooms).
-// season: true rates every MLB card on one player-season (see preloadSeasonRows).
-export function setUniverse(seed, mode = "fictional", { priceNoise = true, season = false } = {}) {
+export function setUniverse(seed, mode = "fictional", { priceNoise = true } = {}) {
   const nextSeed = seed || DEFAULT_UNIVERSE_SEED;
   const config = universeConfig(mode);
   const nextMode = config ? config.key : "fictional";
-  if (nextSeed === universeSeed && nextMode === universeMode
-      && priceNoise === universeNoise && season === universeSeason) return;
+  if (nextSeed === universeSeed && nextMode === universeMode && priceNoise === universeNoise) return;
   universeSeed = nextSeed;
   universeMode = nextMode;
   universeNoise = priceNoise;
-  universeSeason = season;
   poolCache = null;
   poolIndexCache = null;
 }
@@ -185,13 +162,6 @@ export function universePool() {
     if (universeMode === "classic") {
       // Real Showdown cards keep their authentic printed points — no noise.
       poolCache = assignAuthenticRarity(decodeCardRows(CLASSIC_CARD_ROWS));
-    } else if (universeSeason && (universeMode === "mlb-history" || franchise)) {
-      // Single-season variant of the all-time / franchise pools: one card per
-      // player-season, from the lazily-loaded chunk. Its own noise seed
-      // (":season:") keeps season stickers independent of the career pool's.
-      if (!seasonRows) throw new Error("season pool requested before preloadSeasonRows()");
-      const rows = franchise ? seasonRows.MLB_FRANCHISE_SEASON_ROWS[franchise[1]] : seasonRows.MLB_HISTORY_SEASON_ROWS;
-      poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:season:${universeSeed}`, { authentic: true });
     } else if (universeMode === "mlb-history" || decade || multi || franchise) {
       // Real players price on the AUTHENTIC Showdown scale (the classic-set
       // model), so a Control 5 starter costs Wakefield money in any pool;

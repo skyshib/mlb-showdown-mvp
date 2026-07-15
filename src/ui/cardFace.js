@@ -73,8 +73,6 @@ export function rarityTag(card) {
 const TEAM_LIST_CAP = 6;
 
 function cardTeams(card) {
-  // Single-season cards name their exact club in the set tag ("SEA 1996"), so
-  // the tag line already carries it — no separate club line (returns null).
   const match = /^mlb-(all|00s|d\d{4})-(.+?)(-bat)?$/.exec(String(card.id ?? ""));
   if (!match) return null;
   const window = match[1] === "all" ? "all" : match[1] === "00s" ? "2000" : match[1].slice(1);
@@ -189,15 +187,8 @@ function teamMark(card) {
   const codes = cardTeams(card);
   const code = codes?.length
     ? codes[0]
-    // Franchise-pool cards carry the club in the id; single-season cards carry
-    // the season's club in the set tag ("SEA 1996"). Both resolve to a mark.
-    : /^mlb-f([A-Z]{2,3})-/.exec(String(card.id ?? ""))?.[1]
-      ?? /^([A-Z]{2,3}) \d{4}$/.exec(String(card.setTag ?? ""))?.[1]
-      ?? null;
+    : /^mlb-f([A-Z]{2,3})-/.exec(String(card.id ?? ""))?.[1] ?? null;
   if (code) return { code, club: MLB_TEAM_CLUB_NAMES[code] ?? null };
-  // Real-MLB cards keep the years active (not a club) in card.team, so never
-  // fall back to it — an unresolved club shows no mark, never a "199" year slice.
-  if (String(card.id ?? "").startsWith("mlb-")) return null;
   const team = String(card.team ?? "").trim();
   if (!team) return null;
   return { code: team.slice(0, 3).toUpperCase(), club: MLB_TEAM_CLUB_NAMES[team] ?? null };
