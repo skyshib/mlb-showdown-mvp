@@ -1,4 +1,4 @@
-import { uploadRun } from "./gameArchive.js?v=20260714-k";
+import { uploadRun } from "./gameArchive.js?v=20260715-a";
 import {
   catalogProgress,
   ensureAlmanac,
@@ -7,7 +7,7 @@ import {
   rosterPoints,
   seasonHitters,
   seasonPitchers
-} from "./state.js?v=20260714-k";
+} from "./state.js?v=20260715-a";
 
 // The hall of fame outlives any single save: it keeps its own storage key, so
 // deleting or replacing a campaign never erases the plaques it earned.

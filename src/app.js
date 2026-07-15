@@ -14,7 +14,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260714-k";
+import { cardPanelHtml } from "./ui/cardFace.js?v=20260715-a";
 import {
   isMuted,
   playClockWarning,
@@ -26,10 +26,10 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260714-k";
-import { hydratePhotos } from "./ui/photos.js?v=20260714-k";
-import { createBattle } from "./rules/battle/controller.js?v=20260714-k";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260714-k";
+} from "./ui/sounds.js?v=20260715-a";
+import { hydratePhotos } from "./ui/photos.js?v=20260715-a";
+import { createBattle } from "./rules/battle/controller.js?v=20260715-a";
+import { createGame, renderGame } from "./ui/gameScreen.js?v=20260715-a";
 import {
   AUCTION_DEFAULT_BUDGET,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -108,7 +108,7 @@ import {
   undoLastPick,
   upcomingNominators,
   validateRoster
-} from "./rules/draft.js?v=20260714-k";
+} from "./rules/draft.js?v=20260715-a";
 import {
   createRoom,
   fetchRoom,
@@ -117,7 +117,7 @@ import {
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
-} from "./onlineClient.js?v=20260714-k";
+} from "./onlineClient.js?v=20260715-a";
 import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
@@ -126,12 +126,12 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260714-k";
-import { computeAwards } from "./rules/awards.js?v=20260714-k";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260714-k";
-import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260714-k";
-import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260714-k";
-import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260714-k";
+} from "./rules/batch.js?v=20260715-a";
+import { computeAwards } from "./rules/awards.js?v=20260715-a";
+import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260715-a";
+import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260715-a";
+import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260715-a";
+import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260715-a";
 import {
   basesText,
   cardRarity,
@@ -146,7 +146,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260714-k";
+} from "./ui/render.js?v=20260715-a";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -3014,9 +3014,22 @@ function renderBatch() {
   }
   const { summary, runs } = state.batch;
   const top = summary.teams[0];
-  const awards = computeAwards(summary, buildPickNumberMap(state.draft), buildPricePaidMap(state.draft));
+  const pickNumberMap = buildPickNumberMap(state.draft);
+  const pricePaidMap = buildPricePaidMap(state.draft);
+  const awards = computeAwards(summary, pickNumberMap, pricePaidMap);
   const backLabel = "Back to draft";
   const playersById = draftedPlayersById();
+  const auctionDraft = isAuctionDraft(state.draft);
+  const draftCostHeader = auctionDraft ? "Price" : "Pick #";
+  const draftCostFor = (line) => {
+    const player = playerForBoxLine(playersById, line, line.team);
+    if (!player) return "";
+    if (auctionDraft) {
+      const price = pricePaidMap[player.id];
+      return Number.isFinite(price) ? money(price) : "";
+    }
+    return pickNumberMap[player.id] ?? "";
+  };
   const leagueWoba = tournamentWoba(summary.hitters);
   const fipConstant = tournamentFipConstant(summary.pitchers);
   const teamGamesByName = new Map(summary.teams.map((row) => [row.team, row.games ?? teamScheduleGames(row)]));
@@ -3044,6 +3057,7 @@ function renderBatch() {
     .map(
       (line, index) => `<tr>
         <td>${index + 1}</td>
+        <td class="num">${draftCostFor(line)}</td>
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.position ?? "")}</td>
@@ -3072,6 +3086,7 @@ function renderBatch() {
     .map(
       (line, index) => `<tr>
         <td>${index + 1}</td>
+        <td class="num">${draftCostFor(line)}</td>
         <td>${renderBatchPlayerName(line, playersById)}</td>
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.role)}</td>
@@ -3123,6 +3138,7 @@ function renderBatch() {
       <table>
         <thead><tr>
           <th>#</th>
+          <th class="num">${draftCostHeader}</th>
           ${renderBatchSortHeader("hitters", "name", "Player")}
           ${renderBatchSortHeader("hitters", "team", "Team")}
           ${renderBatchSortHeader("hitters", "position", "Pos")}
@@ -3154,6 +3170,7 @@ function renderBatch() {
       <table>
         <thead><tr>
           <th>#</th>
+          <th class="num">${draftCostHeader}</th>
           ${renderBatchSortHeader("pitchers", "name", "Player")}
           ${renderBatchSortHeader("pitchers", "team", "Team")}
           ${renderBatchSortHeader("pitchers", "role", "Role")}

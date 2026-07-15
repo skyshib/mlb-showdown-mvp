@@ -1,16 +1,16 @@
-import { loadSave } from "./state.js?v=20260714-k";
-import { setUniverseSeed, cardById } from "./packs.js?v=20260714-k";
-import { hydratePhotos } from "../ui/photos.js?v=20260714-k";
-import { applyFranchisePalette } from "../ui/franchisePalette.js?v=20260714-k";
-import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260714-k";
-import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260714-k";
-import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260714-k";
-import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen, resumeBattle } from "./ui/battleScreen.js?v=20260714-k";
-import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260714-k";
-import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260714-k";
-import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260714-k";
-import { recordsScreen } from "./ui/recordsScreen.js?v=20260714-k";
-import { unlockSounds, soundsUnlocked, isMuted } from "../ui/sounds.js?v=20260714-k";
+import { loadSave } from "./state.js?v=20260715-a";
+import { setUniverseSeed, cardById } from "./packs.js?v=20260715-a";
+import { hydratePhotos } from "../ui/photos.js?v=20260715-a";
+import { applyFranchisePalette } from "../ui/franchisePalette.js?v=20260715-a";
+import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260715-a";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260715-a";
+import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260715-a";
+import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen, resumeBattle } from "./ui/battleScreen.js?v=20260715-a";
+import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260715-a";
+import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260715-a";
+import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260715-a";
+import { recordsScreen } from "./ui/recordsScreen.js?v=20260715-a";
+import { unlockSounds, soundsUnlocked, isMuted } from "../ui/sounds.js?v=20260715-a";
 
 // A browser will not let a page make a noise until the person has touched it, so
 // the adventure buys the right on the first button pressed — the one that opens

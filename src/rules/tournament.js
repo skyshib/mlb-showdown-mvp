@@ -1,4 +1,4 @@
-import { simulateGame } from "./game.js?v=20260714-k";
+import { simulateGame } from "./game.js?v=20260715-a";
 
 export function simulateRoundRobin(teams, seed = "tournament") {
   const rotation = createRotationTracker(teams);
