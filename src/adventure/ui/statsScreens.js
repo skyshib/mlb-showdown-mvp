@@ -122,7 +122,10 @@ export function gameLogLine(event, playerSide) {
     : `${manTag(event.pitcher, event.pitcherId, event.controlRoll)} <span class="gq-dim">v</span> ${
         manTag(actor, event.batterId, event.resultRoll)
       }`;
-  return `${inning} ${situationTag(event)}${duel} <b>${escapeHtml(event.result)}</b>${score} ${
+  // A grounder that turned two is a GIDP, not a GB — the log calls it what it
+  // became, the way a box score does.
+  const call = event.playDetails?.doublePlayAttempt?.batterOut ? "GIDP" : event.result;
+  return `${inning} ${situationTag(event)}${duel} <b>${escapeHtml(call)}</b>${score} ${
     winProbTag(event, playerSide, wpa)
   }`;
 }

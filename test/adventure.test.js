@@ -1797,11 +1797,18 @@ test("the replacement picker ranks the incumbent by points, diamond-marked; pick
   assert.ok(pricier && cheaper, "the pool brackets the incumbent");
   addCardToCollection(save, pricier.id);
   addCardToCollection(save, cheaper.id);
+  // A keeper marked in the binder is still a keeper here — the swap menu that
+  // decides who leaves the roster has to show which of the candidates you starred.
+  const { toggleStar } = await import("../src/adventure/state.js");
+  toggleStar(save, pricier.id);
 
   const app = { save, screen: { name: "team", index: 0, mode: "roster" }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
   teamScreen.key(app, "a"); // open the card's action menu
   teamScreen.key(app, "a"); // SWAP THIS CARD leads it
   assert.equal(app.screen.mode, "pick");
+  const starredRow = teamScreen.render(app);
+  const pricierAt = starredRow.indexOf(pricier.name.split(" ").pop().toUpperCase());
+  assert.ok(pricierAt >= 0 && starredRow.indexOf("&#9733;", pricierAt) > pricierAt, "the starred candidate keeps his star in the swap menu");
   const rows = [0, 1, 2].map((at) => teamScreen.hoverCard(app, at));
   const anchorAt = rows.findIndex((card) => card?.id === anchor.id);
   assert.ok(anchorAt > 0, "the incumbent no longer leads the list");
@@ -2588,6 +2595,10 @@ test("the game log lines carry player-perspective WPA", async () => {
   assert.ok(yours.includes("<b>3-1</b>"), "scoring plays show the score bold");
   const quiet = gameLogLine({ ...swing, runs: 0, result: "GB", scoreAfter: { away: 1, home: 1 } }, "away");
   assert.ok(quiet.includes("1-1"), "every row carries the score");
+  // A grounder that turned two is logged as a GIDP, not the bare GB it started as.
+  const twinKilling = gameLogLine({ ...swing, runs: 0, result: "GB", playDetails: { doublePlayAttempt: { batterOut: true, roll: 17 } } }, "away");
+  assert.ok(twinKilling.includes("<b>GIDP</b>"), "a double play is called a GIDP in the log");
+  assert.ok(!twinKilling.includes("<b>GB</b>"), "and not the grounder it began as");
   const theirs = gameLogLine({ ...swing, half: "bottom" }, "away");
   assert.ok(theirs.includes("-18%"), "their swing reads negative");
   const atHome = gameLogLine(swing, "home");
@@ -3330,6 +3341,10 @@ test("a glove's die is announced before it is thrown, and the bat's answer is re
   // And what the die has to BEAT. A die you are watching without knowing what it
   // needs is a die you are only waiting on.
   assert.match(pivot.lead, /DEFENSE NEEDS A 13/, "with the number the defense has to throw");
+  // The number lands on its own line, under the setup — not trailing it after an
+  // ellipsis. It is the thing about to be sweated, and it earns the line.
+  assert.match(pivot.lead, /THEY GO FOR TWO<br>DEFENSE NEEDS A 13/, "the needed number gets its own line");
+  assert.ok(!pivot.lead.includes("&hellip;"), "and no ellipsis leading into it");
   assert.match(pivot.caption, /TWO DOWN/, "and what it did, after");
   assert.ok(pivot.late, "the pivot is late, so the screen holds a beat for it");
   assert.ok(!swing.late && !pitch.late, "the duel's own dice are not");

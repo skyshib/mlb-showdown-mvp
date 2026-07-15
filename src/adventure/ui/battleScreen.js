@@ -455,6 +455,15 @@ function needsLine(attempt) {
   return `DEFENSE NEEDS A ${needs.needed}`;
 }
 
+// The lead a late die reads while it holds: the setup, and under it — on its own
+// line — what the die has to beat. It used to trail the setup after an ellipsis,
+// but the number the defense needs is the thing you are about to sweat, and it
+// earns a line of its own rather than a clause on the end of another one.
+function dramaLead(setup, attempt) {
+  const needs = needsLine(attempt);
+  return needs ? `${setup}<br>${needs}` : `${setup}&hellip;`;
+}
+
 function swingCall(event) {
   const call = SWING_CALL[event.result];
   return call ? `${escapeHtml(event.result)} — ${call}` : escapeHtml(String(event.result ?? "IN PLAY"));
@@ -471,7 +480,7 @@ function fieldingStages(event) {
       // Said BEFORE the die tumbles, so you know what you are watching — and what
       // the die has to beat, which is the only thing that makes watching it a
       // sweat rather than a wait.
-      lead: `THEY GO FOR TWO&hellip; ${needsLine(dp)}`,
+      lead: dramaLead("THEY GO FOR TWO", dp),
       // LATE: a glove only has something to do if the ball is in play, so a die
       // that says THE PIVOT sitting on the screen while the swing is still
       // tumbling has already told you the swing was a ball in play. It is not
@@ -496,7 +505,7 @@ function fieldingStages(event) {
     stages.push({
       label: `THROW TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}`,
       roll: attempt.roll,
-      lead: `${escapeHtml(shortName(stripCardYear(attempt.runner ?? "")))} IS SENT TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}&hellip; ${needsLine(attempt)}`,
+      lead: dramaLead(`${escapeHtml(shortName(stripCardYear(attempt.runner ?? "")))} IS SENT TO ${escapeHtml(String(attempt.to ?? "").toUpperCase())}`, attempt),
       // Late, and for the same reason: THROW TO HOME on the screen is a hit,
       // announced before the bat has even been swung.
       late: true,
@@ -609,17 +618,16 @@ function d20FaceHtml() {
 // Two dice thrown at the same moment are one roll with two numbers on it. These
 // are a SEQUENCE — the ball is put in play, and THEN a glove has to do something
 // about it — so the screen is made to say the first thing before it throws the
-// second. The swing lands and calls what it was (GB — GROUND BALL); the game
-// waits long enough to be read; the pivot is announced (THEY GO FOR TWO...); and
-// only then does that die start to tumble. Watching a die decide a double play
-// before anybody has told you there is a ground ball is watching a die for no
-// reason.
+// second. The swing lands and calls what it was (GB — GROUND BALL); the pivot is
+// then announced (THEY GO FOR TWO, and the number it has to beat); the game holds
+// on that announcement long enough to be sweated; and only then does that die
+// start to tumble. The text you are made to read comes just before the pause, not
+// after it — you know what the die needs before you are made to wait on it.
 const DIE_HOLD_MS = 350;      // between two dice of the same roll: pitch, swing
-// Between the bat's answer and the glove's question. Long, and deliberately so:
-// you are being told a ball is in play and a glove is about to decide what it is
-// worth, and a beat that only just clears the reading of it is a beat you feel
-// hurried through. This is the one place in the game where the pause IS the
-// point — the ball is in the air and nobody knows yet.
+// Between the glove's question and its answer. Long, and deliberately so: the die
+// has announced what it must beat, and now you are held on that number while it
+// decides. This is the one place in the game where the pause IS the point — the
+// ball is in the air, the throw is called, and nobody knows yet.
 const READ_THE_PLAY_MS = 2200;
 
 function mountDrama(app) {
@@ -629,14 +637,10 @@ function mountDrama(app) {
     const caption = document.querySelector("[data-die-caption]");
     if (caption && text) caption.innerHTML = text;
   };
-  const spin = (index) => {
-    const die = document.querySelector(`[data-die="${index}"]`);
-    if (!die || !app.screen.drama) return stopDramaTimer();
+  const tumble = (index, die) => {
     // A die that has not been thrown is not on the table. The gloves' dice appear
-    // at the moment they are thrown, and not one beat sooner — and they announce
-    // themselves as they arrive, so the roll has a reason before it has a number.
+    // at the moment they are thrown, and not one beat sooner.
     document.querySelector(`[data-die-stage="${index}"]`)?.classList.remove("gq-die-unthrown");
-    say(stages[index].lead);
     let ticks = 0;
     dramaTimer = setInterval(() => {
       if (!die.isConnected || !app.screen.drama) return stopDramaTimer();
@@ -654,10 +658,25 @@ function mountDrama(app) {
         dramaTimer = setTimeout(() => revealDrama(app), 700);
         return;
       }
-      // A glove answering the bat gets a beat to be read into; a second die of
-      // the same roll does not need one.
-      dramaTimer = setTimeout(() => spin(index + 1), next.late ? READ_THE_PLAY_MS : DIE_HOLD_MS);
+      dramaTimer = setTimeout(() => spin(index + 1), DIE_HOLD_MS);
     }, 85);
+  };
+  const spin = (index) => {
+    const die = document.querySelector(`[data-die="${index}"]`);
+    if (!die || !app.screen.drama) return stopDramaTimer();
+    // The die announces what it is about to do — and what it has to beat — the
+    // moment its turn comes, so the roll has a reason before it has a number.
+    say(stages[index].lead);
+    // A late die holds after it is announced and before it tumbles: you read the
+    // number the defense needs and sweat the pause. The duel's own dice, with
+    // nothing to beat, do not wait — they are thrown as soon as they are called.
+    if (stages[index].late) {
+      dramaTimer = setTimeout(() => {
+        if (die.isConnected && app.screen.drama) tumble(index, die);
+      }, READ_THE_PLAY_MS);
+    } else {
+      tumble(index, die);
+    }
   };
   spin(0);
 }

@@ -1203,7 +1203,7 @@ export const teamScreen = {
       const anchorId = anchor?.id;
       list = `<h3>${benchLabel(save, anchor, filter)}</h3>${menuHtml(
         [
-          ...pickRows.map((card) => ({ html: `${cardLine(card)}${card.id === anchorId ? " &#9670;" : ""}` })),
+          ...pickRows.map((card) => ({ html: `${cardLine(card)}${card.id === anchorId ? " &#9670;" : ""}${starMark(save, card)}` })),
           { label: "CANCEL" }
         ],
         pickIndex
