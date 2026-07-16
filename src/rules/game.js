@@ -114,9 +114,19 @@ export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
     events,
     innings: inningsPlayed(state),
     topSwing: state.topSwing,
+    twenties: state.twenties,
     // The board this game was played on, so a simulated game hangs one too.
     lineScore: state.lineScore
   };
+}
+
+// Every d20 the game throws goes through here, so a natural 20 is counted no
+// matter which kind of roll it was — a pitch, a swing, a throw to a base. The
+// count rides on the state and is read off the finished game (twenties-game).
+function rollD20(state, rng) {
+  const roll = rng.d20();
+  if (roll === 20) state.twenties = (state.twenties ?? 0) + 1;
+  return roll;
 }
 
 // Innings actually played in a finished game. The final out of a bottom half
@@ -143,11 +153,11 @@ export function playPlateAppearance(state, rng) {
   const outsBefore = state.outs;
   const scoreBefore = { ...state.score };
   const wpBefore = winProbabilityHome(state);
-  const controlRoll = rng.d20();
+  const controlRoll = rollD20(state, rng);
   const effectiveControl = pitcher.control - fatiguePenalty;
   const controlTotal = controlRoll + effectiveControl;
   const chartOwner = controlTotal > batter.onBase ? "pitcher" : "hitter";
-  const resultRoll = rng.d20();
+  const resultRoll = rollD20(state, rng);
   const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, resultRoll);
   state.lastPlayDetails = null;
   const runs = applyResult(state, result, batter, battingSide, pitchingSide, rng, pitcher);
@@ -662,6 +672,9 @@ export function createInitialState(awayTeam, homeTeam) {
     lastPlayDetails: null,
     topSwing: null,
     walkoff: false,
+    // Natural 20s rolled this game, either dugout, every kind of roll — the record
+    // book keeps the luckiest afternoon (see rollD20 and the twenties-game record).
+    twenties: 0,
     // Interactive-layer flags. Auto play leaves both null: pitching plans run
     // themselves and extra-base advances resolve by the decision matrix.
     manualPitchingFor: null,
@@ -953,7 +966,7 @@ export function applyGroundout(state, batter, battingSide, pitchingSide, rng) {
   if (first) {
     state.outs += 1;
     if (state.outs < 3) {
-      const roll = rng.d20();
+      const roll = rollD20(state, rng);
       const fielding = totalInfieldFielding(state[pitchingSide]);
       const total = roll + fielding;
       const target = speedTarget(batter);
@@ -1205,7 +1218,7 @@ function chooseStealAttempt(state, pitchingSide) {
 }
 
 function resolveStealAttempt(state, candidate, rng) {
-  const roll = rng.d20();
+  const roll = rollD20(state, rng);
   const total = roll + candidate.fielding;
   const safe = total <= candidate.target;
   state.bases[candidate.fromIndex] = null;
@@ -1318,7 +1331,7 @@ function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rn
   const alwaysSafe = certainSafe(throwTarget);
   const alwaysOut = certainOut(throwTarget);
   const settled = alwaysSafe || alwaysOut;
-  const roll = settled ? null : rng.d20();
+  const roll = settled ? null : rollD20(state, rng);
   const total = settled ? null : roll + throwTarget.fielding;
   const safe = settled ? alwaysSafe : total <= throwTarget.target;
   let runs = 0;

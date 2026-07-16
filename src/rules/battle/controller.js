@@ -380,6 +380,7 @@ export function runSimSeries({ playerManager, npcManager, bestOf, seed }) {
       innings: result.innings,
       playerWon,
       topSwing: result.topSwing,
+      twenties: result.twenties,
       boxScore: result.boxScore,
       lineScore: result.lineScore,
       // Feats (slams, comebacks) read the play-by-play; the events ride the

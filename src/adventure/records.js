@@ -301,6 +301,20 @@ export const RECORDS = [
     fromRun: true,
     read: () => fastestTitle("uncapped")
   },
+  {
+    key: "twenties-game",
+    page: "manager",
+    group: "AT THE TABLE",
+    // The dice, not the diamond. Every d20 the game throws — pitch, swing, throw
+    // to a base, either dugout — and how many came up 20 on the luckiest afternoon.
+    // Only games played since the count existed compete; older ones never rolled
+    // a tracked die and simply do not.
+    title: "MOST 20s ROLLED IN A GAME",
+    better: "max",
+    unit: "",
+    opens: true,
+    read: (save) => bestGame(save, "max", (game) => game.twenties || null)
+  },
 
   // The other half. Every one of these belongs to ONE man, and he is named on the
   // line — the manager is only the club he did it for.

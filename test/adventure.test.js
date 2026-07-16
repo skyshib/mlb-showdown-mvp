@@ -1409,6 +1409,31 @@ test("a caught stealing credits the man behind the plate, on the other side", ()
   assert.notEqual(runner.side, catcher.side, "the throw-out is the defense's, not the runner's own dugout");
 });
 
+test("the game counts every natural 20 rolled, and the record reads the luckiest one", async () => {
+  const { RECORDS } = await import("../src/adventure/records.js");
+  const { player, npc } = hookTeams();
+  const away = buildTeam(npc);
+  const home = buildTeam(player);
+  let sawTwenty = false;
+  for (let game = 0; game < 40; game += 1) {
+    const result = simulateGame({ ...away }, { ...home }, `twenties-${game}`);
+    assert.ok(Number.isInteger(result.twenties) && result.twenties >= 0, "a whole, non-negative count");
+    // Every plate appearance carries its two d20s; the game's count is at least
+    // those, plus any steal / advance / groundout throws that also came up 20.
+    const paTwenties = result.events.reduce(
+      (total, event) => total + (event.controlRoll === 20 ? 1 : 0) + (event.resultRoll === 20 ? 1 : 0), 0);
+    assert.ok(result.twenties >= paTwenties, "the count includes the plate-appearance 20s, and any others");
+    if (result.twenties > 0) sawTwenty = true;
+  }
+  assert.ok(sawTwenty, "somebody rolled a 20 across a season of games");
+
+  const record = RECORDS.find((row) => row.key === "twenties-game");
+  const save = { almanac: [{ day: 1, opponent: "A", twenties: 3 }, { day: 2, opponent: "B", twenties: 5 }] };
+  assert.deepEqual(record.read(save), { value: 5, day: 2, opponent: "B" }, "the luckiest afternoon holds it");
+  assert.equal(record.read({ almanac: [{ day: 1, opponent: "A" }] }), null,
+    "a game from before the count existed never rolled a tracked die, and does not compete");
+});
+
 test("a saved batting order reorders the lineup for future games", () => {
   const save = testSave();
   const defaultLineup = buildTeam(managerFor(save)).lineup;

@@ -31,7 +31,8 @@ export function travelling(game) {
     score: game.score,
     feats: game.feats ?? [],
     boxScore: game.boxScore,
-    lineScore: game.lineScore ?? null
+    lineScore: game.lineScore ?? null,
+    twenties: game.twenties ?? 0
   };
 }
 

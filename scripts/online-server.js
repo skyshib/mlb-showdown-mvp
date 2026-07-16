@@ -505,7 +505,8 @@ function sanitizeGame(body) {
         away: Array.isArray(body.lineScore.away) ? body.lineScore.away.slice(0, 30).map((n) => hofNumber(n, 100)) : [],
         home: Array.isArray(body.lineScore.home) ? body.lineScore.home.slice(0, 30).map((n) => hofNumber(n, 100)) : []
       }
-      : null
+      : null,
+    twenties: hofNumber(body.twenties, 1e4)
   };
 }
 
@@ -547,6 +548,7 @@ const RECORD_DIRECTIONS = {
   "longest-game": "max",
   "win-pct": "max",
   "catalog-days": "min",
+  "twenties-game": "max",
   "fewest-losses-title": "min",
   "fastest-title-budget": "min",
   "fastest-title-uncapped": "min",

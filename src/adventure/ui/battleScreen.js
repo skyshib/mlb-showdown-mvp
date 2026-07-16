@@ -88,7 +88,8 @@ export function startTrainerBattle(app, trainer) {
           : { away: game.npcRuns, home: game.playerRuns },
         innings: game.innings,
         won: game.playerWon,
-        lineScore: game.lineScore
+        lineScore: game.lineScore,
+        twenties: game.twenties
       });
     }
     const outcome = applyOutcome(app, trainer, series.playerWonSeries);
@@ -243,7 +244,7 @@ export function applyOutcome(app, trainer, won) {
 // sim series): feats detected, an almanac page written, trophies framed.
 // Returns the feats so the box-score screen can reuse them. Called after
 // recordGameStats, so the season game count IS the day this game happened.
-export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won, lineScore = null }) {
+export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won, lineScore = null, twenties = 0 }) {
   const feats = gameFeats({ boxScore, playerSide, events, score, innings });
   const day = ensureSeasonStats(save).games;
   const entry = recordAlmanacGame(save, {
@@ -255,6 +256,9 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
     playerSide,
     innings,
     feats,
+    // Natural 20s thrown in this game, either dugout — the raw dice luck of the
+    // afternoon, for the twenties-game record.
+    twenties,
     // The record book wants a run of hits back to back, and that is a fact about
     // the PLAY-BY-PLAY. The box score has how many hits; only the sequence knows
     // they came one after another.
@@ -918,7 +922,8 @@ function resolveGameEnd(app, phase) {
     innings: inningsPlayed(battle.state),
     won: phase.playerWon,
     // So the almanac can hang the board back up when the game is reopened.
-    lineScore: battle.state.lineScore
+    lineScore: battle.state.lineScore,
+    twenties: battle.state.twenties
   });
   const status = recordSeriesGame(save, phase.playerWon);
   // The game is in the books now — coins paid, stats recorded. Nothing left to
