@@ -11,19 +11,19 @@ import {
   surname,
   cardPanelHtml,
   cardLine
-} from "./helpers.js?v=20260715-d";
-import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260715-d";
-import { recordCompletedRun } from "../hallOfFame.js?v=20260715-d";
-import { longestHitStreak, updatePersonalRecords, setsOpenableGameRecord } from "../records.js?v=20260715-d";
-import { uploadGame } from "../gameArchive.js?v=20260715-d";
-import { compactGame } from "../gameLog.js?v=20260715-d";
-import { cardById } from "../packs.js?v=20260715-d";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260715-d";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260715-d";
-import { gameFeats } from "../feats.js?v=20260715-d";
-import { buildNpcTeam } from "../npcTeams.js?v=20260715-d";
-import { positionsOverlap } from "../../rules/cards.js?v=20260715-d";
-import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260715-d";
+} from "./helpers.js?v=20260716-records";
+import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260716-records";
+import { recordCompletedRun } from "../hallOfFame.js?v=20260716-records";
+import { longestHitStreak, updatePersonalRecords, setsOpenableGameRecord } from "../records.js?v=20260716-records";
+import { uploadGame } from "../gameArchive.js?v=20260716-records";
+import { compactGame } from "../gameLog.js?v=20260716-records";
+import { cardById } from "../packs.js?v=20260716-records";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260716-records";
+import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260716-records";
+import { gameFeats } from "../feats.js?v=20260716-records";
+import { buildNpcTeam } from "../npcTeams.js?v=20260716-records";
+import { positionsOverlap } from "../../rules/cards.js?v=20260716-records";
+import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260716-records";
 import {
   persistSave,
   deriveSeed,
@@ -45,7 +45,7 @@ import {
   recordAlmanacGame,
   addTrophies,
   clearSeries
-} from "../state.js?v=20260715-d";
+} from "../state.js?v=20260716-records";
 import {
   createBattle,
   battlePhase,
@@ -63,7 +63,7 @@ import {
   npcMoundVisit,
   serializeBattle,
   restoreBattle
-} from "../../rules/battle/controller.js?v=20260715-d";
+} from "../../rules/battle/controller.js?v=20260716-records";
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -158,13 +158,22 @@ export function resumeBattle(app) {
   const stashed = save?.activeBattle;
   if (!stashed) return null;
   const trainer = trainerById(stashed.trainerId);
-  const battle = trainer && restoreBattle({
-    playerManager: managerFor(save),
+  // A roster is only as real as the cards it can still name. When a build drops
+  // a card set out from under a save — the single-season pools that left with
+  // that mode, say — managerFor silently returns fewer men than the roster
+  // lists, and the lineup rebuilt from them is short or empty. That is the same
+  // "can't replay this recording" case restoreBattle guards, caught one step
+  // earlier: a battle with no one to send to the plate must never reach the HUD.
+  const playerManager = trainer && managerFor(save);
+  const rosterResolved = playerManager &&
+    playerManager.roster.length === (save.roster?.cardIds?.length ?? 0);
+  const battle = rosterResolved && restoreBattle({
+    playerManager,
     npcManager: buildNpcTeam(trainer, save),
     trainer,
     ...stashed
   });
-  if (!battle) {
+  if (!battle || !battle.state.away.lineup.length || !battle.state.home.lineup.length) {
     clearBattle(save);
     persistSave(save);
     return null;

@@ -1,4 +1,4 @@
-import { RESULTS, chartSpan } from "./cards.js?v=20260715-d";
+import { RESULTS, chartSpan } from "./cards.js?v=20260716-records";
 
 // When to go to the pen.
 //

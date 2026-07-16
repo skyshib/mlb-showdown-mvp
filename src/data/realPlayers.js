@@ -1,5 +1,5 @@
-import { RESULTS } from "../rules/cards.js?v=20260715-d";
-import { maxPoolManagers } from "../rules/draft.js?v=20260715-d";
+import { RESULTS } from "../rules/cards.js?v=20260716-records";
+import { maxPoolManagers } from "../rules/draft.js?v=20260716-records";
 import {
   chartFromCounts,
   chartPower,

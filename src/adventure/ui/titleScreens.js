@@ -1,6 +1,6 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260715-d";
-import { resumeBattle } from "./battleScreen.js?v=20260715-d";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260715-d";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260716-records";
+import { resumeBattle } from "./battleScreen.js?v=20260716-records";
+import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260716-records";
 import {
   createSave,
   persistSave,
@@ -12,7 +12,7 @@ import {
   exportSaveCode,
   importSaveCode,
   saveFileName
-} from "../state.js?v=20260715-d";
+} from "../state.js?v=20260716-records";
 
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],
