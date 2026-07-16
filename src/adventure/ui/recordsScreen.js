@@ -9,7 +9,8 @@ import {
   leaderboard,
   cachedGlobalRecords,
   fetchGlobalRecords,
-  submitRecords
+  submitRecords,
+  submitMissingRunRecords
 } from "../records.js?v=20260715-d";
 
 // ---- World records ----------------------------------------------------------
@@ -41,7 +42,12 @@ async function syncGlobal(app) {
     // Yours go up, the league's come down. Both, every visit — a save that beat
     // its own mark since last time is exactly the case worth pushing.
     await submitRecords(app.save);
-    await fetchGlobalRecords();
+    const globals = await fetchGlobalRecords();
+    // The finished runs, too: any whose title marks the book has not got yet go up
+    // under their own managers — a run that finished before this board existed, or
+    // on a day the record screen was never opened, catches up here. Re-read so the
+    // ones that just went up show.
+    if (await submitMissingRunRecords(globals)) await fetchGlobalRecords();
     syncStatus = "online";
   } catch {
     // No server, no problem: your own bests still stand, alone.

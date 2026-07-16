@@ -228,6 +228,7 @@ export const RECORDS = [
     title: "FEWEST LOSSES IN A TITLE RUN",
     better: "min",
     unit: "losses",
+    fromRun: true,
     read: () => fewestTitleLosses()
   },
   // Two boards, not one. A pennant bought with an uncapped chequebook and a
@@ -241,6 +242,7 @@ export const RECORDS = [
     title: "FASTEST CHAMPIONSHIP (BUDGET)",
     better: "min",
     unit: "days",
+    fromRun: true,
     read: () => fastestTitle("budget")
   },
   {
@@ -250,6 +252,7 @@ export const RECORDS = [
     title: "FASTEST CHAMPIONSHIP (UNCAPPED)",
     better: "min",
     unit: "days",
+    fromRun: true,
     read: () => fastestTitle("uncapped")
   },
 
@@ -430,6 +433,12 @@ export const RECORDS = [
 ];
 
 export const RECORD_KEYS = RECORDS.map((record) => record.key);
+
+// The records that are not about the save in your hands but about a run you have
+// already finished — read out of the hall of fame, not the almanac. They are filed
+// when the run ends, each under the manager who set it, so the active save never
+// claims another run's title (see submitRunRecords / personalBests).
+const RUN_RECORD_KEYS = RECORDS.filter((record) => record.fromRun).map((record) => record.key);
 
 export function recordsOnPage(page) {
   return RECORDS.filter((record) => record.page === page);
@@ -627,11 +636,29 @@ function fastestTitle(mode) {
   return best;
 }
 
+// One finished run's mark for one run record, or null if the run did not set it.
+// A fastest-championship board only counts runs won under its own rule set; the
+// fewest-losses board counts them all, whichever league they were won in.
+function runRecordValue(key, run) {
+  if (key === "fewest-losses-title") {
+    const losses = Number(run.losses);
+    return Number.isFinite(losses) && losses >= 0 ? losses : null;
+  }
+  const mode = key === "fastest-title-uncapped" ? "uncapped" : "budget";
+  if ((run.mode ?? "budget") !== mode) return null;
+  const days = Number(run.days);
+  return Number.isFinite(days) && days > 0 ? days : null;
+}
+
 // Everything this save has to submit: one line per record it has actually set.
 export function personalBests(save) {
   if (!save) return {};
   const bests = {};
   for (const record of RECORDS) {
+    // The title-run records belong to finished runs, not to the campaign in your
+    // hands: they go up under their own manager when the run ends, not filed under
+    // whoever happens to be playing when the book is opened. See submitRunRecords.
+    if (record.fromRun) continue;
     const best = record.read(save);
     if (best) bests[record.key] = best;
   }
@@ -662,23 +689,79 @@ export async function fetchGlobalRecords() {
   return globalRecords;
 }
 
-// Your bests go up whenever the book is opened. A save that has beaten its own
-// old mark simply overwrites it — one line per campaign per record, so a long
-// run cannot fill the board with its own history.
-export function submitRecords(save) {
-  if (!inBrowser() || !save) return Promise.resolve(false);
-  const records = personalBests(save);
+// One line per campaign per record, filed under whoever set it. A save that beats
+// its own old mark overwrites it, so a long run cannot fill the board with its own
+// history; the server keeps whichever is better (see fileRecord).
+function postRecordBook(name, saveSeed, mode, records) {
+  if (!inBrowser() || !name || !saveSeed) return Promise.resolve(false);
   if (!Object.keys(records).length) return Promise.resolve(false);
   return fetch("/api/records", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: save.player.name,
-      saveSeed: save.saveSeed,
-      mode: save.mode ?? "budget",
-      records
-    })
+    body: JSON.stringify({ name, saveSeed, mode: mode ?? "budget", records })
   }).then((response) => response.ok, () => false);
+}
+
+// Your bests go up whenever the book is opened — the campaign in your hands, filed
+// under you. The title-run records are not here: they belong to finished runs and
+// go up under their own managers (see submitRunRecords).
+export function submitRecords(save) {
+  if (!save) return Promise.resolve(false);
+  return postRecordBook(save.player.name, save.saveSeed, save.mode ?? "budget", personalBests(save));
+}
+
+// A finished run's own title marks, sent to the book under the manager who set
+// them — the record-book twin of the hall-of-fame plaque, submitted the moment the
+// run ends (see recordCompletedRun). Because each is filed under the run's own
+// saveSeed, the board credits the run that made the number, not whatever save is
+// open when the book is next read.
+export function submitRunRecords(run) {
+  if (!run) return Promise.resolve(false);
+  const records = {};
+  for (const key of RUN_RECORD_KEYS) {
+    const value = runRecordValue(key, run);
+    if (value !== null) records[key] = { value };
+  }
+  return postRecordBook(run.name, run.saveSeed, run.mode ?? "budget", records);
+}
+
+// The finished runs the book has not heard of yet — an offline finish, or a run
+// from before this board existed — sent up each under its own manager. "Not heard
+// of" means the board has no row under that run's saveSeed for a record it holds.
+// Mirrors the hall of fame catching up its missing plaques on every visit; returns
+// whether anything went up, so the screen only re-reads when it is worth it.
+export async function submitMissingRunRecords(globals) {
+  if (!inBrowser()) return false;
+  const missing = loadHallOfFame().filter((run) => runNeedsFiling(run, globals));
+  for (const run of missing) await submitRunRecords(run);
+  return missing.length > 0;
+}
+
+function runNeedsFiling(run, globals) {
+  return RUN_RECORD_KEYS.some((key) => {
+    if (runRecordValue(key, run) === null) return false;
+    return !(globals?.[key] ?? []).some((row) => row.saveSeed === run.saveSeed);
+  });
+}
+
+// Your mark for a save record, as a board row — the campaign in your hands, or
+// nothing if it has not set this record.
+function saveMark(record, save) {
+  const best = save ? record.read(save) : null;
+  return best ? [{ ...best, name: save.player.name, saveSeed: save.saveSeed, you: true }] : [];
+}
+
+// Every finished run's mark for a title-run record, each as its own row under its
+// own name — read straight out of the local hall of fame, the way the run records
+// are only ever attributed.
+function localRunMarks(record) {
+  const marks = [];
+  for (const run of loadHallOfFame()) {
+    const value = runRecordValue(record.key, run);
+    if (value === null) continue;
+    marks.push({ value, name: run.name, saveSeed: run.saveSeed, mode: run.mode ?? "budget", you: true });
+  }
+  return marks;
 }
 
 // The board for one record: the league's top few, with YOUR best folded in even
@@ -686,17 +769,22 @@ export function submitRecords(save) {
 // you are). Ranked the right way round for the record in question.
 export function leaderboard(record, globals, save, limit = 5) {
   const rows = [...(globals?.[record.key] ?? [])].map((row) => ({ ...row }));
-  const mineBest = save ? record.read(save) : null;
-  if (mineBest) {
-    const already = rows.find((row) => row.saveSeed === save.saveSeed);
+  // Your own marks, folded onto the board the server sent. A save record has one —
+  // the campaign in your hands — filed under this save. A title-run record has one
+  // per finished run, each under its own name: the record twin of the hall of
+  // fame's mergeEntries, so an offline or pre-board finish still shows, credited to
+  // the run that earned it rather than to whoever is playing now.
+  const mine = record.fromRun ? localRunMarks(record) : saveMark(record, save);
+  for (const mark of mine) {
+    const already = rows.find((row) => row.saveSeed === mark.saveSeed);
     if (already) {
       already.you = true;
-      // The board can be behind what this save has just done.
-      if (record.better === "max" ? mineBest.value > already.value : mineBest.value < already.value) {
-        Object.assign(already, mineBest);
+      // The board can be behind what has just been done on this machine.
+      if (record.better === "max" ? mark.value > already.value : mark.value < already.value) {
+        Object.assign(already, mark);
       }
     } else {
-      rows.push({ ...mineBest, name: save.player.name, saveSeed: save.saveSeed, you: true });
+      rows.push(mark);
     }
   }
   rows.sort((a, b) => (record.better === "max" ? b.value - a.value : a.value - b.value));

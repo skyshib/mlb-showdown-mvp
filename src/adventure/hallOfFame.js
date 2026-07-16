@@ -1,4 +1,5 @@
 import { uploadRun } from "./gameArchive.js?v=20260715-d";
+import { submitRunRecords } from "./records.js?v=20260715-d";
 import {
   catalogProgress,
   ensureAlmanac,
@@ -71,6 +72,11 @@ export function recordCompletedRun(save, storage = defaultStorage()) {
   // Best effort: the run also goes up to the shared board. If the network is
   // down it stays local, and the leaderboard screen resubmits it next visit.
   submitRun(entry);
+  // And its title marks go to the record book, under this manager's name — a
+  // finished run belongs in both without anyone having to open the record screen
+  // first. Same best-effort deal: the records screen catches up any that missed
+  // (see submitMissingRunRecords).
+  submitRunRecords(entry);
   // And the games under it — the afternoons that got him there. One request each
   // (see gameArchive), quietly, so a plaque somebody opens has something behind
   // it besides a roster.
