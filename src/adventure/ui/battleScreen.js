@@ -14,7 +14,8 @@ import {
 } from "./helpers.js?v=20260715-d";
 import { gameStars, gameLogRows, statLineHtml, seriesStatLines, winProbChartHtml } from "./statsScreens.js?v=20260715-d";
 import { recordCompletedRun } from "../hallOfFame.js?v=20260715-d";
-import { longestHitStreak } from "../records.js?v=20260715-d";
+import { longestHitStreak, updatePersonalRecords, setsOpenableGameRecord } from "../records.js?v=20260715-d";
+import { uploadGame } from "../gameArchive.js?v=20260715-d";
 import { compactGame } from "../gameLog.js?v=20260715-d";
 import { cardById } from "../packs.js?v=20260715-d";
 import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260715-d";
@@ -236,7 +237,7 @@ export function applyOutcome(app, trainer, won) {
 export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won, lineScore = null }) {
   const feats = gameFeats({ boxScore, playerSide, events, score, innings });
   const day = ensureSeasonStats(save).games;
-  recordAlmanacGame(save, {
+  const entry = recordAlmanacGame(save, {
     day,
     trainerId: trainer.id,
     opponent: trainer.name,
@@ -259,6 +260,16 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
     lineScore
   });
   addTrophies(save, feats, { day, opponent: trainer.name });
+  // This game may have just set a personal record. Fold the save's bests into the
+  // all-time book now, so it stands whether or not this run ever wins a title and
+  // survives starting the next run. Best effort — a book that fails to write is not
+  // worth losing a game over.
+  const moved = updatePersonalRecords(save);
+  // And if the record it set opens onto this afternoon, send the box score up so the
+  // world-records board can open it — title or no title. A finished run uploads all
+  // its games anyway (see uploadRun); the server files one page per day, so a game
+  // sent now and again at the trophy is not doubled.
+  if (setsOpenableGameRecord(moved, day)) uploadGame(save, entry);
   return feats;
 }
 

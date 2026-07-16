@@ -9,7 +9,8 @@ import {
   leaderboard,
   cachedGlobalRecords,
   fetchGlobalRecords,
-  submitRecords,
+  updatePersonalRecords,
+  submitPersonalRecords,
   submitMissingRunRecords
 } from "../records.js?v=20260715-d";
 
@@ -40,8 +41,11 @@ async function syncGlobal(app) {
   syncStatus = "syncing";
   try {
     // Yours go up, the league's come down. Both, every visit — a save that beat
-    // its own mark since last time is exactly the case worth pushing.
-    await submitRecords(app.save);
+    // its own mark since last time is exactly the case worth pushing. Fold the run
+    // in your hands into the all-time book first, then send the book: your best of
+    // every record, each under the run that set it, whether or not that run is over.
+    updatePersonalRecords(app.save);
+    await submitPersonalRecords();
     const globals = await fetchGlobalRecords();
     // The finished runs, too: any whose title marks the book has not got yet go up
     // under their own managers — a run that finished before this board existed, or

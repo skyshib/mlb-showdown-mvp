@@ -283,6 +283,10 @@ function performStealAttempt(state, stealAttempt, rng) {
   if (!attemptResult.safe) {
     state.pitching[pitchingSide].outsRecorded += 1;
     ensurePitcherLine(state, pitcher).outs += 1;
+    // The runner is charged the caught-stealing on his own line (see
+    // resolveStealAttempt); the man who threw him out gets the credit on his.
+    const catcher = catcherOf(pitchingTeam);
+    if (catcher?.id) ensureHitterLine(state, catcher, pitchingSide).csCaught += 1;
   }
   const wpAfter = winProbabilityHome(state);
   const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
@@ -1329,8 +1333,10 @@ function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rn
     } else {
       state.bases[throwTarget.toIndex] = throwTarget.runner;
     }
+    recordRunnerStat(state, throwTarget.runner, "adv");
   } else {
     state.outs += 1;
+    recordRunnerStat(state, throwTarget.runner, "advOut");
   }
 
   const thrownAttempt = describeAdvanceAttempt(throwTarget, {
@@ -1350,6 +1356,9 @@ function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rn
     } else {
       state.bases[candidate.toIndex] = candidate.runner;
     }
+    // A conceded base — the throw went to the lead man, this one was waved in
+    // behind him — is an advancement all the same.
+    recordRunnerStat(state, candidate.runner, "adv");
 
     return describeAdvanceAttempt(candidate, {
       roll: null,
@@ -1483,9 +1492,14 @@ function totalOutfieldFielding(team) {
   }, 0);
 }
 
+// The man behind the plate — the only fielder any record cares about by name, and
+// the arm the steal target is set against.
+function catcherOf(team) {
+  return team.lineup.find((item) => playerDefensivePosition(item) === "C" || playerDefensivePosition(item) === "CA") ?? null;
+}
+
 function totalCatcherFielding(team) {
-  const player = team.lineup.find((item) => playerDefensivePosition(item) === "C" || playerDefensivePosition(item) === "CA");
-  return fieldingValue(player);
+  return fieldingValue(catcherOf(team));
 }
 
 function playerDefensivePosition(player) {
@@ -1590,8 +1604,12 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
 // in both lineups keeps separate home and away lines. Deriving the side from
 // state.half is safe because every stat records before the half flips (a
 // pending advance decision blocks the flip until it resolves).
-function ensureHitterLine(state, hitter) {
-  const side = state.half === "top" ? "away" : "home";
+// A hitter line is keyed by side and id. It usually belongs to the man at the
+// plate, so the side defaults to whoever is batting — but a defensive credit (a
+// catcher gunning down a stealer) belongs to a man on the OTHER side, so callers
+// can name the side explicitly. Either way the same key returns the same line, so
+// a catcher's throw-out and his own at-bats land on one row.
+function ensureHitterLine(state, hitter, side = state.half === "top" ? "away" : "home") {
   const key = `${side}:${hitter.id}`;
   if (!state.stats.hitters.has(key)) {
     state.stats.hitters.set(key, {
@@ -1610,6 +1628,12 @@ function ensureHitterLine(state, hitter) {
       hr: 0,
       sb: 0,
       cs: 0,
+      // Baserunning beyond the steal: extra bases taken (adv) and outs made
+      // trying (advOut) — both charged to the runner. csCaught is the other side
+      // of a steal: a runner THIS man, behind the plate, threw out.
+      adv: 0,
+      advOut: 0,
+      csCaught: 0,
       rbi: 0,
       gidp: 0,
       wpa: 0

@@ -286,6 +286,7 @@ const HOF_RARITIES = new Set(["common", "uncommon", "rare", "legend"]);
 // Every stat key the client's season lines render, hitters and pitchers both.
 const HOF_STAT_KEYS = [
   "games", "pa", "ab", "h", "d", "t", "hr", "bb", "so", "r", "rbi", "sb", "cs", "gidp", "wpa",
+  "adv", "advOut", "csCaught",
   "avg", "obp", "slg", "ops", "bf", "outs", "runsPerNine", "strikeoutsPerNine"
 ];
 
@@ -531,9 +532,13 @@ const RECORD_DIRECTIONS = {
   "runs-game": "max",
   "margin-game": "max",
   "homers-game": "max",
+  "steals-game": "max",
+  "advances-game": "max",
   "comeback": "max",
   "inning-runs": "max",
   "strikeouts-game": "max",
+  "caught-stealing-game": "max",
+  "caught-advancing-game": "max",
   "hits-allowed-win": "min",
   "shutouts": "max",
   "hit-streak": "max",
@@ -548,6 +553,9 @@ const RECORD_DIRECTIONS = {
   "player-hr-game": "max",
   "player-rbi-game": "max",
   "player-hits-game": "max",
+  "player-sb-game": "max",
+  "player-adv-game": "max",
+  "player-caught-stealing-game": "max",
   "player-k-game": "max",
   "player-no-hitter": "min",
   "player-homers": "max",

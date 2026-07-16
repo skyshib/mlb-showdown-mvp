@@ -1354,6 +1354,61 @@ test("auto play never defers: simulated games leave no pending decisions", () =>
   assert.ok(result.events.length > 0);
 });
 
+test("the box score counts extra bases taken, outs on the bases, and a catcher's throw-outs", () => {
+  const { player, npc } = hookTeams();
+  const home = buildTeam(player);
+  const away = buildTeam(npc);
+  // A season's worth of games so the rare plays actually turn up.
+  let sawAdv = false, sawAdvOut = false;
+  for (let game = 0; game < 60; game += 1) {
+    const result = simulateGame({ ...away }, { ...home }, `baserunning-${game}`);
+    for (const side of ["away", "home"]) {
+      const them = side === "away" ? "home" : "away";
+      const hitters = result.boxScore[side].hitters;
+      const theirHitters = result.boxScore[them].hitters;
+      // Every new field exists on every line.
+      for (const line of hitters) {
+        assert.equal(typeof line.adv, "number", "adv is on the line");
+        assert.equal(typeof line.advOut, "number", "advOut is on the line");
+        assert.equal(typeof line.csCaught, "number", "csCaught is on the line");
+        if (line.adv > 0) sawAdv = true;
+        if (line.advOut > 0) sawAdvOut = true;
+      }
+      // The invariant that makes the catcher record trustworthy: every caught
+      // stealing charged to a runner is credited to exactly one man behind the
+      // plate. So THIS side's catchers' throw-outs equal the OTHER side's runners'
+      // caught-stealings, game for game — including when both are zero.
+      const sum = (lines, field) => lines.reduce((total, line) => total + (line[field] || 0), 0);
+      assert.equal(sum(hitters, "csCaught"), sum(theirHitters, "cs"),
+        "a catcher is credited for every runner his side cut down, and no other");
+    }
+  }
+  assert.ok(sawAdv, "somebody took an extra base across a season of games");
+  assert.ok(sawAdvOut, "somebody was thrown out trying");
+});
+
+test("a caught stealing credits the man behind the plate, on the other side", () => {
+  const { player, npc } = hookTeams();
+  // A slow runner will be gunned down on some rolls; walk seeds until one is.
+  let caught = null;
+  for (let i = 0; i < 300 && !caught; i += 1) {
+    const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: `cs-${i}` });
+    const state = battle.state;
+    state.outs = 0;
+    state.bases = [{ id: "r1", name: "Runner One", speed: 4 }, null, null];
+    const event = attemptSteal(state, 0, createRng(`cs-roll-${i}`));
+    if (event?.result === "CS") caught = state;
+  }
+  assert.ok(caught, "found a caught stealing to inspect");
+  const lines = [...caught.stats.hitters.values()];
+  const sum = (field) => lines.reduce((total, line) => total + (line[field] || 0), 0);
+  assert.equal(sum("cs"), 1, "the runner is charged the caught stealing");
+  assert.equal(sum("csCaught"), 1, "and exactly one catcher is credited the throw-out");
+  const runner = lines.find((line) => line.cs > 0);
+  const catcher = lines.find((line) => line.csCaught > 0);
+  assert.notEqual(runner.side, catcher.side, "the throw-out is the defense's, not the runner's own dugout");
+});
+
 test("a saved batting order reorders the lineup for future games", () => {
   const save = testSave();
   const defaultLineup = buildTeam(managerFor(save)).lineup;
@@ -4068,6 +4123,9 @@ test("consecutive hits counts a RUN of hits, and a walk breaks it", async () => 
 
 test("the record book ranks each record the right way round, and folds you in", async () => {
   const { RECORDS, leaderboard } = await import("../src/adventure/records.js");
+  // The board also folds in your all-time book (see updatePersonalRecords); this
+  // test is about the save in your hands, so start it from an empty book.
+  localStorage.removeItem("showdown-quest-records-local");
   const runsGame = RECORDS.find((record) => record.key === "runs-game");
   const fewestHits = RECORDS.find((record) => record.key === "hits-allowed-win");
   assert.equal(runsGame.better, "max");
@@ -4104,6 +4162,71 @@ test("the record book ranks each record the right way round, and folds you in", 
   const untouched = leaderboard(RECORDS.find((r) => r.key === "hit-streak"), {}, save);
   assert.equal(untouched.top.length, 0);
   assert.equal(untouched.you, null, "never having done it is not the same as having done it badly");
+});
+
+test("a record from any run stands, and survives starting the next one", async () => {
+  const { RECORDS, leaderboard, updatePersonalRecords, loadPersonalRecords } = await import("../src/adventure/records.js");
+  localStorage.removeItem("showdown-quest-records-local");
+  const runsGame = RECORDS.find((record) => record.key === "runs-game");
+
+  // One away win by however many runs — the raw material of a runs-in-a-game record.
+  const gameWith = (runs) => ({
+    day: 1, opponent: "JOJO", won: true, innings: 9, playerSide: "away",
+    score: { away: runs, home: 0 },
+    boxScore: { away: { team: "?", hitters: [], pitchers: [] }, home: { team: "JOJO", hitters: [], pitchers: [] } }
+  });
+
+  // Run A puts up eight in a game, then the player walks away from it — no title —
+  // and starts run B, which only manages five.
+  const runA = testSave();
+  runA.saveSeed = "sq-a"; runA.player.name = "ANA"; runA.almanac = [gameWith(8)];
+  updatePersonalRecords(runA);
+
+  const runB = testSave();
+  runB.saveSeed = "sq-b"; runB.player.name = "BO"; runB.almanac = [gameWith(5)];
+  updatePersonalRecords(runB);
+
+  // The book still remembers ANA's eight — a better mark, from a run that never won
+  // a thing and is long gone — credited to the run that set it.
+  const book = loadPersonalRecords();
+  assert.equal(book["runs-game"].value, 8, "the best of every run I have played, not just the one I hold");
+  assert.equal(book["runs-game"].saveSeed, "sq-a", "credited to the run that set it");
+
+  // And the board, read while playing run B, folds ANA's eight in above BO's five.
+  const board = leaderboard(runsGame, {}, runB);
+  assert.deepEqual(
+    board.top.map((row) => [row.value, row.name]), [[8, "ANA"], [5, "BO"]],
+    "a game from a past run makes the record book, not just a run that wins the title"
+  );
+
+  // Beat it in run B and the book moves to B; the old mark is replaced, not stacked.
+  runB.almanac = [gameWith(12)];
+  updatePersonalRecords(runB);
+  assert.equal(loadPersonalRecords()["runs-game"].value, 12, "a new best overwrites the old");
+  assert.equal(loadPersonalRecords()["runs-game"].saveSeed, "sq-b");
+
+  localStorage.removeItem("showdown-quest-records-local");
+});
+
+test("a game that sets an openable record is the one worth uploading", async () => {
+  const { updatePersonalRecords, setsOpenableGameRecord } = await import("../src/adventure/records.js");
+  localStorage.removeItem("showdown-quest-records-local");
+
+  const save = testSave();
+  save.saveSeed = "sq-up"; save.player.name = "UP";
+  // An away win by eight on day 1: sets runs-game, whose board line opens the game.
+  save.almanac = [{
+    day: 1, opponent: "J", won: true, innings: 9, playerSide: "away",
+    score: { away: 8, home: 0 },
+    boxScore: { away: { team: "UP", hitters: [], pitchers: [] }, home: { team: "J", hitters: [], pitchers: [] } }
+  }];
+  const moved = updatePersonalRecords(save);
+  assert.ok(moved.includes("runs-game"), "the eight-run game moved an openable record");
+  assert.equal(setsOpenableGameRecord(moved, 1), true, "so its afternoon is worth uploading");
+  assert.equal(setsOpenableGameRecord(moved, 2), false, "but only the day it actually happened");
+  assert.equal(setsOpenableGameRecord(updatePersonalRecords(save), 1), false, "and nothing to send when nothing moved");
+
+  localStorage.removeItem("showdown-quest-records-local");
 });
 
 test("the fastest championship is two boards, and a run only competes in the league it was won in", async () => {
@@ -4156,6 +4279,7 @@ function sluggerSave(games = 8) {
 
 test("a player record belongs to the MAN, and reads out of the campaign, not the afternoon", async () => {
   const { RECORDS, recordsOnPage, leaderboard, personalBests } = await import("../src/adventure/records.js");
+  localStorage.removeItem("showdown-quest-records-local");
   const record = (key) => RECORDS.find((row) => row.key === key);
   const save = sluggerSave();
 
