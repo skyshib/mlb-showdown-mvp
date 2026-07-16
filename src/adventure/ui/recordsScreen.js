@@ -11,6 +11,7 @@ import {
   fetchGlobalRecords,
   updatePersonalRecords,
   submitPersonalRecords,
+  submitCoHolders,
   submitMissingRunRecords
 } from "../records.js?v=20260716-records";
 
@@ -46,6 +47,9 @@ async function syncGlobal(app) {
     // every record, each under the run that set it, whether or not that run is over.
     updatePersonalRecords(app.save);
     await submitPersonalRecords();
+    // The player single-game records go up per man, so a tie (two of your men each
+    // with three homers in a game) reaches the league board, not just your screen.
+    await submitCoHolders(app.save);
     const globals = await fetchGlobalRecords();
     // The finished runs, too: any whose title marks the book has not got yet go up
     // under their own managers — a run that finished before this board existed, or

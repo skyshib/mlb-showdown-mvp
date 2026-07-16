@@ -1,4 +1,4 @@
-import { ensureAlmanac, seasonHitters, seasonPitchers } from "./state.js?v=20260716-records";
+import { almanacGames, seasonHitters, seasonPitchers } from "./state.js?v=20260716-records";
 import { loadHallOfFame } from "./hallOfFame.js?v=20260716-records";
 
 // The record book, and it is the whole league's, not yours.
@@ -330,6 +330,10 @@ export const RECORDS = [
     better: "max",
     unit: "HR",
     opens: true,
+    // side + measure let the board read EVERY man tied at the top, not just the
+    // first (see coLeaders); read is the same measure, single best.
+    side: "hitters",
+    measure: (line) => line.hr || null,
     read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.hr || null)
   },
   {
@@ -340,6 +344,8 @@ export const RECORDS = [
     better: "max",
     unit: "RBI",
     opens: true,
+    side: "hitters",
+    measure: (line) => line.rbi || null,
     read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.rbi || null)
   },
   {
@@ -350,6 +356,8 @@ export const RECORDS = [
     better: "max",
     unit: "hits",
     opens: true,
+    side: "hitters",
+    measure: (line) => line.h || null,
     read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.h || null)
   },
   {
@@ -360,6 +368,8 @@ export const RECORDS = [
     better: "max",
     unit: "SB",
     opens: true,
+    side: "hitters",
+    measure: (line) => line.sb || null,
     read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.sb || null)
   },
   {
@@ -370,6 +380,8 @@ export const RECORDS = [
     better: "max",
     unit: "XBT",
     opens: true,
+    side: "hitters",
+    measure: (line) => line.adv || null,
     read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.adv || null)
   },
   // Then the careers: a whole campaign in one man's hands. (The sections have to
@@ -439,6 +451,8 @@ export const RECORDS = [
     better: "max",
     unit: "K",
     opens: true,
+    side: "pitchers",
+    measure: (line) => line.so || null,
     read: (save) => bestPlayerGame(save, "max", "pitchers", (line) => line.so || null)
   },
   {
@@ -453,6 +467,8 @@ export const RECORDS = [
     better: "min",
     unit: "hits",
     opens: true,
+    side: "pitchers",
+    measure: (line) => (line.outs >= 27 ? line.h : null),
     read: (save) => bestPlayerGame(save, "min", "pitchers", (line) => (line.outs >= 27 ? line.h : null))
   },
   {
@@ -507,6 +523,8 @@ export const RECORDS = [
     better: "max",
     unit: "CS",
     opens: true,
+    side: "hitters",
+    measure: (line) => line.csCaught || null,
     read: (save) => bestPlayerGame(save, "max", "hitters", (line) => line.csCaught || null)
   },
   {
@@ -557,7 +575,7 @@ const whip = (line) => (line.outs ? ((line.h + line.bb) * 3) / line.outs : null)
 // How many games in this campaign answer to something. A count of nought is not a
 // record — it is a campaign that never did the thing — so it does not go up.
 function countGames(save, matches) {
-  const count = ensureAlmanac(save).filter((game) => matches(game)).length;
+  const count = almanacGames(save).filter((game) => matches(game)).length;
   return count > 0 ? { value: count } : null;
 }
 
@@ -602,7 +620,7 @@ function biggestInning(game) {
 function scorelessStreak(save) {
   let best = null;
   let run = 0;
-  for (const game of ensureAlmanac(save)) {
+  for (const game of almanacGames(save)) {
     const frames = game.lineScore?.[theirSide(game)];
     if (!Array.isArray(frames)) {
       run = 0;
@@ -622,7 +640,7 @@ function scorelessStreak(save) {
 
 // Games won over games played, once there are enough of them to mean anything.
 function winRate(save) {
-  const games = ensureAlmanac(save);
+  const games = almanacGames(save);
   if (games.length < QUALIFIED_GAMES) return null;
   return { value: games.filter((game) => game.won).length / games.length };
 }
@@ -658,7 +676,7 @@ function mostValuable(save) {
 // The best single game for one measure, and the page it happened on.
 function bestGame(save, better, measure) {
   let best = null;
-  for (const game of ensureAlmanac(save)) {
+  for (const game of almanacGames(save)) {
     const value = measure(game);
     if (value === null || value === undefined || !Number.isFinite(value)) continue;
     if (!best || (better === "max" ? value > best.value : value < best.value)) {
@@ -682,7 +700,7 @@ function bestGame(save, better, measure) {
 // and show you him doing it.
 function bestPlayerGame(save, better, side, measure) {
   let best = null;
-  for (const game of ensureAlmanac(save)) {
+  for (const game of almanacGames(save)) {
     for (const line of mine(game)?.[side] ?? []) {
       const value = measure(line);
       if (value === null || value === undefined || !Number.isFinite(value)) continue;
@@ -692,6 +710,29 @@ function bestPlayerGame(save, better, side, measure) {
     }
   }
   return best;
+}
+
+// A record can be TIED — two men each with three homers in a game — and the board
+// must name them both, not just whoever did it first. So for a player single-game
+// record this returns EVERY man who holds the mark, each with his best afternoon:
+// first each man's own best game for the measure, then the men whose best equals the
+// best of all. One line per man, so a slugger's two big days are still one record.
+function coLeaders(save, better, side, measure) {
+  const byMan = new Map();
+  for (const game of almanacGames(save)) {
+    for (const line of mine(game)?.[side] ?? []) {
+      const value = measure(line);
+      if (value === null || value === undefined || !Number.isFinite(value)) continue;
+      const prev = byMan.get(line.name);
+      if (!prev || (better === "max" ? value > prev.value : value < prev.value)) {
+        byMan.set(line.name, { value, player: line.name, day: game.day, opponent: game.opponent });
+      }
+    }
+  }
+  const marks = [...byMan.values()];
+  if (!marks.length) return [];
+  const top = marks.reduce((best, mark) => (better === "max" ? Math.max(best, mark.value) : Math.min(best, mark.value)), marks[0].value);
+  return marks.filter((mark) => mark.value === top);
 }
 
 function bestPlayer(lines, better, measure) {
@@ -711,7 +752,7 @@ function bestPlayer(lines, better, measure) {
 function longestWinStreak(save) {
   let best = null;
   let run = 0;
-  for (const game of ensureAlmanac(save)) {
+  for (const game of almanacGames(save)) {
     run = game.won ? run + 1 : 0;
     if (run > 0 && (!best || run > best.value)) {
       best = { value: run, day: game.day, opponent: game.opponent };
@@ -759,6 +800,9 @@ export function personalBests(save) {
     // hands: they go up under their own manager when the run ends, not filed under
     // whoever happens to be playing when the book is opened. See submitRunRecords.
     if (record.fromRun) continue;
+    // Player single-game records can be co-held, so a single best would hide a tie:
+    // they go up per man through submitCoHolders, not one-per-save through the book.
+    if (record.measure) continue;
     const best = record.read(save);
     if (best) bests[record.key] = best;
   }
@@ -894,6 +938,24 @@ export function submitPersonalRecords() {
   return Promise.all(posts).then((results) => results.some(Boolean), () => false);
 }
 
+// The player single-game records the save in your hands is holding or tying — every
+// co-holder, one man per request (the server files a player row per saveSeed+player,
+// so two of your men both land). This is how a tie reaches the league board, not
+// just your own screen. Sent every visit alongside submitPersonalRecords.
+export function submitCoHolders(save) {
+  if (!inBrowser() || !save) return Promise.resolve(false);
+  const posts = [];
+  for (const record of RECORDS) {
+    if (!record.measure) continue;
+    for (const mark of coLeaders(save, record.better, record.side, record.measure)) {
+      posts.push(postRecordBook(save.player.name, save.saveSeed, save.mode ?? "budget", {
+        [record.key]: { value: mark.value, player: mark.player, day: mark.day, opponent: mark.opponent }
+      }));
+    }
+  }
+  return Promise.all(posts).then((results) => results.some(Boolean), () => false);
+}
+
 // A finished run's own title marks, sent to the book under the manager who set
 // them — the record-book twin of the hall-of-fame plaque, submitted the moment the
 // run ends (see recordCompletedRun). Because each is filed under the run's own
@@ -935,6 +997,21 @@ function saveMark(record, save) {
   return best ? [{ ...best, name: save.player.name, saveSeed: save.saveSeed, you: true }] : [];
 }
 
+// The current save's co-holders for a player single-game record: one board row per
+// man tied at the top, so a tie names them all (see coLeaders).
+function coHolderMarks(record, save) {
+  if (!save) return [];
+  return coLeaders(save, record.better, record.side, record.measure)
+    .map((mark) => ({ ...mark, name: save.player.name, saveSeed: save.saveSeed, you: true }));
+}
+
+// One row per record-holder. A manager record is one afternoon per save, so the
+// save is the whole key. A player record belongs to a MAN, and two of your men can
+// each hold or tie it — so the man is part of the key, and they do not collapse.
+function rowKey(row) {
+  return row.player ? `${row.saveSeed} ${row.player}` : row.saveSeed;
+}
+
 // Every finished run's mark for a title-run record, each as its own row under its
 // own name — read straight out of the local hall of fame, the way the run records
 // are only ever attributed.
@@ -959,11 +1036,17 @@ export function leaderboard(record, globals, save, limit = 5) {
   // any run (personalRecordMarks) and, so the run in your hands shows the instant it
   // does something before the book is next written, its live mark too — same
   // saveSeed simply dedupes below.
+  // A title-run record has one row per finished run (localRunMarks). A player
+  // single-game record folds in ALL of the current save's co-holders, so a tie
+  // names both men (coHolderMarks). Everything else folds in your all-time best from
+  // any run, plus the run in your hands live before the book is next written.
   const mine = record.fromRun
     ? localRunMarks(record)
-    : [...personalRecordMarks(record), ...saveMark(record, save)];
+    : record.measure
+      ? coHolderMarks(record, save)
+      : [...personalRecordMarks(record), ...saveMark(record, save)];
   for (const mark of mine) {
-    const already = rows.find((row) => row.saveSeed === mark.saveSeed);
+    const already = rows.find((row) => rowKey(row) === rowKey(mark));
     if (already) {
       already.you = true;
       // The board can be behind what has just been done on this machine.

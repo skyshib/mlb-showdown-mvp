@@ -612,11 +612,18 @@ function persistRecords(store) {
 
 // One line per campaign per record: a manager who breaks his own mark replaces
 // it rather than filling the board with every step on the way up.
+// One line per holder. A manager record is one afternoon per save, so the save is
+// the key. A player record belongs to a MAN — and two men from one save can each
+// hold or tie it — so the man is part of the key and they do not collapse into one.
+function recordRowKey(row) {
+  return row.player ? `${row.saveSeed} ${row.player}` : row.saveSeed;
+}
+
 function fileRecord(store, key, row) {
   const direction = RECORD_DIRECTIONS[key];
   if (!direction) return;
-  const list = (store.records[key] ?? []).filter((existing) => existing.saveSeed !== row.saveSeed);
-  const previous = (store.records[key] ?? []).find((existing) => existing.saveSeed === row.saveSeed);
+  const list = (store.records[key] ?? []).filter((existing) => recordRowKey(existing) !== recordRowKey(row));
+  const previous = (store.records[key] ?? []).find((existing) => recordRowKey(existing) === recordRowKey(row));
   // Keep whichever of the two is actually better — a resubmission of an older,
   // worse number must not erase a standing record.
   const best = !previous ? row

@@ -4467,9 +4467,10 @@ test("a game with no line score breaks a scoreless streak rather than bridging i
 });
 
 test("a man's best afternoon opens the box score, and a no-hitter is worth nought hits", async () => {
-  const { RECORDS, personalBests } = await import("../src/adventure/records.js");
+  const { RECORDS, leaderboard } = await import("../src/adventure/records.js");
   const record = (key) => RECORDS.find((row) => row.key === key);
   const save = almanacSave();
+  localStorage.removeItem("showdown-quest-records-local");
 
   // The single game, the man who had it, and the afternoon it can be opened at.
   const homers = record("player-hr-game").read(save);
@@ -4483,13 +4484,71 @@ test("a man's best afternoon opens the box score, and a no-hitter is worth nough
   const noHitter = record("player-no-hitter").read(save);
   assert.deepEqual(noHitter, { value: 0, player: "PIP", day: 2, opponent: "MABEL" });
   assert.equal(record("player-no-hitter").better, "min");
-  assert.equal(personalBests(save)["player-no-hitter"].value, 0, "and it goes up to the league as nought");
+  // It reaches the league board through the co-holder path (submitCoHolders), and a
+  // hitless complete game is a real nought there — the holder, not a missing mark.
+  const board = leaderboard(record("player-no-hitter"), {}, save);
+  assert.equal(board.top[0].value, 0, "and it goes up to the league as nought");
+  assert.equal(board.top[0].player, "PIP");
 
   // OKABE went the distance too, and gave up seven. A reliever who never did could
   // not hold this record however clean his evening was.
   const short = almanacSave();
   short.almanac[1].boxScore.home.pitchers = [{ id: "p3", name: "REL", so: 3, h: 0, outs: 9 }];
   assert.equal(record("player-no-hitter").read(short).value, 7, "three hitless innings is a fine evening, not a complete game");
+});
+
+test("a single-game record tied by two of your men names them both", async () => {
+  const { RECORDS, leaderboard } = await import("../src/adventure/records.js");
+  localStorage.removeItem("showdown-quest-records-local");
+  const record = RECORDS.find((row) => row.key === "player-hr-game");
+
+  const game = (day, hitters) => ({
+    day, opponent: "RIVALS", won: true, innings: 9, playerSide: "away",
+    score: { away: 5, home: 3 },
+    boxScore: { away: { team: "US", hitters, pitchers: [] }, home: { team: "RIVALS", hitters: [], pitchers: [] } }
+  });
+  const save = testSave();
+  save.saveSeed = "sq-tie"; save.player.name = "SKYLAR";
+  // Yandy hits three one day, Carlos three another — a tie at the top of the board.
+  save.almanac = [
+    game(1, [{ name: "YANDY", hr: 3 }, { name: "ORTIZ", hr: 1 }]),
+    game(2, [{ name: "CARLOS", hr: 3 }])
+  ];
+
+  const board = leaderboard(record, {}, save);
+  assert.deepEqual(
+    board.top.filter((row) => row.value === 3).map((row) => row.player).sort(),
+    ["CARLOS", "YANDY"],
+    "both men who hit three are on the board, not just the first"
+  );
+  assert.ok(!board.top.some((row) => row.player === "ORTIZ"), "the one-homer man is no co-holder and does not crowd it");
+
+  localStorage.removeItem("showdown-quest-records-local");
+});
+
+test("a replay of a beaten trainer is a day of history, not a stat or a record", async () => {
+  const { recordGameStats, ensureSeasonStats, seasonHitters, almanacGames } = await import("../src/adventure/state.js");
+  const { RECORDS } = await import("../src/adventure/records.js");
+
+  const save = testSave();
+  delete save.seasonStats;
+  const box = { hitters: [{ id: "h1", name: "BOPPER", pa: 4, ab: 4, h: 4, d: 0, t: 0, hr: 4, bb: 0, so: 0, r: 4, rbi: 4, sb: 0, cs: 0, gidp: 0, wpa: 1 }], pitchers: [] };
+
+  recordGameStats(save, box);                    // a real game: it counts
+  recordGameStats(save, box, { replay: true });  // a rematch of a beaten gym: it does not
+  assert.equal(ensureSeasonStats(save).games, 2, "both are days played, so the almanac keeps unique days");
+  assert.equal(seasonHitters(save).find((line) => line.id === "h1").hr, 4, "but only the real game's four homers are on his career line");
+
+  // The record book reads through almanacGames, which drops the replay.
+  const played = (day, runs, replay) => ({
+    day, opponent: "GYM", playerSide: "away", won: true, replay,
+    score: { away: runs, home: 0 },
+    boxScore: { away: { team: "US", hitters: [], pitchers: [] }, home: { team: "GYM", hitters: [], pitchers: [] } }
+  });
+  save.almanac = [played(1, 9, false), played(2, 20, true)];
+  assert.equal(almanacGames(save).length, 1, "the replay is not among the games that count");
+  assert.equal(RECORDS.find((row) => row.key === "runs-game").read(save).value, 9,
+    "the 20-run grind sets no record; the 9-run real game holds it");
 });
 
 // The drama screen always KNEW how to stage a steal (see the THE THROW test

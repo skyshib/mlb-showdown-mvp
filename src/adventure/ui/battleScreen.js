@@ -76,8 +76,11 @@ export function startTrainerBattle(app, trainer) {
       bestOf: trainer.battleFormat.bestOf,
       seed: deriveSeed(save, "sim", trainer.id, `a${attempt}`)
     });
+    // Every game of this series shares one replay verdict: the trainer's win count
+    // does not move until the series is decided (applyOutcome, below).
+    const replay = timesBeaten(save, trainer.id) > 0;
     for (const game of series.games) {
-      recordGameStats(save, game.playerIsAway ? game.boxScore.away : game.boxScore.home);
+      recordGameStats(save, game.playerIsAway ? game.boxScore.away : game.boxScore.home, { replay });
       recordFinishedGame(save, {
         trainer,
         boxScore: game.boxScore,
@@ -89,7 +92,8 @@ export function startTrainerBattle(app, trainer) {
         innings: game.innings,
         won: game.playerWon,
         lineScore: game.lineScore,
-        twenties: game.twenties
+        twenties: game.twenties,
+        replay
       });
     }
     const outcome = applyOutcome(app, trainer, series.playerWonSeries);
@@ -244,7 +248,7 @@ export function applyOutcome(app, trainer, won) {
 // sim series): feats detected, an almanac page written, trophies framed.
 // Returns the feats so the box-score screen can reuse them. Called after
 // recordGameStats, so the season game count IS the day this game happened.
-export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won, lineScore = null, twenties = 0 }) {
+export function recordFinishedGame(save, { trainer, boxScore, playerSide, events, score, innings, won, lineScore = null, twenties = 0, replay = false }) {
   const feats = gameFeats({ boxScore, playerSide, events, score, innings });
   const day = ensureSeasonStats(save).games;
   const entry = recordAlmanacGame(save, {
@@ -256,6 +260,10 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
     playerSide,
     innings,
     feats,
+    // A rematch of a trainer already beaten. History keeps it; career stats and
+    // records skip it (see almanacGames). Stamped from the pre-battle win count,
+    // which is still the old value here — recordTrainerWin fires later.
+    replay,
     // Natural 20s thrown in this game, either dugout — the raw dice luck of the
     // afternoon, for the twenties-game record.
     twenties,
@@ -912,7 +920,10 @@ function resolveGameEnd(app, phase) {
   const trainer = trainerById(app.screen.trainerId);
   const battle = app.screen.battle;
   const boxScore = buildBoxScore(battle.state);
-  recordGameStats(save, boxScore[battle.playerSide]);
+  // Read before recordSeriesGame/applyOutcome move the win count: a game played
+  // against a trainer already beaten is a replay and does not touch the stats.
+  const replay = timesBeaten(save, trainer.id) > 0;
+  recordGameStats(save, boxScore[battle.playerSide], { replay });
   const feats = recordFinishedGame(save, {
     trainer,
     boxScore,
@@ -923,7 +934,8 @@ function resolveGameEnd(app, phase) {
     won: phase.playerWon,
     // So the almanac can hang the board back up when the game is reopened.
     lineScore: battle.state.lineScore,
-    twenties: battle.state.twenties
+    twenties: battle.state.twenties,
+    replay
   });
   const status = recordSeriesGame(save, phase.playerWon);
   // The game is in the books now — coins paid, stats recorded. Nothing left to

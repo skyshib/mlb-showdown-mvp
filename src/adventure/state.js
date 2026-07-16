@@ -261,9 +261,13 @@ export function ensureSeasonStats(save) {
 
 // Fold one game's box score for the player's team into the rolling season
 // totals. Every game counts: interactive battles and simulated series alike.
-export function recordGameStats(save, teamBox) {
+export function recordGameStats(save, teamBox, { replay = false } = {}) {
   const season = ensureSeasonStats(save);
   season.games += 1;
+  // A replay of a trainer already beaten is a day you played — the count advances,
+  // so the almanac keeps unique days — but its numbers do not go on any career line.
+  // A grind against a cleared gym cannot pad a stat (see almanacGames for records).
+  if (replay) return season;
   for (const line of teamBox.hitters) {
     const row = season.hitters[line.id] ??
       (season.hitters[line.id] = { id: line.id, name: line.name, games: 0, ...Object.fromEntries(HITTER_STAT_KEYS.map((key) => [key, 0])) });
@@ -341,7 +345,7 @@ export function seasonTeam(save) {
   let losses = 0;
   let runsFor = 0;
   let runsAgainst = 0;
-  for (const game of ensureAlmanac(save)) {
+  for (const game of almanacGames(save)) {
     if (!game?.score || !game.playerSide) continue;
     const mine = game.score[game.playerSide];
     const theirs = game.score[game.playerSide === "home" ? "away" : "home"];
@@ -418,6 +422,15 @@ export function toggleStar(save, cardId) {
 export function ensureAlmanac(save) {
   if (!save.almanac) save.almanac = [];
   return save.almanac;
+}
+
+// The games that COUNT — everything except a replay of a trainer already beaten and
+// advanced past. The game log shows the whole almanac (a replay is still history);
+// career stats and the record book read this instead, so a grind against a cleared
+// gym never pads a line. Games from before the replay stamp existed have no flag and
+// count, which is the safe default.
+export function almanacGames(save) {
+  return ensureAlmanac(save).filter((game) => !game.replay);
 }
 
 export function ensureTrophies(save) {
