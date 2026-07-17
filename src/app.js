@@ -1923,6 +1923,10 @@ function renderDraft() {
   // nowhere to land. That is the whole reason the search only ever took ONE
   // letter. Remember where the caret was and put it back.
   const typing = captureTypingFocus();
+  // A full innerHTML repaint snaps the window back to the top, so a bid landing
+  // from another manager yanked you away from wherever you were reading. Keep
+  // the scroll the way focus and the sealed bids are kept, and put it back below.
+  const scrollTop = window.scrollY;
   const draft = state.draft;
   reactToDraftChange(draft);
   captureSealedBids();
@@ -2049,6 +2053,7 @@ function renderDraft() {
 
   restoreSealedBids();
   restoreTypingFocus(typing);
+  if (window.scrollY !== scrollTop) window.scrollTo(0, scrollTop);
   bindDraftActions();
   pickClockTick();
 }
@@ -2988,6 +2993,22 @@ function startBatchRun(runs, options = {}) {
     return snapshot;
   };
 
+  // A run too short to ever clear plotStart (a handful of games) samples fewer
+  // than the two points a line needs. Rather than strand a finished season on
+  // the placeholder, give it an honest two-point line: even win% at the first
+  // game, the final standings at the last.
+  const raceSeries = () => {
+    if (series.length >= 2) return downsampleSeries(series);
+    const snapshot = batchProgressSnapshot(batchState);
+    const shareByTeam = new Map(snapshot.rows.map((row) => [row.team, row.share]));
+    const finalShares = teamNames.map((name) => shareByTeam.get(name) ?? 0);
+    const parity = teamNames.map(() => 1 / Math.max(1, teamNames.length));
+    return [
+      { n: 1, shares: parity },
+      { n: Math.max(2, count), shares: finalShares }
+    ];
+  };
+
   const finalize = () => {
     if (token !== batchRunToken || !state.draft) return;
     state.tournament = null;
@@ -2995,7 +3016,7 @@ function startBatchRun(runs, options = {}) {
       runs: count,
       seed,
       summary: summarizeBatch(batchState),
-      race: { teamNames, totalRuns: count, series: downsampleSeries(series) }
+      race: { teamNames, totalRuns: count, series: raceSeries() }
     };
     state.view = "batch";
     state.batchStatsTab = "overview";
@@ -3008,9 +3029,20 @@ function startBatchRun(runs, options = {}) {
   const step = () => {
     if (token !== batchRunToken || !state.draft) return;
     if (skipRequested) {
-      runBatchChunk(batchState, teams, seed, completed, count - completed);
+      // Skip the animation, not the race. Running the whole remainder as one
+      // chunk records a single final point, and a one-point series can't draw a
+      // line — the results chart is left on the "waiting" placeholder forever.
+      // Slice it into a handful of synchronous steps so the "How the race
+      // unfolded" chart still gets a real curve; it's instant either way.
+      const remaining = count - completed;
+      const slices = Math.min(remaining, 40);
+      for (let slice = 1; slice <= slices; slice += 1) {
+        const target = completed + Math.round((remaining * slice) / slices);
+        runBatchChunk(batchState, teams, seed, completed, target - completed);
+        completed = target;
+        pushFrame();
+      }
       completed = count;
-      pushFrame();
       finalize();
       return;
     }
