@@ -764,6 +764,38 @@ test("the last man at a spot you need is worth paying for, however ordinary he i
   assert.ok(noFallback > withFallback, "and he is worth more than he was when he was replaceable");
 });
 
+test("scarcity is no windfall — a scarce star dwarfs an equally scarce filler", () => {
+  // Both the best and the worst catcher are made the LAST man at the position, so
+  // they are equally scarce. Quality, not scarcity, must decide the bid: a
+  // computer should never pay a fortune for the last ordinary body just because
+  // he is the last one, while it pays up for a genuine star in the same spot.
+  const room = () => makeAuctionDraft(
+    [{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }],
+    makeGradedPool("windfall")
+  );
+  const model = managerValuation(room(), room().managers[0]);
+  const catchers = room().pool
+    .filter((player) => player.kind === "hitter" && player.position === "C")
+    .sort((a, b) => model.value(b) - model.value(a));
+  const star = catchers[0];
+  const filler = catchers[catchers.length - 1];
+  assert.ok(model.value(star) > model.value(filler), "the star really is the better catcher");
+
+  const bidAsLastCatcher = (card) => {
+    const draft = room();
+    // Nominate first — while the other catchers are still on the board, so the
+    // lot is legal — then buy them out from under him so he is the last one.
+    nominatePlayer(draft, card.id);
+    for (const catcher of catchers) if (catcher.id !== card.id) draft.pickedIds.add(catcher.id);
+    return cpuSealedBid(draft, draft.managers[1]);
+  };
+
+  const starBid = bidAsLastCatcher(star);
+  const fillerBid = bidAsLastCatcher(filler);
+  assert.ok(starBid > fillerBid * 1.5, `the scarce star (${starBid}) must dwarf the scarce filler (${fillerBid})`);
+  assert.ok(fillerBid < model.value(filler), `and the filler is never worth more than he plainly is (${fillerBid} vs ${Math.round(model.value(filler))})`);
+});
+
 test("nine managers on the same board do not arrive at the same number", () => {
   const managers = Array.from({ length: 9 }, (unused, index) => ({ name: `Bot${index}`, cpu: true }));
   const draft = makeAuctionDraft(managers, makeGradedPool("spread", 14));

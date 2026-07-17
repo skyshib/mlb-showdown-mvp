@@ -1540,15 +1540,13 @@ function auctionMarket(draft, manager, forthcoming = forthcomingPlayers(draft)) 
   const others = table.filter((entry) => entry.id !== manager.id);
 
   const byGroup = new Map();
-  let fieldSum = 0;
-  let fieldCount = 0;
+  const allValues = [];
   for (const player of forthcoming) {
     const group = poolGroup(player);
     if (!byGroup.has(group)) byGroup.set(group, []);
     const value = model.value(player);
     byGroup.get(group).push(value);
-    fieldSum += value;
-    fieldCount += 1;
+    allValues.push(value);
   }
   const supply = new Map();
   const rivalsFor = new Map();
@@ -1558,10 +1556,17 @@ function auctionMarket(draft, manager, forthcoming = forthcomingPlayers(draft)) 
     rivalsFor.set(group, others.filter((entry) => needsGroup(entry, group)).length);
   }
   const wants = (group) => (mine ? needsGroup(mine, group) : false);
-  // The mean of the WHOLE remaining field — the outside anchor, so a card is
-  // read against the room and not only against its own position.
-  const fieldMean = fieldCount ? fieldSum / fieldCount : 0;
-  return { model, values: byGroup, supply, rivalsFor, wants, fieldMean };
+  // The REPLACEMENT LEVEL — the freely-available scrub. The board deals far more
+  // cards than the rosters can hold and sweeps the leftovers out for nothing, so
+  // the true floor under any card is not the worst man at his POSITION, it is the
+  // long run of ordinary players anyone can have. Read as a low quantile of the
+  // whole remaining field; a card is worth what it clears THAT by, which is what
+  // keeps a star a star and a filler a filler regardless of how thin his spot is.
+  allValues.sort((a, b) => a - b);
+  const replacement = allValues.length
+    ? allValues[Math.min(allValues.length - 1, Math.floor(allValues.length * REPLACEMENT_QUANTILE))]
+    : 0;
+  return { model, values: byGroup, supply, rivalsFor, wants, replacement };
 }
 
 // The men at his spot this manager could get instead — himself dropped once, so
@@ -1581,43 +1586,43 @@ function auctionAlternatives(market, player) {
   return alts;
 }
 
-// What a card is worth to this manager: his value over a blended REFERENCE
-// PRICE for his spot — a mix, as the name promises, of his own position and the
-// whole room. Four readings feed the reference: the REPLACEMENT (the worst man
-// left at his position, the free scrub he falls back to), the NEXT man down
-// (the immediate step behind him), the POSITION mean (the typical man at his
-// spot), and the FIELD mean (the typical man anywhere). The next man and the
-// position carry most of the weight, and that is the point: if the second-best
-// catcher is nearly as good, the reference sits just under the best one and his
-// surplus is a pittance — you do not pay a fortune for the best of a similar
-// bunch. Let one man tower over that field, though, and the reference falls away
-// beneath him and he is worth a fight. When he is the last man at his spot there
-// is no position to read, so he is priced against the room alone and scarcity
-// speaks for itself.
-const WORTH_REPLACEMENT = 0.15;
-const WORTH_NEXT = 0.35;
-const WORTH_POSITION = 0.3;
-const WORTH_FIELD = 0.2;
+// What a card is worth to this manager: his value over a REFERENCE PRICE that
+// leads with absolute quality and only then reads his position. The reference
+// mixes the global REPLACEMENT level (the scrub anyone can have) with a
+// POSITIONAL reading of the men at his own spot — the worst still there, the
+// next man down, and the typical one. Absolute quality carries most of the
+// weight, and that is the whole correction: a true star clears the scrub line by
+// a mile and stays worth a fight even where his position is deep, while the last
+// man at a thin spot is worth only what he plainly is over replacement — no
+// windfall for being merely the last mediocre body at short. Position still
+// discounts him when the man just behind is nearly as good, so you never pay a
+// fortune for the best of a similar bunch.
+const REPLACEMENT_QUANTILE = 0.35;
+const POS_WORST = 0.2;
+const POS_NEXT = 0.4;
+const POS_MEAN = 0.4;
 
 function auctionWorth(market, player) {
   const value = market.model.value(player);
   const alts = auctionAlternatives(market, player);
-  if (!alts.length) {
-    // Last man at his spot: nothing to fall back to there, priced against the
-    // room at large — so a scarce position commands real money.
-    return Math.max(0, value - WORTH_FIELD * market.fieldMean);
+  // The positional reference: the man you'd take at his spot instead. With a
+  // better one still on the board this sits near (or above) him and his surplus
+  // is nothing — so the worst catcher of a deep bunch is worth zero, you take
+  // the next one. With none left there it is zero, and the global floor decides.
+  let positional = 0;
+  if (alts.length) {
+    const worst = alts[alts.length - 1];
+    const positionMean = alts.reduce((sum, other) => sum + other, 0) / alts.length;
+    const below = alts.filter((other) => other < value);
+    const nextDown = below.length ? below[0] : value;
+    positional = POS_WORST * worst + POS_NEXT * nextDown + POS_MEAN * positionMean;
   }
-  const replacement = alts[alts.length - 1];
-  const positionMean = alts.reduce((sum, other) => sum + other, 0) / alts.length;
-  // The man immediately below him; when he is the worst, he falls back on
-  // himself, so this reading credits him nothing rather than his whole value.
-  const below = alts.filter((other) => other < value);
-  const nextDown = below.length ? below[0] : value;
-  const reference =
-    WORTH_REPLACEMENT * replacement +
-    WORTH_NEXT * nextDown +
-    WORTH_POSITION * positionMean +
-    WORTH_FIELD * market.fieldMean;
+  // A card is worth what it clears the HARDER of its two floors by: the better
+  // man still available at his spot, OR the freely-had scrub. So a replaceable
+  // man is priced on his position (take the next one), and a scarce man is
+  // priced on the room — the last ORDINARY shortstop is no windfall (he barely
+  // beats the scrub), while a scarce STAR keeps every point he clears it by.
+  const reference = Math.max(positional, market.replacement);
   return Math.max(0, value - reference);
 }
 
@@ -1684,17 +1689,28 @@ function auctionScarcity(manager, market, player) {
   return 1 + 0.3 * bias * tightness;
 }
 
+const DEPTH_SLOTS = 3;
+const DEPTH_DAMP = 0.7;
+
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
   const needs = getRosterNeeds(manager.roster);
   // A computer under random nomination budgets against the holes it still has,
-  // not against a roster cap it no longer has. Once its nine and its staff are
-  // whole it stops bidding: hoarding a bench is a human's idea.
-  const openSlots = hasUnlimitedRoster(draft)
+  // not against a roster cap it no longer has.
+  const needSlots = hasUnlimitedRoster(draft)
     ? needs.hitter + needs.starter + needs.bullpen
     : draft.rosterSize - manager.roster.length;
-  if (openSlots <= 0) return 0;
+  // A limited-roster draft has a real cap, so a full roster is genuinely done.
+  // But under unlimited rosters, money left at the last out is money you never
+  // had — so a computer whose nine and staff are whole keeps SHOPPING FOR VALUE:
+  // it spreads its remaining budget over a few more good cards (DEPTH_SLOTS) and
+  // bids a touch softer (DEPTH_DAMP). It is worth-gated like everything else, so
+  // it buys the best men left over and never a scrub — no dumping the bankroll
+  // on the last body to cross the block.
+  if (needSlots <= 0 && !hasUnlimitedRoster(draft)) return 0;
+  const depthMode = needSlots <= 0;
+  const openSlots = depthMode ? DEPTH_SLOTS : needSlots;
 
   const forthcoming = forthcomingPlayers(draft);
   const market = auctionMarket(draft, manager, forthcoming);
@@ -1729,38 +1745,10 @@ function auctionWillingness(draft, manager, player) {
     * share
     * auctionAggression(draft, manager, player)
     * auctionScarcity(manager, market, player)
-    * auctionPace(draft, manager, openSlots);
+    * auctionPace(draft, manager, openSlots)
+    * (depthMode ? DEPTH_DAMP : 1);
   // Sealed bids are whole points, not raise steps — odd amounts make ties rare.
   return Math.max(AUCTION_MIN_BID, Math.min(maxBid, Math.round(raw)));
-}
-
-// TEMP DIAGNOSTIC — remove.
-export function __bidBreakdown(draft, manager, player) {
-  const maxBid = auctionMaxBid(draft, manager);
-  const needs = getRosterNeeds(manager.roster);
-  const openSlots = hasUnlimitedRoster(draft)
-    ? needs.hitter + needs.starter + needs.bullpen
-    : draft.rosterSize - manager.roster.length;
-  const forthcoming = forthcomingPlayers(draft);
-  const market = auctionMarket(draft, manager, forthcoming);
-  const value = market.model.value(player);
-  const worthBase = auctionWorth(market, player);
-  const urgency = auctionUrgency(manager, player, forthcoming);
-  const worth = worthBase + urgency * (value - worthBase);
-  const plan = forthcoming.map((item) => auctionWorth(market, item)).sort((a, b) => b - a).slice(0, Math.max(1, openSlots));
-  const planned = plan.reduce((sum, entry) => sum + entry, 0) || worthBase;
-  const share = worth / planned;
-  const aggression = auctionAggression(draft, manager, player);
-  const scarcity = auctionScarcity(manager, market, player);
-  const pace = auctionPace(draft, manager, openSlots);
-  const group = poolGroup(player);
-  return {
-    value: Math.round(value), worthBase: Math.round(worthBase), urgency: +urgency.toFixed(2),
-    worth: Math.round(worth), planned: Math.round(planned), share: +share.toFixed(3),
-    aggression: +aggression.toFixed(2), scarcity: +scarcity.toFixed(2), pace: +pace.toFixed(2),
-    maxBid, openSlots, group, supply: market.supply.get(group), rivals: market.rivalsFor.get(group),
-    raw: Math.round(maxBid * share * aggression * scarcity * pace), final: cpuSealedBid(draft, manager)
-  };
 }
 
 export function managerValuation(draft, manager) {
