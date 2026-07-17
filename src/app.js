@@ -2043,7 +2043,6 @@ function renderDraft() {
     <div class="panel">
       <h2>Rosters</h2>
       ${renderRecentPicks(draft)}
-      ${renderPoolFloor(draft)}
       <div class="rosters">${rosters}</div>
     </div>
   </section>
