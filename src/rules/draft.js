@@ -1475,29 +1475,6 @@ function autoRunAuctionLot(draft, now = Date.now()) {
 // him — which is right, and which is what makes the rest of the money mean
 // something.
 
-// Who at this table still has a hole, and what plugs it. Read ONCE per market:
-// working it out per group per manager meant running the lineup matcher some
-// eight hundred times a lot, which is the sort of thing that does not show up as
-// a wrong answer, only as a room that has stopped responding.
-function tableNeeds(draft) {
-  return draft.managers.map((manager) => {
-    const needs = getRosterNeeds(manager.roster);
-    // Only pay for the matcher when there are bats still to buy.
-    const missing = needs.hitter > 0 ? lineupStatus(manager.roster).missingPositions : [];
-    return { id: manager.id, needs, missing };
-  });
-}
-
-function needsGroup(entry, group) {
-  if (group === "SP") return entry.needs.starter > 0;
-  if (group === "RP") return entry.needs.bullpen > 0;
-  if (entry.needs.hitter <= 0) return false;
-  // A hole only counts if this group is what actually plugs it. First base and
-  // the DH take anybody, so once those are all that is left, any bat will do.
-  if (!entry.missing.length) return true;
-  return entry.missing.some((slot) => (isCornerOutfielder(slot) ? isCornerOutfielder(group) : slot === group));
-}
-
 // The cards this manager will actually get another crack at. Under random
 // nomination that is NOT the whole board — the board is dealt from a hidden
 // queue and stops when the queue runs dry, leaving a heap of cards that are
@@ -1517,8 +1494,9 @@ function forthcomingPlayers(draft) {
   return availablePlayers(draft);
 }
 
-// Which of the three roster buckets a card fills. Urgency is read at this
-// coarseness — the fine positional matching is left to needsGroup.
+// Which of the three roster buckets a card fills. Urgency and the depth discount
+// are read at this coarseness; the fine positional matching is priced by the
+// per-position replacement floor in auctionWorth.
 function playerBucket(player) {
   if (player?.kind === "pitcher") return pitcherRole(player) === "SP" ? "starter" : "bullpen";
   return "hitter";
@@ -1533,26 +1511,8 @@ function bucketNeed(needs, bucket) {
 // What the next man at each spot is worth, as this manager reads what is still
 // coming. Any card is then priced by what it adds OVER the field it competes
 // with.
-function auctionMarket(draft, manager, forthcoming = forthcomingPlayers(draft)) {
+function auctionMarket(draft, manager) {
   const model = managerValuation(draft, manager);
-  const table = tableNeeds(draft);
-  const mine = table.find((entry) => entry.id === manager.id);
-  const others = table.filter((entry) => entry.id !== manager.id);
-
-  const byGroup = new Map();
-  for (const player of forthcoming) {
-    const group = poolGroup(player);
-    if (!byGroup.has(group)) byGroup.set(group, []);
-    byGroup.get(group).push(model.value(player));
-  }
-  const supply = new Map();
-  const rivalsFor = new Map();
-  for (const [group, values] of byGroup) {
-    values.sort((a, b) => b - a);
-    supply.set(group, values.length);
-    rivalsFor.set(group, others.filter((entry) => needsGroup(entry, group)).length);
-  }
-  const wants = (group) => (mine ? needsGroup(mine, group) : false);
   // The REPLACEMENT LEVEL, read PER POSITION — the freely-had scrub at each spot,
   // because the board deals far more than the rosters hold and sweeps the rest
   // out for nothing. The literal replacement level at a spot is the WORST card
@@ -1563,13 +1523,19 @@ function auctionMarket(draft, manager, forthcoming = forthcomingPlayers(draft)) 
   // the same value clears little and is worth almost nothing. Read over the WHOLE
   // deck so the floor is a fixed property of the spot, not a lone late survivor.
   const replacement = new Map();
+  // Also collect every value in the deck (by THIS manager's weights), sorted, so
+  // a card's standing across the WHOLE pool — not just its spot — can earn the
+  // studs a premium. Pool-elite scarcity helps; positional scarcity does not.
+  const allValues = [];
   for (const player of draft.pool) {
     const group = poolGroup(player);
     const value = model.value(player);
+    allValues.push(value);
     const current = replacement.get(group);
     if (current === undefined || value < current) replacement.set(group, value);
   }
-  return { model, values: byGroup, supply, rivalsFor, wants, replacement };
+  allValues.sort((a, b) => a - b);
+  return { model, replacement, allValues };
 }
 
 // What a card is worth to this manager: his value over the REPLACEMENT level at
@@ -1636,20 +1602,53 @@ function auctionPace(draft, manager, openSlots) {
   return Math.max(0.75, Math.min(1.8, nowPerSlot / parPerSlot));
 }
 
-// A spot the room is short of is worth reaching for, and how far you reach is
-// the persona's business: the positional purist reaches hardest.
-function auctionScarcity(manager, market, player) {
-  const group = poolGroup(player);
-  const supply = market.supply.get(group) ?? 0;
-  if (!supply) return 1;
-  const demand = (market.rivalsFor.get(group) ?? 0) + (market.wants(group) ? 1 : 0);
-  const tightness = Math.min(2, demand / supply);
-  const bias = Number(cpuPersonality(manager.persona).bias?.scarcity) || 1;
-  return 1 + 0.3 * bias * tightness;
+// Spend the bankroll DOWN as the board empties — leftover budget is value you
+// never captured. A manager still flush with few lots left to bid on leans in;
+// one that has already committed pulls back. Keyed to the REAL lots left in the
+// nomination queue and made budget-relative so it holds at any bankroll. (Manual
+// nomination has no queue, so it keeps the neutral factor — pacing lives in
+// auctionPace there instead.)
+function auctionRoundsFactor(draft, manager, openSlots) {
+  const starting = draft.auction?.budget ?? 0;
+  const roundsLeft = nominationQueueRemaining(draft);
+  if (!starting || roundsLeft <= 0) return 1;
+  const spendable = auctionBudget(draft, manager) - AUCTION_MIN_BID * Math.max(0, openSlots - 1);
+  const perRound = spendable / roundsLeft;
+  return Math.max(0.7, Math.min(2.2, 1 + perRound / (starting / 25)));
+}
+
+// A stud in the top decile of the WHOLE deck is worth cornering — and as the
+// field grows you must out-reach more rivals to land him — so lift the bid on
+// cards past the pool's 80th percentile, up to +POOL_PREMIUM_STRENGTH at the
+// very top. This is POOL scarcity (reward absolute studs); it is deliberately
+// distinct from POSITION scarcity above, which the study found counterproductive.
+function auctionPoolPremium(market, player) {
+  const values = market.allValues;
+  if (!values || !values.length) return 1;
+  const value = market.model.value(player);
+  let lo = 0;
+  let hi = values.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (values[mid] < value) lo = mid + 1;
+    else hi = mid;
+  }
+  const pct = lo / values.length;
+  const over = Math.max(0, pct - POOL_PREMIUM_THRESHOLD);
+  return 1 + POOL_PREMIUM_STRENGTH * over / (1 - POOL_PREMIUM_THRESHOLD);
 }
 
 const DEPTH_SLOTS = 3;
 const DEPTH_DAMP = 0.7;
+// How hard budget concentrates on the best cards. A simulation study across pools
+// and opponent counts (2–9) found ^2 badly over-concentrates — ruinous in large
+// fields where rivals bid the studs up — and that a near-linear share is best.
+const SHARE_EXPONENT = 1.1;
+// A card in the top decile of the WHOLE deck is a stud worth cornering; you must
+// out-reach more rivals for him as the field grows. Keyed to pool percentile,
+// not position — positional scarcity, by contrast, was a net negative.
+const POOL_PREMIUM_STRENGTH = 0.7;
+const POOL_PREMIUM_THRESHOLD = 0.8;
 
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
@@ -1672,35 +1671,40 @@ function auctionWillingness(draft, manager, player) {
   const openSlots = depthMode ? DEPTH_SLOTS : needSlots;
 
   const forthcoming = forthcomingPlayers(draft);
-  const market = auctionMarket(draft, manager, forthcoming);
-  // A manager whose holes outnumber the men left to fill them reaches harder for
-  // the ones who are WORTH something — but multiplicatively, so the worst man at
-  // a spot (worth nothing) stays worth nothing however desperate the room: you
-  // still take his free equal off the sweep. This is what keeps a manager who has
-  // fallen behind fighting to fill its roster instead of coasting on bargains.
-  const worth = auctionWorth(market, player) * (1 + URGENCY_WEIGHT * auctionUrgency(manager, player, forthcoming));
+  const market = auctionMarket(draft, manager);
 
-  // THE PASS. He is no better than the replacement you can have for FREE off the
-  // sweep — the worst man at his spot — so there is nothing to bid, even if he is
-  // the last one on the board. You let him go and take his equal for nothing.
+  // What a card is worth to THIS manager, right now. It is his surplus over the
+  // replacement at the spot, lifted multiplicatively when he is desperate to
+  // fill it — but the worst man (worth nothing) stays worth nothing however hard
+  // the room presses, because his equal is free off the sweep. And it is DAMPED
+  // when the spot is already full: a third starter to a man who needs two is
+  // bench depth, not a need, and must not pull budget off the holes still open.
+  const effectiveWorth = (card) => {
+    const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * auctionUrgency(manager, card, forthcoming));
+    return bucketNeed(needs, playerBucket(card)) <= 0 ? base * DEPTH_DAMP : base;
+  };
+  const worth = effectiveWorth(player);
   if (worth <= 0) return 0;
 
-  // What the REST of the roster is going to cost, in worth: the best cards still
-  // COMING for the slots still open. The budget is shared out over that, so a
-  // manager holds money back for the holes it has not filled yet instead of
-  // spending to its cap on whatever happens to come up first.
+  // BUDGET SHARE. A manager splits its bankroll over the best men still coming in
+  // proportion to their worth — raised to SHARE_EXPONENT, a near-linear tilt so
+  // the standouts take a larger bite than a flat split would give without the
+  // ruinous over-concentration a squared share produced in a crowded room. Then
+  // the rounds spend-down and pool-elite premium (below) shape the actual bid.
   const plan = forthcoming
-    .map((item) => auctionWorth(market, item))
+    .map(effectiveWorth)
     .sort((a, b) => b - a)
-    .slice(0, Math.max(1, openSlots));
-  const planned = plan.reduce((sum, entry) => sum + entry, 0) || worthBase;
+    .slice(0, Math.max(1, openSlots))
+    .map((entry) => entry ** SHARE_EXPONENT);
+  const planned = plan.reduce((sum, entry) => sum + entry, 0) || worth ** SHARE_EXPONENT;
 
-  const share = worth / planned;
+  const share = worth ** SHARE_EXPONENT / planned;
   const raw = maxBid
     * share
     * auctionAggression(draft, manager, player)
-    * auctionScarcity(manager, market, player)
     * auctionPace(draft, manager, openSlots)
+    * auctionRoundsFactor(draft, manager, openSlots)
+    * auctionPoolPremium(market, player)
     * (depthMode ? DEPTH_DAMP : 1);
   // Sealed bids are whole points, not raise steps — odd amounts make ties rare.
   return Math.max(AUCTION_MIN_BID, Math.min(maxBid, Math.round(raw)));
