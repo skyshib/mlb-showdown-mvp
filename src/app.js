@@ -4757,7 +4757,12 @@ function renderWarTeamPositions(manager, auction, prices, heatScale) {
   const cells = BOARD_POSITION_GROUPS.map((group) => {
     const players = groups
       .get(group)
-      .sort((a, b) => (auction ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0) : b.points - a.points));
+      .sort((a, b) =>
+        auction
+          ? (prices.get(b.id) ?? 0) - (prices.get(a.id) ?? 0)
+          : pointsHidden()
+            ? a.name.localeCompare(b.name)
+            : b.points - a.points);
     const chips = players
       .map((player) => {
         const tag = auction
@@ -6279,33 +6284,43 @@ function comparePlayers(a, b) {
   return a.name.localeCompare(b.name);
 }
 
+// Points are the one thing a blind draft hides, so they must not sneak back in
+// as the tiebreaker: when they are hidden, players tied on the visible key fall
+// through to the neutral name sort instead of quietly lining up by the number
+// nobody is supposed to see.
+function pointsTiebreak(a, b) {
+  return pointsHidden() ? 0 : a.points - b.points;
+}
+
 function comparePlayersBySort(a, b, sort) {
   if (sort === "primary") {
-    return playerPrimary(a) - playerPrimary(b) || a.points - b.points;
+    return playerPrimary(a) - playerPrimary(b) || pointsTiebreak(a, b);
   }
   if (sort === "power") {
-    return playerPower(a) - playerPower(b) || a.points - b.points;
+    return playerPower(a) - playerPower(b) || pointsTiebreak(a, b);
   }
   if (sort === "position") {
-    return playerPosition(a).localeCompare(playerPosition(b)) || a.points - b.points;
+    return playerPosition(a).localeCompare(playerPosition(b)) || pointsTiebreak(a, b);
   }
   if (sort === "name") {
     return a.name.localeCompare(b.name);
   }
   if (sort === "speed") {
-    return speedValue(a.speed) - speedValue(b.speed) || a.points - b.points;
+    return speedValue(a.speed) - speedValue(b.speed) || pointsTiebreak(a, b);
   }
   if (sort === "fielding") {
-    return (a.fielding ?? 0) - (b.fielding ?? 0) || a.points - b.points;
+    return (a.fielding ?? 0) - (b.fielding ?? 0) || pointsTiebreak(a, b);
   }
   if (sort === "ip") {
-    return (a.ip ?? 0) - (b.ip ?? 0) || a.points - b.points;
+    return (a.ip ?? 0) - (b.ip ?? 0) || pointsTiebreak(a, b);
   }
   if (sort?.startsWith("chart:")) {
     const result = sort.slice("chart:".length);
-    return chartMinimum(a, result) - chartMinimum(b, result) || a.points - b.points;
+    return chartMinimum(a, result) - chartMinimum(b, result) || pointsTiebreak(a, b);
   }
-  return a.points - b.points || playerPrimary(a) - playerPrimary(b);
+  // Unknown sort: points lead only when they are on the table; blind, it is the
+  // primary stat that orders the board.
+  return pointsTiebreak(a, b) || playerPrimary(a) - playerPrimary(b);
 }
 
 function updateSort(sort) {
