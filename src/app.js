@@ -15,6 +15,7 @@ import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml } from "./ui/cardFace.js?v=20260716-records";
+import { nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
   isMuted,
   playClockWarning,
@@ -26,7 +27,7 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260716-records";
+} from "./ui/sounds.js?v=20260716-auction-cues";
 import { hydratePhotos } from "./ui/photos.js?v=20260716-records";
 import { createBattle } from "./rules/battle/controller.js?v=20260716-records";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260716-records";
@@ -476,16 +477,28 @@ function advanceCpuTurns() {
 // expired clock, a snapshot off the room server. They all land here in the end.
 let heardPickNumber = null;
 let heardComplete = false;
+let heardAuctionLotKey;
+let filteredAuctionLotKey = null;
 
 function reactToDraftChange(draft, { spectator = false } = {}) {
   if (!draft) {
     heardPickNumber = null;
     heardComplete = false;
+    heardAuctionLotKey = undefined;
+    filteredAuctionLotKey = null;
     return;
   }
   const picks = draft.pickNumber ?? 0;
   const first = heardPickNumber === null;
   const landed = !first && picks > heardPickNumber;
+  const lot = isAuctionDraft(draft) ? draft.auction?.lot : null;
+  const lotKey = lot
+    ? `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.auction.history.length}:${draft.auction.queueIndex ?? draft.pickNumber}:${lot.playerId}`
+    : null;
+
+  if (heardAuctionLotKey !== undefined && lotKey && lotKey !== heardAuctionLotKey) {
+    playNomination();
+  }
 
   if (landed) {
     // A card off your own board going to somebody else is not a pick, it is a
@@ -496,13 +509,14 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
       .slice(-(picks - heardPickNumber))
       .some((entry) => mine.has(entry.player?.id));
     if (taken) playSniped();
-    else playPick();
+    else playPick(isAuctionDraft(draft) ? 0.38 : undefined);
   }
 
   if (draft.complete && !heardComplete && !first) playDraftComplete();
 
   heardPickNumber = picks;
   heardComplete = Boolean(draft.complete);
+  heardAuctionLotKey = lotKey;
 }
 
 // Wraps up every human-initiated local draft change: computers respond,
@@ -1458,6 +1472,11 @@ function renderSetup(setupError = "") {
   // Backing out of a club's room puts the house colors back on the way in, not
   // on the way out — nothing clears state.universe when a draft is abandoned.
   applyFranchisePalette(null);
+  reactToDraftChange(null);
+  // A local room starts from this screen, so its first queued nomination is
+  // news. Joining an already-live online room never comes through setup and
+  // remains quiet on its initial paint.
+  heardAuctionLotKey = null;
   resetAppHandlers();
   const examples = setupExamples(state.seed);
   app.innerHTML = `<section class="setup">
@@ -1883,6 +1902,7 @@ function renderDraft() {
   reactToDraftChange(draft);
   captureSealedBids();
   if (!state.online && syncAuctionTimer(draft, draftNow())) saveState();
+  syncAuctionPositionFilter(draft);
   const auction = isAuctionDraft(draft);
   const reviewOpen = auction && !auctionReviewComplete(draft, draftNow());
   const queued = isRandomNomination(draft);
@@ -2008,6 +2028,28 @@ function renderDraft() {
   restoreTypingFocus(typing);
   bindDraftActions();
   pickClockTick();
+}
+
+function syncAuctionPositionFilter(draft) {
+  if (!isAuctionDraft(draft)) {
+    filteredAuctionLotKey = null;
+    return;
+  }
+
+  const player = auctionLotPlayer(draft);
+  if (!player) {
+    filteredAuctionLotKey = null;
+    return;
+  }
+
+  const lotKey = `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.auction.history.length}:${draft.auction.queueIndex ?? draft.pickNumber}:${player.id}`;
+  if (lotKey === filteredAuctionLotKey) return;
+
+  const filter = nominatedPlayerFilter(player);
+  state.filters.type = filter.type;
+  state.filters.position = filter.position;
+  filteredAuctionLotKey = lotKey;
+  saveState();
 }
 
 // The field the caret was in when the page was rebuilt under it, and where in

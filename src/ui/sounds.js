@@ -134,16 +134,16 @@ export function playYourTurn() {
   phrase([[A5, 0, 0.55], [D6, 0.18, 0.6]], { level: 0.34, type: "sine", tail: 0.3 });
 }
 
-// A pick landed. Short, dry, and low enough to sit under conversation — this one
-// fires on every pick in the room, so it must never be the loudest thing.
-export function playPick() {
-  phrase([[C5, 0, 0.14], [G5, 0.06, 0.22]], { level: 0.16, type: "triangle", tail: 0.15 });
+// A pick landed. Short and dry; ordinary picks sit under conversation, while
+// auction sales can ask for a stronger level without changing the phrase.
+export function playPick(level = 0.16) {
+  phrase([[C5, 0, 0.14], [G5, 0.06, 0.22]], { level, type: "triangle", tail: 0.15 });
 }
 
 // A card on your board just went to somebody else. It falls, because it is bad
 // news, and it is the one sound allowed to be a little rude.
 export function playSniped() {
-  phrase([[E5, 0, 0.16], [C5, 0.09, 0.18], [G4, 0.19, 0.42]], { level: 0.3, type: "sawtooth", tail: 0.25 });
+  phrase([[E5, 0, 0.16], [C5, 0.09, 0.18], [G4, 0.19, 0.42]], { level: 0.42, type: "sawtooth", tail: 0.25 });
 }
 
 // The clock is nearly out. A tick with an edge on it: quiet, but it climbs.
