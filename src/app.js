@@ -151,7 +151,9 @@ import {
   playerPrimary,
   raceColor,
   renderBoxScore,
+  renderBudgetRace,
   renderDraftHistoryTable,
+  renderDraftScatter,
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart,
@@ -174,6 +176,14 @@ const chartTipValue = document.createElement("strong");
 const chartTipPlay = document.createElement("span");
 chartTip.append(chartTipValue, chartTipPlay);
 document.body.append(chartTip);
+// A richer floating card the interactive draft charts share: a bold title with a
+// manager swatch, then a stack of plain-text lines. Content rides in data-tip-*
+// attributes on each dot (see pointTipAttrs in render.js).
+const pointTip = document.createElement("div");
+pointTip.className = "chart-tip point-tip";
+pointTip.setAttribute("aria-hidden", "true");
+pointTip.hidden = true;
+document.body.append(pointTip);
 
 let state = loadState() ?? defaultState();
 // A restored draft carries its own dealt cards, so it never re-deals — but
@@ -756,6 +766,9 @@ function defaultState() {
     draft: null,
     draftTab: "available",
     rosterTab: "roster",
+    // Whose roster the focus view is showing. Null follows your own board; a
+    // manager id pins someone else's roster (read-only unless it is yours).
+    rosterManagerId: null,
     rosterDock: "open",
     online: null,
     tournament: null,
@@ -767,6 +780,7 @@ function defaultState() {
     },
     batchStatsTab: "overview",
     batchPitcherSplit: "overall",
+    batchChartManager: null,
     batchGamePage: 0,
     batchGameIndex: null,
     view: null,
@@ -1819,6 +1833,7 @@ function renderSetup(setupError = "") {
     state.view = null;
     state.selectedGameIndex = 0;
     state.selectedTeamName = state.managers[0];
+    state.rosterManagerId = null;
     cpuPaused = false;
     advanceCpuTurns();
     saveState();
@@ -2016,6 +2031,7 @@ function renderDraft() {
   </section>
   ${paused ? renderPausedPanel(draft) : ""}
   ${draft.complete ? renderDraftDone(draft) : ""}
+  ${draft.complete ? renderAuctionBudgetSection(draft) : ""}
   ${renderDraftFocus(draft, focusManager, boardManager)}
   ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
   ${lot ? renderAuctionLotPanel(draft) : ""}
@@ -2692,6 +2708,28 @@ function bindDraftActions() {
       renderDraft();
       return;
     }
+    if (action === "roster-manager") {
+      state.rosterManagerId = button.dataset.managerId ?? null;
+      selectedLineupMove = null;
+      selectedOrderMove = null;
+      saveState();
+      renderDraft();
+      return;
+    }
+    if (action === "adopt-manager") {
+      const manager = findDraftManager(button.dataset.managerId);
+      if (manager) {
+        // Claiming a seat is an identity, not a takeover: the team can stay on
+        // CPU auto-pick (use "Hand back" to drive it), but it is now yours to
+        // set a lineup for, play as, and read as "you" everywhere.
+        state.myManagerId = manager.id;
+        state.selectedTeamName = manager.name;
+        state.rosterManagerId = manager.id;
+        saveState();
+        renderDraft();
+      }
+      return;
+    }
     if (action === "play-game") {
       startGame(app.querySelector("[data-play-opponent]")?.value);
     }
@@ -2835,6 +2873,9 @@ function bindHoverCardPreviews(onEscape = null) {
     const chartZone = event.target.closest?.("[data-wp-value]");
     if (chartZone) showChartTip(chartZone, event.clientX, event.clientY);
     else hideChartTip();
+    const chartPoint = event.target.closest?.("[data-point]");
+    if (chartPoint) showPointTip(chartPoint, event.clientX, event.clientY);
+    else hidePointTip();
     if (!hoveredPreviewRow) return;
     showHoverCard(hoveredPreviewRow, event.clientX, event.clientY);
   };
@@ -2843,6 +2884,9 @@ function bindHoverCardPreviews(onEscape = null) {
     if (event.target.closest?.("[data-wp-value]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-wp-value]"))) {
       hideChartTip();
     }
+    if (event.target.closest?.("[data-point]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-point]"))) {
+      hidePointTip();
+    }
     const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget || (event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) return;
     hoveredPreviewRow = null;
@@ -2850,6 +2894,11 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handleFocusIn = (event) => {
+    const chartPoint = event.target.closest?.("[data-point]");
+    if (chartPoint) {
+      const rect = chartPoint.getBoundingClientRect();
+      showPointTip(chartPoint, rect.left + rect.width / 2, rect.top);
+    }
     const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget) return;
     const rect = previewTarget.getBoundingClientRect();
@@ -2857,6 +2906,7 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handleFocusOut = (event) => {
+    if (!event.relatedTarget?.closest?.("[data-point]")) hidePointTip();
     if (event.relatedTarget?.closest?.("[data-preview-card]")) return;
     hideHoverCard();
   };
@@ -2883,6 +2933,7 @@ function clearHoverCardPreviewBindings() {
   hoverPreviewController = null;
   hideHoverCard();
   hideChartTip();
+  hidePointTip();
 }
 
 function invalidateBatch() {
@@ -3110,30 +3161,44 @@ function startBatchRun(runs, options = {}) {
   // can't draw a line). A chunk is capped near 200 games so no single task
   // blocks for more than a frame or two even on modest hardware. Once the race
   // itself is complete we hand off to the WPA scoring pass.
+  // Run the rest of the season without the animation, but without freezing the
+  // page either. Split the remainder into a handful of "pumps" that each
+  // simulate a block of games and then yield once with setTimeout, so input and
+  // paint get a slot before the next block. The yield COUNT is deliberately
+  // small and fixed: a hidden tab throttles setTimeout to ~1s, so dozens of
+  // tiny yields would crawl — a dozen keeps the whole skip snappy in the
+  // foreground and merely brief in the background, while each block stays short
+  // enough (a fraction of the ~1.4s full sim) to never read as a freeze. Inside
+  // a pump the work is sub-chunked so pushFrame() samples the "How the race
+  // unfolded" curve every 200 games regardless of pump size.
   const runSkip = () => {
-    const remaining = count - completed;
-    const slices = Math.min(remaining, Math.max(40, Math.ceil(remaining / 200)));
-    let slice = 0;
-    const doSlice = () => {
+    const start = completed;
+    const remaining = count - start;
+    const pumps = Math.min(remaining, 14);
+    const perPump = Math.ceil(remaining / pumps);
+    const SAMPLE = 200;
+    const pump = () => {
       if (token !== batchRunToken || !state.draft) return;
-      slice += 1;
-      const target = completed + Math.round((remaining * slice) / slices);
-      runBatchChunk(batchState, teams, seed, completed, target - completed, { calibration });
-      completed = target;
-      const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
+      const target = Math.min(count, completed + perPump);
+      let snapshot = null;
+      while (completed < target) {
+        const size = Math.min(SAMPLE, target - completed);
+        runBatchChunk(batchState, teams, seed, completed, size, { calibration });
+        completed += size;
+        snapshot = pushFrame() ?? snapshot;
+      }
       // The instant path (online resync/join) wants results, not a show —
       // leave the "Simulating…" screen up rather than flashing a race by.
       if (!options.instant) {
-        renderBatchRace({ snapshot, series, completed, total: count, teamNames, fastForwarding: true });
+        renderBatchRace({ snapshot: snapshot ?? batchProgressSnapshot(batchState), series, completed, total: count, teamNames, fastForwarding: true });
       }
-      if (slice >= slices) {
-        completed = count;
+      if (completed >= count) {
         beginWpaScoring();
         return;
       }
-      setTimeout(doSlice, 0);
+      setTimeout(pump, 0);
     };
-    doSlice();
+    pump();
   };
 
   const step = () => {
@@ -3346,10 +3411,94 @@ function renderBatch() {
       <tbody>${teamRows}</tbody>
     </table>
   </div>`;
+  // Managers keep the color they wear on the standings race chart, keyed by
+  // their seat order so a team is the same hue everywhere on the screen.
+  const chartTeamOrder = state.batch.race?.teamNames ?? summary.teams.map((row) => row.team);
+  const colorForTeam = (team) => {
+    const index = chartTeamOrder.indexOf(team);
+    return raceColor(index >= 0 ? index : 0);
+  };
+  const chartLegend = chartTeamOrder.map((name, index) => ({ name, color: raceColor(index) }));
+
+  const scatterCost = (line) => {
+    const player = playerForBoxLine(playersById, line, line.team);
+    const id = player?.id ?? line.id;
+    if (auctionDraft) {
+      const price = pricePaidMap[id];
+      return Number.isFinite(price) ? price : null;
+    }
+    const pick = pickNumberMap[id];
+    return Number.isFinite(pick) ? pick : null;
+  };
+  const costLabel = (cost) => (auctionDraft ? money(cost) : `#${cost}`);
+  const scatterPoints = [];
+  for (const line of summary.hitters) {
+    const cost = scatterCost(line);
+    if (cost == null) continue;
+    const wpa162 = batchPace(line, "wpaPer162", "wpa", teamGamesByName);
+    const hr = Math.round(batchPace(line, "hrPer162", "hr", teamGamesByName));
+    const rbi = Math.round(batchPace(line, "rbiPer162", "rbi", teamGamesByName));
+    const sb = Math.round(batchPace(line, "sbPer162", "sb", teamGamesByName));
+    const slash = `${formatBattingStat(line.avg)}/${formatBattingStat(line.obp)}/${formatBattingStat(line.slg)}`;
+    const color = colorForTeam(line.team);
+    scatterPoints.push({
+      x: cost,
+      y: wpa162,
+      color,
+      team: line.team,
+      cardId: playerForBoxLine(playersById, line, line.team)?.id ?? line.id,
+      tipTitle: line.name,
+      tipColor: color,
+      tipLines: [
+        line.team + (line.position ? ` · ${line.position}` : ""),
+        `${auctionDraft ? "Price" : "Pick"}: ${costLabel(cost)}`,
+        `WPA/162: ${formatWpaStat(wpa162)}`,
+        `${slash} · ${hr} HR · ${rbi} RBI${sb ? ` · ${sb} SB` : ""}`
+      ]
+    });
+  }
+  for (const line of summary.pitchers) {
+    const cost = scatterCost(line);
+    if (cost == null) continue;
+    const wpa162 = batchPace(line, "wpaPer162", "wpa", teamGamesByName);
+    const ip162 = batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3);
+    const color = colorForTeam(line.team);
+    scatterPoints.push({
+      x: cost,
+      y: wpa162,
+      color,
+      team: line.team,
+      cardId: playerForBoxLine(playersById, line, line.team)?.id ?? line.id,
+      tipTitle: line.name,
+      tipColor: color,
+      tipLines: [
+        line.team + (line.role ? ` · ${line.role}` : ""),
+        `${auctionDraft ? "Price" : "Pick"}: ${costLabel(cost)}`,
+        `WPA/162: ${formatWpaStat(wpa162)}`,
+        `${formatDecimal(ip162, 1)} IP · ${formatPerNine(line.r, line.outs)} R/9 · ${formatPerNine(line.so, line.outs)} K/9 · ${formatPerNine(line.bb, line.outs)} BB/9`
+      ]
+    });
+  }
+  // Filter the dots to one manager when the legend is toggled; a stale filter
+  // (a manager who isn't in this room) falls back to showing everyone.
+  const chartManager = chartTeamOrder.includes(state.batchChartManager) ? state.batchChartManager : null;
+  const shownScatter = chartManager ? scatterPoints.filter((point) => point.team === chartManager) : scatterPoints;
+  const draftValueSection = scatterPoints.length ? `<section class="panel wide draft-chart-panel">
+    <div class="section-title-row">
+      <div>
+        <p class="eyebrow">Draft value</p>
+        <h2>${auctionDraft ? "Dollars spent" : "Draft slot"} against WPA per 162</h2>
+      </div>
+    </div>
+    <p class="batch-note">Each dot is a drafted player who logged a stat, colored by manager. Hover for the box-score line, click for the card, or use the legend to filter by manager.</p>
+    ${renderDraftScatter({ points: shownScatter, xLabel: auctionDraft ? "Price paid ($)" : "Pick number", yLabel: "WPA / 162 games", legend: chartLegend, activeManager: chartManager })}
+  </section>` : "";
+
   const overviewSection = `<section class="grid batch-overview-grid">
     ${teamTableSection}
     ${awardsSection}
   </section>
+  ${draftValueSection}
   ${raceSection}
   ${renderFormulaRevealSection(summary)}`;
   const headToHeadSection = renderBatchHeadToHead(summary);
@@ -3882,6 +4031,25 @@ function bindBatchActions() {
   resetAppHandlers();
   hideHoverCard();
   app.onclick = (event) => {
+    // A dot on the draft-value chart pins that player's card. Clicking anywhere
+    // else on the results dismisses it — hover cards were unreachable on touch,
+    // and the dots are too small to hover precisely anyway.
+    const cardDot = event.target.closest("[data-card-id]");
+    if (cardDot) {
+      const player = draftedPlayersById().get(cardDot.dataset.cardId);
+      if (player) presentCard(previewCard(player), `dot-${player.id}`, event.clientX, event.clientY);
+      return;
+    }
+    hideHoverCard();
+
+    const chartManagerButton = event.target.closest("button[data-batch-chart-manager]");
+    if (chartManagerButton) {
+      state.batchChartManager = chartManagerButton.dataset.batchChartManager || null;
+      saveState();
+      renderBatch();
+      return;
+    }
+
     const tabButton = event.target.closest("button[data-batch-tab]");
     if (tabButton) {
       state.batchStatsTab = normalizeBatchStatsTab(tabButton.dataset.batchTab);
@@ -4012,9 +4180,13 @@ function formatWpaStat(value) {
 }
 
 function showHoverCard(row, clientX, clientY) {
-  const cardHtml = row.dataset.previewCard;
+  presentCard(row.dataset.previewCard, row.dataset.previewId ?? row.dataset.previewCard, clientX, clientY);
+}
+
+// Drop a rendered player card into the shared preview element and place it near
+// the cursor. Used both by the table hover cards and by clicking a chart dot.
+function presentCard(cardHtml, previewId, clientX, clientY) {
   if (!cardHtml) return;
-  const previewId = row.dataset.previewId ?? cardHtml;
   if (cardPreview.dataset.previewId !== previewId) {
     cardPreview.innerHTML = cardHtml;
     // The face renders with an empty photo window; the cascade fills it (and
@@ -4061,6 +4233,29 @@ function showChartTip(zone, clientX, clientY) {
 
 function hideChartTip() {
   chartTip.hidden = true;
+}
+
+function showPointTip(dot, clientX, clientY) {
+  const title = dot.dataset.tipTitle ?? "";
+  const color = dot.dataset.tipColor ?? "";
+  const lines = (dot.dataset.tipLines ?? "").split("\n").filter(Boolean);
+  pointTip.innerHTML = `<strong class="point-tip-title">${color ? `<i class="point-tip-swatch" style="background:${escapeHtml(color)}"></i>` : ""}${escapeHtml(title)}</strong>${lines.map((line) => `<span>${escapeHtml(line)}</span>`).join("")}`;
+  pointTip.hidden = false;
+  pointTip.setAttribute("aria-hidden", "false");
+
+  const gap = 14;
+  const rect = pointTip.getBoundingClientRect();
+  let x = clientX - rect.width / 2;
+  let y = clientY - rect.height - gap;
+  if (y < gap) y = clientY + gap;
+  x = Math.max(gap, Math.min(x, window.innerWidth - rect.width - gap));
+  pointTip.style.left = `${Math.round(x)}px`;
+  pointTip.style.top = `${Math.round(y)}px`;
+}
+
+function hidePointTip() {
+  pointTip.hidden = true;
+  pointTip.setAttribute("aria-hidden", "true");
 }
 
 function renderGameDetail(game) {
@@ -5197,7 +5392,10 @@ function dockNeedsSummary(manager) {
 // which belongs to you. Conflating them meant a seated player watched somebody
 // else's roster all draft and could never reach their own.
 function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
-  const manager = boardManager;
+  // The roster tabs default to your own board, but a toggle can pin anyone
+  // else's roster to browse it. Only the owner's roster stays editable.
+  const shown = draft.managers.find((entry) => entry.id === state.rosterManagerId) ?? boardManager;
+  const manager = shown;
   const auction = isAuctionDraft(draft);
   const queued = isRandomNomination(draft);
   const lot = auction ? draft.auction.lot : null;
@@ -5215,7 +5413,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
       ? `Lot ${Math.min(lotNumber, totalPicks)} of ${totalPicks}`
       : `Round ${draftPickInfo(draft).round}, pick ${draftPickInfo(draft).pickInRound}`;
   const heading = draft.complete
-    ? `${escapeHtml(boardManager.name)} roster`
+    ? `${escapeHtml(shown.name)} roster`
     : queued
       ? lot
         ? "A card is on the block"
@@ -5264,13 +5462,55 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
     </div>
     <div class="roster-view">
+      ${renderRosterManagerToggle(draft, shown)}
       <div class="game-tabs roster-tabs">
         <button class="game-tab ${state.rosterTab === "order" ? "" : "active"}" data-action="roster-tab" data-tab="roster">Roster</button>
         <button class="game-tab ${state.rosterTab === "order" ? "active" : ""}" data-action="roster-tab" data-tab="order">Batting order</button>
       </div>
+      ${renderRosterAdoptNotice(draft, shown)}
       ${state.rosterTab === "order" ? renderBattingOrder(manager) : renderRosterSlots(manager, draft)}
     </div>
   </section>`;
+}
+
+// A pill per manager so you can flip through everyone's roster from your own
+// seat; the owned seat is tagged "you". Hidden online, where the roster dock and
+// the seat you claimed already answer whose board you are looking at.
+function renderRosterManagerToggle(draft, shown) {
+  if (state.online || draft.managers.length < 2) return "";
+  const owner = viewerManager(draft);
+  const pills = draft.managers
+    .map((manager) => `<button type="button"
+      class="game-tab ${manager.id === shown.id ? "active" : ""}"
+      data-action="roster-manager"
+      data-manager-id="${escapeHtml(manager.id)}"
+      role="tab"
+      aria-selected="${manager.id === shown.id ? "true" : "false"}"
+    >${escapeHtml(manager.name)}${owner && manager.id === owner.id ? ' <em class="roster-you">you</em>' : ""}${manager.cpu ? ' <span class="roster-cpu-tag">CPU</span>' : ""}</button>`)
+    .join("");
+  return `<div class="game-tabs roster-manager-tabs" role="tablist" aria-label="Whose roster to view">${pills}</div>`;
+}
+
+// Whose seat this is, and whether you can claim it:
+//   - your own seat: nothing to say.
+//   - someone else's, when you hold a seat at a table with humans: read-only.
+//   - a shared all-human hotseat: it is meant to run every seat, so stay quiet.
+//   - an all-computer table: there is no "you" at all, so offer to adopt the
+//     shown team. Owning a seat is what lets you field a lineup and run the sim
+//     as a manager rather than a spectator — and you can re-adopt to switch.
+function renderRosterAdoptNotice(draft, shown) {
+  if (state.online) return "";
+  const owner = viewerManager(draft);
+  if (owner && owner.id === shown.id) return "";
+  const allCpu = draft.managers.every((manager) => manager.cpu);
+  if (owner && !allCpu) {
+    return `<div class="roster-adopt roster-adopt-readonly"><span>Viewing ${escapeHtml(shown.name)}'s roster &mdash; read-only.</span></div>`;
+  }
+  if (!owner && !allCpu) return "";
+  return `<div class="roster-adopt">
+    <span>${owner ? `Viewing ${escapeHtml(shown.name)}'s roster.` : "No seat is yours yet."} Adopt a team to set its lineup and play as it.</span>
+    <button type="button" class="small" data-action="adopt-manager" data-manager-id="${escapeHtml(shown.id)}">Make ${escapeHtml(shown.name)} my team</button>
+  </div>`;
 }
 
 // The nine who bat, in the order they bat. Default is the order the lineup
@@ -5508,9 +5748,16 @@ function viewerManager(draft) {
   return humans.length === 1 ? humans[0] : null;
 }
 
+// Online you may only touch your own seat. Offline, when the table has a clear
+// owner — the seat you claimed, or the only human among computers — that owner's
+// roster is the one you edit; everyone else's is there to browse, not change. A
+// table with no owner at all (a shared hotseat, or an all-computer room before
+// anyone has adopted a seat) stays fully editable, the way a hotseat always was.
 function canManageRoster(managerId) {
-  if (!state.online) return true;
-  return managerId === state.online.managerId;
+  if (state.online) return managerId === state.online.managerId;
+  const owner = viewerManager(state.draft);
+  if (owner) return managerId === owner.id;
+  return true;
 }
 
 const isStaffSlot = (label) => staffSlotLabels(state.draft?.startingPitchers).includes(label);
@@ -6174,6 +6421,37 @@ function renderDraftDone(draft) {
   </section>`;
 }
 
+// Auction only: the bankroll burndown, one stepped line per manager, sitting
+// just under "What the table built". Managers wear their standings-race color,
+// keyed by seat order so a team is the same hue as on the sim screens.
+function renderAuctionBudgetSection(draft) {
+  if (!isAuctionDraft(draft)) return "";
+  const history = draftHistory(draft);
+  if (!history.length) return "";
+  const startBudget = draft.auction?.budget ?? 0;
+  const spentByManager = new Map();
+  const managers = new Map(draft.managers.map((manager, index) => [manager.id, { name: manager.name, color: raceColor(index), buys: [] }]));
+  for (const pick of history) {
+    const entry = managers.get(pick.manager.id);
+    if (!entry) continue;
+    const price = Number(pick.price) || 0;
+    const spent = (spentByManager.get(pick.manager.id) ?? 0) + price;
+    spentByManager.set(pick.manager.id, spent);
+    entry.buys.push({ pick: pick.pickNumber, price, playerName: pick.player.name, remaining: startBudget - spent });
+  }
+  const managerList = draft.managers.map((manager) => managers.get(manager.id));
+  return `<section class="panel wide draft-chart-panel budget-race-panel">
+    <div class="section-title-row">
+      <div>
+        <p class="eyebrow">Auction spending</p>
+        <h2>Budget remaining through the draft</h2>
+      </div>
+    </div>
+    <p class="batch-note">Each line is a manager's bankroll as the auction ran. Hover a step for the player bought and the price paid.</p>
+    ${renderBudgetRace({ managers: managerList, totalPicks: history.length, budget: startBudget })}
+  </section>`;
+}
+
 // ---- comparing cards ----
 //
 // The whole game turns on the shape of a chart, and the only way to compare two
@@ -6700,6 +6978,7 @@ function reviveState(value) {
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
     batchPitcherSplit: normalizeBatchPitcherSplit(value.batchPitcherSplit),
     rosterTab: value.rosterTab === "order" ? "order" : "roster",
+    rosterManagerId: typeof value.rosterManagerId === "string" ? value.rosterManagerId : null,
     draft,
     tournament: null,
     view: value.view === "batch" && value.batch ? "batch" : null

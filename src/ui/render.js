@@ -318,6 +318,195 @@ export function renderRaceChart(race) {
   </svg>`;
 }
 
+// A short list of round axis values covering [lo, hi]. Steps land on 1/2/5 times
+// a power of ten so the labels read cleanly at any scale.
+function niceTicks(lo, hi, count = 5) {
+  const span = (hi - lo) || 1;
+  const raw = span / Math.max(1, count);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+  const ticks = [];
+  for (let value = Math.ceil(lo / step) * step; value <= hi + step * 1e-6; value += step) {
+    ticks.push(Math.abs(value) < step * 1e-6 ? 0 : value);
+  }
+  return ticks;
+}
+
+// The dots on the interactive charts share one floating tooltip (see
+// showPointTip in app.js). Each carries its whole card in data- attributes:
+// a bold title, the manager swatch color, and a set of plain-text lines. The
+// text is escaped once here for the attribute and escaped again at display.
+function pointTipAttrs({ title, color, lines }) {
+  return `data-point data-tip-title="${escapeHtml(title ?? "")}" data-tip-color="${escapeHtml(color ?? "")}" data-tip-lines="${escapeHtml((lines ?? []).filter(Boolean).join("\n"))}"`;
+}
+
+// Scatter of drafted players: cost (price or pick number) against WPA/162, each
+// dot colored by manager. Points arrive pre-shaped from app.js so this stays a
+// pure plotter — {x, y, color, cardId, tipTitle, tipColor, tipLines}. cardId
+// lets app.js pop the player's card when the dot is clicked; activeManager
+// highlights the manager whose dots are currently filtered in.
+export function renderDraftScatter({ points = [], xLabel = "", yLabel = "", legend = [], activeManager = null } = {}) {
+  if (points.length < 1) {
+    return `<div class="draft-chart">
+      <div class="race-chart-placeholder">No players to plot for this filter.</div>
+      ${renderChartLegend(legend, activeManager)}
+    </div>`;
+  }
+
+  const width = 760;
+  const height = 360;
+  const margin = { top: 20, right: 26, bottom: 52, left: 62 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+
+  const xValues = points.map((point) => point.x);
+  const yValues = points.map((point) => point.y);
+  const xHi = Math.max(1, Math.max(...xValues) * 1.05);
+  const xLo = 0;
+  const rawYLo = Math.min(0, ...yValues);
+  const rawYHi = Math.max(0, ...yValues);
+  const yPad = Math.max(0.5, (rawYHi - rawYLo) * 0.08);
+  const yLo = rawYLo - yPad;
+  const yHi = rawYHi + yPad;
+
+  const xFor = (value) => margin.left + ((value - xLo) / (xHi - xLo || 1)) * plotWidth;
+  const yFor = (value) => margin.top + (1 - (value - yLo) / (yHi - yLo || 1)) * plotHeight;
+
+  const yGrid = niceTicks(yLo, yHi, 5).map((value) => {
+    const yPos = yFor(value);
+    const zero = Math.abs(value) < 1e-9;
+    return `<line x1="${margin.left}" y1="${yPos.toFixed(1)}" x2="${(margin.left + plotWidth).toFixed(1)}" y2="${yPos.toFixed(1)}" class="${zero ? "race-parity" : "race-grid"}" />
+      <text x="${(margin.left - 8).toFixed(1)}" y="${(yPos + 4).toFixed(1)}" text-anchor="end" class="race-axis-text">${value.toFixed(1)}</text>`;
+  });
+
+  const xGrid = niceTicks(xLo, xHi, 6).map((value) => {
+    const xPos = xFor(value);
+    return `<text x="${xPos.toFixed(1)}" y="${(height - margin.bottom + 20).toFixed(1)}" text-anchor="middle" class="race-axis-text">${formatAxisNumber(value)}</text>`;
+  });
+
+  const dots = points
+    .map((point) => `<circle class="scatter-dot${point.cardId ? " scatter-dot-card" : ""}" cx="${xFor(point.x).toFixed(1)}" cy="${yFor(point.y).toFixed(1)}" r="5" fill="${escapeHtml(point.color ?? "#365f91")}" ${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}" />`)
+    .join("");
+
+  const axisTitles = `<text x="${(margin.left + plotWidth / 2).toFixed(1)}" y="${(height - 6).toFixed(1)}" text-anchor="middle" class="chart-axis-title">${escapeHtml(xLabel)}</text>
+    <text transform="translate(16 ${(margin.top + plotHeight / 2).toFixed(1)}) rotate(-90)" text-anchor="middle" class="chart-axis-title">${escapeHtml(yLabel)}</text>`;
+
+  return `<div class="draft-chart">
+    <svg viewBox="0 0 ${width} ${height}" class="race-chart scatter-chart" role="img" aria-label="${escapeHtml(xLabel)} against ${escapeHtml(yLabel)}, one dot per drafted player">
+      ${yGrid.join("")}
+      ${xGrid.join("")}
+      ${axisTitles}
+      ${dots}
+    </svg>
+    ${renderChartLegend(legend, activeManager)}
+  </div>`;
+}
+
+// Auction budget burndown: pick number on x, dollars left on y, one stepped line
+// per manager. Managers arrive as {name, color, buys:[{pick, price, playerName,
+// remaining}]}; the line holds flat between a manager's buys and steps down at
+// each. Every buy is a hoverable dot.
+export function renderBudgetRace({ managers = [], totalPicks = 0, budget = 0 } = {}) {
+  const withBuys = managers.filter((manager) => (manager.buys ?? []).length);
+  if (!withBuys.length || totalPicks < 1) {
+    return `<div class="race-chart-placeholder">No auction spending to plot yet.</div>`;
+  }
+
+  const width = 760;
+  const height = 340;
+  const margin = { top: 20, right: 132, bottom: 50, left: 60 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+
+  const xHi = Math.max(1, totalPicks);
+  const yHi = Math.max(1, budget);
+  const xFor = (value) => margin.left + (value / xHi) * plotWidth;
+  const yFor = (value) => margin.top + (1 - value / yHi) * plotHeight;
+
+  const yGrid = niceTicks(0, yHi, 5).map((value) => {
+    const yPos = yFor(value);
+    return `<line x1="${margin.left}" y1="${yPos.toFixed(1)}" x2="${(margin.left + plotWidth).toFixed(1)}" y2="${yPos.toFixed(1)}" class="race-grid" />
+      <text x="${(margin.left - 8).toFixed(1)}" y="${(yPos + 4).toFixed(1)}" text-anchor="end" class="race-axis-text">$${Math.round(value)}</text>`;
+  });
+
+  const xTicks = niceTicks(0, xHi, 6).map((value) => {
+    const xPos = xFor(value);
+    return `<text x="${xPos.toFixed(1)}" y="${(height - margin.bottom + 20).toFixed(1)}" text-anchor="middle" class="race-axis-text">${Math.round(value)}</text>`;
+  });
+
+  const lines = [];
+  const dots = [];
+  const endLabels = [];
+  managers.forEach((manager) => {
+    const buys = [...(manager.buys ?? [])].sort((a, b) => a.pick - b.pick);
+    if (!buys.length) return;
+    const color = manager.color ?? "#365f91";
+    // Right-angle steps: hold the prior level across to the buy pick, then drop.
+    const path = [`${xFor(0).toFixed(1)},${yFor(budget).toFixed(1)}`];
+    let level = budget;
+    for (const buy of buys) {
+      path.push(`${xFor(buy.pick).toFixed(1)},${yFor(level).toFixed(1)}`);
+      level = buy.remaining;
+      path.push(`${xFor(buy.pick).toFixed(1)},${yFor(level).toFixed(1)}`);
+    }
+    path.push(`${xFor(totalPicks).toFixed(1)},${yFor(level).toFixed(1)}`);
+    lines.push(`<polyline points="${path.join(" ")}" fill="none" stroke="${color}" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" />`);
+
+    for (const buy of buys) {
+      dots.push(`<circle class="scatter-dot" cx="${xFor(buy.pick).toFixed(1)}" cy="${yFor(buy.remaining).toFixed(1)}" r="4.5" fill="${color}" ${pointTipAttrs({
+        title: buy.playerName,
+        color,
+        lines: [manager.name, `Pick ${buy.pick} · $${buy.price}`, `Budget left: $${buy.remaining}`]
+      })} tabindex="0" role="img" aria-label="${escapeHtml(`${buy.playerName}, $${buy.price}`)}" />`);
+    }
+    endLabels.push({ name: manager.name, color, value: level, yPos: yFor(level) });
+  });
+
+  endLabels.sort((a, b) => a.yPos - b.yPos);
+  for (let index = 1; index < endLabels.length; index += 1) {
+    endLabels[index].yPos = Math.max(endLabels[index].yPos, endLabels[index - 1].yPos + 14);
+  }
+  const labelMaxY = margin.top + plotHeight;
+  for (let index = endLabels.length - 1; index >= 0; index -= 1) {
+    const limit = labelMaxY - (endLabels.length - 1 - index) * 14;
+    if (endLabels[index].yPos > limit) endLabels[index].yPos = limit;
+  }
+  const labelTexts = endLabels.map((label) => `<text x="${(margin.left + plotWidth + 8).toFixed(1)}" y="${(label.yPos + 4).toFixed(1)}" fill="${label.color}" class="race-label">${escapeHtml(label.name)} $${Math.round(label.value)}</text>`);
+
+  const axisTitles = `<text x="${(margin.left + plotWidth / 2).toFixed(1)}" y="${(height - 6).toFixed(1)}" text-anchor="middle" class="chart-axis-title">Pick number</text>
+    <text transform="translate(15 ${(margin.top + plotHeight / 2).toFixed(1)}) rotate(-90)" text-anchor="middle" class="chart-axis-title">Budget remaining</text>`;
+
+  return `<div class="draft-chart">
+    <svg viewBox="0 0 ${width} ${height}" class="race-chart budget-chart" role="img" aria-label="Auction budget remaining by manager across the draft">
+      ${yGrid.join("")}
+      ${xTicks.join("")}
+      ${axisTitles}
+      ${lines.join("")}
+      ${dots.join("")}
+      ${labelTexts.join("")}
+    </svg>
+  </div>`;
+}
+
+// Doubles as the manager filter: each swatch is a toggle button, plus an "All"
+// chip that clears the filter. The active one is pressed; app.js reads
+// data-batch-chart-manager and re-renders. An empty value means "all".
+function renderChartLegend(legend = [], activeManager = null) {
+  if (!legend.length) return "";
+  const chip = (name, color, active, value) => `<button type="button" class="chart-legend-item${active ? " active" : ""}" data-batch-chart-manager="${escapeHtml(value)}" aria-pressed="${active}">${color ? `<i style="background:${escapeHtml(color)}"></i>` : ""}${escapeHtml(name)}</button>`;
+  return `<div class="chart-legend" role="group" aria-label="Filter by manager">
+    ${chip("All", "", !activeManager, "")}
+    ${legend.map((item) => chip(item.name, item.color, activeManager === item.name, item.name)).join("")}
+  </div>`;
+}
+
+function formatAxisNumber(value) {
+  const number = Number(value) || 0;
+  if (Math.abs(number) >= 1000) return `${Math.round(number / 1000)}k`;
+  return String(Math.round(number));
+}
+
 // Home team's win probability across one game's plays. Big swings
 // (|WPA| >= 10%) get a marker; every play carries a native tooltip.
 export function renderWinProbabilityChart(game) {

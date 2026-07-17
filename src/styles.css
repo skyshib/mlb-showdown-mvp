@@ -2276,7 +2276,7 @@ button.roster-slot[draggable="true"]:active {
 .comp-table th,
 .comp-table td {
   border-bottom: 1px solid var(--hairline);
-  padding: 10px 12px;
+  padding: 5px 12px;
   vertical-align: middle;
 }
 
@@ -2317,15 +2317,16 @@ button.roster-slot[draggable="true"]:active {
 
 .comp-grade {
   display: inline-block;
-  min-width: 38px;
-  padding: 5px 8px 6px;
+  min-width: 30px;
+  padding: 3px 7px 4px;
   font-family: var(--display);
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 900;
   font-style: italic;
   line-height: 1;
   letter-spacing: 0.02em;
   color: var(--sheet);
+  vertical-align: middle;
 }
 
 /* The bands are not a traffic light. A C is the middle of the board and reads as
@@ -2337,8 +2338,9 @@ button.roster-slot[draggable="true"]:active {
 .grade-F { background: var(--accent); }
 
 .comp-value {
-  display: block;
-  margin-top: 5px;
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
   color: var(--muted);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
@@ -3611,6 +3613,99 @@ button.roster-slot[draggable="true"]:active {
   color: var(--muted);
 }
 
+.point-tip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.point-tip-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.draft-chart {
+  margin-top: 4px;
+}
+
+.chart-axis-title {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scatter-chart .scatter-dot,
+.budget-chart .scatter-dot {
+  stroke: var(--panel);
+  stroke-width: 1.5;
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.1s ease;
+}
+
+.scatter-chart .scatter-dot:hover,
+.budget-chart .scatter-dot:hover,
+.scatter-chart .scatter-dot:focus-visible,
+.budget-chart .scatter-dot:focus-visible {
+  opacity: 1;
+  stroke: var(--ink, #1c2521);
+  stroke-width: 2;
+  outline: none;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+}
+
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease, border-color 0.1s ease;
+}
+
+.chart-legend-item:hover {
+  color: var(--ink, #1c2521);
+  border-color: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+
+.chart-legend-item.active {
+  color: var(--ink, #1c2521);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  border-color: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.chart-legend-item:focus-visible {
+  outline: 2px solid var(--accent, #0b6b53);
+  outline-offset: 1px;
+}
+
+.chart-legend-item i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.draft-chart-panel {
+  margin-top: 16px;
+}
+
 .wpa-pos {
   color: var(--accent-dark);
   font-weight: 600;
@@ -4312,6 +4407,52 @@ button.roster-slot[draggable="true"]:active {
 
 .roster-tabs {
   justify-self: start;
+}
+
+.roster-manager-tabs {
+  justify-self: start;
+  flex-wrap: wrap;
+}
+
+.roster-you {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-left: 4px;
+}
+
+.roster-cpu-tag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-left: 4px;
+}
+
+.game-tab.active .roster-you,
+.game-tab.active .roster-cpu-tag {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.roster-adopt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--sheet);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.roster-adopt button {
+  margin-left: auto;
 }
 
 .batting-order {
