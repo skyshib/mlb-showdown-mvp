@@ -146,7 +146,7 @@ test("simulateBatchGame recreates a numbered batch game", () => {
   assert.ok(game.events.length > 0);
   assert.deepEqual(game, sameGame);
   assert.notDeepEqual(game.events, previousGame.events);
-  assert.equal(game.away.name, teams[0].name);
+  assert.equal(game.away.name, teams[1].name);
   assert.equal(game.home.name, teams[2].name);
   assert.equal(summary.runs, 5);
   assert.equal(

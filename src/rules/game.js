@@ -3,6 +3,7 @@ import { reliefDecision, lineupProfile } from "./pitching.js?v=20260716-records"
 import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
+import { calibratedWinProbability } from "./wpaCalibration.js?v=20260717-draft-wpa";
 
 // Go/no-go floors for taking a base, by outs and destination. Second and
 // home loosen as outs mount (with two gone the runner is off on contact and
@@ -44,10 +45,10 @@ export function stateLeverage(state) {
   });
 }
 
-// Probability that the home team wins from the given state, looked up in
-// MLB history (Retrosheet 1903-2025 via Greg Stoll's dataset — see
-// src/data/winExpectancy.js). Terminal states resolve exactly; live states
-// read the table from the batting team's perspective.
+// Probability that the home team wins from the given state. Batch replays can
+// carry a draft-specific table learned from their calibration pass; standalone
+// and interactive games fall back to MLB history (Retrosheet 1903-2025 via Greg
+// Stoll's dataset — see src/data/winExpectancy.js). Terminal states are exact.
 export function winProbabilityHome(state) {
   const diff = state.score.home - state.score.away;
   if (state.walkoff) return 1;
@@ -79,7 +80,14 @@ export function winProbabilityHome(state) {
     bases: view.bases,
     diff: battingHome ? diff : -diff
   });
-  return battingHome ? battingWin : 1 - battingWin;
+  const historicalHome = battingHome ? battingWin : 1 - battingWin;
+  return calibratedWinProbability(state.winExpectancyModel, {
+    inning: view.inning,
+    half: view.half,
+    outs: view.outs,
+    bases: view.bases,
+    diff
+  }, historicalHome);
 }
 
 function trackTopSwing(state, player, wpa, result) {
@@ -95,9 +103,9 @@ function trackTopSwing(state, player, wpa, result) {
   }
 }
 
-export function simulateGame(awayTeam, homeTeam, seed = "showdown") {
+export function simulateGame(awayTeam, homeTeam, seed = "showdown", options = {}) {
   const rng = createRng(seed);
-  const state = createInitialState(awayTeam, homeTeam);
+  const state = createInitialState(awayTeam, homeTeam, options);
   const events = [];
 
   while (shouldContinue(state)) {
@@ -653,7 +661,7 @@ export function resolveAdvanceDecision(state, sendCount, rng) {
   return event;
 }
 
-export function createInitialState(awayTeam, homeTeam) {
+export function createInitialState(awayTeam, homeTeam, options = {}) {
   return {
     away: createRuntimeTeam(awayTeam),
     home: createRuntimeTeam(homeTeam),
@@ -671,6 +679,9 @@ export function createInitialState(awayTeam, homeTeam) {
       hitters: new Map(),
       pitchers: new Map()
     },
+    // A batch-only, JSON-safe state lookup. It is frozen after calibration and
+    // never influences dice, pitching, or baserunning decisions.
+    winExpectancyModel: options.winExpectancyModel ?? null,
     // Runs by inning, for the hand-operated board. Grows into extras.
     lineScore: { away: [], home: [] },
     lastPlayDetails: null,

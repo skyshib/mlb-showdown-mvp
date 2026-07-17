@@ -129,11 +129,13 @@ import {
   DEFAULT_BATCH_RUNS,
   batchProgressSnapshot,
   createBatchState,
+  createWinExpectancyCalibration,
+  finalizeWinExpectancyCalibration,
   normalizeBatchRuns,
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260716-sim-splits";
+} from "./rules/batch.js?v=20260717-draft-wpa";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
 import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
@@ -2991,6 +2993,7 @@ function startBatchRun(runs, options = {}) {
   const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
   const teamNames = teams.map((team) => team.name);
   const batchState = createBatchState(teams);
+  const calibration = createWinExpectancyCalibration();
   const seed = options.salt ? `${state.seed}-batch-${options.salt}` : `${state.seed}-batch`;
   const token = ++batchRunToken;
   const gamesPerFrame = Math.max(2, Math.round(count / 90));
@@ -3033,13 +3036,13 @@ function startBatchRun(runs, options = {}) {
     ];
   };
 
-  const finalize = () => {
+  const finalize = (scoredState) => {
     if (token !== batchRunToken || !state.draft) return;
     state.tournament = null;
     state.batch = {
       runs: count,
       seed,
-      summary: summarizeBatch(batchState),
+      summary: summarizeBatch(scoredState),
       race: { teamNames, totalRuns: count, series: raceSeries() }
     };
     state.view = "batch";
@@ -3050,6 +3053,52 @@ function startBatchRun(runs, options = {}) {
     renderBatch();
   };
 
+  const beginWpaScoring = () => {
+    if (token !== batchRunToken || !state.draft) return;
+    const winExpectancyModel = finalizeWinExpectancyCalibration(calibration);
+    const scoredState = createBatchState(teams, { winExpectancyModel });
+    const finalSnapshot = batchProgressSnapshot(batchState);
+    const scoringGamesPerFrame = Math.max(100, Math.round(count / 20));
+    let scored = 0;
+
+    const scoreStep = () => {
+      if (token !== batchRunToken || !state.draft) return;
+      const size = skipRequested
+        ? count - scored
+        : Math.min(
+          fastForwarding ? scoringGamesPerFrame * 4 : scoringGamesPerFrame,
+          count - scored
+        );
+      runBatchChunk(scoredState, teams, seed, scored, size, { winExpectancyModel });
+      scored += size;
+      if (scored >= count) {
+        finalize(scoredState);
+        return;
+      }
+      renderBatchRace({
+        snapshot: finalSnapshot,
+        series,
+        completed: scored,
+        total: count,
+        teamNames,
+        fastForwarding,
+        phase: "wpa"
+      });
+      setTimeout(scoreStep, fastForwarding ? 0 : 16);
+    };
+
+    renderBatchRace({
+      snapshot: finalSnapshot,
+      series,
+      completed: 0,
+      total: count,
+      teamNames,
+      fastForwarding,
+      phase: "wpa"
+    });
+    setTimeout(scoreStep, skipRequested ? 0 : 50);
+  };
+
   const step = () => {
     if (token !== batchRunToken || !state.draft) return;
     if (skipRequested) {
@@ -3058,28 +3107,29 @@ function startBatchRun(runs, options = {}) {
       // line — the results chart is left on the "waiting" placeholder forever.
       // Slice it into a handful of synchronous steps so the "How the race
       // unfolded" chart still gets a real curve; it's instant either way.
+      const skipStart = completed;
       const remaining = count - completed;
       const slices = Math.min(remaining, 40);
       for (let slice = 1; slice <= slices; slice += 1) {
-        const target = completed + Math.round((remaining * slice) / slices);
-        runBatchChunk(batchState, teams, seed, completed, target - completed);
+        const target = skipStart + Math.round((remaining * slice) / slices);
+        runBatchChunk(batchState, teams, seed, completed, target - completed, { calibration });
         completed = target;
         pushFrame();
       }
       completed = count;
-      finalize();
+      beginWpaScoring();
       return;
     }
     // Fast forward runs the same race, just with a longer stride per frame —
     // the chart still draws, it simply gets where it is going sooner.
     const perFrame = fastForwarding ? gamesPerFrame * 8 : gamesPerFrame;
     const size = Math.min(perFrame, count - completed);
-    runBatchChunk(batchState, teams, seed, completed, size);
+    runBatchChunk(batchState, teams, seed, completed, size, { calibration });
     completed += size;
     const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
     renderBatchRace({ snapshot, series, completed, total: count, teamNames, fastForwarding });
     if (completed >= count) {
-      setTimeout(finalize, fastForwarding ? 250 : 700);
+      setTimeout(beginWpaScoring, fastForwarding ? 250 : 700);
       return;
     }
     setTimeout(step, fastForwarding ? 16 : raceFrameDelay(completed / count));
@@ -3106,17 +3156,23 @@ function downsampleSeries(series, maxPoints = 160) {
   return sampled;
 }
 
-function renderBatchRace({ snapshot, series, completed, total, teamNames, fastForwarding = false }) {
+function renderBatchRace({ snapshot, series, completed, total, teamNames, fastForwarding = false, phase = "games" }) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
   const tallies = (snapshot?.rows ?? teamNames.map((name) => ({ team: name, wins: 0, losses: 0, share: 0 })))
     .slice()
     .sort((a, b) => b.share - a.share || b.wins - a.wins);
   const leader = completed > 0 ? tallies[0] : null;
-  const heading = completed >= total
-    ? "Photo finish"
-    : leader
-      ? `${escapeHtml(leader.team)} leads by win percentage`
-      : `Simulating ${total} games`;
+  const scoringWpa = phase === "wpa";
+  const heading = scoringWpa
+    ? "Calibrating draft-specific WPA"
+    : completed >= total
+      ? "Photo finish"
+      : leader
+        ? `${escapeHtml(leader.team)} leads by win percentage`
+        : `Simulating ${total} games`;
+  const lede = scoringWpa
+    ? `${completed} of ${total} games replayed against this draft's run environment.`
+    : `${completed} of ${total} games complete. Win percentage so far:`;
   const chips = tallies
     .map((row) => `<span class="race-chip"><i style="background:${raceColor(teamNames.indexOf(row.team))}"></i>${escapeHtml(row.team)} <strong>${row.wins}-${row.losses}</strong></span>`)
     .join("");
@@ -3124,7 +3180,7 @@ function renderBatchRace({ snapshot, series, completed, total, teamNames, fastFo
   app.innerHTML = `<section class="panel sim-progress race-screen">
     <p class="eyebrow">Game simulator</p>
     <h1>${heading}</h1>
-    <p class="lede">${completed} of ${total} games complete. Win percentage so far:</p>
+    <p class="lede">${lede}</p>
     <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
     ${renderRaceChart({ teamNames, totalRuns: total, series })}
     <div class="race-chips">${chips}</div>
@@ -3174,6 +3230,11 @@ function renderBatch() {
   const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
   const sortedBaserunning = [...summary.teams].sort(compareTournamentBaserunning);
   const sortedDefense = [...summary.teams].sort(compareTournamentDefense);
+  const winExpectancyModel = summary.winExpectancyModel;
+  const secondOneOut = winExpectancyModel?.runExpectancy?.["1|2"]?.runs;
+  const wpaCalibrationNote = winExpectancyModel?.version
+    ? `WPA was calibrated from these ${winExpectancyModel.games} games (${winExpectancyModel.runsPerGame.toFixed(2)} runs/game${Number.isFinite(secondOneOut) ? `; runner on second with one out: ${secondOneOut.toFixed(2)} expected runs` : ""}) and then scored on an identical seeded replay.`
+    : "This simulation predates draft-specific WPA calibration.";
 
   const teamRows = sortedTeams
     .map(
@@ -3249,6 +3310,7 @@ function renderBatch() {
     <p class="eyebrow">${runs} simulated games</p>
     <h1>${escapeHtml(top.team)} had the best draft</h1>
     <p class="batch-note">${escapeHtml(top.team)} led the sim with a ${formatShare(top.winPct)} win rate.</p>
+    <p class="batch-note">${wpaCalibrationNote}</p>
     <table>
       <thead><tr>
         <th>#</th>
@@ -3472,8 +3534,17 @@ const GAME_LOG_PAGE_SIZE = 50;
 function renderBatchGamesSection() {
   const { runs, seed } = state.batch;
   const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
+  const winExpectancyModel = state.batch.summary?.winExpectancyModel ?? null;
+  const replayOptions = { scheduleVersion: state.batch.summary?.scheduleVersion ?? 1 };
   if (state.batchGameIndex != null && state.batchGameIndex >= 0 && state.batchGameIndex < runs) {
-    const replay = replayBatchGames(teams, seed, state.batchGameIndex, 1)[0];
+    const replay = replayBatchGames(
+      teams,
+      seed,
+      state.batchGameIndex,
+      1,
+      winExpectancyModel,
+      replayOptions
+    )[0];
     return renderBatchGameDetail(replay?.game, state.batchGameIndex, runs);
   }
 
@@ -3481,7 +3552,7 @@ function renderBatchGamesSection() {
   const page = Math.min(Math.max(state.batchGamePage ?? 0, 0), pageCount - 1);
   const start = page * GAME_LOG_PAGE_SIZE;
   const count = Math.min(GAME_LOG_PAGE_SIZE, runs - start);
-  const games = replayBatchGames(teams, seed, start, count);
+  const games = replayBatchGames(teams, seed, start, count, winExpectancyModel, replayOptions);
 
   const rows = games
     .map(({ index, game }) => {
