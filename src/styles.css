@@ -1200,6 +1200,13 @@ button.roster-slot[draggable="true"]:active {
   font-variant-numeric: tabular-nums;
 }
 
+.sold-tag .sold-round {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The card up for bid right now. */
 .player-table tr.on-block-row,
 .player-table tr.on-block-row:hover {

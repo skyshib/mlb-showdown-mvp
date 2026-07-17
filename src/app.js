@@ -2110,6 +2110,7 @@ function draftSoldTags(draft) {
     const priced = Number.isFinite(pick.price);
     tags.set(pick.player.id, {
       label: pick.manager.name,
+      round: auction ? pick.round : null,
       detail: auction ? (priced ? money(pick.price) : "") : `#${pick.pickNumber}`,
       title: auction
         ? (priced
