@@ -40,9 +40,9 @@ npm run balance
    - **Fictional players** — a made-up league invented fresh from the seed.
 
    The seed deals a deck out of the set, drawn down the rarity ladder so draft night has stars in it as well as scrubs. Cards, charts, points, and card art are shared with the adventure — the same Griffey card, wherever you meet him.
-2. Draft 13 cards per team:
+2. Choose 1–5 starting pitchers per team, then draft the resulting roster:
    - 9 hitters
-   - 2 starting pitchers
+   - Your configured number of starting pitchers (2 by default)
    - 2 bullpen pitchers
 3. Fill a legal lineup:
    - C, 1B, 2B, 3B, SS, LF, CF, RF, DH

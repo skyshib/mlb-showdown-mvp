@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, managerValuation, normalizeCardPosition, pauseSnake, pickPlayer, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, normalizeCardPosition, pauseSnake, pickPlayer, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
   applyDouble,
@@ -1401,6 +1401,29 @@ test("draft requires two starters and two bullpen pitchers", () => {
   assert.deepEqual(validateRoster(manager).filter((issue) => issue.includes("starter")), []);
   assert.ok(validateRoster(manager).some((issue) => issue.includes("bullpen pitcher")));
   assert.equal(canPickPlayer(draft, manager, makePitcher({ id: "role-sp-3", role: "SP" })).ok, false);
+});
+
+test("a configured four-man rotation changes CPU roster needs and the active game staff", () => {
+  const draft = createDraft(["One", "Two"], makeDraftPool("rotation-four", 24, 24), 15, "rotation-four", {
+    startingPitchers: 4
+  });
+
+  assert.equal(draft.rosterSize, 15);
+  assert.equal(getRosterNeeds([], draft).starter, 4);
+
+  while (!draft.complete) autopick(draft);
+
+  for (const manager of draft.managers) {
+    const starters = manager.roster.filter((player) => player.kind === "pitcher" && player.role === "SP");
+    assert.equal(starters.length, 4);
+    assert.deepEqual(validateRoster(manager), []);
+    assert.equal(buildTeam(manager).starters.length, 4, "every drafted starter remains in the game rotation");
+    assert.equal(
+      canPickPlayer(draft, manager, makePitcher({ id: `${manager.id}-extra-sp`, role: "SP" })).ok,
+      false,
+      "a fifth starter does not fit a four-man staff"
+    );
+  }
 });
 
 test("single-game team uses first starter and two bullpen pitchers", () => {

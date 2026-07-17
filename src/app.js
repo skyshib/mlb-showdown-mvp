@@ -41,8 +41,10 @@ import {
   AUCTION_MIN_BID,
   AUCTION_MIN_RAISE,
   CORNER_OUTFIELD_POSITION,
+  DEFAULT_STARTING_PITCHERS,
+  MAX_STARTING_PITCHERS,
+  MIN_STARTING_PITCHERS,
   SIM_ACTION_TYPES,
-  STAFF_SLOT_LABELS,
   applyBattingOrder,
   applyDraftAction,
   assignLineupSlots,
@@ -88,6 +90,7 @@ import {
   normalizeAuctionTimerConfig,
   normalizeCardPosition,
   normalizePickTimerSeconds,
+  normalizeStartingPitchers,
   normalizeSnakeTimerConfig,
   pauseAuction,
   pauseSnake,
@@ -95,6 +98,7 @@ import {
   placeSealedBid,
   randomNominationCounts,
   randomNominationShortfalls,
+  rosterSizeForStartingPitchers,
   resumeAuction,
   resumeSnake,
   sealedBidder,
@@ -104,6 +108,7 @@ import {
   snakeClockFlagged,
   snakeTimeRemainingMs,
   staffStatus,
+  staffSlotLabels,
   startAuctionReview,
   startSnakeClock,
   syncAuctionTimer,
@@ -743,7 +748,8 @@ function defaultState() {
     // room ends — see viewerManager().
     myManagerId: null,
     maskBids: false,
-    rosterSize: 13,
+    startingPitchers: DEFAULT_STARTING_PITCHERS,
+    rosterSize: rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS),
     draft: null,
     draftTab: "available",
     rosterTab: "roster",
@@ -853,13 +859,14 @@ function openRoom(roomId, room) {
   state = defaultState();
   state.seed = room.seed;
   state.managers = room.managers.map((manager) => manager.name);
-  state.rosterSize = room.rosterSize;
+  state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
+  state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
   state.universe = universeConfig(room.universe)?.key ?? DEFAULT_UNIVERSE;
   state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
   state.draftType = room.draftType === "auction" ? "auction" : "snake";
   state.nomination = room.nomination === "random" ? "random" : "manual";
   state.hidePoints = Boolean(room.hidePoints);
-  state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, room.rosterSize);
+  state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, state.rosterSize);
   state.auctionTimer = normalizeAuctionTimerState(room.auctionTimer);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
   state.online = {
@@ -896,7 +903,8 @@ function rebuildOnlineDraft(room) {
     ? deckFromIds(state.universe, room.seed, room.deck)
     : buildDraftPool(state.universe, room.seed, {
       nomination: state.nomination,
-      managerCount: room.managers.length
+      managerCount: room.managers.length,
+      startingPitchers: state.startingPitchers
     });
   state.draft = createDraft(
     room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
@@ -905,6 +913,7 @@ function rebuildOnlineDraft(room) {
     room.seed,
     {
       draftType: state.draftType,
+      startingPitchers: state.startingPitchers,
       nomination: state.nomination,
       hidePoints: state.hidePoints,
       budget: state.auctionBudget,
@@ -1293,24 +1302,24 @@ function draftModeFromForm(form) {
 // the advice sent people looking for a bigger set that would not have helped.
 // The advice is real now — a single club's set runs dry where the whole of
 // Showdown does not.
-function draftPoolError(pool, universe, managerCount, nomination) {
+function draftPoolError(pool, universe, managerCount, nomination, startingPitchers = DEFAULT_STARTING_PITCHERS) {
   const setName = universeConfig(universe).name;
   if (nomination === "random") {
-    const shortfalls = randomNominationShortfalls(pool, managerCount);
+    const shortfalls = randomNominationShortfalls(pool, managerCount, startingPitchers);
     if (!shortfalls.length) return "";
     const spots = shortfalls.map((short) => `${short.group} (${short.dealt} of ${short.quota})`).join(", ");
     return `The ${setName} set is too thin to deal a ${managerCount}-manager random-nomination board: ${spots}. Trim the manager list or pick a deeper card set.`;
   }
-  const managerLimit = maxPoolManagers(pool);
+  const managerLimit = maxPoolManagers(pool, startingPitchers);
   if (managerCount <= managerLimit) return "";
   return `The ${setName} set runs out of position depth at ${managerLimit} managers — it cannot deal a board deep enough for ${managerCount}. Trim the manager list or pick a deeper card set.`;
 }
 
 // The headline number: what this many managers actually see on the board, and
 // how much of it comes up for bid.
-function randomNominationBlurb(managerCount) {
+function randomNominationBlurb(managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS) {
   const { hiddenPerSlot, visiblePerSlot } = randomNominationCounts(Math.max(2, managerCount));
-  return `With ${managerCount} managers the board shows ${visiblePerSlot * 2} starters and ${hiddenPerSlot * 2} of them come up.`;
+  return `With ${managerCount} managers the board shows ${visiblePerSlot * startingPitchers} starters and ${hiddenPerSlot * startingPitchers} of them come up.`;
 }
 
 // One real card from each pool, so the hero shows what it is offering instead
@@ -1533,8 +1542,9 @@ function renderSetup(setupError = "") {
             <input name="seed" value="${escapeHtml(state.seed)}" />
           </label>
           <label>
-            Roster size
-            <input name="rosterSize" type="number" min="13" max="13" value="13" />
+            Starting pitchers per team
+            <input name="startingPitchers" type="number" min="${MIN_STARTING_PITCHERS}" max="${MAX_STARTING_PITCHERS}" step="1" value="${state.startingPitchers}" />
+            <small>Each team also drafts nine hitters and two relievers.</small>
           </label>
         </div>
         <fieldset class="pool-mode snake-clock-mode">
@@ -1594,12 +1604,12 @@ function renderSetup(setupError = "") {
           </label>
           <label class="pool-option">
             <input type="radio" name="nomination" value="random" ${state.nomination === "random" ? "checked" : ""} />
-            <span><strong>Random nomination</strong><small>${escapeHtml(randomNominationBlurb(state.managers.length))} Nobody nominates: a hidden queue deals the cards out in random order. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
+            <span><strong>Random nomination</strong><small><span data-random-nomination-blurb>${escapeHtml(randomNominationBlurb(state.managers.length, state.startingPitchers))}</span> Nobody nominates: a hidden queue deals the cards out in random order. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
           </label>
           <label class="auction-budget-field">
             Budget per manager ($)
-            <input name="auctionBudget" type="number" min="${13 * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
-            <small>Dollars, not card points &mdash; a card's printed points are what it is worth, and this is what you have to spend. A strong 13-card roster runs to roughly 5000 points, so $5000 bids like the classic Showdown cap.</small>
+            <input name="auctionBudget" type="number" min="${state.rosterSize * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
+            <small>Dollars, not card points &mdash; a card's printed points are what it is worth, and this is what you have to spend. A strong roster runs to roughly 5000 points, so $5000 bids like the classic Showdown cap.</small>
           </label>
           <label class="auction-budget-field">
             Pool review
@@ -1699,8 +1709,14 @@ function renderSetup(setupError = "") {
   });
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
-    if (event.target.name !== "managers") return;
     const form = new FormData(setupForm);
+    if (event.target.name === "startingPitchers") {
+      const blurb = setupForm.querySelector("[data-random-nomination-blurb]");
+      const managerCount = dedupeManagerNames(String(form.get("managers")).split("\n").map((name) => name.trim()).filter(Boolean)).length;
+      if (blurb) blurb.textContent = randomNominationBlurb(managerCount, normalizeStartingPitchers(form.get("startingPitchers")));
+      return;
+    }
+    if (event.target.name !== "managers") return;
     const checked = form.getAll("cpu").map(String);
     const names = dedupeManagerNames(
       String(form.get("managers"))
@@ -1709,6 +1725,8 @@ function renderSetup(setupError = "") {
         .filter(Boolean)
     );
     setupForm.querySelector("[data-cpu-list]").innerHTML = renderCpuChoices(names, checked);
+    const blurb = setupForm.querySelector("[data-random-nomination-blurb]");
+    if (blurb) blurb.textContent = randomNominationBlurb(names.length, normalizeStartingPitchers(form.get("startingPitchers")));
   });
   // Check all / uncheck all for the decade list: one button that flips to
   // whichever move is left. Reaching for it means you want decades, so it
@@ -1752,7 +1770,8 @@ function renderSetup(setupError = "") {
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
     const cpuChecked = new Set(form.getAll("cpu").map(String));
     state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));
-    state.rosterSize = 13;
+    state.startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
+    state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
     const universe = universeFromForm(form);
     if (!universe) {
       renderSetup("Check at least one decade, or pick a different card set.");
@@ -1770,15 +1789,17 @@ function renderSetup(setupError = "") {
     state.snakeTimer = snakeClock.snakeTimer;
     const pool = buildDraftPool(state.universe, state.seed, {
       nomination: state.nomination,
-      managerCount: state.managers.length
+      managerCount: state.managers.length,
+      startingPitchers: state.startingPitchers
     });
-    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination);
+    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers);
     if (poolError) {
       renderSetup(poolError);
       return;
     }
     state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
       draftType: state.draftType,
+      startingPitchers: state.startingPitchers,
       nomination: state.nomination,
       hidePoints: state.hidePoints,
       budget: state.auctionBudget,
@@ -1812,11 +1833,13 @@ function renderSetup(setupError = "") {
         .filter(Boolean)
     );
     const seed = String(form.get("seed")).trim() || "showdown";
+    const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
+    const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
     const universe = universeFromForm(form);
     const snakeClock = snakeClockFromForm(form);
     const pickTimer = snakeClock.pickTimerSeconds;
     const { draftType, nomination, hidePoints } = draftModeFromForm(form);
-    const budget = normalizeAuctionBudget(form.get("auctionBudget"), 13);
+    const budget = normalizeAuctionBudget(form.get("auctionBudget"), rosterSize);
     const auctionTimer = normalizeAuctionTimerInput(form);
     const cpuChecked = form.getAll("cpu").map(String);
     if (!universe) {
@@ -1828,6 +1851,7 @@ function renderSetup(setupError = "") {
     try {
       const room = await createRoom({
         seed,
+        startingPitchers,
         managers: managers.length >= 2 ? managers : ["Home", "Away"],
         universe,
         pickTimer,
@@ -4502,7 +4526,7 @@ function renderRoster(manager, draft) {
     ? ` &middot; ${money(auctionBudget(draft, manager))} left &middot; max bid ${money(draft.complete ? 0 : auctionMaxBid(draft, manager))}`
     : "";
   // Nothing to count up to when the roster has no ceiling: a manager owns as
-  // many cards as they bought, thirteen of which take the field.
+  // many cards as they bought, one active roster of which takes the field.
   const draftedLine = hasUnlimitedRoster(draft)
     ? `${manager.roster.length} card${manager.roster.length === 1 ? "" : "s"}`
     : `${manager.roster.length}/${draft.rosterSize} drafted`;
@@ -4522,7 +4546,7 @@ function renderRoster(manager, draft) {
     <p>${draftedLine}${budgetLine}</p>
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
-      <span class="${counts.starters >= 2 ? "ok" : "warn"}">${counts.starters}/2 starters</span>
+      <span class="${counts.starters >= draft.startingPitchers ? "ok" : "warn"}">${counts.starters}/${draft.startingPitchers} starters</span>
       <span class="${counts.bullpen >= 2 ? "ok" : "warn"}">${counts.bullpen}/2 bullpen</span>
     </div>
     ${renderRosterDepthChart(manager, slotContext)}
@@ -4533,7 +4557,7 @@ function renderRosterDepthChart(manager, slotContext = {}) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
-    ["SP", "SP", "RP", "RP"],
+    [...Array.from({ length: state.draft?.startingPitchers ?? DEFAULT_STARTING_PITCHERS }, () => "SP"), "RP", "RP"],
     (player) => player.role
   ).slots;
 
@@ -4869,7 +4893,7 @@ function leagueOpenGroups(draft) {
     for (const position of lineup.missingPositions) {
       needed.add(isCornerOutfielder(position) ? "LF/RF" : position);
     }
-    const needs = getRosterNeeds(manager.roster);
+    const needs = getRosterNeeds(manager.roster, draft);
     if (needs.starter) needed.add("SP");
     if (needs.bullpen) needed.add("RP");
     if (needs.hitter && !lineup.dhFilled) needed.add("DH");
@@ -5029,7 +5053,7 @@ function renderDockBar(draft, manager, auction, prices, heatScale, { own = false
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
-    ["SP", "SP", "RP", "RP"],
+    [...Array.from({ length: draft.startingPitchers }, () => "SP"), "RP", "RP"],
     (player) => player.role
   ).slots;
   const slots = [...lineupSlots, ...staffSlots]
@@ -5067,7 +5091,7 @@ function dockChipName(player) {
 }
 
 function dockNeedsSummary(manager) {
-  const needs = getRosterNeeds(manager.roster);
+  const needs = getRosterNeeds(manager.roster, state.draft);
   const lineup = lineupStatus(manager.roster);
   const parts = [...lineup.missingPositions];
   if (needs.starter) parts.push(`${needs.starter}SP`);
@@ -5206,8 +5230,8 @@ function moveBattingOrder(managerId, playerId, toIndex) {
 
 function renderRosterSlots(manager, draft) {
   const hitterSlots = assignHittersToLineupSlots(manager);
-  const staffSlots = assignStaffSlots(manager.roster, manager.staffAssignments);
-  // Everything drafted that is not in the thirteen. On a capped roster this is
+  const staffSlots = assignStaffSlots(manager.roster, manager.staffAssignments, draft);
+  // Everything drafted that is not in the active roster. On a capped roster this is
   // empty; on an unlimited one it is where the manager chooses their team.
   const bench = benchPlayers(manager);
   const mine = canManageRoster(manager.id);
@@ -5221,7 +5245,7 @@ function renderRosterSlots(manager, draft) {
       <div class="slot-grid staff-slots">${staffSlots.map((slot) => renderRosterSlot(slot.player, slot.label, manager)).join("")}</div>
     </div>
     ${bench.length ? `<div class="slot-group bench-group">
-      <span>Bench &middot; ${bench.length} not in the thirteen${mine ? " &mdash; drag one into a slot to play them" : ""}</span>
+      <span>Bench &middot; ${bench.length} inactive${mine ? " &mdash; drag one into a slot to play them" : ""}</span>
       <div class="slot-grid bench-slots">${bench.map((player) => renderBenchCard(player, manager)).join("")}</div>
     </div>` : ""}
   </div>`;
@@ -5387,7 +5411,7 @@ function canManageRoster(managerId) {
   return managerId === state.online.managerId;
 }
 
-const isStaffSlot = (label) => STAFF_SLOT_LABELS.includes(label);
+const isStaffSlot = (label) => staffSlotLabels(state.draft?.startingPitchers).includes(label);
 
 // Can this card go in that slot? Works for a card already on the field and for
 // one sitting on the bench — the bench is where an unlimited roster keeps the
@@ -5401,7 +5425,7 @@ function canMoveLineupPlayer(managerId, playerId, toLabel) {
 
   if (isStaffSlot(toLabel)) {
     if (player.kind !== "pitcher") return false;
-    const slots = assignStaffSlots(manager.roster, manager.staffAssignments);
+    const slots = assignStaffSlots(manager.roster, manager.staffAssignments, state.draft);
     const target = slots.find((slot) => slot.label === toLabel);
     if (!target || target.player?.id === playerId) return false;
     // An arm only fills the kind of slot it is: a closer does not start.
@@ -5425,7 +5449,7 @@ function moveLineupPlayer(managerId, playerId, toLabel) {
   if (!manager || !canMoveLineupPlayer(managerId, playerId, toLabel)) return false;
 
   if (isStaffSlot(toLabel)) {
-    const slots = assignStaffSlots(manager.roster, manager.staffAssignments);
+    const slots = assignStaffSlots(manager.roster, manager.staffAssignments, state.draft);
     const fromSlot = slots.find((slot) => slot.player?.id === playerId);
     const targetSlot = slots.find((slot) => slot.label === toLabel);
     const assignments = Object.fromEntries(slots.filter((slot) => slot.player).map((slot) => [slot.label, slot.player.id]));
@@ -5709,7 +5733,7 @@ function autopickTurn(draft) {
 //
 // This is a description. What did each manager actually walk away with: how fast
 // is it, how well does it field, how much of the ball leaves the yard, and what
-// is the rotation made of. All of it reads straight off the thirteen cards, so
+// is the rotation made of. All of it reads straight off the drafted roster, so
 // it is true the moment the last one lands, and it does not pretend to know who
 // wins.
 // A hitter's chart, read as if it were a season: what the twenty faces do when
@@ -5976,7 +6000,7 @@ function renderDraftDone(draft) {
     .join("");
 
   // Not a grade, and not a bill either: nothing is spent in points. It is simply
-  // what the thirteen cards add up to — worth reporting, and worth leaving alone,
+  // what the roster's cards add up to — worth reporting, and worth leaving alone,
   // because a light roster is a thing a manager chose.
   const cheapest = Math.min(...teams.map((team) => team.points));
   const pointsRow = `<tr class="comp-points">
@@ -6157,7 +6181,7 @@ function rosterOpenings(manager, draft) {
   if (manager.roster.length >= draft.rosterSize) return null;
 
   const lineup = lineupStatus(manager.roster);
-  const needs = getRosterNeeds(manager.roster);
+  const needs = getRosterNeeds(manager.roster, draft);
   const bats = [...lineup.missingPositions];
   if (!lineup.dhFilled && needs.hitter > bats.length) bats.push("DH");
 
@@ -6289,7 +6313,7 @@ function assignPlayersToSlots(players, labels, labelForPlayer) {
 }
 
 function canSimulate(draft) {
-  const options = { unlimitedRoster: hasUnlimitedRoster(draft) };
+  const options = { unlimitedRoster: hasUnlimitedRoster(draft), startingPitchers: draft.startingPitchers };
   return draft.complete && draft.managers.every((manager) => validateRoster(manager, options).length === 0);
 }
 
@@ -6381,7 +6405,7 @@ function rosterCounts(roster) {
     pitchers: staff.pitchers.length,
     starters: staff.starters.length,
     bullpen: staff.bullpen.length,
-    needs: getRosterNeeds(roster)
+    needs: getRosterNeeds(roster, state.draft)
   };
 }
 
@@ -6515,10 +6539,14 @@ function reviveState(value) {
   const batchSorts = normalizeBatchSorts(value.batchSorts);
   if (filters.type === "all") filters.type = "hitter";
   filters.sortDirection = filters.sortDirection ?? defaultSortDirection(filters.sort);
+  const savedStartingPitchers = normalizeStartingPitchers(
+    value.draft?.startingPitchers ?? value.startingPitchers ?? Number(value.draft?.rosterSize) - 11
+  );
   const draft = value.draft
     ? {
         ...value.draft,
-        rosterSize: Math.max(13, Number(value.draft.rosterSize) || 13),
+        startingPitchers: savedStartingPitchers,
+        rosterSize: rosterSizeForStartingPitchers(savedStartingPitchers),
         pickedIds: new Set(value.draft.pickedIds ?? [])
       }
     : null;
@@ -6536,6 +6564,7 @@ function reviveState(value) {
     // Rooms saved before corners were lumped still carry bare LF/RF labels.
     draft.pool = draft.pool.map(normalizeCardPosition);
     for (const manager of draft.managers) {
+      manager.startingPitchers = draft.startingPitchers;
       manager.roster = manager.roster.map(normalizeCardPosition);
     }
     if (draft.draftType === "auction") {
@@ -6545,10 +6574,14 @@ function reviveState(value) {
   return {
     ...defaultState(),
     ...value,
-    rosterSize: 13,
+    startingPitchers: draft?.startingPitchers ?? normalizeStartingPitchers(value.startingPitchers),
+    rosterSize: draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers),
     universe: universeConfig(value.universe)?.key ?? DEFAULT_UNIVERSE,
     draftType: value.draftType === "auction" ? "auction" : "snake",
-    auctionBudget: normalizeAuctionBudget(value.auctionBudget ?? AUCTION_DEFAULT_BUDGET, 13),
+    auctionBudget: normalizeAuctionBudget(
+      value.auctionBudget ?? AUCTION_DEFAULT_BUDGET,
+      draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers)
+    ),
     auctionTimer: normalizeAuctionTimerState(value.auctionTimer),
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
     snakeTimer: normalizeSnakeTimerState(value.snakeTimer),

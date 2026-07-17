@@ -519,6 +519,31 @@ test("computer managers bid instantly when their turn comes up", () => {
   assert.equal(draft.pickNumber, 1);
 });
 
+test("computer auction bidders budget for every starter in a configured rotation", () => {
+  const draft = makeAuctionDraft(
+    [{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }],
+    makeDraftPool("four-starter-bids", 24, 24),
+    { startingPitchers: 4, budget: 5000 }
+  );
+  const beta = draft.managers[1];
+  const starters = draft.pool.filter((player) => player.kind === "pitcher" && player.role === "SP");
+  starters[0].control = 6;
+  starters[0].chart = [{ from: 1, to: 20, result: "SO" }];
+  for (const starter of starters.slice(1)) {
+    starter.control = 0;
+    starter.chart = [{ from: 1, to: 20, result: "HR" }];
+  }
+  const model = managerValuation(draft, beta);
+  const bestStarter = starters
+    .sort((a, b) => model.value(b) - model.value(a))[0];
+
+  nominatePlayer(draft, bestStarter.id);
+
+  assert.equal(draft.rosterSize, 15);
+  assert.ok(draft.auction.lot.pending.includes(beta.id), "the fourth starter is a legal open roster need");
+  assert.ok(cpuSealedBid(draft, beta) >= AUCTION_MIN_BID, "the CPU values a strong starter while rotation slots remain");
+});
+
 test("upcomingNominators rotates through the managers", () => {
   const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16));
   const names = upcomingNominators(draft, 4).map((manager) => manager.name);

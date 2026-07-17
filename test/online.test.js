@@ -115,6 +115,43 @@ test("online room lifecycle: create, join, turn enforcement, replay parity", asy
   );
 });
 
+test("online rooms carry the configured rotation size into roster construction", async (t) => {
+  const base = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "online-four-starters",
+    managers: ["Ana", "Bo"],
+    startingPitchers: 4
+  });
+
+  assert.equal(created.status, 201);
+  assert.equal(created.data.startingPitchers, 4);
+  assert.equal(created.data.rosterSize, 15);
+
+  const joined = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  const finish = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
+    token: joined.data.token,
+    action: { type: "finish" }
+  });
+  assert.equal(finish.status, 200);
+
+  const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  const pool = deckFromIds(room.data.universe, room.data.seed, room.data.deck);
+  const replica = createDraft(
+    room.data.managers.map((manager) => manager.name),
+    pool,
+    room.data.rosterSize,
+    room.data.seed,
+    { startingPitchers: room.data.startingPitchers }
+  );
+  for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
+  assert.ok(replica.managers.every((manager) =>
+    manager.roster.filter((player) => player.kind === "pitcher" && player.role === "SP").length === 4
+  ));
+});
+
 // The server does not expose its replica directly; a second replay from the
 // same log must land on the same rosters, which is what clients rely on.
 async function serverRosters(base, roomId) {

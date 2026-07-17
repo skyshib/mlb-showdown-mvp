@@ -337,10 +337,14 @@ const DECK_QUOTAS = [
 // on it, and a three-manager night should not be punished for being small: it
 // keeps the same deep board it has always had. Rooms of eight or fewer deal
 // exactly the cards they dealt before, down to the card.
-function deckQuotas(managerCount) {
+function deckQuotas(managerCount, startingPitchers = 2) {
   const managers = Math.max(1, Math.round(Number(managerCount) || DECK_BASELINE_MANAGERS));
-  if (managers <= DECK_BASELINE_MANAGERS) return DECK_QUOTAS;
-  return DECK_QUOTAS.map(([group, quota]) => [
+  const starterScale = Math.max(1, Math.round(Number(startingPitchers) || 2)) / 2;
+  const starterAdjusted = starterScale === 1
+    ? DECK_QUOTAS
+    : DECK_QUOTAS.map(([group, quota]) => [group, group === "SP" ? Math.ceil(quota * starterScale) : quota]);
+  if (managers <= DECK_BASELINE_MANAGERS) return starterAdjusted;
+  return starterAdjusted.map(([group, quota]) => [
     group,
     Math.ceil((quota * managers) / DECK_BASELINE_MANAGERS)
   ]);
@@ -424,9 +428,12 @@ function dealDeckToQuotas(quotas, rngKey) {
 // The room's size is salted into the deal ONLY when it changes the quotas. A
 // room of eight or fewer deals the very same cards it dealt before this took a
 // manager count at all — same seed, same salt, same board.
-export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS) {
-  const quotas = deckQuotas(managerCount);
-  const salt = quotas === DECK_QUOTAS ? "" : `:m${Math.round(managerCount)}`;
+export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, startingPitchers = 2) {
+  const quotas = deckQuotas(managerCount, startingPitchers);
+  const defaultRotation = Math.round(Number(startingPitchers) || 2) === 2;
+  const salt = quotas === DECK_QUOTAS
+    ? ""
+    : `${managerCount > DECK_BASELINE_MANAGERS ? `:m${Math.round(managerCount)}` : ""}${defaultRotation ? "" : `:sp${Math.round(startingPitchers)}`}`;
   return dealDeckToQuotas(quotas, `deck-deal:${universeKey()}:${seed}${salt}`);
 }
 
@@ -435,9 +442,10 @@ export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS) {
 // enough that the closing sweep can always finish everybody (see
 // randomNominationCounts). Three managers see twelve starters; eight of them
 // will come up for bid, and the other four sit there all night as insurance.
-export function dealRandomNominationDeck(seed, managerCount) {
-  const { visible } = randomNominationQuotas(managerCount);
-  return dealDeckToQuotas(visible, `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}`);
+export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 2) {
+  const { visible } = randomNominationQuotas(managerCount, startingPitchers);
+  const rotationSalt = Math.round(Number(startingPitchers) || 2) === 2 ? "" : `:sp${Math.round(startingPitchers)}`;
+  return dealDeckToQuotas(visible, `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}${rotationSalt}`);
 }
 
 // Build a room's deck in one call: point the universe at the room's league
@@ -446,9 +454,9 @@ export function dealRandomNominationDeck(seed, managerCount) {
 export function buildDraftPool(mode, seed, options = {}) {
   setUniverse(seed, mode, { priceNoise: false });
   if (options.nomination === "random") {
-    return dealRandomNominationDeck(seed, options.managerCount);
+    return dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers);
   }
-  return dealDraftDeck(seed, options.managerCount);
+  return dealDraftDeck(seed, options.managerCount, options.startingPitchers);
 }
 
 // A deck that was already dealt, rebuilt card for card from the ids it dealt.

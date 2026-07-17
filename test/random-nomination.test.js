@@ -74,6 +74,26 @@ test("three managers see twelve starters and eight of them come up", () => {
   assert.equal(new Set(draft.auction.queue).size, draft.auction.queue.length, "a card queues once");
 });
 
+test("random nomination scales its starter board to the configured rotation", () => {
+  const managerCount = 3;
+  const startingPitchers = 4;
+  const seed = "rn-four-starters";
+  const managers = Array.from({ length: managerCount }, (_, index) => ({ name: `M${index + 1}`, cpu: true }));
+  const pool = buildDraftPool(UNIVERSE, seed, { nomination: "random", managerCount, startingPitchers });
+  const draft = createDraft(managers, pool, 15, seed, {
+    draftType: "auction",
+    nomination: "random",
+    startingPitchers,
+    budget: 5000,
+    timer: false
+  });
+
+  assert.equal(countGroup(pool, "SP"), 24);
+  const queued = draft.auction.queue.map((id) => draft.pool.find((card) => card.id === id));
+  assert.equal(countGroup(queued, "SP"), 16);
+  assert.deepEqual(randomNominationShortfalls(pool, managerCount, startingPitchers), []);
+});
+
 test("the visible board always outlasts a hoarder", () => {
   // One manager wins every card that comes up at a position; the leftovers on
   // the board must still finish the other n - 1 rosters, or the sweep is a lie.

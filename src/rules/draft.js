@@ -7,6 +7,9 @@ const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
 const EXACT_REQUIRED_POSITIONS = ["C", "2B", "3B", "SS", "CF"];
 const CORNER_OUTFIELD_SLOTS = ["LF", "RF"];
 export const CORNER_OUTFIELD_POSITION = "LF/RF";
+export const DEFAULT_STARTING_PITCHERS = 2;
+export const MIN_STARTING_PITCHERS = 1;
+export const MAX_STARTING_PITCHERS = 5;
 
 // Corner outfielders are one group: an LF/RF card plays either corner at the
 // same fielding score. Bare "LF"/"RF" card positions are accepted for
@@ -39,10 +42,23 @@ function positionMatchesSlot(player, label) {
   return playsPosition(player, label);
 }
 const HITTER_TARGET = 9;
-const STARTER_TARGET = 2;
 const BULLPEN_TARGET = 2;
-const PITCHER_TARGET = STARTER_TARGET + BULLPEN_TARGET;
-const DEFAULT_ROSTER_SIZE = HITTER_TARGET + PITCHER_TARGET;
+const BASE_ROSTER_SIZE = HITTER_TARGET + BULLPEN_TARGET;
+const DEFAULT_ROSTER_SIZE = BASE_ROSTER_SIZE + DEFAULT_STARTING_PITCHERS;
+
+export function normalizeStartingPitchers(value) {
+  const count = Math.round(Number(value) || DEFAULT_STARTING_PITCHERS);
+  return Math.min(MAX_STARTING_PITCHERS, Math.max(MIN_STARTING_PITCHERS, count));
+}
+
+export function rosterSizeForStartingPitchers(value = DEFAULT_STARTING_PITCHERS) {
+  return BASE_ROSTER_SIZE + normalizeStartingPitchers(value);
+}
+
+function startingPitcherTarget(options = {}) {
+  if (typeof options === "number" || typeof options === "string") return normalizeStartingPitchers(options);
+  return normalizeStartingPitchers(options?.startingPitchers);
+}
 
 // The designated hitter is a slot, not a position: ANY bat fills it, and
 // whole card sets print nobody at "DH" at all — the dead-ball decades never
@@ -50,10 +66,11 @@ const DEFAULT_ROSTER_SIZE = HITTER_TARGET + PITCHER_TARGET;
 // DH shelf that may not exist.
 export const ANY_HITTER = "HITTER";
 
-// The active roster, slot by slot. The table sums to the 13-man roster on
-// purpose: it IS the roster, spelled out. Every slot needs a supply of cards
-// that can fill it, which is what sizes a board.
-export const ROSTER_SLOTS = [
+// The active roster, slot by slot. Every slot needs a supply of cards that can
+// fill it, which is what sizes a board. The exported ROSTER_SLOTS is the
+// default 13-card version; rosterSlots() builds the configured rotation.
+export function rosterSlots(startingPitchers = DEFAULT_STARTING_PITCHERS) {
+  return [
   ["C", 1],
   ["1B", 1],
   ["2B", 1],
@@ -64,9 +81,12 @@ export const ROSTER_SLOTS = [
   // Last of the hitters on purpose: the position groups take their cards
   // first, and the DH slot draws from whoever is left.
   [ANY_HITTER, 1],
-  ["SP", STARTER_TARGET],
+  ["SP", normalizeStartingPitchers(startingPitchers)],
   ["RP", BULLPEN_TARGET]
-];
+  ];
+}
+
+export const ROSTER_SLOTS = rosterSlots();
 
 // The pool group a card is dealt and counted under: its PRIMARY position (a
 // 2B/SS card is a second baseman here, whatever else it can cover), or SP/RP
@@ -103,11 +123,11 @@ export function randomNominationCounts(managerCount) {
 
 // Per-position card counts for a random-nomination room: the slot quota times
 // the manager multiplier. Returns [[group, count], ...] in ROSTER_SLOTS order.
-export function randomNominationQuotas(managerCount) {
+export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS) {
   const { hiddenPerSlot, visiblePerSlot } = randomNominationCounts(managerCount);
   return {
-    visible: ROSTER_SLOTS.map(([group, slots]) => [group, visiblePerSlot * slots]),
-    hidden: ROSTER_SLOTS.map(([group, slots]) => [group, hiddenPerSlot * slots])
+    visible: rosterSlots(startingPitchers).map(([group, slots]) => [group, visiblePerSlot * slots]),
+    hidden: rosterSlots(startingPitchers).map(([group, slots]) => [group, hiddenPerSlot * slots])
   };
 }
 
@@ -119,10 +139,10 @@ export function randomNominationQuotas(managerCount) {
 // checked against what is LEFT after the position groups take theirs, because
 // one card cannot be two managers' cards: nine hitters per roster means nine
 // hitters' worth of board, however they are labelled.
-export function randomNominationShortfalls(pool, managerCount) {
+export function randomNominationShortfalls(pool, managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS) {
   const shortfalls = [];
   const taken = new Set();
-  for (const [group, quota] of randomNominationQuotas(managerCount).visible) {
+  for (const [group, quota] of randomNominationQuotas(managerCount, startingPitchers).visible) {
     const available = pool.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
     for (const player of available.slice(0, quota)) taken.add(player.id);
     if (available.length < quota) shortfalls.push({ group, quota, dealt: available.length });
@@ -131,11 +151,12 @@ export function randomNominationShortfalls(pool, managerCount) {
 }
 
 // How many managers a pool can seat: every team needs a catcher, a middle
-// infield, a center fielder, two corners, two starters and two relievers —
+// infield, a center fielder, two corners, its configured starters, and two relievers —
 // whichever of those runs out first caps the room. Counts read a card's
 // PRIMARY position, so the answer is a floor: a pool that seats eight this
 // way seats eight however the secondary listings fall.
-export function maxPoolManagers(pool) {
+export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHERS) {
+  const starterTarget = normalizeStartingPitchers(startingPitchers);
   const hitters = pool.filter((player) => player.kind === "hitter");
   const pitchers = pool.filter((player) => player.kind === "pitcher");
   const countPosition = (position) => hitters.filter((player) => player.position === position).length;
@@ -143,9 +164,9 @@ export function maxPoolManagers(pool) {
     ...EXACT_REQUIRED_POSITIONS.map(countPosition),
     Math.floor(countPosition(CORNER_OUTFIELD_POSITION) / 2),
     Math.floor(hitters.length / HITTER_TARGET),
-    Math.floor(pitchers.filter((player) => player.role === "SP").length / STARTER_TARGET),
+    Math.floor(pitchers.filter((player) => player.role === "SP").length / starterTarget),
     Math.floor(pitchers.filter((player) => player.role !== "SP").length / BULLPEN_TARGET),
-    Math.floor(pool.length / DEFAULT_ROSTER_SIZE)
+    Math.floor(pool.length / rosterSizeForStartingPitchers(starterTarget))
   );
 }
 
@@ -223,6 +244,9 @@ export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE)
 // Managers arrive as plain names or as { name, cpu } descriptors; cpu
 // managers play themselves (instant autopicks and sealed bids).
 export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, seed = "showdown", options = {}) {
+  const startingPitchers = normalizeStartingPitchers(
+    options.startingPitchers ?? Number(rosterSize) - BASE_ROSTER_SIZE
+  );
   // A computer manager gets an opinion, dealt from the seed so the same room
   // always faces the same table. A human's seat carries none: he has his own.
   const personaRng = createRng(`${seed}:personas`);
@@ -234,6 +258,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
       id: `team-${index + 1}`,
       name: name.trim() || `Manager ${index + 1}`,
       cpu,
+      startingPitchers,
       persona: cpu
         ? (CPU_PERSONALITIES[chosen] ? chosen : CPU_PERSONALITY_KEYS[Math.floor(personaRng.next() * CPU_PERSONALITY_KEYS.length)])
         : null,
@@ -245,7 +270,8 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
     managers: cleanManagers,
     pool: pool.map((player) => normalizeCardPosition({ ...player })),
     pickedIds: new Set(),
-    rosterSize,
+    rosterSize: rosterSizeForStartingPitchers(startingPitchers),
+    startingPitchers,
     seed,
     pickNumber: 0,
     complete: false,
@@ -257,7 +283,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
   };
 
   if (draft.draftType === "auction") {
-    const budget = normalizeAuctionBudget(options.budget, rosterSize);
+    const budget = normalizeAuctionBudget(options.budget, draft.rosterSize);
     const timer = normalizeAuctionTimerConfig(options.timer ?? options.auctionTimer);
     // Random nomination is an auction with nobody at the wheel: a hidden queue
     // deals the cards out, and since no manager has to reserve slots for the
@@ -341,7 +367,7 @@ function dealtInSlot(player, group) {
 // third man short of one. Read the tag; leave the reserve alone.
 function buildNominationQueue(draft) {
   const rng = createRng(`${draft.seed}:nomination-queue`);
-  const { hidden } = randomNominationQuotas(draft.managers.length);
+  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers);
   const queue = [];
   const queued = new Set();
   for (const [group, count] of hidden) {
@@ -423,14 +449,14 @@ export function canPickPlayer(draft, manager, player) {
   if (!hitterLegality.ok) {
     return hitterLegality;
   }
-  const pitcherLegality = canAddPitcherToStaff(manager.roster, player);
+  const pitcherLegality = canAddPitcherToStaff(manager.roster, player, draft);
   if (!pitcherLegality.ok) {
     return pitcherLegality;
   }
 
   const nextRoster = [...manager.roster, player];
   const remainingSlots = draft.rosterSize - nextRoster.length;
-  const needs = getRosterNeeds(nextRoster);
+  const needs = getRosterNeeds(nextRoster, draft);
   const remainingRequired = needs.hitter + needs.starter + needs.bullpen;
   if (remainingRequired > remainingSlots) {
     const needed = [];
@@ -1323,7 +1349,7 @@ export function currentManagerMustReplace(draft) {
   if (!draft || draft.complete || isAuctionDraft(draft)) return false;
   const manager = currentManager(draft);
   if (!manager || manager.roster.length >= draft.rosterSize) return false;
-  if (!neediestGap(manager.roster)) return false;
+  if (!neediestGap(manager.roster, draft)) return false;
   return !availablePlayers(draft).some((player) => canPickPlayer(draft, manager, player).ok);
 }
 
@@ -1333,7 +1359,7 @@ export function pickReplacement(draft, now = Date.now()) {
   if (draft.complete) return draft;
   if (isAuctionDraft(draft)) throw new Error("Auction rosters are filled by the closing sweep");
   const manager = currentManager(draft);
-  const gap = neediestGap(manager.roster);
+  const gap = neediestGap(manager.roster, draft);
   if (!gap) throw new Error("Roster has no hole to fill");
   const replacement = makeReplacementPlayer(
     draft, manager, gap.kind, gap.role, gap.position, lastPickedEligible(draft, gap)
@@ -1349,8 +1375,8 @@ export function pickReplacement(draft, now = Date.now()) {
 // The hole to fill first: a missing fielding position (a catcher before a bat),
 // then a bare bat, then the rotation, then the bullpen. 1B never appears here —
 // any glove covers the bag, so activeRosterGaps folds it into the bat count.
-function neediestGap(roster) {
-  const gaps = activeRosterGaps(roster);
+function neediestGap(roster, options = {}) {
+  const gaps = activeRosterGaps(roster, options);
   if (gaps.positions.length) return { kind: "hitter", role: null, position: gaps.positions[0] };
   if (gaps.hitter > 0) return { kind: "hitter", role: null, position: null };
   if (gaps.starter > 0) return { kind: "pitcher", role: "SP", position: null };
@@ -1380,7 +1406,7 @@ function lastPickedEligible(draft, gap) {
 }
 
 function bestAutopickTarget(draft, manager) {
-  const rosterNeeds = getRosterNeeds(manager.roster);
+  const rosterNeeds = getRosterNeeds(manager.roster, draft);
   const candidates = availablePlayers(draft);
   const legal = candidates.filter((player) => canPickPlayer(draft, manager, player).ok);
   if (!legal.length) {
@@ -1565,9 +1591,9 @@ const URGENCY_PATIENT = 0.5; // holes-per-remaining below this: no hurry
 const URGENCY_DESPERATE = 1; // holes at or above the men left to fill them: all in
 const URGENCY_WEIGHT = 1; // how far full desperation lifts a card's worth (×2 at the limit)
 
-function auctionUrgency(manager, player, forthcoming) {
+function auctionUrgency(draft, manager, player, forthcoming) {
   const bucket = playerBucket(player);
-  const need = bucketNeed(getRosterNeeds(manager.roster), bucket);
+  const need = bucketNeed(getRosterNeeds(manager.roster, draft), bucket);
   if (need <= 0) return 0;
   const supply = forthcoming.reduce((count, other) => count + (playerBucket(other) === bucket ? 1 : 0), 0);
   if (supply <= 0) return 1;
@@ -1653,7 +1679,7 @@ const POOL_PREMIUM_THRESHOLD = 0.8;
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
-  const needs = getRosterNeeds(manager.roster);
+  const needs = getRosterNeeds(manager.roster, draft);
   // A computer under random nomination budgets against the holes it still has,
   // not against a roster cap it no longer has.
   const needSlots = hasUnlimitedRoster(draft)
@@ -1680,7 +1706,7 @@ function auctionWillingness(draft, manager, player) {
   // when the spot is already full: a third starter to a man who needs two is
   // bench depth, not a need, and must not pull budget off the holes still open.
   const effectiveWorth = (card) => {
-    const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * auctionUrgency(manager, card, forthcoming));
+    const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * auctionUrgency(draft, manager, card, forthcoming));
     return bucketNeed(needs, playerBucket(card)) <= 0 ? base * DEPTH_DAMP : base;
   };
   const worth = effectiveWorth(player);
@@ -1723,17 +1749,26 @@ export function managerValuation(draft, manager) {
 
 const valuationModels = new Map();
 
-// The four staff slots. A capped roster holds exactly these four arms, so the
-// choice makes itself; an unlimited one can hold a dozen, and then WHICH two
+// The configured staff slots. A capped roster holds exactly these arms, so the
+// choice makes itself; an unlimited one can hold a dozen, and then WHICH
 // starters and which two relievers suit up is the manager's call — the same
 // call the lineup slots ask about the bats. staffAssignments answers it.
-export const STAFF_SLOT_LABELS = ["SP1", "SP2", "RP1", "RP2"];
+export function staffSlotLabels(startingPitchers = DEFAULT_STARTING_PITCHERS) {
+  return [
+    ...Array.from({ length: normalizeStartingPitchers(startingPitchers) }, (_, index) => `SP${index + 1}`),
+    "RP1",
+    "RP2"
+  ];
+}
+
+export const STAFF_SLOT_LABELS = staffSlotLabels();
 
 const staffSlotRole = (label) => (label.startsWith("SP") ? "SP" : "RP");
 
-export function assignStaffSlots(roster, assignments = {}) {
+export function assignStaffSlots(roster, assignments = {}, options = {}) {
   const pitchers = roster.filter((player) => player.kind === "pitcher");
-  const slots = STAFF_SLOT_LABELS.map((label) => ({ label, role: staffSlotRole(label), player: null }));
+  const slots = staffSlotLabels(startingPitcherTarget(options))
+    .map((label) => ({ label, role: staffSlotRole(label), player: null }));
   const used = new Set();
 
   // What the manager asked for, where it is legal.
@@ -1758,13 +1793,13 @@ export function assignStaffSlots(roster, assignments = {}) {
   return slots;
 }
 
-// The cards a manager actually takes the field with: nine bats and four arms.
+// The cards a manager actually takes the field with: nine bats and the configured staff.
 // Everything else they own is a bench.
 export function activeRoster(manager) {
   const lineup = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
     .map((slot) => slot.player)
     .filter(Boolean);
-  const staff = assignStaffSlots(manager.roster, manager.staffAssignments)
+  const staff = assignStaffSlots(manager.roster, manager.staffAssignments, manager)
     .map((slot) => slot.player)
     .filter(Boolean);
   return [...lineup, ...staff];
@@ -1857,25 +1892,28 @@ function bestLineupAssignment(roster) {
   return assignment;
 }
 
-// The two best starters and two best relievers by value — the arms a manager
-// would choose, not the four he happened to buy first.
-function bestStaffAssignment(roster) {
+// The configured number of best starters and the two best relievers by value —
+// the arms a manager would choose, not the ones he happened to buy first.
+function bestStaffAssignment(roster, options = {}) {
   const { starters, bullpen } = staffStatus(roster);
   const byValue = (list) => [...list].sort((a, b) => lineupRankValue(b) - lineupRankValue(a));
-  const [sp1, sp2] = byValue(starters);
-  const [rp1, rp2] = byValue(bullpen);
   const assignment = {};
-  if (sp1) assignment.SP1 = sp1.id;
-  if (sp2) assignment.SP2 = sp2.id;
-  if (rp1) assignment.RP1 = rp1.id;
-  if (rp2) assignment.RP2 = rp2.id;
+  const ranked = {
+    SP: byValue(starters),
+    RP: byValue(bullpen)
+  };
+  for (const label of staffSlotLabels(startingPitcherTarget(options))) {
+    const role = staffSlotRole(label);
+    const player = ranked[role].shift();
+    if (player) assignment[label] = player.id;
+  }
   return assignment;
 }
 
 export function buildTeam(manager, options = {}) {
   // With `optimize` on, a manager who never hand-set a lineup, staff, or order
   // fields the value-optimal team instead of whatever the draft happened to seat:
-  // the best nine into their spots, the best four arms, and the order batting by
+  // the best nine into their spots, the best configured staff, and the order batting by
   // value with the heart of the order up top. A hand-set choice always wins, and
   // without `optimize` the old roster-order defaults hold (adventure runs its own
   // rotation off roster order, so it must not be second-guessed here).
@@ -1891,11 +1929,14 @@ export function buildTeam(manager, options = {}) {
     ? manager.battingOrder
     : [...seated].sort((a, b) => lineupRankValue(b) - lineupRankValue(a)).map((player) => player.id);
   const lineup = applyBattingOrder(seated, battingOrder);
-  // The staff is the four arms the manager put in the slots — not simply the
-  // first four in roster order. On an unlimited roster that is the difference
+  // The staff is the arms the manager put in the slots — not simply the first
+  // pitchers in roster order. On an unlimited roster that is the difference
   // between the two relievers you chose and the two you happened to buy first.
-  const staffAssignments = hasStaff || !optimize ? manager.staffAssignments : bestStaffAssignment(manager.roster);
-  const staff = assignStaffSlots(manager.roster, staffAssignments);
+  const staffOptions = { startingPitchers: options.startingPitchers ?? manager.startingPitchers };
+  const staffAssignments = hasStaff || !optimize
+    ? manager.staffAssignments
+    : bestStaffAssignment(manager.roster, staffOptions);
+  const staff = assignStaffSlots(manager.roster, staffAssignments, staffOptions);
   const starters = staff.filter((slot) => slot.role === "SP" && slot.player).map((slot) => slot.player);
   const bullpen = staff.filter((slot) => slot.role === "RP" && slot.player).map((slot) => slot.player);
   const starterIndex = starters.length ? Number(options.starterIndex ?? 0) % starters.length : 0;
@@ -1951,6 +1992,9 @@ export function duplicateEraPeople(roster) {
 // "too many" complaint only applies to rooms that cap the roster.
 export function validateRoster(manager, options = {}) {
   const unlimited = Boolean(options.unlimitedRoster);
+  const starterTarget = startingPitcherTarget({
+    startingPitchers: options.startingPitchers ?? manager.startingPitchers
+  });
   const lineup = lineupStatus(manager.roster);
   const staff = staffStatus(manager.roster);
   const issues = [];
@@ -1959,7 +2003,7 @@ export function validateRoster(manager, options = {}) {
   if (lineup.hitters.length < HITTER_TARGET) issues.push(`needs ${HITTER_TARGET - lineup.hitters.length} more hitter${HITTER_TARGET - lineup.hitters.length === 1 ? "" : "s"}`);
   if (lineup.missingPositions.length) issues.push(`missing ${lineup.missingPositions.join("/")}`);
   if (!unlimited && lineup.extraDuplicates.length) issues.push(`too many ${lineup.extraDuplicates.join("/")} hitters`);
-  if (staff.starters.length < STARTER_TARGET) issues.push(`needs ${STARTER_TARGET - staff.starters.length} more starter${STARTER_TARGET - staff.starters.length === 1 ? "" : "s"}`);
+  if (staff.starters.length < starterTarget) issues.push(`needs ${starterTarget - staff.starters.length} more starter${starterTarget - staff.starters.length === 1 ? "" : "s"}`);
   if (staff.bullpen.length < BULLPEN_TARGET) issues.push(`needs ${BULLPEN_TARGET - staff.bullpen.length} more bullpen pitcher${BULLPEN_TARGET - staff.bullpen.length === 1 ? "" : "s"}`);
   return issues;
 }
@@ -1967,8 +2011,8 @@ export function validateRoster(manager, options = {}) {
 // What a manager is still missing to field a legal nine plus a legal staff.
 // 1B and DH never appear here: any glove covers first, any bat DHs, so those
 // two slots are a question of hitter COUNT, not of position.
-function activeRosterGaps(roster) {
-  const needs = getRosterNeeds(roster);
+function activeRosterGaps(roster, options = {}) {
+  const needs = getRosterNeeds(roster, options);
   const lineup = lineupStatus(roster);
   return {
     positions: lineup.missingPositions.filter((position) => position !== "1B"),
@@ -2006,7 +2050,7 @@ export function sweepRosters(draft) {
   for (const manager of draft.managers) {
     let guard = 0;
     for (;;) {
-      const gaps = activeRosterGaps(manager.roster);
+      const gaps = activeRosterGaps(manager.roster, draft);
       if (!hasRosterGaps(gaps)) break;
       guard += 1;
       if (guard > draft.rosterSize * 2) break;
@@ -2063,10 +2107,10 @@ export function repairDraftRosters(draft) {
   return draft;
 }
 
-export function getRosterNeeds(roster) {
+export function getRosterNeeds(roster, options = {}) {
   const hitters = roster.filter((player) => player.kind === "hitter").length;
   const staff = staffStatus(roster);
-  const starter = Math.max(0, STARTER_TARGET - staff.starters.length);
+  const starter = Math.max(0, startingPitcherTarget(options) - staff.starters.length);
   const bullpen = Math.max(0, BULLPEN_TARGET - staff.bullpen.length);
   return {
     hitter: Math.max(0, HITTER_TARGET - hitters),
@@ -2200,9 +2244,9 @@ export function canPlayerFillLineupSlot(player, label) {
 
 function repairManagerRoster(draft, manager) {
   let guard = 0;
-  while (validateRoster(manager).length > 0 && guard < draft.rosterSize * 2) {
+  while (validateRoster(manager, draft).length > 0 && guard < draft.rosterSize * 2) {
     guard += 1;
-    const needs = getRosterNeeds(manager.roster);
+    const needs = getRosterNeeds(manager.roster, draft);
     const lineup = lineupStatus(manager.roster);
     const neededPosition = lineup.missingPositions.find((position) => position !== "1B");
     const neededKind = needs.starter > 0 || needs.bullpen > 0 ? "pitcher" : "hitter";
@@ -2236,7 +2280,7 @@ function canLeagueFinishAfterPick(draft, pickingManager, nextRoster, pickedPlaye
   const demand = emptyLeagueDemand();
 
   for (const manager of draft.managers) {
-    addRosterDemand(demand, manager === pickingManager ? nextRoster : manager.roster);
+    addRosterDemand(demand, manager === pickingManager ? nextRoster : manager.roster, draft);
   }
 
   const supply = leagueSupply(remaining);
@@ -2264,9 +2308,9 @@ function emptyLeagueDemand() {
   };
 }
 
-function addRosterDemand(demand, roster) {
+function addRosterDemand(demand, roster, options = {}) {
   const lineup = lineupStatus(roster);
-  const needs = getRosterNeeds(roster);
+  const needs = getRosterNeeds(roster, options);
   for (const position of lineup.missingPositions) {
     if (EXACT_REQUIRED_POSITIONS.includes(position)) demand.positions[position] += 1;
     if (CORNER_OUTFIELD_SLOTS.includes(position)) demand.cornerOutfield += 1;
@@ -2484,10 +2528,10 @@ function managerNeedsPositionGroup(manager, player, needs) {
       : lineup.missingPositions.includes(entry.pos));
 }
 
-function canAddPitcherToStaff(roster, player) {
+function canAddPitcherToStaff(roster, player, options = {}) {
   if (player?.kind !== "pitcher") return { ok: true, reason: "" };
   const staff = staffStatus(roster);
-  if (pitcherRole(player) === "SP" && staff.starters.length >= STARTER_TARGET) {
+  if (pitcherRole(player) === "SP" && staff.starters.length >= startingPitcherTarget(options)) {
     return { ok: false, reason: "starter slots are already filled" };
   }
   if (pitcherRole(player) === "RP" && staff.bullpen.length >= BULLPEN_TARGET) {

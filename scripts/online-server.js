@@ -32,6 +32,8 @@ import {
   normalizeAuctionBudget,
   normalizeAuctionTimerConfig,
   normalizePickTimerSeconds,
+  normalizeStartingPitchers,
+  rosterSizeForStartingPitchers,
   sealedBidder,
   timedOutAuctionBidderIds,
   SIM_ACTION_TYPES
@@ -169,7 +171,8 @@ function roomPool(room) {
   if (room.deck?.length) return deckFromIds(room.universe, room.seed, room.deck);
   return buildDraftPool(room.universe, room.seed, {
     nomination: room.nomination,
-    managerCount: room.managerCount
+    managerCount: room.managerCount,
+    startingPitchers: room.startingPitchers
   });
 }
 
@@ -180,6 +183,10 @@ function reviveRoom(saved) {
   const realPool = saved.realPool === "mariners" ? "mariners" : "stars";
   const draftType = saved.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && saved.nomination === "random" ? "random" : "manual";
+  const startingPitchers = normalizeStartingPitchers(
+    saved.startingPitchers ?? Number(saved.rosterSize) - 11
+  );
+  const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
   const savedDeck = Array.isArray(saved.deck) && saved.deck.length ? saved.deck : null;
   const pool = roomPool({
     universe,
@@ -187,18 +194,19 @@ function reviveRoom(saved) {
     poolMode: saved.poolMode,
     realPool,
     nomination,
+    startingPitchers,
     managerCount: managerNames.length,
     deck: savedDeck
   });
   const auctionBudget = draftType === "auction"
-    ? normalizeAuctionBudget(saved.auctionBudget, saved.rosterSize)
+    ? normalizeAuctionBudget(saved.auctionBudget, rosterSize)
     : null;
   const draft = createDraft(
     managerNames.map((name) => ({ name, cpu: cpuNames.includes(name) })),
     pool,
-    saved.rosterSize,
+    rosterSize,
     saved.seed,
-    { draftType, nomination, budget: auctionBudget, timer: saved.auctionTimer ?? false, snakeTimer: saved.snakeTimer ?? false }
+    { draftType, nomination, startingPitchers, budget: auctionBudget, timer: saved.auctionTimer ?? false, snakeTimer: saved.snakeTimer ?? false }
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
@@ -211,7 +219,8 @@ function reviveRoom(saved) {
   return {
     id: saved.id,
     seed: saved.seed,
-    rosterSize: saved.rosterSize,
+    rosterSize,
+    startingPitchers,
     universe,
     // A room saved before decks were written down pins the one it just revived
     // with: that board is the best record of itself that survives, and pinning
@@ -246,6 +255,7 @@ function persistRoom(store, room) {
     id: room.id,
     seed: room.seed,
     rosterSize: room.rosterSize,
+    startingPitchers: room.startingPitchers,
     universe: room.universe,
     deck: room.deck ?? null,
     poolMode: room.poolMode,
@@ -742,7 +752,8 @@ async function createRoom(store, request, response) {
   if (managers.length < 2) return sendJson(response, 400, { error: "At least two managers are required" });
   if (managers.length > 8) return sendJson(response, 400, { error: "At most eight managers are supported" });
   const seed = String(body.seed ?? "").trim() || "showdown";
-  const rosterSize = 13;
+  const startingPitchers = normalizeStartingPitchers(body.startingPitchers);
+  const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
   // No card set named is the fictional league, as it always was; a card set
   // named that we don't have is a mistake worth saying out loud.
   const universe = body.universe == null ? "fictional" : universeConfig(body.universe)?.key;
@@ -765,9 +776,9 @@ async function createRoom(store, request, response) {
   // random-nomination board is dealt to the size of the ROOM, so how many
   // managers it seats is not a question — whether the set is deep enough to
   // deal it is.
-  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length });
+  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers });
   if (nomination === "random") {
-    const shortfalls = randomNominationShortfalls(pool, managers.length);
+    const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers);
     if (shortfalls.length) {
       const spots = shortfalls.map((short) => `${short.group} (${short.dealt} of ${short.quota})`).join(", ");
       return sendJson(response, 400, {
@@ -775,7 +786,7 @@ async function createRoom(store, request, response) {
       });
     }
   } else {
-    const managerLimit = maxPoolManagers(pool);
+    const managerLimit = maxPoolManagers(pool, startingPitchers);
     if (managers.length > managerLimit) {
       return sendJson(response, 400, {
         error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers`
@@ -787,7 +798,7 @@ async function createRoom(store, request, response) {
     pool,
     rosterSize,
     seed,
-    { draftType, nomination, budget: auctionBudget, timer: auctionTimer, snakeTimer }
+    { draftType, nomination, startingPitchers, budget: auctionBudget, timer: auctionTimer, snakeTimer }
   );
   const createdAt = Date.now();
   const actions = [];
@@ -807,6 +818,7 @@ async function createRoom(store, request, response) {
     id: newRoomId(store.rooms),
     seed,
     rosterSize,
+    startingPitchers,
     universe,
     // The board this room dealt, written down on the night it dealt it —
     // each card with the roster slot it was dealt to fill.
@@ -1262,6 +1274,7 @@ function roomSnapshot(room, port = null) {
     roomId: room.id,
     seed: room.seed,
     rosterSize: room.rosterSize,
+    startingPitchers: room.startingPitchers,
     universe: room.universe ?? null,
     // The room deals its board to every client. Left to re-deal from the seed a
     // client runs whatever deal ITS copy of the code knows, which is not always
