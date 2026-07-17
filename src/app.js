@@ -1940,11 +1940,8 @@ function renderDraft() {
   const boardCount = boardOwner
     ? bigBoard(boardOwner, draft).filter((entry) => !entry.gone).length
     : 0;
-  const playerRows = historyTab || boardTab
-    ? []
-    : draft.complete && !auction
-      ? filteredPlayers(availablePlayers(draft)).sort(comparePlayers).slice(0, 40)
-      : draftVisiblePlayers(draft, current);
+  const playerRows = historyTab || boardTab ? [] : draftVisiblePlayers(draft);
+  const soldTags = draftSoldTags(draft);
   const rosters = draft.managers.map((manager) => renderRoster(manager, draft)).join("");
   const focusManager = current ?? (state.selectedTeamName
     ? draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0]
@@ -2024,11 +2021,12 @@ function renderDraft() {
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
-        // The auction board is the whole deck at once, so it scrolls in place
+        // Both boards are the whole deck at once, so they scroll in place
         // rather than pushing the rosters off the bottom of the screen.
-        scroll: auction,
+        scroll: true,
         lotPlayerId: lot?.playerId ?? null,
-        ownerOf: auction ? (player) => cardOwnerTag(draft, player) : null,
+        ownerOf: (player) => soldTags.get(player.id)
+          ?? (draft.pickedIds.has(player.id) ? { label: "Gone", detail: "", title: "" } : null),
         canPick: (player) => {
           if (!current) return { ok: false, reason: "draft complete" };
           if (paused) return { ok: false, reason: "the draft is paused" };
@@ -2101,32 +2099,26 @@ function restoreTypingFocus(typing) {
   }
 }
 
-// Who owns a card, for the greyed-out rows on the auction board. Null while it
-// is still there to be bought.
-function cardOwnerTag(draft, player) {
-  if (!draft.pickedIds.has(player.id)) return null;
-  const owner = draft.managers.find((manager) => manager.roster.some((card) => card.id === player.id));
-  // The card's place in the sale order is its index in the ledger — the same
-  // pick number the draft-history tab prints for it.
-  const history = draft.auction?.history ?? [];
-  const saleIndex = history.findIndex((entry) => entry.playerId === player.id && !entry.passed);
-  const sale = saleIndex >= 0 ? history[saleIndex] : null;
-  if (!owner) return { label: "Gone", title: "" };
-  const price = Number.isFinite(sale?.price) ? sale.price : null;
-  const pickNumber = saleIndex >= 0 ? saleIndex + 1 : null;
-  const detail = [
-    pickNumber === null ? null : `#${pickNumber}`,
-    price === null ? null : money(price)
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  return {
-    label: owner.name,
-    detail,
-    title: price === null
-      ? `${owner.name} has ${player.name}`
-      : `${owner.name} bought ${player.name} for ${money(price)}`
-  };
+// The greyed-out rows on the draft board: who took each card, and the one
+// number that is the story of the pick. In an auction that number is money —
+// what the card sold for; in a snake draft it is the pick it went at. Keyed by
+// player id so a full-deck repaint is one map lookup per row, not a scan.
+function draftSoldTags(draft) {
+  const auction = isAuctionDraft(draft);
+  const tags = new Map();
+  for (const pick of draftHistory(draft)) {
+    const priced = Number.isFinite(pick.price);
+    tags.set(pick.player.id, {
+      label: pick.manager.name,
+      detail: auction ? (priced ? money(pick.price) : "") : `#${pick.pickNumber}`,
+      title: auction
+        ? (priced
+            ? `${pick.manager.name} bought ${pick.player.name} for ${money(pick.price)}`
+            : `${pick.manager.name} has ${pick.player.name}`)
+        : `${pick.manager.name} took ${pick.player.name} with pick ${pick.pickNumber}`
+    });
+  }
+  return tags;
 }
 
 function renderPausedPanel(draft) {
@@ -6268,25 +6260,11 @@ function canSimulate(draft) {
   return draft.complete && draft.managers.every((manager) => validateRoster(manager, options).length === 0);
 }
 
-// A snake board shows what you can still take, best first, and only as much of
-// it as anyone reads. An auction board shows the whole deck — the cards that
-// have sold stay in their place on it, greyed out, because in an auction what
-// is gone (and what it went for) is half of what the board is telling you.
-function draftVisiblePlayers(draft, manager) {
-  if (isAuctionDraft(draft)) {
-    return filteredPlayers(draft.pool).sort(comparePlayers);
-  }
-  return filteredPlayers(availablePlayers(draft))
-    .map((player) => ({ player, legality: canPickPlayer(draft, manager, player) }))
-    .sort(compareDraftRows)
-    .slice(0, 40)
-    .map((item) => item.player);
-}
-
-function compareDraftRows(a, b) {
-  const legalSort = Number(b.legality.ok) - Number(a.legality.ok);
-  if (legalSort) return legalSort;
-  return comparePlayers(a.player, b.player);
+// Both boards show the whole deck at once, best first — the cards that have
+// gone stay in their place, greyed out, because what is off the board (and who
+// took it, and what it went for) is half of what the board is telling you.
+function draftVisiblePlayers(draft) {
+  return filteredPlayers(draft.pool).sort(comparePlayers);
 }
 
 function comparePlayers(a, b) {

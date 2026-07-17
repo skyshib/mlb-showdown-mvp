@@ -757,7 +757,7 @@ test("a computer passes on the worst man at a spot, because it can still have th
   assert.ok(bidBest > bidWorst, "and worth more than the man you can replace for free");
 });
 
-test("the last man at a spot you need is worth paying for, however ordinary he is", () => {
+test("a replacement-level man is free even as the last one, but a better one is worth securing", () => {
   const draft = makeAuctionDraft(
     [{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }],
     makeGradedPool("scarcity")
@@ -768,23 +768,30 @@ test("the last man at a spot you need is worth paying for, however ordinary he i
     .filter((player) => player.kind === "hitter" && player.position === "C")
     .sort((a, b) => model.value(b) - model.value(a));
   assert.ok(catchers.length >= 3);
-
-  // The WORST catcher on the board goes up, with better ones still to come.
   const worst = catchers[catchers.length - 1];
-  nominatePlayer(draft, worst.id);
-  const withFallback = cpuSealedBid(draft, beta);
-  assert.equal(withFallback, 0, "with better catchers still to come, this one is worth nothing");
+  const decent = catchers[Math.floor(catchers.length / 2)];
 
-  // The same card, the same lot, the same manager — and now every other catcher
-  // in the room has been bought out from under him while he was thinking. He has
-  // no fallback left. The card has not changed; what it is WORTH has, because
-  // what it is worth was never about the card. It was about the next one.
+  // The worst catcher IS the replacement level — worth nothing when there are
+  // better ones to come...
+  const onWorst = makeAuctionDraft([{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }], draft.pool.map((card) => ({ ...card })));
+  nominatePlayer(onWorst, worst.id);
+  assert.equal(cpuSealedBid(onWorst, onWorst.managers[1]), 0, "the worst catcher is replacement level — nothing to pay");
+
+  // ...and STILL worth nothing when every other catcher is bought out from under
+  // him: a replacement-level man can be had for free off the sweep, last or not.
   for (const catcher of catchers) {
-    if (catcher.id !== worst.id) draft.pickedIds.add(catcher.id);
+    if (catcher.id !== worst.id) onWorst.pickedIds.add(catcher.id);
   }
-  const noFallback = cpuSealedBid(draft, beta);
-  assert.ok(noFallback >= AUCTION_MIN_BID, "the last catcher in the room is not something you pass on");
-  assert.ok(noFallback > withFallback, "and he is worth more than he was when he was replaceable");
+  assert.equal(cpuSealedBid(onWorst, onWorst.managers[1]), 0, "still free — you take his equal off the sweep");
+
+  // A catcher above the replacement, though, is worth securing when he is the
+  // last one, because his equal is NOT freely had.
+  const onDecent = makeAuctionDraft([{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }], draft.pool.map((card) => ({ ...card })));
+  nominatePlayer(onDecent, decent.id);
+  for (const catcher of catchers) {
+    if (catcher.id !== decent.id) onDecent.pickedIds.add(catcher.id);
+  }
+  assert.ok(cpuSealedBid(onDecent, onDecent.managers[1]) >= AUCTION_MIN_BID, "an above-replacement catcher is worth paying for");
 });
 
 test("scarcity is no windfall — a scarce star dwarfs an equally scarce filler", () => {
@@ -817,6 +824,33 @@ test("scarcity is no windfall — a scarce star dwarfs an equally scarce filler"
   const fillerBid = bidAsLastCatcher(filler);
   assert.ok(starBid > fillerBid * 1.5, `the scarce star (${starBid}) must dwarf the scarce filler (${fillerBid})`);
   assert.ok(fillerBid < model.value(filler), `and the filler is never worth more than he plainly is (${fillerBid} vs ${Math.round(model.value(filler))})`);
+});
+
+test("positional scarcity: the same value is worth more at a thin spot than a deep one", () => {
+  // Two bats of IDENTICAL value, one at a shallow position (catcher, a weak
+  // pool) and one at a deep position (first base, a strong pool). The scarce-spot
+  // bat clears his position's replacement and is worth real money; the deep-spot
+  // one is below his and is worth nothing — you take the next first baseman.
+  const cards = [];
+  [7, 8, 9, 10].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-C-${i}`, position: "C", onBase })));
+  [10, 11, 12, 13, 14, 15, 16, 17].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-1B-${i}`, position: "1B", onBase })));
+  for (const pos of ["2B", "3B", "SS", "LF", "CF", "RF"]) {
+    [11, 12, 13, 14].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-${pos}-${i}`, position: pos, onBase })));
+  }
+  for (let i = 0; i < 8; i += 1) cards.push(makePitcher({ id: `wk-SP-${i}`, role: "SP", control: 4 + (i % 3) }));
+  for (let i = 0; i < 8; i += 1) cards.push(makePitcher({ id: `wk-RP-${i}`, role: "RP", control: 4 + (i % 3), ip: 1 }));
+
+  const model = managerValuation(makeAuctionDraft([{ name: "A", cpu: true }, { name: "B", cpu: true }], cards), makeAuctionDraft([{ name: "A", cpu: true }], cards).managers[0]);
+  const bestCatcher = cards.filter((card) => card.position === "C").sort((a, b) => model.value(b) - model.value(a))[0];
+  const worstFirst = cards.filter((card) => card.position === "1B").sort((a, b) => model.value(a) - model.value(b))[0];
+  assert.ok(Math.abs(model.value(bestCatcher) - model.value(worstFirst)) < 1, "the two bats are worth the same on paper");
+
+  const bidFor = (card) => {
+    const room = makeAuctionDraft([{ name: "A", cpu: true }, { name: "B", cpu: true }], cards.map((entry) => ({ ...entry })));
+    nominatePlayer(room, card.id);
+    return cpuSealedBid(room, room.managers[1]);
+  };
+  assert.ok(bidFor(bestCatcher) > bidFor(worstFirst), "the scarce-position bat outbids the deep-position one of equal value");
 });
 
 test("nine managers on the same board do not arrive at the same number", () => {

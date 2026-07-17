@@ -1540,13 +1540,10 @@ function auctionMarket(draft, manager, forthcoming = forthcomingPlayers(draft)) 
   const others = table.filter((entry) => entry.id !== manager.id);
 
   const byGroup = new Map();
-  const allValues = [];
   for (const player of forthcoming) {
     const group = poolGroup(player);
     if (!byGroup.has(group)) byGroup.set(group, []);
-    const value = model.value(player);
-    byGroup.get(group).push(value);
-    allValues.push(value);
+    byGroup.get(group).push(model.value(player));
   }
   const supply = new Map();
   const rivalsFor = new Map();
@@ -1556,16 +1553,26 @@ function auctionMarket(draft, manager, forthcoming = forthcomingPlayers(draft)) 
     rivalsFor.set(group, others.filter((entry) => needsGroup(entry, group)).length);
   }
   const wants = (group) => (mine ? needsGroup(mine, group) : false);
-  // The REPLACEMENT LEVEL — the freely-available scrub. The board deals far more
-  // cards than the rosters can hold and sweeps the leftovers out for nothing, so
-  // the true floor under any card is not the worst man at his POSITION, it is the
-  // long run of ordinary players anyone can have. Read as a low quantile of the
-  // whole remaining field; a card is worth what it clears THAT by, which is what
-  // keeps a star a star and a filler a filler regardless of how thin his spot is.
-  allValues.sort((a, b) => a - b);
-  const replacement = allValues.length
-    ? allValues[Math.min(allValues.length - 1, Math.floor(allValues.length * REPLACEMENT_QUANTILE))]
-    : 0;
+  // The REPLACEMENT LEVEL, read PER POSITION — the freely-had scrub at each spot,
+  // because the board deals far more than the rosters hold and sweeps the rest
+  // out for nothing. A card is worth what it clears the replacement AT ITS OWN
+  // POSITION by, so a passable bat at a shallow spot (a catcher when catchers are
+  // thin) outweighs the same value at a deep one (one more ordinary first
+  // baseman), and a whole low tier like the bullpen is priced against other
+  // relievers instead of drowning under the hitters. Read over the WHOLE deck so
+  // it is a fixed property of the position, not a number that collapses to a lone
+  // survivor as the spot empties out.
+  const replacement = new Map();
+  const deckByGroup = new Map();
+  for (const player of draft.pool) {
+    const group = poolGroup(player);
+    if (!deckByGroup.has(group)) deckByGroup.set(group, []);
+    deckByGroup.get(group).push(model.value(player));
+  }
+  for (const [group, values] of deckByGroup) {
+    values.sort((a, b) => a - b);
+    replacement.set(group, values[Math.min(values.length - 1, Math.floor(values.length * REPLACEMENT_QUANTILE))]);
+  }
   return { model, values: byGroup, supply, rivalsFor, wants, replacement };
 }
 
@@ -1586,17 +1593,17 @@ function auctionAlternatives(market, player) {
   return alts;
 }
 
-// What a card is worth to this manager: his value over a REFERENCE PRICE that
-// leads with absolute quality and only then reads his position. The reference
-// mixes the global REPLACEMENT level (the scrub anyone can have) with a
-// POSITIONAL reading of the men at his own spot — the worst still there, the
-// next man down, and the typical one. Absolute quality carries most of the
-// weight, and that is the whole correction: a true star clears the scrub line by
-// a mile and stays worth a fight even where his position is deep, while the last
-// man at a thin spot is worth only what he plainly is over replacement — no
-// windfall for being merely the last mediocre body at short. Position still
-// discounts him when the man just behind is nearly as good, so you never pay a
-// fortune for the best of a similar bunch.
+// What a card is worth to this manager: his value over a REFERENCE PRICE for his
+// spot. Two readings feed it. One is the POSITIONAL alternative — the men still
+// on the board at his position, the one you'd take instead: with a better one in
+// hand his surplus is nothing (the worst catcher of a deep bunch is worth zero,
+// you take the next). The other is the per-position REPLACEMENT level, the scrub
+// you can always have at that spot. A card clears the HARDER of the two, so a
+// replaceable man is priced on his position, and a scarce man on the position's
+// replacement — which is why a passable catcher on a thin board is worth real
+// money and a passable first baseman on a deep one is worth nothing, and why the
+// last ORDINARY shortstop is no windfall while a scarce STAR keeps every point he
+// clears the scrub by.
 const REPLACEMENT_QUANTILE = 0.35;
 const POS_WORST = 0.2;
 const POS_NEXT = 0.4;
@@ -1605,10 +1612,6 @@ const POS_MEAN = 0.4;
 function auctionWorth(market, player) {
   const value = market.model.value(player);
   const alts = auctionAlternatives(market, player);
-  // The positional reference: the man you'd take at his spot instead. With a
-  // better one still on the board this sits near (or above) him and his surplus
-  // is nothing — so the worst catcher of a deep bunch is worth zero, you take
-  // the next one. With none left there it is zero, and the global floor decides.
   let positional = 0;
   if (alts.length) {
     const worst = alts[alts.length - 1];
@@ -1617,12 +1620,8 @@ function auctionWorth(market, player) {
     const nextDown = below.length ? below[0] : value;
     positional = POS_WORST * worst + POS_NEXT * nextDown + POS_MEAN * positionMean;
   }
-  // A card is worth what it clears the HARDER of its two floors by: the better
-  // man still available at his spot, OR the freely-had scrub. So a replaceable
-  // man is priced on his position (take the next one), and a scarce man is
-  // priced on the room — the last ORDINARY shortstop is no windfall (he barely
-  // beats the scrub), while a scarce STAR keeps every point he clears it by.
-  const reference = Math.max(positional, market.replacement);
+  const replacement = market.replacement.get(poolGroup(player)) ?? 0;
+  const reference = Math.max(positional, replacement);
   return Math.max(0, value - reference);
 }
 
@@ -1724,10 +1723,11 @@ function auctionWillingness(draft, manager, player) {
   const urgency = auctionUrgency(manager, player, forthcoming);
   const worth = worthBase + urgency * (value - worthBase);
 
-  // THE PASS. He is no better than the man you can still have for the minimum
-  // AND you are in no hurry, so let him go and take the man. This is what stops
-  // a computer paying real money for the worst catcher on the board; urgency is
-  // what stops it passing forever and ending the draft rich and empty-handed.
+  // THE PASS. He is no better than the replacement you can have for FREE off the
+  // sweep, so there is nothing to bid — even if he is the last one on the board.
+  // A replacement-level card, worst at his spot, is worth exactly nothing; you
+  // let it go and take its equal for nothing. Urgency is what stops a computer
+  // passing on the men who ARE worth something and ending the draft empty-handed.
   if (worth <= 0) return 0;
 
   // What the REST of the roster is going to cost, in worth: the best cards still
