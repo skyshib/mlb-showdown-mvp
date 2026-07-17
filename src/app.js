@@ -1180,6 +1180,7 @@ function renderOnlineBanner(draft, current) {
       : "";
   return `<section class="panel online-banner">
     <span><strong>Online room ${escapeHtml(online.roomId)}</strong></span>
+    ${draft.seed ? `<span class="online-seed">Seed <code>${escapeHtml(String(draft.seed))}</code></span>` : ""}
     <span>${mySeat ? `You are ${escapeHtml(mySeat.name)}${online.host ? " (host)" : ""}` : "Spectating"}</span>
     ${turnNote ? `<span>${escapeHtml(turnNote)}</span>` : ""}
     <span class="online-share">Invite link: <code>${escapeHtml(shareUrl)}</code></span>
