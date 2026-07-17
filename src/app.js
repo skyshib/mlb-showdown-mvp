@@ -3100,25 +3100,46 @@ function startBatchRun(runs, options = {}) {
     setTimeout(scoreStep, skipRequested ? 0 : 50);
   };
 
+  // Skip the animation, not the race. Running the whole remainder as one
+  // synchronous chunk froze the page long enough to trip Chrome's "Page
+  // Unresponsive" on slower machines — and did it with no feedback on the
+  // {instant:true} online-resync path, which re-fires on every reconnect. So
+  // slice the remainder into small chunks and yield the main thread between
+  // them: the page stays responsive, and the "How the race unfolded" chart
+  // still gets a real curve from the per-slice samples (a one-point series
+  // can't draw a line). A chunk is capped near 200 games so no single task
+  // blocks for more than a frame or two even on modest hardware. Once the race
+  // itself is complete we hand off to the WPA scoring pass.
+  const runSkip = () => {
+    const remaining = count - completed;
+    const slices = Math.min(remaining, Math.max(40, Math.ceil(remaining / 200)));
+    let slice = 0;
+    const doSlice = () => {
+      if (token !== batchRunToken || !state.draft) return;
+      slice += 1;
+      const target = completed + Math.round((remaining * slice) / slices);
+      runBatchChunk(batchState, teams, seed, completed, target - completed, { calibration });
+      completed = target;
+      const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
+      // The instant path (online resync/join) wants results, not a show —
+      // leave the "Simulating…" screen up rather than flashing a race by.
+      if (!options.instant) {
+        renderBatchRace({ snapshot, series, completed, total: count, teamNames, fastForwarding: true });
+      }
+      if (slice >= slices) {
+        completed = count;
+        beginWpaScoring();
+        return;
+      }
+      setTimeout(doSlice, 0);
+    };
+    doSlice();
+  };
+
   const step = () => {
     if (token !== batchRunToken || !state.draft) return;
     if (skipRequested) {
-      // Skip the animation, not the race. Running the whole remainder as one
-      // chunk records a single final point, and a one-point series can't draw a
-      // line — the results chart is left on the "waiting" placeholder forever.
-      // Slice it into a handful of synchronous steps so the "How the race
-      // unfolded" chart still gets a real curve; it's instant either way.
-      const skipStart = completed;
-      const remaining = count - completed;
-      const slices = Math.min(remaining, 40);
-      for (let slice = 1; slice <= slices; slice += 1) {
-        const target = skipStart + Math.round((remaining * slice) / slices);
-        runBatchChunk(batchState, teams, seed, completed, target - completed, { calibration });
-        completed = target;
-        pushFrame();
-      }
-      completed = count;
-      beginWpaScoring();
+      runSkip();
       return;
     }
     // Fast forward runs the same race, just with a longer stride per frame —
