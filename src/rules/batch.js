@@ -1,6 +1,7 @@
 import { distribution, rate } from "./stats.js?v=20260716-records";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260716-records";
 import { simulateGame } from "./game.js?v=20260716-sim-splits";
+import { createRng } from "./rng.js?v=20260716-records";
 
 export const DEFAULT_BATCH_RUNS = 10000;
 
@@ -25,8 +26,7 @@ export function createBatchState(teams) {
     headToHead: new Map(),
     hitters: new Map(),
     pitchers: new Map(),
-    topSwing: null,
-    rotation: createRotationTracker(teams)
+    topSwing: null
   };
 
   for (const team of teams) {
@@ -53,36 +53,32 @@ export function runBatchChunk(state, teams, seed, startIndex, count) {
   const schedule = createSchedule(teams);
   if (!schedule.length) return state;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    foldGame(state, playScheduledGame(schedule[index % schedule.length], state.rotation, seed, index));
+    foldGame(state, playScheduledGame(schedule[index % schedule.length], seed, index));
   }
   return state;
 }
 
-function playScheduledGame(matchup, rotation, seed, index) {
+function playScheduledGame(matchup, seed, index) {
+  const gameSeed = `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`;
   return simulateGame(
-    teamForGame(matchup.away, rotation),
-    teamForGame(matchup.home, rotation),
-    `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`
+    teamForGame(matchup.away, gameSeed, "away"),
+    teamForGame(matchup.home, gameSeed, "home"),
+    gameSeed
   );
 }
 
 // Re-simulates games [startIndex, startIndex + count) of a batch run. Batch
-// games are fully determined by (teams, seed, index), so the review log can
-// page through every game of a finished run without storing any of them —
-// the rotation walk below replays the starter sequence runBatchChunk saw.
+// games are fully determined by (teams, seed, index) — including each team's
+// starter, which teamForGame picks from a seed derived from the game — so the
+// review log can page through every game of a finished run without storing any
+// of them, and without replaying the games before startIndex.
 export function replayBatchGames(teams, seed, startIndex, count) {
   const schedule = createSchedule(teams);
   if (!schedule.length) return [];
-  const rotation = createRotationTracker(teams);
   const games = [];
-  for (let index = 0; index < startIndex + count; index += 1) {
+  for (let index = startIndex; index < startIndex + count; index += 1) {
     const matchup = schedule[index % schedule.length];
-    if (index < startIndex) {
-      teamForGame(matchup.away, rotation);
-      teamForGame(matchup.home, rotation);
-      continue;
-    }
-    games.push({ index, game: playScheduledGame(matchup, rotation, seed, index) });
+    games.push({ index, game: playScheduledGame(matchup, seed, index) });
   }
   return games;
 }
@@ -372,19 +368,21 @@ function createSchedule(teams) {
   return schedule;
 }
 
-function createRotationTracker(teams) {
-  return new Map(teams.map((team) => [team.name, 0]));
-}
-
-function teamForGame(team, rotation) {
+// Each game draws a random starter for each team rather than walking the
+// rotation in lockstep — otherwise the fixed schedule kept pairing the same two
+// starters against each other every time a matchup came around. The pick is
+// seeded off the game (which already encodes seed, index, and both team names),
+// so a batch stays fully replayable from (teams, seed, index).
+function teamForGame(team, gameSeed, side) {
   const starters = team.starters?.length ? team.starters : team.pitchers?.slice(0, 1) ?? [];
   const bullpen = team.bullpen?.length ? team.bullpen : team.pitchers?.slice(1) ?? [];
-  const startCount = rotation.get(team.name) ?? 0;
-  rotation.set(team.name, startCount + 1);
-  const starter = starters.length ? starters[startCount % starters.length] : null;
+  const starterIndex = starters.length
+    ? createRng(`${gameSeed}:${side}:sp`).int(0, starters.length - 1)
+    : 0;
+  const starter = starters.length ? starters[starterIndex] : null;
   return {
     ...team,
-    starterIndex: starters.length ? startCount % starters.length : 0,
+    starterIndex,
     pitchers: [starter, ...bullpen].filter(Boolean)
   };
 }

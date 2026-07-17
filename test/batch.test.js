@@ -123,7 +123,7 @@ test("single-game batch hitter totals match the source box score", () => {
   const teams = draftTeams("batch-box-source", 2);
   const seed = "batch-box-source";
   const summary = simulateBatch(teams, { seed, runs: 1 });
-  const game = simulateGame(teams[0], teams[1], `${seed}-game-1-${teams[0].name}-${teams[1].name}`);
+  const game = simulateBatchGame(teams, seed, 1);
   const boxHitters = [...game.boxScore.away.hitters, ...game.boxScore.home.hitters];
 
   for (const key of ["r", "sb", "cs", "rbi", "hr"]) {

@@ -1734,6 +1734,35 @@ function auctionWillingness(draft, manager, player) {
   return Math.max(AUCTION_MIN_BID, Math.min(maxBid, Math.round(raw)));
 }
 
+// TEMP DIAGNOSTIC — remove.
+export function __bidBreakdown(draft, manager, player) {
+  const maxBid = auctionMaxBid(draft, manager);
+  const needs = getRosterNeeds(manager.roster);
+  const openSlots = hasUnlimitedRoster(draft)
+    ? needs.hitter + needs.starter + needs.bullpen
+    : draft.rosterSize - manager.roster.length;
+  const forthcoming = forthcomingPlayers(draft);
+  const market = auctionMarket(draft, manager, forthcoming);
+  const value = market.model.value(player);
+  const worthBase = auctionWorth(market, player);
+  const urgency = auctionUrgency(manager, player, forthcoming);
+  const worth = worthBase + urgency * (value - worthBase);
+  const plan = forthcoming.map((item) => auctionWorth(market, item)).sort((a, b) => b - a).slice(0, Math.max(1, openSlots));
+  const planned = plan.reduce((sum, entry) => sum + entry, 0) || worthBase;
+  const share = worth / planned;
+  const aggression = auctionAggression(draft, manager, player);
+  const scarcity = auctionScarcity(manager, market, player);
+  const pace = auctionPace(draft, manager, openSlots);
+  const group = poolGroup(player);
+  return {
+    value: Math.round(value), worthBase: Math.round(worthBase), urgency: +urgency.toFixed(2),
+    worth: Math.round(worth), planned: Math.round(planned), share: +share.toFixed(3),
+    aggression: +aggression.toFixed(2), scarcity: +scarcity.toFixed(2), pace: +pace.toFixed(2),
+    maxBid, openSlots, group, supply: market.supply.get(group), rivals: market.rivalsFor.get(group),
+    raw: Math.round(maxBid * share * aggression * scarcity * pace), final: cpuSealedBid(draft, manager)
+  };
+}
+
 export function managerValuation(draft, manager) {
   const persona = manager.persona ?? "balanced";
   const key = `${draft.seed ?? "showdown"}:valuation:${manager.id}:${persona}`;
