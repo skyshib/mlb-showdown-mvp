@@ -148,6 +148,8 @@ export function playPlateAppearance(state, rng) {
   const batter = battingTeam.lineup[state.lineupIndex[battingSide] % battingTeam.lineup.length];
   const pitcher = currentPitcher(state, pitchingSide);
   const fatiguePenalty = pitcherFatigue(state.pitching[pitchingSide], pitcher);
+  const pitcherWasFresh = fatiguePenalty === 0;
+  const responsiblePitcher = { id: pitcher.id, freshAtReach: pitcherWasFresh };
 
   const before = snapshotBases(state);
   const outsBefore = state.outs;
@@ -160,11 +162,11 @@ export function playPlateAppearance(state, rng) {
   const resultRoll = rollD20(state, rng);
   const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, resultRoll);
   state.lastPlayDetails = null;
-  const runs = applyResult(state, result, batter, battingSide, pitchingSide, rng, pitcher);
+  const runs = applyResult(state, result, batter, battingSide, pitchingSide, rng, responsiblePitcher);
   if (state.pendingAdvance) state.pendingAdvance.batter = { id: batter.id, name: batter.name };
 
   const outsOnPlay = Math.max(0, state.outs - outsBefore);
-  recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay);
+  recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay, pitcherWasFresh);
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
   // The at-bat is over: every runner's steal attempt refreshes.
@@ -175,7 +177,9 @@ export function playPlateAppearance(state, rng) {
   const wpAfter = winProbabilityHome(state);
   const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
   ensureHitterLine(state, batter).wpa += battingWpa;
-  ensurePitcherLine(state, pitcher).wpa -= battingWpa;
+  const pitcherLine = ensurePitcherLine(state, pitcher);
+  pitcherLine.wpa -= battingWpa;
+  if (pitcherWasFresh) pitcherLine.fresh.wpa -= battingWpa;
   trackTopSwing(state, batter, battingWpa, result);
 
   const event = {
@@ -1098,7 +1102,12 @@ function scoreRunner(state, battingSide, pitchingSide, runner, fallbackPitcher =
   state.score[battingSide] += 1;
   creditInning(state, battingSide);
   recordRunnerStat(state, runner, "r");
-  chargeRun(state, pitchingSide, runner?.responsiblePitcherId ?? fallbackPitcher?.id);
+  chargeRun(
+    state,
+    pitchingSide,
+    runner?.responsiblePitcherId ?? fallbackPitcher?.id,
+    runner?.responsiblePitcherFresh ?? fallbackPitcher?.freshAtReach
+  );
   return 1;
 }
 
@@ -1118,11 +1127,13 @@ function recordRunnerStat(state, runner, stat) {
   line[stat] = (line[stat] ?? 0) + 1;
 }
 
-function chargeRun(state, pitchingSide, pitcherId) {
+function chargeRun(state, pitchingSide, pitcherId, pitcherWasFresh = false) {
   if (!pitchingSide || !pitcherId) return;
   const pitcher = state[pitchingSide].pitchers.find((item) => item.id === pitcherId);
   if (!pitcher) return;
-  ensurePitcherLine(state, pitcher).r += 1;
+  const line = ensurePitcherLine(state, pitcher);
+  line.r += 1;
+  if (pitcherWasFresh) line.fresh.r += 1;
 }
 
 function runnerFor(player, responsiblePitcher = null) {
@@ -1130,7 +1141,8 @@ function runnerFor(player, responsiblePitcher = null) {
     id: player.id,
     name: player.name,
     speed: Number(player.speed) || 0,
-    responsiblePitcherId: player.responsiblePitcherId ?? responsiblePitcher?.id ?? null
+    responsiblePitcherId: player.responsiblePitcherId ?? responsiblePitcher?.id ?? null,
+    responsiblePitcherFresh: player.responsiblePitcherFresh ?? responsiblePitcher?.freshAtReach ?? null
   };
 }
 
@@ -1571,16 +1583,19 @@ function snapshotBases(state) {
   return state.bases.map((runner) => (runner ? runner.name : null));
 }
 
-function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay) {
+function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay, pitcherWasFresh = false) {
   const hitterLine = ensureHitterLine(state, batter);
   const pitcherLine = ensurePitcherLine(state, pitcher);
+  const freshLine = pitcherWasFresh ? pitcherLine.fresh : null;
   hitterLine.pa += 1;
   pitcherLine.bf += 1;
+  if (freshLine) freshLine.bf += 1;
   hitterLine.rbi += runs;
 
   if ([RESULTS.SINGLE, RESULTS.SINGLE_PLUS, RESULTS.DOUBLE, RESULTS.TRIPLE, RESULTS.HR].includes(result)) {
     hitterLine.h += 1;
     pitcherLine.h += 1;
+    if (freshLine) freshLine.h += 1;
   }
   if (result === RESULTS.DOUBLE) {
     hitterLine.d += 1;
@@ -1591,14 +1606,17 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   if (result === RESULTS.BB) {
     hitterLine.bb += 1;
     pitcherLine.bb += 1;
+    if (freshLine) freshLine.bb += 1;
   }
   if (result === RESULTS.SO) {
     hitterLine.so += 1;
     pitcherLine.so += 1;
+    if (freshLine) freshLine.so += 1;
   }
   if (result === RESULTS.HR) {
     hitterLine.hr += 1;
     pitcherLine.hr += 1;
+    if (freshLine) freshLine.hr += 1;
   }
   if ([RESULTS.PU, RESULTS.SO, RESULTS.GB, RESULTS.FB].includes(result)) {
     hitterLine.ab += 1;
@@ -1609,6 +1627,7 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
     hitterLine.gidp += 1;
   }
   pitcherLine.outs += outsOnPlay;
+  if (freshLine) freshLine.outs += outsOnPlay;
 
   state[battingSide].runs = state.score[battingSide];
   state[pitchingSide].runsAllowed = state.score[battingSide];
@@ -1672,10 +1691,24 @@ function ensurePitcherLine(state, pitcher) {
       so: 0,
       hr: 0,
       r: 0,
-      wpa: 0
+      wpa: 0,
+      fresh: emptyPitcherTotals()
     });
   }
   return state.stats.pitchers.get(key);
+}
+
+function emptyPitcherTotals() {
+  return {
+    bf: 0,
+    outs: 0,
+    h: 0,
+    bb: 0,
+    so: 0,
+    hr: 0,
+    r: 0,
+    wpa: 0
+  };
 }
 
 function summarizeTeam(state, side) {

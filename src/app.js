@@ -15,6 +15,7 @@ import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml } from "./ui/cardFace.js?v=20260716-records";
+import { nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
   isMuted,
   playClockWarning,
@@ -26,7 +27,7 @@ import {
   playYourTurn,
   toggleMuted,
   unlockSounds
-} from "./ui/sounds.js?v=20260716-records";
+} from "./ui/sounds.js?v=20260716-auction-cues";
 import { hydratePhotos } from "./ui/photos.js?v=20260716-records";
 import { createBattle } from "./rules/battle/controller.js?v=20260716-records";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260716-records";
@@ -127,7 +128,7 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260716-records";
+} from "./rules/batch.js?v=20260716-sim-splits";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
 import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
@@ -476,16 +477,28 @@ function advanceCpuTurns() {
 // expired clock, a snapshot off the room server. They all land here in the end.
 let heardPickNumber = null;
 let heardComplete = false;
+let heardAuctionLotKey;
+let filteredAuctionLotKey = null;
 
 function reactToDraftChange(draft, { spectator = false } = {}) {
   if (!draft) {
     heardPickNumber = null;
     heardComplete = false;
+    heardAuctionLotKey = undefined;
+    filteredAuctionLotKey = null;
     return;
   }
   const picks = draft.pickNumber ?? 0;
   const first = heardPickNumber === null;
   const landed = !first && picks > heardPickNumber;
+  const lot = isAuctionDraft(draft) ? draft.auction?.lot : null;
+  const lotKey = lot
+    ? `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.auction.history.length}:${draft.auction.queueIndex ?? draft.pickNumber}:${lot.playerId}`
+    : null;
+
+  if (heardAuctionLotKey !== undefined && lotKey && lotKey !== heardAuctionLotKey) {
+    playNomination();
+  }
 
   if (landed) {
     // A card off your own board going to somebody else is not a pick, it is a
@@ -496,13 +509,14 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
       .slice(-(picks - heardPickNumber))
       .some((entry) => mine.has(entry.player?.id));
     if (taken) playSniped();
-    else playPick();
+    else playPick(isAuctionDraft(draft) ? 0.38 : undefined);
   }
 
   if (draft.complete && !heardComplete && !first) playDraftComplete();
 
   heardPickNumber = picks;
   heardComplete = Boolean(draft.complete);
+  heardAuctionLotKey = lotKey;
 }
 
 // Wraps up every human-initiated local draft change: computers respond,
@@ -743,6 +757,7 @@ function defaultState() {
       pitchers: { sort: "era", direction: "asc" }
     },
     batchStatsTab: "overview",
+    batchPitcherSplit: "overall",
     batchGamePage: 0,
     batchGameIndex: null,
     view: null,
@@ -1464,6 +1479,11 @@ function renderSetup(setupError = "") {
   // Backing out of a club's room puts the house colors back on the way in, not
   // on the way out — nothing clears state.universe when a draft is abandoned.
   applyFranchisePalette(null);
+  reactToDraftChange(null);
+  // A local room starts from this screen, so its first queued nomination is
+  // news. Joining an already-live online room never comes through setup and
+  // remains quiet on its initial paint.
+  heardAuctionLotKey = null;
   resetAppHandlers();
   const examples = setupExamples(state.seed);
   app.innerHTML = `<section class="setup">
@@ -1906,6 +1926,7 @@ function renderDraft() {
   reactToDraftChange(draft);
   captureSealedBids();
   if (!state.online && syncAuctionTimer(draft, draftNow())) saveState();
+  syncAuctionPositionFilter(draft);
   const auction = isAuctionDraft(draft);
   const reviewOpen = auction && !auctionReviewComplete(draft, draftNow());
   const queued = isRandomNomination(draft);
@@ -2032,6 +2053,28 @@ function renderDraft() {
   restoreTypingFocus(typing);
   bindDraftActions();
   pickClockTick();
+}
+
+function syncAuctionPositionFilter(draft) {
+  if (!isAuctionDraft(draft)) {
+    filteredAuctionLotKey = null;
+    return;
+  }
+
+  const player = auctionLotPlayer(draft);
+  if (!player) {
+    filteredAuctionLotKey = null;
+    return;
+  }
+
+  const lotKey = `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.auction.history.length}:${draft.auction.queueIndex ?? draft.pickNumber}:${player.id}`;
+  if (lotKey === filteredAuctionLotKey) return;
+
+  const filter = nominatedPlayerFilter(player);
+  state.filters.type = filter.type;
+  state.filters.position = filter.position;
+  filteredAuctionLotKey = lotKey;
+  saveState();
 }
 
 // The field the caret was in when the page was rebuilt under it, and where in
@@ -3058,11 +3101,16 @@ function renderBatch() {
     return pickNumberMap[player.id] ?? "";
   };
   const leagueWoba = tournamentWoba(summary.hitters);
-  const fipConstant = tournamentFipConstant(summary.pitchers);
+  const hasPitcherSplits = summary.pitchers.some((line) => line.fresh);
+  const pitcherSplit = hasPitcherSplits ? normalizeBatchPitcherSplit(state.batchPitcherSplit) : "overall";
+  const pitcherLines = pitcherSplit === "fresh"
+    ? summary.pitchers.map((line) => ({ ...line, ...(line.fresh ?? {}) }))
+    : summary.pitchers;
+  const fipConstant = tournamentFipConstant(pitcherLines);
   const teamGamesByName = new Map(summary.teams.map((row) => [row.team, row.games ?? teamScheduleGames(row)]));
   const sortedTeams = sortBatchRows(summary.teams, "teams", (row, sort) => batchTeamSortValue(row, sort));
   const sortedHitters = sortBatchRows(summary.hitters, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
-  const sortedPitchers = sortBatchRows(summary.pitchers, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
+  const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
   const sortedBaserunning = [...summary.teams].sort(compareTournamentBaserunning);
   const sortedDefense = [...summary.teams].sort(compareTournamentDefense);
 
@@ -3159,6 +3207,7 @@ function renderBatch() {
   </section>
   ${raceSection}
   ${renderFormulaRevealSection(summary)}`;
+  const headToHeadSection = renderBatchHeadToHead(summary);
   const hittersSection = `<section class="panel wide">
     <h2>Hitters, 162-game pace</h2>
     <div class="table-scroll">
@@ -3192,7 +3241,20 @@ function renderBatch() {
     </div>
   </section>`;
   const pitchersSection = `<section class="panel wide">
-    <h2>Pitchers, 162-game pace</h2>
+    <div class="section-title-row">
+      <div>
+        <h2>Pitchers, 162-game pace</h2>
+        <p class="batch-note">${!hasPitcherSplits
+          ? "This simulation predates fatigue splits. Run it again to compare fresh and tired work."
+          : pitcherSplit === "fresh"
+          ? "Only plate appearances that began before the pitcher was tired."
+          : "All plate appearances, including work after the pitcher became tired."}</p>
+      </div>
+      <div class="type-filter batch-pitcher-filter" role="group" aria-label="Pitcher fatigue split">
+        <button type="button" class="type-pill ${pitcherSplit === "overall" ? "active" : ""}" data-batch-pitcher-split="overall" aria-pressed="${pitcherSplit === "overall"}">Overall</button>
+        <button type="button" class="type-pill ${pitcherSplit === "fresh" ? "active" : ""}" data-batch-pitcher-split="fresh" aria-pressed="${pitcherSplit === "fresh"}" ${hasPitcherSplits ? "" : "disabled"}>Not tired</button>
+      </div>
+    </div>
     <div class="table-scroll">
       <table>
         <thead><tr>
@@ -3253,6 +3315,7 @@ function renderBatch() {
   </section>`;
   const batchSections = {
     overview: overviewSection,
+    headToHead: headToHeadSection,
     hitters: hittersSection,
     pitchers: pitchersSection,
     skills: teamSkillsSection,
@@ -3290,6 +3353,7 @@ function renderBatchStatsTabs(activeTab) {
 function batchStatsTabs() {
   return [
     { id: "overview", label: "Overview" },
+    { id: "headToHead", label: "Head-to-head" },
     { id: "hitters", label: "Hitters" },
     { id: "pitchers", label: "Pitchers" },
     { id: "skills", label: "Team skills" },
@@ -3300,6 +3364,43 @@ function batchStatsTabs() {
 
 function normalizeBatchStatsTab(value) {
   return batchStatsTabs().some((tab) => tab.id === value) ? value : "overview";
+}
+
+function normalizeBatchPitcherSplit(value) {
+  return value === "fresh" ? "fresh" : "overall";
+}
+
+function renderBatchHeadToHead(summary) {
+  const teams = summary.teams.map((row) => row.team);
+  const records = new Map((summary.headToHead ?? []).map((row) => [`${row.team}\u0000${row.opponent}`, row]));
+  if (!records.size) {
+    return `<section class="panel wide">
+      <h2>Head-to-head records</h2>
+      <p class="batch-note">This simulation predates head-to-head tracking. Run it again to build the matchup matrix.</p>
+    </section>`;
+  }
+  const header = teams.map((team) => `<th class="num" title="${escapeHtml(team)}">${escapeHtml(team)}</th>`).join("");
+  const rows = teams.map((team) => {
+    const cells = teams.map((opponent) => {
+      if (team === opponent) return `<td class="num head-to-head-diagonal" aria-label="${escapeHtml(team)}">—</td>`;
+      const row = records.get(`${team}\u0000${opponent}`);
+      if (!row) return `<td class="num" title="No games played">0-0</td>`;
+      const title = `${team} vs ${opponent}: ${row.wins}-${row.losses}, ${row.runsFor}-${row.runsAgainst} runs`;
+      return `<td class="num head-to-head-record" title="${escapeHtml(title)}"><strong>${row.wins}-${row.losses}</strong><span>${row.runsFor}-${row.runsAgainst} runs</span></td>`;
+    }).join("");
+    return `<tr><th scope="row">${escapeHtml(team)}</th>${cells}</tr>`;
+  }).join("");
+  return `<section class="panel wide">
+    <p class="eyebrow">${summary.runs} simulated games</p>
+    <h2>Head-to-head records</h2>
+    <p class="batch-note">Each cell shows wins-losses, with runs scored and allowed underneath.</p>
+    <div class="table-scroll">
+      <table class="head-to-head-table">
+        <thead><tr><th>Team</th>${header}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </section>`;
 }
 
 const GAME_LOG_PAGE_SIZE = 50;
@@ -3628,6 +3729,14 @@ function bindBatchActions() {
     const tabButton = event.target.closest("button[data-batch-tab]");
     if (tabButton) {
       state.batchStatsTab = normalizeBatchStatsTab(tabButton.dataset.batchTab);
+      saveState();
+      renderBatch();
+      return;
+    }
+
+    const pitcherSplitButton = event.target.closest("button[data-batch-pitcher-split]");
+    if (pitcherSplitButton) {
+      state.batchPitcherSplit = normalizeBatchPitcherSplit(pitcherSplitButton.dataset.batchPitcherSplit);
       saveState();
       renderBatch();
       return;
@@ -6414,6 +6523,7 @@ function reviveState(value) {
     filters,
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
+    batchPitcherSplit: normalizeBatchPitcherSplit(value.batchPitcherSplit),
     rosterTab: value.rosterTab === "order" ? "order" : "roster",
     draft,
     tournament: null,

@@ -1,6 +1,6 @@
 import { distribution, rate } from "./stats.js?v=20260716-records";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260716-records";
-import { simulateGame } from "./game.js?v=20260716-records";
+import { simulateGame } from "./game.js?v=20260716-sim-splits";
 
 export const DEFAULT_BATCH_RUNS = 10000;
 
@@ -22,6 +22,7 @@ export function createBatchState(teams) {
   const state = {
     runs: 0,
     teams: new Map(),
+    headToHead: new Map(),
     hitters: new Map(),
     pitchers: new Map(),
     topSwing: null,
@@ -151,21 +152,13 @@ export function summarizeBatch(state) {
     .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
 
   const pitchers = [...state.pitchers.values()]
-    .map((line) => ({
-      ...line,
-      ipPer162: per162(line.outs / 3, line.teamGames),
-      inningsPerSeason: rate(line.outs, state.runs * 3),
-      runsPerNine: rate(line.r * 27, line.outs),
-      strikeoutsPerNine: rate(line.so * 27, line.outs),
-      walksPerNine: rate(line.bb * 27, line.outs),
-      wpaPer162: per162(line.wpa, line.teamGames),
-      wpaPerSeason: rate(line.wpa, state.runs)
-    }))
+    .map((line) => summarizePitcherLine(line, state.runs))
     .sort((a, b) => (a.outs === 0) - (b.outs === 0) || a.runsPerNine - b.runsPerNine || b.outs - a.outs);
 
   return {
     runs: state.runs,
     teams,
+    headToHead: [...state.headToHead.values()],
     hitters,
     pitchers,
     topSwing: state.topSwing
@@ -177,6 +170,8 @@ function foldGame(state, game) {
 
   foldTeamResult(state, game.away.name, game.away.runs, game.home.runs);
   foldTeamResult(state, game.home.name, game.home.runs, game.away.runs);
+  foldHeadToHead(state, game.away.name, game.home.name, game.away.runs, game.home.runs);
+  foldHeadToHead(state, game.home.name, game.away.name, game.home.runs, game.away.runs);
   foldBoxScore(state, game.boxScore?.away);
   foldBoxScore(state, game.boxScore?.home);
   for (const event of game.events ?? []) {
@@ -189,6 +184,25 @@ function foldGame(state, game) {
       matchup: `${game.away.name} at ${game.home.name}`
     };
   }
+}
+
+function foldHeadToHead(state, team, opponent, runsFor, runsAgainst) {
+  const key = `${team}\u0000${opponent}`;
+  const row = state.headToHead.get(key) ?? {
+    team,
+    opponent,
+    games: 0,
+    wins: 0,
+    losses: 0,
+    runsFor: 0,
+    runsAgainst: 0
+  };
+  row.games += 1;
+  row.wins += runsFor > runsAgainst ? 1 : 0;
+  row.losses += runsFor > runsAgainst ? 0 : 1;
+  row.runsFor += runsFor;
+  row.runsAgainst += runsAgainst;
+  state.headToHead.set(key, row);
 }
 
 function foldTeamResult(state, teamName, runsFor, runsAgainst) {
@@ -239,6 +253,9 @@ function foldBoxScore(state, teamBox) {
     row.hr += line.hr;
     row.r += line.r;
     row.wpa += line.wpa ?? 0;
+    for (const key of ["bf", "outs", "h", "bb", "so", "hr", "r", "wpa"]) {
+      row.fresh[key] += line.fresh?.[key] ?? 0;
+    }
   }
 }
 
@@ -282,8 +299,42 @@ function registerPitcher(state, teamName, player) {
     so: 0,
     hr: 0,
     r: 0,
-    wpa: 0
+    wpa: 0,
+    fresh: emptyPitcherTotals()
   });
+}
+
+function emptyPitcherTotals() {
+  return {
+    bf: 0,
+    outs: 0,
+    h: 0,
+    bb: 0,
+    so: 0,
+    hr: 0,
+    r: 0,
+    wpa: 0
+  };
+}
+
+function summarizePitcherLine(line, runs) {
+  return {
+    ...summarizePitcherTotals(line, line.teamGames, runs),
+    fresh: summarizePitcherTotals(line.fresh ?? emptyPitcherTotals(), line.teamGames, runs)
+  };
+}
+
+function summarizePitcherTotals(line, teamGames, runs) {
+  return {
+    ...line,
+    ipPer162: per162(line.outs / 3, teamGames),
+    inningsPerSeason: rate(line.outs, runs * 3),
+    runsPerNine: rate(line.r * 27, line.outs),
+    strikeoutsPerNine: rate(line.so * 27, line.outs),
+    walksPerNine: rate(line.bb * 27, line.outs),
+    wpaPer162: per162(line.wpa, teamGames),
+    wpaPerSeason: rate(line.wpa, runs)
+  };
 }
 
 function teamSkillTotals(row) {
