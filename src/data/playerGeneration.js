@@ -468,6 +468,52 @@ const POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF"];
 // Corner outfielders are one interchangeable group covering two lineup slots,
 // so their bucket generates twice as many copies as single-slot positions.
 const POSITION_POOL_MULTIPLIER = { "LF/RF": 2 };
+
+// The all-time MLB pool is the model for fictional defensive versatility.
+// About 28% of its hitters list more than one position, but the chance varies
+// sharply by primary spot: catchers rarely move, center fielders often cover a
+// corner, and middle infielders commonly cross the bag. `secondary` weights
+// are the observed secondary/tertiary listings in that pool. Keeping this
+// table separate from the primary-position draw preserves the fixed per-slot
+// depth that draft deals rely on.
+const MULTI_POSITION_PROFILES = {
+  C: {
+    rate: 49 / 956,
+    thirdRate: 0,
+    secondary: { "1B": 23, "LF/RF": 20, SS: 3, CF: 2, "3B": 1 }
+  },
+  "1B": {
+    rate: 138 / 641,
+    thirdRate: 2 / 138,
+    secondary: { "LF/RF": 78, "3B": 25, "2B": 15, C: 13, CF: 6, SS: 3 }
+  },
+  "2B": {
+    rate: 275 / 776,
+    thirdRate: 24 / 275,
+    secondary: { "3B": 123, SS: 115, "LF/RF": 40, "1B": 17, CF: 4 }
+  },
+  "3B": {
+    rate: 219 / 686,
+    thirdRate: 17 / 219,
+    secondary: { "2B": 89, SS: 62, "1B": 41, "LF/RF": 38, C: 5, CF: 1 }
+  },
+  SS: {
+    rate: 197 / 691,
+    thirdRate: 12 / 197,
+    secondary: { "2B": 124, "3B": 66, "LF/RF": 10, CF: 5, C: 3, "1B": 1 }
+  },
+  "LF/RF": {
+    rate: 521 / 1637,
+    thirdRate: 7 / 521,
+    secondary: { CF: 373, "1B": 78, "3B": 30, "2B": 26, C: 12, SS: 9 }
+  },
+  CF: {
+    rate: 286 / 607,
+    thirdRate: 3 / 286,
+    secondary: { "LF/RF": 273, "2B": 6, "1B": 4, "3B": 4, SS: 2 }
+  }
+};
+
 const FIELDING_DISTRIBUTIONS = {
   C: { min: 1, max: 10, mean: 6, sd: 1.5 },
   "1B": { min: 0, max: 1, mean: 0.5, sd: 0.5 },
@@ -515,6 +561,10 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
     pitcherCount += 1;
     players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP"));
   }
+
+  // A separate stream makes versatility deterministic without perturbing the
+  // established names, charts, and ratings produced by the main seed.
+  addGeneratedPositions(players, createRng(`${seed}:positions`));
 
   return players.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
 }
@@ -616,6 +666,42 @@ function makePitcherCard(rng, index, usedNames, role) {
     points,
     chart: toChart(chart)
   };
+}
+
+function addGeneratedPositions(players, rng) {
+  for (const player of players) {
+    if (player.kind !== "hitter") continue;
+    const profile = MULTI_POSITION_PROFILES[player.position];
+    if (!profile || rng.next() >= profile.rate) continue;
+
+    const positions = [{ pos: player.position, fielding: player.fielding }];
+    const secondary = weightedPosition(rng, profile.secondary, new Set([player.position]));
+    if (!secondary) continue;
+    positions.push({ pos: secondary, fielding: randomFielding(rng, secondary) });
+
+    // Three-position cards exist in the MLB pool, but make up only about four
+    // percent of its multi-position cards. The rate remains primary-specific
+    // so utility infielders are more common than three-position catchers.
+    if (rng.next() < profile.thirdRate) {
+      const excluded = new Set(positions.map((entry) => entry.pos));
+      const third = weightedPosition(rng, profile.secondary, excluded);
+      if (third) positions.push({ pos: third, fielding: randomFielding(rng, third) });
+    }
+
+    player.positions = positions;
+  }
+}
+
+function weightedPosition(rng, weights, excluded) {
+  const choices = Object.entries(weights).filter(([position]) => !excluded.has(position));
+  const total = choices.reduce((sum, [, weight]) => sum + weight, 0);
+  if (total <= 0) return null;
+  let roll = rng.next() * total;
+  for (const [position, weight] of choices) {
+    roll -= weight;
+    if (roll < 0) return position;
+  }
+  return choices.at(-1)?.[0] ?? null;
 }
 
 function makeName(rng, usedNames) {

@@ -99,11 +99,12 @@ Implemented:
 
 - Five card sets, shared with the adventure: the real 2000-2005 Showdown cards, MLB all-time, MLB by decade, MLB by franchise, and a generated fictional league.
 - One card face everywhere: a classic card renders its real printed scan, an MLB or fictional card the 2005 front, with photos hydrated from the MLB and Wikipedia image APIs.
-- Hitter cards with position, fielding, on-base, speed, handedness, points, and d20 chart.
+- Hitter cards with one or more positions and per-position fielding, plus on-base, speed, handedness, points, and a d20 chart.
 - Pitcher cards with role, control, IP, handedness, points, and d20 chart.
 - Drafting with legal roster checks.
 - Manual lineup assignment in the top roster board.
 - LF/RF flexibility.
+- Multi-position hitters in the real and fictional pools, with fictional eligibility modeled on the all-time MLB pool.
 - Any hitter can play 1B out of position with literal `-1` fielding.
 - Two starters and two bullpen pitchers per roster.
 - Batch game simulation with starter rotation across games.
@@ -147,7 +148,6 @@ Not implemented yet:
 Intentionally deprioritized for now:
 
 - Bench players.
-- Backup/secondary positions beyond current LF/RF flexibility and emergency 1B handling.
 
 Known rough edges:
 

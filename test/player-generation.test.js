@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildFictionalDraftPool, buildFictionalUniverse, generatePlayerPool } from "../src/data/playerGeneration.js";
 import { maxRealPoolManagers } from "../src/data/realPlayers.js";
+import { hitterPositions } from "../src/rules/cards.js";
 import { autopick, createDraft, validateRoster } from "../src/rules/draft.js";
 
 const FIELDING_RANGES = {
@@ -72,6 +73,45 @@ test("generated player pools include two players per team per lineup slot at eve
     "LF/RF": 8,
     CF: 4
   });
+});
+
+test("generated hitters loosely follow all-time MLB multi-position patterns", () => {
+  const pool = generatePlayerPool("multi-position-pattern-check", 125, 13);
+  const hitters = pool.filter((player) => player.kind === "hitter");
+  const multi = hitters.filter((player) => hitterPositions(player).length > 1);
+  const threePosition = multi.filter((player) => hitterPositions(player).length === 3);
+  const pairCount = (a, b) => multi.filter((player) => {
+    const positions = hitterPositions(player).map((entry) => entry.pos);
+    return positions.includes(a) && positions.includes(b);
+  }).length;
+
+  // The all-time reference is 28.1%; leave enough room for seeded variance
+  // and for the fictional pool's deliberately even primary-position supply.
+  assert.ok(multi.length / hitters.length >= 0.25);
+  assert.ok(multi.length / hitters.length <= 0.34);
+  assert.ok(multi.length < hitters.length, "most generated hitters remain single-position");
+  assert.ok(threePosition.length > 0, "rare utility players can cover three positions");
+  assert.ok(threePosition.length / multi.length < 0.08, "three-position players stay rare");
+
+  assert.ok(pairCount("SS", "2B") > pairCount("SS", "C"), "SS/2B is more common than SS/C");
+  assert.ok(pairCount("CF", "LF/RF") > pairCount("CF", "2B"), "CF/corner OF is more common than CF/2B");
+});
+
+test("generated multi-position cards retain primary ratings and valid secondary fielding", () => {
+  const hitters = generatePlayerPool("multi-position-ratings-check", 40, 13)
+    .filter((player) => player.kind === "hitter");
+  const multi = hitters.filter((player) => hitterPositions(player).length > 1);
+
+  assert.ok(multi.length > 0);
+  for (const player of multi) {
+    const positions = hitterPositions(player);
+    assert.deepEqual(positions[0], { pos: player.position, fielding: player.fielding });
+    assert.equal(new Set(positions.map((entry) => entry.pos)).size, positions.length);
+    for (const entry of positions) {
+      const [min, max] = FIELDING_RANGES[entry.pos];
+      assert.ok(entry.fielding >= min && entry.fielding <= max, `${player.name} ${entry.pos}+${entry.fielding}`);
+    }
+  }
 });
 
 test("the fictional universe is one persistent league", () => {

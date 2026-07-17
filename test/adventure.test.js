@@ -61,6 +61,7 @@ import {
   runSimSeries
 } from "../src/rules/battle/controller.js";
 import { validateRoster, buildTeam } from "../src/rules/draft.js";
+import { playsPosition } from "../src/rules/cards.js";
 import {
   stealCandidates,
   attemptSteal,
@@ -3202,7 +3203,7 @@ test("the shop catalog lists the whole universe, best first", async () => {
     assert.ok(all[i - 1].points >= all[i].points, "sorted by printed points, best first");
   }
   const catchers = catalogRows("C");
-  assert.ok(catchers.length > 0 && catchers.every((card) => card.position === "C"), "position paging filters");
+  assert.ok(catchers.length > 0 && catchers.every((card) => playsPosition(card, "C")), "position paging filters");
   const arms = catalogRows("SP");
   assert.ok(arms.every((card) => card.role === "SP"));
 });
@@ -3214,7 +3215,7 @@ test("the binder pages by position with the arrow filters", async () => {
   assert.equal(all.length, collectionCardCount(save), "ALL shows the whole binder");
   const catchers = binderRows(save, "C");
   assert.ok(catchers.length >= 1, "the starter catcher shows under C");
-  assert.ok(catchers.every(({ card }) => card.position === "C"));
+  assert.ok(catchers.every(({ card }) => playsPosition(card, "C")));
   const starters = binderRows(save, "SP");
   assert.ok(starters.length >= 2, "both starter arms show under SP");
   assert.ok(starters.every(({ card }) => card.role === "SP"));
