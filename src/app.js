@@ -3505,14 +3505,16 @@ function renderAwardCard(item, playersById = new Map()) {
   </div>`;
 }
 
-// End-of-sim reveal: every manager drafts with a private, draft-seeded twist
-// on the shared valuation formula. Showing the exact weights next to the
-// standings lets players trace which preferences produced which outcomes.
+// End-of-sim reveal: CPU managers draft with a private, draft-seeded twist on
+// the shared valuation formula. Human seats carry no CPU persona, so showing a
+// generated model for them would imply the app made choices that the player did.
 function renderFormulaRevealSection(summary) {
   const draft = state.draft;
   if (!draft?.managers?.length) return "";
+  const cpuManagers = draft.managers.filter((manager) => manager.cpu);
+  if (!cpuManagers.length) return "";
   const outcomes = new Map(summary.teams.map((row, index) => [row.team, { place: index + 1, winPct: row.winPct }]));
-  const cards = [...draft.managers]
+  const cards = [...cpuManagers]
     .sort((a, b) => (outcomes.get(a.name)?.place ?? 99) - (outcomes.get(b.name)?.place ?? 99))
     .map((manager) => renderFormulaCard(draft, manager, outcomes.get(manager.name)))
     .join("");
@@ -3520,11 +3522,11 @@ function renderFormulaRevealSection(summary) {
   return `<section class="panel wide formula-reveal-panel">
     <div class="section-title-row">
       <div>
-        <p class="eyebrow">The formulas revealed</p>
-        <h2>How each manager's auto-pick brain valued cards</h2>
+        <p class="eyebrow">CPU draft formulas</p>
+        <h2>How the computer managers valued cards</h2>
       </div>
     </div>
-    <p class="batch-note">Every manager scores cards with the same baseline formula, but their draft-seeded preferences nudge each weight up to &plusmn;${spread}%. These exact numbers drove their auto-picks and auction bids &mdash; compare the leans against the standings to see which preferences paid off.</p>
+    <p class="batch-note">Only computer-controlled seats are shown. Each CPU uses the same baseline formula, with draft-seeded preferences nudging each weight up to &plusmn;${spread}%. These numbers drove the CPU managers' auto-picks and auction bids &mdash; compare the leans against the standings to see which preferences paid off.</p>
     <div class="formula-grid">${cards}</div>
     <p class="batch-note">Chart is the card's result chart scored slot by slot (HR +14 &hellip; SO &minus;4 for hitters; SO +10 &hellip; HR &minus;16 for pitchers). IP-load scales pitcher quality by workload: (IP + 4) / 10, so full price for a 6-IP starter and about half for a 1-IP reliever.</p>
   </section>`;
@@ -3548,7 +3550,7 @@ function renderFormulaCard(draft, manager, outcome) {
     : `<span class="formula-outcome">did not play</span>`;
   return `<div class="formula-card">
     <div class="formula-card-head">
-      <strong>${escapeHtml(manager.name)}</strong>
+      <strong>${escapeHtml(manager.name)} <span class="cpu-tag">CPU</span></strong>
       ${standing}
     </div>
     <p class="formula-line"><span class="formula-kind">Hitters</span> ${formulaTerm(hitter.onBase, "On-Base")} + ${formulaTerm(hitter.fielding, "Fielding")} + ${formulaTerm(hitter.speed, "(Speed&minus;1)")} + ${formulaTerm(hitter.chart, "Chart")}</p>
