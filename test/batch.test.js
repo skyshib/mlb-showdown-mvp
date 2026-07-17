@@ -44,6 +44,8 @@ test("simulateBatch accounts for every simulated game", () => {
   assert.equal(summary.teams.reduce((sum, row) => sum + row.wins.sum, 0), 25);
   assert.equal(summary.teams.reduce((sum, row) => sum + row.losses.sum, 0), 25);
   assert.equal(summary.teams.reduce((sum, row) => sum + row.games, 0), 50);
+  assert.equal(summary.headToHead.length, 12);
+  assert.equal(summary.headToHead.reduce((sum, row) => sum + row.games, 0), 50);
 
   for (const row of summary.teams) {
     assert.ok(Number.isFinite(row.winPct));
@@ -57,6 +59,15 @@ test("simulateBatch accounts for every simulated game", () => {
     assert.ok(Number.isFinite(row.caughtStealingByDefense));
     assert.ok(Number.isFinite(row.doublePlays));
     assert.ok(Number.isFinite(row.doublePlayChances));
+  }
+  for (const row of summary.headToHead) {
+    const reverse = summary.headToHead.find((candidate) => candidate.team === row.opponent && candidate.opponent === row.team);
+    assert.ok(reverse);
+    assert.equal(row.games, reverse.games);
+    assert.equal(row.wins, reverse.losses);
+    assert.equal(row.losses, reverse.wins);
+    assert.equal(row.runsFor, reverse.runsAgainst);
+    assert.equal(row.runsAgainst, reverse.runsFor);
   }
 });
 
@@ -90,7 +101,19 @@ test("simulateBatch aggregates every drafted lineup and staff member", () => {
     assert.ok(Number.isFinite(line.runsPerNine));
     assert.ok(line.teamGames > 0);
     assert.ok(Number.isFinite(line.ipPer162));
+    assert.ok(line.fresh.bf <= line.bf);
+    assert.ok(line.fresh.outs <= line.outs);
+    for (const key of ["h", "bb", "so", "hr", "r"]) {
+      assert.ok(line.fresh[key] <= line[key], `fresh ${key} is a subset of overall ${key}`);
+    }
+    assert.ok(Number.isFinite(line.fresh.runsPerNine));
+    assert.ok(Number.isFinite(line.fresh.ipPer162));
   }
+  assert.ok(
+    summary.pitchers.reduce((sum, line) => sum + line.fresh.bf, 0)
+      < summary.pitchers.reduce((sum, line) => sum + line.bf, 0),
+    "fresh split excludes tired plate appearances"
+  );
   for (let index = 1; index < summary.hitters.length; index += 1) {
     assert.ok(summary.hitters[index - 1].ops >= summary.hitters[index].ops, "hitters sorted by OPS");
   }

@@ -704,13 +704,20 @@ test("runs are charged to the pitcher responsible for inherited runners", () => 
   };
   const state = createInitialState(teamA, staff);
   state.pitching.home.pitcherIndex = 1;
-  state.bases = [null, { name: "Inherited Runner", speed: 12, responsiblePitcherId: "starter" }, null];
+  state.bases = [null, {
+    name: "Inherited Runner",
+    speed: 12,
+    responsiblePitcherId: "starter",
+    responsiblePitcherFresh: true
+  }, null];
 
   const runs = applyDouble(state, hitter, "away", "home", null, state.home.pitchers[1]);
 
   assert.equal(runs, 1);
   assert.equal(state.stats.pitchers.get("home:starter").r, 1);
+  assert.equal(state.stats.pitchers.get("home:starter").fresh.r, 1);
   assert.equal(state.stats.pitchers.get("home:reliever")?.r ?? 0, 0);
+  assert.equal(state.stats.pitchers.get("home:reliever")?.fresh.r ?? 0, 0);
 });
 
 test("fatigue runs on batters faced alone and never forces the bullpen door", () => {
@@ -740,6 +747,10 @@ test("fatigue runs on batters faced alone and never forces the bullpen door", ()
   assert.equal(tired.fatiguePenalty, 1);
   assert.equal(tired.effectiveControl, 8);
   assert.equal(state.pitching.home.pitcherIndex, 0, "fatigue never forces the bullpen door");
+  const line = state.stats.pitchers.get("home:starter");
+  assert.equal(line.bf, 2);
+  assert.equal(line.fresh.bf, 1);
+  assert.equal(line.fresh.outs, 1);
 });
 
 test("simulation is deterministic for a seed", () => {
