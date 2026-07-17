@@ -73,6 +73,7 @@ import {
   currentManager,
   currentManagerMustReplace,
   draftHistory,
+  guaranteedNominationMinimums,
   getRosterNeeds,
   hasUnlimitedRoster,
   isAuctionDraft,
@@ -5209,6 +5210,14 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
   const remaining = queued && !draft.complete
     ? `<p class="next-up">${nominationQueueRemaining(draft)} cards still to come up &middot; anyone short at the buzzer gets filled out free from the board</p>`
     : "";
+  const nominationMinimums = queued && !draft.complete
+    ? `<div class="nomination-minimums" aria-label="Guaranteed primary-position nominations still to come">
+        <span class="nomination-minimums-label">Guaranteed still to come</span>
+        ${guaranteedNominationMinimums(draft).map(({ position, minimum }) =>
+          `<span class="nomination-minimum"><strong>${escapeHtml(position)}</strong> min ${minimum}</span>`
+        ).join("")}
+      </div>`
+    : "";
   // The board can run dry on a scarce slot — the last catcher taken while this
   // seat still needs one. There is nothing legal left to pick, so tell him the
   // one move he has: Auto-pick prints a replacement-level fill-in for the hole.
@@ -5228,6 +5237,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
       </div>
       ${remaining}
+      ${nominationMinimums}
       ${stallNotice}
       ${snakeClocksHtml(draft)}
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}

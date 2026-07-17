@@ -393,6 +393,32 @@ export function nominationQueueRemaining(draft) {
   return Math.max(0, draft.auction.queue.length - draft.auction.queueIndex);
 }
 
+// The public lower bound on what each primary-position bucket still owes the
+// room. The hidden queue contains exactly the configured slot quotas plus an
+// any-hitter/DH bucket whose printed positions are deliberately unknowable.
+// Every CALLED card at a primary position counts against that position's floor,
+// even if it secretly came from the any-hitter bucket. That can only make this
+// number more conservative; it can never reveal or overstate the unseen queue.
+//
+// The current lot has already been nominated, even though queueIndex advances
+// only when it settles, so it counts alongside sold and passed history.
+export function guaranteedNominationMinimums(draft) {
+  if (!isRandomNomination(draft)) return [];
+  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers);
+  const minimums = new Map(hidden.filter(([group]) => group !== ANY_HITTER));
+  const calledIds = (draft.auction.history ?? []).map((entry) => entry.playerId);
+  if (draft.auction.lot?.playerId) calledIds.push(draft.auction.lot.playerId);
+
+  for (const playerId of calledIds) {
+    const player = draft.pool.find((card) => card.id === playerId);
+    const group = poolGroup(player);
+    if (!minimums.has(group)) continue;
+    minimums.set(group, Math.max(0, minimums.get(group) - 1));
+  }
+
+  return [...minimums].map(([position, minimum]) => ({ position, minimum }));
+}
+
 // Enough loop steps for a caller to run every remaining lot to a decision: one
 // nomination plus a sealed bid per manager, plus a rebid round, plus slack. A
 // random-nomination room runs as long as its queue, not as long as its rosters.

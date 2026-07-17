@@ -11,6 +11,7 @@ import {
   cpuSealedBid,
   createDraft,
   auctionLotPlayer,
+  guaranteedNominationMinimums,
   isRandomNomination,
   nominationQueueRemaining,
   nextQueuedPlayer,
@@ -156,6 +157,56 @@ test("a manager may spend their whole budget on one card", () => {
   const { draft } = roomOf(3);
   // No reserve for open slots: the sweep fills a short roster for free.
   assert.equal(auctionMaxBid(draft, draft.managers[0]), 5000);
+});
+
+test("position countdowns show only the guaranteed nominations still to come", () => {
+  const { draft } = roomOf(3, "minimum-countdown");
+  const minimums = () => Object.fromEntries(
+    guaranteedNominationMinimums(draft).map(({ position, minimum }) => [position, minimum])
+  );
+
+  assert.deepEqual(minimums(), {
+    C: 4,
+    "1B": 4,
+    "2B": 4,
+    "3B": 4,
+    SS: 4,
+    "LF/RF": 8,
+    CF: 4,
+    SP: 8,
+    RP: 8
+  });
+
+  const thirdBasemen = draft.auction.queue
+    .map((id) => draft.pool.find((card) => card.id === id))
+    .filter((card) => poolGroup(card) === "3B");
+  assert.ok(thirdBasemen.length >= 4);
+  draft.auction.history = thirdBasemen.slice(0, 3).map((card) => ({
+    playerId: card.id,
+    managerId: null,
+    price: 0,
+    passed: true
+  }));
+  assert.equal(minimums()["3B"], 1, "three called third basemen leave a public floor of one");
+
+  // The card currently on the block has already been called.
+  draft.auction.lot = { playerId: thirdBasemen[3].id };
+  assert.equal(minimums()["3B"], 0);
+
+  // Future queue composition is hidden information and cannot affect the
+  // public lower bound.
+  const before = minimums();
+  draft.auction.queue = draft.auction.queue.filter((id) => id !== thirdBasemen.at(-1).id);
+  assert.deepEqual(minimums(), before);
+});
+
+test("guaranteed nomination countdowns apply only to random nomination", () => {
+  const pool = buildDraftPool(UNIVERSE, "manual-minimums", { managerCount: 3 });
+  const draft = createDraft(["A", "B", "C"], pool, 13, "manual-minimums", {
+    draftType: "auction",
+    timer: false
+  });
+  assert.deepEqual(guaranteedNominationMinimums(draft), []);
 });
 
 test("every manager finishes with a legal roster, however the bidding went", () => {
