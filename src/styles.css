@@ -1173,17 +1173,31 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .sold-tag {
-  display: inline-block;
-  max-width: 92px;
-  overflow: hidden;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 110px;
   border-radius: 4px;
   background: #dfe3dd;
   padding: 2px 6px;
   color: #5c665f;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1.25;
+}
+
+.sold-tag .sold-owner {
+  max-width: 100%;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sold-tag .sold-detail {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The card up for bid right now. */

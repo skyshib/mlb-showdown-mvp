@@ -63,7 +63,7 @@ export function renderPlayerTable(players, options = {}) {
       const onBlock = Boolean(options.lotPlayerId) && player.id === options.lotPlayerId;
       const legality = options.canPick ? options.canPick(player) : { ok: true, reason: "" };
       const action = owner
-        ? `<span class="sold-tag" title="${escapeHtml(owner.title ?? "")}">${escapeHtml(owner.label)}</span>`
+        ? `<span class="sold-tag" title="${escapeHtml(owner.title ?? "")}"><span class="sold-owner">${escapeHtml(owner.label)}</span>${owner.detail ? `<span class="sold-detail">${escapeHtml(owner.detail)}</span>` : ""}</span>`
         : options.action
           ? `<button class="small" data-action="${options.action}" data-player-id="${player.id}" ${legality.ok ? "" : "disabled"} title="${escapeHtml(legality.reason)}">${legality.ok ? (options.label ?? "Pick") : "Blocked"}</button>`
           : "";

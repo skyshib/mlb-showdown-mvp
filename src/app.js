@@ -2106,11 +2106,23 @@ function restoreTypingFocus(typing) {
 function cardOwnerTag(draft, player) {
   if (!draft.pickedIds.has(player.id)) return null;
   const owner = draft.managers.find((manager) => manager.roster.some((card) => card.id === player.id));
-  const sale = draft.auction?.history?.find((entry) => entry.playerId === player.id && !entry.passed);
+  // The card's place in the sale order is its index in the ledger — the same
+  // pick number the draft-history tab prints for it.
+  const history = draft.auction?.history ?? [];
+  const saleIndex = history.findIndex((entry) => entry.playerId === player.id && !entry.passed);
+  const sale = saleIndex >= 0 ? history[saleIndex] : null;
   if (!owner) return { label: "Gone", title: "" };
   const price = Number.isFinite(sale?.price) ? sale.price : null;
+  const pickNumber = saleIndex >= 0 ? saleIndex + 1 : null;
+  const detail = [
+    pickNumber === null ? null : `#${pickNumber}`,
+    price === null ? null : money(price)
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return {
     label: owner.name,
+    detail,
     title: price === null
       ? `${owner.name} has ${player.name}`
       : `${owner.name} bought ${player.name} for ${money(price)}`
@@ -2954,7 +2966,7 @@ function newBatchSalt() {
 function startBatchRun(runs, options = {}) {
   if (!state.draft || !canSimulate(state.draft)) return;
   const count = normalizeBatchRuns(runs);
-  const teams = state.draft.managers.map((manager) => buildTeam(manager));
+  const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
   const teamNames = teams.map((team) => team.name);
   const batchState = createBatchState(teams);
   const seed = options.salt ? `${state.seed}-batch-${options.salt}` : `${state.seed}-batch`;
@@ -3410,7 +3422,7 @@ const GAME_LOG_PAGE_SIZE = 50;
 // reopened play by play — including win probability — at any time.
 function renderBatchGamesSection() {
   const { runs, seed } = state.batch;
-  const teams = state.draft.managers.map((manager) => buildTeam(manager));
+  const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
   if (state.batchGameIndex != null && state.batchGameIndex >= 0 && state.batchGameIndex < runs) {
     const replay = replayBatchGames(teams, seed, state.batchGameIndex, 1)[0];
     return renderBatchGameDetail(replay?.game, state.batchGameIndex, runs);

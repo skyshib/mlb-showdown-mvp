@@ -1816,17 +1816,127 @@ export function benchPlayers(manager) {
   return manager.roster.filter((player) => !active.has(player.id));
 }
 
-export function buildTeam(manager, options = {}) {
-  const lineup = applyBattingOrder(
-    assignLineupSlots(manager.roster, manager.lineupAssignments).slots
-      .filter((slot) => slot.player)
-      .map((slot) => lineupPlayer(slot)),
-    manager.battingOrder
+// The card's own points — the universal strength the board already ranks by —
+// so a manager fields the BEST nine and the best arms, not merely the first
+// drafted. Blind drafts still carry points on the card; only the display hides
+// them, and the lineup is not the display.
+function lineupRankValue(player) {
+  return Number(player?.points) || 0;
+}
+
+// Minimum-cost assignment (Kuhn–Munkres) of rows to distinct columns, rows ≤
+// columns. Returns rowToCol[row] = col. Costs are tiny (nine slots), so the
+// classic O(n²m) form is plenty.
+function minCostAssignment(cost) {
+  const n = cost.length;
+  const m = cost[0].length;
+  const u = new Array(n + 1).fill(0);
+  const v = new Array(m + 1).fill(0);
+  const p = new Array(m + 1).fill(0);
+  const way = new Array(m + 1).fill(0);
+  for (let i = 1; i <= n; i += 1) {
+    p[0] = i;
+    let j0 = 0;
+    const minv = new Array(m + 1).fill(Infinity);
+    const used = new Array(m + 1).fill(false);
+    do {
+      used[j0] = true;
+      const i0 = p[j0];
+      let delta = Infinity;
+      let j1 = -1;
+      for (let j = 1; j <= m; j += 1) {
+        if (!used[j]) {
+          const cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+          if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
+          if (minv[j] < delta) { delta = minv[j]; j1 = j; }
+        }
+      }
+      for (let j = 0; j <= m; j += 1) {
+        if (used[j]) { u[p[j]] += delta; v[j] -= delta; }
+        else { minv[j] -= delta; }
+      }
+      j0 = j1;
+    } while (p[j0] !== 0);
+    do {
+      const j1 = way[j0];
+      p[j0] = p[j1];
+      j0 = j1;
+    } while (j0);
+  }
+  const rowToCol = new Array(n).fill(-1);
+  for (let j = 1; j <= m; j += 1) {
+    if (p[j] >= 1 && p[j] <= n) rowToCol[p[j] - 1] = j - 1;
+  }
+  return rowToCol;
+}
+
+// Best legal seating of a manager's hitters into the nine lineup slots, by total
+// value. A max-weight assignment, not a greedy sort: covering a scarce spot (the
+// only true shortstop) can seat a lesser bat there so a better one plays where he
+// is also eligible. Returns { [slotLabel]: playerId }, ready to hand to
+// assignLineupSlots exactly as if the manager had set it by hand.
+function bestLineupAssignment(roster) {
+  const hitters = roster.filter((player) => player.kind === "hitter");
+  if (!hitters.length) return {};
+  const BIG = 1e9;
+  const cols = Math.max(LINEUP_SLOT_LABELS.length, hitters.length);
+  const cost = LINEUP_SLOT_LABELS.map((label) =>
+    Array.from({ length: cols }, (unused, col) => {
+      const hitter = hitters[col];
+      if (!hitter) return 0; // dummy column — leaves the slot to a real bat
+      return canPlayerFillLineupSlot(hitter, label) ? -lineupRankValue(hitter) : BIG;
+    })
   );
+  const rowToCol = minCostAssignment(cost);
+  const assignment = {};
+  rowToCol.forEach((col, row) => {
+    const hitter = hitters[col];
+    if (hitter && canPlayerFillLineupSlot(hitter, LINEUP_SLOT_LABELS[row])) {
+      assignment[LINEUP_SLOT_LABELS[row]] = hitter.id;
+    }
+  });
+  return assignment;
+}
+
+// The two best starters and two best relievers by value — the arms a manager
+// would choose, not the four he happened to buy first.
+function bestStaffAssignment(roster) {
+  const { starters, bullpen } = staffStatus(roster);
+  const byValue = (list) => [...list].sort((a, b) => lineupRankValue(b) - lineupRankValue(a));
+  const [sp1, sp2] = byValue(starters);
+  const [rp1, rp2] = byValue(bullpen);
+  const assignment = {};
+  if (sp1) assignment.SP1 = sp1.id;
+  if (sp2) assignment.SP2 = sp2.id;
+  if (rp1) assignment.RP1 = rp1.id;
+  if (rp2) assignment.RP2 = rp2.id;
+  return assignment;
+}
+
+export function buildTeam(manager, options = {}) {
+  // With `optimize` on, a manager who never hand-set a lineup, staff, or order
+  // fields the value-optimal team instead of whatever the draft happened to seat:
+  // the best nine into their spots, the best four arms, and the order batting by
+  // value with the heart of the order up top. A hand-set choice always wins, and
+  // without `optimize` the old roster-order defaults hold (adventure runs its own
+  // rotation off roster order, so it must not be second-guessed here).
+  const optimize = Boolean(options.optimize);
+  const hasLineup = manager.lineupAssignments && Object.keys(manager.lineupAssignments).length > 0;
+  const hasStaff = manager.staffAssignments && Object.keys(manager.staffAssignments).length > 0;
+  const hasOrder = Array.isArray(manager.battingOrder) && manager.battingOrder.length > 0;
+  const lineupAssignments = hasLineup || !optimize ? manager.lineupAssignments : bestLineupAssignment(manager.roster);
+  const seated = assignLineupSlots(manager.roster, lineupAssignments).slots
+    .filter((slot) => slot.player)
+    .map((slot) => lineupPlayer(slot));
+  const battingOrder = hasOrder || !optimize
+    ? manager.battingOrder
+    : [...seated].sort((a, b) => lineupRankValue(b) - lineupRankValue(a)).map((player) => player.id);
+  const lineup = applyBattingOrder(seated, battingOrder);
   // The staff is the four arms the manager put in the slots — not simply the
   // first four in roster order. On an unlimited roster that is the difference
   // between the two relievers you chose and the two you happened to buy first.
-  const staff = assignStaffSlots(manager.roster, manager.staffAssignments);
+  const staffAssignments = hasStaff || !optimize ? manager.staffAssignments : bestStaffAssignment(manager.roster);
+  const staff = assignStaffSlots(manager.roster, staffAssignments);
   const starters = staff.filter((slot) => slot.role === "SP" && slot.player).map((slot) => slot.player);
   const bullpen = staff.filter((slot) => slot.role === "RP" && slot.player).map((slot) => slot.player);
   const starterIndex = starters.length ? Number(options.starterIndex ?? 0) % starters.length : 0;

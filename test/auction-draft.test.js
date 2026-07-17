@@ -660,6 +660,29 @@ test("the batting order a manager sets is the order they bat in", () => {
   assert.equal(after.length, 9, "and nobody is lost");
 });
 
+test("with optimize, a team fields its best arms and bats in value order", () => {
+  // A roster where draft ORDER and VALUE disagree: the ace and the big bat were
+  // drafted last, and there is an extra reliever and an extra bat to leave behind.
+  const scrubSP = makePitcher({ id: "sp-scrub", role: "SP", points: 100 });
+  const aceSP = makePitcher({ id: "sp-ace", role: "SP", points: 500 });
+  const rpWeak = makePitcher({ id: "rp-weak", role: "RP", points: 60 });
+  const rpMid = makePitcher({ id: "rp-mid", role: "RP", points: 90 });
+  const rpBest = makePitcher({ id: "rp-best", role: "RP", points: 200 });
+  const hitters = positions.map((pos, index) => makeHitter({ id: `h-${pos}`, position: pos, points: 100 + index * 25 }));
+  const bigBat = makeHitter({ id: "h-big", position: "1B", points: 600 });
+  const manager = { name: "Opt", roster: [scrubSP, rpWeak, rpMid, ...hitters, rpBest, aceSP, bigBat] };
+
+  const optimized = buildTeam(manager, { optimize: true });
+  assert.equal(optimized.starters[0].id, "sp-ace", "the ace starts, not the first SP drafted");
+  assert.deepEqual(optimized.bullpen.map((player) => player.id).sort(), ["rp-best", "rp-mid"], "the two best relievers make the pen");
+  assert.ok(optimized.lineup.some((player) => player.id === "h-big"), "the big bat is in the lineup");
+  const points = optimized.lineup.map((player) => player.points);
+  assert.deepEqual(points, [...points].sort((a, b) => b - a), "the order bats by value, best up top");
+
+  // Without optimize, roster order still decides — adventure's rotation relies on it.
+  assert.equal(buildTeam(manager).starters[0].id, "sp-scrub", "no optimize: roster order starts the first SP drafted");
+});
+
 // ---- How a computer decides what to pay -------------------------------------
 //
 // The old bidder priced a card against the AVERAGE card of its kind, so the
