@@ -28,6 +28,10 @@ export function renderPlayerTable(players, options = {}) {
   // spectator's board simply has no star column to click.
   const starred = options.starred ?? null;
   const starHeader = starred ? [{ label: "" }] : [];
+  // A blind draft strips the points column outright — the number is the one
+  // thing the house rule keeps off the board.
+  const hidePoints = Boolean(options.hidePoints);
+  const pointsHeader = hidePoints ? [] : [{ label: "Pts", sort: "points" }];
   const headers = mode === "pitcher"
     ? [
         ...starHeader,
@@ -36,7 +40,7 @@ export function renderPlayerTable(players, options = {}) {
         { label: "Role", sort: "position" },
         { label: "CTRL", sort: "primary" },
         { label: "IP", sort: "ip" },
-        { label: "Pts", sort: "points" },
+        ...pointsHeader,
         ...outcomes.map((outcome) => ({ label: outcome, sort: `chart:${outcome}` }))
       ]
     : [
@@ -47,7 +51,7 @@ export function renderPlayerTable(players, options = {}) {
         { label: "OB", sort: "primary" },
         { label: "Speed", sort: "speed" },
         { label: "Field", sort: "fielding" },
-        { label: "Pts", sort: "points" },
+        ...pointsHeader,
         ...outcomes.map((outcome) => ({ label: outcome, sort: `chart:${outcome}` }))
       ];
 
@@ -95,9 +99,9 @@ export function renderPlayerTable(players, options = {}) {
       return `<tr class="${rowClass}">
         ${starCell}
         <td>${action}</td>
-        <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
+        <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong></td>
         ${detailCells}
-        <td class="card-stat num">${player.points}</td>
+        ${hidePoints ? "" : `<td class="card-stat num">${player.points}</td>`}
         ${renderOutcomeCells(player, outcomes)}
       </tr>`;
     })
@@ -113,10 +117,11 @@ export function renderPlayerTable(players, options = {}) {
   </table></div>`;
 }
 
-export function renderDraftHistoryTable(picks) {
+export function renderDraftHistoryTable(picks, options = {}) {
   if (!picks.length) {
     return `<p class="empty">No picks made yet.</p>`;
   }
+  const hidePoints = Boolean(options.hidePoints);
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
@@ -125,11 +130,11 @@ export function renderDraftHistoryTable(picks) {
         <td class="num">${pickNumber}</td>
         <td class="num">${round}</td>
         <td>${escapeHtml(manager.name)}</td>
-        <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong></td>
+        <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong></td>
         <td>${escapeHtml(playerPosition(player))}</td>
         ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? `$${price.toLocaleString()}` : "&mdash;"}</td>` : ""}
         <td class="num">${playerPrimary(player)}</td>
-        <td class="num">${player.points}</td>
+        ${hidePoints ? "" : `<td class="num">${player.points}</td>`}
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
       </tr>`)
     .join("");
@@ -144,7 +149,7 @@ export function renderDraftHistoryTable(picks) {
         <th>Pos</th>
         ${auction ? `<th class="num">Paid ($)</th>` : ""}
         <th class="num">OB/CT</th>
-        <th class="num">Pts</th>
+        ${hidePoints ? "" : `<th class="num">Pts</th>`}
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
       </tr>
     </thead>
@@ -194,8 +199,8 @@ function chartRanges(chart) {
 // an MLB or fictional card shows the 2005 front. The photo slots inside are
 // empty until hydratePhotos fills them, so a caller that renders cards must
 // hydrate afterwards.
-export function renderPlayerCard(player) {
-  return cardPanelHtml(player);
+export function renderPlayerCard(player, options = {}) {
+  return cardPanelHtml(player, options);
 }
 
 // The draft board's price tier: how dear a card is, in four bands. A different

@@ -175,7 +175,7 @@ function actionsHtml(phase) {
       option.fromIndex));
     }
   } else {
-    buttons.push(action("pitch", "Pitch to him"));
+    buttons.push(action("pitch", "Pitch to batter"));
     buttons.push(action("walk", "Intentional walk"));
     for (const relief of phase.bullpen) {
       buttons.push(action("relieve", `Bring in ${escapeHtml(shortName(stripCardYear(relief.pitcher.name)))}

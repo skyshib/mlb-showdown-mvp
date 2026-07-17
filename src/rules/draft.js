@@ -249,7 +249,11 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
     seed,
     pickNumber: 0,
     complete: false,
-    draftType: options.draftType === "auction" ? "auction" : "snake"
+    draftType: options.draftType === "auction" ? "auction" : "snake",
+    // A display-only house rule: keep every card's printed points off the
+    // board so managers draft on the baseball, not the number. It never
+    // touches the rules — replay and determinism are indifferent to it.
+    hidePoints: Boolean(options.hidePoints)
   };
 
   if (draft.draftType === "auction") {
@@ -1494,19 +1498,57 @@ function needsGroup(entry, group) {
   return entry.missing.some((slot) => (isCornerOutfielder(slot) ? isCornerOutfielder(group) : slot === group));
 }
 
-// What the next man at each spot is worth, as this manager reads the board. Any
-// card is then priced by what it adds OVER him.
-function auctionMarket(draft, manager) {
+// The cards this manager will actually get another crack at. Under random
+// nomination that is NOT the whole board — the board is dealt from a hidden
+// queue and stops when the queue runs dry, leaving a heap of cards that are
+// never auctioned at all (they are swept out for free at the end, by design).
+// Pricing a man against replacements that will never come up for bid is how a
+// computer talked itself out of every fight: it always believed another
+// catcher was on the way. So the market it reads is the cards STILL IN THE
+// QUEUE, current lot included — the men it can genuinely still buy. Under
+// manual nomination any unpicked card can be put up, so there the board is the
+// market.
+function forthcomingPlayers(draft) {
+  if (isRandomNomination(draft)) {
+    const { queue, queueIndex } = draft.auction;
+    const byId = new Map(draft.pool.map((player) => [player.id, player]));
+    return queue.slice(queueIndex).map((id) => byId.get(id)).filter(Boolean);
+  }
+  return availablePlayers(draft);
+}
+
+// Which of the three roster buckets a card fills. Urgency is read at this
+// coarseness — the fine positional matching is left to needsGroup.
+function playerBucket(player) {
+  if (player?.kind === "pitcher") return pitcherRole(player) === "SP" ? "starter" : "bullpen";
+  return "hitter";
+}
+
+function bucketNeed(needs, bucket) {
+  if (bucket === "starter") return needs.starter;
+  if (bucket === "bullpen") return needs.bullpen;
+  return needs.hitter;
+}
+
+// What the next man at each spot is worth, as this manager reads what is still
+// coming. Any card is then priced by what it adds OVER the field it competes
+// with.
+function auctionMarket(draft, manager, forthcoming = forthcomingPlayers(draft)) {
   const model = managerValuation(draft, manager);
   const table = tableNeeds(draft);
   const mine = table.find((entry) => entry.id === manager.id);
   const others = table.filter((entry) => entry.id !== manager.id);
 
   const byGroup = new Map();
-  for (const player of availablePlayers(draft)) {
+  let fieldSum = 0;
+  let fieldCount = 0;
+  for (const player of forthcoming) {
     const group = poolGroup(player);
     if (!byGroup.has(group)) byGroup.set(group, []);
-    byGroup.get(group).push(model.value(player));
+    const value = model.value(player);
+    byGroup.get(group).push(value);
+    fieldSum += value;
+    fieldCount += 1;
   }
   const supply = new Map();
   const rivalsFor = new Map();
@@ -1516,35 +1558,91 @@ function auctionMarket(draft, manager) {
     rivalsFor.set(group, others.filter((entry) => needsGroup(entry, group)).length);
   }
   const wants = (group) => (mine ? needsGroup(mine, group) : false);
-  return { model, values: byGroup, supply, rivalsFor, wants };
+  // The mean of the WHOLE remaining field — the outside anchor, so a card is
+  // read against the room and not only against its own position.
+  const fieldMean = fieldCount ? fieldSum / fieldCount : 0;
+  return { model, values: byGroup, supply, rivalsFor, wants, fieldMean };
 }
 
-// The man you get INSTEAD of him — which is the whole question, and which means
-// he cannot be his own replacement. Leaving the card on the block in the list it
-// is measured against was a real bug: an unopposed manager compared the best
-// catcher on the board with the best catcher on the board, found no gain in it,
-// and passed on catchers for ever.
-//
-// The rivals take the men above him; the one you are left holding is the next
-// one down from there. If nobody else wants the spot you simply take the next
-// card at your leisure — so the most he can be worth is the step up from it. And
-// if he is the last man at a spot you need, there is nobody to fall back on: his
-// replacement is nothing, his surplus is everything, and you pay.
-function auctionReplacement(market, player) {
-  const group = poolGroup(player);
-  const values = market.values.get(group) ?? [];
-  if (values.length <= 1) return 0;
+// The men at his spot this manager could get instead — himself dropped once, so
+// a card is never measured against a copy of itself. Sorted best-first.
+function auctionAlternatives(market, player) {
+  const values = market.values.get(poolGroup(player)) ?? [];
   const value = market.model.value(player);
-  let rank = values.findIndex((item) => item <= value);
-  if (rank < 0) rank = values.length - 1;
-  const rivals = market.rivalsFor.get(group) ?? 0;
-  const step = Math.min(rivals, values.length - 2);
-  return step < rank ? values[step] : values[step + 1];
+  const alts = [];
+  let droppedSelf = false;
+  for (const other of values) {
+    if (!droppedSelf && other === value) {
+      droppedSelf = true;
+      continue;
+    }
+    alts.push(other);
+  }
+  return alts;
 }
 
-// The surplus of a card over the man this manager could still get instead.
-function auctionSurplus(market, player) {
-  return Math.max(0, market.model.value(player) - auctionReplacement(market, player));
+// What a card is worth to this manager: his value over a blended REFERENCE
+// PRICE for his spot — a mix, as the name promises, of his own position and the
+// whole room. Four readings feed the reference: the REPLACEMENT (the worst man
+// left at his position, the free scrub he falls back to), the NEXT man down
+// (the immediate step behind him), the POSITION mean (the typical man at his
+// spot), and the FIELD mean (the typical man anywhere). The next man and the
+// position carry most of the weight, and that is the point: if the second-best
+// catcher is nearly as good, the reference sits just under the best one and his
+// surplus is a pittance — you do not pay a fortune for the best of a similar
+// bunch. Let one man tower over that field, though, and the reference falls away
+// beneath him and he is worth a fight. When he is the last man at his spot there
+// is no position to read, so he is priced against the room alone and scarcity
+// speaks for itself.
+const WORTH_REPLACEMENT = 0.15;
+const WORTH_NEXT = 0.35;
+const WORTH_POSITION = 0.3;
+const WORTH_FIELD = 0.2;
+
+function auctionWorth(market, player) {
+  const value = market.model.value(player);
+  const alts = auctionAlternatives(market, player);
+  if (!alts.length) {
+    // Last man at his spot: nothing to fall back to there, priced against the
+    // room at large — so a scarce position commands real money.
+    return Math.max(0, value - WORTH_FIELD * market.fieldMean);
+  }
+  const replacement = alts[alts.length - 1];
+  const positionMean = alts.reduce((sum, other) => sum + other, 0) / alts.length;
+  // The man immediately below him; when he is the worst, he falls back on
+  // himself, so this reading credits him nothing rather than his whole value.
+  const below = alts.filter((other) => other < value);
+  const nextDown = below.length ? below[0] : value;
+  const reference =
+    WORTH_REPLACEMENT * replacement +
+    WORTH_NEXT * nextDown +
+    WORTH_POSITION * positionMean +
+    WORTH_FIELD * market.fieldMean;
+  return Math.max(0, value - reference);
+}
+
+// How badly this manager needs to buy SOMETHING at this spot before its chances
+// run out. Worth says how good the card is; urgency says whether it can afford
+// to be choosy. It weighs the holes it still has at the card's bucket against
+// the men at that bucket STILL TO COME (this lot included). Early, with the
+// whole queue ahead, that ratio is small and it stays patient and picky; as the
+// bucket drains — or as it falls behind and its holes outnumber what is left —
+// the ratio climbs and it reaches for full value; the last man at a bucket it
+// still needs is worth all of him. Rivals are not counted here: the scarcity
+// multiplier already leans on them, and losing contested lots thins the supply
+// on its own. The same reading holds under manual nomination against the
+// thinning board.
+const URGENCY_PATIENT = 0.5; // holes-per-remaining below this: no hurry
+const URGENCY_DESPERATE = 1; // holes at or above the men left to fill them: all in
+
+function auctionUrgency(manager, player, forthcoming) {
+  const bucket = playerBucket(player);
+  const need = bucketNeed(getRosterNeeds(manager.roster), bucket);
+  if (need <= 0) return 0;
+  const supply = forthcoming.reduce((count, other) => count + (playerBucket(other) === bucket ? 1 : 0), 0);
+  if (supply <= 0) return 1;
+  const pressure = need / supply;
+  return Math.max(0, Math.min(1, (pressure - URGENCY_PATIENT) / (URGENCY_DESPERATE - URGENCY_PATIENT)));
 }
 
 // Two managers with the same budget and the same board should not arrive at the
@@ -1598,26 +1696,35 @@ function auctionWillingness(draft, manager, player) {
     : draft.rosterSize - manager.roster.length;
   if (openSlots <= 0) return 0;
 
-  const market = auctionMarket(draft, manager);
-  const surplus = auctionSurplus(market, player);
+  const forthcoming = forthcomingPlayers(draft);
+  const market = auctionMarket(draft, manager, forthcoming);
+  const value = market.model.value(player);
+  const worthBase = auctionWorth(market, player);
 
-  // THE PASS. He is no better than the man you can still have for the minimum,
-  // so let him go and take the man. This is the whole point: it is what stops
-  // a computer paying real money for the worst catcher on the board, and it is
-  // what leaves it the money to win the fights that are worth having.
-  if (surplus <= 0) return 0;
+  // As the chances to fill this hole run out, a card is worth less what it beats
+  // the field by and more what it plainly is: urgency slides worth from surplus
+  // toward full value. At the limit — the last man at a spot you still need —
+  // it is worth all of him, which is the whole of "bid the max on the last lot."
+  const urgency = auctionUrgency(manager, player, forthcoming);
+  const worth = worthBase + urgency * (value - worthBase);
 
-  // What the REST of the roster is going to cost, in surplus: the best cards
-  // still on the board for the slots still open. The budget is shared out over
-  // that, so a manager holds money back for the holes it has not filled yet
-  // instead of spending to its cap on whatever happens to come up first.
-  const plan = availablePlayers(draft)
-    .map((item) => auctionSurplus(market, item))
+  // THE PASS. He is no better than the man you can still have for the minimum
+  // AND you are in no hurry, so let him go and take the man. This is what stops
+  // a computer paying real money for the worst catcher on the board; urgency is
+  // what stops it passing forever and ending the draft rich and empty-handed.
+  if (worth <= 0) return 0;
+
+  // What the REST of the roster is going to cost, in worth: the best cards still
+  // COMING for the slots still open. The budget is shared out over that, so a
+  // manager holds money back for the holes it has not filled yet instead of
+  // spending to its cap on whatever happens to come up first.
+  const plan = forthcoming
+    .map((item) => auctionWorth(market, item))
     .sort((a, b) => b - a)
     .slice(0, Math.max(1, openSlots));
-  const planned = plan.reduce((sum, value) => sum + value, 0) || surplus;
+  const planned = plan.reduce((sum, entry) => sum + entry, 0) || worthBase;
 
-  const share = surplus / planned;
+  const share = worth / planned;
   const raw = maxBid
     * share
     * auctionAggression(draft, manager, player)

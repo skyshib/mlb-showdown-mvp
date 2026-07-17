@@ -291,7 +291,7 @@ function sellConfirmActions(app, card) {
         }
       }
     },
-    { label: "NO &mdash; KEEP HIM", run: () => { app.screen.confirmSell = null; } }
+    { label: "NO &mdash; KEEP", run: () => { app.screen.confirmSell = null; } }
   ];
 }
 
@@ -809,7 +809,7 @@ export const binderScreen = {
       </div></div>
       <div class="gq-textbox">${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">${
         app.screen.actionMenu ? "Z picks an action. X closes."
-          : swapping ? "Z benches him for your card. X cancels."
+          : swapping ? "Z benches them for your card. X cancels."
           : "Z/ENTER opens card actions &middot; F finds &middot; &#9664;/&#9654; page by position &middot; &#9670; = on team &middot; &#9733; = keeper. X to leave."
       }</p></div>
     </div>`;
@@ -1234,7 +1234,7 @@ export const teamScreen = {
           picking
             ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels."
             : switching
-              ? "Z gives him the spot; the man who had it takes his. X cancels."
+              ? "Z gives them the spot; the one who had it takes theirs. X cancels."
               : save.activeSeries
                 ? `SERIES IN PROGRESS — swaps wait until it ends. &#9664;/&#9654; ${page === "arms" ? "the bats" : "the arms"}.`
                 : `Z opens a card's actions &middot; &#9664;/&#9654; ${page === "arms" ? "THE BATS" : "THE ARMS"}. X to leave.`
@@ -1361,7 +1361,7 @@ export const lineupScreen = {
         <div class="gq-card-side">${selected ? cardPanelHtml(selected) : ""}</div>
       </div></div>
       <div class="gq-textbox"><p class="gq-dim">${
-        grabbed ? "Carry him with the arrows. Z sets him down." : "Z grabs a hitter to move him. X to leave."
+        grabbed ? "Carry them with the arrows. Z sets them down." : "Z grabs a hitter to move them. X to leave."
       }</p></div>
     </div>`;
   },
@@ -1537,7 +1537,7 @@ function packSellActions(app, card) {
       }
     },
     {
-      label: "NO &mdash; KEEP HIM",
+      label: "NO &mdash; KEEP",
       run: () => {
         app.screen.confirmSell = null;
         app.screen.menuIndex = 0;
@@ -1565,7 +1565,7 @@ function packFooter(app, card, cards) {
         { label: "CANCEL" }
       ],
       pickIndex
-    )}<p class="gq-dim">Z benches him for your card. X cancels.</p>`;
+    )}<p class="gq-dim">Z benches them for your card. X cancels.</p>`;
   }
 
   const items = card && app.screen.confirmSell === card.id
@@ -1576,7 +1576,7 @@ function packFooter(app, card, cards) {
   // a plain label — so hand it markup, the way the action menus do.
   const rows = items.map((item) => ({ html: item.label, disabled: item.disabled }));
   return `${menuHtml(rows, index)}<p class="gq-dim">${
-    app.screen.confirmSell ? "Z answers. X keeps him."
+    app.screen.confirmSell ? "Z answers. X keeps them."
       : `Z picks &middot; &#9650;/&#9660; moves${revealed > 1 ? " &middot; &#9664;/&#9654; looks back through the pulls" : ""}`
   }</p>`;
 }

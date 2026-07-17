@@ -93,7 +93,7 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
     if (steal && steal.costRank - steal.productionRank > 0) {
       awards.push(award("steal", byMoney ? "Bargain of the auction" : "Steal of the draft", steal.line,
         `${label(steal.cost)}, finished #${steal.productionRank} in WPA`,
-        byMoney ? "Nobody else wanted him. Nobody else got him." : "Late-round pick, front-of-the-draft production."));
+        byMoney ? "Nobody else wanted them. Nobody else got them." : "Late-round pick, front-of-the-draft production."));
     }
 
     // The cards the room paid up for: the priciest few in an auction, the first
@@ -103,7 +103,7 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
     if (bust && bust.productionRank - bust.costRank > 0) {
       awards.push(award("bust", byMoney ? "Bust of the auction" : "Bust of the draft", bust.line,
         `${label(bust.cost)}, finished #${bust.productionRank} in WPA`,
-        byMoney ? "The room bid him up. The room was wrong." : "First three rounds. This is a safe space."));
+        byMoney ? "The room bid them up. The room was wrong." : "First three rounds. This is a safe space."));
     }
   }
 

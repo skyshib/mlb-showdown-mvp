@@ -321,7 +321,7 @@ function battleMenuItems(app, phase) {
     items.push(rostersItem(), gameLogItem(), fastForwardItem());
     return items;
   }
-  const items = [{ label: "PITCH TO HIM", run: (a) => resolveWithDrama(a, () => actPitch(a.screen.battle)) }];
+  const items = [{ label: "PITCH TO BATTER", run: (a) => resolveWithDrama(a, () => actPitch(a.screen.battle)) }];
   items.push({
     label: "INTENTIONAL WALK",
     run: (a) => afterAction(a, actIntentionalWalk(a.screen.battle))
@@ -464,7 +464,7 @@ function resolveWithDrama(app, act) {
 // to follow. A die that starts tumbling for a double play before you have been
 // told there IS a ground ball is a die you are watching for no reason.
 const SWING_CALL = {
-  SO: "STRUCK HIM OUT",
+  SO: "STRUCK OUT",
   GB: "GROUND BALL",
   FB: "FLY BALL",
   PU: "POPPED IT UP",
@@ -482,8 +482,8 @@ const SWING_CALL = {
 function needsLine(attempt) {
   const needs = fieldingCheckNeeds(attempt);
   if (!needs) return "";
-  if (needs.certain) return "THEY HAVE HIM DEAD TO RIGHTS";
-  if (needs.impossible) return "NOTHING CAN CATCH HIM";
+  if (needs.certain) return "THEY HAVE THE RUNNER DEAD TO RIGHTS";
+  if (needs.impossible) return "NOTHING CAN CATCH THEM";
   return `DEFENSE NEEDS A ${needs.needed}`;
 }
 
@@ -1059,7 +1059,7 @@ function renderPen(app, battle, trainer, phase) {
         <p class="gq-dim">${moundLine(mound)}</p>
       </div>
     </div></div>
-    <div class="gq-textbox"><p class="gq-dim">A brings him in. X leaves your arm in the game.</p></div>
+    <div class="gq-textbox"><p class="gq-dim">A brings them in. X leaves your arm in the game.</p></div>
   </div>`;
 }
 
@@ -1636,7 +1636,7 @@ export const battleResultScreen = {
           <b style="font-size:6cqw">${outcome.won ? "&#9733; W &#9733;" : "L"}</b>
           <p class="gq-mt">${outcome.won
             ? `+$${outcome.coins}${outcome.rematch ? ` <span class="gq-dim">REMATCH RATE</span>` : ""}`
-            : `NO FEE. COME BACK AND TAKE HIM.`}</p>
+            : `NO FEE. COME BACK AND TAKE THEM.`}</p>
           ${outcome.badge ? `<p><b>THE ${escapeHtml(outcome.badge.toUpperCase())} BADGE IS YOURS!</b><br><span class="gq-dim">NEW CHALLENGERS AWAIT.</span></p>` : ""}
           ${outcome.pack ? `<p>BONUS: A BOOSTER PACK!</p>` : ""}
           ${outcome.cardClaim ? `<p>WINNER'S RULE: TAKE A CARD FROM THEIR ROSTER!</p>` : ""}

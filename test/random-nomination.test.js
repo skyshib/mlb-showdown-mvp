@@ -8,7 +8,9 @@ import {
   auctionMaxBid,
   autopick,
   canNominatePlayer,
+  cpuSealedBid,
   createDraft,
+  auctionLotPlayer,
   isRandomNomination,
   nominationQueueRemaining,
   nextQueuedPlayer,
@@ -328,4 +330,59 @@ test("an action log replays to the same draft", () => {
     draft.managers.map((manager) => manager.roster.map((card) => card.id))
   );
   assert.deepEqual(replay.auction.budgets, draft.auction.budgets);
+});
+
+// The room that started all this in earnest: computers priced every card against
+// replacements sitting on the board that the queue would never actually deal, so
+// they always believed a cheaper man was coming, passed on almost everyone, and
+// ended the draft rich and rostered only by the free sweep. A computer must read
+// its market as the cards STILL TO COME and spend against the holes it has.
+test("computers spend their budget instead of hoarding it", () => {
+  const budget = 5000;
+  for (const managerCount of [2, 3, 4]) {
+    for (const seed of ["spend-a", "spend-b"]) {
+      const { draft } = roomOf(managerCount, seed);
+      let guard = 0;
+      while (!draft.complete && guard < 5000) {
+        guard += 1;
+        autopick(draft);
+      }
+      assert.ok(draft.complete);
+      for (const manager of draft.managers) {
+        const spent = budget - draft.auction.budgets[manager.id];
+        assert.ok(
+          spent >= 0.4 * budget,
+          `${managerCount}/${seed}: ${manager.name} spent only ${spent} of ${budget} — hoarding`
+        );
+        assert.ok(manager.roster.length >= 13, `${manager.name} finished short: ${manager.roster.length}`);
+      }
+    }
+  }
+});
+
+// The whole of "bid the max on the last lot": when the last man at a bucket it
+// still needs comes up, there is no replacement to fall back on and no later
+// round to catch one, so a computer bids all it can.
+test("the last man at a needed bucket is bid to the max", () => {
+  const { draft, pool } = roomOf(2, "last-man");
+  const cpu = draft.managers[0];
+
+  // Drive the board down to a single unpicked card and put it up as the final
+  // lot, with the buyer's roster still empty so the bucket is genuinely needed.
+  const survivor = pool.find((card) => card.kind === "hitter");
+  for (const card of pool) if (card.id !== survivor.id) draft.pickedIds.add(card.id);
+  draft.auction.queue = [survivor.id];
+  draft.auction.queueIndex = 0;
+  draft.auction.lot = {
+    playerId: survivor.id,
+    nominatorId: null,
+    round: 1,
+    bids: {},
+    pending: draft.managers.map((manager) => manager.id),
+    tie: null,
+    clock: null
+  };
+
+  assert.equal(auctionLotPlayer(draft).id, survivor.id);
+  assert.equal(cpuSealedBid(draft, cpu), auctionMaxBid(draft, cpu));
 });

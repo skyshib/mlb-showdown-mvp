@@ -224,6 +224,7 @@ function reviveRoom(saved) {
     snakeTimer: draft.clock?.timer ?? null,
     draftType,
     nomination,
+    hidePoints: Boolean(saved.hidePoints),
     auctionBudget,
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
@@ -253,6 +254,7 @@ function persistRoom(store, room) {
     snakeTimer: room.snakeTimer ?? null,
     draftType: room.draftType,
     nomination: room.nomination ?? "manual",
+    hidePoints: Boolean(room.hidePoints),
     auctionBudget: room.auctionBudget,
     auctionTimer: room.auctionTimer,
     cpuNames: room.cpuNames ?? [],
@@ -748,6 +750,9 @@ async function createRoom(store, request, response) {
   const pickTimer = normalizePickTimerSeconds(body.pickTimer);
   const draftType = body.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && body.nomination === "random" ? "random" : "manual";
+  // Display-only house rule: hide every card's printed points. It never touches
+  // the deal or the replay, so it just rides along as a room setting.
+  const hidePoints = Boolean(body.hidePoints);
   const auctionBudget = draftType === "auction" ? normalizeAuctionBudget(body.budget, rosterSize) : null;
   const auctionTimer = draftType === "auction" ? normalizeAuctionTimerConfig(body.auctionTimer) : null;
   const snakeTimer = draftType === "auction" ? null : normalizeSnakeTimerConfig(body.snakeTimer);
@@ -810,6 +815,7 @@ async function createRoom(store, request, response) {
     snakeTimer: draft.clock?.timer ?? null,
     draftType,
     nomination,
+    hidePoints,
     auctionBudget,
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
@@ -1267,6 +1273,7 @@ function roomSnapshot(room, port = null) {
     snakeTimer: room.snakeTimer ?? null,
     draftType: room.draftType ?? "snake",
     nomination: room.nomination ?? "manual",
+    hidePoints: Boolean(room.hidePoints),
     auctionBudget: room.auctionBudget ?? null,
     auctionTimer: room.auctionTimer ?? null,
     managers: room.draft.managers.map((manager) => ({

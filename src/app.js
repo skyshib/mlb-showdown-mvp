@@ -708,6 +708,9 @@ function defaultState() {
     universe: DEFAULT_UNIVERSE,
     draftType: "snake",
     nomination: "manual",
+    // A blind draft: hide every card's printed points until it is drafted, so
+    // managers pick and bid on the baseball rather than the number.
+    hidePoints: false,
     auctionBudget: AUCTION_DEFAULT_BUDGET,
     auctionTimer: {
       reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
@@ -840,6 +843,7 @@ function openRoom(roomId, room) {
   state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
   state.draftType = room.draftType === "auction" ? "auction" : "snake";
   state.nomination = room.nomination === "random" ? "random" : "manual";
+  state.hidePoints = Boolean(room.hidePoints);
   state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, room.rosterSize);
   state.auctionTimer = normalizeAuctionTimerState(room.auctionTimer);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
@@ -887,6 +891,7 @@ function rebuildOnlineDraft(room) {
     {
       draftType: state.draftType,
       nomination: state.nomination,
+      hidePoints: state.hidePoints,
       budget: state.auctionBudget,
       // A room that names no clock has no clock — the same default reviveRoom
       // takes on the server. Left undefined this normalizes to a TIMED auction
@@ -1235,7 +1240,7 @@ function renderUniverseFieldset(key) {
       <small>The ${EARLIEST_DECADE}s bucket folds in the dead-ball era and everything before it. A player who lasted three decades prints three cards &mdash; you may only roster one of them.</small>
     </div>
     ${option("franchise", "MLB: by franchise",
-      "One club's all-time roster, every player rated on his years there.")}
+      "One club's all-time roster, every player rated on their years there.")}
     <div class="pool-suboptions" ${choice.pick === "franchise" ? "" : "hidden"}>
       <label class="franchise-field">
         Club
@@ -1256,7 +1261,8 @@ function renderUniverseFieldset(key) {
 function draftModeFromForm(form) {
   const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && form.get("nomination") === "random" ? "random" : "manual";
-  return { draftType, nomination };
+  const hidePoints = Boolean(form.get("hidePoints"));
+  return { draftType, nomination, hidePoints };
 }
 
 // Whether the chosen card set can actually seat the room, phrased for the setup
@@ -1591,6 +1597,13 @@ function renderSetup(setupError = "") {
           </label>
         </div>
       </fieldset>
+      <fieldset class="pool-mode hide-points-mode">
+        <legend>Points</legend>
+        <label class="pool-option">
+          <input type="checkbox" name="hidePoints" ${state.hidePoints ? "checked" : ""} />
+          <span><strong>Blind draft</strong><small>Hide every card's printed points until it is drafted &mdash; the board, the card faces, and the picks all go numberless. Card colours stay, so you still see roughly how good a card is, just not its exact worth.</small></span>
+        </label>
+      </fieldset>
       ${renderUniverseFieldset(state.universe)}
       </div>
       <div class="setup-actions">
@@ -1728,6 +1741,7 @@ function renderSetup(setupError = "") {
     const mode = draftModeFromForm(form);
     state.draftType = mode.draftType;
     state.nomination = mode.nomination;
+    state.hidePoints = mode.hidePoints;
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
     state.auctionTimer = normalizeAuctionTimerInput(form);
     const snakeClock = snakeClockFromForm(form);
@@ -1745,6 +1759,7 @@ function renderSetup(setupError = "") {
     state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
       draftType: state.draftType,
       nomination: state.nomination,
+      hidePoints: state.hidePoints,
       budget: state.auctionBudget,
       timer: state.auctionTimer,
       snakeTimer: snakeTimerConfig(state, state.draftType)
@@ -1779,7 +1794,7 @@ function renderSetup(setupError = "") {
     const universe = universeFromForm(form);
     const snakeClock = snakeClockFromForm(form);
     const pickTimer = snakeClock.pickTimerSeconds;
-    const { draftType, nomination } = draftModeFromForm(form);
+    const { draftType, nomination, hidePoints } = draftModeFromForm(form);
     const budget = normalizeAuctionBudget(form.get("auctionBudget"), 13);
     const auctionTimer = normalizeAuctionTimerInput(form);
     const cpuChecked = form.getAll("cpu").map(String);
@@ -1798,6 +1813,7 @@ function renderSetup(setupError = "") {
         cpu: cpuChecked.filter((name) => managers.includes(name)),
         draftType,
         nomination,
+        hidePoints,
         budget,
         auctionTimer,
         snakeTimer: snakeTimerConfig(snakeClock, draftType)
@@ -1873,6 +1889,13 @@ function renderDraft() {
   // so a palette hung off the dispatcher alone never runs for the screen that
   // most needs it.
   applyFranchisePalette(state.universe);
+  // A blind draft has no points column to sort by, so the default "best points"
+  // ordering — and any points sort a manager left set from an earlier draft —
+  // falls back to the closest neutral one.
+  if (pointsHidden() && state.filters.sort === "points") {
+    state.filters.sort = "primary";
+    state.filters.sortDirection = "desc";
+  }
   // Typing into the card search re-renders the draft on every keystroke, and a
   // re-render replaces every node on the page — so the input the letter had just
   // gone into was thrown away, focus and caret with it, and the next letter had
@@ -1955,7 +1978,7 @@ function renderDraft() {
         <button class="game-tab ${historyTab ? "active" : ""}" data-action="draft-tab" data-tab="history">Draft history</button>
       </div>
       ${historyTab
-        ? renderDraftHistoryTable(draftHistory(draft))
+        ? renderDraftHistoryTable(draftHistory(draft), { hidePoints: pointsHidden() })
         : boardTab
         ? renderBigBoard(boardOwner, draft)
         : `<div class="section-head">
@@ -1966,6 +1989,7 @@ function renderDraft() {
       ${renderComparePanel(draft)}
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
+        hidePoints: pointsHidden(),
         starred: watchlistOwner() ? starredIds() : null,
         compared: new Set(state.compare ?? []),
         fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
@@ -2222,7 +2246,7 @@ function renderAuctionLotPanel(draft) {
       <div>
         <p class="eyebrow">${lot.round === 2 ? "Tie break" : "On the block"} &middot; ${nominator ? `nominated by ${escapeHtml(nominator.name)}` : "dealt by the queue"}</p>
         <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}
-          <span class="lot-player-meta">${escapeHtml(playerPosition(player))} &middot; ${player.points} pts</span></h2>
+          <span class="lot-player-meta">${escapeHtml(playerPosition(player))}${pointsHidden() ? "" : ` &middot; ${player.points} pts`}</span></h2>
       </div>
     </div>
     ${tieNote}
@@ -2337,7 +2361,7 @@ function bindDraftActions() {
       state.filters[filterButton.dataset.filter] = filterButton.dataset.filterValue;
       if (filterButton.dataset.filter === "type") {
         state.filters.position = "all";
-        state.filters.sort = "points";
+        state.filters.sort = pointsHidden() ? "primary" : "points";
         state.filters.sortDirection = "desc";
       }
       saveState();
@@ -3985,7 +4009,7 @@ function renderPlayerPreviewName(player, name, tagName = "span", className = "")
     class="${escapeHtml(classes)}"
     tabindex="0"
     data-preview-id="${escapeHtml(player.id)}"
-    data-preview-card="${escapeHtml(renderPlayerCard(player))}"
+    data-preview-card="${escapeHtml(previewCard(player))}"
   >${escapeHtml(name)}</${tagName}>`;
 }
 
@@ -4301,6 +4325,21 @@ function renderAdvanceAttempts(attempts) {
     .join("; ");
 }
 
+// The blind-draft rule, asked once and answered the same everywhere: keep a
+// single card's printed points off the screen. Only the numerals go — the
+// rarity and heat COLOURS stay, so a card still reads as roughly good or bad,
+// just not exactly how much — and aggregate team totals are left alone, because
+// the rule is about one card's worth, not the shape of a finished roster.
+function pointsHidden() {
+  return Boolean(state.draft?.hidePoints);
+}
+
+// A floating card-face preview that obeys the blind-draft rule wherever it
+// appears — over the board, the dock, a roster slot.
+function previewCard(player) {
+  return renderPlayerCard(player, { hidePoints: pointsHidden() });
+}
+
 function renderRoster(manager, draft) {
   const counts = rosterCounts(manager.roster);
   const auction = isAuctionDraft(draft);
@@ -4330,7 +4369,7 @@ function renderRoster(manager, draft) {
     ? `<button class="small seat-button" data-action="seat" data-manager-id="${escapeHtml(manager.id)}" data-cpu="${manager.cpu ? "0" : "1"}">${manager.cpu ? "Hand back" : "Hand to CPU"}</button>`
     : "";
   return `<article class="roster">
-    <h3>${escapeHtml(manager.name)} <span class="roster-points">${totalPoints} pts</span>${seatButton}</h3>
+    <h3>${escapeHtml(manager.name)} ${pointsHidden() ? "" : `<span class="roster-points">${totalPoints} pts</span>`}${seatButton}</h3>
     ${persona ? `<p class="persona" title="${escapeHtml(persona.blurb)}"><span class="persona-tag">${escapeHtml(persona.name)}</span><span class="persona-blurb">${escapeHtml(persona.blurb)}</span></p>` : ""}
     <p>${draftedLine}${budgetLine}</p>
     <div class="target-row">
@@ -4374,8 +4413,8 @@ function renderMiniRosterSlot(player, slotLabel, slotContext = {}) {
   const heat = slotContext.heatScale ? heatStyle(heatValue(player, slotContext.heatScale, slotContext.prices), slotContext.heatScale) : "";
   return `<div class="mini-roster-slot filled-mini-slot heat${flash}" style="${heat}">
     <span class="mini-slot-label">${escapeHtml(slotLabel)}</span>
-    <strong class="mini-slot-name player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
-    <span class="mini-slot-meta">${escapeHtml(rosterSlotDescription(player, slotLabel))} | ${player.points} pts</span>
+    <strong class="mini-slot-name player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(previewCard(player))}">${escapeHtml(player.name)}</strong>
+    <span class="mini-slot-meta">${escapeHtml(rosterSlotDescription(player, slotLabel))}${pointsHidden() ? "" : ` | ${player.points} pts`}</span>
     ${price !== undefined ? `<span class="mini-slot-price">${money(price)}</span>` : ""}
   </div>`;
 }
@@ -4439,7 +4478,7 @@ function renderWarGrid(draft, history) {
         }
         return `<td class="war-cell filled heat" style="${heatStyle(pick.player.points, scale)}">
           <span class="war-cell-name">${escapeHtml(shortCardName(pick.player.name))}</span>
-          <span class="war-cell-meta">${escapeHtml(playerPosition(pick.player))} &middot; ${pick.player.points}</span>
+          <span class="war-cell-meta">${escapeHtml(playerPosition(pick.player))}${pointsHidden() ? "" : ` &middot; ${pick.player.points}`}</span>
         </td>`;
       })
       .join("");
@@ -4510,10 +4549,17 @@ function renderWarRoom() {
     .map((manager) => {
       const needs = dockNeedsSummary(manager);
       const points = manager.roster.reduce((sum, player) => sum + player.points, 0);
+      // A running total is a specific card's points in disguise — one card early,
+      // or the gap between two picks — so the blind draft drops it and keeps the
+      // budget line.
+      const budgetLead = auction && !draft.complete
+        ? `${money(auctionBudget(draft, manager))} left &middot; max ${money(auctionMaxBid(draft, manager))}`
+        : "";
+      const headerMeta = [budgetLead, pointsHidden() ? "" : `${points} pts`].filter(Boolean).join(" &middot; ");
       return `<section class="war-team">
         <header>
           <h3>${escapeHtml(manager.name)}</h3>
-          <span>${auction && !draft.complete ? `${money(auctionBudget(draft, manager))} left &middot; max ${money(auctionMaxBid(draft, manager))} &middot; ` : ""}${points} pts</span>
+          <span>${headerMeta}</span>
         </header>
         ${renderWarTeamPositions(manager, auction, prices, heatScale)}
         ${needs ? `<footer>needs ${escapeHtml(needs)}</footer>` : ""}
@@ -4544,7 +4590,7 @@ function renderWarRoom() {
     <div class="war-main">
       <section class="war-spotlight">
         <p class="war-spotlight-label">${spotlightLabel}</p>
-        ${spotlightPlayer ? `<div class="war-card">${renderPlayerCard(spotlightPlayer)}</div>` : ""}
+        ${spotlightPlayer ? `<div class="war-card">${previewCard(spotlightPlayer)}</div>` : ""}
         ${bidBoard}
       </section>
       <div class="war-teams">${teams}</div>
@@ -4605,7 +4651,7 @@ function renderWarTeamPositions(manager, auction, prices, heatScale) {
     const chips = players
       .map((player) => {
         const tag = auction
-          ? (heatBy() === "points" ? `${player.points}` : money(prices.get(player.id)))
+          ? (heatBy() === "points" ? (pointsHidden() ? undefined : `${player.points}`) : money(prices.get(player.id)))
           : undefined;
         return `<span class="war-pos-chip heat" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}">${escapeHtml(dockChipName(player))}${tag !== undefined ? `<em>${tag}</em>` : ""}</span>`;
       })
@@ -4629,7 +4675,7 @@ function renderPoolFloor(draft) {
   const available = availablePlayers(draft);
   const pointsScale = poolPointsScale(draft);
   const previewChip = (label, player) =>
-    `<strong class="player-name-preview" tabindex="0" data-preview-id="pool-${label}-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${label} ${escapeHtml(dockChipName(player))} &middot; ${player.points}</strong>`;
+    `<strong class="player-name-preview" tabindex="0" data-preview-id="pool-${label}-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(previewCard(player))}">${label} ${escapeHtml(dockChipName(player))}${pointsHidden() ? "" : ` &middot; ${player.points}`}</strong>`;
   const items = BOARD_POSITION_GROUPS.filter((group) => needed.has(group))
     .map((group) => {
       const eligible = available.filter((player) => poolGroupEligible(player, group));
@@ -4780,11 +4826,16 @@ function renderHeatLegend(scale) {
         <span class="${dollars ? "on" : ""}">$ paid</span><span class="${dollars ? "" : "on"}">pts</span>
       </button>`
     : "";
+  // A blind draft keeps the colour but drops the numeric points scale — the bar
+  // still reads weaker-to-stronger, it just doesn't put a number on it.
+  const numbersHidden = !dollars && pointsHidden();
+  const lo = numbersHidden ? "" : `${dollars ? "" : "pts "}${show(scale.lo)}`;
+  const hi = numbersHidden ? "" : `${show(scale.hi)}+`;
   return `<span class="heat-legend" aria-label="Colour scale for ${dollars ? "winning bids" : "card points"}">
     ${toggle}
-    <em>${dollars ? "" : "pts "}${show(scale.lo)}</em>
+    <em>${lo}</em>
     <i class="heat-bar"></i>
-    <em>${show(scale.hi)}+</em>
+    <em>${hi}</em>
   </span>`;
 }
 
@@ -4846,9 +4897,9 @@ function renderDockSlot(player, label, auction, prices, heatScale) {
     return `<span class="dock-slot empty-dock-slot"><small>${escapeHtml(label)}</small><span>open</span></span>`;
   }
   const tag = auction
-    ? (heatBy() === "points" ? `${player.points} pts` : money(prices.get(player.id)))
+    ? (heatBy() === "points" ? (pointsHidden() ? undefined : `${player.points} pts`) : money(prices.get(player.id)))
     : undefined;
-  return `<span class="dock-slot heat player-name-preview" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}" tabindex="0" data-preview-id="dockslot-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">
+  return `<span class="dock-slot heat player-name-preview" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}" tabindex="0" data-preview-id="dockslot-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(previewCard(player))}">
     <small>${escapeHtml(label)}${tag !== undefined ? ` &middot; ${tag}` : ""}</small>
     <span>${escapeHtml(dockChipName(player))}</span>
   </span>`;
@@ -4924,7 +4975,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
         <span>${queued ? `${draft.auction.queueIndex}/${queueTotal} lots called` : `${draft.pickNumber}/${totalPicks} ${auction ? "cards sold" : "picks made"}`}</span>
         ${queued ? `<span>${manager.roster.length} cards</span>` : ""}
         ${auction ? `<span>${money(auctionBudget(draft, manager))} budget left</span>` : ""}
-        <span>${totalPoints} pts</span>
+        ${pointsHidden() ? "" : `<span>${totalPoints} pts</span>`}
         <span>IF ${formatSignedNumber(fieldingSums.infield)}</span>
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
       </div>
@@ -4962,11 +5013,11 @@ function renderBattingOrder(manager) {
       data-order-index="${index}"
       ${mine ? 'draggable="true"' : "disabled"}
       data-preview-id="order-${escapeHtml(manager.id)}-${escapeHtml(player.id)}"
-      data-preview-card="${escapeHtml(renderPlayerCard(player))}"
+      data-preview-card="${escapeHtml(previewCard(player))}"
     >
       <strong>${index + 1}</strong>
       <span>${escapeHtml(player.name)}</span>
-      <em>${escapeHtml(playerPosition(player))} &middot; OB ${player.onBase} &middot; SPD ${player.speed} &middot; ${player.points} pts</em>
+      <em>${escapeHtml(playerPosition(player))} &middot; OB ${player.onBase} &middot; SPD ${player.speed}${pointsHidden() ? "" : ` &middot; ${player.points} pts`}</em>
     </button>`)
     .join("");
   return `<div class="batting-order" aria-label="${escapeHtml(manager.name)} batting order">
@@ -5036,12 +5087,12 @@ function renderBenchCard(player, manager) {
     ${mine ? "" : "disabled"}
     data-player-id="${escapeHtml(player.id)}"
     data-preview-id="bench-${escapeHtml(manager.id)}-${escapeHtml(player.id)}"
-    data-preview-card="${escapeHtml(renderPlayerCard(player))}"
+    data-preview-card="${escapeHtml(previewCard(player))}"
     ${mine ? 'draggable="true"' : ""}
   >
     <strong>${escapeHtml(player.kind === "pitcher" ? pitcherRoleOf(player) : playerPosition(player))}</strong>
     <span>${escapeHtml(player.name)}</span>
-    <em>${player.points} pts</em>
+    ${pointsHidden() ? "" : `<em>${player.points} pts</em>`}
   </button>`;
 }
 
@@ -5103,12 +5154,12 @@ function renderLineupSlot(player, slotLabel, manager) {
     data-slot-label="${escapeHtml(slotLabel)}"
     ${mine ? "" : "disabled"}
     ${player && mine ? `data-player-id="${escapeHtml(player.id)}" draggable="true"` : player ? `data-player-id="${escapeHtml(player.id)}"` : ""}
-    ${player ? `data-preview-id="slot-${escapeHtml(manager.id)}-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}"` : ""}
+    ${player ? `data-preview-id="slot-${escapeHtml(manager.id)}-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(previewCard(player))}"` : ""}
     ${isValidTarget ? `aria-label="Move selected player to ${escapeHtml(slotLabel)}"` : ""}
   >
     <strong>${escapeHtml(slotLabel)}</strong>
     <span>${player ? escapeHtml(player.name) : "open"}</span>
-    <em>${player ? `${escapeHtml(description)} &middot; ${player.points} pts` : "open"}</em>
+    <em>${player ? `${escapeHtml(description)}${pointsHidden() ? "" : ` &middot; ${player.points} pts`}` : "open"}</em>
   </button>`;
 }
 
@@ -5286,7 +5337,8 @@ function renderFilters() {
     ? ["all", "SP", "RP"]
     : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", ...(hasDesignatedHitters ? ["DH"] : [])];
   const sortOptions = [
-    ["points", "Best points"],
+    // A blind draft drops "best points": there is no points column to sort on.
+    ...(pointsHidden() ? [] : [["points", "Best points"]]),
     ["primary", "Best OB/CTRL"],
     ["power", "Best chart"],
     ["position", "Position"],
@@ -5789,8 +5841,8 @@ function renderDraftDone(draft) {
     const line = recap.auction
       ? `<p class="recap-line">
           to <strong>${escapeHtml(pick.manager.name)}</strong> for <strong>${money(pick.price)}</strong>.
-          He is worth <strong>${pick.player.points}</strong> points, and this room paid
-          ${money(Math.round(recap.rate * 100) / 100)} a point &mdash; so he ought to have gone for about
+          They are worth <strong>${pick.player.points}</strong> points, and this room paid
+          ${money(Math.round(recap.rate * 100) / 100)} a point &mdash; so they ought to have gone for about
           <strong>${money(Math.round(pick.worth))}</strong>.
         </p>
         <p class="recap-swing">${
@@ -5802,14 +5854,14 @@ function renderDraftDone(draft) {
         }</p>`
       : `<p class="recap-line">
           to <strong>${escapeHtml(pick.manager.name)}</strong> at pick ${pick.pickNumber},
-          and the set ranks him <strong>#${pick.rank}</strong> of ${draft.pool.length} by points.
+          and the set ranks them <strong>#${pick.rank}</strong> of ${draft.pool.length} by points.
         </p>
         <p class="recap-swing">${
           pick.swing < 0
-            ? `He fell ${Math.abs(pick.swing)} picks further than his price says he should have.`
+            ? `They fell ${Math.abs(pick.swing)} picks further than their price says they should have.`
             : pick.swing > 0
-              ? `Taken ${pick.swing} picks ahead of his price.`
-              : "Taken exactly where his price says."
+              ? `Taken ${pick.swing} picks ahead of their price.`
+              : "Taken exactly where their price says."
         }</p>`;
     return `<div class="recap-card ${tone}">
       <p class="eyebrow">${label}</p>
@@ -5886,7 +5938,7 @@ function renderComparePanel(draft) {
       const spot = card.kind === "pitcher" ? card.role : positionsLabel(card);
       return `<th>
         <span class="compare-name">${escapeHtml(card.name)}</span>
-        <span class="compare-meta">${escapeHtml(spot)} &middot; ${escapeHtml(rating)} &middot; ${card.points} pts</span>
+        <span class="compare-meta">${escapeHtml(spot)} &middot; ${escapeHtml(rating)}${pointsHidden() ? "" : ` &middot; ${card.points} pts`}</span>
         <button class="small compare-drop" data-action="compare" data-player-id="${escapeHtml(card.id)}" title="Unpin ${escapeHtml(card.name)}">&times;</button>
       </th>`;
     })
@@ -6003,8 +6055,8 @@ function renderBigBoard(manager, draft) {
       return `<li class="board-row${entry.gone ? " gone" : ""}${player.id === nextUp?.id ? " next" : ""}">
         <span class="board-rank">${index + 1}</span>
         <span class="board-name">
-          <strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player))}">${escapeHtml(player.name)}</strong>
-          <small>${escapeHtml(spot)} &middot; ${escapeHtml(rating)} &middot; ${player.points} pts</small>
+          <strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(previewCard(player))}">${escapeHtml(player.name)}</strong>
+          <small>${escapeHtml(spot)} &middot; ${escapeHtml(rating)}${pointsHidden() ? "" : ` &middot; ${player.points} pts`}</small>
         </span>
         ${status}
         <span class="board-controls">
@@ -6326,6 +6378,7 @@ function reviveState(value) {
     draft.draftType = draft.draftType === "auction" ? "auction" : "snake";
     draft.nomination = draft.draftType === "auction" && draft.nomination === "random" ? "random" : "manual";
     draft.unlimitedRoster = draft.nomination === "random";
+    draft.hidePoints = Boolean(draft.hidePoints);
     // A random-nomination draft ends when the queue runs out, not when the
     // rosters fill — they never do, there is no cap to fill to.
     draft.complete = draft.unlimitedRoster
@@ -6351,6 +6404,7 @@ function reviveState(value) {
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
     snakeTimer: normalizeSnakeTimerState(value.snakeTimer),
     maskBids: Boolean(value.maskBids),
+    hidePoints: Boolean(value.hidePoints),
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],

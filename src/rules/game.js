@@ -809,7 +809,8 @@ export function autoRelieve(state, side, bias = AUTO_PULL_BIAS) {
     bullpen: team.pitchers.slice(runtime.pitcherIndex + 1),
     batters: lineupProfile(state[side === "home" ? "away" : "home"].lineup),
     outsRemaining: outsRemainingToPitch(state),
-    bias
+    bias,
+    leverage: stateLeverage(state)
   });
   if (!decision.pull) return null;
   // Bring in THAT arm — the best one out there — not merely the next man along

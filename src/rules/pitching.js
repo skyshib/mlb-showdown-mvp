@@ -148,13 +148,38 @@ const MARGIN_LATE = 0.5;    // the bar with three outs left, and in every extra 
 const REGULATION_OUTS = 27;
 const FLOOR_OUTS = 3;
 
+// Leverage lowers the bar, a little. How much a plate appearance MATTERS —
+// Greg Stoll's leverage index, 1.0 for an average moment, up past 10 for a tie
+// game with the bags full in the ninth — is exactly the thing a skipper reads
+// when he decides how hard to chase a small upgrade. In a moment the game can
+// turn on, an arm a fraction of a control point better is worth spending; in a
+// blowout it is not worth a warm-up toss. So the bar comes down as leverage
+// climbs above an average moment.
+//
+// It is a NUDGE, not a new bar: a fraction of a control point per unit of
+// leverage, capped low, so the drama can shave the margin but never erase it.
+// A blowup in the pen's own math (the desperation clause, the coverage clause)
+// still stands; leverage only bends the ordinary sliding bar, and only enough
+// that a genuine coin-flip upgrade in a genuine crisis gets made.
+const LEVERAGE_WEIGHT = 0.4;   // control points shaved per unit of leverage over average
+const LEVERAGE_MAX_DROP = 1.5; // and no more than this, however wild the moment
+const AVERAGE_LEVERAGE = 1;
+
+export function leverageDrop(leverage = AVERAGE_LEVERAGE) {
+  const li = Number(leverage);
+  if (!Number.isFinite(li)) return 0;
+  return Math.min(LEVERAGE_MAX_DROP, Math.max(0, (li - AVERAGE_LEVERAGE) * LEVERAGE_WEIGHT));
+}
+
 // The bar, at this point in the game. `bias` is the skipper's temperament in
 // control points: positive rides his starter, negative is a quick hook.
-export function pullMargin(outsRemaining = REGULATION_OUTS, bias = 0) {
+// `leverage` shaves it down in moments the game can turn on (see leverageDrop).
+export function pullMargin(outsRemaining = REGULATION_OUTS, bias = 0, leverage = AVERAGE_LEVERAGE) {
   const outs = Number(outsRemaining);
   const clamped = Math.max(FLOOR_OUTS, Number.isFinite(outs) ? outs : REGULATION_OUTS);
   const share = Math.min(1, (clamped - FLOOR_OUTS) / (REGULATION_OUTS - FLOOR_OUTS));
-  return Math.max(0, MARGIN_LATE + (MARGIN_EARLY - MARGIN_LATE) * share + bias);
+  const sliding = MARGIN_LATE + (MARGIN_EARLY - MARGIN_LATE) * share + bias;
+  return Math.max(0, sliding - leverageDrop(leverage));
 }
 
 // The bar when the pen CANNOT cover what is left, which is flat and higher. Late
@@ -186,8 +211,11 @@ const DESPERATION_GAP = 4;
 // tiredness is priced already: it is in his control, which is in the gap. It
 // does not need a second vote.
 //
-// `margin` stays overridable so a caller can ask the question at a bar of its
-// own choosing; leave it alone and the sliding one answers.
+// `leverage` shaves the bar down in moments the game can turn on (see
+// leverageDrop) — the skipper is quicker with the hook when the plate
+// appearance matters. `margin` stays overridable so a caller can ask the
+// question at a bar of its own choosing; leave it alone and the sliding one,
+// bent by leverage, answers.
 export function reliefDecision({
   current,
   currentFatigue = 0,
@@ -195,7 +223,8 @@ export function reliefDecision({
   batters,
   outsRemaining = 27,
   bias = 0,
-  margin = pullMargin(outsRemaining, bias),
+  leverage = AVERAGE_LEVERAGE,
+  margin = pullMargin(outsRemaining, bias, leverage),
   desperationGap = DESPERATION_GAP
 }) {
   const stay = (reason) => ({ pull: false, index: null, reliever: null, reason });
@@ -230,14 +259,14 @@ export function reliefDecision({
   const penOuts = bullpen.reduce((sum, arm) => sum + armOuts(arm), 0);
   const canCover = penOuts >= outsRemaining;
   if (!canCover && gap < desperationGap - EPSILON) {
-    return { ...stay("the pen cannot cover what's left and he is not bad enough to burn it"), ...decision };
+    return { ...stay("the pen cannot cover what's left and the arm on the mound is not bad enough to burn it"), ...decision };
   }
 
   return {
     pull: true,
     index: best.index,
     reliever: best.arm,
-    reason: canCover ? "the pen has a better arm and the innings to spend" : "he is getting hit around; go get him",
+    reason: canCover ? "the pen has a better arm and the innings to spend" : "the arm on the mound is getting hit around; go make the change",
     ...decision
   };
 }

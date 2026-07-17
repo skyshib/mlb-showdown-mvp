@@ -206,11 +206,12 @@ function nameFontSize(name, twoWay) {
 
 // rating: lead with OB/CTRL — for the classic scan tray, where there's no
 // home-plate graphic carrying the number.
-function statLineHtml(card, { rating = false } = {}) {
+function statLineHtml(card, { rating = false, hidePoints = false } = {}) {
   const lead = rating ? `<span>${card.kind === "pitcher" ? `CTRL ${card.control}` : `OB ${card.onBase}`}</span>` : "";
+  const points = hidePoints ? "" : `<span>${card.points} PTS</span>`;
   return card.kind === "pitcher"
-    ? `${lead}<span>${card.points} PTS</span><span>IP ${card.ip}</span><span>${escapeHtml(card.role)}</span>`
-    : `${lead}<span>${card.points} PTS</span><span>SPEED ${card.speed}</span><span>${escapeHtml(positionFieldingLabel(card))}</span>`;
+    ? `${lead}${points}<span>IP ${card.ip}</span><span>${escapeHtml(card.role)}</span>`
+    : `${lead}${points}<span>SPEED ${card.speed}</span><span>${escapeHtml(positionFieldingLabel(card))}</span>`;
 }
 
 // The stadium backdrop behind the strip: blurred crowd lights over outfield
@@ -328,16 +329,17 @@ function fictionalPitcherBadge(card) {
   </svg>`;
 }
 
-function fictionalCardHtml(card, count) {
+function fictionalCardHtml(card, count, hidePoints = false) {
   const pitcher = card.kind === "pitcher";
   const rarity = fictionalRarity(card);
   const frame = pitcher
     ? "vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER-NO-RIBBON.png"
     : "vendor/showdownbot/2004-Hitter-BLUE-NO-FOOTER.png";
   const role = card.role === "SP" ? "STARTER" : "RELIEVER";
+  const points = hidePoints ? [] : [`${card.points} PT`];
   const stats = pitcher
-    ? [`${card.points} PT`, role, `IP ${card.ip}`, `THROWS ${card.throws}`]
-    : [`${card.points} PT`, `SPEED ${card.speed}`, `BATS ${card.bats}`, positionFieldingLabel(card)];
+    ? [...points, role, `IP ${card.ip}`, `THROWS ${card.throws}`]
+    : [...points, `SPEED ${card.speed}`, `BATS ${card.bats}`, positionFieldingLabel(card)];
   const rating = pitcher
     ? fictionalPitcherBadge(card)
     : `<div class="gq-proto-onbase">${escapeHtml(card.onBase)}</div>`;
@@ -358,7 +360,7 @@ function fictionalCardHtml(card, count) {
   </div></div>`;
 }
 
-export function cardPanelHtml(card, { count = null } = {}) {
+export function cardPanelHtml(card, { count = null, hidePoints = false } = {}) {
   // Classic cards with a real scan ARE the card: the printed scan fills the
   // frame (courtesy of ShowdownCards.com), with just a compact chart tray
   // below at the scan's width — no rarity chip, no set tag; the print
@@ -370,10 +372,10 @@ export function cardPanelHtml(card, { count = null } = {}) {
         <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
         ${count !== null ? `<span class="gq-photo-tag">x${count}</span>` : ""}
       </div>
-      <div class="gq-scan-tray"><div class="gq-stat-line">${statLineHtml(card, { rating: true })}</div>${chartRows(card)}</div>
+      <div class="gq-scan-tray"><div class="gq-stat-line">${statLineHtml(card, { rating: true, hidePoints })}</div>${chartRows(card)}</div>
     </div></div>`;
   }
-  if (!card.real) return fictionalCardHtml(card, count);
+  if (!card.real) return fictionalCardHtml(card, count, hidePoints);
   const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
   const mark = teamMark(card);
   // Years active and clubs float in the photo's top-left corner — the
@@ -396,8 +398,8 @@ export function cardPanelHtml(card, { count = null } = {}) {
   const plate = partner ? `${bat.onBase}|${arm.control}` : card.kind === "pitcher" ? card.control : card.onBase;
   const plateLabel = partner ? "OB|CTRL" : card.kind === "pitcher" ? "CTRL" : "OB";
   const stat = partner
-    ? `<span>${card.points + partner.points} PTS</span><span>SPEED ${bat.speed}</span><span>IP ${arm.ip}</span><span>${escapeHtml(arm.role)}</span>`
-    : statLineHtml(card);
+    ? `${hidePoints ? "" : `<span>${card.points + partner.points} PTS</span>`}<span>SPEED ${bat.speed}</span><span>IP ${arm.ip}</span><span>${escapeHtml(arm.role)}</span>`
+    : statLineHtml(card, { hidePoints });
   const charts = partner ? comboChartRows(bat, arm) : chartRows(card);
   const photoClass = card.real ? "gq-photo" : `gq-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}`;
   return `<div class="${cardShell(card, partner ? " gq-card-two-way" : "")}"><div class="gq-face">

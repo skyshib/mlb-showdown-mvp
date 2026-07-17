@@ -88,12 +88,12 @@ export const ambushScreen = {
         <div class="gq-frame gq-title-frame gq-ambush-card">
           ${versusSprite(faceSeed(rival), rival.sprite)}
           <b>${escapeHtml(rival.name)}</b><br>
-          <span class="gq-dim">HE LOOKS MEAN. ${npcBudget(app.save, rival)} PT OF MEAN.</span>
+          <span class="gq-dim">THEY LOOK MEAN. ${npcBudget(app.save, rival)} PT OF MEAN.</span>
         </div>
       </div>
       <div class="gq-textbox">
         <p>You head for the ballpark... ${escapeHtml(rival.name)} jumps out of the dugout shadows!</p>
-        <p class="gq-blink">Z — FACE HIM</p>
+        <p class="gq-blink">Z — FACE THEM</p>
       </div>
     </div>`;
   },
