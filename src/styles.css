@@ -898,52 +898,44 @@ td span {
   text-align: right;
 }
 
+/* Laid out on its side: one row of positions, the guaranteed counts beneath, so
+   the whole slate reads across in two lines instead of a tall column. */
 .guaranteed-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  table-layout: fixed;
+  font-size: 11px;
 }
 
-.guaranteed-table thead th {
-  padding: 2px 6px;
+.guaranteed-table th,
+.guaranteed-table td {
+  padding: 3px 2px;
+  text-align: center;
+}
+
+.guaranteed-pos-row th {
   color: var(--muted);
-  font-size: 10px;
   font-weight: 900;
-  letter-spacing: 0.06em;
-  text-align: left;
+  letter-spacing: 0.01em;
   text-transform: uppercase;
 }
 
-.guaranteed-table thead th:last-child {
-  text-align: right;
-}
-
-.guaranteed-table tbody tr {
+.guaranteed-min-row td {
+  color: var(--ink);
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
   border-top: 1px solid var(--line);
 }
 
-.guaranteed-table tbody th {
-  padding: 3px 6px;
-  color: var(--ink);
-  font-weight: 850;
-  text-align: left;
-}
-
-.guaranteed-table tbody td {
-  padding: 3px 6px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-/* The soft highlight shared with the active-manager row: a position the card
-   on the block can fill. */
-.guaranteed-table tbody tr.plays {
+/* The soft highlight shared with the active-manager row: the whole column for a
+   position the card on the block can fill lights up, header and count together. */
+.guaranteed-table .plays {
   background: #e9f4ee;
 }
 
-.guaranteed-table tbody tr.plays th {
-  box-shadow: inset 3px 0 0 var(--accent);
+.guaranteed-pos-row th.plays {
+  color: var(--ink);
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 .auction-lot-card-face {

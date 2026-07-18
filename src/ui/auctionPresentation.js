@@ -10,13 +10,12 @@ export function nominatedPlayerFilter(player) {
     };
   }
 
-  // A utility card could fill any of several holes, so the board stays on all
-  // hitters rather than hiding the other spots he's eligible for. A card with a
-  // single listed position filters down to just that position.
+  // hitterPositions lists the primary spot first, so a utility card filters the
+  // board to where he mostly plays rather than washing the filter out to "all".
   const positions = hitterPositions(player);
   return {
     type: "hitter",
-    position: positions.length > 1 ? "all" : normalizeFilterPosition(positions[0].pos)
+    position: normalizeFilterPosition(positions[0].pos)
   };
 }
 

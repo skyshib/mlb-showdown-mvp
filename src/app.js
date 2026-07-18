@@ -2483,19 +2483,22 @@ function renderAuctionStatusPanel(draft) {
     if (lotPlayer.kind === "pitcher") return group === (lotPlayer.role === "SP" ? "SP" : "RP");
     return playsPosition(lotPlayer, group);
   };
+  const guaranteed = random ? guaranteedNominationMinimums(draft) : [];
   const minimums = random
     ? `<div class="auction-side-section auction-guaranteed">
         <h3>Guaranteed still to come</h3>
         <table class="guaranteed-table" aria-label="Guaranteed primary-position nominations still to come">
-          <thead><tr><th scope="col">Pos</th><th scope="col">Min</th></tr></thead>
           <tbody>
-            ${guaranteedNominationMinimums(draft).map(({ position, minimum }) => {
-              const plays = lotPlaysGroup(position);
-              return `<tr${plays ? ' class="plays"' : ""}>
-                <th scope="row">${escapeHtml(position)}</th>
-                <td>${minimum}</td>
-              </tr>`;
-            }).join("")}
+            <tr class="guaranteed-pos-row">
+              ${guaranteed.map(({ position }) =>
+                `<th scope="col"${lotPlaysGroup(position) ? ' class="plays"' : ""}>${escapeHtml(position)}</th>`
+              ).join("")}
+            </tr>
+            <tr class="guaranteed-min-row">
+              ${guaranteed.map(({ position, minimum }) =>
+                `<td${lotPlaysGroup(position) ? ' class="plays"' : ""}>${minimum}</td>`
+              ).join("")}
+            </tr>
           </tbody>
         </table>
       </div>`
