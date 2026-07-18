@@ -19,6 +19,15 @@ export function nominatedPlayerFilter(player) {
   };
 }
 
+// Online, only the seat connected to this client may enter a sealed bid.
+// Offline, human seats share the screen while CPU seats bid automatically.
+// `undefined` deliberately means offline; `null` is an online spectator.
+export function canEnterAuctionBid(manager, onlineManagerId) {
+  if (!manager) return false;
+  if (onlineManagerId !== undefined) return manager.id === onlineManagerId;
+  return !manager.cpu;
+}
+
 function normalizeFilterPosition(position) {
   return isCornerOutfielder(position) ? CORNER_OUTFIELD_POSITION : position;
 }

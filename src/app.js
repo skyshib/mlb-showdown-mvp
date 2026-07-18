@@ -15,7 +15,7 @@ import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml } from "./ui/cardFace.js?v=20260716-records";
-import { nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
+import { canEnterAuctionBid, nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
   isMuted,
   playClockWarning,
@@ -2392,9 +2392,10 @@ function renderAuctionBidEntry(draft) {
   }
 
   const online = state.online;
-  // Your own seat only online; a local hotseat keeps one box for every person
-  // who still owes the sealed lot a bid.
-  const canEnterFor = (manager) => !online || manager.id === online.managerId;
+  // Your own seat only online; a local hotseat keeps one box for every human
+  // who still owes the sealed lot a bid. CPU seats submit automatically.
+  const onlineManagerId = online ? online.managerId ?? null : undefined;
+  const canEnterFor = (manager) => canEnterAuctionBid(manager, onlineManagerId);
   const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
   const lotKey = sealedBidLotKey(lot);
   const mine = draft.managers.filter((manager) => lot.pending.includes(manager.id) && canEnterFor(manager));

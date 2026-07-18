@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nominatedPlayerFilter } from "../src/ui/auctionPresentation.js";
+import { canEnterAuctionBid, nominatedPlayerFilter } from "../src/ui/auctionPresentation.js";
 
 test("auction nominations filter single-position hitters to their position", () => {
   assert.deepEqual(
@@ -36,4 +36,15 @@ test("auction nominations filter pitchers to their role", () => {
     nominatedPlayerFilter({ kind: "pitcher", role: "RP" }),
     { type: "pitcher", position: "RP" }
   );
+});
+
+test("offline auction bid entry is limited to human-controlled managers", () => {
+  assert.equal(canEnterAuctionBid({ id: "human", cpu: false }, undefined), true);
+  assert.equal(canEnterAuctionBid({ id: "cpu", cpu: true }, undefined), false);
+});
+
+test("online auction bid entry is limited to this client's seat", () => {
+  assert.equal(canEnterAuctionBid({ id: "mine", cpu: false }, "mine"), true);
+  assert.equal(canEnterAuctionBid({ id: "other", cpu: false }, "mine"), false);
+  assert.equal(canEnterAuctionBid({ id: "other", cpu: false }, null), false);
 });
