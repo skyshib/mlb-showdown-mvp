@@ -44,6 +44,7 @@ import {
   DEFAULT_STARTING_PITCHERS,
   MAX_STARTING_PITCHERS,
   MIN_STARTING_PITCHERS,
+  ROSTER_BENCH_KEY,
   SIM_ACTION_TYPES,
   applyBattingOrder,
   applyDraftAction,
@@ -1988,7 +1989,6 @@ function renderDraft() {
     : 0;
   const playerRows = historyTab || boardTab ? [] : draftVisiblePlayers(draft);
   const soldTags = draftSoldTags(draft);
-  const rosters = draft.managers.map((manager) => renderRoster(manager, draft)).join("");
   const focusManager = current ?? (state.selectedTeamName
     ? draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0]
     : draft.managers[0]);
@@ -2010,34 +2010,7 @@ function renderDraft() {
     && onlineCanUndo();
   const canAdvance = !draft.complete && !reviewOpen && !paused
     && (queued ? !online || online.host : onlineCanPickNow(current));
-  app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
-  <section class="toolbar">
-    <button data-action="reset">${online ? "Leave room" : "New room"}</button>
-    ${canPause ? `<button class="pause-button${paused ? " resume" : ""}" data-action="${paused ? "resume-draft" : "pause-draft"}">${paused ? "&#9654; Resume draft" : "&#10073;&#10073; Pause draft"}</button>` : ""}
-    <button data-action="autopick" ${canAdvance ? "" : "disabled"}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
-    <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot && !queued ? "Undo nomination" : "Undo last pick"}</button>
-    ${auction && reviewOpen ? `<button data-action="complete-review" ${(online && !online.host) || paused ? "disabled" : ""}>Start auction now</button>` : ""}
-    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
-    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
-    ${renderPlayGameControl(draft)}
-    <button data-action="export-save" title="Save this room to a file you can keep, move, or send">&#128190; Save room</button>
-    <button class="sound-toggle${isMuted() ? " muted" : ""}" data-action="toggle-sound" aria-pressed="${!isMuted()}" title="${isMuted() ? "Turn sound on" : "Turn sound off"}">${isMuted() ? "&#128264;" : "&#128266;"}</button>
-    <span class="pick-clock" data-pick-timer hidden></span>
-    ${/* A bare ?board reads the draft out of this browser's own storage, which is
-          the whole draft on a hotseat and nothing at all in a room. The room's
-          board hangs off the invite link up in the banner, so online there is
-          only ever the one TV board link, and it is the one that works. */
-      online ? "" : `<a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>`}
-  </section>
-  ${paused ? renderPausedPanel(draft) : ""}
-  ${draft.complete ? renderDraftDone(draft) : ""}
-  ${draft.complete ? renderAuctionBudgetSection(draft) : ""}
-  ${renderDraftFocus(draft, focusManager, boardManager)}
-  ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
-  ${lot ? renderAuctionLotPanel(draft) : ""}
-  ${auction && !draft.complete ? renderLastSalePanel(draft) : ""}
-  <section class="grid">
-    <div class="panel">
+  const boardPanel = `<section class="panel draft-board-panel">
       <div class="game-tabs">
         <button class="game-tab ${state.draftTab === "available" ? "active" : ""}" data-action="draft-tab" data-tab="available">Available cards</button>
         ${boardOwner ? `<button class="game-tab ${boardTab ? "active" : ""}" data-action="draft-tab" data-tab="board">${escapeHtml(boardOwner.name)}'s board${boardCount ? ` <em>${boardCount}</em>` : ""}</button>` : ""}
@@ -2085,13 +2058,41 @@ function renderDraft() {
           return canPickPlayer(draft, current, player);
         }
       })}`}
-    </div>
-    <div class="panel">
-      <h2>Rosters</h2>
-      ${renderRecentPicks(draft)}
-      <div class="rosters">${rosters}</div>
-    </div>
+    </section>`;
+  const leadPanels = `${paused ? renderPausedPanel(draft) : ""}
+    ${draft.complete ? renderDraftDone(draft) : ""}
+    ${draft.complete ? renderAuctionBudgetSection(draft) : ""}
+    ${renderDraftFocus(draft, focusManager, boardManager)}
+    ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
+    ${lot ? renderAuctionLotPanel(draft) : ""}
+    ${auction && !draft.complete ? renderLastSalePanel(draft) : ""}`;
+  const workspace = auction
+    ? `<div class="auction-workspace">
+        <div class="auction-workspace-main">${leadPanels}${boardPanel}</div>
+        ${renderAuctionStatusPanel(draft)}
+      </div>`
+    : `${leadPanels}<div class="draft-board-full">${boardPanel}</div>`;
+
+  app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
+  <section class="toolbar">
+    <button data-action="reset">${online ? "Leave room" : "New room"}</button>
+    ${canPause ? `<button class="pause-button${paused ? " resume" : ""}" data-action="${paused ? "resume-draft" : "pause-draft"}">${paused ? "&#9654; Resume draft" : "&#10073;&#10073; Pause draft"}</button>` : ""}
+    <button data-action="autopick" ${canAdvance ? "" : "disabled"}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
+    <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot && !queued ? "Undo nomination" : "Undo last pick"}</button>
+    ${auction && reviewOpen ? `<button data-action="complete-review" ${(online && !online.host) || paused ? "disabled" : ""}>Start auction now</button>` : ""}
+    ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
+    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
+    ${renderPlayGameControl(draft)}
+    <button data-action="export-save" title="Save this room to a file you can keep, move, or send">&#128190; Save room</button>
+    <button class="sound-toggle${isMuted() ? " muted" : ""}" data-action="toggle-sound" aria-pressed="${!isMuted()}" title="${isMuted() ? "Turn sound on" : "Turn sound off"}">${isMuted() ? "&#128264;" : "&#128266;"}</button>
+    <span class="pick-clock" data-pick-timer hidden></span>
+    ${/* A bare ?board reads the draft out of this browser's own storage, which is
+          the whole draft on a hotseat and nothing at all in a room. The room's
+          board hangs off the invite link up in the banner, so online there is
+          only ever the one TV board link, and it is the one that works. */
+      online ? "" : `<a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>`}
   </section>
+  ${workspace}
   ${renderRosterDock(draft, dockViewerId)}`;
 
   restoreSealedBids();
@@ -2270,16 +2271,120 @@ function liveDraft(draft) {
   };
 }
 
+function renderAuctionBidEntry(draft) {
+  const lot = liveLot(draft);
+  if (!lot) {
+    return `<p class="auction-side-empty">${draft.complete
+      ? "The auction is complete."
+      : auctionReviewComplete(draft, draftNow())
+        ? "Waiting for the next card."
+        : "Bidding opens when pool review ends."}</p>`;
+  }
+  if (isAuctionPaused(draft)) {
+    return `<p class="auction-side-empty">Bidding is paused.</p>`;
+  }
+
+  const online = state.online;
+  // Your own seat only online; a local hotseat keeps one box for every person
+  // who still owes the sealed lot a bid.
+  const canEnterFor = (manager) => !online || manager.id === online.managerId;
+  const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
+  const lotKey = sealedBidLotKey(lot);
+  const mine = draft.managers.filter((manager) => lot.pending.includes(manager.id) && canEnterFor(manager));
+  if (!mine.length) {
+    const viewerId = online?.managerId;
+    const submitted = viewerId && viewerId in lot.bids;
+    return `<p class="auction-side-empty">${submitted
+      ? "Your sealed bid is in."
+      : online
+        ? "Watching this lot."
+        : "All local bids are in."}</p>`;
+  }
+
+  return mine.map((manager) => {
+    const isNominator = lot.round === 1 && manager.id === lot.nominatorId;
+    const canPass = lot.round === 1 && !isNominator;
+    const maxBid = Math.max(0, auctionMaxBid(draft, manager));
+    const error = lotEntryError?.managerId === manager.id ? lotEntryError.message : "";
+    return `<div class="lot-entry auction-side-entry">
+      <span class="lot-entry-name">${escapeHtml(manager.name)}${isNominator ? ` nominated &middot; min ${money(AUCTION_MIN_BID)}` : lot.round === 2 ? ` tie-break &middot; min ${money(minBid)}` : ""}</span>
+      <div class="auction-side-entry-controls">
+        ${state.maskBids
+          ? `<input type="password" aria-label="${escapeHtml(manager.name)} sealed bid" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" inputmode="numeric" autocomplete="off" placeholder="${minBid}" />`
+          : `<input type="number" aria-label="${escapeHtml(manager.name)} sealed bid" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" min="${canPass ? 0 : minBid}" max="${maxBid}" step="1" placeholder="${minBid}" />`}
+        <button data-action="seal-bid" data-manager-id="${escapeHtml(manager.id)}">Bid</button>
+        ${canPass ? `<button class="secondary-button" data-action="seal-pass" data-manager-id="${escapeHtml(manager.id)}">Pass</button>` : ""}
+      </div>
+      <span class="auction-side-max">Maximum ${money(maxBid)}</span>
+      <label class="mask-toggle"><input type="checkbox" data-mask-bids ${state.maskBids ? "checked" : ""} /> Mask bids</label>
+      ${error ? `<span class="warn">${escapeHtml(error)}</span>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function auctionPlayersStillToCome(draft, lot) {
+  if (isRandomNomination(draft)) {
+    // The card on the block has already come up even though queueIndex moves
+    // only after it settles.
+    return Math.max(0, nominationQueueRemaining(draft) - (lot ? 1 : 0));
+  }
+  const target = draft.managers.length * draft.rosterSize;
+  // Manual-auction nominations always sell because the nominator must open.
+  return Math.max(0, target - draft.pickNumber - (lot ? 1 : 0));
+}
+
+function renderAuctionStatusPanel(draft) {
+  const lot = liveLot(draft);
+  const live = liveDraft(draft);
+  const random = isRandomNomination(draft);
+  const remaining = auctionPlayersStillToCome(draft, lot);
+  const timed = auctionTimerEnabled(draft);
+  const managers = draft.managers.map((manager) => {
+    const clock = timed
+      ? formatAuctionClock(auctionBidTimeRemainingMs(live, manager, draftNow()))
+      : "untimed";
+    const active = Boolean(lot?.pending?.includes(manager.id));
+    return `<div class="auction-manager-status${active ? " active" : ""}">
+      <strong>${escapeHtml(manager.name)}${manager.cpu ? ' <span class="cpu-tag">CPU</span>' : ""}</strong>
+      <span class="auction-manager-budget">${money(auctionBudget(draft, manager))} left</span>
+      <span class="auction-manager-clock${timed && clock === "0:00" ? " flagged" : ""}"${timed ? ` data-auction-clock data-manager-id="${escapeHtml(manager.id)}"` : ""}>${clock}</span>
+    </div>`;
+  }).join("");
+  const minimums = random
+    ? `<div class="auction-side-section">
+        <h3>Guaranteed still to come</h3>
+        <div class="nomination-minimums auction-side-minimums" aria-label="Guaranteed primary-position nominations still to come">
+          ${guaranteedNominationMinimums(draft).map(({ position, minimum }) =>
+            `<span class="nomination-minimum"><strong>${escapeHtml(position)}</strong> min ${minimum}</span>`
+          ).join("")}
+        </div>
+      </div>`
+    : "";
+
+  return `<aside class="panel auction-status-panel" aria-label="Auction desk">
+    <p class="eyebrow">Auction desk</p>
+    <div class="auction-remaining">
+      <strong>${remaining}</strong>
+      <span>players still to come${lot ? " after this lot" : ""}</span>
+    </div>
+    <div class="auction-side-section auction-side-bid">
+      <h3>${lot?.round === 2 ? "Tie-break bid" : "Enter bid"}</h3>
+      ${renderAuctionBidEntry(draft)}
+    </div>
+    <div class="auction-side-section">
+      <h3>Budget &amp; time</h3>
+      <div class="auction-manager-statuses">${managers}</div>
+    </div>
+    ${minimums}
+  </aside>`;
+}
+
 function renderAuctionLotPanel(draft) {
   const lot = liveLot(draft);
   const player = auctionLotPlayer(draft);
   if (!player || !lot) return "";
   const online = state.online;
   const nominator = draft.managers.find((manager) => manager.id === lot.nominatorId);
-  // Your own seat only — being host does not put you at everyone's keyboard.
-  // A seat that goes quiet is covered by its own clock (a stalled bid auto-bids)
-  // or by the host closing the lot with Auto-run, not by a box you never wanted.
-  const canEnterFor = (manager) => !online || manager.id === online.managerId;
   const participants = draft.managers.filter((manager) =>
     lot.round === 2 ? lot.tie.managerIds.includes(manager.id) : manager.id in lot.bids || lot.pending.includes(manager.id)
   );
@@ -2289,45 +2394,10 @@ function renderAuctionLotPanel(draft) {
       const waiting = lot.pending.includes(manager.id);
       const timedOut = Boolean(lot.clock?.timedOut?.includes(manager.id));
       const status = timedOut ? "timed out (0)" : waiting ? "still to bid" : "bid in";
-      const clock = auctionTimerEnabled(draft)
-        ? formatAuctionClock(auctionBidTimeRemainingMs(liveDraft(draft), manager, draftNow()))
-        : null;
       return `<div class="lot-bidder ${waiting ? "" : "high-bidder"}">
         <strong>${escapeHtml(manager.name)}${manager.cpu ? ' <span class="cpu-tag">CPU</span>' : ""}</strong>
-        <span>${money(auctionBudget(draft, manager))} left &middot; max bid ${money(Math.max(0, auctionMaxBid(draft, manager)))}${clock ? ` &middot; clock <span data-auction-clock data-manager-id="${escapeHtml(manager.id)}">${clock}</span>` : ""}</span>
         <em>${status}</em>
       </div>`;
-    })
-    .join("");
-
-  const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
-  // Which lot a box was filled in for. A half-typed bid survives a repaint, but
-  // only onto the same card in the same round — never onto the next one.
-  const lotKey = sealedBidLotKey(lot);
-  // The bids are sealed, so nobody waits their turn: every manager this
-  // screen speaks for — your seat online, the whole table on a hotseat — gets
-  // their own box, and they can be filled in any order. The lot resolves on the
-  // last one in, whoever that turns out to be.
-  // A paused room takes no bids, so it offers nobody a box to put one in.
-  const mine = isAuctionPaused(draft)
-    ? []
-    : draft.managers.filter((manager) => lot.pending.includes(manager.id) && canEnterFor(manager));
-  const entry = mine
-    .map((manager) => {
-      const isNominator = lot.round === 1 && manager.id === lot.nominatorId;
-      const canPass = lot.round === 1 && !isNominator;
-      const maxBid = Math.max(0, auctionMaxBid(draft, manager));
-      const error = lotEntryError?.managerId === manager.id ? lotEntryError.message : "";
-      return `<div class="lot-entry">
-      <span class="lot-entry-name">${escapeHtml(manager.name)}, enter your sealed bid${isNominator ? ` (you nominated — minimum ${AUCTION_MIN_BID})` : lot.round === 2 ? ` (rebid at least ${minBid})` : ""}</span>
-      ${state.maskBids
-        ? `<input type="password" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" inputmode="numeric" autocomplete="off" placeholder="${minBid}" />`
-        : `<input type="number" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" min="${canPass ? 0 : minBid}" max="${maxBid}" step="1" placeholder="${minBid}" />`}
-      <button data-action="seal-bid" data-manager-id="${escapeHtml(manager.id)}">Submit bid</button>
-      ${canPass ? `<button data-action="seal-pass" data-manager-id="${escapeHtml(manager.id)}">Pass</button>` : ""}
-      <label class="mask-toggle"><input type="checkbox" data-mask-bids ${state.maskBids ? "checked" : ""} /> Mask bids (shared screen)</label>
-      ${error ? `<span class="warn">${escapeHtml(error)}</span>` : ""}
-    </div>`;
     })
     .join("");
 
@@ -2347,7 +2417,6 @@ function renderAuctionLotPanel(draft) {
     </div>
     ${tieNote}
     <div class="lot-bidders">${bidderChips}</div>
-    ${entry}
     ${allowCancelLot(draft) ? `<div class="lot-actions"><button data-action="cancel-lot" ${online && !online.host ? "disabled" : ""}>Cancel nomination</button></div>` : ""}
   </section>`;
 }
@@ -4879,25 +4948,6 @@ function renderMiniRosterSlot(player, slotLabel, slotContext = {}) {
   </div>`;
 }
 
-// Live-draft catch-up strip: the last few results at a glance, newest first.
-function renderRecentPicks(draft) {
-  const picks = draftHistory(draft).slice(-4).reverse();
-  if (!picks.length) return "";
-  const auction = isAuctionDraft(draft);
-  const heatScale = draftHeatScale(draft);
-  const prices = auction ? new Map(draftHistory(draft).map((pick) => [pick.player.id, pick.price])) : null;
-  const items = picks
-    .map(
-      (pick, index) => `<span class="recent-pick heat ${index === 0 ? "newest-pick" : ""}" style="${heatStyle(heatValue(pick.player, heatScale, prices), heatScale)}">
-        <strong>${escapeHtml(pick.player.name)}</strong>
-        <em>&rarr; ${escapeHtml(pick.manager.name)}${auction ? ` for ${money(pick.price)}` : ""}</em>
-      </span>`
-    )
-    .join("");
-  return `<div class="recent-picks" aria-label="Most recent picks">${items}</div>`;
-}
-
-
 // Read-only broadcast layout for a TV: the lot, every board, and the ticker
 // on one dark screen. Opened with ?board (same browser via localStorage) or
 // ?room=CODE&board (live spectator over SSE).
@@ -5338,7 +5388,10 @@ function renderRosterDock(draft, viewerId) {
 }
 
 function renderDockBar(draft, manager, auction, prices, heatScale, { own = false, ownTag = "" } = {}) {
-  const lineupSlots = assignHittersToLineupSlots(manager).slots;
+  // This strip is an ownership board, not the manager's private depth chart.
+  // Keep showing every drafted card in the usual compact slots even if that
+  // manager has deliberately left one of their playable slots open.
+  const lineupSlots = assignLineupSlots(manager.roster).slots;
   const staffSlots = assignPlayersToSlots(
     manager.roster.filter((player) => player.kind === "pitcher"),
     [...Array.from({ length: draft.startingPitchers }, () => "SP"), "RP", "RP"],
@@ -5347,12 +5400,8 @@ function renderDockBar(draft, manager, auction, prices, heatScale, { own = false
   const slots = [...lineupSlots, ...staffSlots]
     .map((slot) => renderDockSlot(slot.player, slot.label, auction, prices, heatScale))
     .join("");
-  const budget = auction
-    ? `<span class="dock-budget">${money(auctionBudget(draft, manager))} left${draft.complete ? "" : `<br />max ${money(auctionMaxBid(draft, manager))}`}</span>`
-    : "";
   return `<div class="dock-bar${own ? " own-bar" : ""}">
     <span class="dock-team">${escapeHtml(manager.name)}${own && ownTag ? ` <em class="own-tag">${escapeHtml(ownTag)}</em>` : ""}</span>
-    ${budget}
     <div class="dock-slots">${slots}</div>
   </div>`;
 }
@@ -5426,17 +5475,6 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
   const nextNames = (auction ? upcomingNominators(draft, 5).slice(1) : upcomingManagers(draft, 4))
     .map((item) => escapeHtml(item.name))
     .join(" · ");
-  const remaining = queued && !draft.complete
-    ? `<p class="next-up">${nominationQueueRemaining(draft)} cards still to come up &middot; anyone short at the buzzer gets filled out free from the board</p>`
-    : "";
-  const nominationMinimums = queued && !draft.complete
-    ? `<div class="nomination-minimums" aria-label="Guaranteed primary-position nominations still to come">
-        <span class="nomination-minimums-label">Guaranteed still to come</span>
-        ${guaranteedNominationMinimums(draft).map(({ position, minimum }) =>
-          `<span class="nomination-minimum"><strong>${escapeHtml(position)}</strong> min ${minimum}</span>`
-        ).join("")}
-      </div>`
-    : "";
   // The board can run dry on a scarce slot — the last catcher taken while this
   // seat still needs one. There is nothing legal left to pick, so tell him the
   // one move he has: Auto-pick prints a replacement-level fill-in for the hole.
@@ -5455,8 +5493,6 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
         <span>IF ${formatSignedNumber(fieldingSums.infield)}</span>
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
       </div>
-      ${remaining}
-      ${nominationMinimums}
       ${stallNotice}
       ${snakeClocksHtml(draft)}
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
@@ -5586,11 +5622,30 @@ function renderRosterSlots(manager, draft) {
       <span>Staff</span>
       <div class="slot-grid staff-slots">${staffSlots.map((slot) => renderRosterSlot(slot.player, slot.label, manager)).join("")}</div>
     </div>
-    ${bench.length ? `<div class="slot-group bench-group">
-      <span>Bench &middot; ${bench.length} inactive${mine ? " &mdash; drag one into a slot to play them" : ""}</span>
-      <div class="slot-grid bench-slots">${bench.map((player) => renderBenchCard(player, manager)).join("")}</div>
+    ${mine || bench.length ? `<div class="slot-group bench-group">
+      <span>Bench${bench.length ? ` &middot; ${bench.length} inactive` : ""}${mine ? " &mdash; drag a player here to keep their slot open" : ""}</span>
+      <div class="slot-grid bench-slots">
+        ${mine ? renderBenchDropZone(manager) : ""}
+        ${bench.map((player) => renderBenchCard(player, manager)).join("")}
+      </div>
     </div>` : ""}
   </div>`;
+}
+
+function renderBenchDropZone(manager) {
+  const selected = selectedLineupMove?.managerId === manager.id;
+  const valid = selected && canMoveLineupPlayer(manager.id, selectedLineupMove.playerId, "BENCH");
+  return `<button type="button"
+    class="roster-slot bench-drop-zone empty-slot ${valid ? "valid-drop-slot" : selected ? "invalid-drop-slot" : ""}"
+    data-lineup-slot="true"
+    data-manager-id="${escapeHtml(manager.id)}"
+    data-slot-label="BENCH"
+    ${valid ? 'aria-label="Move selected player to the bench"' : ""}
+  >
+    <strong>Bench</strong>
+    <span>Drop player here</span>
+    <em>Keeps their slot open</em>
+  </button>`;
 }
 
 // A drafted card that is not taking the field. Drag it onto a slot it can fill
@@ -5767,10 +5822,16 @@ const isStaffSlot = (label) => staffSlotLabels(state.draft?.startingPitchers).in
 // cards it bought and did not start.
 function canMoveLineupPlayer(managerId, playerId, toLabel) {
   if (!canManageRoster(managerId)) return false;
-  if (toLabel === "BENCH") return false;
   const manager = findDraftManager(managerId);
   const player = findRosterPlayer(managerId, playerId);
   if (!manager || !player) return false;
+
+  if (toLabel === "BENCH") {
+    const slots = player.kind === "pitcher"
+      ? assignStaffSlots(manager.roster, manager.staffAssignments, state.draft)
+      : assignLineupSlots(manager.roster, manager.lineupAssignments).slots;
+    return slots.some((slot) => slot.player?.id === playerId);
+  }
 
   if (isStaffSlot(toLabel)) {
     if (player.kind !== "pitcher") return false;
@@ -5797,43 +5858,80 @@ function moveLineupPlayer(managerId, playerId, toLabel) {
   const manager = findDraftManager(managerId);
   if (!manager || !canMoveLineupPlayer(managerId, playerId, toLabel)) return false;
 
+  const player = findRosterPlayer(managerId, playerId);
+  const staffMove = player.kind === "pitcher";
+  const actionType = staffMove ? "staff" : "lineup";
+  const previous = staffMove ? manager.staffAssignments : manager.lineupAssignments;
+  const slots = staffMove
+    ? assignStaffSlots(manager.roster, previous, state.draft)
+    : assignLineupSlots(manager.roster, previous).slots;
+  const fromSlot = slots.find((slot) => slot.player?.id === playerId);
+  let assignments = rosterAssignmentsFromSlots(slots, previous);
+
+  if (toLabel === "BENCH") {
+    if (!fromSlot) return false;
+    assignments[fromSlot.label] = null;
+    assignments = withBenchIds(assignments, [...assignmentBenchIds(assignments), playerId]);
+    return commitRosterAssignments(manager, actionType, assignments);
+  }
+
   if (isStaffSlot(toLabel)) {
-    const slots = assignStaffSlots(manager.roster, manager.staffAssignments, state.draft);
-    const fromSlot = slots.find((slot) => slot.player?.id === playerId);
     const targetSlot = slots.find((slot) => slot.label === toLabel);
-    const assignments = Object.fromEntries(slots.filter((slot) => slot.player).map((slot) => [slot.label, slot.player.id]));
     assignments[toLabel] = playerId;
     if (fromSlot) {
       // Two arms on the field trade places.
       if (targetSlot.player) assignments[fromSlot.label] = targetSlot.player.id;
-      else delete assignments[fromSlot.label];
+      else assignments[fromSlot.label] = null;
+    } else if (targetSlot.player) {
+      assignments = withBenchIds(assignments, [...assignmentBenchIds(assignments), targetSlot.player.id]);
     }
-    // From the bench, the arm he replaced simply sits down.
-    if (state.online) {
-      sendOnlineAction({ type: "staff", managerId, assignments });
-      return true;
-    }
-    manager.staffAssignments = assignments;
-    return true;
+    assignments = withBenchIds(assignments, assignmentBenchIds(assignments).filter((id) => id !== playerId));
+    return commitRosterAssignments(manager, actionType, assignments);
   }
 
-  const slots = assignLineupSlots(manager.roster, manager.lineupAssignments).slots;
-  const fromSlot = slots.find((slot) => slot.player?.id === playerId);
   const targetSlot = slots.find((slot) => slot.label === toLabel);
-  const assignments = Object.fromEntries(slots.filter((slot) => slot.player).map((slot) => [slot.label, slot.player.id]));
-
   assignments[toLabel] = playerId;
   if (fromSlot) {
     if (targetSlot.player) assignments[fromSlot.label] = targetSlot.player.id;
-    else delete assignments[fromSlot.label];
+    else assignments[fromSlot.label] = null;
+  } else if (targetSlot.player) {
+    assignments = withBenchIds(assignments, [...assignmentBenchIds(assignments), targetSlot.player.id]);
   }
+  assignments = withBenchIds(assignments, assignmentBenchIds(assignments).filter((id) => id !== playerId));
 
   const cleaned = cleanLineupAssignments(manager, assignments);
+  return commitRosterAssignments(manager, actionType, cleaned);
+}
+
+function assignmentBenchIds(assignments) {
+  return Array.isArray(assignments?.[ROSTER_BENCH_KEY]) ? assignments[ROSTER_BENCH_KEY] : [];
+}
+
+function withBenchIds(assignments, playerIds) {
+  const unique = [...new Set(playerIds)];
+  if (unique.length) assignments[ROSTER_BENCH_KEY] = unique;
+  else delete assignments[ROSTER_BENCH_KEY];
+  return assignments;
+}
+
+function rosterAssignmentsFromSlots(slots, previous = {}) {
+  const assignments = {};
+  for (const slot of slots) {
+    if (slot.player) assignments[slot.label] = slot.player.id;
+    else if (Object.prototype.hasOwnProperty.call(previous ?? {}, slot.label) && previous[slot.label] === null) {
+      assignments[slot.label] = null;
+    }
+  }
+  return withBenchIds(assignments, assignmentBenchIds(previous));
+}
+
+function commitRosterAssignments(manager, actionType, assignments) {
   if (state.online) {
-    sendOnlineAction({ type: "lineup", managerId, assignments: cleaned });
+    sendOnlineAction({ type: actionType, managerId: manager.id, assignments });
     return true;
   }
-  manager.lineupAssignments = cleaned;
+  if (actionType === "staff") manager.staffAssignments = assignments;
+  else manager.lineupAssignments = assignments;
   return true;
 }
 
@@ -5841,9 +5939,15 @@ function cleanLineupAssignments(manager, assignments) {
   const rosterIds = new Set(manager.roster.filter((player) => player.kind === "hitter").map((player) => player.id));
   const clean = {};
   for (const [label, playerId] of Object.entries(assignments ?? {})) {
+    if (label === ROSTER_BENCH_KEY) continue;
+    if (playerId === null) {
+      clean[label] = null;
+      continue;
+    }
     const player = manager.roster.find((item) => item.id === playerId);
     if (rosterIds.has(playerId) && canPlayerFillLineupSlot(player, label)) clean[label] = playerId;
   }
+  withBenchIds(clean, assignmentBenchIds(assignments).filter((playerId) => rosterIds.has(playerId)));
   return clean;
 }
 

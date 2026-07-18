@@ -6,10 +6,21 @@ const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
 const EXACT_REQUIRED_POSITIONS = ["C", "2B", "3B", "SS", "CF"];
 const CORNER_OUTFIELD_SLOTS = ["LF", "RF"];
+// Roster assignments are still a plain, replayable object. This reserved key
+// records cards the manager explicitly sat down; a null slot records the hole
+// they intentionally left on the field. Both survive local saves and online
+// action replay without introducing a second roster-edit action shape.
+export const ROSTER_BENCH_KEY = "__bench";
 export const CORNER_OUTFIELD_POSITION = "LF/RF";
 export const DEFAULT_STARTING_PITCHERS = 2;
 export const MIN_STARTING_PITCHERS = 1;
 export const MAX_STARTING_PITCHERS = 5;
+
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object ?? {}, key);
+
+function explicitBenchIds(assignments) {
+  return new Set(Array.isArray(assignments?.[ROSTER_BENCH_KEY]) ? assignments[ROSTER_BENCH_KEY] : []);
+}
 
 // Corner outfielders are one group: an LF/RF card plays either corner at the
 // same fielding score. Bare "LF"/"RF" card positions are accepted for
@@ -1147,6 +1158,21 @@ function nextNominatorIndex(draft, fromIndex) {
   return fromIndex;
 }
 
+function forgetRosterPlayer(manager, playerId) {
+  for (const key of ["lineupAssignments", "staffAssignments"]) {
+    const assignments = manager?.[key];
+    if (!assignments) continue;
+    for (const [slot, assigned] of Object.entries(assignments)) {
+      if (assigned === playerId) delete assignments[slot];
+    }
+    if (Array.isArray(assignments[ROSTER_BENCH_KEY])) {
+      const bench = assignments[ROSTER_BENCH_KEY].filter((id) => id !== playerId);
+      if (bench.length) assignments[ROSTER_BENCH_KEY] = bench;
+      else delete assignments[ROSTER_BENCH_KEY];
+    }
+  }
+}
+
 export function undoLastPick(draft) {
   if (!draft) return null;
   if (isAuctionDraft(draft)) return undoAuctionAction(draft);
@@ -1164,11 +1190,7 @@ export function undoLastPick(draft) {
   }
   draft.pickNumber -= 1;
   draft.complete = false;
-  if (manager.lineupAssignments) {
-    for (const [slot, playerId] of Object.entries(manager.lineupAssignments)) {
-      if (playerId === player.id) delete manager.lineupAssignments[slot];
-    }
-  }
+  forgetRosterPlayer(manager, player.id);
   return { manager, player };
 }
 
@@ -1208,11 +1230,7 @@ function undoAuctionAction(draft) {
   draft.pickNumber -= 1;
   draft.complete = false;
   if (isRandomNomination(draft)) draft.auction.queueIndex -= 1;
-  if (manager.lineupAssignments) {
-    for (const [slot, playerId] of Object.entries(manager.lineupAssignments)) {
-      if (playerId === player.id) delete manager.lineupAssignments[slot];
-    }
-  }
+  forgetRosterPlayer(manager, player.id);
   return { manager, player };
 }
 
@@ -1226,11 +1244,7 @@ function revertSweep(draft) {
     const manager = draft.managers.find((item) => item.id === entry.managerId);
     if (manager) {
       manager.roster = manager.roster.filter((player) => player.id !== entry.playerId);
-      if (manager.lineupAssignments) {
-        for (const [slot, playerId] of Object.entries(manager.lineupAssignments)) {
-          if (playerId === entry.playerId) delete manager.lineupAssignments[slot];
-        }
-      }
+      forgetRosterPlayer(manager, entry.playerId);
     }
     draft.pickedIds.delete(entry.playerId);
     // A printed replacement exists only because the sweep printed it. Undo the
@@ -1792,9 +1806,15 @@ export const STAFF_SLOT_LABELS = staffSlotLabels();
 const staffSlotRole = (label) => (label.startsWith("SP") ? "SP" : "RP");
 
 export function assignStaffSlots(roster, assignments = {}, options = {}) {
-  const pitchers = roster.filter((player) => player.kind === "pitcher");
+  const benched = explicitBenchIds(assignments);
+  const pitchers = roster.filter((player) => player.kind === "pitcher" && !benched.has(player.id));
   const slots = staffSlotLabels(startingPitcherTarget(options))
-    .map((label) => ({ label, role: staffSlotRole(label), player: null }));
+    .map((label) => ({
+      label,
+      role: staffSlotRole(label),
+      player: null,
+      lockedEmpty: hasOwn(assignments, label) && assignments[label] === null
+    }));
   const used = new Set();
 
   // What the manager asked for, where it is legal.
@@ -1810,7 +1830,7 @@ export function assignStaffSlots(roster, assignments = {}, options = {}) {
   // The rest fill in roster order, so a manager who never touched the board
   // still takes the field with the arms they drafted.
   for (const slot of slots) {
-    if (slot.player) continue;
+    if (slot.player || slot.lockedEmpty) continue;
     const next = pitchers.find((player) => !used.has(player.id) && pitcherRole(player) === slot.role);
     if (!next) continue;
     slot.player = next;
@@ -2179,8 +2199,15 @@ export function lineupStatus(roster) {
 }
 
 export function assignLineupSlots(roster, assignments = {}) {
-  const hitters = roster.filter((player) => player.kind === "hitter");
-  const slots = LINEUP_SLOT_LABELS.map((label) => ({ label, player: null, fielding: null, outOfPosition: false }));
+  const benched = explicitBenchIds(assignments);
+  const hitters = roster.filter((player) => player.kind === "hitter" && !benched.has(player.id));
+  const slots = LINEUP_SLOT_LABELS.map((label) => ({
+    label,
+    player: null,
+    fielding: null,
+    outOfPosition: false,
+    lockedEmpty: hasOwn(assignments, label) && assignments[label] === null
+  }));
   const used = new Set();
   const manualAssignments = assignments ?? {};
 
@@ -2200,17 +2227,24 @@ export function assignLineupSlots(roster, assignments = {}) {
   }
 
   // Nobody lists first base: any glove covers it at a flat -1.
-  if (!slots.find((slot) => slot.label === "1B").player) {
+  const firstBaseSlot = slots.find((slot) => slot.label === "1B");
+  if (!firstBaseSlot.player && !firstBaseSlot.lockedEmpty) {
     const fallbackFirstBase = hitters.find((player) => !used.has(player.id));
     assignFirst(slots, used, "1B", fallbackFirstBase, { firstBaseOutOfPosition: Boolean(fallbackFirstBase) });
   }
 
-  const dh = hitters.find((player) => !used.has(player.id));
-  assignFirst(slots, used, "DH", dh);
+  const dhSlot = slots.find((slot) => slot.label === "DH");
+  if (!dhSlot.lockedEmpty) {
+    const dh = hitters.find((player) => !used.has(player.id));
+    assignFirst(slots, used, "DH", dh);
+  }
 
   return {
     slots,
-    extras: hitters.filter((player) => !used.has(player.id))
+    // Explicitly benched hitters are extras too; callers use extras to explain
+    // lineup depth, and leaving them out would make a deliberately sat card
+    // disappear from that accounting.
+    extras: roster.filter((player) => player.kind === "hitter" && !used.has(player.id))
   };
 }
 
@@ -2222,7 +2256,10 @@ export function assignLineupSlots(roster, assignments = {}) {
 // the anyone-covers-1B rule stays a fallback outside the matching.
 function matchExactSlots(slots, hitters, used) {
   const openLabels = [...EXACT_REQUIRED_POSITIONS, "1B", ...CORNER_OUTFIELD_SLOTS]
-    .filter((label) => !slots.find((slot) => slot.label === label)?.player);
+    .filter((label) => {
+      const slot = slots.find((item) => item.label === label);
+      return slot && !slot.player && !slot.lockedEmpty;
+    });
   const fits = (player, label) =>
     CORNER_OUTFIELD_SLOTS.includes(label) ? cardIsCornerOutfielder(player) : playsPosition(player, label);
   const primaryFirst = (player) => {

@@ -6,7 +6,9 @@ import {
   AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS,
   AUCTION_DEFAULT_REVIEW_SECONDS,
   AUCTION_MIN_BID,
+  ROSTER_BENCH_KEY,
   applyDraftAction,
+  assignLineupSlots,
   assignStaffSlots,
   auctionBidTimeRemainingMs,
   auctionBudget,
@@ -655,6 +657,47 @@ test("a manager picks which of their cards take the field", () => {
   // A closer cannot be handed the ball to start.
   const chosen = assignStaffSlots(alpha.roster, { SP1: rp3.id });
   assert.notEqual(chosen[0].player.id, rp3.id, "a reliever does not fill a starter's slot");
+});
+
+test("a manager can bench an active hitter or pitcher and hold the vacated slot open", () => {
+  const pool = makeDraftPool("open-bench", 40, 24);
+  const draft = makeAuctionDraft(["Alpha"], pool);
+  const [alpha] = draft.managers;
+  alpha.roster = [
+    ...pool.filter((card) => card.kind === "hitter").slice(0, 9),
+    ...pool.filter((card) => card.role === "SP").slice(0, 2),
+    ...pool.filter((card) => card.role === "RP").slice(0, 2)
+  ];
+
+  const hitterSlot = assignLineupSlots(alpha.roster).slots.find((slot) => slot.player);
+  const starterSlot = assignStaffSlots(alpha.roster, {}, draft).find((slot) => slot.role === "SP" && slot.player);
+  applyDraftAction(draft, {
+    type: "lineup",
+    managerId: alpha.id,
+    assignments: {
+      [hitterSlot.label]: null,
+      [ROSTER_BENCH_KEY]: [hitterSlot.player.id]
+    }
+  });
+  applyDraftAction(draft, {
+    type: "staff",
+    managerId: alpha.id,
+    assignments: {
+      [starterSlot.label]: null,
+      [ROSTER_BENCH_KEY]: [starterSlot.player.id]
+    }
+  });
+
+  const lineup = assignLineupSlots(alpha.roster, alpha.lineupAssignments).slots;
+  const staff = assignStaffSlots(alpha.roster, alpha.staffAssignments, draft);
+  assert.equal(lineup.find((slot) => slot.label === hitterSlot.label).player, null);
+  assert.equal(staff.find((slot) => slot.label === starterSlot.label).player, null);
+  assert.deepEqual(
+    new Set(benchPlayers(alpha).map((player) => player.id)),
+    new Set([hitterSlot.player.id, starterSlot.player.id])
+  );
+  assert.equal(buildTeam(alpha).lineup.length, 8, "the visual hole is the lineup used by games too");
+  assert.equal(buildTeam(alpha).starters.length, 1, "the held-open rotation slot stays open");
 });
 
 test("the batting order a manager sets is the order they bat in", () => {
