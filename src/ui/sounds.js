@@ -159,6 +159,16 @@ export function playNomination() {
   );
 }
 
+// The lot came back tied. A held minor second — two pitches a hair apart struck
+// together and left hanging, the audible shrug of a card that would not settle —
+// so the room hears "nobody won that" a beat before the rebid boxes open.
+export function playTie() {
+  phrase(
+    [[C5, 0, 0.5], [554.37, 0.03, 0.46], [C5, 0.32, 0.34]],
+    { level: 0.32, type: "triangle", tail: 0.45 }
+  );
+}
+
 // A seat comes out of the lottery hat. One note, and it climbs with each seat
 // drawn, so the room hears the order being built.
 export function playLotteryBall(index = 0, total = 1) {

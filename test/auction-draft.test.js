@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  AUCTION_DEFAULT_BUDGET,
+  defaultAuctionBudget,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
   AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS,
   AUCTION_DEFAULT_REVIEW_SECONDS,
@@ -211,9 +211,9 @@ test("timed-out sealed bidders submit zero without revealing other bids", () => 
 test("auction draft starts with full budgets and the first manager nominating", () => {
   const draft = makeAuctionDraft();
   assert.equal(isAuctionDraft(draft), true);
-  assert.equal(draft.auction.budget, AUCTION_DEFAULT_BUDGET);
+  assert.equal(draft.auction.budget, defaultAuctionBudget(draft.rosterSize));
   for (const manager of draft.managers) {
-    assert.equal(auctionBudget(draft, manager), AUCTION_DEFAULT_BUDGET);
+    assert.equal(auctionBudget(draft, manager), defaultAuctionBudget(draft.rosterSize));
   }
   assert.equal(currentManager(draft).name, "Alpha");
   assert.equal(draft.auction.lot, null);
@@ -226,7 +226,9 @@ test("auction draft starts with full budgets and the first manager nominating", 
 test("normalizeAuctionBudget rounds to the raise step and floors at min bids", () => {
   assert.equal(normalizeAuctionBudget(998), 1000);
   assert.equal(normalizeAuctionBudget(10, 13), 13 * AUCTION_MIN_BID);
-  assert.equal(normalizeAuctionBudget(undefined), AUCTION_DEFAULT_BUDGET);
+  // With no budget given, the house default is $100 a slot.
+  assert.equal(normalizeAuctionBudget(undefined), defaultAuctionBudget());
+  assert.equal(normalizeAuctionBudget(undefined, 13), 13 * 100);
 });
 
 test("createDraft accepts { name, cpu } descriptors and flags cpu managers", () => {
@@ -328,7 +330,7 @@ test("the high bid wins at the second-highest bid plus one", () => {
   assert.equal(sale.sold, true);
   assert.equal(sale.manager.id, beta.id);
   assert.equal(sale.price, 106);
-  assert.equal(auctionBudget(draft, beta), AUCTION_DEFAULT_BUDGET - 106);
+  assert.equal(auctionBudget(draft, beta), defaultAuctionBudget(draft.rosterSize) - 106);
   assert.equal(beta.roster.length, 1);
   assert.equal(draft.pickNumber, 1);
   assert.equal(draft.auction.lot, null);
@@ -357,7 +359,7 @@ test("bids are capped so every open slot keeps the minimum bid", () => {
   const draft = makeAuctionDraft();
   const [alpha] = draft.managers;
   nominatePlayer(draft, draft.pool[0].id);
-  const expectedMax = AUCTION_DEFAULT_BUDGET - (draft.rosterSize - 1) * AUCTION_MIN_BID;
+  const expectedMax = defaultAuctionBudget(draft.rosterSize) - (draft.rosterSize - 1) * AUCTION_MIN_BID;
   assert.equal(auctionMaxBid(draft, alpha), expectedMax);
   assert.equal(canPlaceSealedBid(draft, alpha, expectedMax + 1).ok, false);
   assert.throws(() => placeSealedBid(draft, alpha.id, expectedMax + 1), /max bid/);
@@ -455,7 +457,7 @@ test("cancel works until another human bids; undo unwinds one step", () => {
   // ...but undo refunds the sale.
   const undone = undoLastPick(draft);
   assert.equal(undone.manager.id, alpha.id);
-  assert.equal(auctionBudget(draft, alpha), AUCTION_DEFAULT_BUDGET);
+  assert.equal(auctionBudget(draft, alpha), defaultAuctionBudget(draft.rosterSize));
   assert.equal(draft.pickNumber, 0);
 });
 
@@ -485,7 +487,7 @@ test("undoing a sale refunds the winner and restores the nominator", () => {
   const undone = undoLastPick(draft);
   assert.equal(undone.manager.id, beta.id);
   assert.equal(undone.player.id, target.id);
-  assert.equal(auctionBudget(draft, beta), AUCTION_DEFAULT_BUDGET);
+  assert.equal(auctionBudget(draft, beta), defaultAuctionBudget(draft.rosterSize));
   assert.equal(beta.roster.length, 0);
   assert.equal(draft.pickNumber, 0);
   assert.equal(draft.pickedIds.has(target.id), false);

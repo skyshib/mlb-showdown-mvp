@@ -27,6 +27,9 @@ export function renderPlayerTable(players, options = {}) {
   // The watchlist only has an owner when somebody is on the clock, so a
   // spectator's board simply has no star column to click.
   const starred = options.starred ?? null;
+  // The flag rides in the same first column as the star, so it needs no header
+  // of its own.
+  const flagged = options.flagged ?? null;
   const starHeader = starred ? [{ label: "" }] : [];
   // A blind draft strips the points column outright — the number is the one
   // thing the house rule keeps off the board.
@@ -80,18 +83,19 @@ export function renderPlayerTable(players, options = {}) {
       // than disappears.
       const idle = options.fillsNeed && !owner ? !options.fillsNeed(player) : false;
       const isStarred = starred ? starred.has(player.id) : false;
-      const pinned = options.compared ? options.compared.has(player.id) : false;
-      const compareButton = options.compared
-        ? `<button type="button" class="compare-pin${pinned ? " pinned" : ""}" data-action="compare" data-player-id="${escapeHtml(player.id)}" aria-pressed="${pinned}" title="${pinned ? "Unpin" : "Compare"} ${escapeHtml(player.name)}">&#8646;</button>`
+      const isFlagged = flagged ? flagged.has(player.id) : false;
+      const flagButton = flagged
+        ? `<button type="button" class="flag-toggle${isFlagged ? " flagged" : ""}" data-action="toggle-flag" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isFlagged}" title="${isFlagged ? "Remove flag" : "Flag"} ${escapeHtml(player.name)}">${isFlagged ? "⚑" : "⚐"}</button>`
         : "";
       const starCell = starred
-        ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button>${compareButton}</td>`
+        ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button>${flagButton}</td>`
         : "";
       const rowClass = [
         "draft-player-row",
         owner ? "sold-row" : "",
         onBlock ? "on-block-row" : "",
         isStarred ? "starred-row" : "",
+        isFlagged ? "flagged-row" : "",
         idle ? "idle-row" : ""
       ]
         .filter(Boolean)

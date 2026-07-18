@@ -247,8 +247,15 @@ export function normalizePickTimerSeconds(value) {
   return Math.min(600, Math.max(15, seconds));
 }
 
+// The house default scales with the roster: $100 a slot, so a bigger squad
+// bids with a bigger bankroll and a lot is worth the same share of it whatever
+// the roster size.
+export function defaultAuctionBudget(rosterSize = DEFAULT_ROSTER_SIZE) {
+  return 100 * rosterSize;
+}
+
 export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE) {
-  const value = Math.round((Number(budget) || AUCTION_DEFAULT_BUDGET) / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
+  const value = Math.round((Number(budget) || defaultAuctionBudget(rosterSize)) / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
   return Math.max(rosterSize * AUCTION_MIN_BID, value);
 }
 
@@ -2093,13 +2100,27 @@ function reserveSlots(kind, role, position) {
 // never has to invent a player. Managers are swept in seat order.
 export function sweepRosters(draft) {
   const swept = [];
-  for (const manager of draft.managers) {
-    let guard = 0;
-    for (;;) {
+  // Deal the free fills interleaved, not one roster emptied before the next
+  // starts. Filling manager by manager handed the first-listed roster first call
+  // on the scarce reserve every time; here each pass takes a fresh random order
+  // (seeded, so the sweep still replays identically), fills ONE gap per still-
+  // short manager, and comes round again — so a shared last card falls to a
+  // random roster rather than always the same one.
+  const rng = createRng(`${draft.seed ?? "showdown"}:sweep`);
+  const guardLimit = draft.managers.length * draft.rosterSize * 2 + draft.managers.length;
+  let guard = 0;
+  for (;;) {
+    const needy = shuffleSeeded(
+      draft.managers.filter((manager) => hasRosterGaps(activeRosterGaps(manager.roster, draft))),
+      rng
+    );
+    if (!needy.length) break;
+    guard += 1;
+    if (guard > guardLimit) break;
+
+    for (const manager of needy) {
       const gaps = activeRosterGaps(manager.roster, draft);
-      if (!hasRosterGaps(gaps)) break;
-      guard += 1;
-      if (guard > draft.rosterSize * 2) break;
+      if (!hasRosterGaps(gaps)) continue;
 
       // Scarce positions first — a catcher is harder to come by than a bat —
       // then the hitter count, then the staff.

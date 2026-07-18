@@ -2182,6 +2182,19 @@ button.roster-slot[draggable="true"]:active {
   font-weight: 800;
 }
 
+/* The card on the block, counted apart from the "N left" fallback. */
+.floor-onblock {
+  display: inline;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: var(--accent, #b3562e);
+  color: #fff;
+  font-style: normal;
+  font-size: 8.5px;
+  letter-spacing: 0.03em;
+}
+
 .floor-chip.floor-empty {
   border-color: rgba(179, 86, 62, 0.6);
   background: #fdf1ee;
@@ -2589,161 +2602,6 @@ button.roster-slot[draggable="true"]:active {
 /* ---- side by side ---- */
 .star-cell {
   white-space: nowrap;
-}
-
-.compare-pin {
-  min-height: 0;
-  width: 22px;
-  padding: 2px 0 3px;
-  margin-left: 1px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--hairline);
-  font-size: 13px;
-  font-style: normal;
-  letter-spacing: 0;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.compare-pin:hover {
-  background: transparent;
-  color: var(--navy);
-}
-
-.compare-pin.pinned {
-  color: var(--navy);
-  background: var(--sheet);
-}
-
-.compare-panel {
-  margin: 14px 0 4px;
-}
-
-.compare-note {
-  margin: 0 0 12px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.compare-table {
-  width: auto;
-  min-width: 0;
-  border-collapse: collapse;
-}
-
-.compare-table th,
-.compare-table td {
-  border-bottom: 1px solid var(--hairline);
-  padding: 8px 12px;
-  text-align: center;
-  vertical-align: middle;
-}
-
-.compare-table thead th {
-  border-bottom: var(--rule) solid var(--navy);
-  padding-bottom: 10px;
-}
-
-.compare-corner {
-  width: 62px;
-}
-
-.compare-name {
-  display: block;
-  font-family: var(--display);
-  font-size: 16px;
-  font-weight: 900;
-  font-style: italic;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--navy);
-}
-
-.compare-meta {
-  display: block;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.compare-drop {
-  margin-top: 6px;
-  padding: 2px 8px;
-  background: var(--panel);
-  color: var(--navy);
-  font-size: 11px;
-}
-
-.compare-drop:hover {
-  background: var(--accent-bright);
-  color: var(--accent-ink);
-}
-
-.compare-outcome {
-  text-align: right;
-}
-
-/* The outcome chips wear the same colours the card's own chart does, so a row
-   here reads as the row it came from. */
-.chart-chip {
-  display: inline-block;
-  min-width: 44px;
-  padding: 4px 8px 5px;
-  border-radius: 3px;
-  font-family: var(--display);
-  font-size: 12.5px;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  line-height: 1;
-  text-transform: uppercase;
-  color: #ffffff;
-}
-
-.chart-pu,
-.chart-so,
-.chart-gb,
-.chart-fb { background: #253544; color: #c3d0d6; }
-.chart-bb { background: #16825e; }
-.chart-1b,
-.chart-1b-plus { background: #d7aa36; color: #241a08; }
-.chart-2b { background: #e88334; }
-.chart-3b { background: #d9572d; }
-.chart-hr { background: #e94c5f; }
-
-/* How many faces of the die this outcome takes. The number is the comparison;
-   the printed range is there to be recognised. */
-.compare-faces {
-  display: block;
-  font-family: var(--display);
-  font-size: 22px;
-  font-weight: 900;
-  font-style: italic;
-  line-height: 1;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-}
-
-.compare-range {
-  display: block;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The most faces at this outcome — marked, not judged: a pitcher wants the
-   strikeouts and dreads the homers, and the board does not presume to know
-   which row you are reading. */
-.compare-lead {
-  background: var(--sheet);
-}
-
-.compare-lead .compare-faces {
-  color: var(--accent-dark);
 }
 
 /* ---- the lottery ---- */
@@ -3178,8 +3036,9 @@ button.roster-slot[draggable="true"]:active {
    A star is a manager's private note about a card he is watching. It marks the
    row without shouting: the board is still a board, not a wishlist. */
 .star-cell {
-  width: 30px;
+  width: 52px;
   padding-right: 0 !important;
+  white-space: nowrap;
 }
 
 .star-toggle {
@@ -3212,6 +3071,38 @@ button.roster-slot[draggable="true"]:active {
   outline-offset: 1px;
 }
 
+/* The flag sits beside the star in the same column: same toggle, its own mark
+   and its own colour so the two shortlists never blur together. */
+.flag-toggle {
+  min-height: 0;
+  width: 24px;
+  padding: 2px 0 3px;
+  margin-left: 1px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--hairline);
+  font-size: 14px;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.flag-toggle:hover {
+  background: transparent;
+  color: var(--navy);
+}
+
+.flag-toggle.flagged {
+  color: var(--navy);
+}
+
+.flag-toggle:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 1px;
+}
+
 /* A watched card carries a red edge down its left side — enough to catch the
    eye as the board scrolls, not enough to outrank a card that has sold. */
 .player-table tr.starred-row td {
@@ -3220,6 +3111,35 @@ button.roster-slot[draggable="true"]:active {
 
 .player-table tr.starred-row .star-cell {
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* A flagged card gets a navy edge, the flag's own colour, so it reads apart from
+   a starred one even at a glance. A card on both lists shows the star's tint and
+   the flag's edge layered underneath. */
+.player-table tr.flagged-row .star-cell {
+  box-shadow: inset 3px 0 0 var(--navy);
+}
+
+.player-table tr.flagged-row.starred-row .star-cell {
+  box-shadow: inset 3px 0 0 var(--accent), inset 6px 0 0 var(--navy);
+}
+
+.flag-filter .star-filter-mark {
+  color: var(--navy);
+}
+
+.flag-filter.active {
+  background: var(--navy);
+  color: var(--sheet);
+}
+
+.flag-filter.active .star-filter-mark {
+  color: var(--sheet);
+}
+
+.flag-filter.active .star-filter-count {
+  background: var(--sheet);
+  color: var(--navy);
 }
 
 /* The filter names its owner: at a shared screen the list belongs to whoever is
@@ -3784,6 +3704,71 @@ button.roster-slot[draggable="true"]:active {
   flex: none;
 }
 
+/* The won-lot announcement: a card dropped in over the top of the board, gone on
+   its own after a beat. It never takes a click and never blocks the draft. */
+.sale-toast {
+  position: fixed;
+  z-index: 60;
+  bottom: 36px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 280px;
+  max-width: min(92vw, 440px);
+  padding: 16px 30px 18px;
+  border: 3px solid var(--navy);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 16px 48px rgba(20, 28, 24, 0.36);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 18px) scale(0.96);
+  transition: opacity 180ms ease, transform 240ms cubic-bezier(0.2, 1.2, 0.4, 1);
+}
+
+.sale-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.sale-toast-mark {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.sale-toast-name {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1.05;
+  text-transform: uppercase;
+  color: var(--navy);
+}
+
+.sale-toast-line {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sale-toast {
+    transition: opacity 120ms ease;
+    transform: translate(-50%, 0);
+  }
+  .sale-toast.show {
+    transform: translate(-50%, 0);
+  }
+}
+
 .draft-chart {
   margin-top: 4px;
 }
@@ -4169,6 +4154,20 @@ button.roster-slot[draggable="true"]:active {
 
 .lot-entry input {
   width: 110px;
+}
+
+/* The shove button: it only turns up in the short strokes, so it wears the
+   warning colour to say what it does before you press it. */
+.lot-all-in {
+  border-color: var(--warn, #b3562e) !important;
+  background: var(--warn, #b3562e) !important;
+  color: #fff !important;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.lot-all-in:hover {
+  filter: brightness(1.08);
 }
 
 .mask-toggle {
@@ -4730,7 +4729,15 @@ html.club .player-table tr.sold-row { background: color-mix(in srgb, var(--sheet
 /* Icon buttons that borrowed the hairline for their glyph: on cream that was a
    soft grey mark, and on black it is a mark you cannot see. */
 html.club .star-toggle,
-html.club .compare-pin { color: var(--muted); }
+html.club .flag-toggle { color: var(--muted); }
+
+/* On the dark board the flag's navy would vanish, so it borrows a light ink. */
+html.club .flag-toggle.flagged { color: var(--ink); }
+html.club .player-table tr.flagged-row .star-cell { box-shadow: inset 3px 0 0 var(--ink); }
+html.club .player-table tr.flagged-row.starred-row .star-cell { box-shadow: inset 3px 0 0 var(--accent), inset 6px 0 0 var(--ink); }
+html.club .flag-filter .star-filter-mark { color: var(--ink); }
+html.club .flag-filter.active { background: var(--ink); color: var(--panel); }
+html.club .flag-filter.active .star-filter-mark { color: var(--panel); }
 
 /* The signal colors were mixed to sit on cream, and a red mixed for cream is a
    red that disappears on black. Same two meanings, lit for a dark room. They are

@@ -24,6 +24,7 @@ import {
   playNomination,
   playPick,
   playSniped,
+  playTie,
   playYourTurn,
   toggleMuted,
   unlockSounds
@@ -33,6 +34,7 @@ import { createBattle } from "./rules/battle/controller.js?v=20260716-records";
 import { createGame, renderGame } from "./ui/gameScreen.js?v=20260716-records";
 import {
   AUCTION_DEFAULT_BUDGET,
+  defaultAuctionBudget,
   AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
   AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS,
   AUCTION_DEFAULT_REVIEW_SECONDS,
@@ -139,7 +141,7 @@ import {
   summarizeBatch
 } from "./rules/batch.js?v=20260717-draft-wpa";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
-import { MAX_ROLL, chartSpan, formatRange, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
+import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260716-records";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260716-records";
@@ -185,6 +187,14 @@ pointTip.className = "chart-tip point-tip";
 pointTip.setAttribute("aria-hidden", "true");
 pointTip.hidden = true;
 document.body.append(pointTip);
+// A won lot gets a beat of its own: a card that drops in over the board naming
+// the winner and the price, then bows out on its own a couple of seconds later.
+const saleToast = document.createElement("div");
+saleToast.className = "sale-toast";
+saleToast.setAttribute("aria-hidden", "true");
+saleToast.hidden = true;
+document.body.append(saleToast);
+let saleToastTimer = null;
 
 let state = loadState() ?? defaultState();
 // A restored draft carries its own dealt cards, so it never re-deals — but
@@ -497,6 +507,9 @@ function advanceCpuTurns() {
 let heardPickNumber = null;
 let heardComplete = false;
 let heardAuctionLotKey;
+// The lot key we last sounded a tie for, so a lot that comes back tied cries out
+// once when it goes to a rebid rather than on every repaint while it hangs there.
+let heardTieLotKey = null;
 let filteredAuctionLotKey = null;
 
 function reactToDraftChange(draft, { spectator = false } = {}) {
@@ -519,6 +532,16 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
     playNomination();
   }
 
+  // A lot that came back tied goes to a sealed rebid. It keeps the same lot key,
+  // so it never trips the nomination sting — it gets its own, sounded once when
+  // the round turns over rather than on every repaint while the rebid sits open.
+  if (lot && lot.round === 2 && lotKey && lotKey !== heardTieLotKey) {
+    if (heardTieLotKey !== null || !first) playTie();
+    heardTieLotKey = lotKey;
+  } else if (!lot || lot.round !== 2) {
+    heardTieLotKey = null;
+  }
+
   if (landed) {
     // A card off your own board going to somebody else is not a pick, it is a
     // mugging, and it gets its own sound. A wall has no board and cannot be
@@ -529,6 +552,16 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
       .some((entry) => mine.has(entry.player?.id));
     if (taken) playSniped();
     else playPick(isAuctionDraft(draft) ? 0.38 : undefined);
+    // A won lot gets a moment of its own: the winner and the price, front and
+    // centre, gone on its own a couple of seconds later. Only for real auction
+    // wins — the closing sweep hands out free fills and completes the draft, and
+    // those are not somebody winning a card.
+    if (!spectator && isAuctionDraft(draft) && !draft.complete) {
+      const sale = draftHistory(draft).slice(-1)[0];
+      if (sale?.player && sale.manager && Number.isFinite(sale.price)) {
+        showSaleToast(sale);
+      }
+    }
   }
 
   if (draft.complete && !heardComplete && !first) playDraftComplete();
@@ -744,7 +777,7 @@ function defaultState() {
     // A blind draft: hide every card's printed points until it is drafted, so
     // managers pick and bid on the baseball rather than the number.
     hidePoints: false,
-    auctionBudget: AUCTION_DEFAULT_BUDGET,
+    auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS)),
     auctionTimer: {
       reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
       bankSeconds: AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -791,8 +824,9 @@ function defaultState() {
     // an eye on. It belongs to your own seat when you have one; only an
     // anonymous hotseat lets it follow the clock around the table.
     starred: {},
-    // Up to three cards pinned side by side.
-    compare: [],
+    // A second watchlist that works exactly like the stars, keyed the same way:
+    // a separate shortlist you can keep on the same board.
+    flagged: {},
     // Whether an auction board colours by what a card cost or what it is worth.
     heatBy: "price",
     // When the clock on the current pick runs out — published for the board on
@@ -804,7 +838,8 @@ function defaultState() {
       sort: "points",
       sortDirection: "desc",
       search: "",
-      starredOnly: false
+      starredOnly: false,
+      flaggedOnly: false
     }
   };
 }
@@ -1728,10 +1763,25 @@ function renderSetup(setupError = "") {
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
     const form = new FormData(setupForm);
+    // A hand-typed budget stops tracking the roster size — the manager has said
+    // what they want, so a later roster change leaves it alone.
+    if (event.target.name === "auctionBudget") {
+      event.target.dataset.userEdited = "1";
+      return;
+    }
     if (event.target.name === "startingPitchers") {
+      const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
+      const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
+      // The default budget is $100 a slot, so it moves with the roster until a
+      // manager overrides it.
+      const budgetInput = setupForm.querySelector('input[name="auctionBudget"]');
+      if (budgetInput) {
+        budgetInput.min = rosterSize * AUCTION_MIN_BID;
+        if (!budgetInput.dataset.userEdited) budgetInput.value = defaultAuctionBudget(rosterSize);
+      }
       const blurb = setupForm.querySelector("[data-random-nomination-blurb]");
       const managerCount = dedupeManagerNames(String(form.get("managers")).split("\n").map((name) => name.trim()).filter(Boolean)).length;
-      if (blurb) blurb.textContent = randomNominationBlurb(managerCount, normalizeStartingPitchers(form.get("startingPitchers")));
+      if (blurb) blurb.textContent = randomNominationBlurb(managerCount, startingPitchers);
       return;
     }
     if (event.target.name !== "managers") return;
@@ -1828,7 +1878,6 @@ function renderSetup(setupError = "") {
     // The gun. Both clocks start when the board is dealt, not when somebody
     // first looks at it.
     else startSnakeClock(state.draft, draftNow());
-    state.compare = [];
     state.tournament = null;
     state.batch = null;
     state.view = null;
@@ -1970,6 +2019,11 @@ function renderDraft() {
   // from another manager yanked you away from wherever you were reading. Keep
   // the scroll the way focus and the sealed bids are kept, and put it back below.
   const scrollTop = window.scrollY;
+  // The card list scrolls inside its own tall pane, not the window — starring a
+  // card repaints the page and reset that inner scroll to the top, throwing you
+  // back to the best cards mid-scan. Remember it and put it back too.
+  const listScrollTop = app.querySelector(".table-scroll-tall")?.scrollTop ?? 0;
+  hideFloatingTips();
   const draft = state.draft;
   reactToDraftChange(draft);
   captureSealedBids();
@@ -2025,17 +2079,18 @@ function renderDraft() {
         ${renderFilters()}
       </div>
       ${renderNeedsStrip(boardManager, draft)}
-      ${renderComparePanel(draft)}
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         hidePoints: pointsHidden(),
         starred: watchlistOwner() ? starredIds() : null,
-        compared: new Set(state.compare ?? []),
+        flagged: watchlistOwner() ? flaggedIds() : null,
         fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
         // An empty board under the watchlist filter means the list is empty, not
         // that the deck is — say which.
         emptyMessage: state.filters.starredOnly
           ? `${watchlistOwner()?.name ?? "This manager"} hasn't starred any ${state.filters.type === "pitcher" ? "pitchers" : "hitters"} yet. Tap a star to start a list.`
+          : state.filters.flaggedOnly
+          ? `${watchlistOwner()?.name ?? "This manager"} hasn't flagged any ${state.filters.type === "pitcher" ? "pitchers" : "hitters"} yet. Tap a flag to start a list.`
           : undefined,
         action: auction ? "nominate" : "pick",
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
@@ -2098,6 +2153,10 @@ function renderDraft() {
   restoreSealedBids();
   restoreTypingFocus(typing);
   if (window.scrollY !== scrollTop) window.scrollTo(0, scrollTop);
+  if (listScrollTop) {
+    const list = app.querySelector(".table-scroll-tall");
+    if (list) list.scrollTop = listScrollTop;
+  }
   bindDraftActions();
   pickClockTick();
 }
@@ -2305,6 +2364,12 @@ function renderAuctionBidEntry(draft) {
     const isNominator = lot.round === 1 && manager.id === lot.nominatorId;
     const canPass = lot.round === 1 && !isNominator;
     const maxBid = Math.max(0, auctionMaxBid(draft, manager));
+    // Down to the short strokes: when there is less than $200 of spendable budget
+    // left, the fine-grained raise stops mattering — one button shoves the whole
+    // stack (the most you can legally bid) into the box for you.
+    const allIn = maxBid > 0 && auctionBudget(draft, manager) < 200
+      ? `<button type="button" class="lot-all-in" data-action="seal-all-in" data-manager-id="${escapeHtml(manager.id)}" data-amount="${maxBid}" title="Load your whole remaining budget (${money(maxBid)}) into the box">All in &middot; ${money(maxBid)}</button>`
+      : "";
     const error = lotEntryError?.managerId === manager.id ? lotEntryError.message : "";
     return `<div class="lot-entry auction-side-entry">
       <span class="lot-entry-name">${escapeHtml(manager.name)}${isNominator ? ` nominated &middot; min ${money(AUCTION_MIN_BID)}` : lot.round === 2 ? ` tie-break &middot; min ${money(minBid)}` : ""}</span>
@@ -2313,6 +2378,7 @@ function renderAuctionBidEntry(draft) {
           ? `<input type="password" aria-label="${escapeHtml(manager.name)} sealed bid" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" inputmode="numeric" autocomplete="off" placeholder="${minBid}" />`
           : `<input type="number" aria-label="${escapeHtml(manager.name)} sealed bid" data-sealed-bid data-manager-id="${escapeHtml(manager.id)}" data-lot-key="${escapeHtml(lotKey)}" min="${canPass ? 0 : minBid}" max="${maxBid}" step="1" placeholder="${minBid}" />`}
         <button data-action="seal-bid" data-manager-id="${escapeHtml(manager.id)}">Bid</button>
+        ${allIn}
         ${canPass ? `<button class="secondary-button" data-action="seal-pass" data-manager-id="${escapeHtml(manager.id)}">Pass</button>` : ""}
       </div>
       <span class="auction-side-max">Maximum ${money(maxBid)}</span>
@@ -2490,16 +2556,11 @@ function bindDraftActions() {
       return;
     }
 
-    const comparePin = event.target.closest("button[data-action='compare']");
-    if (comparePin) {
-      toggleCompare(comparePin.dataset.playerId);
-      saveState();
-      renderDraft();
-      return;
-    }
-
-    if (event.target.closest("button[data-action='compare-clear']")) {
-      state.compare = [];
+    // A flag is a second note to yourself, alongside the star: same idea, its own
+    // list, so you can keep two shortlists on the same board.
+    const flagButton = event.target.closest("button[data-action='toggle-flag']");
+    if (flagButton) {
+      toggleFlag(flagButton.dataset.playerId);
       saveState();
       renderDraft();
       return;
@@ -2516,6 +2577,16 @@ function bindDraftActions() {
     const starFilter = event.target.closest("button[data-action='toggle-starred-only']");
     if (starFilter) {
       state.filters.starredOnly = !state.filters.starredOnly;
+      if (state.filters.starredOnly) state.filters.flaggedOnly = false;
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const flagFilter = event.target.closest("button[data-action='toggle-flagged-only']");
+    if (flagFilter) {
+      state.filters.flaggedOnly = !state.filters.flaggedOnly;
+      if (state.filters.flaggedOnly) state.filters.starredOnly = false;
       saveState();
       renderDraft();
       return;
@@ -2680,6 +2751,18 @@ function bindDraftActions() {
       }
       nominatePlayer(state.draft, playerId, draftNow());
       afterLocalDraftAction();
+    }
+    if (action === "seal-all-in") {
+      if (button.disabled) return;
+      const managerId = button.dataset.managerId;
+      const input = app.querySelector(`[data-sealed-bid][data-manager-id="${CSS.escape(managerId)}"]`);
+      // Load the box, don't fire it — the manager still gets to look at the
+      // number and press Submit (or think better of it) themselves.
+      if (input) {
+        input.value = button.dataset.amount;
+        input.focus();
+      }
+      return;
     }
     if (action === "seal-bid" || action === "seal-pass") {
       if (button.disabled) return;
@@ -3355,6 +3438,7 @@ function renderBatch() {
     renderCurrentScreen();
     return;
   }
+  hideFloatingTips();
   const { summary, runs } = state.batch;
   const top = summary.teams[0];
   const pickNumberMap = buildPickNumberMap(state.draft);
@@ -4327,6 +4411,42 @@ function hidePointTip() {
   pointTip.setAttribute("aria-hidden", "true");
 }
 
+// Both floating tips are singletons pinned to the body, anchored to a dot that a
+// repaint throws away — and a removed dot fires no pointer-out, so the tip that
+// was riding it hangs there over the new screen. Any full repaint of a
+// chart-bearing view calls this first to clear a stale one; the pointer handlers
+// bring it back the moment the cursor actually sits on a live dot again.
+function hideFloatingTips() {
+  hidePointTip();
+  hideChartTip();
+}
+
+// Announce a won lot: winner and price, dropped in over the board and cleared on
+// its own after a beat. It never blocks — the draft rolls straight on to the next
+// nomination underneath it.
+function showSaleToast(sale) {
+  const price = money(sale.price);
+  const name = sale.player?.name ?? "";
+  const winner = sale.manager?.name ?? "";
+  saleToast.innerHTML = `<span class="sale-toast-mark">SOLD</span>
+    <strong class="sale-toast-name">${escapeHtml(name)}</strong>
+    <span class="sale-toast-line">to <strong>${escapeHtml(winner)}</strong> for <strong>${escapeHtml(price)}</strong></span>`;
+  saleToast.hidden = false;
+  saleToast.setAttribute("aria-hidden", "false");
+  // Restart the entrance every time so a quick run of sales each get their own
+  // full moment rather than one frozen card riding through all of them.
+  saleToast.classList.remove("show");
+  void saleToast.offsetWidth;
+  saleToast.classList.add("show");
+  if (saleToastTimer) clearTimeout(saleToastTimer);
+  saleToastTimer = setTimeout(() => {
+    saleToast.classList.remove("show");
+    saleToast.hidden = true;
+    saleToast.setAttribute("aria-hidden", "true");
+    saleToastTimer = null;
+  }, 2600);
+}
+
 function renderGameDetail(game) {
   if (!game) return "<p>No game selected.</p>";
   return `<div class="game-detail">
@@ -5188,24 +5308,32 @@ function renderPoolFloor(draft) {
   const needed = leagueOpenGroups(draft);
   if (!needed.size) return "";
   const available = availablePlayers(draft);
+  // The card on the block is still "available", but it is the very one being
+  // decided right now — so "N left" that quietly counted it read as one more
+  // fallback than you actually have. Set it aside and mark its group, so the
+  // number is what remains if you let this lot go.
+  const lotPlayer = isAuctionDraft(draft) ? auctionLotPlayer(draft) : null;
   const pointsScale = poolPointsScale(draft);
   const previewChip = (label, player) =>
     `<strong class="player-name-preview" tabindex="0" data-preview-id="pool-${label}-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(previewCard(player))}">${label} ${escapeHtml(dockChipName(player))}${pointsHidden() ? "" : ` &middot; ${player.points}`}</strong>`;
   const items = BOARD_POSITION_GROUPS.filter((group) => needed.has(group))
     .map((group) => {
-      const eligible = available.filter((player) => poolGroupEligible(player, group));
+      const onBlock = lotPlayer && poolGroupEligible(lotPlayer, group);
+      const eligible = available.filter((player) =>
+        poolGroupEligible(player, group) && !(onBlock && player.id === lotPlayer.id));
+      const blockNote = onBlock ? `<em class="floor-onblock">+1 up now</em>` : "";
       if (!eligible.length) {
-        return `<span class="floor-chip floor-empty"><small>${group}</small><strong>none left</strong></span>`;
+        return `<span class="floor-chip floor-empty"><small>${group} ${blockNote}</small><strong>none left${onBlock ? " after this" : ""}</strong></span>`;
       }
       const best = eligible.reduce((high, player) => (player.points > high.points ? player : high));
       const floor = eligible.reduce((low, player) => (player.points < low.points ? player : low));
       const lines = best === floor
         ? previewChip("last:", best)
         : `${previewChip("best", best)}${previewChip("floor", floor)}`;
-      return `<span class="floor-chip heat" style="${heatStyle(best.points, pointsScale)}"><small>${group} &middot; ${eligible.length} left</small>${lines}</span>`;
+      return `<span class="floor-chip heat" style="${heatStyle(best.points, pointsScale)}"><small>${group} &middot; ${eligible.length} left ${blockNote}</small>${lines}</span>`;
     })
     .join("");
-  return `<div class="pool-floor" aria-label="Strength remaining at open positions"><small>left on the board</small>${items}</div>`;
+  return `<div class="pool-floor" aria-label="Strength remaining at open positions"><small>left on the board &middot; the card up now is counted apart</small>${items}</div>`;
 }
 
 // Card-points scale for pool-quality tints, independent of the bid scale.
@@ -5988,15 +6116,25 @@ function renderFilters() {
   // the manager's list — undo a pick and it comes back — but it is nothing he
   // can act on, so it does not pad the number on the button.
   const owner = watchlistOwner();
+  const gettable = (ids) => state.draft
+    ? ids.filter((id) => !state.draft.pickedIds.has(id)).length
+    : ids.length;
   const list = owner ? (state.starred[owner.id] ?? []) : [];
-  const starCount = state.draft
-    ? list.filter((id) => !state.draft.pickedIds.has(id)).length
-    : list.length;
+  const starCount = gettable(list);
   const starFilter = owner
     ? `<button type="button" class="star-filter${state.filters.starredOnly ? " active" : ""}" data-action="toggle-starred-only" aria-pressed="${state.filters.starredOnly}" title="${state.filters.starredOnly ? "Show every card" : `Show only the cards ${owner.name} is watching`}">
         <span class="star-filter-mark">${starCount ? "★" : "☆"}</span>
         <span>${escapeHtml(owner.name)}'s list</span>
         ${starCount ? `<span class="star-filter-count">${starCount}</span>` : ""}
+      </button>`
+    : "";
+  const flagList = owner ? (state.flagged[owner.id] ?? []) : [];
+  const flagCount = gettable(flagList);
+  const flagFilter = owner
+    ? `<button type="button" class="star-filter flag-filter${state.filters.flaggedOnly ? " active" : ""}" data-action="toggle-flagged-only" aria-pressed="${state.filters.flaggedOnly}" title="${state.filters.flaggedOnly ? "Show every card" : `Show only the cards ${owner.name} has flagged`}">
+        <span class="star-filter-mark">${flagCount ? "⚑" : "⚐"}</span>
+        <span>Flagged</span>
+        ${flagCount ? `<span class="star-filter-count">${flagCount}</span>` : ""}
       </button>`
     : "";
 
@@ -6005,6 +6143,7 @@ function renderFilters() {
       ${typeOptions.map(([value, label]) => `<button type="button" class="type-pill ${state.filters.type === value ? "active" : ""}" data-filter="type" data-filter-value="${value}">${label}</button>`).join("")}
     </div>
     ${starFilter}
+    ${flagFilter}
     <label class="filter-position">
       Position
       <select data-filter="position">
@@ -6110,6 +6249,24 @@ function toggleStar(playerId) {
     : [...list, playerId];
   if (next.length) state.starred[owner.id] = next;
   else delete state.starred[owner.id];
+}
+
+// The flag is a second shortlist, owned and toggled exactly like the stars.
+function flaggedIds() {
+  const owner = watchlistOwner();
+  if (!owner) return new Set();
+  return new Set(state.flagged[owner.id] ?? []);
+}
+
+function toggleFlag(playerId) {
+  const owner = watchlistOwner();
+  if (!owner) return;
+  const list = state.flagged[owner.id] ?? [];
+  const next = list.includes(playerId)
+    ? list.filter((id) => id !== playerId)
+    : [...list, playerId];
+  if (next.length) state.flagged[owner.id] = next;
+  else delete state.flagged[owner.id];
 }
 
 // ---- the big board ----
@@ -6556,99 +6713,6 @@ function renderAuctionBudgetSection(draft) {
   </section>`;
 }
 
-// ---- comparing cards ----
-//
-// The whole game turns on the shape of a chart, and the only way to compare two
-// of them was to hover one card, then the other, and hold the difference in your
-// head. Pin them side by side instead, lined up by outcome — and count the faces
-// of the die rather than printing the ranges, because "7-12" and "13-16" tell
-// you nothing until you have worked out that one is six faces and the other is
-// four. That subtraction is the entire comparison, so the board does it.
-const COMPARE_LIMIT = 3;
-const COMPARE_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
-
-function toggleCompare(playerId) {
-  const pinned = state.compare ?? [];
-  if (pinned.includes(playerId)) {
-    state.compare = pinned.filter((id) => id !== playerId);
-    return;
-  }
-  // A fourth card pushes the first one off the bench.
-  state.compare = [...pinned, playerId].slice(-COMPARE_LIMIT);
-}
-
-function comparedCards(draft) {
-  if (!draft) return [];
-  const byId = new Map(draft.pool.map((player) => [player.id, player]));
-  return (state.compare ?? []).map((id) => byId.get(id)).filter(Boolean);
-}
-
-function renderComparePanel(draft) {
-  const cards = comparedCards(draft);
-  if (!cards.length) return "";
-
-  // Only the rows anybody actually rolls: a grid full of empty cells compares
-  // nothing.
-  const rows = COMPARE_OUTCOMES.filter((outcome) =>
-    cards.some((card) => card.chart.some((entry) => entry.result === outcome))
-  );
-
-  const header = cards
-    .map((card) => {
-      const rating = card.kind === "pitcher" ? `CTRL ${card.control}` : `OB ${card.onBase}`;
-      const spot = card.kind === "pitcher" ? card.role : positionsLabel(card);
-      return `<th>
-        <span class="compare-name">${escapeHtml(card.name)}</span>
-        <span class="compare-meta">${escapeHtml(spot)} &middot; ${escapeHtml(rating)}${pointsHidden() ? "" : ` &middot; ${card.points} pts`}</span>
-        <button class="small compare-drop" data-action="compare" data-player-id="${escapeHtml(card.id)}" title="Unpin ${escapeHtml(card.name)}">&times;</button>
-      </th>`;
-    })
-    .join("");
-
-  const body = rows
-    .map((outcome) => {
-      const faces = cards.map((card) =>
-        card.chart
-          .filter((entry) => entry.result === outcome)
-          .reduce((sum, entry) => sum + chartSpan(entry), 0)
-      );
-      const best = Math.max(...faces);
-      const cells = cards
-        .map((card, index) => {
-          const count = faces[index];
-          const entries = card.chart.filter((entry) => entry.result === outcome);
-          const range = entries.map((entry) => formatRange(entry)).join(", ") || "&mdash;";
-          // "Most" is not "best" — a pitcher wants strikeouts and dreads homers —
-          // so the leader is marked, not judged.
-          const lead = count > 0 && count === best && faces.filter((value) => value === best).length < cards.length;
-          return `<td class="${lead ? "compare-lead" : ""}">
-            <span class="compare-faces">${count}</span>
-            <span class="compare-range">${range}</span>
-          </td>`;
-        })
-        .join("");
-      return `<tr>
-        <th class="compare-outcome"><span class="chart-chip chart-${outcome.toLowerCase().replace("+", "-plus")}">${outcome}</span></th>
-        ${cells}
-      </tr>`;
-    })
-    .join("");
-
-  return `<section class="panel compare-panel">
-    <div class="section-head">
-      <h2>Side by side</h2>
-      <button class="small" data-action="compare-clear">Clear</button>
-    </div>
-    <p class="compare-note">Faces of the d20 each outcome takes, with the printed range beneath.</p>
-    <div class="table-scroll">
-      <table class="compare-table">
-        <thead><tr><th class="compare-corner"></th>${header}</tr></thead>
-        <tbody>${body}</tbody>
-      </table>
-    </div>
-  </section>`;
-}
-
 // ---- what the roster still wants ----
 //
 // The board sorts by points and wishes you luck. But a fourth outfielder is
@@ -6757,9 +6821,11 @@ function renderNeedsStrip(manager, draft) {
 function filteredPlayers(players) {
   const search = state.filters.search.trim().toLowerCase();
   const starred = state.filters.starredOnly ? starredIds() : null;
+  const flagged = state.filters.flaggedOnly ? flaggedIds() : null;
   return players.filter((player) => {
     if (player.kind !== state.filters.type) return false;
     if (starred && !starred.has(player.id)) return false;
+    if (flagged && !flagged.has(player.id)) return false;
     if (state.filters.position !== "all" && !matchesPositionFilter(player, state.filters.position)) return false;
     if (search && !`${player.name} ${player.team ?? ""} ${playerPosition(player)} ${player.kind}`.toLowerCase().includes(search)) return false;
     return true;
@@ -7073,7 +7139,7 @@ function reviveState(value) {
     hidePoints: Boolean(value.hidePoints),
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
-    compare: Array.isArray(value.compare) ? value.compare.filter((id) => typeof id === "string").slice(0, 3) : [],
+    flagged: normalizeStarred(value.flagged),
     heatBy: value.heatBy === "points" ? "points" : "price",
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
     myManagerId: typeof value.myManagerId === "string" ? value.myManagerId : null,
