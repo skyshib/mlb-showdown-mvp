@@ -14,9 +14,13 @@ const PITCHER_BASE_WEIGHTS = {
   chart: 1
 };
 
+// Calibrated to this sim's ACTUAL run values, measured by RE24 over 314k plate
+// appearances (BB +0.30, 1B +0.41, 2B +0.81, 3B +1.01, HR +1.38, outs ≈ −0.29).
+// Hitter values sit on a ~10.6 units-per-run scale; the notable correction from
+// the old table is GB (double plays make it worse than a fly ball, not equal).
 const HITTER_CHART_VALUES = {
   [RESULTS.SO]: -4,
-  [RESULTS.GB]: -2,
+  [RESULTS.GB]: -3,
   [RESULTS.FB]: -2,
   [RESULTS.BB]: 4,
   [RESULTS.SINGLE]: 5,
@@ -26,6 +30,13 @@ const HITTER_CHART_VALUES = {
   [RESULTS.HR]: 14
 };
 
+// The out rewards (PU/SO/GB/FB) are left as a strong chart-quality signal —
+// head-to-head testing showed that damping them makes the valuation discriminate
+// WORSE between arms, so they stay. The correction is at the extra-base end,
+// which the old table under-penalized relative to its own singles/doubles: at
+// the table's scale (a single at −0.41 runs → −7), the run-value-fair HR (+1.38)
+// is −24 and the triple (+1.01) is −16. The triple was previously missing
+// entirely (scored 0). So an HR-prone arm is no longer flattered by its outs.
 const PITCHER_CHART_VALUES = {
   [RESULTS.PU]: 8,
   [RESULTS.SO]: 10,
@@ -34,7 +45,8 @@ const PITCHER_CHART_VALUES = {
   [RESULTS.BB]: -5,
   [RESULTS.SINGLE]: -7,
   [RESULTS.DOUBLE]: -11,
-  [RESULTS.HR]: -16
+  [RESULTS.TRIPLE]: -16,
+  [RESULTS.HR]: -24
 };
 
 const PERTURBATION = 0.25;

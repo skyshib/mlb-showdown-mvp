@@ -1723,6 +1723,31 @@ const SHARE_EXPONENT = 1.1;
 const POOL_PREMIUM_STRENGTH = 0.7;
 const POOL_PREMIUM_THRESHOLD = 0.8;
 
+// The draft's tail: 0 until ~60% of the nomination queue is gone, ramping to 1
+// at the end. Only random nomination has a queue, so manual returns 0 and the
+// end-game upgrade logic below simply never engages there.
+function auctionEndgamePressure(draft) {
+  const total = isRandomNomination(draft) ? draft.auction.queue.length : 0;
+  if (!total) return 0;
+  const fracDone = 1 - nominationQueueRemaining(draft) / total;
+  return Math.max(0, Math.min(1, (fracDone - 0.6) / 0.4));
+}
+
+// The value of this manager's WEAKEST fielded card at each bucket — its worst
+// starter, worst reliever, worst regular. A card that clears the floor at its
+// bucket is a genuine upgrade to the nine/staff, which is the only thing a team
+// with a full roster should still pay up for late (more bench depth is not).
+function fieldedBucketFloor(manager, model) {
+  const floor = new Map();
+  for (const card of activeRoster(manager)) {
+    const bucket = playerBucket(card);
+    const value = model.value(card);
+    const current = floor.get(bucket);
+    if (current === undefined || value < current) floor.set(bucket, value);
+  }
+  return floor;
+}
+
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
@@ -1752,9 +1777,24 @@ function auctionWillingness(draft, manager, player) {
   // the room presses, because his equal is free off the sweep. And it is DAMPED
   // when the spot is already full: a third starter to a man who needs two is
   // bench depth, not a need, and must not pull budget off the holes still open.
+  //
+  // The exception is the END GAME. A manager whose roster is full but whose
+  // budget will otherwise expire unspent should still buy a genuine UPGRADE to
+  // its fielded nine or staff (and make a leader pay for the ones it wants),
+  // rather than sit on money for nothing while the board is picked clean. So in
+  // the draft's tail, a full-bucket card is worth the larger of its damped depth
+  // and how far it clears the manager's OWN weakest fielded card at that bucket,
+  // scaled by how near the end we are. Upgrade-gated, so it never chases scrubs.
+  const endgame = auctionEndgamePressure(draft);
+  const fieldedFloor = endgame > 0 ? fieldedBucketFloor(manager, market.model) : null;
   const effectiveWorth = (card) => {
     const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * auctionUrgency(draft, manager, card, forthcoming));
-    return bucketNeed(needs, playerBucket(card)) <= 0 ? base * DEPTH_DAMP : base;
+    if (bucketNeed(needs, playerBucket(card)) > 0) return base;
+    const damped = base * DEPTH_DAMP;
+    if (!endgame) return damped;
+    const floor = fieldedFloor.get(playerBucket(card));
+    const upgrade = floor == null ? 0 : Math.max(0, market.model.value(card) - floor);
+    return Math.max(damped, upgrade * endgame);
   };
   const worth = effectiveWorth(player);
   if (worth <= 0) return 0;
