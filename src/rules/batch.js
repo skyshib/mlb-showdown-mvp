@@ -401,7 +401,9 @@ function teamSkillTotals(row) {
     homeCutDowns: row.homeCutDowns,
     caughtStealingByDefense: row.caughtStealingByDefense,
     doublePlayChances: row.doublePlayChances,
-    doublePlays: row.doublePlays
+    doublePlays: row.doublePlays,
+    baserunningWpa: row.baserunningWpa,
+    baserunningWpaAllowed: row.baserunningWpaAllowed
   };
 }
 

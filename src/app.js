@@ -20,8 +20,10 @@ import {
   isMuted,
   playClockWarning,
   playDraftComplete,
+  playDraftStart,
   playLotteryBall,
   playNomination,
+  playPassed,
   playPick,
   playSniped,
   playTie,
@@ -195,6 +197,26 @@ saleToast.setAttribute("aria-hidden", "true");
 saleToast.hidden = true;
 document.body.append(saleToast);
 let saleToastTimer = null;
+
+// A fresh room gets a random baseball-flavored seed so nobody has to think one
+// up — two hyphenated words pulled from the diamond. Editable in the box. Defined
+// here, above the first defaultState() call, so a first visit with no saved state
+// does not reach for these lists before they exist.
+const SEED_ADJECTIVES = [
+  "corner", "sandlot", "extra", "walkoff", "leadoff", "clutch", "ninth", "opening",
+  "twilight", "October", "dead", "live", "small", "grand", "backdoor", "high",
+  "inside", "golden", "perfect", "rookie", "veteran", "designated", "warning"
+];
+const SEED_NOUNS = [
+  "slider", "curveball", "changeup", "knuckler", "splitter", "sinker", "fastball",
+  "bunt", "dinger", "grandslam", "shutout", "doubleheader", "bullpen", "dugout",
+  "mound", "diamond", "outfield", "infield", "batflip", "rally", "moonshot",
+  "screwball", "cutter", "heater", "gapper", "chopper", "squeeze", "pickoff"
+];
+function randomBaseballSeed() {
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  return `${pick(SEED_ADJECTIVES)}-${pick(SEED_NOUNS)}`;
+}
 
 let state = loadState() ?? defaultState();
 // A restored draft carries its own dealt cards, so it never re-deals — but
@@ -507,6 +529,10 @@ function advanceCpuTurns() {
 let heardPickNumber = null;
 let heardComplete = false;
 let heardAuctionLotKey;
+// A passed-out lot never touches the pick counter, so the sale watcher above
+// can't see it. This one tracks the auction log's length instead, so the room
+// hears "nobody wanted that" when a lot lands in the history as a pass.
+let heardAuctionHistory = null;
 // The lot key we last sounded a tie for, so a lot that comes back tied cries out
 // once when it goes to a rebid rather than on every repaint while it hangs there.
 let heardTieLotKey = null;
@@ -517,6 +543,7 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
     heardPickNumber = null;
     heardComplete = false;
     heardAuctionLotKey = undefined;
+    heardAuctionHistory = null;
     filteredAuctionLotKey = null;
     return;
   }
@@ -540,6 +567,15 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
     heardTieLotKey = lotKey;
   } else if (!lot || lot.round !== 2) {
     heardTieLotKey = null;
+  }
+
+  // A lot the whole room passed on lands in the auction log without moving the
+  // pick counter, so the sale watcher below never sees it. Catch it here off the
+  // log's growth, and only for a genuine pass — a sale grows the log too, but
+  // that one is a win and gets the winning chime.
+  const auctionHistory = isAuctionDraft(draft) ? draft.auction?.history ?? [] : [];
+  if (heardAuctionHistory !== null && auctionHistory.length > heardAuctionHistory) {
+    if (auctionHistory.at(-1)?.passed) playPassed();
   }
 
   if (landed) {
@@ -569,6 +605,7 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
   heardPickNumber = picks;
   heardComplete = Boolean(draft.complete);
   heardAuctionLotKey = lotKey;
+  heardAuctionHistory = auctionHistory.length;
 }
 
 // Wraps up every human-initiated local draft change: computers respond,
@@ -768,7 +805,7 @@ if (warRoomMode && !onlineRoomParam) {
 
 function defaultState() {
   return {
-    seed: "coefficient-classic",
+    seed: randomBaseballSeed(),
     managers: ["Skylar", "Kasey", "Scott"],
     cpuManagers: [],
     universe: DEFAULT_UNIVERSE,
@@ -815,6 +852,11 @@ function defaultState() {
     batchStatsTab: "overview",
     batchPitcherSplit: "overall",
     batchChartManager: null,
+    // Draft-value chart axes. x defaults to what a card cost (price in an auction,
+    // pick number in a snake); y to the WPA it went on to earn. Both are
+    // re-pointable — see renderBatch's axis pickers.
+    batchChartXAxis: null,
+    batchChartYAxis: "wpa",
     batchGamePage: 0,
     batchGameIndex: null,
     view: null,
@@ -1878,6 +1920,12 @@ function renderSetup(setupError = "") {
     // The gun. Both clocks start when the board is dealt, not when somebody
     // first looks at it.
     else startSnakeClock(state.draft, draftNow());
+    // The whistle to go with the gun. This runs inside the submit gesture, so we
+    // can ask for the audio context and play in the same breath; unlock never
+    // waits, so a browser still deciding stays silent rather than stalling.
+    unlockSounds().then((ok) => {
+      if (ok) playDraftStart();
+    });
     state.tournament = null;
     state.batch = null;
     state.view = null;
@@ -2405,6 +2453,16 @@ function renderAuctionStatusPanel(draft) {
   const random = isRandomNomination(draft);
   const remaining = auctionPlayersStillToCome(draft, lot);
   const timed = auctionTimerEnabled(draft);
+  const lotPlayer = auctionLotPlayer(draft);
+
+  // How far the slate has run, as a fraction of every lot the draft will ever
+  // hold. The queue is the whole slate in a random room; a manual room runs one
+  // lot per roster spot. Only settled lots count as done — the card on the block
+  // is in flight, so it sits in neither the done pile nor the still-to-come one.
+  const totalLots = random ? (draft.auction.queue?.length ?? 0) : draft.managers.length * draft.rosterSize;
+  const settled = Math.max(0, totalLots - remaining - (lot ? 1 : 0));
+  const pct = totalLots ? Math.round((settled / totalLots) * 100) : 0;
+
   const managers = draft.managers.map((manager) => {
     const clock = timed
       ? formatAuctionClock(auctionBidTimeRemainingMs(live, manager, draftNow()))
@@ -2416,23 +2474,53 @@ function renderAuctionStatusPanel(draft) {
       <span class="auction-manager-clock${timed && clock === "0:00" ? " flagged" : ""}"${timed ? ` data-auction-clock data-manager-id="${escapeHtml(manager.id)}"` : ""}>${clock}</span>
     </div>`;
   }).join("");
+  // The floors, as a compact table under the count. A row for a spot the card on
+  // the block actually plays — the positions PRINTED on it, not everywhere a bat
+  // could be hidden (any hitter can stand at first) — gets a soft highlight, so
+  // the desk sees at a glance whether this lot eats into a position it still owes.
+  const lotPlaysGroup = (group) => {
+    if (!lotPlayer) return false;
+    if (lotPlayer.kind === "pitcher") return group === (lotPlayer.role === "SP" ? "SP" : "RP");
+    return playsPosition(lotPlayer, group);
+  };
   const minimums = random
-    ? `<div class="auction-side-section">
+    ? `<div class="auction-side-section auction-guaranteed">
         <h3>Guaranteed still to come</h3>
-        <div class="nomination-minimums auction-side-minimums" aria-label="Guaranteed primary-position nominations still to come">
-          ${guaranteedNominationMinimums(draft).map(({ position, minimum }) =>
-            `<span class="nomination-minimum"><strong>${escapeHtml(position)}</strong> min ${minimum}</span>`
-          ).join("")}
-        </div>
+        <table class="guaranteed-table" aria-label="Guaranteed primary-position nominations still to come">
+          <thead><tr><th scope="col">Pos</th><th scope="col">Min</th></tr></thead>
+          <tbody>
+            ${guaranteedNominationMinimums(draft).map(({ position, minimum }) => {
+              const plays = lotPlaysGroup(position);
+              return `<tr${plays ? ' class="plays"' : ""}>
+                <th scope="row">${escapeHtml(position)}</th>
+                <td>${minimum}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`
+    : "";
+
+  // The card on the block, at the foot of the desk — the face to go with the
+  // name up in the lot panel.
+  const lotCard = lotPlayer
+    ? `<div class="auction-side-section auction-lot-card">
+        <h3>On the block</h3>
+        <div class="auction-lot-card-face">${cardPanelHtml(lotPlayer, { hidePoints: pointsHidden() })}</div>
       </div>`
     : "";
 
   return `<aside class="panel auction-status-panel" aria-label="Auction desk">
     <p class="eyebrow">Auction desk</p>
+    <div class="auction-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Draft completion">
+      <div class="auction-progress-track"><div class="auction-progress-fill" style="width:${pct}%"></div></div>
+      <span class="auction-progress-pct">${pct}%</span>
+    </div>
     <div class="auction-remaining">
       <strong>${remaining}</strong>
       <span>players still to come${lot ? " after this lot" : ""}</span>
     </div>
+    ${minimums}
     <div class="auction-side-section auction-side-bid">
       <h3>${lot?.round === 2 ? "Tie-break bid" : "Enter bid"}</h3>
       ${renderAuctionBidEntry(draft)}
@@ -2441,7 +2529,7 @@ function renderAuctionStatusPanel(draft) {
       <h3>Budget &amp; time</h3>
       <div class="auction-manager-statuses">${managers}</div>
     </div>
-    ${minimums}
+    ${lotCard}
   </aside>`;
 }
 
@@ -3069,6 +3157,16 @@ function bindHoverCardPreviews(onEscape = null) {
     onEscape?.(event);
   };
 
+  // Scrolling slides a dot out from under a stationary cursor without firing any
+  // pointer event, so the floating tip would hang over empty space. Drop it on
+  // any scroll (capture, since inner scroll containers don't bubble the event).
+  const handleScroll = () => {
+    hidePointTip();
+    hideChartTip();
+    hideHoverCard();
+    hoveredPreviewRow = null;
+  };
+
   app.addEventListener("pointerover", handlePointerOver, listenerOptions);
   app.addEventListener("pointermove", handlePointerMove, listenerOptions);
   app.addEventListener("pointerout", handlePointerOut, listenerOptions);
@@ -3078,6 +3176,7 @@ function bindHoverCardPreviews(onEscape = null) {
   app.addEventListener("focusin", handleFocusIn, listenerOptions);
   app.addEventListener("focusout", handleFocusOut, listenerOptions);
   app.addEventListener("keydown", handleKeyDown, listenerOptions);
+  window.addEventListener("scroll", handleScroll, { ...listenerOptions, capture: true, passive: true });
 }
 
 function clearHoverCardPreviewBindings() {
@@ -3447,6 +3546,11 @@ function renderBatch() {
   const backLabel = "Back to draft";
   const playersById = draftedPlayersById();
   const auctionDraft = isAuctionDraft(state.draft);
+  // Auction lots don't follow the snake order buildPickNumberMap assumes, so the
+  // real acquisition order comes from the auction history instead.
+  const acquisitionPickMap = auctionDraft
+    ? Object.fromEntries(draftHistory(state.draft).map((pick) => [pick.player.id, pick.pickNumber]))
+    : pickNumberMap;
   const draftCostHeader = auctionDraft ? "Price" : "Pick #";
   const draftCostFor = (line) => {
     const player = playerForBoxLine(playersById, line, line.team);
@@ -3573,78 +3677,197 @@ function renderBatch() {
   };
   const chartLegend = chartTeamOrder.map((name, index) => ({ name, color: raceColor(index) }));
 
-  const scatterCost = (line) => {
+  // One record per drafted card that logged a stat. Every axis the chart can plot
+  // — what it cost, what it earned, its printed points — hangs off this record, so
+  // re-pointing an axis is just reading a different field rather than rebuilding.
+  const cardRecords = [];
+  const collectRecord = (line, kind) => {
     const player = playerForBoxLine(playersById, line, line.team);
     const id = player?.id ?? line.id;
-    if (auctionDraft) {
-      const price = pricePaidMap[id];
-      return Number.isFinite(price) ? price : null;
+    const wpa162 = batchPace(line, "wpaPer162", "wpa", teamGamesByName);
+    let statLine;
+    if (kind === "hitter") {
+      const hr = Math.round(batchPace(line, "hrPer162", "hr", teamGamesByName));
+      const rbi = Math.round(batchPace(line, "rbiPer162", "rbi", teamGamesByName));
+      const sb = Math.round(batchPace(line, "sbPer162", "sb", teamGamesByName));
+      const slash = `${formatBattingStat(line.avg)}/${formatBattingStat(line.obp)}/${formatBattingStat(line.slg)}`;
+      statLine = `${slash} · ${hr} HR · ${rbi} RBI${sb ? ` · ${sb} SB` : ""}`;
+    } else {
+      const ip162 = batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3);
+      statLine = `${formatDecimal(ip162, 1)} IP · ${formatPerNine(line.r, line.outs)} R/9 · ${formatPerNine(line.so, line.outs)} K/9 · ${formatPerNine(line.bb, line.outs)} BB/9`;
     }
-    const pick = pickNumberMap[id];
-    return Number.isFinite(pick) ? pick : null;
+    cardRecords.push({
+      cardId: id,
+      name: line.name,
+      team: line.team,
+      color: colorForTeam(line.team),
+      slot: kind === "hitter" ? line.position : line.role,
+      points: Number.isFinite(player?.points) ? player.points : null,
+      wpa162,
+      pick: acquisitionPickMap[id],
+      price: pricePaidMap[id],
+      pickNumber: pickNumberMap[id],
+      statLine
+    });
   };
-  const costLabel = (cost) => (auctionDraft ? money(cost) : `#${cost}`);
-  const scatterPoints = [];
-  for (const line of summary.hitters) {
-    const cost = scatterCost(line);
-    if (cost == null) continue;
-    const wpa162 = batchPace(line, "wpaPer162", "wpa", teamGamesByName);
-    const hr = Math.round(batchPace(line, "hrPer162", "hr", teamGamesByName));
-    const rbi = Math.round(batchPace(line, "rbiPer162", "rbi", teamGamesByName));
-    const sb = Math.round(batchPace(line, "sbPer162", "sb", teamGamesByName));
-    const slash = `${formatBattingStat(line.avg)}/${formatBattingStat(line.obp)}/${formatBattingStat(line.slg)}`;
-    const color = colorForTeam(line.team);
-    scatterPoints.push({
-      x: cost,
-      y: wpa162,
-      color,
-      team: line.team,
-      cardId: playerForBoxLine(playersById, line, line.team)?.id ?? line.id,
-      tipTitle: line.name,
-      tipColor: color,
-      tipLines: [
-        line.team + (line.position ? ` · ${line.position}` : ""),
-        `${auctionDraft ? "Price" : "Pick"}: ${costLabel(cost)}`,
-        `WPA/162: ${formatWpaStat(wpa162)}`,
-        `${slash} · ${hr} HR · ${rbi} RBI${sb ? ` · ${sb} SB` : ""}`
-      ]
-    });
+  for (const line of summary.hitters) collectRecord(line, "hitter");
+  for (const line of summary.pitchers) collectRecord(line, "pitcher");
+
+  // Every sealed bid on every card, keyed by the card and the manager who made
+  // it, plus the top bid on each — the raw material for the bid-aware x-axes.
+  const bidsByCard = {};
+  const maxBidByCard = {};
+  if (auctionDraft) {
+    const nameById = new Map(state.draft.managers.map((manager) => [manager.id, manager.name]));
+    for (const entry of state.draft.auction?.history ?? []) {
+      if (!entry?.bids) continue;
+      const map = {};
+      let max = null;
+      for (const [managerId, amount] of Object.entries(entry.bids)) {
+        const amt = Number(amount);
+        if (!Number.isFinite(amt) || amt <= 0) continue;
+        map[nameById.get(managerId) ?? managerId] = amt;
+        if (max === null || amt > max) max = amt;
+      }
+      bidsByCard[entry.playerId] = map;
+      if (max !== null) maxBidByCard[entry.playerId] = max;
+    }
   }
-  for (const line of summary.pitchers) {
-    const cost = scatterCost(line);
-    if (cost == null) continue;
-    const wpa162 = batchPace(line, "wpaPer162", "wpa", teamGamesByName);
-    const ip162 = batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3);
-    const color = colorForTeam(line.team);
-    scatterPoints.push({
-      x: cost,
-      y: wpa162,
-      color,
-      team: line.team,
-      cardId: playerForBoxLine(playersById, line, line.team)?.id ?? line.id,
-      tipTitle: line.name,
-      tipColor: color,
-      tipLines: [
-        line.team + (line.role ? ` · ${line.role}` : ""),
-        `${auctionDraft ? "Price" : "Pick"}: ${costLabel(cost)}`,
-        `WPA/162: ${formatWpaStat(wpa162)}`,
-        `${formatDecimal(ip162, 1)} IP · ${formatPerNine(line.r, line.outs)} R/9 · ${formatPerNine(line.so, line.outs)} K/9 · ${formatPerNine(line.bb, line.outs)} BB/9`
-      ]
-    });
-  }
-  // Filter the dots to one manager when the legend is toggled; a stale filter
-  // (a manager who isn't in this room) falls back to showing everyone.
+
   const chartManager = chartTeamOrder.includes(state.batchChartManager) ? state.batchChartManager : null;
-  const shownScatter = chartManager ? scatterPoints.filter((point) => point.team === chartManager) : scatterPoints;
-  const draftValueSection = scatterPoints.length ? `<section class="panel wide draft-chart-panel">
+  const xMode = auctionDraft
+    ? (state.batchChartXAxis ?? "price")
+    : (state.batchChartXAxis === "points" ? "points" : "pick");
+  const yMode = state.batchChartYAxis === "points" ? "points" : "wpa";
+  const yValue = (rec) => (yMode === "points" ? rec.points : rec.wpa162);
+  const yAxisLabel = yMode === "points" ? "Card points" : "WPA / 162 games";
+  const yTip = (rec) => (yMode === "points" ? `Points: ${rec.points ?? "—"}` : `WPA/162: ${formatWpaStat(rec.wpa162)}`);
+  const X_TITLES = { price: "Dollars spent", max: "Top bid", manager: "Manager's bid", allbids: "Every bid", points: "Points", pick: "Draft slot" };
+  const yTitle = yMode === "points" ? "Points" : "WPA per 162";
+
+  const scatterPoints = [];
+  const connectors = [];
+  let xAxisLabel;
+
+  if (xMode === "allbids") {
+    // One dot per manager per card, gathered onto a thin line at the card's
+    // height: the whole room's read on every card, side by side.
+    xAxisLabel = "Every bid ($)";
+    const colorByName = new Map(chartLegend.map((item) => [item.name, item.color]));
+    for (const rec of cardRecords) {
+      const yv = yValue(rec);
+      const bids = bidsByCard[rec.cardId];
+      if (!Number.isFinite(yv) || !bids) continue;
+      const amounts = Object.values(bids);
+      if (!amounts.length) continue;
+      connectors.push({ y: yv, xMin: Math.min(...amounts), xMax: Math.max(...amounts) });
+      for (const [managerName, amount] of Object.entries(bids)) {
+        const color = colorByName.get(managerName) ?? rec.color;
+        scatterPoints.push({
+          x: amount,
+          y: yv,
+          color,
+          cardId: rec.cardId,
+          tipTitle: rec.name,
+          tipColor: color,
+          tipLines: [
+            rec.name + (rec.slot ? ` · ${rec.slot}` : ""),
+            `${managerName} bid ${money(amount)}`,
+            Number.isFinite(rec.price) ? `Won by ${rec.team} for ${money(rec.price)}` : `Won by ${rec.team}`,
+            yTip(rec)
+          ].filter(Boolean)
+        });
+      }
+    }
+  } else if (xMode === "manager") {
+    // One manager's whole bid book — every card they chased, at what they bid,
+    // won or lost. With nobody picked yet, fall back to each card's top bid.
+    xAxisLabel = chartManager ? `${chartManager}'s bid ($)` : "Top bid ($)";
+    for (const rec of cardRecords) {
+      const yv = yValue(rec);
+      if (!Number.isFinite(yv)) continue;
+      const bid = chartManager ? bidsByCard[rec.cardId]?.[chartManager] : maxBidByCard[rec.cardId];
+      if (!Number.isFinite(bid)) continue;
+      const won = rec.team === chartManager;
+      scatterPoints.push({
+        x: bid,
+        y: yv,
+        color: rec.color,
+        cardId: rec.cardId,
+        tipTitle: rec.name,
+        tipColor: rec.color,
+        tipLines: [
+          rec.name + (rec.slot ? ` · ${rec.slot}` : ""),
+          chartManager ? `${chartManager} bid ${money(bid)}${won ? " · won it" : " · lost to " + rec.team}` : `Top bid: ${money(bid)}`,
+          yTip(rec)
+        ].filter(Boolean)
+      });
+    }
+  } else {
+    // A single value per card: cost, top bid, or printed points on x.
+    xAxisLabel = xMode === "points" ? "Card points"
+      : xMode === "max" ? "Top bid ($)"
+      : auctionDraft ? "Price paid ($)" : "Pick number";
+    const xValueFor = (rec) => {
+      if (xMode === "points") return rec.points;
+      if (xMode === "max") return maxBidByCard[rec.cardId];
+      if (auctionDraft) return rec.price;
+      return rec.pickNumber;
+    };
+    const xTip = (rec, value) => {
+      if (xMode === "points") return `Points: ${value}`;
+      if (xMode === "max") return `Top bid: ${money(value)}`;
+      if (auctionDraft) return `Price: ${money(value)}`;
+      return `Pick #${value}`;
+    };
+    const shown = chartManager ? cardRecords.filter((rec) => rec.team === chartManager) : cardRecords;
+    for (const rec of shown) {
+      const xv = xValueFor(rec);
+      const yv = yValue(rec);
+      if (!Number.isFinite(xv) || !Number.isFinite(yv)) continue;
+      scatterPoints.push({
+        x: xv,
+        y: yv,
+        color: rec.color,
+        cardId: rec.cardId,
+        tipTitle: rec.name,
+        tipColor: rec.color,
+        tipLines: [
+          rec.team + (rec.slot ? ` · ${rec.slot}` : ""),
+          xTip(rec, xv),
+          auctionDraft && xMode !== "points" && Number.isFinite(rec.pick) ? `Pick #${rec.pick}` : "",
+          yTip(rec),
+          rec.statLine
+        ].filter(Boolean)
+      });
+    }
+  }
+
+  const xOptions = auctionDraft
+    ? [["price", "Price paid"], ["max", "Top bid"], ["manager", "Manager bid"], ["allbids", "All bids"], ["points", "Points"]]
+    : [["pick", "Pick"], ["points", "Points"]];
+  const yOptions = [["wpa", "WPA/162"], ["points", "Points"]];
+  const axisOption = (axis, value, label, active) =>
+    `<button type="button" class="chart-axis-option${active ? " active" : ""}" data-batch-chart-${axis}="${escapeHtml(value)}" aria-pressed="${active}">${escapeHtml(label)}</button>`;
+  const axisPicker = `<div class="chart-axis-pickers">
+    <div class="chart-axis-row"><span class="chart-axis-label">X</span>${xOptions.map(([value, label]) => axisOption("xaxis", value, label, xMode === value)).join("")}</div>
+    <div class="chart-axis-row"><span class="chart-axis-label">Y</span>${yOptions.map(([value, label]) => axisOption("yaxis", value, label, yMode === value)).join("")}</div>
+  </div>`;
+  const chartNote = xMode === "allbids"
+    ? "Each card is a thin line at its WPA (or points); a dot on it is one manager's sealed bid. Hover a dot for who bid what."
+    : xMode === "manager"
+      ? (chartManager ? `Every card ${chartManager} bid on, at what they bid — dots in another manager's colour are ones they lost.` : "Pick a manager in the legend to see only their bids; showing each card's top bid until then.")
+      : "Each dot is a drafted player who logged a stat, colored by manager. Hover for the line, click for the card, or filter by manager in the legend.";
+  const draftValueSection = cardRecords.length ? `<section class="panel wide draft-chart-panel">
     <div class="section-title-row">
       <div>
         <p class="eyebrow">Draft value</p>
-        <h2>${auctionDraft ? "Dollars spent" : "Draft slot"} against WPA per 162</h2>
+        <h2>${escapeHtml(X_TITLES[xMode] ?? "Draft value")} against ${escapeHtml(yTitle)}</h2>
       </div>
+      ${axisPicker}
     </div>
-    <p class="batch-note">Each dot is a drafted player who logged a stat, colored by manager. Hover for the box-score line, click for the card, or use the legend to filter by manager.</p>
-    ${renderDraftScatter({ points: shownScatter, xLabel: auctionDraft ? "Price paid ($)" : "Pick number", yLabel: "WPA / 162 games", legend: chartLegend, activeManager: chartManager })}
+    <p class="batch-note">${chartNote}</p>
+    ${renderDraftScatter({ points: scatterPoints, connectors, xLabel: xAxisLabel, yLabel: yAxisLabel, legend: chartLegend, activeManager: chartManager })}
   </section>` : "";
 
   const overviewSection = `<section class="grid batch-overview-grid">
@@ -3734,7 +3957,7 @@ function renderBatch() {
         <h3>Baserunning</h3>
         <div class="table-scroll">
           <table class="tournament-stat-table team-stat-table">
-            <thead><tr><th>Team</th><th class="num">SB/162</th><th class="num">CS/162</th><th class="num">Adv/162</th><th class="num">Att/162</th><th class="num">Adv%</th><th class="num">Tag%</th><th class="num">OOB/162</th></tr></thead>
+            <thead>${renderSkillHeaderRow(BASERUNNING_HEADERS)}</thead>
             <tbody>${sortedBaserunning.map(renderBatchBaserunningRow).join("")}</tbody>
           </table>
         </div>
@@ -3743,7 +3966,7 @@ function renderBatch() {
         <h3>Defense</h3>
         <div class="table-scroll">
           <table class="tournament-stat-table team-stat-table">
-            <thead><tr><th>Team</th><th class="num">Cut/162</th><th class="num">Home/162</th><th class="num">CS/162</th><th class="num">DP%</th><th class="num">Ch/162</th><th class="num">Stop%</th></tr></thead>
+            <thead>${renderSkillHeaderRow(DEFENSE_HEADERS)}</thead>
             <tbody>${sortedDefense.map(renderBatchDefenseRow).join("")}</tbody>
           </table>
         </div>
@@ -3758,7 +3981,7 @@ function renderBatch() {
       </div>
       <span>${state.draft.pickNumber} picks</span>
     </div>
-    ${renderDraftHistoryTable(draftHistory(state.draft))}
+    ${renderDraftHistoryTable(draftHistory(state.draft), { wpaByPlayerId: batchWpaByPlayerId(summary) })}
   </section>`;
   const batchSections = {
     overview: overviewSection,
@@ -3819,6 +4042,7 @@ function normalizeBatchPitcherSplit(value) {
 
 function renderBatchHeadToHead(summary) {
   const teams = summary.teams.map((row) => row.team);
+  const overall = new Map(summary.teams.map((row) => [row.team, row]));
   const records = new Map((summary.headToHead ?? []).map((row) => [`${row.team}\u0000${row.opponent}`, row]));
   if (!records.size) {
     return `<section class="panel wide">
@@ -3835,12 +4059,12 @@ function renderBatchHeadToHead(summary) {
       const title = `${team} vs ${opponent}: ${row.wins}-${row.losses}, ${row.runsFor}-${row.runsAgainst} runs`;
       return `<td class="num head-to-head-record" title="${escapeHtml(title)}"><strong>${row.wins}-${row.losses}</strong><span>${row.runsFor}-${row.runsAgainst} runs</span></td>`;
     }).join("");
-    return `<tr><th scope="row">${escapeHtml(team)}</th>${cells}</tr>`;
+    return `<tr><th scope="row" class="head-to-head-team">${renderHeadToHeadTeamBox(team, overall.get(team))}</th>${cells}</tr>`;
   }).join("");
   return `<section class="panel wide">
     <p class="eyebrow">${summary.runs} simulated games</p>
     <h2>Head-to-head records</h2>
-    <p class="batch-note">Each cell shows wins-losses, with runs scored and allowed underneath.</p>
+    <p class="batch-note">The Team column carries each manager's overall record, win rate, and runs scored/allowed per game. Each matchup cell shows wins-losses with total runs underneath.</p>
     <div class="table-scroll">
       <table class="head-to-head-table">
         <thead><tr><th>Team</th>${header}</tr></thead>
@@ -3848,6 +4072,29 @@ function renderBatchHeadToHead(summary) {
       </table>
     </div>
   </section>`;
+}
+
+// Player id -> WPA per 162 games from the sim, over hitters and pitchers alike,
+// so the draft-review ledger can show how each pick actually performed.
+function batchWpaByPlayerId(summary) {
+  const map = new Map();
+  for (const line of [...(summary.hitters ?? []), ...(summary.pitchers ?? [])]) {
+    if (line?.id != null && Number.isFinite(line.wpaPer162)) map.set(line.id, line.wpaPer162);
+  }
+  return map;
+}
+
+// The row header doubles as a season card: the manager's name over his full
+// record, win rate, and average runs for and against per game.
+function renderHeadToHeadTeamBox(team, overallRow) {
+  if (!overallRow) return `<strong>${escapeHtml(team)}</strong>`;
+  const wins = overallRow.wins?.sum ?? 0;
+  const losses = overallRow.losses?.sum ?? 0;
+  const runsFor = overallRow.runsFor?.mean ?? 0;
+  const runsAgainst = overallRow.runsAgainst?.mean ?? 0;
+  return `<strong>${escapeHtml(team)}</strong>
+    <span class="head-to-head-team-line">${wins}-${losses} &middot; ${formatShare(overallRow.winPct)}</span>
+    <span class="head-to-head-team-line">${runsFor.toFixed(1)} / ${runsAgainst.toFixed(1)} R/G</span>`;
 }
 
 const GAME_LOG_PAGE_SIZE = 50;
@@ -4198,6 +4445,22 @@ function bindBatchActions() {
     const chartManagerButton = event.target.closest("button[data-batch-chart-manager]");
     if (chartManagerButton) {
       state.batchChartManager = chartManagerButton.dataset.batchChartManager || null;
+      saveState();
+      renderBatch();
+      return;
+    }
+
+    const chartXAxisButton = event.target.closest("button[data-batch-chart-xaxis]");
+    if (chartXAxisButton) {
+      state.batchChartXAxis = chartXAxisButton.dataset.batchChartXaxis || null;
+      saveState();
+      renderBatch();
+      return;
+    }
+
+    const chartYAxisButton = event.target.closest("button[data-batch-chart-yaxis]");
+    if (chartYAxisButton) {
+      state.batchChartYAxis = chartYAxisButton.dataset.batchChartYaxis || "wpa";
       saveState();
       renderBatch();
       return;
@@ -4591,6 +4854,39 @@ function renderTournamentPitcherRow(row, fipConstant) {
   </tr>`;
 }
 
+// Column headers for the team-skill tables. Each abbreviation carries its full
+// explanation as a hover title, so the tight per-162 labels stay legible.
+const BASERUNNING_HEADERS = [
+  { label: "Team", tip: "Drafted roster", className: "" },
+  { label: "SB/162", tip: "Stolen bases per 162 games" },
+  { label: "CS/162", tip: "Times caught stealing per 162 games" },
+  { label: "Adv/162", tip: "Extra bases taken on hits and fly balls per 162 games (first to third, scoring from second, tagging up)" },
+  { label: "Att/162", tip: "Extra-base attempts per 162 games, whether safe or out" },
+  { label: "Adv%", tip: "Share of extra-base attempts that were safe" },
+  { label: "Tag%", tip: "Share of tag-up attempts on fly balls that were safe" },
+  { label: "OOB/162", tip: "Runners thrown out on the bases per 162 games (caught stealing plus advances gunned down)" },
+  { label: "WPA/162", tip: "Win probability added by baserunning per 162 games — steals and extra bases taken. Higher is better." }
+];
+
+const DEFENSE_HEADERS = [
+  { label: "Team", tip: "Drafted roster", className: "" },
+  { label: "SB allw/162", tip: "Stolen bases allowed per 162 games" },
+  { label: "CS/162", tip: "Runners this defense caught stealing per 162 games" },
+  { label: "XB allw/162", tip: "Extra bases allowed on hits and fly balls per 162 games" },
+  { label: "Cut/162", tip: "Runners thrown out trying to take a base per 162 games (advances plus caught stealing)" },
+  { label: "Home/162", tip: "Runners thrown out at home plate per 162 games" },
+  { label: "DP%", tip: "Share of double-play chances turned" },
+  { label: "Ch/162", tip: "Chances to make a play on a runner per 162 games (steal and advance attempts faced)" },
+  { label: "Stop%", tip: "Share of baserunner chances where this defense threw the runner out" },
+  { label: "WPA/162", tip: "Opponent win probability added on the bases against this defense per 162 games. Lower is better." }
+];
+
+function renderSkillHeaderRow(headers) {
+  return `<tr>${headers
+    .map((header) => `<th class="${header.className ?? "num"}"><abbr title="${escapeHtml(header.tip)}">${escapeHtml(header.label)}</abbr></th>`)
+    .join("")}</tr>`;
+}
+
 function renderBatchBaserunningRow(row) {
   const games = teamSkillGames(row);
   return `<tr>
@@ -4602,6 +4898,7 @@ function renderBatchBaserunningRow(row) {
     <td class="num">${formatPercent(row.advances, row.advanceAttempts)}</td>
     <td class="num">${formatPercent(row.tagAdvances, row.tagAttempts)}</td>
     <td class="num">${formatSeasonCount(per162(row.outsOnBases, games))}</td>
+    <td class="num">${formatWpaStat(per162(row.baserunningWpa, games))}</td>
   </tr>`;
 }
 
@@ -4609,12 +4906,15 @@ function renderBatchDefenseRow(row) {
   const games = teamSkillGames(row);
   return `<tr>
     <td>${escapeHtml(row.team)}</td>
+    <td class="num">${formatSeasonCount(per162(row.stealsAllowed, games))}</td>
+    <td class="num">${formatSeasonCount(per162(row.caughtStealingByDefense, games))}</td>
+    <td class="num">${formatSeasonCount(per162(row.advancesAllowed, games))}</td>
     <td class="num">${formatSeasonCount(per162(row.cutDowns, games))}</td>
     <td class="num">${formatSeasonCount(per162(row.homeCutDowns, games))}</td>
-    <td class="num">${formatSeasonCount(per162(row.caughtStealingByDefense, games))}</td>
     <td class="num">${formatPercent(row.doublePlays, row.doublePlayChances)}</td>
     <td class="num">${formatSeasonCount(per162(row.advanceChances, games))}</td>
     <td class="num">${formatPercent(row.cutDowns, row.advanceChances)}</td>
+    <td class="num">${formatWpaStat(per162(row.baserunningWpaAllowed, games))}</td>
   </tr>`;
 }
 
@@ -6652,7 +6952,7 @@ function renderDraftDone(draft) {
         }</p>`;
     return `<div class="recap-card ${tone}">
       <p class="eyebrow">${label}</p>
-      <h3>${escapeHtml(pick.player.name)}</h3>
+      ${renderPlayerPreviewName(pick.player, pick.player.name, "h3", "recap-player-name")}
       ${line}
     </div>`;
   };

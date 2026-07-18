@@ -126,6 +126,13 @@ export function renderDraftHistoryTable(picks, options = {}) {
     return `<p class="empty">No picks made yet.</p>`;
   }
   const hidePoints = Boolean(options.hidePoints);
+  // When the batch recap hands over per-player WPA (keyed by player id), the
+  // ledger earns a column for how each pick actually panned out in the sim. The
+  // live draft board has no sim to draw on, so it passes nothing and the column
+  // simply doesn't appear.
+  const wpaByPlayerId = options.wpaByPlayerId ?? null;
+  const showWpa = Boolean(wpaByPlayerId);
+  const formatWpa = (value) => (value >= 0 ? "+" : "") + value.toFixed(2);
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
@@ -139,6 +146,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? `$${price.toLocaleString()}` : "&mdash;"}</td>` : ""}
         <td class="num">${playerPrimary(player)}</td>
         ${hidePoints ? "" : `<td class="num">${player.points}</td>`}
+        ${showWpa ? `<td class="num">${Number.isFinite(wpaByPlayerId.get(player.id)) ? formatWpa(wpaByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
       </tr>`)
     .join("");
@@ -146,7 +154,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
   return `<div class="table-scroll"><table class="player-table history-table">
     <thead>
       <tr>
-        <th class="num">#</th>
+        <th class="num"><abbr title="Overall pick number">#</abbr></th>
         <th class="num">Rnd</th>
         <th>Manager</th>
         <th>Player</th>
@@ -154,6 +162,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         ${auction ? `<th class="num">Paid ($)</th>` : ""}
         <th class="num">OB/CT</th>
         ${hidePoints ? "" : `<th class="num">Pts</th>`}
+        ${showWpa ? `<th class="num"><abbr title="Win probability added per 162 games in the simulation">WPA/162</abbr></th>` : ""}
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
       </tr>
     </thead>
@@ -350,7 +359,7 @@ function pointTipAttrs({ title, color, lines }) {
 // pure plotter — {x, y, color, cardId, tipTitle, tipColor, tipLines}. cardId
 // lets app.js pop the player's card when the dot is clicked; activeManager
 // highlights the manager whose dots are currently filtered in.
-export function renderDraftScatter({ points = [], xLabel = "", yLabel = "", legend = [], activeManager = null } = {}) {
+export function renderDraftScatter({ points = [], connectors = [], xLabel = "", yLabel = "", legend = [], activeManager = null } = {}) {
   if (points.length < 1) {
     return `<div class="draft-chart">
       <div class="race-chart-placeholder">No players to plot for this filter.</div>
@@ -389,6 +398,14 @@ export function renderDraftScatter({ points = [], xLabel = "", yLabel = "", lege
     return `<text x="${xPos.toFixed(1)}" y="${(height - margin.bottom + 20).toFixed(1)}" text-anchor="middle" class="race-axis-text">${formatAxisNumber(value)}</text>`;
   });
 
+  // Thin ties that gather every manager's bid on one card onto a single line —
+  // the card sits at one height (its WPA, or its points), and the bids fan out
+  // along it, so the spread of what the room was willing to pay reads at a glance.
+  const connectorLines = connectors
+    .filter((line) => Number.isFinite(line.xMin) && Number.isFinite(line.xMax) && line.xMax > line.xMin)
+    .map((line) => `<line class="scatter-connector" x1="${xFor(line.xMin).toFixed(1)}" y1="${yFor(line.y).toFixed(1)}" x2="${xFor(line.xMax).toFixed(1)}" y2="${yFor(line.y).toFixed(1)}" />`)
+    .join("");
+
   const dots = points
     .map((point) => `<circle class="scatter-dot${point.cardId ? " scatter-dot-card" : ""}" cx="${xFor(point.x).toFixed(1)}" cy="${yFor(point.y).toFixed(1)}" r="5" fill="${escapeHtml(point.color ?? "#365f91")}" ${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}" />`)
     .join("");
@@ -401,6 +418,7 @@ export function renderDraftScatter({ points = [], xLabel = "", yLabel = "", lege
       ${yGrid.join("")}
       ${xGrid.join("")}
       ${axisTitles}
+      ${connectorLines}
       ${dots}
     </svg>
     ${renderChartLegend(legend, activeManager)}

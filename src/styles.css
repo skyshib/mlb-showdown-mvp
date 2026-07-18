@@ -866,6 +866,92 @@ td span {
   text-transform: uppercase;
 }
 
+/* A slim gauge of how much of the slate has settled, riding above the count. */
+.auction-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auction-progress-track {
+  flex: 1;
+  height: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  overflow: hidden;
+}
+
+.auction-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 240ms ease;
+}
+
+.auction-progress-pct {
+  min-width: 3ch;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.guaranteed-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.guaranteed-table thead th {
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.guaranteed-table thead th:last-child {
+  text-align: right;
+}
+
+.guaranteed-table tbody tr {
+  border-top: 1px solid var(--line);
+}
+
+.guaranteed-table tbody th {
+  padding: 3px 6px;
+  color: var(--ink);
+  font-weight: 850;
+  text-align: left;
+}
+
+.guaranteed-table tbody td {
+  padding: 3px 6px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The soft highlight shared with the active-manager row: a position the card
+   on the block can fill. */
+.guaranteed-table tbody tr.plays {
+  background: #e9f4ee;
+}
+
+.guaranteed-table tbody tr.plays th {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.auction-lot-card-face {
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto;
+}
+
 .auction-side-section {
   display: grid;
   gap: 8px;
@@ -1321,7 +1407,17 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .team-stat-table {
-  min-width: 560px;
+  min-width: 640px;
+}
+
+/* The tight per-162 header labels carry their full meaning in a hover title;
+   the dotted underline and help cursor flag that there's an explanation. */
+.team-stat-table th abbr,
+.tournament-stat-table th abbr,
+.history-table th abbr {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
 }
 
 .wide {
@@ -3258,13 +3354,32 @@ button.roster-slot[draggable="true"]:active {
   min-width: 720px;
 }
 
+.head-to-head-table th,
+.head-to-head-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
 .head-to-head-table th:first-child,
 .head-to-head-table td:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
   background: var(--card);
-  text-align: left;
+}
+
+.head-to-head-team strong {
+  display: block;
+  white-space: nowrap;
+}
+
+.head-to-head-team-line {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .head-to-head-record strong,
@@ -3846,6 +3961,61 @@ button.roster-slot[draggable="true"]:active {
 
 .draft-chart-panel {
   margin-top: 16px;
+}
+
+/* The thin ties that gather one card's bids onto a single line in "All bids". */
+.scatter-connector {
+  stroke: color-mix(in srgb, var(--muted) 45%, transparent);
+  stroke-width: 1;
+}
+
+.chart-axis-pickers {
+  display: grid;
+  gap: 5px;
+}
+
+.chart-axis-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.chart-axis-label {
+  width: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.chart-axis-option {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--muted) 22%, transparent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color 0.1s ease, background 0.1s ease, border-color 0.1s ease;
+}
+
+.chart-axis-option:hover {
+  color: var(--ink, #1c2521);
+  border-color: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+
+.chart-axis-option.active {
+  color: #fff;
+  font-weight: 700;
+  background: var(--accent, #0b6b53);
+  border-color: var(--accent, #0b6b53);
+}
+
+.chart-axis-option:focus-visible {
+  outline: 2px solid var(--accent, #0b6b53);
+  outline-offset: 1px;
 }
 
 .wpa-pos {

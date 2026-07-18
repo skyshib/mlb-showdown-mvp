@@ -140,6 +140,14 @@ export function playPick(level = 0.16) {
   phrase([[C5, 0, 0.14], [G5, 0.06, 0.22]], { level, type: "triangle", tail: 0.15 });
 }
 
+// The whole room passed and the card goes back on the board unsold. It is the
+// won-lot chime run backwards — the same two notes, falling instead of rising —
+// so the ear reads "nothing landed" against "a card was won" without a new
+// vocabulary. Quiet, like an ordinary pick: a non-event should sound like one.
+export function playPassed() {
+  phrase([[G5, 0, 0.14], [C5, 0.07, 0.2]], { level: 0.16, type: "triangle", tail: 0.15 });
+}
+
 // A card on your board just went to somebody else. It falls, because it is bad
 // news, and it is the one sound allowed to be a little rude.
 export function playSniped() {
@@ -175,6 +183,17 @@ export function playLotteryBall(index = 0, total = 1) {
   const scale = [C5, E5, G5, A5, C6, D6, E6];
   const step = total > 1 ? Math.round((index / (total - 1)) * (scale.length - 1)) : 0;
   phrase([[scale[Math.min(step, scale.length - 1)], 0, 0.3]], { level: 0.3, type: "triangle", shimmer: true, tail: 0.3 });
+}
+
+// The draft is open. A struck bell and a bright call over it — an announcement,
+// not a flourish. Where completion CLIMBS and rings out on top, this lands square
+// on a stable octave: the sound of a room being called to order, a whistle at the
+// start of play. It fires once, on the frame the board is dealt.
+export function playDraftStart() {
+  phrase(
+    [[G3, 0, 0.7], [G4, 0.05, 0.28], [C5, 0.2, 0.26], [E5, 0.34, 0.26], [G5, 0.5, 0.66]],
+    { level: 0.46, shimmer: true, tail: 0.66 }
+  );
 }
 
 // The draft is over. The one moment that has earned a real flourish.

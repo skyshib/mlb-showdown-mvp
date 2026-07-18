@@ -350,7 +350,9 @@ function performStealAttempt(state, stealAttempt, rng) {
     wpa: battingWpa,
     playDetails: {
       kind: "steal",
-      stealAttempt: attemptResult
+      stealAttempt: attemptResult,
+      // Nobody swung: the whole win-probability swing is baserunning.
+      baserunningWpa: battingWpa
     }
   };
 
@@ -618,7 +620,9 @@ export function resolveAdvanceDecision(state, sendCount, rng) {
     kind: kind === "tagup" ? "tagup" : "advance",
     outsBefore,
     attempts: attemptResult.attempts,
-    thrownAttempt: attemptResult.thrownAttempt
+    thrownAttempt: attemptResult.thrownAttempt,
+    // A sent runner's advance is its own event, so its whole swing is baserunning.
+    baserunningWpa: battingWpa
   };
 
   const event = {
@@ -958,7 +962,8 @@ export function applyFlyout(state, batter, battingSide, pitchingSide, rng) {
       kind: "flyout",
       outsBefore,
       tagUpAttempts: attemptResult.attempts,
-      thrownAttempt: attemptResult.thrownAttempt
+      thrownAttempt: attemptResult.thrownAttempt,
+      baserunningWpa: baserunningSwing(state, battingSide, wpBeforeTag)
     };
   } else {
     state.lastPlayDetails = {
@@ -1317,7 +1322,8 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
     kind: "hit",
     outsBefore,
     extraBaseAttempts: attemptResult.attempts,
-    thrownAttempt: attemptResult.thrownAttempt
+    thrownAttempt: attemptResult.thrownAttempt,
+    baserunningWpa: baserunningSwing(state, battingSide, wpBeforeAdvance)
   };
   return attemptResult.runs;
 }
@@ -1447,6 +1453,15 @@ export function fieldingCheckNeeds(attempt) {
 // closes — so the runner's half is taken back off the batter here rather than
 // added to him twice. The offense's total is untouched either way, which is why
 // the zero-sum stays zero.
+// The win-probability swing an auto-resolved advance (extra base on a hit, tag-up
+// on a fly) is worth to the batting team — measured from just before the runners
+// went. Unlike splitAutoAdvanceCredit this is a team figure: it doesn't care who
+// gets the individual credit, so a batter who stretches it himself still counts.
+function baserunningSwing(state, battingSide, wpBefore) {
+  const wpAfter = winProbabilityHome(state);
+  return battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
+}
+
 function splitAutoAdvanceCredit(state, battingSide, batter, taker, wpBefore) {
   if (!batter?.id || !taker?.id || batter.id === taker.id) return;
   const wpAfter = winProbabilityHome(state);

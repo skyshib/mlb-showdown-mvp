@@ -16,7 +16,11 @@ export function createTeamSkillLine(team) {
     homeCutDowns: 0,
     caughtStealingByDefense: 0,
     doublePlayChances: 0,
-    doublePlays: 0
+    doublePlays: 0,
+    // Win probability the team added on the bases (steals + extra bases taken),
+    // and the win probability it let opponents add running against it.
+    baserunningWpa: 0,
+    baserunningWpaAllowed: 0
   };
 }
 
@@ -25,6 +29,14 @@ export function aggregateEventSkillStats(teams, event) {
   const pitchingTeam = event.pitchingTeam;
   const details = event.playDetails;
   if (!details || !battingTeam || !pitchingTeam) return;
+
+  // The baserunning WP swing (batting-team perspective) is recorded on the play
+  // itself, since on a hit or fly it's only a slice of the whole event's WPA. The
+  // runners' team banks it; the defense that let it happen is charged the same.
+  if (Number.isFinite(details.baserunningWpa) && details.baserunningWpa !== 0) {
+    getTeamSkillLine(teams, battingTeam).baserunningWpa += details.baserunningWpa;
+    getTeamSkillLine(teams, pitchingTeam).baserunningWpaAllowed += details.baserunningWpa;
+  }
 
   if (details.kind === "steal" && details.stealAttempt) {
     trackAdvanceAttempt(teams, battingTeam, pitchingTeam, details.stealAttempt, "steal");
