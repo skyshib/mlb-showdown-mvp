@@ -5,7 +5,8 @@
       "name": "showdown",
       "runtimeExecutable": "node",
       "runtimeArgs": ["scripts/serve.js"],
-      "port": 5177
+      "port": 5177,
+      "autoPort": true
     }
   ]
 }

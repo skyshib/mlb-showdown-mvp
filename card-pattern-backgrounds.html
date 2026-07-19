@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fictional Card Pattern Backgrounds</title>
+  <link rel="stylesheet" href="./src/ui/cardFace.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 28px;
+      background: #17191d;
+      color: #f5f7fa;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    main {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    p.lede {
+      margin: 0 0 26px;
+      color: #9aa3ad;
+      font-size: 13px;
+    }
+    section.option {
+      margin: 0 0 34px;
+    }
+    section.option h2 {
+      margin: 0 0 2px;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    section.option p {
+      margin: 0 0 10px;
+      color: #9aa3ad;
+      font-size: 12px;
+    }
+    .card-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card-row .gq-card { width: 100%; margin: 0; }
+    @media (max-width: 900px) {
+      .card-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    /* Every pattern is a ::before overlay on the photo window: it sits on the
+       player's hashed color gradient and under the portrait, and fades a bit
+       toward the face so the pattern reads at the edges without fighting it. */
+    [class*="pat-"] .gq-proto-photo::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      -webkit-mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.6), #000 72%);
+      mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.6), #000 72%);
+    }
+
+    /* 1. Pinstripes — vertical flannel stripes. */
+    .pat-pinstripe .gq-proto-photo::before {
+      background-image: repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.30) 0,
+        rgba(255, 255, 255, 0.30) 0.65cqw,
+        transparent 0.65cqw,
+        transparent 5.5cqw
+      );
+    }
+
+    /* 2. Sunburst — retro rays from behind the player. */
+    .pat-sunburst .gq-proto-photo::before {
+      background-image: repeating-conic-gradient(
+        from -90deg at 50% 58%,
+        rgba(255, 255, 255, 0.22) 0deg 7deg,
+        rgba(255, 255, 255, 0) 7deg 18deg
+      );
+    }
+
+    /* 3. Scattered baseballs — polka-dot ball outlines, offset rows. */
+    .pat-baseballs .gq-proto-photo::before {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.38' stroke-width='2'%3E%3Ccircle cx='20' cy='20' r='12'/%3E%3Cpath d='M13.2 10.1 A13 13 0 0 1 13.2 29.9 M26.8 10.1 A13 13 0 0 0 26.8 29.9'/%3E%3Ccircle cx='60' cy='60' r='12'/%3E%3Cpath d='M53.2 50.1 A13 13 0 0 1 53.2 69.9 M66.8 50.1 A13 13 0 0 0 66.8 69.9'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 24cqw 24cqw;
+    }
+
+    /* 4. Seigaiha waves — overlapping scalloped fans. */
+    .pat-waves .gq-proto-photo::before {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.28' stroke-width='2'%3E%3Cpath d='M0 32 A32 32 0 0 1 64 32 M10 32 A22 22 0 0 1 54 32 M20 32 A12 12 0 0 1 44 32'/%3E%3Cpath d='M-32 64 A32 32 0 0 1 32 64 M-22 64 A22 22 0 0 1 22 64 M-12 64 A12 12 0 0 1 12 64'/%3E%3Cpath d='M32 64 A32 32 0 0 1 96 64 M42 64 A22 22 0 0 1 86 64 M52 64 A12 12 0 0 1 76 64'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 21cqw 21cqw;
+    }
+
+    /* 5. Diamond lattice — crossing diagonals, an argyle nod to the infield. */
+    .pat-argyle .gq-proto-photo::before {
+      background-image:
+        repeating-linear-gradient(
+          45deg,
+          rgba(255, 255, 255, 0.30) 0,
+          rgba(255, 255, 255, 0.30) 0.55cqw,
+          transparent 0.55cqw,
+          transparent 8cqw
+        ),
+        repeating-linear-gradient(
+          -45deg,
+          rgba(255, 255, 255, 0.30) 0,
+          rgba(255, 255, 255, 0.30) 0.55cqw,
+          transparent 0.55cqw,
+          transparent 8cqw
+        ),
+        repeating-linear-gradient(
+          45deg,
+          rgba(255, 255, 255, 0.09) 0,
+          rgba(255, 255, 255, 0.09) 8cqw,
+          transparent 8cqw,
+          transparent 16cqw
+        );
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Fictional card pattern backgrounds</h1>
+    <p class="lede">Five repeated-pattern treatments over each player's existing color backdrop. Same four players in every row for comparison.</p>
+    <div id="options"></div>
+  </main>
+  <script type="module">
+    import { buildFictionalUniverse } from "./src/data/playerGeneration.js";
+    import { cardPanelHtml } from "./src/ui/cardFace.js";
+
+    const PATTERNS = [
+      { key: "pat-pinstripe", name: "1. Pinstripes", note: "Vertical flannel stripes — old uniform fabric." },
+      { key: "pat-sunburst", name: "2. Sunburst", note: "Retro rays fanning out from behind the player." },
+      { key: "pat-baseballs", name: "3. Scattered baseballs", note: "Polka-dot rows of stitched ball outlines." },
+      { key: "pat-waves", name: "4. Seigaiha waves", note: "Overlapping scalloped fans, wallpaper style." },
+      { key: "pat-argyle", name: "5. Diamond lattice", note: "Crossing diagonals — argyle by way of the infield." }
+    ];
+
+    // Same four players across every option: three hitters + one pitcher,
+    // each with a different hashed backdrop color so the pattern is seen
+    // against light and dark fields alike.
+    const picks = [];
+    const seenVariants = new Set();
+    let pitcherPicked = false;
+    for (const card of buildFictionalUniverse()) {
+      const html = cardPanelHtml({ ...card, rarity: "common" });
+      const variant = /gq-backdrop-([a-z]+)/.exec(html)?.[1];
+      if (!variant || seenVariants.has(variant)) continue;
+      const pitcher = card.kind === "pitcher";
+      if (pitcher && pitcherPicked) continue;
+      if (!pitcher && picks.filter((p) => !p.pitcher).length >= 3) continue;
+      seenVariants.add(variant);
+      picks.push({ html, pitcher });
+      if (pitcher) pitcherPicked = true;
+      if (picks.length === 4 && pitcherPicked) break;
+    }
+
+    document.querySelector("#options").innerHTML = PATTERNS.map(({ key, name, note }) => `
+      <section class="option ${key}">
+        <h2>${name}</h2>
+        <p>${note}</p>
+        <div class="card-row">${picks.map((pick) => pick.html).join("")}</div>
+      </section>`).join("");
+  </script>
+</body>
+</html>

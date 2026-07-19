@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Legendary Card Pattern Backgrounds — Round 2</title>
+  <link rel="stylesheet" href="./src/ui/cardFace.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 28px;
+      background: #17191d;
+      color: #f5f7fa;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    main {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    p.lede {
+      margin: 0 0 26px;
+      color: #9aa3ad;
+      font-size: 13px;
+    }
+    section.option {
+      margin: 0 0 34px;
+    }
+    section.option h2 {
+      margin: 0 0 2px;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    section.option p {
+      margin: 0 0 10px;
+      color: #9aa3ad;
+      font-size: 12px;
+    }
+    .card-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card-row .gq-card { width: 100%; margin: 0; }
+    @media (max-width: 900px) {
+      .card-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    /* These cards render as real legendaries, so the shipped CSS already
+       hands each one a hashed pattern (or the halftone). This page-level
+       reset ties that specificity and loads later, so each row can audition
+       its own candidate on the same ::before layer. */
+    [class*="pat-"] .gq-proto-photo::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image: none;
+      background-position: 0 0;
+      background-size: auto;
+      opacity: 1;
+      -webkit-mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.6), #000 72%);
+      mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.6), #000 72%);
+    }
+
+    /* 6. Sparkles — scattered four-point foil glints. */
+    .pat-sparkles .gq-proto-photo::before {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='%23ffffff'%3E%3Cpath fill-opacity='0.5' d='M24 13 Q24 20 31 20 Q24 20 24 27 Q24 20 17 20 Q24 20 24 13 Z'/%3E%3Cpath fill-opacity='0.3' d='M68 40 Q68 44 72 44 Q68 44 68 48 Q68 44 64 44 Q68 44 68 40 Z'/%3E%3Cpath fill-opacity='0.42' d='M44 70.5 Q44 76 49.5 76 Q44 76 44 81.5 Q44 76 38.5 76 Q44 76 44 70.5 Z'/%3E%3Cpath fill-opacity='0.26' d='M84 9 Q84 12 87 12 Q84 12 84 15 Q84 12 81 12 Q84 12 84 9 Z'/%3E%3Cpath fill-opacity='0.26' d='M10 56.5 Q10 60 13.5 60 Q10 60 10 63.5 Q10 60 6.5 60 Q10 60 10 56.5 Z'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 26cqw 26cqw;
+    }
+
+    /* 7. Halo rings — concentric circles radiating from behind the player. */
+    .pat-rings .gq-proto-photo::before {
+      background-image: repeating-radial-gradient(
+        circle at 50% 42%,
+        rgba(255, 255, 255, 0.32) 0,
+        rgba(255, 255, 255, 0.32) 0.65cqw,
+        transparent 0.65cqw,
+        transparent 7cqw
+      );
+    }
+
+    /* 8. Chevrons — paired zigzag bands, deco style. */
+    .pat-chevron .gq-proto-photo::before {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='24' viewBox='0 0 36 24'%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='2'%3E%3Cpath stroke-opacity='0.34' d='M0 16 L9 8 L18 16 L27 8 L36 16'/%3E%3Cpath stroke-opacity='0.18' d='M0 21 L9 13 L18 21 L27 13 L36 21'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 12cqw 8cqw;
+    }
+
+    /* 9. Home plates — tiled plate outlines, offset rows. */
+    .pat-plates .gq-proto-photo::before {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 44 44'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.34' stroke-width='1.6' stroke-linejoin='round'%3E%3Cpath d='M6 4 h14 v6 l-7 7 l-7 -7 z'/%3E%3Cpath d='M28 26 h14 v6 l-7 7 l-7 -7 z'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 15cqw 15cqw;
+    }
+
+    /* 10. Honeycomb — hexagon grid. */
+    .pat-hex .gq-proto-photo::before {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20.78' height='36' viewBox='0 0 20.78 36'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.30' stroke-width='1.8'%3E%3Cpath d='M10.39 -3 L20.78 3 L20.78 15 L10.39 21 L0 15 L0 3 Z'/%3E%3Cpath d='M10.39 33 L20.78 39 L20.78 51 L10.39 57 L0 51 L0 39 Z'/%3E%3Cpath d='M0 15 L10.39 21 L10.39 33 L0 39 L-10.39 33 L-10.39 21 Z'/%3E%3Cpath d='M20.78 15 L31.17 21 L31.17 33 L20.78 39 L10.39 33 L10.39 21 Z'/%3E%3C/g%3E%3C/svg%3E");
+      background-size: 13cqw 22.52cqw;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Legendary pattern backgrounds — round 2</h1>
+    <p class="lede">Five new candidates on real legendary cards (foil border, teal field, glow intact). Numbered 6&ndash;10 to follow sunburst (2), waves (4), and lattice (5). Same four players in every row.</p>
+    <div id="options"></div>
+  </main>
+  <script type="module">
+    import { buildFictionalUniverse } from "./src/data/playerGeneration.js";
+    import { cardPanelHtml } from "./src/ui/cardFace.js";
+
+    const PATTERNS = [
+      { key: "pat-sparkles", name: "6. Sparkles", note: "Scattered four-point foil glints in mixed sizes." },
+      { key: "pat-rings", name: "7. Halo rings", note: "Concentric circles radiating from behind the player." },
+      { key: "pat-chevron", name: "8. Chevrons", note: "Paired zigzag bands, art-deco style." },
+      { key: "pat-plates", name: "9. Home plates", note: "Tiled home-plate outlines in offset rows." },
+      { key: "pat-hex", name: "10. Honeycomb", note: "Hexagon grid, modern and premium." }
+    ];
+
+    // Three hitters plus a pitcher, all rendered as legendaries so the rows
+    // show the real shipping treatment (foil border, teal field, glow).
+    const picks = [];
+    let pitcherPicked = false;
+    for (const card of buildFictionalUniverse()) {
+      const pitcher = card.kind === "pitcher";
+      if (pitcher && pitcherPicked) continue;
+      if (!pitcher && picks.filter((p) => !p.pitcher).length >= 3) continue;
+      picks.push({ html: cardPanelHtml({ ...card, rarity: "legend" }), pitcher });
+      if (pitcher) pitcherPicked = true;
+      if (picks.length === 4 && pitcherPicked) break;
+    }
+
+    document.querySelector("#options").innerHTML = PATTERNS.map(({ key, name, note }) => `
+      <section class="option ${key}">
+        <h2>${name}</h2>
+        <p>${note}</p>
+        <div class="card-row">${picks.map((pick) => pick.html).join("")}</div>
+      </section>`).join("");
+  </script>
+</body>
+</html>

@@ -259,14 +259,32 @@ const FICTIONAL_BACKDROPS = [
   "salmon", "indigo", "jade", "wine", "ice", "peach"
 ];
 
-function fictionalBackdropClass(card) {
-  const key = String(card.id ?? card.name ?? "player");
+function fnv1aHash(key) {
   let hash = 2166136261;
   for (const char of key) {
     hash ^= char.charCodeAt(0);
     hash = Math.imul(hash, 16777619) >>> 0;
   }
+  return hash;
+}
+
+function fictionalBackdropClass(card) {
+  const hash = fnv1aHash(String(card.id ?? card.name ?? "player"));
   return `gq-backdrop-${FICTIONAL_BACKDROPS[hash % FICTIONAL_BACKDROPS.length]}`;
+}
+
+// Legendaries additionally wear a repeated pattern over the color field —
+// sunburst rays, seigaiha waves, a diamond lattice, foil sparkles, deco
+// chevrons, or a honeycomb grid. Hashed from the card id like the backdrop,
+// so each legend keeps his pattern; the salt keeps the pick independent of
+// the color (the pool sizes divide 24, so the raw hash would pair every
+// backdrop with one fixed pattern).
+const LEGENDARY_PATTERNS = ["sunburst", "waves", "lattice", "sparkles", "chevrons", "honeycomb"];
+
+function legendaryPatternClass(card) {
+  if (card.rarity !== "legend") return "";
+  const hash = fnv1aHash(`${card.id ?? card.name ?? "player"}::pattern`);
+  return ` gq-pattern-${LEGENDARY_PATTERNS[hash % LEGENDARY_PATTERNS.length]}`;
 }
 
 const FICTIONAL_HITTER_CHART = ["SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
@@ -345,7 +363,7 @@ function fictionalCardHtml(card, count, hidePoints = false) {
     : `<div class="gq-proto-onbase">${escapeHtml(card.onBase)}</div>`;
   const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
   return `<div class="${cardShell(card)} gq-proto-card gq-proto-${pitcher ? "pitcher" : "hitter"} gq-proto-rarity-${rarity.key}"><div class="gq-face">
-    <div class="gq-proto-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}">
+    <div class="gq-proto-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}${legendaryPatternClass(card)}">
       <span class="gq-proto-initials">${escapeHtml(initials)}</span>
       <img class="gq-proto-portrait" src="https://api.dicebear.com/10.x/micah/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}-${card.position ?? card.role}`)}&clothesVariant=crew" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
     </div>

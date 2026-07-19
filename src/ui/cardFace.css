@@ -534,6 +534,114 @@
   filter: saturate(0.94) contrast(1.04);
 }
 
+/* Legendary fictional cards use a foil halftone field: dense enough to read
+   as a special printing, but opened up behind the illustrated player's face.
+   The teal field (like the halftone dots below) stands only on a legendary
+   without a pattern class; patterned legends keep the player's own hashed
+   backdrop color underneath, same as every other fictional card. */
+.gq-proto-rarity-legendary .gq-proto-photo:not([class*="gq-pattern-"]) {
+  background: linear-gradient(145deg, #0b3a3d, #21636a 45%, #18234d);
+}
+.gq-proto-rarity-legendary .gq-proto-photo::before,
+.gq-proto-rarity-legendary .gq-proto-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.gq-proto-rarity-legendary .gq-proto-photo::before {
+  background-image: radial-gradient(circle, rgba(255, 223, 125, 0.95) 0 0.38cqw, transparent 0.52cqw);
+  background-position: 1cqw 0.7cqw;
+  background-size: 3.25cqw 3.25cqw;
+  opacity: 0.78;
+  -webkit-mask-image: radial-gradient(ellipse at 52% 39%, transparent 10%, #000 50%, #000 100%);
+  mask-image: radial-gradient(ellipse at 52% 39%, transparent 10%, #000 50%, #000 100%);
+}
+.gq-proto-rarity-legendary .gq-proto-photo::after {
+  background:
+    radial-gradient(circle at 19% 15%, rgba(255, 102, 126, 0.2), transparent 25%),
+    radial-gradient(circle at 84% 72%, rgba(86, 161, 255, 0.24), transparent 28%),
+    radial-gradient(ellipse at 50% 40%, transparent 18%, rgba(2, 12, 18, 0.38) 100%);
+  mix-blend-mode: screen;
+}
+
+/* Legendary pattern overlays: painted between the field and the portrait,
+   and faded toward the face so the pattern reads at the edges without
+   fighting it. The class is hashed per card in cardFace.js. These share the
+   ::before layer with the halftone above — the compound selector ties its
+   specificity, so source order lets the pattern win when a card has one,
+   and the halftone stands wherever no pattern class lands. */
+.gq-proto-photo.gq-pattern-sunburst::before,
+.gq-proto-photo.gq-pattern-waves::before,
+.gq-proto-photo.gq-pattern-lattice::before,
+.gq-proto-photo.gq-pattern-sparkles::before,
+.gq-proto-photo.gq-pattern-chevrons::before,
+.gq-proto-photo.gq-pattern-honeycomb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-position: 0 0;
+  background-size: auto;
+  opacity: 1;
+  -webkit-mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.6), #000 72%);
+  mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.6), #000 72%);
+}
+/* Retro rays fanning out from behind the player. */
+.gq-proto-photo.gq-pattern-sunburst::before {
+  background-image: repeating-conic-gradient(
+    from -90deg at 50% 58%,
+    rgba(255, 255, 255, 0.22) 0deg 7deg,
+    rgba(255, 255, 255, 0) 7deg 18deg
+  );
+}
+/* Seigaiha waves: overlapping scalloped fans, wallpaper style. */
+.gq-proto-photo.gq-pattern-waves::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.28' stroke-width='2'%3E%3Cpath d='M0 32 A32 32 0 0 1 64 32 M10 32 A22 22 0 0 1 54 32 M20 32 A12 12 0 0 1 44 32'/%3E%3Cpath d='M-32 64 A32 32 0 0 1 32 64 M-22 64 A22 22 0 0 1 22 64 M-12 64 A12 12 0 0 1 12 64'/%3E%3Cpath d='M32 64 A32 32 0 0 1 96 64 M42 64 A22 22 0 0 1 86 64 M52 64 A12 12 0 0 1 76 64'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 21cqw 21cqw;
+}
+/* Diamond lattice: crossing diagonals over a faint alternating checker. */
+.gq-proto-photo.gq-pattern-lattice::before {
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.30) 0,
+      rgba(255, 255, 255, 0.30) 0.55cqw,
+      transparent 0.55cqw,
+      transparent 8cqw
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      rgba(255, 255, 255, 0.30) 0,
+      rgba(255, 255, 255, 0.30) 0.55cqw,
+      transparent 0.55cqw,
+      transparent 8cqw
+    ),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.09) 0,
+      rgba(255, 255, 255, 0.09) 8cqw,
+      transparent 8cqw,
+      transparent 16cqw
+    );
+}
+/* Sparkles: scattered four-point foil glints in mixed sizes. */
+.gq-proto-photo.gq-pattern-sparkles::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='%23ffffff'%3E%3Cpath fill-opacity='0.5' d='M24 13 Q24 20 31 20 Q24 20 24 27 Q24 20 17 20 Q24 20 24 13 Z'/%3E%3Cpath fill-opacity='0.3' d='M68 40 Q68 44 72 44 Q68 44 68 48 Q68 44 64 44 Q68 44 68 40 Z'/%3E%3Cpath fill-opacity='0.42' d='M44 70.5 Q44 76 49.5 76 Q44 76 44 81.5 Q44 76 38.5 76 Q44 76 44 70.5 Z'/%3E%3Cpath fill-opacity='0.26' d='M84 9 Q84 12 87 12 Q84 12 84 15 Q84 12 81 12 Q84 12 84 9 Z'/%3E%3Cpath fill-opacity='0.26' d='M10 56.5 Q10 60 13.5 60 Q10 60 10 63.5 Q10 60 6.5 60 Q10 60 10 56.5 Z'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 26cqw 26cqw;
+}
+/* Chevrons: paired zigzag bands, deco style. */
+.gq-proto-photo.gq-pattern-chevrons::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='24' viewBox='0 0 36 24'%3E%3Cg fill='none' stroke='%23ffffff' stroke-width='2'%3E%3Cpath stroke-opacity='0.34' d='M0 16 L9 8 L18 16 L27 8 L36 16'/%3E%3Cpath stroke-opacity='0.18' d='M0 21 L9 13 L18 21 L27 13 L36 21'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 12cqw 8cqw;
+}
+/* Honeycomb: hexagon grid. */
+.gq-proto-photo.gq-pattern-honeycomb::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20.78' height='36' viewBox='0 0 20.78 36'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.30' stroke-width='1.8'%3E%3Cpath d='M10.39 -3 L20.78 3 L20.78 15 L10.39 21 L0 15 L0 3 Z'/%3E%3Cpath d='M10.39 33 L20.78 39 L20.78 51 L10.39 57 L0 51 L0 39 Z'/%3E%3Cpath d='M0 15 L10.39 21 L10.39 33 L0 39 L-10.39 33 L-10.39 21 Z'/%3E%3Cpath d='M20.78 15 L31.17 21 L31.17 33 L20.78 39 L10.39 33 L10.39 21 Z'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 13cqw 22.52cqw;
+}
+
 .gq-proto-portrait {
   position: absolute;
   inset: 0;
@@ -595,8 +703,8 @@
 .gq-proto-rarity-bronze .gq-proto-rarity-mark { color: #c9915d; }
 .gq-proto-rarity-gold .gq-proto-rarity-mark { color: #f0c95e; }
 .gq-proto-rarity-legendary .gq-proto-rarity-mark {
-  color: #ffffff;
-  text-shadow: 0 0.35cqw 0.5cqw rgba(0, 0, 0, 0.95);
+  color: transparent;
+  text-shadow: none;
 }
 .gq-proto-rainbow-word {
   display: inline-flex;
@@ -611,6 +719,18 @@
 .gq-proto-rainbow-word span:nth-child(6) { color: #56a1ff; }
 .gq-proto-rainbow-word span:nth-child(7) { color: #8d82ff; }
 .gq-proto-rainbow-word span:nth-child(8) { color: #c77dff; }
+.gq-proto-rarity-legendary .gq-proto-rainbow-word {
+  background: linear-gradient(90deg, #d3c6a2, #9fbfb8 42%, #a9adca 72%, #c4a9b7);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  filter:
+    drop-shadow(0 0 0.24cqw rgba(1, 7, 13, 0.98))
+    drop-shadow(0 0.22cqw 0.18cqw rgba(1, 7, 13, 0.92));
+}
+.gq-proto-rarity-legendary .gq-proto-rainbow-word span {
+  color: transparent;
+}
 
 .gq-proto-count {
   position: absolute;
