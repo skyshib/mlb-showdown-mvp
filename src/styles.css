@@ -733,9 +733,7 @@ td span {
 }
 
 .toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  position: static;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -763,6 +761,34 @@ td span {
   border-color: var(--warn);
   color: var(--warn);
   animation: pick-clock-pulse 1s ease-in-out infinite;
+}
+
+/* A single-beat warning for the final ten seconds of a human auction clock.
+   It sits over the whole draft without taking clicks, so the urgency is visible
+   even when the manager is reading the bottom of the board. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: color-mix(in srgb, var(--warn) 28%, transparent);
+  box-shadow: inset 0 0 120px color-mix(in srgb, var(--warn) 72%, transparent);
+  pointer-events: none;
+  opacity: 0;
+}
+
+body.auction-clock-beat::after {
+  animation: auction-heartbeat 620ms ease-out 1;
+}
+
+body.auction-clock-urgent .auction-lot-rail {
+  border-color: var(--warn);
+}
+
+@keyframes auction-heartbeat {
+  0%, 100% { opacity: 0.04; }
+  28% { opacity: 0.34; }
+  70% { opacity: 0.04; }
 }
 
 /* The table's chess clocks, side by side. The bank that is running is the only
@@ -827,19 +853,306 @@ td span {
 }
 
 .auction-status-panel {
-  position: sticky;
-  top: 124px;
   display: grid;
   gap: 14px;
-  max-height: calc(100vh - 320px);
   margin-top: 16px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+}
+
+/* The utility toolbar scrolls away. The one thing that follows a manager down
+   the board is the decision they are actually making: the live card, the room's
+   bid progress, the money available to this seat, and the bid box itself. */
+.auction-lot-rail {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  /* player | clock | budgets | bid entry | cancel — the clock stands in its
+     own slim cell on the row instead of stacking over the budget strip. */
+  grid-template-columns: minmax(210px, 0.8fr) auto minmax(300px, 0.9fr) minmax(340px, 1.3fr) auto;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-color: var(--accent);
+  background: var(--card-sheer);
+  box-shadow: 0 8px 18px rgba(28, 37, 33, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+.auction-lot-rail-player {
+  min-width: 0;
+}
+
+.auction-lot-rail-idle {
+  grid-template-columns: minmax(320px, 1fr) minmax(260px, auto) auto;
+}
+
+/* No clock cell in an untimed draft — the row closes up around it. */
+.auction-lot-rail-untimed {
+  grid-template-columns: minmax(210px, 0.8fr) minmax(300px, 0.9fr) minmax(340px, 1.3fr) auto;
+}
+
+.auction-lot-rail-state {
+  display: grid;
+  gap: 2px;
+  border-left: 1px solid var(--line);
+  padding-left: 14px;
+}
+
+.auction-lot-rail-state small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.auction-lot-rail-state strong {
+  color: var(--accent-dark);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.auction-lot-rail-action {
+  justify-self: end;
+}
+
+.auction-lot-rail-action button {
+  white-space: nowrap;
+}
+
+.auction-lot-rail-player .eyebrow {
+  margin-bottom: 5px;
+}
+
+.auction-lot-rail-player h2 {
+  overflow: hidden;
+  margin: 0;
+  font-size: 24px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auction-lot-rail-meta {
+  overflow: hidden;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auction-lot-rail-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
+  gap: 0;
+}
+
+.auction-lot-rail-overview {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.auction-lot-rail-idle .auction-lot-rail-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+}
+
+.auction-lot-rail-metrics > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  padding: 3px 10px;
+}
+
+.auction-lot-rail-metrics small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.auction-lot-rail-metrics strong {
+  color: var(--ink);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.auction-lot-rail-time strong {
+  color: var(--navy);
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+}
+
+body.auction-clock-urgent .auction-lot-rail-time strong {
+  color: var(--accent);
+}
+
+.auction-lot-rail-budgets {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+/* The dividing rule only earns its keep when a metrics row sits above. */
+.auction-lot-rail-metrics + .auction-lot-rail-budgets {
+  border-top: 1px solid var(--line);
+  padding-top: 5px;
+}
+
+.auction-lot-rail-budgets > span {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) auto 4ch;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  padding: 2px 5px;
+  transition: opacity 140ms ease, background-color 140ms ease;
+}
+
+.auction-lot-rail-budgets > span.own {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.auction-lot-rail-budgets > span.submitted {
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  opacity: 0.42;
+}
+
+.auction-lot-rail-budgets > span.inactive {
+  opacity: 0.6;
+}
+
+.auction-lot-rail-budgets small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.auction-lot-rail-budgets strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.auction-lot-rail-budgets em {
+  justify-self: end;
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.auction-lot-rail-entry {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.auction-lot-rail-entry .auction-side-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+}
+
+.auction-lot-rail-entry .auction-side-entry-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.auction-lot-rail-entry .auction-side-entry-controls input {
+  flex: 0 1 86px;
+  width: 86px;
+  min-width: 64px;
+}
+
+.auction-lot-rail-entry .auction-side-entry-controls button {
+  flex: none;
+}
+
+.auction-lot-rail-entry .auction-side-max {
+  white-space: nowrap;
+}
+
+.auction-lot-rail-entry .warn {
+  grid-column: 1 / -1;
+}
+
+.auction-lot-rail-cancel {
+  align-self: center;
+}
+
+.auction-lot-rail-cancel button {
+  padding: 7px 9px;
+  white-space: nowrap;
 }
 
 .auction-status-panel > .eyebrow {
   justify-self: stretch;
   text-align: center;
+}
+
+.auction-last-sale p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.auction-last-sale strong {
+  color: var(--ink);
+}
+
+/* Revealed bids stack one per line, highest first; passes print quiet.
+   Names and amounts sit in two snug columns so the amounts read as one
+   skimmable rail right beside the names, not across the panel. */
+.auction-last-sale-bids {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  column-gap: 14px;
+  row-gap: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.auction-last-sale-bids li {
+  display: contents;
+}
+
+.auction-last-sale-bids li strong,
+.auction-last-sale-bids li em {
+  text-align: right;
+}
+
+.auction-last-sale-bids em {
+  font-style: italic;
 }
 
 .auction-remaining {
@@ -1080,6 +1393,73 @@ td span {
   background: var(--card);
   font-size: 12px;
   font-weight: 800;
+}
+
+.auction-focus-summary {
+  width: min(100%, 250px);
+  margin-top: 4px;
+}
+
+.auction-focus-budget {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 9px;
+}
+
+.auction-focus-budget span,
+.auction-focus-fielding dt {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.auction-focus-budget strong {
+  color: var(--accent-dark);
+  font-family: var(--display);
+  font-size: 24px;
+  font-style: italic;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.auction-focus-points {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auction-focus-fielding-label {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.auction-focus-fielding {
+  display: grid;
+  gap: 5px;
+  margin: 5px 0 0;
+}
+
+.auction-focus-fielding div {
+  display: grid;
+  grid-template-columns: 2ch auto;
+  align-items: baseline;
+  justify-content: start;
+  column-gap: 7px;
+}
+
+.auction-focus-fielding dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
 }
 
 .next-up {
@@ -1855,6 +2235,26 @@ button.roster-slot[draggable="true"]:active {
   white-space: nowrap;
 }
 
+.dock-slot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3px;
+}
+
+.dock-slot-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-slot-head b {
+  flex: none;
+  color: var(--ink);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
 .dock-slot > span {
   overflow: hidden;
   font-size: 10.5px;
@@ -1872,6 +2272,11 @@ button.roster-slot[draggable="true"]:active {
 .dock-slot.empty-dock-slot > span {
   color: #b3563e;
   font-weight: 750;
+}
+
+.dock-bench-slot {
+  flex: 0 1 94px;
+  min-width: 72px;
 }
 
 /* Heat coloring for all draft chips; lives after the base blocks so the
@@ -2515,8 +2920,8 @@ button.roster-slot[draggable="true"]:active {
 
 /* ---- what the table built ----
    A grade against the board, not against the other two managers: an A means the
-   average card at that spot sits in the top tenth of every card that could have
-   been drafted. The letter carries the row; the number underneath is the
+   average active card at that spot sits in the top tenth of every card that
+   could have been drafted. The letter carries the row; the adjacent number is
    evidence for it. */
 .comp-table {
   width: 100%;
@@ -2566,6 +2971,16 @@ button.roster-slot[draggable="true"]:active {
   white-space: nowrap;
 }
 
+.comp-score {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.comp-score .comp-grade {
+  grid-column: 2;
+}
+
 .comp-grade {
   display: inline-block;
   min-width: 30px;
@@ -2589,7 +3004,8 @@ button.roster-slot[draggable="true"]:active {
 .grade-F { background: var(--accent); }
 
 .comp-value {
-  display: inline-block;
+  grid-column: 3;
+  justify-self: start;
   margin-left: 6px;
   vertical-align: middle;
   color: var(--muted);
@@ -3471,6 +3887,23 @@ button.roster-slot[draggable="true"]:active {
   transform: translateY(0) scale(1);
 }
 
+.dock-preview-position {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 50;
+  border: 1px solid var(--navy);
+  border-radius: 5px;
+  padding: 3px 7px;
+  background: var(--navy);
+  color: var(--sheet);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* The floating card is the printed face (src/ui/cardFace.css), which sizes
    itself off its own width — so the preview just sets that width and drops
    a shadow under it. A classic card's scan is taller than the 5:7 face, and
@@ -3496,6 +3929,37 @@ button.roster-slot[draggable="true"]:active {
   color: var(--muted);
 }
 
+@media (max-width: 1220px) {
+  .auction-lot-rail {
+    grid-template-columns: minmax(200px, 0.65fr) auto minmax(280px, 0.8fr) minmax(0, 1.55fr);
+  }
+
+  .auction-lot-rail-untimed {
+    grid-template-columns: minmax(200px, 0.65fr) minmax(280px, 0.8fr) minmax(0, 1.55fr);
+  }
+
+  .auction-lot-rail-cancel {
+    grid-column: 4;
+    justify-self: end;
+  }
+
+  .auction-lot-rail-untimed .auction-lot-rail-cancel {
+    grid-column: 3;
+  }
+
+  .auction-lot-rail-entry .auction-side-entry {
+    grid-template-columns: minmax(100px, 0.65fr) minmax(210px, 1.35fr) auto;
+  }
+
+  .auction-lot-rail-entry .mask-toggle {
+    grid-column: 1 / -1;
+  }
+
+  .auction-lot-rail-idle {
+    grid-template-columns: minmax(280px, 1fr) minmax(230px, auto) auto;
+  }
+}
+
 @media (max-width: 900px) {
   main {
     width: min(100vw - 20px, 760px);
@@ -3517,6 +3981,34 @@ button.roster-slot[draggable="true"]:active {
     order: -1;
     max-height: none;
     overflow: visible;
+  }
+
+  .auction-lot-rail {
+    position: static;
+    grid-template-columns: 1fr;
+  }
+
+  .auction-lot-rail-idle {
+    grid-template-columns: 1fr;
+  }
+
+  .auction-lot-rail-metrics {
+    grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+  }
+
+  .auction-lot-rail-idle .auction-lot-rail-metrics {
+    grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  }
+
+  .auction-lot-rail-entry .auction-side-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .auction-lot-rail-entry .mask-toggle,
+  .auction-lot-rail-cancel,
+  .auction-lot-rail-action {
+    grid-column: auto;
+    justify-self: start;
   }
 
   .section-head,
@@ -3873,6 +4365,10 @@ button.roster-slot[draggable="true"]:active {
   }
   .sale-toast.show {
     transform: translate(-50%, 0);
+  }
+  body.auction-clock-urgent::after {
+    animation: none;
+    opacity: 0.14;
   }
 }
 

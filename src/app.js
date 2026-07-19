@@ -256,9 +256,12 @@ let pickClockDeadline = 0;
 let pickClockTimeoutKey = null;
 let pickClockWarned = false;
 let warRoomLotKey = null;
+let auctionUrgentSecond = null;
 
 setInterval(pickClockTick, 500);
-setInterval(auctionClockTick, 500);
+// The final-ten-second pulse restarts on the same tick that changes the visible
+// second. A short cadence keeps those two events perceptually simultaneous.
+setInterval(auctionClockTick, 100);
 
 // Coming back from a break, the clock picks up where it stopped rather than
 // handing the manager a fresh minute he did not earn.
@@ -311,20 +314,62 @@ function pickClockTurn() {
 
 function auctionClockTick() {
   const draft = state.draft;
-  if (!draft || !isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) return;
-  if (!state.online && syncAuctionTimer(draft, draftNow())) {
+  const now = draftNow();
+  if (!draft || !isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) {
+    clearAuctionUrgency();
+    return;
+  }
+  syncAuctionUrgency(draft, now);
+  if (!state.online && syncAuctionTimer(draft, now)) {
     selectedLineupMove = null;
     invalidateBatch();
     afterLocalDraftAction();
     return;
   }
   const reviewClock = document.querySelector("[data-auction-review-clock]");
-  if (reviewClock) reviewClock.textContent = formatAuctionClock(auctionReviewRemainingMs(draft, draftNow()));
+  if (reviewClock) reviewClock.textContent = formatAuctionClock(auctionReviewRemainingMs(draft, now));
   const live = liveDraft(draft);
   for (const clock of document.querySelectorAll("[data-auction-clock][data-manager-id]")) {
     const manager = draft.managers.find((item) => item.id === clock.dataset.managerId);
-    if (manager) clock.textContent = formatAuctionClock(auctionBidTimeRemainingMs(live, manager, draftNow()));
+    if (manager) clock.textContent = formatAuctionClock(auctionBidTimeRemainingMs(live, manager, now));
   }
+}
+
+function syncAuctionUrgency(draft, now = draftNow()) {
+  const lot = liveLot(draft);
+  if (!lot || isDraftPaused(draft) || !auctionTimerEnabled(draft)) {
+    clearAuctionUrgency();
+    return;
+  }
+  const managers = state.online
+    ? draft.managers.filter((manager) => manager.id === state.online.managerId && lot.pending.includes(manager.id))
+    : draft.managers.filter((manager) => !manager.cpu && lot.pending.includes(manager.id));
+  const live = liveDraft(draft);
+  const urgentSeconds = managers
+    .map((manager) => auctionBidTimeRemainingMs(live, manager, now))
+    .filter((left) => left > 0 && left <= 10_000)
+    .map((left) => Math.ceil(left / 1000));
+  const second = urgentSeconds.length ? Math.min(...urgentSeconds) : null;
+  const urgent = second !== null;
+  document.body.classList.toggle("auction-clock-urgent", urgent);
+  if (!urgent) {
+    document.body.classList.remove("auction-clock-beat");
+    auctionUrgentSecond = null;
+    return;
+  }
+  if (second === auctionUrgentSecond) return;
+  auctionUrgentSecond = second;
+  // Restart the one-shot animation as the displayed clock changes to 0:10,
+  // 0:09, and so on. The forced style read makes a repeated class observable
+  // as a fresh beat rather than a continuation of an unrelated CSS rhythm.
+  document.body.classList.remove("auction-clock-beat");
+  void document.body.offsetWidth;
+  document.body.classList.add("auction-clock-beat");
+}
+
+function clearAuctionUrgency() {
+  document.body.classList.remove("auction-clock-urgent", "auction-clock-beat");
+  auctionUrgentSecond = null;
 }
 
 function formatAuctionClock(ms) {
@@ -591,12 +636,24 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
     // A won lot gets a moment of its own: the winner and the price, front and
     // centre, gone on its own a couple of seconds later. Only for real auction
     // wins — the closing sweep hands out free fills and completes the draft, and
-    // those are not somebody winning a card.
-    if (!spectator && isAuctionDraft(draft) && !draft.complete) {
-      const sale = draftHistory(draft).slice(-1)[0];
-      if (sale?.player && sale.manager && Number.isFinite(sale.price)) {
-        showSaleToast(sale);
-      }
+    // those are not somebody winning a card. The last real sale still gets its
+    // full moment even when it also completes the draft; previously `complete`
+    // suppressed exactly the confirmation the room most needed to see.
+    if (!spectator && isAuctionDraft(draft)) {
+      const newAuctionEntries = heardAuctionHistory === null
+        ? []
+        : auctionHistory.slice(heardAuctionHistory);
+      const saleEntry = [...newAuctionEntries]
+        .reverse()
+        .find((entry) => !entry.passed && !entry.swept && entry.managerId && Number.isFinite(entry.price));
+      const sale = saleEntry
+        ? {
+            player: draft.pool.find((player) => player.id === saleEntry.playerId),
+            manager: draft.managers.find((manager) => manager.id === saleEntry.managerId),
+            price: saleEntry.price
+          }
+        : null;
+      if (sale?.player && sale.manager) showSaleToast(sale);
     }
   }
 
@@ -2165,16 +2222,14 @@ function renderDraft() {
   const leadPanels = `${paused ? renderPausedPanel(draft) : ""}
     ${draft.complete ? renderDraftDone(draft) : ""}
     ${draft.complete ? renderAuctionBudgetSection(draft) : ""}
-    ${renderDraftFocus(draft, focusManager, boardManager)}
-    ${reviewOpen ? renderAuctionReviewPanel(draft) : ""}
-    ${lot ? renderAuctionLotPanel(draft) : ""}
-    ${auction && !draft.complete ? renderLastSalePanel(draft) : ""}`;
+    `;
+  const focusPanel = renderDraftFocus(draft, focusManager, boardManager);
   const workspace = auction
     ? `<div class="auction-workspace">
-        <div class="auction-workspace-main">${leadPanels}${boardPanel}</div>
+        <div class="auction-workspace-main">${leadPanels}${boardPanel}${focusPanel}</div>
         ${renderAuctionStatusPanel(draft)}
       </div>`
-    : `${leadPanels}<div class="draft-board-full">${boardPanel}</div>`;
+    : `${leadPanels}${focusPanel}<div class="draft-board-full">${boardPanel}</div>`;
 
   app.innerHTML = `${online ? renderOnlineBanner(draft, current) : ""}
   <section class="toolbar">
@@ -2182,7 +2237,6 @@ function renderDraft() {
     ${canPause ? `<button class="pause-button${paused ? " resume" : ""}" data-action="${paused ? "resume-draft" : "pause-draft"}">${paused ? "&#9654; Resume draft" : "&#10073;&#10073; Pause draft"}</button>` : ""}
     <button data-action="autopick" ${canAdvance ? "" : "disabled"}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot && !queued ? "Undo nomination" : "Undo last pick"}</button>
-    ${auction && reviewOpen ? `<button data-action="complete-review" ${(online && !online.host) || paused ? "disabled" : ""}>Start auction now</button>` : ""}
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
     <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
     ${renderPlayGameControl(draft)}
@@ -2195,6 +2249,7 @@ function renderDraft() {
           only ever the one TV board link, and it is the one that works. */
       online ? "" : `<a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>`}
   </section>
+  ${auction && !draft.complete ? renderAuctionDecisionRail(draft) : ""}
   ${workspace}
   ${renderRosterDock(draft, dockViewerId)}`;
 
@@ -2206,6 +2261,7 @@ function renderDraft() {
     if (list) list.scrollTop = listScrollTop;
   }
   bindDraftActions();
+  syncAuctionUrgency(draft, draftNow());
   pickClockTick();
 }
 
@@ -2297,24 +2353,6 @@ function renderPausedPanel(draft) {
       </div>
     </div>
     ${host ? `<div class="lot-actions"><button data-action="resume-draft">&#9654; Resume draft</button></div>` : ""}
-  </section>`;
-}
-
-function renderAuctionReviewPanel(draft) {
-  return `<section class="panel auction-lot">
-    <div class="lot-header">
-      <div>
-        <p class="eyebrow">Pool review</p>
-        <h2>Inspect the cards before the auction clock starts</h2>
-      </div>
-      <div class="lot-bid-state">
-        <span class="lot-bid-amount" data-auction-review-clock>${formatAuctionClock(auctionReviewRemainingMs(draft, draftNow()))}</span>
-        <span class="lot-bid-holder">review remaining</span>
-      </div>
-    </div>
-    <div class="lot-actions">
-      <button data-action="complete-review" ${state.online && !state.online.host ? "disabled" : ""}>Skip review and start auction</button>
-    </div>
   </section>`;
 }
 
@@ -2505,15 +2543,6 @@ function renderAuctionStatusPanel(draft) {
       </div>`
     : "";
 
-  // The card on the block, at the foot of the desk — the face to go with the
-  // name up in the lot panel.
-  const lotCard = lotPlayer
-    ? `<div class="auction-side-section auction-lot-card">
-        <h3>On the block</h3>
-        <div class="auction-lot-card-face">${cardPanelHtml(lotPlayer, { hidePoints: pointsHidden() })}</div>
-      </div>`
-    : "";
-
   return `<aside class="panel auction-status-panel" aria-label="Auction desk">
     <p class="eyebrow">Auction desk</p>
     <div class="auction-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Draft completion">
@@ -2525,58 +2554,129 @@ function renderAuctionStatusPanel(draft) {
       <span>players still to come${lot ? " after this lot" : ""}</span>
     </div>
     ${minimums}
-    <div class="auction-side-section auction-side-bid">
-      <h3>${lot?.round === 2 ? "Tie-break bid" : "Enter bid"}</h3>
-      ${renderAuctionBidEntry(draft)}
-    </div>
     <div class="auction-side-section">
       <h3>Budget &amp; time</h3>
       <div class="auction-manager-statuses">${managers}</div>
     </div>
-    ${lotCard}
+    ${renderLastSaleSummary(draft)}
   </aside>`;
 }
 
-function renderAuctionLotPanel(draft) {
+function renderAuctionDecisionRail(draft) {
   const lot = liveLot(draft);
   const player = auctionLotPlayer(draft);
-  if (!player || !lot) return "";
   const online = state.online;
+
+  if (!auctionReviewComplete(draft, draftNow())) {
+    return `<section class="panel auction-lot-rail auction-lot-rail-idle" aria-label="Auction pool review">
+      <div class="auction-lot-rail-player">
+        <p class="eyebrow">Pool review</p>
+        <h2>Inspect the cards before bidding starts</h2>
+        <p class="auction-lot-rail-meta">The auction rail will stay here when the first card goes on the block.</p>
+      </div>
+      <div class="auction-lot-rail-state">
+        <small>Review remaining</small>
+        <strong data-auction-review-clock>${formatAuctionClock(auctionReviewRemainingMs(draft, draftNow()))}</strong>
+      </div>
+      <div class="auction-lot-rail-action">
+        <button data-action="complete-review" ${(online && !online.host) || isDraftPaused(draft) ? "disabled" : ""}>Start auction now</button>
+      </div>
+    </section>`;
+  }
+
+  if (!player || !lot) {
+    const queued = isRandomNomination(draft);
+    const manager = viewerManager(draft) ?? currentManager(draft);
+    const budgetAmount = manager ? auctionBudget(draft, manager) : null;
+    const maxBidAmount = manager ? Math.max(0, auctionMaxBid(draft, manager)) : null;
+    const constrained = budgetAmount !== null && maxBidAmount < budgetAmount;
+    const heading = queued
+      ? "The queue deals the next card"
+      : `${escapeHtml(currentManager(draft)?.name ?? "The next manager")} nominates next`;
+    return `<section class="panel auction-lot-rail auction-lot-rail-idle" aria-label="Next auction decision">
+      <div class="auction-lot-rail-player">
+        <p class="eyebrow">Next lot</p>
+        <h2>${heading}</h2>
+        <p class="auction-lot-rail-meta">${queued ? "Ready to reveal the next card." : "Choose a card from the board below."}</p>
+      </div>
+      <div class="auction-lot-rail-overview">
+        <div class="auction-lot-rail-metrics" aria-label="Status for the next lot">
+          <span><small>Cards sold</small><strong>${draft.pickNumber}</strong></span>
+          ${constrained ? `<span><small>Max bid</small><strong>${money(maxBidAmount)}</strong></span>` : ""}
+        </div>
+        ${renderAuctionBudgetStrip(draft)}
+      </div>
+      ${queued ? `<div class="auction-lot-rail-action"><button data-action="autopick" ${isDraftPaused(draft) || (online && !online.host) ? "disabled" : ""}>Deal next card</button></div>` : ""}
+    </section>`;
+  }
+
   const nominator = draft.managers.find((manager) => manager.id === lot.nominatorId);
   const participants = draft.managers.filter((manager) =>
     lot.round === 2 ? lot.tie.managerIds.includes(manager.id) : manager.id in lot.bids || lot.pending.includes(manager.id)
   );
 
-  const bidderChips = participants
-    .map((manager) => {
-      const waiting = lot.pending.includes(manager.id);
-      const timedOut = Boolean(lot.clock?.timedOut?.includes(manager.id));
-      const status = timedOut ? "timed out (0)" : waiting ? "still to bid" : "bid in";
-      return `<div class="lot-bidder ${waiting ? "" : "high-bidder"}">
-        <strong>${escapeHtml(manager.name)}${manager.cpu ? ' <span class="cpu-tag">CPU</span>' : ""}</strong>
-        <em>${status}</em>
-      </div>`;
-    })
-    .join("");
+  const metricManager = viewerManager(draft)
+    ?? participants.find((manager) => lot.pending.includes(manager.id) && !manager.cpu)
+    ?? participants[0];
+  const budgetAmount = metricManager ? auctionBudget(draft, metricManager) : null;
+  const maxBidAmount = metricManager ? Math.max(0, auctionMaxBid(draft, metricManager)) : null;
+  const constrained = budgetAmount !== null && maxBidAmount < budgetAmount;
+  const timed = metricManager && auctionTimerEnabled(draft);
+  const timeLeft = timed ? formatAuctionClock(auctionBidTimeRemainingMs(liveDraft(draft), metricManager, draftNow())) : "Untimed";
+  const source = nominator ? `Nominated by ${escapeHtml(nominator.name)}` : "Dealt by the queue";
 
-  const tieNote = lot.round === 2
-    ? `<p class="lot-tie-note">Tied at ${lot.tie.amount} — the tied managers rebid sealed. Another tie is a coin flip at that price.</p>`
-    : lot.nominatorId
-      ? `<p class="lot-tie-note muted">Bids stay hidden until the card sells; the winner pays the second-highest bid + 1.</p>`
-      : `<p class="lot-tie-note muted">Nobody nominated this card, so nobody has to open. Bids stay hidden until it sells; the winner pays the second-highest bid + 1. If the whole room passes, the card goes back on the board unsold.</p>`;
-
-  return `<section class="panel auction-lot">
-    <div class="lot-header">
-      <div>
-        <p class="eyebrow">${lot.round === 2 ? "Tie break" : "On the block"} &middot; ${nominator ? `nominated by ${escapeHtml(nominator.name)}` : "dealt by the queue"}</p>
-        <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}
-          <span class="lot-player-meta">${escapeHtml(playerPosition(player))}${pointsHidden() ? "" : ` &middot; ${player.points} pts`}</span></h2>
-      </div>
+  return `<section class="panel auction-lot-rail${timed ? "" : " auction-lot-rail-untimed"}" aria-label="Current auction lot">
+    <div class="auction-lot-rail-player">
+      <p class="eyebrow">${lot.round === 2 ? `Tie break at ${money(lot.tie.amount)}` : "On the block"}</p>
+      <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}</h2>
+      <p class="auction-lot-rail-meta">${escapeHtml(playerPosition(player))}${pointsHidden() ? "" : ` &middot; ${player.points} pts`} &middot; ${source}</p>
     </div>
-    ${tieNote}
-    <div class="lot-bidders">${bidderChips}</div>
-    ${allowCancelLot(draft) ? `<div class="lot-actions"><button data-action="cancel-lot" ${online && !online.host ? "disabled" : ""}>Cancel nomination</button></div>` : ""}
+    ${timed ? `<div class="auction-lot-rail-state auction-lot-rail-time" aria-label="Time left to bid">
+      <small>Time left</small>
+      <strong data-auction-clock data-manager-id="${escapeHtml(metricManager.id)}">${timeLeft}</strong>
+    </div>` : ""}
+    <div class="auction-lot-rail-overview">
+      ${constrained ? `<div class="auction-lot-rail-metrics" aria-label="Live auction status">
+        <span><small>Max bid</small><strong>${money(maxBidAmount)}</strong></span>
+      </div>` : ""}
+      ${renderAuctionBudgetStrip(draft)}
+    </div>
+    <div class="auction-lot-rail-entry">
+      ${renderAuctionBidEntry(draft)}
+    </div>
+    ${allowCancelLot(draft) ? `<div class="auction-lot-rail-cancel"><button class="secondary-button" data-action="cancel-lot" ${online && !online.host ? "disabled" : ""}>Cancel nomination</button></div>` : ""}
   </section>`;
+}
+
+function renderAuctionBudgetStrip(draft) {
+  const viewerId = viewerManager(draft)?.id;
+  const lot = liveLot(draft);
+  const live = liveDraft(draft);
+  const timed = auctionTimerEnabled(draft);
+  const seatOrder = new Map(draft.managers.map((manager, index) => [manager.id, index]));
+  const managers = [...draft.managers]
+    .sort((a, b) => auctionBudget(draft, b) - auctionBudget(draft, a) || seatOrder.get(a.id) - seatOrder.get(b.id))
+    .map((manager) => {
+      const participating = !lot
+        || (lot.round === 2
+          ? lot.tie.managerIds.includes(manager.id)
+          : lot.pending.includes(manager.id) || manager.id in lot.bids);
+      const submitted = Boolean(lot && participating && !lot.pending.includes(manager.id));
+      const inactive = Boolean(lot && !participating);
+      const classes = [manager.id === viewerId ? "own" : "", submitted ? "submitted" : "", inactive ? "inactive" : ""]
+        .filter(Boolean)
+        .join(" ");
+      const time = timed
+        ? formatAuctionClock(auctionBidTimeRemainingMs(live, manager, draftNow()))
+        : "Untimed";
+      const status = submitted ? " · bid in" : inactive ? " · not in rebid" : "";
+      return `<span${classes ? ` class="${classes}"` : ""} title="${escapeHtml(manager.name)} budget and time${status}">
+        <small>${escapeHtml(manager.name)} budget${status}</small>
+        <strong>${money(auctionBudget(draft, manager))}</strong>
+        <em${timed ? ` data-auction-clock data-manager-id="${escapeHtml(manager.id)}"` : ""}>${time}</em>
+      </span>`;
+    }).join("");
+  return `<div class="auction-lot-rail-budgets" aria-label="Manager budgets and time remaining">${managers}</div>`;
 }
 
 // Online, whether a bid has landed is only knowable from the live lot — the
@@ -2585,30 +2685,38 @@ function allowCancelLot(draft) {
   return canCancelLot(liveDraft(draft));
 }
 
-// After a sale the sealed bids get revealed alongside the price paid.
-function renderLastSalePanel(draft) {
+// After a sale the sealed bids get revealed alongside the price paid, one
+// line per manager, highest bid first (passes settle to the bottom in seat
+// order).
+function renderLastSaleSummary(draft) {
   const entry = draft.auction.history.at(-1);
   if (!entry?.bids) return "";
   const player = draft.pool.find((item) => item.id === entry.playerId);
   if (!player) return "";
   const revealed = draft.managers
     .filter((manager) => manager.id in entry.bids)
-    .map((manager) => `${escapeHtml(manager.name)} ${entry.bids[manager.id] > 0 ? entry.bids[manager.id] : "pass"}`)
-    .join(" &middot; ");
+    .map((manager) => ({ name: manager.name, bid: entry.bids[manager.id] }))
+    .sort((a, b) => b.bid - a.bid)
+    .map(({ name, bid }) =>
+      `<li><span>${escapeHtml(name)}</span>${bid > 0 ? `<strong>${money(bid)}</strong>` : "<em>pass</em>"}</li>`)
+    .join("");
 
   // A card the whole room passed on. It stays on the board, and the sweep may
   // yet hand it to whoever ends the night short.
   if (entry.passed) {
-    return `<section class="panel last-sale">
-      <p><strong>${escapeHtml(player.name)}</strong> went unsold — the whole room passed. He stays on the board.</p>
-    </section>`;
+    return `<div class="auction-side-section auction-last-sale">
+      <h3>Last lot</h3>
+      <p>${renderPlayerPreviewName(player, player.name, "strong")} went unsold — the whole room passed. He stays on the board.</p>
+    </div>`;
   }
 
   const winner = draft.managers.find((manager) => manager.id === entry.managerId);
   if (!winner) return "";
-  return `<section class="panel last-sale">
-    <p><strong>${escapeHtml(player.name)}</strong> sold to <strong>${escapeHtml(winner.name)}</strong> for <strong>${money(entry.price)}</strong> — bids revealed: ${revealed}</p>
-  </section>`;
+  return `<div class="auction-side-section auction-last-sale">
+    <h3>Last sale</h3>
+    <p>${renderPlayerPreviewName(player, player.name, "strong")} sold to <strong>${escapeHtml(winner.name)}</strong> for <strong>${money(entry.price)}</strong></p>
+    <ul class="auction-last-sale-bids">${revealed}</ul>
+  </div>`;
 }
 
 function bindDraftActions() {
@@ -3109,6 +3217,9 @@ function bindHoverCardPreviews(onEscape = null) {
   const handlePointerOver = (event) => {
     const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget) return;
+    if (!(event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) {
+      resetDockPreview(previewTarget.closest(".dock-carousel-slot"));
+    }
     hoveredPreviewRow = previewTarget;
     showHoverCard(previewTarget, event.clientX, event.clientY);
   };
@@ -3133,6 +3244,7 @@ function bindHoverCardPreviews(onEscape = null) {
     }
     const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget || (event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) return;
+    resetDockPreview(previewTarget.closest(".dock-carousel-slot"));
     hoveredPreviewRow = null;
     hideHoverCard();
   };
@@ -3145,6 +3257,7 @@ function bindHoverCardPreviews(onEscape = null) {
     }
     const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget) return;
+    resetDockPreview(previewTarget.closest(".dock-carousel-slot"));
     const rect = previewTarget.getBoundingClientRect();
     showHoverCard(previewTarget, rect.right, rect.top + rect.height / 2);
   };
@@ -3152,10 +3265,20 @@ function bindHoverCardPreviews(onEscape = null) {
   const handleFocusOut = (event) => {
     if (!event.relatedTarget?.closest?.("[data-point]")) hidePointTip();
     if (event.relatedTarget?.closest?.("[data-preview-card]")) return;
+    resetDockPreview(event.target.closest?.(".dock-carousel-slot"));
     hideHoverCard();
   };
 
   const handleKeyDown = (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const carouselSlot = event.target.closest?.(".dock-carousel-slot")
+        ?? hoveredPreviewRow?.closest?.(".dock-carousel-slot");
+      if (carouselSlot && cycleDockPreview(carouselSlot, event.key === "ArrowRight" ? 1 : -1)) {
+        event.preventDefault();
+        hoveredPreviewRow = carouselSlot;
+        return;
+      }
+    }
     if (event.key !== "Escape") return;
     hideHoverCard();
     onEscape?.(event);
@@ -3168,6 +3291,7 @@ function bindHoverCardPreviews(onEscape = null) {
     hidePointTip();
     hideChartTip();
     hideHoverCard();
+    resetDockPreview(hoveredPreviewRow?.closest?.(".dock-carousel-slot"));
     hoveredPreviewRow = null;
   };
 
@@ -3179,7 +3303,7 @@ function bindHoverCardPreviews(onEscape = null) {
   app.addEventListener("mouseout", handlePointerOut, listenerOptions);
   app.addEventListener("focusin", handleFocusIn, listenerOptions);
   app.addEventListener("focusout", handleFocusOut, listenerOptions);
-  app.addEventListener("keydown", handleKeyDown, listenerOptions);
+  document.addEventListener("keydown", handleKeyDown, listenerOptions);
   window.addEventListener("scroll", handleScroll, { ...listenerOptions, capture: true, passive: true });
 }
 
@@ -4601,6 +4725,33 @@ function formatWpaStat(value) {
 
 function showHoverCard(row, clientX, clientY) {
   presentCard(row.dataset.previewCard, row.dataset.previewId ?? row.dataset.previewCard, clientX, clientY);
+  syncDockPreviewIndicator(row);
+}
+
+function syncDockPreviewIndicator(row) {
+  const existing = cardPreview.querySelector(":scope > .dock-preview-position");
+  const raw = row.dataset.carouselCards;
+  if (!raw) {
+    existing?.remove();
+    return;
+  }
+  let cards;
+  try {
+    cards = JSON.parse(raw);
+  } catch {
+    existing?.remove();
+    return;
+  }
+  const total = cards.length;
+  if (!total) {
+    existing?.remove();
+    return;
+  }
+  const index = Math.min(Math.max(0, Number(row.dataset.carouselIndex) || 0), total - 1);
+  const indicator = existing ?? document.createElement("span");
+  indicator.className = "dock-preview-position";
+  indicator.textContent = `${index + 1}/${total} · ${cards[index]?.status ?? "Bench"}`;
+  if (!existing) cardPreview.append(indicator);
 }
 
 // Drop a rendered player card into the shared preview element and place it near
@@ -5336,11 +5487,7 @@ function renderRoster(manager, draft) {
 
 function renderRosterDepthChart(manager, slotContext = {}) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
-  const staffSlots = assignPlayersToSlots(
-    manager.roster.filter((player) => player.kind === "pitcher"),
-    [...Array.from({ length: state.draft?.startingPitchers ?? DEFAULT_STARTING_PITCHERS }, () => "SP"), "RP", "RP"],
-    (player) => player.role
-  ).slots;
+  const staffSlots = assignStaffSlots(manager.roster, manager.staffAssignments, state.draft ?? {});
 
   return `<div class="mini-roster-board">
     <div class="mini-roster-section">
@@ -5349,7 +5496,7 @@ function renderRosterDepthChart(manager, slotContext = {}) {
     </div>
     <div class="mini-roster-section">
       <span class="mini-roster-heading">Staff</span>
-      <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.label, slotContext)).join("")}</div>
+      <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.role, slotContext)).join("")}</div>
     </div>
   </div>`;
 }
@@ -5820,35 +5967,122 @@ function renderRosterDock(draft, viewerId) {
 }
 
 function renderDockBar(draft, manager, auction, prices, heatScale, { own = false, ownTag = "" } = {}) {
-  // This strip is an ownership board, not the manager's private depth chart.
-  // Keep showing every drafted card in the usual compact slots even if that
-  // manager has deliberately left one of their playable slots open.
-  const lineupSlots = assignLineupSlots(manager.roster).slots;
-  const staffSlots = assignPlayersToSlots(
-    manager.roster.filter((player) => player.kind === "pitcher"),
-    [...Array.from({ length: draft.startingPitchers }, () => "SP"), "RP", "RP"],
-    (player) => player.role
-  ).slots;
-  const slots = [...lineupSlots, ...staffSlots]
-    .map((slot) => renderDockSlot(slot.player, slot.label, auction, prices, heatScale))
-    .join("");
+  // Every position is a tiny depth chart. A multi-position card deliberately
+  // appears in more than one list; its hover badge says where it is actually
+  // starting so that availability is not mistaken for another owned card.
+  const lineupSlots = assignLineupSlots(manager.roster, manager.lineupAssignments).slots;
+  const staffSlots = assignStaffSlots(manager.roster, manager.staffAssignments, draft);
+  const activeAt = new Map([...lineupSlots, ...staffSlots]
+    .filter((slot) => slot.player)
+    .map((slot) => [slot.player.id, slot.label]));
+  const bench = manager.roster.filter((player) => !activeAt.has(player.id));
+  const hitterSlots = lineupSlots.map((slot) => renderDockPositionSlot({
+    manager,
+    slotKey: slot.label,
+    label: slot.label,
+    assignedPlayer: slot.player,
+    candidates: manager.roster.filter((player) => dockHitterEligibleAt(player, slot.label, slot.player)),
+    activeAt,
+    heatScale,
+    prices
+  })).join("");
+  const pitcherSlots = staffSlots.map((slot) => renderDockPositionSlot({
+    manager,
+    slotKey: slot.label,
+    label: slot.label,
+    assignedPlayer: slot.player,
+    candidates: manager.roster.filter((player) => player.kind === "pitcher" && pitcherRoleOf(player) === slot.role),
+    activeAt,
+    heatScale,
+    prices
+  })).join("");
   return `<div class="dock-bar${own ? " own-bar" : ""}">
     <span class="dock-team">${escapeHtml(manager.name)}${own && ownTag ? ` <em class="own-tag">${escapeHtml(ownTag)}</em>` : ""}</span>
-    <div class="dock-slots">${slots}</div>
+    <div class="dock-slots">${hitterSlots}${pitcherSlots}${renderDockBenchSlot(manager, bench, activeAt, heatScale, prices)}</div>
   </div>`;
 }
 
-function renderDockSlot(player, label, auction, prices, heatScale) {
-  if (!player) {
-    return `<span class="dock-slot empty-dock-slot"><small>${escapeHtml(label)}</small><span>open</span></span>`;
+function dockHitterEligibleAt(player, label, assignedPlayer = null) {
+  if (player.kind !== "hitter") return false;
+  if (label === "DH") return true;
+  if (label === "1B") return playsPosition(player, "1B") || player.id === assignedPlayer?.id;
+  if (label === "LF" || label === "RF") return hitterPositions(player).some((entry) => isCornerOutfielder(entry.pos));
+  return playsPosition(player, label);
+}
+
+function dockCarouselCards(candidates, activeAt, heatScale, prices) {
+  return candidates.map((player) => ({
+    id: player.id,
+    card: previewCard(player),
+    status: activeAt.has(player.id) ? `Starting at ${activeAt.get(player.id)}` : "Bench",
+    heat: heatStyle(heatValue(player, heatScale, prices), heatScale)
+  }));
+}
+
+function renderDockPositionSlot({ manager, slotKey, label, assignedPlayer, candidates, activeAt, heatScale, prices }) {
+  const carouselKey = `${manager.id}:${slotKey}`;
+  if (!candidates.length) {
+    return `<span class="dock-slot empty-dock-slot"><small class="dock-slot-head"><span>${escapeHtml(label)}</span><b>0</b></small><span>open</span></span>`;
   }
-  const tag = auction
-    ? (heatBy() === "points" ? (pointsHidden() ? undefined : `${player.points} pts`) : money(prices.get(player.id)))
-    : undefined;
-  return `<span class="dock-slot heat player-name-preview" style="${heatStyle(heatValue(player, heatScale, prices), heatScale)}" tabindex="0" data-preview-id="dockslot-${escapeHtml(player.id)}" data-preview-card="${escapeHtml(previewCard(player))}">
-    <small>${escapeHtml(label)}${tag !== undefined ? ` &middot; ${tag}` : ""}</small>
-    <span>${escapeHtml(dockChipName(player))}</span>
+  const cards = dockCarouselCards(candidates, activeAt, heatScale, prices);
+  const assignedIndex = assignedPlayer ? cards.findIndex((card) => card.id === assignedPlayer.id) : -1;
+  const index = assignedIndex >= 0 ? assignedIndex : 0;
+  const card = cards[index];
+  const assignedHeat = assignedPlayer ? heatStyle(heatValue(assignedPlayer, heatScale, prices), heatScale) : "";
+  return `<span class="dock-slot dock-carousel-slot${assignedPlayer ? " heat" : " empty-dock-slot"}" style="${assignedHeat}" tabindex="0" data-carousel-key="${escapeHtml(carouselKey)}" data-carousel-index="${index}" data-carousel-default-index="${index}" data-carousel-cards="${escapeHtml(JSON.stringify(cards))}" data-preview-id="dock-${escapeHtml(carouselKey)}-${escapeHtml(card.id)}" data-preview-card="${escapeHtml(card.card)}">
+    <small class="dock-slot-head"><span>${escapeHtml(label)}</span><b>${cards.length}</b></small>
+    <span>${assignedPlayer ? escapeHtml(dockChipName(assignedPlayer)) : "open"}</span>
   </span>`;
+}
+
+function renderDockBenchSlot(manager, bench, activeAt, heatScale, prices) {
+  const carouselKey = `${manager.id}:bench`;
+  if (!bench.length) {
+    return `<span class="dock-slot empty-dock-slot dock-bench-slot"><small class="dock-slot-head"><span>Bench</span><b>0</b></small><span>0 players</span></span>`;
+  }
+  const cards = dockCarouselCards(bench, activeAt, heatScale, prices).map((card) => ({ ...card, status: "Bench" }));
+  const index = 0;
+  const card = cards[index];
+  return `<span class="dock-slot dock-bench-slot dock-carousel-slot heat" style="${card.heat}" tabindex="0" data-carousel-key="${escapeHtml(carouselKey)}" data-carousel-index="${index}" data-carousel-default-index="${index}" data-carousel-cards="${escapeHtml(JSON.stringify(cards))}" data-preview-id="dock-${escapeHtml(carouselKey)}-${escapeHtml(card.id)}" data-preview-card="${escapeHtml(card.card)}">
+    <small class="dock-slot-head"><span>Bench</span><b>${cards.length}</b></small>
+    <span>${bench.length} ${bench.length === 1 ? "player" : "players"}</span>
+  </span>`;
+}
+
+function cycleDockPreview(slot, step, clientX = null, clientY = null) {
+  if (!slot) return false;
+  let cards;
+  try {
+    cards = JSON.parse(slot.dataset.carouselCards ?? "[]");
+  } catch {
+    return false;
+  }
+  if (cards.length < 2) return false;
+  const current = Math.min(Math.max(0, Number(slot.dataset.carouselIndex) || 0), cards.length - 1);
+  const next = (current + step + cards.length) % cards.length;
+  const card = cards[next];
+  slot.dataset.carouselIndex = String(next);
+  slot.dataset.previewId = `dock-${slot.dataset.carouselKey}-${card.id}`;
+  slot.dataset.previewCard = card.card;
+  const rect = slot.getBoundingClientRect();
+  showHoverCard(slot, clientX ?? rect.right, clientY ?? (rect.top + rect.height / 2));
+  return true;
+}
+
+function resetDockPreview(slot) {
+  if (!slot) return;
+  let cards;
+  try {
+    cards = JSON.parse(slot.dataset.carouselCards ?? "[]");
+  } catch {
+    return;
+  }
+  if (!cards.length) return;
+  const index = Math.min(Math.max(0, Number(slot.dataset.carouselDefaultIndex) || 0), cards.length - 1);
+  const card = cards[index];
+  slot.dataset.carouselIndex = String(index);
+  slot.dataset.previewId = `dock-${slot.dataset.carouselKey}-${card.id}`;
+  slot.dataset.previewCard = card.card;
 }
 
 
@@ -5913,18 +6147,31 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
   const stallNotice = !auction && !draft.complete && currentManagerMustReplace(draft)
     ? `<p class="next-up stall-notice">The board is out of cards for ${escapeHtml(clockManager.name)}'s open ${escapeHtml(dockNeedsSummary(clockManager) || "slot")} &mdash; Auto-pick hands out a replacement-level fill-in.</p>`
     : "";
-  return `<section class="panel draft-focus">
-    <div class="draft-focus-main">
-      <p class="eyebrow">${eyebrow}</p>
-      <h1>${heading}</h1>
-      <div class="draft-metrics">
-        <span>${queued ? `${draft.auction.queueIndex}/${queueTotal} lots called` : `${draft.pickNumber}/${totalPicks} ${auction ? "cards sold" : "picks made"}`}</span>
-        ${queued ? `<span>${manager.roster.length} cards</span>` : ""}
-        ${auction ? `<span>${money(auctionBudget(draft, manager))} budget left</span>` : ""}
+  const focusSummary = auction
+    ? `<div class="auction-focus-summary">
+        <div class="auction-focus-budget">
+          <span>Budget left</span>
+          <strong>${money(auctionBudget(draft, manager))}</strong>
+        </div>
+        ${pointsHidden() ? "" : `<p class="auction-focus-points">${totalPoints} team points</p>`}
+        <p class="auction-focus-fielding-label">Defense</p>
+        <dl class="auction-focus-fielding" aria-label="Active lineup fielding">
+          <div><dt>C</dt><dd>${formatSignedNumber(fieldingSums.catcher)}</dd></div>
+          <div><dt>IF</dt><dd>${formatSignedNumber(fieldingSums.infield)}</dd></div>
+          <div><dt>OF</dt><dd>${formatSignedNumber(fieldingSums.outfield)}</dd></div>
+        </dl>
+      </div>`
+    : `<div class="draft-metrics">
+        <span>${draft.pickNumber}/${totalPicks} picks made</span>
         ${pointsHidden() ? "" : `<span>${totalPoints} pts</span>`}
         <span>IF ${formatSignedNumber(fieldingSums.infield)}</span>
         <span>OF ${formatSignedNumber(fieldingSums.outfield)}</span>
-      </div>
+      </div>`;
+  return `<section class="panel draft-focus">
+    <div class="draft-focus-main">
+      <p class="eyebrow">${eyebrow}</p>
+      ${auction && lot ? "" : `<h1>${heading}</h1>`}
+      ${focusSummary}
       ${stallNotice}
       ${snakeClocksHtml(draft)}
       ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
@@ -6116,11 +6363,12 @@ function lineupFieldingSums(manager) {
   return assignHittersToLineupSlots(manager).slots.reduce(
     (sums, slot) => {
       const fielding = Number(slot.fielding ?? 0);
+      if (slot.label === "C") sums.catcher += fielding;
       if (infieldPositions.has(slot.label)) sums.infield += fielding;
       if (outfieldPositions.has(slot.label)) sums.outfield += fielding;
       return sums;
     },
-    { infield: 0, outfield: 0 }
+    { catcher: 0, infield: 0, outfield: 0 }
   );
 }
 
@@ -6752,8 +7000,15 @@ function gradeFor(share) {
 
 function teamComposition(manager, draft) {
   const scales = poolScales(draft);
-  const bats = manager.roster.filter((card) => card.kind === "hitter");
-  const arms = manager.roster.filter((card) => card.kind === "pitcher");
+  // This is a report card for the team on the field, not everything it owns.
+  // Reading the live assignments also means a post-draft lineup change updates
+  // the report immediately instead of leaving a stale grade behind.
+  const bats = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
+    .map((slot) => slot.player)
+    .filter(Boolean);
+  const arms = assignStaffSlots(manager.roster, manager.staffAssignments, draft)
+    .map((slot) => slot.player)
+    .filter(Boolean);
   const groups = {
     hitter: bats,
     SP: arms.filter((card) => card.role === "SP"),
@@ -6776,7 +7031,7 @@ function teamComposition(manager, draft) {
   return {
     manager,
     ...graded,
-    points: manager.roster.reduce((sum, card) => sum + card.points, 0)
+    points: [...bats, ...arms].reduce((sum, card) => sum + card.points, 0)
   };
 }
 
@@ -6858,7 +7113,7 @@ function recapText(draft) {
   const names = draft.managers.map((manager) => manager.name);
 
   const lines = [`MLB Showdown draft — seed "${draft.seed}"`, ""];
-  lines.push(`What each manager built, graded against the ${draft.pool.length} cards on the board:`);
+  lines.push(`What each manager is fielding, graded against the ${draft.pool.length} cards on the board:`);
   const width = 16;
   const col = 14;
   lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(col)).join("")}`);
@@ -6868,7 +7123,7 @@ function recapText(draft) {
       .join("");
     lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
-  lines.push(`  ${"Total points".padEnd(width)}${teams.map((team) => String(team.points).padStart(col)).join("")}`);
+  lines.push(`  ${"Active points".padEnd(width)}${teams.map((team) => String(team.points).padStart(col)).join("")}`);
   lines.push("");
   if (recap.auction) {
     const rate = Math.round(recap.rate * 100) / 100;
@@ -6903,9 +7158,10 @@ function renderDraftDone(draft) {
         <th class="comp-label"><span class="comp-name">${escapeHtml(row.label)}</span></th>
         ${row.cells
           .map(
-            (cell) => `<td class="comp-cell">
+            (cell) => `<td class="comp-cell"><span class="comp-score">
               <span class="comp-grade grade-${cell.grade}">${cell.grade}</span>
               ${row.decimals === null ? "" : `<span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>`}
+            </span>
             </td>`
           )
           .join("")}
@@ -6914,11 +7170,11 @@ function renderDraftDone(draft) {
     .join("");
 
   // Not a grade, and not a bill either: nothing is spent in points. It is simply
-  // what the roster's cards add up to — worth reporting, and worth leaving alone,
-  // because a light roster is a thing a manager chose.
+  // what the active cards add up to. The bench is deliberately absent for the
+  // same reason it is absent from every grade above.
   const cheapest = Math.min(...teams.map((team) => team.points));
   const pointsRow = `<tr class="comp-points">
-    <th class="comp-label"><span class="comp-name">Total points</span></th>
+    <th class="comp-label"><span class="comp-name">Active points</span></th>
     ${teams
       .map(
         (team) => `<td class="comp-cell">
@@ -6963,22 +7219,19 @@ function renderDraftDone(draft) {
 
   return `<section class="panel draft-done">
     <div class="section-head">
-      <h2>What the table built</h2>
+      <h2>How the starting lineups stack up</h2>
       <div class="done-actions">
         <button class="small" data-action="copy-recap">Copy the recap</button>
         <button class="small" data-action="export-save">Save the room</button>
       </div>
     </div>
+    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card on the board &mdash; the bench isn't graded. Active points adds up those same starters.</p>
     <div class="table-scroll">
       <table class="comp-table">
         <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
         <tbody>${body}${pointsRow}</tbody>
       </table>
     </div>
-    <p class="compare-note">
-      Graded card-for-card against the ${draft.pool.length} cards on the board, not against each other:
-      an A is a top-tenth roster of what you could have drafted. Who actually wins is a question for the simulator.
-    </p>
     <div class="recap-cards">
       ${card("Best value", recap.steal, "steal")}
       ${card(recap.auction ? "Biggest overpay" : "Biggest reach", recap.reach, "reach")}
@@ -6987,7 +7240,7 @@ function renderDraftDone(draft) {
 }
 
 // Auction only: the bankroll burndown, one stepped line per manager, sitting
-// just under "What the table built". Managers wear their standings-race color,
+// just under the report card. Managers wear their standings-race color,
 // keyed by seat order so a team is the same hue as on the sim screens.
 function renderAuctionBudgetSection(draft) {
   if (!isAuctionDraft(draft)) return "";
@@ -7142,28 +7395,6 @@ function matchesPositionFilter(player, filterPosition) {
     return hitterPositions(player).some((entry) => isCornerOutfielder(entry.pos));
   }
   return playsPosition(player, filterPosition);
-}
-
-function assignPlayersToSlots(players, labels, labelForPlayer) {
-  const slots = labels.map((label) => ({ label, player: null }));
-  const extras = [];
-  const remaining = [...players];
-
-  for (const slot of slots) {
-    const matchIndex = remaining.findIndex((player) => labelForPlayer(player) === slot.label);
-    if (matchIndex >= 0) {
-      slot.player = remaining.splice(matchIndex, 1)[0];
-    }
-  }
-
-  for (const slot of slots) {
-    if (!slot.player && remaining.length) {
-      slot.player = remaining.shift();
-    }
-  }
-
-  extras.push(...remaining);
-  return { slots, extras };
 }
 
 function canSimulate(draft) {

@@ -13,7 +13,7 @@ test("auction nominations filter single-position hitters to their position", () 
   );
 });
 
-test("auction nominations leave multi-position players on all hitters", () => {
+test("auction nominations filter multi-position players to their primary spot", () => {
   assert.deepEqual(
     nominatedPlayerFilter({
       kind: "hitter",
@@ -23,7 +23,7 @@ test("auction nominations leave multi-position players on all hitters", () => {
         { pos: "SS", fielding: 2 }
       ]
     }),
-    { type: "hitter", position: "all" }
+    { type: "hitter", position: "2B" }
   );
 });
 
