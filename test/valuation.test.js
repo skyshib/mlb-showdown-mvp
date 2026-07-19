@@ -53,14 +53,8 @@ test("the computer's archetypes build different rosters", () => {
   while (!draft.complete) autopick(draft);
 
   const by = (key) => draft.managers.find((manager) => manager.persona === key);
-  const points = (manager) => manager.roster.reduce((sum, card) => sum + card.points, 0);
   const fielding = (manager) =>
     manager.roster.filter((c) => c.kind === "hitter").reduce((sum, c) => sum + (Number(c.fielding) || 0), 0);
-
-  // The bargain hunter buys the cheapest roster at the table, by a distance.
-  const cheapest = Math.min(...draft.managers.map(points));
-  assert.equal(points(by("bargain")), cheapest);
-  assert.ok(points(by("bargain")) < points(by("balanced")) * 0.75);
 
   // The purist fields the best defence at the table.
   const bestGlove = Math.max(...draft.managers.map(fielding));

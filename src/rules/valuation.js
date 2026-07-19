@@ -58,16 +58,15 @@ const PERTURBATION = 0.25;
 // same as three managers with opinions. These are opinions.
 //
 // `weights` bend what a card is worth to this manager. `bias` bends how he
-// shops: how far he will reach for an arm, whether he cares what a card costs,
-// how much a scarce position moves him. The noise still sits on top, so two
-// sluggers are not the same slugger.
+// shops: how far he will reach for an arm, how much a scarce position moves him.
+// The noise still sits on top, so two sluggers are not the same slugger.
 export const CPU_PERSONALITIES = {
   balanced: {
     key: "balanced",
     name: "Balanced",
     blurb: "Takes the best card on the board and keeps the roster honest.",
     weights: { hitter: {}, pitcher: {} },
-    bias: { pitcher: 1, thrift: 0, scarcity: 1 }
+    bias: { pitcher: 1, scarcity: 1 }
   },
   slugger: {
     key: "slugger",
@@ -77,7 +76,7 @@ export const CPU_PERSONALITIES = {
       hitter: { onBase: 17, fielding: 2, speed: 0.6, chart: 1.8 },
       pitcher: {}
     },
-    bias: { pitcher: 0.85, thrift: 0, scarcity: 0.8 }
+    bias: { pitcher: 0.85, scarcity: 0.8 }
   },
   ace: {
     key: "ace",
@@ -87,14 +86,7 @@ export const CPU_PERSONALITIES = {
       hitter: {},
       pitcher: { control: 44, ip: 12, chart: 1.35 }
     },
-    bias: { pitcher: 1.7, thrift: 0, scarcity: 1 }
-  },
-  bargain: {
-    key: "bargain",
-    name: "Bargain hunter",
-    blurb: "Counts the points. Would rather have two good cards than one great one.",
-    weights: { hitter: {}, pitcher: {} },
-    bias: { pitcher: 1, thrift: 1, scarcity: 1.1 }
+    bias: { pitcher: 1.7, scarcity: 1 }
   },
   purist: {
     key: "purist",
@@ -104,7 +96,7 @@ export const CPU_PERSONALITIES = {
       hitter: { onBase: 18, fielding: 15, speed: 3, chart: 0.85 },
       pitcher: {}
     },
-    bias: { pitcher: 1, thrift: 0, scarcity: 1.8 }
+    bias: { pitcher: 1, scarcity: 1.8 }
   }
 };
 

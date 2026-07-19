@@ -1532,8 +1532,8 @@ function autoRunAuctionLot(draft, now = Date.now()) {
 // same, and the valuations differ only by a little noise — so nine managers
 // arrived at nine near-identical numbers and the auction was a coin toss.
 //
-// It read the personas and then ignored half of them: `thrift` and `scarcity`
-// are declared on every archetype and were never once consulted here.
+// It read the personas and then ignored them: the archetype biases were
+// declared on every manager and never once consulted here.
 //
 // And worst, it bid on EVERYTHING. A card was priced against the average card,
 // so the worst catcher on the board still drew a bid proportional to what he
@@ -1649,15 +1649,11 @@ function auctionUrgency(draft, manager, player, forthcoming) {
 }
 
 // Two managers with the same budget and the same board should not arrive at the
-// same number. The persona leans it — a bargain hunter keeps his hand in his
-// pocket — and a seeded wobble does the rest, so the room is an auction rather
-// than a tie-break.
+// same number. A seeded wobble breaks the tie, so the room is an auction rather
+// than a coin toss.
 function auctionAggression(draft, manager, player) {
-  const bias = cpuPersonality(manager.persona).bias ?? {};
-  const thrift = 1 - 0.22 * (Number(bias.thrift) || 0);
   const rng = createRng(`${draft.seed ?? "showdown"}:bid:${manager.id}:${player.id}`);
-  const wobble = 0.86 + rng.next() * 0.28;
-  return thrift * wobble;
+  return 0.86 + rng.next() * 0.28;
 }
 
 // Money left over at the last out is money you never had. A manager that is
@@ -2592,13 +2588,8 @@ function autopickScore(draft, manager, player, needs, personalValue, dropoff, bi
   const scarcityBonus = positionScarcityBonus(manager, player, needs, dropoff) * lean.scarcity;
   // The ace-first man reaches for arms; the slugger lets them come to him.
   const armLean = player.kind === "pitcher" ? (lean.pitcher - 1) * 140 : 0;
-  // The bargain hunter is the only one who reads the price tag. He does not want
-  // bad cards — he wants the same card cheaper — so the tag is a discount on the
-  // score, not a prize for being worthless. Reward value-per-point directly and
-  // he fills a roster with ten-point scrubs and calls it shrewd.
-  const thrift = lean.thrift ? -lean.thrift * (player.points ?? 0) * 0.22 : 0;
   return (
-    personalValue + needBonus + balanceBonus + positionBonus + scarcityBonus + armLean + thrift +
+    personalValue + needBonus + balanceBonus + positionBonus + scarcityBonus + armLean +
     (forcedNeed ? 1000 : 0)
   );
 }
