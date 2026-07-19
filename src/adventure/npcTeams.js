@@ -40,7 +40,7 @@ function slotMatches(slot, card) {
 // without one the printed budget stands. Team identity (seeded slot order,
 // weights, picks) only shifts when the budget itself does.
 export function buildNpcTeam(trainer, save = null) {
-  const { roster, spent } = assembleRoster(trainer, save);
+  const { roster, spent } = assembleRosterCached(trainer, save);
 
   // Present (and bat) the squad best-first: hitters by printed points, then
   // pitchers by printed points, so the top starter also opens game 1.
@@ -66,6 +66,33 @@ const WEAK_SLOT_BIAS = 4;
 // stochastic stop, so two trainers with the same budget settle differently.
 const REJECT_LIMIT = 25;
 
+// A team is a pure function of (trainer, budget, pool): it is rebuilt from a
+// seeded stream, so the same inputs always yield the same roster. It is also
+// expensive — the climb reads a pool of thousands — and callers hammer it: the
+// winner's-pick screen rebuilds the beaten roster on every keystroke, the
+// scouting screen builds it twice a render, and a summit rival recurses through
+// his whole inheritance chain. So the assembled roster is memoized here, keyed
+// by trainer and budget. The cache is dropped whenever the active pool object
+// changes — a new save, league, or seed swaps universePool's poolCache out, and
+// pool identity is the one signal that captures all three.
+let rosterCache = new Map();
+let rosterCachePool = null;
+
+function assembleRosterCached(trainer, save) {
+  const pool = adventurePool();
+  if (pool !== rosterCachePool) {
+    rosterCache = new Map();
+    rosterCachePool = pool;
+  }
+  const key = `${trainer.id}:${npcBudget(save, trainer)}`;
+  let hit = rosterCache.get(key);
+  if (!hit) {
+    hit = assembleRoster(trainer, save);
+    rosterCache.set(key, hit);
+  }
+  return hit;
+}
+
 // The roster in fill order, alongside the slot each card was bought for — an
 // heir needs that pairing to keep shopping where his predecessor stopped.
 function assembleRoster(trainer, save) {
@@ -76,18 +103,35 @@ function assembleRoster(trainer, save) {
   // owns and spends the season's new money on it — so RIVAL CAM at the summit is
   // the Cam from Route 1, several trades richer, not a stranger wearing his
   // sprite. He opens from last round's roster and climbs it with the new budget.
-  const heirloom = trainer.inherits ? assembleRoster(trainerById(trainer.inherits), save) : null;
+  const heirloom = trainer.inherits ? assembleRosterCached(trainerById(trainer.inherits), save) : null;
   // One seeded stream feeds the slot order, the baseline fill, and every upgrade
   // draw — so a save always rebuilds the same rival, round after round.
   const rng = createRng(`npc-team:${trainer.teamSeed}`);
   const slots = heirloom ? heirloom.slots : draftSlots(trainer, rng);
+  // Bucket the pool by slot ONCE, in pool order. The minimum fill, the climb,
+  // and the percentile ranking all read these buckets instead of rescanning the
+  // whole pool per slot per pass. Pool order is kept exactly so the seeded draws
+  // below see the same candidate order they always have — this is a speedup, not
+  // a behavior change.
+  const candidates = candidatesForSlots(pool, slots);
   // A fresh trainer opens from the cheapest legal roster; an heir from his
   // inherited binder. The same climb spends the budget up from whichever floor.
-  const roster = heirloom ? [...heirloom.roster] : minimumRoster(pool, slots, trainer);
+  const roster = heirloom ? [...heirloom.roster] : minimumRoster(candidates, slots, trainer);
   const used = new Set(roster.map((card) => card.id));
-  const spent = climb({ pool, pointBudget, score, slots, roster, used, rng });
+  const spent = climb({ candidates, pointBudget, score, slots, roster, used, rng });
 
   return { roster, slots, spent };
+}
+
+// The pool split into per-slot buckets, each holding every card that can fill
+// that slot, in the pool's own order. Built once per assembly and shared across
+// the fill, the climb, and the percentile ranking.
+function candidatesForSlots(pool, slots) {
+  const buckets = new Map();
+  for (const slot of new Set(slots)) {
+    buckets.set(slot, pool.filter((card) => slotMatches(slot, card)));
+  }
+  return buckets;
 }
 
 // Early slots see the most room, so the fill ORDER is shuffled per trainer —
@@ -103,13 +147,20 @@ function draftSlots(trainer, rng) {
 // The cheapest legal roster: fill every slot with the least-expensive unused
 // card that fits, one era of a player per team. This floor is what the climb
 // trades up from.
-function minimumRoster(pool, slots, trainer) {
+function minimumRoster(candidates, slots, trainer) {
   const roster = [];
   const used = new Set();
   for (const slot of slots) {
-    const cheapest = pool
-      .filter((card) => !used.has(card.id) && !personConflict(roster, card) && slotMatches(slot, card))
-      .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name))[0];
+    // The cheapest legal fit: the same card the old filter-then-sort took first
+    // (points ascending, name breaking ties), found in one pass over the bucket.
+    let cheapest = null;
+    for (const card of candidates.get(slot)) {
+      if (used.has(card.id) || personConflict(roster, card)) continue;
+      if (!cheapest || card.points < cheapest.points
+        || (card.points === cheapest.points && card.name.localeCompare(cheapest.name) < 0)) {
+        cheapest = card;
+      }
+    }
     if (!cheapest) throw new Error(`NPC team for ${trainer.id} cannot fill ${slot}`);
     used.add(cheapest.id);
     roster.push(cheapest);
@@ -125,14 +176,14 @@ function minimumRoster(pool, slots, trainer) {
 // Within the chosen slot the replacement is weighted by archetype fit, keeping a
 // power squad's bats and an ace's arm. A pick that would breach the budget is
 // rejected; REJECT_LIMIT rejections in a row end the climb.
-function climb({ pool, pointBudget, score, slots, roster, used, rng }) {
+function climb({ candidates, pointBudget, score, slots, roster, used, rng }) {
   let spent = roster.reduce((total, card) => total + card.points, 0);
-  const percentileOf = positionalPercentile(pool, slots);
+  const percentileOf = positionalPercentile(candidates, slots);
   let rejects = 0;
   while (rejects < REJECT_LIMIT) {
     const openSlots = [];
     for (let index = 0; index < roster.length; index += 1) {
-      const upgrades = slotUpgrades({ pool, score, slots, roster, used, index });
+      const upgrades = slotUpgrades({ candidates, score, slots, roster, used, index });
       if (!upgrades.length) continue;
       const weakness = 1 - percentileOf(slots[index], roster[index].points);
       openSlots.push({ index, upgrades, weight: Math.max(weakness ** WEAK_SLOT_BIAS, 1e-6) });
@@ -155,13 +206,14 @@ function climb({ pool, pointBudget, score, slots, roster, used, rng }) {
 // Every legal upgrade for one slot: an unused card that costs MORE than the
 // incumbent and fits the archetype BETTER. The weight is the fit gain, which
 // biases card choice toward the trainer's strengths.
-function slotUpgrades({ pool, score, slots, roster, used, index }) {
+function slotUpgrades({ candidates, score, slots, roster, used, index }) {
   const current = roster[index];
   const slot = slots[index];
   const moves = [];
-  for (const card of pool) {
+  // The slot's bucket is in pool order, so the moves come out in the same order
+  // the old full-pool scan produced — the weighted draw downstream is unchanged.
+  for (const card of candidates.get(slot)) {
     if (used.has(card.id) || card.points <= current.points) continue;
-    if (!slotMatches(slot, card)) continue;
     if (personConflict(roster, card, current.id)) continue;
     const gain = score(card) - score(current);
     if (gain <= 0) continue;
@@ -179,10 +231,10 @@ function applySwap(roster, used, index, card) {
 // For each distinct slot label, the sorted prices of every card that can fill
 // it — enough to place any card in its positional pecking order. A card at the
 // 10th percentile is a bargain-bin fit; one at the 90th is a headliner.
-function positionalPercentile(pool, slots) {
+function positionalPercentile(candidates, slots) {
   const prices = new Map();
   for (const slot of new Set(slots)) {
-    prices.set(slot, pool.filter((card) => slotMatches(slot, card)).map((card) => card.points).sort((a, b) => a - b));
+    prices.set(slot, candidates.get(slot).map((card) => card.points).sort((a, b) => a - b));
   }
   return (slot, points) => {
     const sorted = prices.get(slot);
