@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fictional Player Face Options</title>
+  <link rel="stylesheet" href="./src/ui/cardFace.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 28px;
+      background: #17191d;
+      color: #f5f7fa;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+    main {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    p.lede {
+      margin: 0 0 26px;
+      color: #9aa3ad;
+      font-size: 13px;
+    }
+    section.option {
+      margin: 0 0 34px;
+    }
+    section.option h2 {
+      margin: 0 0 2px;
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    section.option p {
+      margin: 0 0 10px;
+      color: #9aa3ad;
+      font-size: 12px;
+    }
+    .card-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card-row .gq-card { width: 100%; margin: 0; }
+    @media (max-width: 900px) {
+      .card-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .face-pixel-art .gq-proto-portrait { image-rendering: pixelated; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Fictional player face options</h1>
+    <p class="lede">Ten portrait sources on real fictional cards, plus the current style as a baseline. Same four players in every row (the photo row wears real MLB stand-ins).</p>
+    <div id="options"></div>
+  </main>
+  <script type="module">
+    import { buildFictionalUniverse } from "./src/data/playerGeneration.js";
+    import { cardPanelHtml } from "./src/ui/cardFace.js";
+
+    const dicebear = (style) => (card) =>
+      `https://api.dicebear.com/10.x/${style}/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}`)}&backgroundColor=00000000`;
+
+    // Real transparent cutouts from MLB's CDN ("silo" headshots) — one
+    // stand-in per mockup slot so the row shows real-photo texture.
+    const SILO_IDS = [545361, 592450, 660271, 808967];
+    const silo = (card, index) =>
+      `https://img.mlbstatic.com/mlb-photos/image/upload/w_426,q_auto:best/v1/people/${SILO_IDS[index % SILO_IDS.length]}/headshot/silo/current`;
+
+    const OPTIONS = [
+      { key: "face-micah", name: "Current: Micah", note: "The style on the cards today, for reference.", url: dicebear("micah") },
+      { key: "face-adventurer", name: "1. Adventurer", note: "DiceBear — big expressive illustrated heads.", url: dicebear("adventurer") },
+      { key: "face-avataaars", name: "2. Avataaars", note: "DiceBear — the classic Sketch-library avatar look.", url: dicebear("avataaars") },
+      { key: "face-open-peeps", name: "3. Open Peeps", note: "DiceBear — loose hand-drawn busts (used on the older fictional card face).", url: dicebear("open-peeps") },
+      { key: "face-personas", name: "4. Personas", note: "DiceBear — flat, bold, friendly busts.", url: dicebear("personas") },
+      { key: "face-lorelei", name: "5. Lorelei", note: "DiceBear — elegant fine-line faces.", url: dicebear("lorelei") },
+      { key: "face-notionists", name: "6. Notionists", note: "DiceBear — Notion-style ink busts.", url: dicebear("notionists") },
+      { key: "face-big-ears", name: "7. Big Ears", note: "DiceBear — quirky rounded cartoon heads.", url: dicebear("big-ears") },
+      { key: "face-dylan", name: "8. Dylan", note: "DiceBear — bold comic busts with heavy outlines.", url: dicebear("dylan") },
+      { key: "face-pixel-art", name: "9. Pixel Art", note: "DiceBear — retro 8-bit heads, rendered crisp.", url: dicebear("pixel-art") },
+      { key: "face-photo", name: "10. Real photos (MLB silo cutouts)", note: "Transparent player cutouts from MLB's CDN — shown with four real stand-ins. MLB's imagery, so fine to audition, not freely licensed.", url: silo }
+    ];
+
+    // Same four players per row: three hitters plus a pitcher, at common
+    // rarity so backdrops stay simple and the face is the only variable.
+    const picks = [];
+    let pitcherPicked = false;
+    for (const card of buildFictionalUniverse()) {
+      const pitcher = card.kind === "pitcher";
+      if (pitcher && pitcherPicked) continue;
+      if (!pitcher && picks.filter((p) => !p.pitcher).length >= 3) continue;
+      picks.push({ card, pitcher, html: cardPanelHtml({ ...card, rarity: "common" }) });
+      if (pitcher) pitcherPicked = true;
+      if (picks.length === 4 && pitcherPicked) break;
+    }
+
+    // The card face hardcodes the Micah portrait; each row swaps the img src
+    // for its own source, everything else untouched.
+    const swapPortrait = (html, url) => html.replace(/src="https:\/\/api\.dicebear\.com[^"]*"/, `src="${url}"`);
+
+    document.querySelector("#options").innerHTML = OPTIONS.map(({ key, name, note, url }) => `
+      <section class="option ${key}">
+        <h2>${name}</h2>
+        <p>${note}</p>
+        <div class="card-row">${picks.map((pick, index) => swapPortrait(pick.html, url(pick.card, index))).join("")}</div>
+      </section>`).join("");
+  </script>
+</body>
+</html>
