@@ -23,6 +23,7 @@ import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=2026071
 import { gameFeats } from "../feats.js?v=20260716-records";
 import { buildNpcTeam } from "../npcTeams.js?v=20260716-records";
 import { positionsOverlap } from "../../rules/cards.js?v=20260716-records";
+import { hydratePhotos } from "../../ui/photos.js?v=20260716-records";
 import { playArmTiring, playArmSpent, playVictory, playDefeat } from "../../ui/sounds.js?v=20260716-records";
 import {
   persistSave,
@@ -507,14 +508,14 @@ function fieldingStages(event) {
   const dp = details.doublePlayAttempt;
   if (typeof dp?.roll === "number") {
     stages.push({
-      label: "THE PIVOT",
+      label: "THE THROW",
       roll: dp.roll,
       // Said BEFORE the die tumbles, so you know what you are watching — and what
       // the die has to beat, which is the only thing that makes watching it a
       // sweat rather than a wait.
       lead: dramaLead("THEY GO FOR TWO", dp),
       // LATE: a glove only has something to do if the ball is in play, so a die
-      // that says THE PIVOT sitting on the screen while the swing is still
+      // that says THE THROW sitting on the screen while the swing is still
       // tumbling has already told you the swing was a ball in play. It is not
       // drawn until it is thrown.
       late: true,
@@ -650,7 +651,7 @@ function d20FaceHtml() {
 // Two dice thrown at the same moment are one roll with two numbers on it. These
 // are a SEQUENCE — the ball is put in play, and THEN a glove has to do something
 // about it — so the screen is made to say the first thing before it throws the
-// second. The swing lands and calls what it was (GB — GROUND BALL); the pivot is
+// second. The swing lands and calls what it was (GB — GROUND BALL); the throw is
 // then announced (THEY GO FOR TWO, and the number it has to beat); the game holds
 // on that announcement long enough to be sweated; and only then does that die
 // start to tumble. The text you are made to read comes just before the pause, not
@@ -1716,7 +1717,7 @@ export const claimCardScreen = {
         )}</div>
         <div class="gq-card-side">${claimComparisonHtml(app, selected)}</div>
       </div></div>
-      <div class="gq-textbox"><p>Take ONE card from their roster — your own ${selected ? escapeHtml(selected.kind === "pitcher" ? selected.role : selected.position) : ""} cards show below theirs. Z claims it. X walks away empty-handed.</p></div>
+      <div class="gq-textbox"><p>${claimPrompt(selected)}</p></div>
     </div>`;
   },
   hoverCard(app, index) {
@@ -1727,18 +1728,64 @@ export const claimCardScreen = {
     const roster = claimableRoster(trainer, app.save);
     if (key === "up" || key === "down") {
       app.screen.index = clampIndex((app.screen.index ?? 0) + (key === "down" ? 1 : -1), roster.length);
-    } else if (key === "a") {
+      // Scrolling the roster changes only the cursor and the card on the right,
+      // but rebuilding the whole screen — the list, the frame, both columns —
+      // reparses and re-lays-out a card face's worth of DOM on every keypress
+      // (~16ms a step, worse on a slow machine, so a held arrow key stutters).
+      // Move the cursor and swap just the compared card instead; fall back to a
+      // full rerender if the DOM isn't the shape we expect (first paint, tests).
+      if (scrollClaimSelection(app, roster)) return;
+      app.rerender();
+      return;
+    }
+    if (key === "a") {
       const card = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       addCardToCollection(app.save, card.id);
       addLog(app.save, `Claimed ${card.name} from ${trainer.name}.`);
       persistSave(app.save);
-      leaveClaim(app);
-    } else if (key === "b") {
-      leaveClaim(app);
+      leaveClaim(app); // navigates away, which rerenders
+      return;
     }
-    app.rerender();
+    if (key === "b") leaveClaim(app);
   }
 };
+
+// The winner's-pick prompt names the slot you are shopping, so it moves with the
+// cursor. Shared by the full render and the in-place scroll so the two can't drift.
+function claimPrompt(selected) {
+  const slot = selected ? escapeHtml(selected.kind === "pitcher" ? selected.role : selected.position) : "";
+  return `Take ONE card from their roster — your own ${slot} cards show below theirs. Z claims it. X walks away empty-handed.`;
+}
+
+// In-place update for a roster scroll: move the cursor caret to the new row and
+// replace only the compared card and the prompt. Returns false if the live DOM
+// isn't the claim screen we rendered (so the caller can rerender in full).
+function scrollClaimSelection(app, roster) {
+  if (typeof document === "undefined") return false;
+  const root = document.getElementById("app");
+  const menu = root?.querySelector(".gq-columns .gq-menu");
+  const side = root?.querySelector(".gq-card-side");
+  const prompt = root?.querySelector(".gq-textbox p");
+  if (!menu || !side) return false;
+  const index = clampIndex(app.screen.index ?? 0, roster.length);
+  const nextRow = menu.querySelectorAll("li")[index];
+  if (!nextRow) return false;
+  const prevRow = menu.querySelector(".gq-cursor");
+  if (prevRow && prevRow !== nextRow) {
+    prevRow.classList.remove("gq-cursor");
+    const caret = prevRow.querySelector(".gq-caret");
+    if (caret) caret.innerHTML = "&nbsp;";
+  }
+  nextRow.classList.add("gq-cursor");
+  const nextCaret = nextRow.querySelector(".gq-caret");
+  if (nextCaret) nextCaret.innerHTML = "&#9654;";
+  const selected = roster[index];
+  side.innerHTML = claimComparisonHtml(app, selected);
+  hydratePhotos(side);
+  if (prompt) prompt.textContent = claimPrompt(selected);
+  nextRow.scrollIntoView({ block: "nearest" });
+  return true;
+}
 
 function leaveClaim(app) {
   // Winning the World Series ends the season: the review screen follows the
