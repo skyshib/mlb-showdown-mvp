@@ -310,6 +310,25 @@ test("runner can steal second before the plate appearance", () => {
   assert.equal(state.stats.hitters.get("away:a-h-0").sb, 1);
 });
 
+test("a runner who cannot be thrown out steals without a die being rolled", () => {
+  const state = createInitialState(teamA, weakDefense);
+  // Top speed against a 0-fielding catcher: even a 20 beats the throw, so it is
+  // settled before the throw.
+  state.bases = [{ id: "a-h-0", name: "A Hitter 0", speed: 20 }, null, null];
+
+  let rolled = false;
+  const event = playStealAttempt(state, { d20: () => { rolled = true; return 20; } });
+
+  assert.equal(rolled, false, "the die is never rolled");
+  assert.equal(event.result, "SB");
+  assert.equal(event.playDetails.stealAttempt.roll, null, "and no roll is recorded");
+  assert.equal(event.playDetails.stealAttempt.total, null);
+  assert.deepEqual(
+    state.bases.map((runner) => runner?.name ?? null),
+    [null, "A Hitter 0", null]
+  );
+});
+
 test("stealing third fights the shorter throw: +5 to the catcher, not the runner", () => {
   const state = createInitialState(teamA, strongCatcherDefense);
   state.outs = 1;
@@ -383,6 +402,22 @@ test("groundout with runner on first can become a double play", () => {
   assert.equal(state.outs, 2);
   assert.deepEqual(state.bases, [null, null, null]);
   assert.equal(state.lastPlayDetails.doublePlayAttempt.batterOut, true);
+});
+
+test("a batter dead to rights is out without a throw being rolled", () => {
+  const state = createInitialState(teamA, strongDefense);
+  state.bases = [{ name: "Runner 1" }, null, { name: "Runner 3" }];
+
+  // strongDefense turns 20 of infield fielding on a target of 12, so even a roll
+  // of 1 is an out. There is nothing for the throw to decide.
+  let rolled = false;
+  const rng = { d20: () => { rolled = true; return 1; } };
+  applyGroundout(state, hitter, "away", "home", rng);
+
+  assert.equal(rolled, false, "the die is never rolled");
+  assert.equal(state.lastPlayDetails.doublePlayAttempt.roll, null, "and no roll is recorded");
+  assert.equal(state.lastPlayDetails.doublePlayAttempt.batterOut, true);
+  assert.equal(state.outs, 2);
 });
 
 test("failed double play attempt leaves batter at first and advances other runners", () => {

@@ -987,11 +987,18 @@ export function applyGroundout(state, batter, battingSide, pitchingSide, rng) {
   if (first) {
     state.outs += 1;
     if (state.outs < 3) {
-      const roll = rollD20(state, rng);
       const fielding = totalInfieldFielding(state[pitchingSide]);
-      const total = roll + fielding;
       const target = speedTarget(batter);
-      const batterOut = total > target;
+      // The throw is worth rolling only when the die could land on either side of
+      // the target. A batter beaten on even his kindest roll (a 1) is out every
+      // time; one safe on even his harshest (a 20) is safe every time. Either way
+      // the die is a formality — turn two, or leave him on, without rolling it.
+      const alwaysOut = 1 + fielding > target;
+      const alwaysSafe = 20 + fielding <= target;
+      const settled = alwaysOut || alwaysSafe;
+      const roll = settled ? null : rollD20(state, rng);
+      const total = settled ? null : roll + fielding;
+      const batterOut = settled ? alwaysOut : total > target;
       doublePlayAttempt = {
         roll,
         fielding,
@@ -1247,9 +1254,15 @@ function chooseStealAttempt(state, pitchingSide) {
 }
 
 function resolveStealAttempt(state, candidate, rng) {
-  const roll = rollD20(state, rng);
-  const total = roll + candidate.fielding;
-  const safe = total <= candidate.target;
+  // Same rule as a send: a die is only worth throwing when it could land on
+  // either side of the target. A runner safe on his harshest roll, or out on his
+  // kindest, is settled before the throw — take the base, or the out, uncontested.
+  const alwaysSafe = certainSafe(candidate);
+  const alwaysOut = certainOut(candidate);
+  const settled = alwaysSafe || alwaysOut;
+  const roll = settled ? null : rollD20(state, rng);
+  const total = settled ? null : roll + candidate.fielding;
+  const safe = settled ? alwaysSafe : total <= candidate.target;
   state.bases[candidate.fromIndex] = null;
 
   if (safe) {

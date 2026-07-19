@@ -2633,7 +2633,7 @@ test("grand slams get called and celebrated", async () => {
   assert.ok(advance.includes("(rolled 19)"), "the send-or-hold throw reports its roll");
   assert.equal((advance.match(/rolled/g) ?? []).length, 1, "unthrown runners stay quiet");
   const twinKilling = describeEvent({ ...base, result: "GB", outsAfter: 2, playDetails: { doublePlayAttempt: { batterOut: true, roll: 12 } } }, "away").join(" ");
-  assert.ok(twinKilling.includes("Double play! Two gone. (rolled 12)"), "the pivot reports its roll");
+  assert.ok(twinKilling.includes("Double play! Two gone. (rolled 12)"), "the throw reports its roll");
   const bat = { id: "h1", name: "Al Smith", pa: 4, ab: 4, h: 2, d: 0, t: 0, hr: 1, r: 1, bb: 0, so: 0, sb: 0, cs: 0, rbi: 4 };
   const feats = gameFeats({
     boxScore: { away: { hitters: [bat], pitchers: [{ id: "p", name: "Arm", bf: 30, outs: 27, h: 5, bb: 2, so: 6, hr: 0, r: 2 }] }, home: { hitters: [], pitchers: [] } },
@@ -3441,7 +3441,7 @@ test("a glove's die is announced before it is thrown, and the bat's answer is re
   assert.match(pivot.lead, /THEY GO FOR TWO<br>DEFENSE NEEDS A 13/, "the needed number gets its own line");
   assert.ok(!pivot.lead.includes("&hellip;"), "and no ellipsis leading into it");
   assert.match(pivot.caption, /TWO DOWN/, "and what it did, after");
-  assert.ok(pivot.late, "the pivot is late, so the screen holds a beat for it");
+  assert.ok(pivot.late, "the throw is late, so the screen holds a beat for it");
   assert.ok(!swing.late && !pitch.late, "the duel's own dice are not");
 
   // A throw names the man being run at, and it does so BEFORE the die tumbles.
@@ -3547,7 +3547,7 @@ test("the suspense screen stages every die the play threw, gloves included", asy
     playDetails: { doublePlayAttempt: { batterOut: true, roll: 17 } }
   };
   const turned = dramaStages([grounder]);
-  assert.deepEqual(turned.map((stage) => stage.label), ["PITCH", "SWING", "THE PIVOT"]);
+  assert.deepEqual(turned.map((stage) => stage.label), ["PITCH", "SWING", "THE THROW"]);
   assert.deepEqual(turned.map((stage) => stage.roll), [4, 11, 17]);
   assert.match(turned[2].caption, /TWO DOWN/, "and it says what the glove did with it");
 

@@ -51,7 +51,12 @@ function concededSafe(event) {
 // and get no such line.
 function duelLine(event) {
   if (typeof event.controlRoll !== "number" || typeof event.resultRoll !== "number") return null;
-  return `PITCH ${event.controlRoll} vs SWING ${event.resultRoll}.`;
+  // A tired pitcher's control roll is docked by the fatigue penalty; show the
+  // raw die and the deduction, e.g. (5-1), so the math on the mound is visible.
+  const pitch = event.fatiguePenalty > 0
+    ? `(${event.controlRoll}-${event.fatiguePenalty})`
+    : `${event.controlRoll}`;
+  return `PITCH ${pitch} vs SWING ${event.resultRoll}.`;
 }
 
 // Scores always read from the player's side: up 3-0 is "3-0" whether the
@@ -108,8 +113,8 @@ export function describeEvent(event, playerSide = "away") {
     if (attempt) {
       lines.push(
         attempt.safe
-          ? `${playName(attempt.runner)} steals ${attempt.to}! (rolled ${attempt.roll})`
-          : `${playName(attempt.runner)} is GUNNED DOWN at ${attempt.to}! (rolled ${attempt.roll})`
+          ? `${playName(attempt.runner)} steals ${attempt.to}!${rolled(attempt)}`
+          : `${playName(attempt.runner)} is GUNNED DOWN at ${attempt.to}!${rolled(attempt)}`
       );
     }
     return lines;
