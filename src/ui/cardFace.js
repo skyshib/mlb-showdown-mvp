@@ -308,11 +308,20 @@ function fictionalRarityMark(rarity) {
 function fictionalChartRows(card) {
   const order = card.kind === "pitcher" ? FICTIONAL_PITCHER_CHART : FICTIONAL_HITTER_CHART;
   const merged = chartRangeCells(card);
-  const ranges = order.map((result) => {
+  // An outcome the card can't roll dims to grey — both cells — so the live
+  // columns carry the color.
+  const columns = order.map((result) => ({
+    result,
+    empty: merged.every((entry) => entry.result !== result)
+  }));
+  const emptyClass = (empty) => (empty ? ' class="gq-proto-chart-empty"' : "");
+  const ranges = columns.map(({ result, empty }) => {
     const text = merged.filter((entry) => entry.result === result).map(formatRange).join(",");
-    return `<span>${text ? escapeHtml(text) : "&mdash;"}</span>`;
+    return `<span${emptyClass(empty)}>${text ? escapeHtml(text) : "&mdash;"}</span>`;
   }).join("");
-  const outcomes = order.map((result) => `<span>${escapeHtml(result)}</span>`).join("");
+  const outcomes = columns
+    .map(({ result, empty }) => `<span${emptyClass(empty)}>${escapeHtml(result)}</span>`)
+    .join("");
   return `<div class="gq-proto-chart" style="--gq-proto-cols:${order.length}">
     <div class="gq-proto-chart-ranges">${ranges}</div>
     <div class="gq-proto-chart-outcomes">${outcomes}</div>

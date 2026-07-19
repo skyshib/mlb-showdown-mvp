@@ -881,6 +881,17 @@
 .gq-proto-pitcher .gq-proto-chart-ranges span:nth-child(4),
 .gq-proto-pitcher .gq-proto-chart-outcomes span:nth-child(4) { background: color-mix(in srgb, var(--gq-proto-fb) 82%, rgb(9, 41, 64)); }
 
+/* A column the card can't roll (its range prints an em-dash) drops its
+   color for a faint neutral chip and dimmed text, so the eye reads the
+   live outcomes first. Ties the tints above on specificity; being later
+   in the file, the grey wins. */
+.gq-proto-card .gq-proto-chart-ranges span.gq-proto-chart-empty,
+.gq-proto-card .gq-proto-chart-outcomes span.gq-proto-chart-empty {
+  background: rgba(124, 135, 146, 0.16);
+  color: rgba(255, 255, 255, 0.38);
+  text-shadow: none;
+}
+
 .gq-proto-baseball {
   position: absolute;
   z-index: 7;
