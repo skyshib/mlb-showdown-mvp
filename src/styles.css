@@ -4281,6 +4281,14 @@ button.roster-slot[draggable="true"]:active {
   pointer-events: none;
 }
 
+/* display:grid above would otherwise beat the [hidden] attribute's UA
+   display:none, so hidePointTip()/hideChartTip() set hidden but the tip stayed
+   painted — a stale hover label that only moved when the next dot repositioned
+   it. This attribute rule outranks the class, so hidden actually hides. */
+.chart-tip[hidden] {
+  display: none;
+}
+
 .chart-tip strong {
   font-size: 13px;
 }

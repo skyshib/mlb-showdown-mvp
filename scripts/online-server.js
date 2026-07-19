@@ -889,6 +889,20 @@ async function postAction(store, room, request, response) {
   const denial = denyAction(room.draft, seat, isHost, action);
   if (denial) return sendJson(response, 409, { error: denial });
 
+  // A targeted autopick names the seat it means to pick for. The host drives
+  // computer turns and covers stalled seats off its OWN view of the clock, which
+  // can lag the room's — a resync landing out of order rolls it back to a turn
+  // already left. An untargeted autopick lands on whoever is up NOW, so from a
+  // stale view it picks for the wrong seat; that is how a lone human's own turns
+  // got auto-fired. Drop it as a harmless no-op instead: the client resyncs to
+  // the real clock and drives the seat that is genuinely up. (No managerId keeps
+  // the old "whoever is up" meaning, so nothing else changes.)
+  if (action?.type === "autopick" && action.managerId
+    && !isAuctionDraft(room.draft) && !room.draft.complete
+    && currentManager(room.draft)?.id !== action.managerId) {
+    return sendJson(response, 200, { seq: room.actions.length, lot: lotView(room) });
+  }
+
   // Finishing auto-bids the rest of the draft from the current lot, so every
   // replica has to be looking at the same lot first: release anything withheld
   // before the draft runs away from the clients.

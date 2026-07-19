@@ -530,7 +530,14 @@ function handlePickClockExpiry(turn) {
     sendOnlineAction({ type: "seal-bid", managerId: turn.current.id, amount: cpuSealedBid(live, turn.current) });
     return;
   }
-  sendOnlineAction({ type: isAuctionDraft(state.draft) ? "auto-nominate" : "autopick" });
+  if (isAuctionDraft(state.draft)) {
+    sendOnlineAction({ type: "auto-nominate" });
+    return;
+  }
+  // Same target check as the computer-drive: time out the seat that is actually
+  // on this client's clock, and let the server refuse it if the room has already
+  // moved on — otherwise a lagged host times out whoever it lands on.
+  sendOnlineAction({ type: "autopick", managerId: turn.current.id });
 }
 
 // Everything a computer manager is currently up for happens at once: snake
@@ -686,7 +693,14 @@ function driveOnlineCpuTurn() {
   const key = `${online.roomId}:${draft.pickNumber}`;
   if (cpuDriveKey === key) return;
   cpuDriveKey = key;
-  sendOnlineAction({ type: "autopick" });
+  // Name the seat we mean to pick for. The host's autopick lands on whoever the
+  // SERVER has on the clock, and this client's view can lag it — a resync that
+  // arrives out of order rolls us back to a computer turn the room already left.
+  // Firing untargeted from there autopicks whatever seat is really up, which is
+  // how a lone human's own turns got picked for him. The server drops a targeted
+  // autopick whose seat is no longer current, so a stale fire is a no-op, never a
+  // stolen turn.
+  sendOnlineAction({ type: "autopick", managerId: current.id });
 }
 
 function updatePickClockDisplay(remaining, onTheClock = null) {
@@ -3229,7 +3243,9 @@ function bindHoverCardPreviews(onEscape = null) {
     if (chartZone) showChartTip(chartZone, event.clientX, event.clientY);
     else hideChartTip();
     const chartPoint = event.target.closest?.("[data-point]");
+    const hintTarget = chartPoint ? null : event.target.closest?.("[data-hint]");
     if (chartPoint) showPointTip(chartPoint, event.clientX, event.clientY);
+    else if (hintTarget) showHintTip(hintTarget, event.clientX, event.clientY);
     else hidePointTip();
     if (!hoveredPreviewRow) return;
     showHoverCard(hoveredPreviewRow, event.clientX, event.clientY);
@@ -3240,6 +3256,9 @@ function bindHoverCardPreviews(onEscape = null) {
       hideChartTip();
     }
     if (event.target.closest?.("[data-point]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-point]"))) {
+      hidePointTip();
+    }
+    if (event.target.closest?.("[data-hint]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-hint]"))) {
       hidePointTip();
     }
     const previewTarget = event.target.closest("[data-preview-card]");
@@ -4829,6 +4848,24 @@ function hidePointTip() {
   pointTip.setAttribute("aria-hidden", "true");
 }
 
+// A tight column header carries its full meaning in data-hint; hovering it floats
+// that text in the same tip the charts use, so it clears the scroll container the
+// native title tooltip used to hide behind.
+function showHintTip(el, clientX, clientY) {
+  pointTip.innerHTML = `<span>${escapeHtml(el.dataset.hint ?? "")}</span>`;
+  pointTip.hidden = false;
+  pointTip.setAttribute("aria-hidden", "false");
+
+  const gap = 14;
+  const rect = pointTip.getBoundingClientRect();
+  let x = clientX - rect.width / 2;
+  let y = clientY - rect.height - gap;
+  if (y < gap) y = clientY + gap;
+  x = Math.max(gap, Math.min(x, window.innerWidth - rect.width - gap));
+  pointTip.style.left = `${Math.round(x)}px`;
+  pointTip.style.top = `${Math.round(y)}px`;
+}
+
 // Both floating tips are singletons pinned to the body, anchored to a dot that a
 // repaint throws away — and a removed dot fires no pointer-out, so the tip that
 // was riding it hangs there over the new screen. Any full repaint of a
@@ -5037,8 +5074,11 @@ const DEFENSE_HEADERS = [
 ];
 
 function renderSkillHeaderRow(headers) {
+  // The explanation rides in data-hint and shows through the app's own floating
+  // tip (see handlePointerMove), not the browser's native title tooltip, which
+  // lags by a second and never appears on touch. aria-label keeps it for readers.
   return `<tr>${headers
-    .map((header) => `<th class="${header.className ?? "num"}"><abbr title="${escapeHtml(header.tip)}">${escapeHtml(header.label)}</abbr></th>`)
+    .map((header) => `<th class="${header.className ?? "num"}"><abbr class="col-hint" data-hint="${escapeHtml(header.tip)}" aria-label="${escapeHtml(`${header.label}: ${header.tip}`)}">${escapeHtml(header.label)}</abbr></th>`)
     .join("")}</tr>`;
 }
 

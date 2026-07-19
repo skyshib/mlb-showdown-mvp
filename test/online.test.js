@@ -458,6 +458,52 @@ test("cpu managers are flagged in snapshots, unclaimable, and survive restarts",
   assert.deepEqual(revived.data.managers.map((manager) => manager.cpu), [false, true]);
 });
 
+test("a host's stale targeted autopick is a no-op, never a stolen human turn", async (t) => {
+  const base = await startServer(t);
+  // One human host and two computer seats — the shape that auto-fired a lone
+  // human's own picks: the host drives the computers off its own view of the
+  // clock, a resync lands it on a turn the room already left, and an untargeted
+  // autopick from there picks for whoever is really up (the human).
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "stale-autopick",
+    managers: ["Ana", "Robo1", "Robo2"],
+    cpu: ["Robo1", "Robo2"]
+  });
+  const roomId = created.data.roomId;
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+
+  const act = (action) => api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action });
+
+  // Ana (team-1) is on the clock at the first pick. A targeted autopick that
+  // names a computer seat — because the host's lagging client still thinks a
+  // computer is up — must not advance the draft: it is dropped as a no-op.
+  const stale = await act({ type: "autopick", managerId: "team-2" });
+  assert.equal(stale.status, 200);
+  assert.equal(stale.data.seq, 0, "a stale targeted autopick appends no action");
+  let room = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(room.data.actions.length, 0, "Ana's live turn was not picked for");
+
+  // Naming the seat that IS on the clock still works — this is how a real turn
+  // (Ana's own timeout, or a computer the room is genuinely waiting on) resolves.
+  const live = await act({ type: "autopick", managerId: "team-1" });
+  assert.equal(live.status, 200);
+  assert.equal(live.data.seq, 1);
+
+  // With Ana's pick in, team-2 (Robo1) is up. A targeted drive for it lands.
+  const cpu = await act({ type: "autopick", managerId: "team-2" });
+  assert.equal(cpu.status, 200);
+  assert.equal(cpu.data.seq, 2);
+
+  // An untargeted autopick keeps its old "whoever is up" meaning, unchanged —
+  // team-3 (Robo2) is on the clock and gets picked for.
+  const untargeted = await act({ type: "autopick" });
+  assert.equal(untargeted.status, 200);
+  assert.equal(untargeted.data.seq, 3);
+});
+
 test("pick timer is normalized, returned in snapshots, and survives restarts", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
   const base = await startServer(t, dataDir);
