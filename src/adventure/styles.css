@@ -1278,6 +1278,15 @@ h1.gq-logo {
 .gq-pack-menued .gq-textbox { min-height: 36%; max-height: 58%; }
 .gq-pack-menued .gq-pack-reveal { width: 33%; }
 
+/* Who-sits stands both men up in the stage instead of the lone pull: the man
+   who sits and the man who starts, level, each the size the single pull takes
+   once its menu is up — so the pair is no taller than the card was, and the
+   who-sits list underneath keeps the room it needs. */
+.gq-pack-swap { display: flex; align-items: flex-start; justify-content: center; gap: 6cqw; width: 100%; }
+.gq-pack-swap .gq-card-side { flex: 0 0 auto; width: 33%; }
+.gq-pack-swap .gq-card-side .gq-card { width: 100%; margin-inline: auto; }
+.gq-pack-swap .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
+
 @keyframes gq-reveal {
   from { transform: scale(0.2); }
   to { transform: scale(1); }

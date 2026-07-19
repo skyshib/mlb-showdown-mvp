@@ -805,7 +805,7 @@ export const binderScreen = {
               <p class="gq-dim">STARTS</p>
               ${cardPanelHtml(selected.card, { count: selected.count })}
             </div>`
-          : `<div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected.card, { count: selected.count }) : ""}</div>`}
+          : `<div class="gq-card-side gq-card-side-sm">${selected ? cardPanelHtml(selected.card, { count: selected.count }) + seasonStatsHtml(app.save, selected.card) : ""}</div>`}
       </div></div>
       <div class="gq-textbox">${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">${
         app.screen.actionMenu ? "Z picks an action. X closes."
@@ -1597,6 +1597,13 @@ export const packOpenScreen = {
     // A menu is standing under the card, and it needs the room to stand in: the
     // card gives some back rather than pushing the last row off the bottom.
     const menued = revealed > 0 && !curtain;
+    // Benching a man for the pull is a comparison, the same one the binder and the
+    // pen make — so it goes up the same way: both cards, side by side, the man who
+    // sits and the man he sits for, instead of the lone pull over a blind list.
+    const swapping = app.screen.mode === "team-swap" && Boolean(current);
+    const swapCandidates = swapping ? swapTargets(save, current) : [];
+    const swapPick = swapping ? clampIndex(app.screen.pickIndex ?? 0, swapCandidates.length + 1) : 0;
+    const outgoing = swapping ? swapCandidates[swapPick] ?? null : null;
     return `<div class="gq-screen${landed ? " gq-legend-screen" : ""}${menued ? " gq-pack-menued" : ""}">
       <div class="gq-topbar"><span>${escapeHtml(PACKS[pending.packId].name.toUpperCase())}</span><span>${revealed}/${cards.length}</span></div>
       <div class="gq-pack-stage">
@@ -1606,7 +1613,18 @@ export const packOpenScreen = {
               <p class="gq-legend-bang gq-blink">&#9733;</p>
               <p class="gq-pack-count"><b>SOMETHING IN THERE IS GLOWING&hellip;</b></p>
             </div>`
-          : `${revealed === 0 ? `<p class="gq-pack-count">&#9993; RIP IT OPEN!</p>` : rewound ? `<p class="gq-pack-count"><span class="gq-dim">CARD ${viewing} OF ${revealed}</span></p>` : ""}
+          : swapping
+            ? `<div class="gq-pack-swap">
+                <div class="gq-card-side">
+                  <p class="gq-dim">${outgoing ? "SITS" : "&nbsp;"}</p>
+                  ${outgoing ? cardPanelHtml(outgoing) : ""}
+                </div>
+                <div class="gq-card-side">
+                  <p class="gq-dim">STARTS</p>
+                  ${cardPanelHtml(current, { count: ownedCount(save, current.id) })}
+                </div>
+              </div>`
+            : `${revealed === 0 ? `<p class="gq-pack-count">&#9993; RIP IT OPEN!</p>` : rewound ? `<p class="gq-pack-count"><span class="gq-dim">CARD ${viewing} OF ${revealed}</span></p>` : ""}
             ${current ? `<div class="gq-pack-reveal${landed ? " gq-legend-reveal" : ""}">${
               landed ? `<span class="gq-legend-rays"></span>` : ""
             }${cardPanelHtml(current, { count: ownedCount(save, current.id) })}</div>` : ""}`}
