@@ -642,6 +642,70 @@
   background-size: 13cqw 22.52cqw;
 }
 
+/* ---- Hidden printings ---- */
+
+/* The misprint: the portrait ran through the press upside down and the name
+   picked up an off-register ghost. Every copy prints this way. */
+.gq-proto-misprint .gq-proto-portrait {
+  transform: translateY(-5cqw) scale(1.08) rotate(180deg);
+  /* Rotate about the middle — the base rule's bottom origin would flip the
+     whole portrait out of the photo window. */
+  transform-origin: center;
+}
+.gq-proto-misprint .gq-proto-name {
+  text-shadow:
+    0.45cqw 0 0 rgba(64, 200, 255, 0.5),
+    -0.45cqw 0 0 rgba(255, 70, 96, 0.45);
+}
+
+/* The golden ticket: the pool's single 1-of-1 printing. The whole face runs
+   gold through one filter — portrait, chart chips, frame and all — under a
+   gold-leaf border, a gold sparkle field, and a slow shine sweep. */
+.gq-proto-golden .gq-face {
+  border-color: transparent;
+  background:
+    linear-gradient(#f3e3b2, #e2c56a) padding-box,
+    linear-gradient(120deg, #8a6a1f, #ffe9a8 30%, #b8860b 55%, #fff2c4 80%, #8a6a1f) border-box;
+  filter: sepia(0.85) saturate(1.45) brightness(1.06) contrast(1.02);
+}
+.gq-proto-golden .gq-proto-photo {
+  background: radial-gradient(120% 90% at 50% 30%, #ffedb4, #dcae3c 62%, #a3791c);
+}
+.gq-proto-golden .gq-proto-photo::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='%23fff6d8'%3E%3Cpath fill-opacity='0.7' d='M24 13 Q24 20 31 20 Q24 20 24 27 Q24 20 17 20 Q24 20 24 13 Z'/%3E%3Cpath fill-opacity='0.45' d='M68 40 Q68 44 72 44 Q68 44 68 48 Q68 44 64 44 Q68 44 68 40 Z'/%3E%3Cpath fill-opacity='0.6' d='M44 70.5 Q44 76 49.5 76 Q44 76 44 81.5 Q44 76 38.5 76 Q44 76 44 70.5 Z'/%3E%3Cpath fill-opacity='0.4' d='M84 9 Q84 12 87 12 Q84 12 84 15 Q84 12 81 12 Q84 12 84 9 Z'/%3E%3Cpath fill-opacity='0.4' d='M10 56.5 Q10 60 13.5 60 Q10 60 10 63.5 Q10 60 6.5 60 Q10 60 10 56.5 Z'/%3E%3C/g%3E%3C/svg%3E");
+  background-position: 0 0;
+  background-size: 24cqw 24cqw;
+  opacity: 1;
+  -webkit-mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.55), #000 72%);
+  mask-image: radial-gradient(120% 95% at 50% 40%, rgba(0, 0, 0, 0.55), #000 72%);
+}
+.gq-proto-golden .gq-face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 40%, rgba(255, 248, 208, 0.5) 50%, transparent 60%);
+  transform: translateX(-120%);
+  animation: gq-golden-sweep 3.4s ease-in-out infinite;
+}
+@keyframes gq-golden-sweep {
+  0% { transform: translateX(-120%); }
+  60% { transform: translateX(120%); }
+  100% { transform: translateX(120%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gq-proto-golden .gq-face::after { animation: none; }
+}
+.gq-proto-golden .gq-proto-rarity-mark {
+  color: #6d5312;
+  text-shadow: 0 0.25cqw 0.5cqw rgba(255, 244, 200, 0.9);
+}
+
 .gq-proto-portrait {
   position: absolute;
   inset: 0;

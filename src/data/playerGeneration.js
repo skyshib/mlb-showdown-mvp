@@ -3016,8 +3016,17 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
   // A separate stream makes versatility deterministic without perturbing the
   // established names, charts, and ratings produced by the main seed.
   addGeneratedPositions(players, createRng(`${seed}:positions`));
+  assignEggCards(players, createRng(`${seed}:eggs`));
 
   return players.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+}
+
+// Every generated pool hides one card, seeded like everything else so the
+// same universe always hides the same one: the pool's golden ticket, a
+// 1-of-1 printing. Cosmetic only — it plays by its chart.
+function assignEggCards(players, rng) {
+  if (!players.length) return;
+  players[rng.int(0, players.length - 1)].egg = "golden";
 }
 
 // ---- Deep set, per-draft deal ---------------------------------------------

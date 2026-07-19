@@ -282,9 +282,19 @@ function fictionalBackdropClass(card) {
 const LEGENDARY_PATTERNS = ["sunburst", "waves", "lattice", "sparkles", "chevrons", "honeycomb"];
 
 function legendaryPatternClass(card) {
-  if (card.rarity !== "legend") return "";
+  // The golden ticket wears gold, not a pattern, whatever its rarity.
+  if (card.rarity !== "legend" || card.egg === "golden") return "";
   const hash = fnv1aHash(`${card.id ?? card.name ?? "player"}::pattern`);
   return ` gq-pattern-${LEGENDARY_PATTERNS[hash % LEGENDARY_PATTERNS.length]}`;
+}
+
+// A misprint: roughly one card in 64 ran through the press upside down, and
+// every copy of that card prints that way — hashed off the id, like a real
+// set's error card. The league does not issue corrections.
+function misprintClass(card) {
+  return fnv1aHash(`${card.id ?? card.name ?? "player"}::misprint`) % 64 === 0
+    ? " gq-proto-misprint"
+    : "";
 }
 
 const FICTIONAL_HITTER_CHART = ["SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
@@ -371,14 +381,15 @@ function fictionalCardHtml(card, count, hidePoints = false) {
     ? fictionalPitcherBadge(card)
     : `<div class="gq-proto-onbase">${escapeHtml(card.onBase)}</div>`;
   const initials = card.name.split(" ").map((word) => word[0] ?? "").slice(0, 2).join("").toUpperCase();
-  return `<div class="${cardShell(card)} gq-proto-card gq-proto-${pitcher ? "pitcher" : "hitter"} gq-proto-rarity-${rarity.key}"><div class="gq-face">
+  const golden = card.egg === "golden";
+  return `<div class="${cardShell(card)} gq-proto-card gq-proto-${pitcher ? "pitcher" : "hitter"} gq-proto-rarity-${rarity.key}${golden ? " gq-proto-golden" : ""}${misprintClass(card)}"><div class="gq-face">
     <div class="gq-proto-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}${legendaryPatternClass(card)}">
       <span class="gq-proto-initials">${escapeHtml(initials)}</span>
       <img class="gq-proto-portrait" src="https://api.dicebear.com/10.x/micah/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}-${card.position ?? card.role}`)}&clothesVariant=crew" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
     </div>
     <img class="gq-proto-frame gq-proto-frame-top" src="${frame}" alt="">
     <img class="gq-proto-frame gq-proto-frame-bottom" src="${frame}" alt="">
-    <span class="gq-proto-rarity-mark">${fictionalRarityMark(rarity)}</span>
+    <span class="gq-proto-rarity-mark">${golden ? "1 OF 1" : fictionalRarityMark(rarity)}</span>
     ${count !== null ? `<span class="gq-proto-count">x${count}</span>` : ""}
     ${rating}
     <div class="gq-proto-name" style="font-size:${fictionalNameFontSize(card.name)}cqw">${escapeHtml(card.name.toUpperCase())}</div>
