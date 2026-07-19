@@ -750,7 +750,10 @@ async function createRoom(store, request, response) {
     ? body.managers.map((name) => String(name).trim()).filter(Boolean)
     : [];
   if (managers.length < 2) return sendJson(response, 400, { error: "At least two managers are required" });
-  if (managers.length > 8) return sendJson(response, 400, { error: "At most eight managers are supported" });
+  // Blanket ceiling; the per-set depth check below is the real limit (the decks
+  // deal for ~24). Team colors run out here too (see RACE_COLORS), so past 24
+  // teams would start sharing a hue.
+  if (managers.length > 24) return sendJson(response, 400, { error: "At most twenty-four managers are supported" });
   const seed = String(body.seed ?? "").trim() || "showdown";
   const startingPitchers = normalizeStartingPitchers(body.startingPitchers);
   const rosterSize = rosterSizeForStartingPitchers(startingPitchers);

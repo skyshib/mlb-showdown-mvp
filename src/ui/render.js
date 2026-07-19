@@ -237,9 +237,18 @@ export function renderBoxScore(game, playersById = new Map()) {
   </div>`;
 }
 
-// Eight lines on the win-rate race, and eight colors dark enough to read against
-// the cream sheet they were drawn for.
-export const RACE_COLORS = ["#0b6b53", "#8f3147", "#365f91", "#b06c1f", "#5a4f91", "#4f6f2b", "#9c3b21", "#2b6f6f"];
+// One color per team on the win-rate race, dark enough to read against the cream
+// sheet they were drawn for. The first eight are the originals; the rest fill the
+// hue gaps at two lightness bands so a 24-manager room still tells its teams
+// apart. raceColor() wraps past the end, so this only has to be as long as the
+// manager cap (24). Twenty-four hues cannot all be distinct, so past the first
+// dozen lightness does some of the separating — held on the club theme too (see
+// the --race-N block in styles.css).
+export const RACE_COLORS = [
+  "#0b6b53", "#8f3147", "#365f91", "#b06c1f", "#5a4f91", "#4f6f2b", "#9c3b21", "#2b6f6f",
+  "#74492f", "#74742f", "#2f7437", "#2f746b", "#2f6174", "#2f3974", "#722f74", "#742f30",
+  "#b67854", "#b5b654", "#54b65e", "#54b6a9", "#549bb6", "#5462b6", "#b254b6", "#b65455"
+];
 
 // A franchise league draws the same chart on a black page, where eight dark
 // lines are eight lines nobody can see — and the race chart IS the results

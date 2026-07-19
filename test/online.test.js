@@ -282,11 +282,11 @@ test("online rooms draft any card set, and the client rebuilds the same deck", a
 
   const tooMany = await api(base, "POST", "/api/rooms", {
     seed: "real-room",
-    managers: Array.from({ length: 9 }, (_, index) => `M${index + 1}`),
+    managers: Array.from({ length: 25 }, (_, index) => `M${index + 1}`),
     universe: "classic"
   });
   assert.equal(tooMany.status, 400);
-  // Either guard may fire first: the deck-depth limit or the room-size cap.
+  // Either guard may fire first: the deck-depth limit or the room-size cap (24).
   assert.match(tooMany.data.error, /managers/);
 
   const created = await api(base, "POST", "/api/rooms", {

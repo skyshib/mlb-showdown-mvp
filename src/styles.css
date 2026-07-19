@@ -5432,11 +5432,12 @@ html.club .heat {
  * Everything the tokens could not reach, found by walking the sheet for literals
  * rather than by walking the screens and hoping to notice.
  *
- * The eight race lines first, because they are the results screen. They were
- * mixed dark to sit on cream, and eight dark lines on a black page is a chart
- * with nothing in it. Lit in HSL — hue and saturation held, lightness raised —
- * because mixing eight distinct colors toward white gives you eight greys, and
- * the whole job of these eight is to be told apart. */
+ * The race lines first, because they are the results screen. They were mixed
+ * dark to sit on cream, and dark lines on a black page is a chart with nothing
+ * in it. Lit in HSL — hue and saturation held, lightness raised — because mixing
+ * distinct colors toward white gives you greys, and the whole job of these is to
+ * be told apart. One per team up to the manager cap; the last sixteen keep two
+ * lightness bands so they stay distinct on black as well as cream. */
 html.club {
   --race-0: #109977;
   --race-1: #cc6b82;
@@ -5446,6 +5447,22 @@ html.club {
   --race-5: #699439;
   --race-6: #d76343;
   --race-7: #399494;
+  --race-8: #b5724a;
+  --race-9: #b5b54a;
+  --race-10: #4ab556;
+  --race-11: #4ab5a7;
+  --race-12: #4a98b5;
+  --race-13: #4a59b5;
+  --race-14: #b24ab5;
+  --race-15: #b54a4b;
+  --race-16: #cda289;
+  --race-17: #cccd89;
+  --race-18: #89cd90;
+  --race-19: #89cdc4;
+  --race-20: #89bacd;
+  --race-21: #8993cd;
+  --race-22: #ca89cd;
+  --race-23: #cd898a;
 }
 
 /* Text that was mixed dark because it was always going to land on something
