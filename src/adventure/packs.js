@@ -1,6 +1,6 @@
 import { createRng } from "../rules/rng.js?v=20260716-records";
 import { cardPerson, personConflict, playsPosition } from "../rules/cards.js?v=20260716-records";
-import { RARITY_REFERENCE, setUniverse, universePool } from "../data/universes.js";
+import { RARITY_REFERENCE, setUniverse, universePool, snapshotUniversePool, installUniversePool } from "../data/universes.js";
 
 // The adventure's economy on top of the shared card universes: what a card
 // is worth at the shop counter, what a booster pulls, what the sealed
@@ -25,6 +25,7 @@ export {
 // universes generally.
 export const setUniverseSeed = setUniverse;
 export const adventurePool = universePool;
+export { snapshotUniversePool, installUniversePool };
 
 // Sell values run ~15% of shop price: the shop is a pawnbroker, not a buyer.
 export const RARITIES = {

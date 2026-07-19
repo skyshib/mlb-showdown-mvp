@@ -5,8 +5,12 @@ import {
   FRANCHISES,
   UNIVERSES,
   buildDraftPool,
+  cardById,
+  installUniversePool,
   setUniverse,
+  snapshotUniversePool,
   universeConfig,
+  universeKey,
   universePool
 } from "../src/data/universes.js";
 import { autopick, createDraft, maxPoolManagers, validateRoster } from "../src/rules/draft.js";
@@ -103,6 +107,27 @@ test("an every-decade set prints a long career once per decade, and you may rost
   const [young, old] = careers;
   assert.ok(personConflict([young], old), "two decades of one man is a roster conflict");
   assert.equal(personConflict([young], young), null, "a card never conflicts with itself");
+});
+
+test("a snapshotted pool is served verbatim, not re-derived from the seed", () => {
+  // An adventure save stores its cards so its universe never re-rolls when the
+  // generators change. Prove the stored cards win over what the seed would build.
+  setUniverse("frozen-save", "fictional", { priceNoise: true });
+  const frozen = snapshotUniversePool();
+  // Stand in for a generator change: the stored cards say something the seed
+  // would never produce. If install re-derived, this edit would vanish.
+  frozen[0] = { ...frozen[0], name: "FROZEN MARKER" };
+  const markerId = frozen[0].id;
+
+  // The generators move on — a different seed is a different league entirely.
+  setUniverse("some-other-seed", "fictional", { priceNoise: true });
+  assert.notEqual(cardById(markerId)?.name, "FROZEN MARKER", "a new seed really re-rolls the pool");
+
+  // Installing the snapshot seats those exact cards again, drift and all.
+  installUniversePool(frozen, { seed: "frozen-save", mode: "fictional", priceNoise: true });
+  assert.equal(cardById(markerId).name, "FROZEN MARKER", "the stored card is served, not regenerated");
+  assert.equal(universePool().length, frozen.length);
+  assert.equal(universeKey(), "fictional", "and the mode is recorded so a matching setUniverse is a no-op");
 });
 
 test("the whole universe stays behind the deck, so a card can find its two-way other half", () => {

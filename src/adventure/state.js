@@ -1,4 +1,13 @@
-import { cardById, dualPartnerId, dualPrimaryId, adventurePool, budgetCap } from "./packs.js?v=20260716-records";
+import {
+  cardById,
+  dualPartnerId,
+  dualPrimaryId,
+  adventurePool,
+  budgetCap,
+  setUniverseSeed,
+  snapshotUniversePool,
+  installUniversePool
+} from "./packs.js?v=20260716-records";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
@@ -50,6 +59,35 @@ export function pointCap(save) {
 
 export function deriveSeed(save, ...parts) {
   return [save.saveSeed, ...parts].join(":");
+}
+
+// A save OWNS its card universe. Left to the seed alone, the pool is rebuilt from
+// scratch on every load — so any change to the generators (a name-pool tweak, a
+// new card kind, a pricing pass) silently re-rolls the save into a different
+// league, teams and all. Storing the actual cards the first time the save meets
+// them freezes its universe for good: thereafter the pool is loaded from the
+// save, never re-derived.
+//
+// Point the pool at `save` before anything reads a card. Returns true when it
+// froze a not-yet-snapshotted save (a new game, or one made before snapshots
+// existed) — the caller should persist so the freeze sticks.
+export function hydrateUniverse(save) {
+  if (!save) return false;
+  const options = {
+    seed: save.saveSeed,
+    mode: save.universe ?? "fictional",
+    priceNoise: save.mode !== "uncapped"
+  };
+  if (Array.isArray(save.universeCards) && save.universeCards.length) {
+    installUniversePool(save.universeCards, options);
+    return false;
+  }
+  // No snapshot yet. Build the pool from the seed as it stands right now and
+  // freeze whatever it produces — for an existing save this locks in the league
+  // it is showing today, so it stops shifting under future generator changes.
+  setUniverseSeed(options.seed, options.mode, { priceNoise: options.priceNoise });
+  save.universeCards = snapshotUniversePool();
+  return true;
 }
 
 // ---- Persistence -----------------------------------------------------------

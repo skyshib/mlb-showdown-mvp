@@ -1,5 +1,5 @@
-import { loadSave } from "./state.js?v=20260716-records";
-import { setUniverseSeed, cardById } from "./packs.js?v=20260716-records";
+import { loadSave, hydrateUniverse, persistSave } from "./state.js?v=20260716-records";
+import { cardById } from "./packs.js?v=20260716-records";
 import { hydratePhotos } from "../ui/photos.js?v=20260716-records";
 import { applyFranchisePalette } from "../ui/franchisePalette.js?v=20260716-records";
 import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260716-records";
@@ -142,13 +142,13 @@ const app = {
   }
 };
 
-// Every save lives in its own card universe, keyed by its seed and league.
-// Point the pool at the loaded save before anything renders a card.
-// Uncapped saves print honest stickers — no bargain noise on points.
+// Every save lives in its own card universe. Point the pool at the loaded save
+// before anything renders a card: install its stored cards if it has them, or —
+// for a save made before universes were snapshotted — freeze the pool it shows
+// today so it stops re-rolling under generator changes. A freeze is persisted at
+// once so it survives the next reload.
 if (app.save) {
-  setUniverseSeed(app.save.saveSeed, app.save.universe ?? "fictional", {
-    priceNoise: app.save.mode !== "uncapped"
-  });
+  if (hydrateUniverse(app.save)) app.save = persistSave(app.save);
   // A game left running is a game you are still in the middle of. Reloading the
   // tab — or closing it and coming back tomorrow — puts you back at the plate,
   // in the same inning, against the same arm, with the same men on.

@@ -154,6 +154,30 @@ export function universeKey() {
   return universeMode;
 }
 
+// The pool is otherwise a pure function of the seed AND the generators — the
+// name lists, the card kinds, the pricing pass. Change any of those and the same
+// seed re-rolls into a different league, silently swapping an existing save's
+// universe out from under it. snapshot/install let a save store the exact cards
+// it was built with and load them back verbatim, so a frozen universe never
+// re-derives no matter how the generators drift.
+export function snapshotUniversePool() {
+  // Shallow-copy each card so the stored array is decoupled from the live cache.
+  return universePool().map((card) => ({ ...card }));
+}
+
+// Seat a previously snapshotted pool AS the active universe, bypassing
+// generation. Seed/mode/pricing are recorded to match setUniverse's own state so
+// universeKey() and a later same-coordinates setUniverse() behave as usual; a
+// DIFFERENT universe still swaps this out and regenerates.
+export function installUniversePool(cards, { seed, mode = "fictional", priceNoise = true } = {}) {
+  const config = universeConfig(mode);
+  universeSeed = seed || DEFAULT_UNIVERSE_SEED;
+  universeMode = config ? config.key : "fictional";
+  universeNoise = priceNoise;
+  poolCache = cards;
+  poolIndexCache = new Map(cards.map((card) => [card.id, card]));
+}
+
 export function universePool() {
   if (!poolCache) {
     const decade = /^decade-(\d{4})$/.exec(universeMode);

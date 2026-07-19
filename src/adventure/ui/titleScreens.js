@@ -1,8 +1,9 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260716-records";
 import { resumeBattle } from "./battleScreen.js?v=20260716-records";
-import { starterPack, setUniverseSeed, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260716-records";
+import { starterPack, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260716-records";
 import {
   createSave,
+  hydrateUniverse,
   persistSave,
   addCardToCollection,
   setRoster,
@@ -138,8 +139,10 @@ function restoreSave(app, code) {
     app.rerender();
     return;
   }
+  // Install the imported save's own cards; an older backup with none freezes the
+  // pool its seed builds now. Persist after, so a just-frozen import keeps them.
+  hydrateUniverse(save);
   app.save = persistSave(save);
-  setUniverseSeed(save.saveSeed, save.universe ?? "fictional", { priceNoise: save.mode !== "uncapped" });
   app.go("map");
 }
 
@@ -397,7 +400,9 @@ export const modeSelectScreen = {
 function finishNewGame(app, playerName, universe, mode = "budget") {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
   const save = createSave({ name: playerName, saveSeed, universe, mode });
-  setUniverseSeed(saveSeed, universe, { priceNoise: mode !== "uncapped" });
+  // Build this league's pool and freeze it into the save at birth, so its cards
+  // never re-derive as the generators change.
+  hydrateUniverse(save);
   const roster = starterPack(saveSeed);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));

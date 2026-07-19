@@ -15,6 +15,7 @@ import { recordCompletedRun, loadHallOfFame, hallOfFameByMode, mergeEntries } fr
 import { hallOfFameScreen, hofTeamScreen } from "../src/adventure/ui/hallOfFameScreen.js";
 import {
   createSave,
+  hydrateUniverse,
   persistSave,
   loadSave,
   exportSaveCode,
@@ -159,6 +160,30 @@ test("each save seed generates its own universe, deterministically", () => {
     assert.notDeepEqual(other, original, "different seed, different league");
     setUniverseSeed("test-seed");
     assert.deepEqual(names(), original, "same seed regenerates the same league");
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("a save freezes its universe on first load, then installs it verbatim", () => {
+  try {
+    const save = createSave({ name: "FREEZE", saveSeed: "freeze-seed", universe: "fictional" });
+    // A fresh save carries no cards. The first hydrate builds the pool from the
+    // seed and freezes whatever it produces, reporting that it changed the save.
+    assert.equal("universeCards" in save, false);
+    assert.equal(hydrateUniverse(save), true);
+    assert.ok(Array.isArray(save.universeCards) && save.universeCards.length > 0);
+
+    // Tamper with a stored card to stand in for a later generator change: the
+    // seed would never build this name. If a load re-derived, the edit vanishes.
+    save.universeCards[0] = { ...save.universeCards[0], name: "STAYS PUT" };
+    const markerId = save.universeCards[0].id;
+
+    // Point the module at another league, then re-hydrate: the stored cards
+    // install verbatim, and there is nothing new to persist.
+    setUniverseSeed("some-other-seed", "fictional");
+    assert.equal(hydrateUniverse(save), false);
+    assert.equal(cardById(markerId).name, "STAYS PUT");
   } finally {
     setUniverseSeed("test-seed");
   }
