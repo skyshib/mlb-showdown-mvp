@@ -3094,7 +3094,18 @@ export function buildFictionalUniverse(seed = "") {
 }
 
 export function buildFictionalDraftPool(seed) {
-  return dealPool(buildFictionalUniverse(seed), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
+  const dealt = dealPool(buildFictionalUniverse(seed), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
+  // Every deck carries exactly one golden ticket. A deal is a slice of the
+  // league, so the league's 1-of-1 can miss the cut — when it does, the deal
+  // stamps one of its own. The stamped card is a copy: the cached league
+  // keeps its original printing, and a league never holds two, so a deck
+  // never can either.
+  if (dealt.some((card) => card.egg === "golden") || !dealt.length) return dealt;
+  const rng = createRng(`fictional-golden:${seed}`);
+  const stamped = [...dealt];
+  const index = rng.int(0, stamped.length - 1);
+  stamped[index] = { ...stamped[index], egg: "golden" };
+  return stamped;
 }
 
 function makeHitterCard(rng, index, usedNames, position) {

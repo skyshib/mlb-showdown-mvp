@@ -153,6 +153,13 @@ test("each fictional draft deals a seeded slice of its own league", () => {
   );
 });
 
+test("every fictional deck carries exactly one golden ticket", () => {
+  for (const seed of ["night-a", "night-b", "night-c", "golden-hunt", "high-dinger"]) {
+    const goldens = buildFictionalDraftPool(seed).filter((card) => card.egg === "golden");
+    assert.equal(goldens.length, 1, `seed "${seed}" deals ${goldens.length} golden tickets`);
+  }
+});
+
 test("dealt fictional pools draft to completion at the eight-manager maximum", () => {
   const pool = buildFictionalDraftPool("fictional-max");
   const managers = ["A", "B", "C", "D", "E", "F", "G", "H"];
