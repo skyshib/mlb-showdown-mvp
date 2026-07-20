@@ -446,21 +446,23 @@ td span {
   align-items: start;
 }
 
-/* The seed box and its two refills — last room's seed, or a fresh roll —
-   share one line; the input takes whatever the buttons leave. */
-.seed-row {
+/* The seed's two refills — last room's seed, or a fresh roll — ride the
+   header line so the box below keeps its full width for reading the seed. */
+.seed-label-row {
   display: flex;
-  gap: 6px;
+  justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
-.seed-row input {
-  flex: 1;
-  min-width: 0;
-}
-
-.seed-row button {
+.seed-buttons {
+  display: flex;
   flex: none;
+  gap: 4px;
+}
+
+.seed-buttons button {
+  padding: 1px 7px;
   white-space: nowrap;
 }
 

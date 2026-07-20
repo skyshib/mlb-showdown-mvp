@@ -888,10 +888,11 @@ function defaultState() {
     cpuManagers: [],
     universe: DEFAULT_UNIVERSE,
     draftType: "snake",
-    nomination: "manual",
+    nomination: "random",
     // A blind draft: hide every card's printed points until it is drafted, so
-    // managers pick and bid on the baseball rather than the number.
-    hidePoints: false,
+    // managers pick and bid on the baseball rather than the number. On by
+    // default — the number is the least interesting thing on the card.
+    hidePoints: true,
     auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS)),
     auctionTimer: {
       reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
@@ -1712,12 +1713,14 @@ function renderSetup(setupError = "") {
         </fieldset>
         <div class="setup-row">
           <label>
-            Seed
-            <span class="seed-row">
-              <input name="seed" value="${escapeHtml(state.seed)}" />
-              <button type="button" class="small" data-action="seed-last" title="Refill the seed the last room ran with"${lastUsedSeed() ? "" : " disabled"}>&#8634; Last seed</button>
-              <button type="button" class="small" data-action="seed-random" title="Roll a fresh seed">&#127922;</button>
+            <span class="seed-label-row">
+              <span>Seed</span>
+              <span class="seed-buttons">
+                <button type="button" class="small" data-action="seed-last" title="Refill the seed the last room ran with"${lastUsedSeed() ? "" : " disabled"}>&#8634; last</button>
+                <button type="button" class="small" data-action="seed-random" title="Roll a fresh seed">&#127922;</button>
+              </span>
             </span>
+            <input name="seed" value="${escapeHtml(state.seed)}" />
           </label>
           <label>
             Starting pitchers per team
@@ -1777,12 +1780,12 @@ function renderSetup(setupError = "") {
         </label>
         <div class="pool-suboptions auction-suboptions" ${state.draftType === "auction" ? "" : "hidden"}>
           <label class="pool-option">
-            <input type="radio" name="nomination" value="manual" ${state.nomination === "random" ? "" : "checked"} />
-            <span><strong>Managers nominate</strong><small>Each manager takes a turn putting a card of their choosing on the block.</small></span>
-          </label>
-          <label class="pool-option">
             <input type="radio" name="nomination" value="random" ${state.nomination === "random" ? "checked" : ""} />
             <span><strong>Random nomination</strong><small><span data-random-nomination-blurb>${escapeHtml(randomNominationBlurb(state.managers.length, state.startingPitchers))}</span> Nobody nominates: a hidden queue deals the cards out in random order. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
+          </label>
+          <label class="pool-option">
+            <input type="radio" name="nomination" value="manual" ${state.nomination === "random" ? "" : "checked"} />
+            <span><strong>Managers nominate</strong><small>Each manager takes a turn putting a card of their choosing on the block.</small></span>
           </label>
           <label class="auction-budget-field">
             Budget per manager ($)
