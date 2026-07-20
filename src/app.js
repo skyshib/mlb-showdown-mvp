@@ -218,6 +218,27 @@ function randomBaseballSeed() {
   return `${pick(SEED_ADJECTIVES)}-${pick(SEED_NOUNS)}`;
 }
 
+// The seed the last room actually ran with, kept outside the main state so
+// "New room" (which resets state to fresh defaults) can still refill it.
+// Rerunning a good night's seed is the whole reason to remember it.
+const LAST_SEED_KEY = "mlb-showdown-mvp-last-seed";
+
+function rememberLastSeed(seed) {
+  try {
+    localStorage.setItem(LAST_SEED_KEY, seed);
+  } catch {
+    // Storage can be unavailable (private mode); the button just stays off.
+  }
+}
+
+function lastUsedSeed() {
+  try {
+    return localStorage.getItem(LAST_SEED_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 let state = loadState() ?? defaultState();
 // A restored draft carries its own dealt cards, so it never re-deals — but
 // the card faces still look the rest of the universe up (a two-way player's
@@ -1010,6 +1031,7 @@ function openRoom(roomId, room) {
   const seat = loadOnlineSeat(roomId);
   state = defaultState();
   state.seed = room.seed;
+  rememberLastSeed(state.seed);
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
   state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
@@ -1691,7 +1713,11 @@ function renderSetup(setupError = "") {
         <div class="setup-row">
           <label>
             Seed
-            <input name="seed" value="${escapeHtml(state.seed)}" />
+            <span class="seed-row">
+              <input name="seed" value="${escapeHtml(state.seed)}" />
+              <button type="button" class="small" data-action="seed-last" title="Refill the seed the last room ran with"${lastUsedSeed() ? "" : " disabled"}>&#8634; Last seed</button>
+              <button type="button" class="small" data-action="seed-random" title="Roll a fresh seed">&#127922;</button>
+            </span>
           </label>
           <label>
             Starting pitchers per team
@@ -1898,9 +1924,25 @@ function renderSetup(setupError = "") {
   // Check all / uncheck all for the decade list: one button that flips to
   // whichever move is left. Reaching for it means you want decades, so it
   // selects that set the same way touching any other picker does.
+  // Both seed buttons write the box and then fire the normal change path,
+  // so the invented example follows the new seed exactly as if it were typed.
+  const fillSeed = (seed) => {
+    if (!seed) return;
+    const input = setupForm.querySelector('input[name="seed"]');
+    input.value = seed;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
   setupForm.addEventListener("click", (event) => {
     if (event.target.closest('[data-action="lottery"]')) {
       runLottery(setupForm);
+      return;
+    }
+    if (event.target.closest('[data-action="seed-random"]')) {
+      fillSeed(randomBaseballSeed());
+      return;
+    }
+    if (event.target.closest('[data-action="seed-last"]')) {
+      fillSeed(lastUsedSeed());
       return;
     }
     if (event.target.closest('[data-action="import-save"]')) {
@@ -1934,6 +1976,7 @@ function renderSetup(setupError = "") {
         .filter(Boolean)
     );
     state.seed = String(form.get("seed")).trim() || "showdown";
+    rememberLastSeed(state.seed);
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
     const cpuChecked = new Set(form.getAll("cpu").map(String));
     state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));
