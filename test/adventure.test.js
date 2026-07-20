@@ -363,10 +363,12 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
 
   const jojo = trainerById("scout-jojo");
   const worldSeries = trainerById("post-worldseries");
-  // Budget mode hangs the printed ladder off the CAP: the summit shops 76% of
-  // the room between the player's cap and what the pool can actually field.
-  const { poolCeiling, budgetCap, LADDER_REFERENCE, REFERENCE_CAP } = await import("../src/adventure/packs.js");
-  const cap = budgetCap();
+  // Budget mode hangs the printed ladder off the CAP — the EXACT cap, not the
+  // rounded one, or every rung inherits the rounding error magnified: the
+  // summit shops 76% of the room between the player's cap and what the pool
+  // can actually field.
+  const { poolCeiling, exactCap, LADDER_REFERENCE, REFERENCE_CAP } = await import("../src/adventure/packs.js");
+  const cap = exactCap();
   const share = (worldSeries.pointBudget - REFERENCE_CAP) / (LADDER_REFERENCE - REFERENCE_CAP);
   assert.equal(
     npcBudget(testSave(), worldSeries),
@@ -2288,6 +2290,11 @@ test("the play description is the whole book of the game, ruled at the innings",
   // Play a couple of innings.
   for (let i = 0; i < 24 && app.screen.name === "battle"; i += 1) {
     if (battlePhase(app.screen.battle).type === "over") break;
+    battleScreen.key(app, "a");
+  }
+  // The loop can land on a suspense pause, and the dice screen holds the floor
+  // instead of the book. Let the play finish before reading the screen.
+  for (let i = 0; i < 12 && app.screen.mode === "drama"; i += 1) {
     battleScreen.key(app, "a");
   }
   const entries = app.screen.playLog;

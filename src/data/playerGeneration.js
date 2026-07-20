@@ -2994,23 +2994,28 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
   const usedNames = new Set();
   let hitterCount = 0;
   let pitcherCount = 0;
+  // One in a thousand prints past the clamps the bell allows: an OB 16 bat or
+  // a Control 7 arm — ratings the rest of the pool treats as impossible. The
+  // promotion rides its own stream so the other 999 keep the exact names,
+  // charts, and ratings the main seed always dealt them.
+  const aceRng = createRng(`${seed}:aces`);
 
   for (const position of POSITIONS) {
     const copies = hitterCopiesPerPosition * (POSITION_POOL_MULTIPLIER[position] ?? 1);
     for (let copy = 0; copy < copies; copy += 1) {
       hitterCount += 1;
-      players.push(makeHitterCard(rng, hitterCount, usedNames, position));
+      players.push(makeHitterCard(rng, hitterCount, usedNames, position, aceRng));
     }
   }
 
   for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
     pitcherCount += 1;
-    players.push(makePitcherCard(rng, pitcherCount, usedNames, "SP"));
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "SP", aceRng));
   }
 
   for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
     pitcherCount += 1;
-    players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP"));
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP", aceRng));
   }
 
   // A separate stream makes versatility deterministic without perturbing the
@@ -3108,10 +3113,18 @@ export function buildFictionalDraftPool(seed) {
   return stamped;
 }
 
-function makeHitterCard(rng, index, usedNames, position) {
+// One roll in a thousand prints past the bell's ceiling — see the aces
+// stream in generatePlayerPool.
+const ACE_CHANCE = 0.001;
+const NO_ACES = { next: () => 1 };
+
+function makeHitterCard(rng, index, usedNames, position, aceRng = NO_ACES) {
   const chart = makeHitterChart(rng);
   const outSlots = countChartSlots(chart, [RESULTS.SO, RESULTS.GB, RESULTS.FB]);
-  const onBase = normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.6, 6, 15);
+  // The bell rolls off the main stream for EVERY card — an ace overrides the
+  // roll but never swallows it, or every card dealt after him would shift.
+  const rolled = normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.6, 6, 15);
+  const onBase = aceRng.next() < ACE_CHANCE ? 16 : rolled;
   const speed = randomSpeed(rng, position, outSlots);
   const fielding = randomFielding(rng, position);
   const points = onBase * 20 + fielding * 7 + speedPoints(speed) + chartPower(chart);
@@ -3129,9 +3142,10 @@ function makeHitterCard(rng, index, usedNames, position) {
   };
 }
 
-function makePitcherCard(rng, index, usedNames, role) {
+function makePitcherCard(rng, index, usedNames, role, aceRng = NO_ACES) {
   const isReliever = role === "RP";
-  const control = normalInt(rng, 3.5, 1.5, 0, 6);
+  const rolled = normalInt(rng, 3.5, 1.5, 0, 6);
+  const control = aceRng.next() < ACE_CHANCE ? 7 : rolled;
   const ip = isReliever ? 1 : starterIp(rng);
   const chart = makePitcherChart(rng);
   const points = pitcherPoints(control, ip, chart);

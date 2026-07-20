@@ -153,6 +153,31 @@ test("each fictional draft deals a seeded slice of its own league", () => {
   );
 });
 
+test("one roll in a thousand prints past the bell: OB 16 bats and Control 7 arms", () => {
+  let hitters = 0;
+  let pitchers = 0;
+  let ob16 = 0;
+  let ctrl7 = 0;
+  let overCeiling = 0;
+  for (let i = 0; i < 60; i += 1) {
+    for (const card of buildFictionalUniverse(`aces-${i}`)) {
+      if (card.kind === "hitter") {
+        hitters += 1;
+        if (card.onBase === 16) ob16 += 1;
+        if (card.onBase > 16) overCeiling += 1;
+      } else {
+        pitchers += 1;
+        if (card.control === 7) ctrl7 += 1;
+        if (card.control > 7) overCeiling += 1;
+      }
+    }
+  }
+  // ~6,240 hitters and ~5,280 pitchers at 0.1% — a handful each, never a flood.
+  assert.ok(ob16 >= 1 && ob16 <= 20, `${ob16} OB 16 hitters in ${hitters}`);
+  assert.ok(ctrl7 >= 1 && ctrl7 <= 20, `${ctrl7} Control 7 pitchers in ${pitchers}`);
+  assert.equal(overCeiling, 0, "nothing prints past the ace ceiling");
+});
+
 test("every fictional deck carries exactly one golden ticket", () => {
   for (const seed of ["night-a", "night-b", "night-c", "golden-hunt", "high-dinger"]) {
     const goldens = buildFictionalDraftPool(seed).filter((card) => card.egg === "golden");
