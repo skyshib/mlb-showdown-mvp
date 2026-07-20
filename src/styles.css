@@ -611,6 +611,18 @@ td span {
   display: none;
 }
 
+/* The snake's clock options live under its radio, the way the auction's
+   sub-options live under its own; the heading stands in for the legend the
+   clock block had when it was a fieldset of its own. */
+.suboption-heading {
+  margin: 0 0 -2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 /* One column, so the decades read as a single list you run down rather than a
    grid you hunt around in. */
 .decade-checklist {

@@ -1725,8 +1725,17 @@ function renderSetup(setupError = "") {
             <small>Each team also drafts nine hitters and two relievers.</small>
           </label>
         </div>
-        <fieldset class="pool-mode snake-clock-mode">
-          <legend>Snake clock</legend>
+      </div>
+      <div class="setup-col">
+        <h2 class="setup-h2">The draft</h2>
+      <fieldset class="pool-mode draft-type-mode">
+        <legend>Draft type</legend>
+        <label class="pool-option">
+          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
+          <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
+        </label>
+        <div class="pool-suboptions snake-suboptions" ${state.draftType === "auction" ? "hidden" : ""}>
+          <p class="suboption-heading">Snake clock</p>
           <label class="pool-option">
             <input type="radio" name="snakeClock" value="off" ${snakeClockMode(state) === "off" ? "checked" : ""} />
             <span><strong>Off</strong><small>Take as long as you like.</small></span>
@@ -1761,16 +1770,7 @@ function renderSetup(setupError = "") {
               <small>Seconds added back to the bank each time you make a pick.</small>
             </label>
           </div>
-        </fieldset>
-      </div>
-      <div class="setup-col">
-        <h2 class="setup-h2">The draft</h2>
-      <fieldset class="pool-mode draft-type-mode">
-        <legend>Draft type</legend>
-        <label class="pool-option">
-          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
-          <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
-        </label>
+        </div>
         <label class="pool-option">
           <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
           <span><strong>Auction draft</strong><small>Cards go up one at a time and everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
@@ -1842,12 +1842,14 @@ function renderSetup(setupError = "") {
     setupForm.querySelector(".decade-checklist").hidden = pick !== "decades";
     setupForm.querySelector(".franchise-field").closest(".pool-suboptions").hidden = pick !== "franchise";
   };
-  // The auction's own sub-options — who nominates, and the budget — belong to
-  // the auction, so they only show when it is chosen; and reaching for one of
-  // them says you want an auction, so it selects it.
+  // Each draft type's sub-options — the auction's nomination and budget, the
+  // snake's clock — belong to their type, so they only show when it is
+  // chosen; and reaching for one of them says you want that type, so it
+  // selects it.
   const syncAuctionOptions = () => {
     const auction = new FormData(setupForm).get("draftType") === "auction";
     setupForm.querySelector(".auction-suboptions").hidden = !auction;
+    setupForm.querySelector(".snake-suboptions").hidden = auction;
   };
   // The snake has one clock or none, so each clock shows only its own settings —
   // and reaching for a setting says you want the clock it belongs to.
@@ -1883,7 +1885,11 @@ function renderSetup(setupError = "") {
     if (["snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
       setupForm.querySelector('input[name="snakeClock"][value="chess"]').checked = true;
     }
-    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) syncSnakeClockOptions();
+    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
+      setupForm.querySelector('input[name="draftType"][value="snake"]').checked = true;
+      syncAuctionOptions();
+      syncSnakeClockOptions();
+    }
   });
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
