@@ -3057,13 +3057,15 @@ function shuffleCards(players, rng) {
   return copy;
 }
 
-// The fictional randoms are one persistent league rather than a fresh
-// invention per room: the same made-up players live behind the scenes
-// (generated once from a fixed seed), and each draft deals a slice of them.
-// Rooms meet the same characters night after night without ever seeing the
-// whole league at once. Bump the version in the seed to trigger a full
-// expansion draft of new fictional players.
-const FICTIONAL_UNIVERSE_SEED = "fictional-universe-v1";
+// The fictional randoms are a fresh invention per room: the room seed makes
+// its own league — exactly what the setup screen promises — and the draft
+// deals a slice of it, so no room ever sees its whole league at once. Same
+// seed, same league, same deck: online clients rebuild identically, and the
+// hidden printings land on different players in every room. The version tag
+// prefixes every seed; bump it and each seed generates a new expansion
+// draft. Callers with no seed (card labs, tests) get the version tag alone —
+// the original league.
+const FICTIONAL_UNIVERSE_VERSION = "fictional-universe-v1";
 const FICTIONAL_UNIVERSE_TEAMS = 8;
 const FICTIONAL_DEAL_QUOTAS = [
   ["C", 10],
@@ -3077,15 +3079,22 @@ const FICTIONAL_DEAL_QUOTAS = [
   ["RP", 16]
 ];
 
+// One-entry cache: the setup screen rebuilds the pool as the seed is typed
+// and the online server hosts several rooms, but both revisit the same seed
+// over and over, and a league regenerates in a few milliseconds when they
+// don't.
 let fictionalUniverseCache = null;
 
-export function buildFictionalUniverse() {
-  fictionalUniverseCache ??= generatePlayerPool(FICTIONAL_UNIVERSE_SEED, FICTIONAL_UNIVERSE_TEAMS, 13);
-  return fictionalUniverseCache;
+export function buildFictionalUniverse(seed = "") {
+  const key = seed ? `${FICTIONAL_UNIVERSE_VERSION}:${seed}` : FICTIONAL_UNIVERSE_VERSION;
+  if (fictionalUniverseCache?.key !== key) {
+    fictionalUniverseCache = { key, pool: generatePlayerPool(key, FICTIONAL_UNIVERSE_TEAMS, 13) };
+  }
+  return fictionalUniverseCache.pool;
 }
 
 export function buildFictionalDraftPool(seed) {
-  return dealPool(buildFictionalUniverse(), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
+  return dealPool(buildFictionalUniverse(seed), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
 }
 
 function makeHitterCard(rng, index, usedNames, position) {

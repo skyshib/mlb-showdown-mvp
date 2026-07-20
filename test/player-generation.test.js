@@ -114,37 +114,43 @@ test("generated multi-position cards retain primary ratings and valid secondary 
   }
 });
 
-test("the fictional universe is one persistent league", () => {
+test("each room seed invents its own fictional league", () => {
   const universe = buildFictionalUniverse();
-  assert.deepEqual(universe, buildFictionalUniverse(), "universe is stable across builds");
-  assert.ok(universe.length >= 150, "universe is deep enough to deal from");
+  assert.deepEqual(universe, buildFictionalUniverse(), "the no-seed league is stable across builds");
+  assert.ok(universe.length >= 150, "a league is deep enough to deal from");
   const names = universe.map((player) => player.name);
   assert.equal(new Set(names).size, names.length, "every fictional player is one person");
+
+  const nightA = buildFictionalUniverse("night-a");
+  assert.deepEqual(nightA, buildFictionalUniverse("night-a"), "same seed, same league");
+  const nightB = buildFictionalUniverse("night-b");
+  assert.notDeepEqual(
+    nightA.map((player) => player.name),
+    nightB.map((player) => player.name),
+    "two seeds invent different players"
+  );
+  assert.equal(nightA.filter((player) => player.egg === "golden").length, 1, "every league hides one golden ticket");
 });
 
-test("each fictional draft deals a seeded slice of the universe", () => {
-  const dealA = buildFictionalDraftPool("night-a");
-  const dealB = buildFictionalDraftPool("night-b");
+test("each fictional draft deals a seeded slice of its own league", () => {
+  const deal = buildFictionalDraftPool("night-a");
 
   // Same seed, same deck — required for online rooms to rebuild identically.
-  assert.deepEqual(dealA, buildFictionalDraftPool("night-a"));
+  assert.deepEqual(deal, buildFictionalDraftPool("night-a"));
 
-  const idsA = new Set(dealA.map((player) => player.id));
-  const idsB = new Set(dealB.map((player) => player.id));
-  assert.notDeepEqual([...idsA].sort(), [...idsB].sort(), "two seeds deal different decks");
-
-  // Recurring characters: the decks overlap without being identical.
-  const shared = [...idsA].filter((id) => idsB.has(id));
-  assert.ok(shared.length > 0, "some fictional players recur across decks");
-
-  const universe = buildFictionalUniverse();
-  for (const deal of [dealA, dealB]) {
-    assert.ok(deal.length < universe.length, "a deal is a strict slice of the universe");
-    assert.ok(maxRealPoolManagers(deal) >= 8, "every deal supports eight-manager rooms");
-    for (const player of deal) {
-      assert.ok(universe.some((card) => card.id === player.id), `${player.name} comes from the universe`);
-    }
+  const universe = buildFictionalUniverse("night-a");
+  assert.ok(deal.length < universe.length, "a deal is a strict slice of its league");
+  assert.ok(maxRealPoolManagers(deal) >= 8, "every deal supports eight-manager rooms");
+  for (const player of deal) {
+    assert.ok(universe.some((card) => card.id === player.id), `${player.name} comes from his league`);
   }
+
+  const otherDeal = buildFictionalDraftPool("night-b");
+  assert.notDeepEqual(
+    deal.map((player) => player.name),
+    otherDeal.map((player) => player.name),
+    "two seeds deal decks of different players"
+  );
 });
 
 test("dealt fictional pools draft to completion at the eight-manager maximum", () => {
