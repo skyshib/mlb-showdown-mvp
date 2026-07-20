@@ -818,7 +818,7 @@
   /* The ratings print in a grotesque whose 1 wears the top flag and nothing
      at the foot — Archivo's 1 stands on a serif and reads wrong at plate
      size. System fonts, so the game stays offline-complete. */
-  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-family: Futura, "Century Gothic", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
   font-size: 7.3cqw;
   font-style: normal;
   font-weight: 700;
@@ -984,9 +984,9 @@
 .gq-proto-ribbon,
 .gq-proto-control-label {
   position: absolute;
-  left: 3.2%;
+  left: 4.1%;
   top: calc(89.05% - 0.5cqw);
-  width: 14%;
+  width: 12.3%;
   height: 4.4%;
   overflow: visible;
   pointer-events: none;
@@ -1011,7 +1011,7 @@
   display: grid;
   place-items: center;
   color: #ef3d1b;
-  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-family: Futura, "Century Gothic", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
   font-size: 7.75cqw;
   font-style: normal;
   font-weight: 700;
