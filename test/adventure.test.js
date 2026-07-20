@@ -3547,7 +3547,7 @@ test("the suspense screen stages every die the play threw, gloves included", asy
     playDetails: { doublePlayAttempt: { batterOut: true, roll: 17 } }
   };
   const turned = dramaStages([grounder]);
-  assert.deepEqual(turned.map((stage) => stage.label), ["PITCH", "SWING", "THE PIVOT"]);
+  assert.deepEqual(turned.map((stage) => stage.label), ["PITCH", "SWING", "THE THROW"]);
   assert.deepEqual(turned.map((stage) => stage.roll), [4, 11, 17]);
   assert.match(turned[2].caption, /TWO DOWN/, "and it says what the glove did with it");
 
