@@ -353,9 +353,7 @@ function fictionalPitcherBadge(card) {
       <path class="gq-proto-ball-stitches" d="M 67 12 L 77 20 M 61 26 L 71 32 M 57 42 L 69 44 M 57 58 L 69 56 M 61 74 L 71 68 M 67 88 L 77 80"></path>
     </g>
   </svg>
-  <svg class="gq-proto-ribbon" viewBox="0 0 200 70" preserveAspectRatio="none" aria-hidden="true">
-    <path d="M 8 30 Q 100 7 192 30 L 181 64 Q 100 42 19 64 Z"></path>
-  </svg>
+  <img class="gq-proto-frame gq-proto-frame-ribbon" src="vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER-v2.png" alt="">
   <div class="gq-proto-control" aria-label="Control plus ${escapeHtml(card.control)}">
     <span class="gq-proto-control-plus">+</span>
     <span class="gq-proto-control-number">${escapeHtml(card.control)}</span>

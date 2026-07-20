@@ -981,25 +981,22 @@
 .gq-proto-ball-stitches { fill: none; stroke: #c84b43; stroke-width: 2.4; stroke-linecap: round; }
 .gq-proto-ball-markings { opacity: 0.42; }
 
-.gq-proto-ribbon,
+/* The CONTROL ribbon is the frame art's own printing: the v2 pitcher frame
+   carries the empty banner that the NO-RIBBON variant strips (plus a baked
+   footer and a stray mark, which this clip discards). Same overscan box as
+   the other frame layers; only the lettering over it is ours. */
+.gq-proto-frame-ribbon {
+  z-index: 8;
+  clip-path: inset(85.6% 79.4% 10.1% 6.9%);
+}
 .gq-proto-control-label {
   position: absolute;
-  left: 4.1%;
-  top: calc(89.05% - 0.5cqw);
-  width: 12.3%;
-  height: 4.4%;
+  left: 3.3%;
+  top: 88.7%;
+  width: 13.7%;
+  height: 3.4%;
   overflow: visible;
   pointer-events: none;
-}
-.gq-proto-ribbon {
-  z-index: 8;
-  transform: translateY(-0.55cqw);
-}
-.gq-proto-ribbon path {
-  fill: #091018;
-  stroke: #ef3d1b;
-  stroke-width: 4px;
-  stroke-linejoin: round;
 }
 .gq-proto-control {
   position: absolute;
