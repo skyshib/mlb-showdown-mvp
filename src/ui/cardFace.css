@@ -815,6 +815,10 @@
   left: 10.23%;
   top: calc(86.38% - 0.1cqw);
   color: #ef3d1b;
+  /* The ratings print in a grotesque whose 1 wears the top flag and nothing
+     at the foot — Archivo's 1 stands on a serif and reads wrong at plate
+     size. System fonts, so the game stays offline-complete. */
+  font-family: "Helvetica Neue", Arial, sans-serif;
   font-size: 7.75cqw;
   font-style: normal;
   font-weight: 700;
@@ -976,9 +980,9 @@
 .gq-proto-control-label {
   position: absolute;
   left: 2.5%;
-  top: calc(89.25% - 0.5cqw);
+  top: calc(89.1% - 0.5cqw);
   width: 15.5%;
-  height: 3.6%;
+  height: 4.05%;
   overflow: visible;
   pointer-events: none;
 }
@@ -1002,6 +1006,7 @@
   display: grid;
   place-items: center;
   color: #ef3d1b;
+  font-family: "Helvetica Neue", Arial, sans-serif;
   font-size: 7.75cqw;
   font-style: normal;
   font-weight: 700;
@@ -1032,4 +1037,11 @@
   font-weight: 700;
   paint-order: stroke fill;
   text-anchor: middle;
+}
+/* A second pass of the same lettering, white-stroked, fattens the glyphs to
+   the chunk of the frame's printed ON-BASE — the weight range maps onto one
+   700 file, so a heavier font-weight alone changes nothing. */
+.gq-proto-control-label text.gq-proto-control-label-bold {
+  stroke: #fff;
+  stroke-width: 1.1px;
 }

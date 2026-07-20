@@ -363,6 +363,7 @@ function fictionalPitcherBadge(card) {
   <svg class="gq-proto-control-label" viewBox="0 0 200 70" role="img" aria-label="Control">
     <path id="gq-control-curve-${escapeHtml(card.id)}" d="M 15 52 Q 100 29 185 52"></path>
     <text><textPath href="#gq-control-curve-${escapeHtml(card.id)}" startOffset="50%">CONTROL</textPath></text>
+    <text class="gq-proto-control-label-bold" aria-hidden="true"><textPath href="#gq-control-curve-${escapeHtml(card.id)}" startOffset="50%">CONTROL</textPath></text>
   </svg>`;
 }
 
