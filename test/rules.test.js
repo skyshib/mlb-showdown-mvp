@@ -870,6 +870,34 @@ test("undoLastPick reopens a completed draft and clears undone lineup assignment
   assert.deepEqual(manager.lineupAssignments, {});
 });
 
+test("a completed draft hands every CPU manager an optimized lineup, staff, and order", () => {
+  const draft = createDraft(
+    [{ name: "Robo", cpu: true }, { name: "Human", cpu: false }],
+    makeDraftPool("cpu-sync"),
+    13
+  );
+  while (!draft.complete) autopick(draft);
+
+  const robo = draft.managers[0];
+  const human = draft.managers[1];
+
+  // The CPU's materialized choices reproduce exactly the team the optimizer
+  // would build from a blank slate — nothing better is left on his bench.
+  const played = buildTeam(robo);
+  const optimal = buildTeam(
+    { ...robo, lineupAssignments: {}, staffAssignments: {}, battingOrder: [] },
+    { optimize: true }
+  );
+  assert.deepEqual(played.lineup.map((player) => player.id), optimal.lineup.map((player) => player.id));
+  assert.deepEqual(played.starters.map((player) => player.id), optimal.starters.map((player) => player.id));
+  assert.deepEqual(played.bullpen.map((player) => player.id), optimal.bullpen.map((player) => player.id));
+
+  // The human's seat is his own business: completion writes him nothing.
+  assert.ok(!human.lineupAssignments || Object.keys(human.lineupAssignments).length === 0);
+  assert.ok(!human.staffAssignments || Object.keys(human.staffAssignments).length === 0);
+  assert.ok(!human.battingOrder || human.battingOrder.length === 0);
+});
+
 test("corner outfielders can fill left or right field", () => {
   const manager = {
     name: "Corner Flex",
