@@ -815,20 +815,11 @@
   left: 10.23%;
   top: calc(86.38% - 0.1cqw);
   color: #ef3d1b;
-  /* The ratings print in a grotesque whose 1 wears the top flag and nothing
-     at the foot — Archivo's 1 stands on a serif and reads wrong at plate
-     size. System fonts, so the game stays offline-complete. */
-  font-family: Futura, "Century Gothic", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
-  font-size: 7.3cqw;
+  font-size: 7.75cqw;
   font-style: normal;
   font-weight: 700;
-  /* Helvetica's digits sit looser than the condensed face this plate was
-     measured for — pulled in so a two-digit rating stays inside the plate.
-     Negative tracking hangs on the LAST digit too, leaving the glyphs right
-     of the box's center; the transform walks them back. */
-  letter-spacing: -0.55cqw;
   line-height: 1;
-  transform: translate(calc(-50% - 0.43cqw), -50%);
+  transform: translate(-50%, -50%);
   text-shadow:
     -0.18cqw -0.18cqw 0 #080808,
     0.18cqw -0.18cqw 0 #080808,
@@ -1008,7 +999,6 @@
   display: grid;
   place-items: center;
   color: #ef3d1b;
-  font-family: Futura, "Century Gothic", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
   font-size: 7.75cqw;
   font-style: normal;
   font-weight: 700;
