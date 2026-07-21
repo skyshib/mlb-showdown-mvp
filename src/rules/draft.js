@@ -1744,6 +1744,34 @@ function fieldedBucketFloor(manager, model) {
   return floor;
 }
 
+// Does this card take an OPEN slot on the manager's roster, or is it bench? An
+// arm answers by its staff count (a starter needs an open rotation seat, a
+// reliever an open pen seat). A bat answers by the lineup: seat the roster
+// optimally, and a bat is a NEED only if it mans an open FIELD position — its
+// own, that nobody covers yet. A card whose position is already manned can only
+// spill to the util (DH) slot, and that is a need only once every field slot is
+// filled and the DH is the last hole left; ahead of an open field position it is
+// a duplicate, so a third corner outfielder while the catcher's slot sits empty
+// fills nothing. This is what the coarse hitter/starter/bullpen count could not
+// see — it read bats nine-deep as one pool and called every duplicate a need.
+function hitterTakesOpenSlot(roster, card) {
+  const fieldFilled = (list) =>
+    assignLineupSlots(list).slots.filter((slot) => slot.player && slot.label !== "DH").length;
+  if (fieldFilled([...roster, card]) > fieldFilled(roster)) return true;
+  const slots = assignLineupSlots(roster).slots;
+  const fieldOpen = slots.some((slot) => !slot.player && slot.label !== "DH");
+  const dhOpen = slots.some((slot) => !slot.player && slot.label === "DH");
+  return !fieldOpen && dhOpen;
+}
+
+function cardFillsNeed(manager, draft, card) {
+  if (card?.kind === "pitcher") {
+    const needs = getRosterNeeds(manager.roster, draft);
+    return pitcherRole(card) === "SP" ? needs.starter > 0 : needs.bullpen > 0;
+  }
+  return hitterTakesOpenSlot(manager.roster, card);
+}
+
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
@@ -1784,8 +1812,17 @@ function auctionWillingness(draft, manager, player) {
   const endgame = auctionEndgamePressure(draft);
   const fieldedFloor = endgame > 0 ? fieldedBucketFloor(manager, market.model) : null;
   const effectiveWorth = (card) => {
-    const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * auctionUrgency(draft, manager, card, forthcoming));
-    if (bucketNeed(needs, playerBucket(card)) > 0) return base;
+    // A card fills a need only if it would take an OPEN slot — an empty lineup
+    // spot for a bat (its own position, or the util slot behind it), an empty
+    // staff seat for an arm. A redundant one — a fifth corner outfielder to a man
+    // whose outfield is set, a third catcher — is bench, however good its raw
+    // worth, so it earns no urgency and is damped, and never pulls budget off a
+    // hole that is still open. (The old gate counted bats nine-deep as one pool,
+    // so duplicate positions read as needs until the ninth bat was aboard.)
+    const fills = cardFillsNeed(manager, draft, card);
+    const urgency = fills ? auctionUrgency(draft, manager, card, forthcoming) : 0;
+    const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * urgency);
+    if (fills) return base;
     const damped = base * DEPTH_DAMP;
     if (!endgame) return damped;
     const floor = fieldedFloor.get(playerBucket(card));
