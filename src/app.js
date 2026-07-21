@@ -12,7 +12,7 @@ import {
 import { applyFranchisePalette } from "./ui/franchisePalette.js";
 import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
-import { buildFictionalDraftPool } from "./data/playerGeneration.js";
+import { buildFictionalDraftPool, MAX_TEMPERATURE, normalizeTemperature } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml } from "./ui/cardFace.js?v=20260716-records";
 import { canEnterAuctionBid, nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
@@ -905,6 +905,8 @@ function defaultState() {
     maskBids: false,
     startingPitchers: DEFAULT_STARTING_PITCHERS,
     rosterSize: rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS),
+    // Wildness of the generated (fictional) pool; 0 = normal. Ignored by real sets.
+    temperature: 0,
     draft: null,
     draftTab: "available",
     rosterTab: "roster",
@@ -1027,6 +1029,7 @@ function openRoom(roomId, room) {
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
   state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
+  state.temperature = normalizeTemperature(room.temperature);
   state.universe = universeConfig(room.universe)?.key ?? DEFAULT_UNIVERSE;
   state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
   state.draftType = room.draftType === "auction" ? "auction" : "snake";
@@ -1066,11 +1069,12 @@ function rebuildOnlineDraft(room) {
   // Re-dealing from the seed asks every client to reproduce a deal that only
   // holds while nobody touches the dealing code — and the room outlives that.
   const pool = room.deck?.length
-    ? deckFromIds(state.universe, room.seed, room.deck)
+    ? deckFromIds(state.universe, room.seed, room.deck, state.temperature)
     : buildDraftPool(state.universe, room.seed, {
       nomination: state.nomination,
       managerCount: room.managers.length,
-      startingPitchers: state.startingPitchers
+      startingPitchers: state.startingPitchers,
+      temperature: state.temperature
     });
   state.draft = createDraft(
     room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
@@ -1442,7 +1446,23 @@ function renderUniverseFieldset(key) {
     </div>
     ${option("fictional", "Fictional players",
       "A made-up league, invented fresh from the seed above. Nobody has scouting reports on these guys.")}
+    <div class="pool-suboptions temperature-field" ${choice.pick === "fictional" ? "" : "hidden"}>
+      <label class="temperature-slider">
+        Wildness <span class="temperature-value" data-temperature-value>${escapeHtml(temperatureLabel(state.temperature))}</span>
+        <input type="range" name="temperature" min="0" max="${MAX_TEMPERATURE}" step="1" value="${state.temperature}" />
+        <small>Widens every stat &mdash; cards drift far outside the normal ranges: monster bats, double-digit control, oddball charts. Only touches the fictional set.</small>
+      </label>
+    </div>
   </fieldset>`;
+}
+
+// The wildness slider's live caption. 0 is the untouched pool; the rest climb
+// through progressively sillier leagues.
+function temperatureLabel(temperature) {
+  const value = normalizeTemperature(temperature);
+  if (value === 0) return "Normal";
+  const tier = Math.ceil((value / MAX_TEMPERATURE) * 4);
+  return ["A little wild", "Wild", "Very wild", "Maximum chaos"][tier - 1] ?? "Wild";
 }
 
 // Random nomination is not a third kind of draft — it IS an auction, one that
@@ -1829,6 +1849,7 @@ function renderSetup(setupError = "") {
     const pick = new FormData(setupForm).get("universe");
     setupForm.querySelector(".decade-checklist").hidden = pick !== "decades";
     setupForm.querySelector(".franchise-field").closest(".pool-suboptions").hidden = pick !== "franchise";
+    setupForm.querySelector(".temperature-field").hidden = pick !== "fictional";
   };
   // The auction's own sub-options — who nominates, and the budget — belong to
   // the auction, so they only show when it is chosen; and reaching for one of
@@ -1876,6 +1897,11 @@ function renderSetup(setupError = "") {
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
     const form = new FormData(setupForm);
+    if (event.target.name === "temperature") {
+      const label = setupForm.querySelector("[data-temperature-value]");
+      if (label) label.textContent = temperatureLabel(form.get("temperature"));
+      return;
+    }
     // A hand-typed budget stops tracking the roster size — the manager has said
     // what they want, so a later roster change leaves it alone.
     if (event.target.name === "auctionBudget") {
@@ -1953,6 +1979,7 @@ function renderSetup(setupError = "") {
     state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));
     state.startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
     state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
+    state.temperature = normalizeTemperature(form.get("temperature"));
     const universe = universeFromForm(form);
     if (!universe) {
       renderSetup("Check at least one decade, or pick a different card set.");
@@ -1971,7 +1998,8 @@ function renderSetup(setupError = "") {
     const pool = buildDraftPool(state.universe, state.seed, {
       nomination: state.nomination,
       managerCount: state.managers.length,
-      startingPitchers: state.startingPitchers
+      startingPitchers: state.startingPitchers,
+      temperature: state.temperature
     });
     const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers);
     if (poolError) {
@@ -2039,6 +2067,7 @@ function renderSetup(setupError = "") {
       const room = await createRoom({
         seed,
         startingPitchers,
+        temperature: normalizeTemperature(form.get("temperature")),
         managers: managers.length >= 2 ? managers : ["Home", "Away"],
         universe,
         pickTimer,

@@ -2985,8 +2985,9 @@ const SPEED_MEANS = {
   CF: 14
 };
 
-export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
+export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13, temperature = 0) {
   const rng = createRng(seed);
+  const heat = temperatureHeat(temperature);
   const normalizedTeamCount = Math.max(1, Math.floor(Number(teamCount) || 4));
   const hitterCopiesPerPosition = normalizedTeamCount * 2;
   const pitcherCopiesPerRole = normalizedTeamCount * 4;
@@ -2999,18 +3000,18 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13) {
     const copies = hitterCopiesPerPosition * (POSITION_POOL_MULTIPLIER[position] ?? 1);
     for (let copy = 0; copy < copies; copy += 1) {
       hitterCount += 1;
-      players.push(makeHitterCard(rng, hitterCount, usedNames, position));
+      players.push(makeHitterCard(rng, hitterCount, usedNames, position, heat));
     }
   }
 
   for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
     pitcherCount += 1;
-    players.push(makePitcherCard(rng, pitcherCount, usedNames, "SP"));
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "SP", heat));
   }
 
   for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
     pitcherCount += 1;
-    players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP"));
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP", heat));
   }
 
   // A separate stream makes versatility deterministic without perturbing the
@@ -3088,12 +3089,12 @@ export function buildFictionalDraftPool(seed) {
   return dealPool(buildFictionalUniverse(), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
 }
 
-function makeHitterCard(rng, index, usedNames, position) {
-  const chart = makeHitterChart(rng);
+function makeHitterCard(rng, index, usedNames, position, heat = 0) {
+  const chart = makeHitterChart(rng, heat);
   const outSlots = countChartSlots(chart, [RESULTS.SO, RESULTS.GB, RESULTS.FB]);
-  const onBase = normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.6, 6, 15);
-  const speed = randomSpeed(rng, position, outSlots);
-  const fielding = randomFielding(rng, position);
+  const onBase = Math.max(1, normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.6, 6, 15, heat));
+  const speed = randomSpeed(rng, position, outSlots, heat);
+  const fielding = randomFielding(rng, position, heat);
   const points = onBase * 20 + fielding * 7 + speedPoints(speed) + chartPower(chart);
   return {
     id: `h-${index}`,
@@ -3109,11 +3110,11 @@ function makeHitterCard(rng, index, usedNames, position) {
   };
 }
 
-function makePitcherCard(rng, index, usedNames, role) {
+function makePitcherCard(rng, index, usedNames, role, heat = 0) {
   const isReliever = role === "RP";
-  const control = normalInt(rng, 3.5, 1.5, 0, 6);
-  const ip = isReliever ? 1 : starterIp(rng);
-  const chart = makePitcherChart(rng);
+  const control = Math.max(0, normalInt(rng, 3.5, 1.5, 0, 6, heat));
+  const ip = isReliever ? 1 : starterIp(rng, heat);
+  const chart = makePitcherChart(rng, heat);
   const points = pitcherPoints(control, ip, chart);
   return {
     id: `p-${index}`,
@@ -3182,21 +3183,23 @@ export function toChart(rows) {
   return rows.map(([from, to, result]) => ({ from, to, result }));
 }
 
-function makeHitterChart(rng) {
-  const outs = normalInt(rng, 6, 2.2, 1, 11);
+function makeHitterChart(rng, heat = 0) {
+  // The out-count sets remaining = 20 - outs, so it is hard-clamped to [1,19] to
+  // keep the chart a full 20-slot d20 no matter how wide temperature reaches.
+  const outs = clamp(normalInt(rng, 6, 2.2, 1, 11, heat), 1, 19);
   const remaining = 20 - outs;
-  const hitRate = normalFloat(rng, 0.8, 0.16, 0.5, 0.98);
+  const hitRate = normalFloat(rng, 0.8, 0.16, 0.5, 0.98, heat, 0);
   const hits = clamp(Math.round(remaining * hitRate), 1, remaining);
   const walks = remaining - hits;
-  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.32, 0.18, 0, 0.8)), 0, hits);
+  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.32, 0.18, 0, 0.8, heat, 0)), 0, hits);
   const singles = hits - extraBaseHits;
   const triples = extraBaseHits >= 2 && rng.next() < 0.22 ? 1 : 0;
-  const homeRuns = clamp(Math.round((extraBaseHits - triples) * normalFloat(rng, 0.42, 0.25, 0, 0.95)), 0, extraBaseHits - triples);
+  const homeRuns = clamp(Math.round((extraBaseHits - triples) * normalFloat(rng, 0.42, 0.25, 0, 0.95, heat, 0)), 0, extraBaseHits - triples);
   const doubles = extraBaseHits - triples - homeRuns;
   const outCounts = splitSlots(rng, outs, [
-    normalFloat(rng, 0.32, 0.18, 0.03, 0.75),
-    normalFloat(rng, 0.38, 0.2, 0.03, 0.8),
-    normalFloat(rng, 0.3, 0.18, 0.03, 0.75)
+    normalFloat(rng, 0.32, 0.18, 0.03, 0.75, heat, 0),
+    normalFloat(rng, 0.38, 0.2, 0.03, 0.8, heat, 0),
+    normalFloat(rng, 0.3, 0.18, 0.03, 0.75, heat, 0)
   ]);
 
   return chartFromCounts([
@@ -3211,21 +3214,22 @@ function makeHitterChart(rng) {
   ]);
 }
 
-function makePitcherChart(rng) {
-  const outs = normalInt(rng, 16, 1.6, 11, 19);
+function makePitcherChart(rng, heat = 0) {
+  // Hard-clamped to [1,19] for the same 20-slot reason as the hitter chart.
+  const outs = clamp(normalInt(rng, 16, 1.6, 11, 19, heat), 1, 19);
   const remaining = 20 - outs;
-  const walkRate = normalFloat(rng, 0.35, 0.18, 0.05, 0.75);
+  const walkRate = normalFloat(rng, 0.35, 0.18, 0.05, 0.75, heat, 0);
   const walks = clamp(Math.round(remaining * walkRate), 0, remaining);
   const hits = remaining - walks;
-  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.28, 0.16, 0, 0.75)), 0, hits);
+  const extraBaseHits = clamp(Math.round(hits * normalFloat(rng, 0.28, 0.16, 0, 0.75, heat, 0)), 0, hits);
   const singles = hits - extraBaseHits;
-  const homeRuns = clamp(Math.round(extraBaseHits * normalFloat(rng, 0.35, 0.25, 0, 0.9)), 0, extraBaseHits);
+  const homeRuns = clamp(Math.round(extraBaseHits * normalFloat(rng, 0.35, 0.25, 0, 0.9, heat, 0)), 0, extraBaseHits);
   const doubles = extraBaseHits - homeRuns;
   const outCounts = splitSlots(rng, outs, [
-    normalFloat(rng, 0.12, 0.08, 0.01, 0.32),
-    normalFloat(rng, 0.34, 0.18, 0.06, 0.75),
-    normalFloat(rng, 0.34, 0.18, 0.06, 0.75),
-    normalFloat(rng, 0.2, 0.12, 0.03, 0.55)
+    normalFloat(rng, 0.12, 0.08, 0.01, 0.32, heat, 0),
+    normalFloat(rng, 0.34, 0.18, 0.06, 0.75, heat, 0),
+    normalFloat(rng, 0.34, 0.18, 0.06, 0.75, heat, 0),
+    normalFloat(rng, 0.2, 0.12, 0.03, 0.55, heat, 0)
   ]);
 
   return chartFromCounts([
@@ -3257,8 +3261,12 @@ function countChartSlots(chart, results) {
 }
 
 function splitSlots(rng, total, weights) {
-  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
-  const raw = weights.map((weight) => (weight / weightTotal) * total);
+  const weightSum = weights.reduce((sum, weight) => sum + weight, 0);
+  // A very hot pool can widen every weight down to ~0; fall back to an even
+  // split so the slots still get distributed rather than dividing by zero.
+  const weightTotal = weightSum > 0 ? weightSum : weights.length;
+  const effectiveWeights = weightSum > 0 ? weights : weights.map(() => 1);
+  const raw = effectiveWeights.map((weight) => (weight / weightTotal) * total);
   const counts = raw.map((value) => Math.floor(value));
   let remaining = total - counts.reduce((sum, value) => sum + value, 0);
   const order = raw
@@ -3268,18 +3276,18 @@ function splitSlots(rng, total, weights) {
   return counts;
 }
 
-function randomSpeed(rng, position, outSlots) {
+function randomSpeed(rng, position, outSlots, heat = 0) {
   const outAdjustment = (6 - outSlots) * 0.6;
-  return Math.max(1, Math.round(normal(rng, (SPEED_MEANS[position] ?? 12) + outAdjustment, 4.5)));
+  return Math.max(1, Math.round(normal(rng, (SPEED_MEANS[position] ?? 12) + outAdjustment, 4.5, heat)));
 }
 
-function randomFielding(rng, position) {
+function randomFielding(rng, position, heat = 0) {
   const distribution = FIELDING_DISTRIBUTIONS[position] ?? { min: 0, max: 3, mean: 1.5, sd: 1 };
-  return normalInt(rng, distribution.mean, distribution.sd, distribution.min, distribution.max);
+  return normalInt(rng, distribution.mean, distribution.sd, distribution.min, distribution.max, heat);
 }
 
-function starterIp(rng) {
-  const ip = normalInt(rng, 6, 0.5, 5, 7);
+function starterIp(rng, heat = 0) {
+  const ip = Math.max(1, normalInt(rng, 6, 0.5, 5, 7, heat));
   return rng.next() < 0.02 ? 8 : ip;
 }
 
@@ -3288,18 +3296,52 @@ export function speedPoints(speed) {
   return Number.isFinite(value) ? Math.max(0, Math.round((value - 1) * 1.5)) : 0;
 }
 
-function normalInt(rng, mean, sd, min, max) {
-  return clamp(Math.round(normal(rng, mean, sd)), min, max);
+// ---- Temperature ("wildness") ------------------------------------------------
+//
+// A draft can crank the generated pool wilder: a scalar 0..MAX_TEMPERATURE that
+// widens every stat's SPREAD (the Gaussian sd) and its RANGE (the clamp window)
+// in proportion. heat is that scalar mapped to [0,1] and threaded down to the
+// primitives below. heat === 0 is a STRICT no-op — same rng draws, same clamps,
+// byte-identical cards — so the default pool, saves, adventure, and the existing
+// generation tests are untouched. The only thing temperature never breaks is the
+// chart's 20-slot structure (the out-count draw is hard-clamped where it lives).
+export const MAX_TEMPERATURE = 100;
+const HEAT_SD_GAIN = 1.8; // heat 1 -> sd x2.8
+const HEAT_RANGE_GAIN = 2.2; // heat 1 -> distance-from-mean x3.2
+
+export function normalizeTemperature(value) {
+  const number = Math.round(Number(value) || 0);
+  return Math.max(0, Math.min(MAX_TEMPERATURE, number));
 }
 
-function normalFloat(rng, mean, sd, min, max) {
-  return clamp(normal(rng, mean, sd), min, max);
+export function temperatureHeat(temperature) {
+  return normalizeTemperature(temperature) / MAX_TEMPERATURE;
 }
 
-function normal(rng, mean, sd) {
+function widenBounds(mean, min, max, heat) {
+  if (!heat) return [min, max];
+  const factor = 1 + heat * HEAT_RANGE_GAIN;
+  return [mean - (mean - min) * factor, mean + (max - mean) * factor];
+}
+
+function normalInt(rng, mean, sd, min, max, heat = 0) {
+  const [lo, hi] = widenBounds(mean, min, max, heat);
+  return clamp(Math.round(normal(rng, mean, sd, heat)), Math.round(lo), Math.round(hi));
+}
+
+// `floor` is an absolute hard floor applied AFTER the temperature range-widen —
+// used for rates and split-weights, which feed proportional chart math and must
+// never go negative however hot the pool runs.
+function normalFloat(rng, mean, sd, min, max, heat = 0, floor = -Infinity) {
+  const [lo, hi] = widenBounds(mean, min, max, heat);
+  return clamp(normal(rng, mean, sd, heat), Math.max(lo, floor), hi);
+}
+
+function normal(rng, mean, sd, heat = 0) {
+  const spread = sd * (1 + heat * HEAT_SD_GAIN);
   const u1 = Math.max(rng.next(), Number.EPSILON);
   const u2 = Math.max(rng.next(), Number.EPSILON);
-  return mean + sd * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  return mean + spread * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 }
 
 function clamp(value, min, max) {

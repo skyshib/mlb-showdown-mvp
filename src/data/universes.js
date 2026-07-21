@@ -1,4 +1,4 @@
-import { generatePlayerPool } from "./playerGeneration.js";
+import { generatePlayerPool, normalizeTemperature } from "./playerGeneration.js";
 import { createRng } from "../rules/rng.js?v=20260716-records";
 import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
@@ -132,20 +132,24 @@ const DUAL_PERSONS = new Set(MLB_DUAL_PERSONS);
 let universeSeed = DEFAULT_UNIVERSE_SEED;
 let universeMode = "fictional";
 let universeNoise = true;
+let universeTemperature = 0;
 let poolCache = null;
 let poolIndexCache = null;
 
-// Point the games at a universe. Same seed+mode+pricing is a no-op; any
-// change drops the cache so the next universePool() call rebuilds.
+// Point the games at a universe. Same seed+mode+pricing+temperature is a no-op;
+// any change drops the cache so the next universePool() call rebuilds.
 // priceNoise: false prints honest stickers (uncapped saves, draft rooms).
-export function setUniverse(seed, mode = "fictional", { priceNoise = true } = {}) {
+// temperature widens the GENERATED (fictional) pool's stats; real sets ignore it.
+export function setUniverse(seed, mode = "fictional", { priceNoise = true, temperature = 0 } = {}) {
   const nextSeed = seed || DEFAULT_UNIVERSE_SEED;
   const config = universeConfig(mode);
   const nextMode = config ? config.key : "fictional";
-  if (nextSeed === universeSeed && nextMode === universeMode && priceNoise === universeNoise) return;
+  const nextTemp = normalizeTemperature(temperature);
+  if (nextSeed === universeSeed && nextMode === universeMode && priceNoise === universeNoise && nextTemp === universeTemperature) return;
   universeSeed = nextSeed;
   universeMode = nextMode;
   universeNoise = priceNoise;
+  universeTemperature = nextTemp;
   poolCache = null;
   poolIndexCache = null;
 }
@@ -174,6 +178,9 @@ export function installUniversePool(cards, { seed, mode = "fictional", priceNois
   universeSeed = seed || DEFAULT_UNIVERSE_SEED;
   universeMode = config ? config.key : "fictional";
   universeNoise = priceNoise;
+  // A frozen pool is seated verbatim, so temperature is moot; reset it so a later
+  // same-coordinates setUniverse compares cleanly.
+  universeTemperature = 0;
   poolCache = cards;
   poolIndexCache = new Map(cards.map((card) => [card.id, card]));
 }
@@ -196,7 +203,13 @@ export function universePool() {
         : MLB_HISTORY_ROWS;
       poolCache = calibrateUniverse(decodeCardRows(rows), `${universeMode}:${universeSeed}`, { authentic: true });
     } else {
-      const raw = generatePlayerPool(`universe:${universeSeed}`, UNIVERSE_TEAMS, 13);
+      // Temperature is folded into the generation seed so each wildness level is
+      // its own deterministic league, AND passed as the widening arg. The salt is
+      // only added when hot, so a temperature-0 pool keeps its ORIGINAL seed and
+      // stays byte-identical to before this feature (adventure, saves, old rooms).
+      // Real sets above never reach here, so they ignore temperature.
+      const tempSalt = universeTemperature ? `:t${universeTemperature}` : "";
+      const raw = generatePlayerPool(`universe:${universeSeed}${tempSalt}`, UNIVERSE_TEAMS, 13, universeTemperature);
       poolCache = calibrateUniverse(raw, universeSeed);
     }
     poolIndexCache = new Map(poolCache.map((card) => [card.id, card]));
@@ -476,7 +489,7 @@ export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 
 // and seed, then deal. Draft rooms print honest stickers — there is no shop
 // to hunt bargains in, and a card's price is what the auction bids in.
 export function buildDraftPool(mode, seed, options = {}) {
-  setUniverse(seed, mode, { priceNoise: false });
+  setUniverse(seed, mode, { priceNoise: false, temperature: options.temperature });
   if (options.nomination === "random") {
     return dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers);
   }
@@ -500,8 +513,8 @@ export function deckEntry(card) {
   return card.slot ? { id: card.id, slot: card.slot } : card.id;
 }
 
-export function deckFromIds(mode, seed, entries) {
-  setUniverse(seed, mode, { priceNoise: false });
+export function deckFromIds(mode, seed, entries, temperature = 0) {
+  setUniverse(seed, mode, { priceNoise: false, temperature });
   // Rooms saved before the tag existed wrote bare ids. They come back untagged
   // and deal exactly as they always did — an old room's log still replays.
   return entries.map((entry) => {

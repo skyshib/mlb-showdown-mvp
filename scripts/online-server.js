@@ -6,7 +6,7 @@ import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { buildFictionalDraftPool } from "../src/data/playerGeneration.js";
+import { buildFictionalDraftPool, normalizeTemperature } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
 import { buildDraftPool, deckEntry, deckFromIds, universeConfig } from "../src/data/universes.js";
@@ -168,11 +168,12 @@ function roomPool(room) {
   // A room that wrote down its deck deals from THAT deck, never from the seed
   // again. Re-dealing trusts the deal to be the same tomorrow as it was the
   // night the room opened, and it isn't: the deal is code, and code changes.
-  if (room.deck?.length) return deckFromIds(room.universe, room.seed, room.deck);
+  if (room.deck?.length) return deckFromIds(room.universe, room.seed, room.deck, room.temperature);
   return buildDraftPool(room.universe, room.seed, {
     nomination: room.nomination,
     managerCount: room.managerCount,
-    startingPitchers: room.startingPitchers
+    startingPitchers: room.startingPitchers,
+    temperature: room.temperature
   });
 }
 
@@ -187,6 +188,7 @@ function reviveRoom(saved) {
     saved.startingPitchers ?? Number(saved.rosterSize) - 11
   );
   const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
+  const temperature = normalizeTemperature(saved.temperature);
   const savedDeck = Array.isArray(saved.deck) && saved.deck.length ? saved.deck : null;
   const pool = roomPool({
     universe,
@@ -195,6 +197,7 @@ function reviveRoom(saved) {
     realPool,
     nomination,
     startingPitchers,
+    temperature,
     managerCount: managerNames.length,
     deck: savedDeck
   });
@@ -221,6 +224,7 @@ function reviveRoom(saved) {
     seed: saved.seed,
     rosterSize,
     startingPitchers,
+    temperature,
     universe,
     // A room saved before decks were written down pins the one it just revived
     // with: that board is the best record of itself that survives, and pinning
@@ -256,6 +260,7 @@ function persistRoom(store, room) {
     seed: room.seed,
     rosterSize: room.rosterSize,
     startingPitchers: room.startingPitchers,
+    temperature: room.temperature ?? 0,
     universe: room.universe,
     deck: room.deck ?? null,
     poolMode: room.poolMode,
@@ -757,6 +762,7 @@ async function createRoom(store, request, response) {
   const seed = String(body.seed ?? "").trim() || "showdown";
   const startingPitchers = normalizeStartingPitchers(body.startingPitchers);
   const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
+  const temperature = normalizeTemperature(body.temperature);
   // No card set named is the fictional league, as it always was; a card set
   // named that we don't have is a mistake worth saying out loud.
   const universe = body.universe == null ? "fictional" : universeConfig(body.universe)?.key;
@@ -779,7 +785,7 @@ async function createRoom(store, request, response) {
   // random-nomination board is dealt to the size of the ROOM, so how many
   // managers it seats is not a question — whether the set is deep enough to
   // deal it is.
-  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers });
+  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, temperature });
   if (nomination === "random") {
     const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers);
     if (shortfalls.length) {
@@ -822,6 +828,7 @@ async function createRoom(store, request, response) {
     seed,
     rosterSize,
     startingPitchers,
+    temperature,
     universe,
     // The board this room dealt, written down on the night it dealt it —
     // each card with the roster slot it was dealt to fill.
@@ -1292,6 +1299,7 @@ function roomSnapshot(room, port = null) {
     seed: room.seed,
     rosterSize: room.rosterSize,
     startingPitchers: room.startingPitchers,
+    temperature: room.temperature ?? 0,
     universe: room.universe ?? null,
     // The room deals its board to every client. Left to re-deal from the seed a
     // client runs whatever deal ITS copy of the code knows, which is not always
