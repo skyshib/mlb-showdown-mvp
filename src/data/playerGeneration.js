@@ -3021,7 +3021,7 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13, tempera
 
   // A separate stream makes versatility deterministic without perturbing the
   // established names, charts, and ratings produced by the main seed.
-  addGeneratedPositions(players, createRng(`${seed}:positions`));
+  addGeneratedPositions(players, createRng(`${seed}:positions`), heat);
   assignEggCards(players, createRng(`${seed}:eggs`));
 
   return players.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
@@ -3149,7 +3149,7 @@ function makePitcherCard(rng, index, usedNames, role, aceRng = NO_ACES, heat = 0
   const isReliever = role === "RP";
   const rolled = Math.max(0, normalInt(rng, 3.5, 1.5, 0, 6, heat));
   const control = aceRng.next() < ACE_CHANCE ? Math.max(7, rolled) : rolled;
-  const ip = isReliever ? 1 : starterIp(rng, heat);
+  const ip = isReliever ? relieverIp(rng, heat) : starterIp(rng, heat);
   const chart = makePitcherChart(rng, heat);
   const points = pitcherPoints(control, ip, chart);
   return {
@@ -3165,7 +3165,7 @@ function makePitcherCard(rng, index, usedNames, role, aceRng = NO_ACES, heat = 0
   };
 }
 
-function addGeneratedPositions(players, rng) {
+function addGeneratedPositions(players, rng, heat = 0) {
   for (const player of players) {
     if (player.kind !== "hitter") continue;
     const profile = MULTI_POSITION_PROFILES[player.position];
@@ -3174,7 +3174,7 @@ function addGeneratedPositions(players, rng) {
     const positions = [{ pos: player.position, fielding: player.fielding }];
     const secondary = weightedPosition(rng, profile.secondary, new Set([player.position]));
     if (!secondary) continue;
-    positions.push({ pos: secondary, fielding: randomFielding(rng, secondary) });
+    positions.push({ pos: secondary, fielding: randomFielding(rng, secondary, heat) });
 
     // Three-position cards exist in the MLB pool, but make up only about four
     // percent of its multi-position cards. The rate remains primary-specific
@@ -3182,7 +3182,7 @@ function addGeneratedPositions(players, rng) {
     if (rng.next() < profile.thirdRate) {
       const excluded = new Set(positions.map((entry) => entry.pos));
       const third = weightedPosition(rng, profile.secondary, excluded);
-      if (third) positions.push({ pos: third, fielding: randomFielding(rng, third) });
+      if (third) positions.push({ pos: third, fielding: randomFielding(rng, third, heat) });
     }
 
     player.positions = positions;
@@ -3319,7 +3319,24 @@ function randomSpeed(rng, position, outSlots, heat = 0) {
 
 function randomFielding(rng, position, heat = 0) {
   const distribution = FIELDING_DISTRIBUTIONS[position] ?? { min: 0, max: 3, mean: 1.5, sd: 1 };
-  return normalInt(rng, distribution.mean, distribution.sd, distribution.min, distribution.max, heat);
+  // Fielding's base spreads and ranges are tiny (a 1B is 0–1, sd 0.5), so the
+  // shared widen barely moves them off the mean and the pool feels tame. Give
+  // fielding its own absolute heat term on both the spread and the ceiling so a
+  // hot pool reaches genuinely wild gloves — wizard shortstops, +8 corner men —
+  // and, as the low side opens with it, negative-fielding butchers (which
+  // correctly discount the card's points). heat 0 is a strict no-op: both terms
+  // vanish and the draw is byte-identical.
+  const sd = distribution.sd + heat * FIELDING_HEAT_SPREAD;
+  const max = distribution.max + Math.round(heat * FIELDING_HEAT_CEILING);
+  return normalInt(rng, distribution.mean, sd, distribution.min, max, heat);
+}
+
+function relieverIp(rng, heat = 0) {
+  // Cold, every reliever is a one-inning arm — and it's a strict no-op: no rng
+  // draw, so the default pool stays byte-identical. Heat lets a hot pool print
+  // multi-inning firemen who can wear a rally down over three or four frames.
+  if (!heat) return 1;
+  return Math.max(1, normalInt(rng, 1.5, 0.5, 1, 2, heat));
 }
 
 function starterIp(rng, heat = 0) {
@@ -3344,6 +3361,8 @@ export function speedPoints(speed) {
 export const MAX_TEMPERATURE = 100;
 const HEAT_SD_GAIN = 1.8; // heat 1 -> sd x2.8
 const HEAT_RANGE_GAIN = 2.2; // heat 1 -> distance-from-mean x3.2
+const FIELDING_HEAT_CEILING = 10; // heat 1 lifts every position's fielding ceiling by ~10
+const FIELDING_HEAT_SPREAD = 1.5; // heat 1 adds ~1.5 to every position's fielding sd (before the shared widen)
 
 export function normalizeTemperature(value) {
   const number = Math.round(Number(value) || 0);
