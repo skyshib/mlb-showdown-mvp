@@ -51,6 +51,26 @@ const PITCHER_CHART_VALUES = {
 
 const PERTURBATION = 0.25;
 
+// A starting pitcher only takes the ball once through the rotation, so the games
+// he starts — and thus his whole seasonal contribution — scale with 1 / (SP
+// slots): each of two starters opens half a team's games, each of four opens a
+// quarter. The per-card value functions below are format-blind (they price one
+// start), so an SP's worth is lifted by how OFTEN he starts. The lift is
+// anchored at a full rotation (SP_SLOT_ANCHOR): at that many slots or more a
+// starter is priced as-is, and a shorter rotation lifts him toward the anchor.
+// Relievers work out of the pen on availability, not the rotation, so they never
+// take this factor. The shape (anchor 3, floor 1, cap 2) was chosen by an A/B
+// sweep of the CPU bidder: boosting SP ~1.5x at 2 slots beat the slot-blind
+// bidder by ~+4 win pts, while EVER cutting SP below its base value (long
+// rotations) consistently hurt — so the floor never lets it drop below 1.
+const SP_SLOT_ANCHOR = 3;
+const SP_SLOT_FACTOR_CAP = 2;
+
+function spSlotFactor(startingPitchers) {
+  const slots = Number(startingPitchers) || SP_SLOT_ANCHOR;
+  return Math.min(SP_SLOT_FACTOR_CAP, Math.max(1, SP_SLOT_ANCHOR / slots));
+}
+
 // ---- what a computer manager believes ----
 //
 // One autopicker played every empty seat the same way, with a little noise on
@@ -114,9 +134,10 @@ export const VALUATION_BASE_WEIGHTS = {
 };
 export const VALUATION_PERTURBATION = PERTURBATION;
 
-export function createValuationModel(seed, personalityKey = "balanced") {
+export function createValuationModel(seed, personalityKey = "balanced", startingPitchers = SP_SLOT_ANCHOR) {
   const rng = createRng(String(seed));
   const persona = cpuPersonality(personalityKey);
+  const spFactor = spSlotFactor(startingPitchers);
   // The archetype states its case; the noise keeps two of the same archetype
   // from being the same manager.
   const weights = {
@@ -128,8 +149,12 @@ export function createValuationModel(seed, personalityKey = "balanced") {
     weights,
     persona,
     bias: persona.bias,
+    startingPitchers,
     value(player) {
-      return player?.kind === "pitcher" ? pitcherValue(player, weights.pitcher) : hitterValue(player, weights.hitter);
+      if (player?.kind !== "pitcher") return hitterValue(player, weights.hitter);
+      const base = pitcherValue(player, weights.pitcher);
+      // Only starters ride the rotation-size lift; relievers are format-neutral.
+      return player.role === "SP" ? base * spFactor : base;
     }
   };
 }

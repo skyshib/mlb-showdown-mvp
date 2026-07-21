@@ -49,7 +49,12 @@ test("an open-ended top range is worth its share of the die, not infinity", () =
 // them agree on everything, they are one manager wearing two hats.
 test("the computer's archetypes build different rosters", () => {
   const managers = CPU_PERSONALITY_KEYS.map((persona) => ({ name: persona, cpu: true, persona }));
-  const draft = createDraft(managers, pool, 13, "archetype-spread");
+  // Read the arm-timing lean at a FULL four-man rotation, where the SP-slot
+  // value lift is neutral. At a short rotation (two slots) a starter is worth so
+  // much more — he opens half your games — that every archetype, slugger
+  // included, reaches for one early, which is correct pricing but washes out the
+  // persona lean this test is checking.
+  const draft = createDraft(managers, pool, 15, "archetype-spread", { startingPitchers: 4 });
   while (!draft.complete) autopick(draft);
 
   const by = (key) => draft.managers.find((manager) => manager.persona === key);

@@ -1821,11 +1821,18 @@ function auctionWillingness(draft, manager, player) {
 
 export function managerValuation(draft, manager) {
   const persona = manager.persona ?? "balanced";
-  const key = `${draft.seed ?? "showdown"}:valuation:${manager.id}:${persona}`;
-  let model = valuationModels.get(key);
+  // The rotation size is part of what a card is worth (a starter's value scales
+  // with how many games he opens), so it keys the cache alongside the persona.
+  const startingPitchers = draft.startingPitchers ?? DEFAULT_STARTING_PITCHERS;
+  // The weight-perturbation seed stays free of the rotation size, so two rooms
+  // that differ only in SP slots draw the SAME archetype and differ solely by
+  // the starter lift — but the cache still keys on slots so each is its own model.
+  const seedKey = `${draft.seed ?? "showdown"}:valuation:${manager.id}:${persona}`;
+  const cacheKey = `${seedKey}:sp${startingPitchers}`;
+  let model = valuationModels.get(cacheKey);
   if (!model) {
-    model = createValuationModel(key, persona);
-    valuationModels.set(key, model);
+    model = createValuationModel(seedKey, persona, startingPitchers);
+    valuationModels.set(cacheKey, model);
   }
   return model;
 }
