@@ -165,13 +165,53 @@ function perturbWeights(rng, base) {
   );
 }
 
+// On-base is the batter's half of the same roll control is the pitcher's half
+// of: the batter's card settles the plate appearance when d20 + control does
+// NOT clear his on-base. So on-base is the SHARE OF PLATE APPEARANCES DECIDED
+// ON HIS OWN CHART, which makes it a multiplier on that chart, not an addition
+// to it. Measured against simulated runs scored (72 bats, one per DH slot, 300
+// seasons each): on-base alone 0.710, chart alone 0.769, the old additive sum
+// 0.868, the bare product 0.938 — and the form below 0.966. Head to head against
+// the additive model it is worth ~+15 win points on a fictional deck at full
+// temperature (and ~+3 at temperature zero); on mlb-history it is exactly
+// neutral, because real cards sit in a narrow on-base band with little for the
+// interaction to separate.
+//
+// The ladder is the staff a drafted opponent actually runs out, a shade above
+// the pool's mean control (3.5-4.1 across every set measured) because managers
+// draft the high-control arms.
+const REFERENCE_STAFF_CONTROL = [3, 4, 4, 5, 5, 6, 7];
+
+// What a typical pitcher's chart is worth when IT is the one consulted, scored
+// on the hitter's table (per slot): −1.44 fictional, −1.10 at full temperature,
+// −1.41 mlb-history. The break-even line — a bat whose chart rates above it
+// gains from on-base, one below it would rather the pitcher's card were read.
+const REPLACEMENT_ARM_RATE = -1.35;
+
+// Calibrated on hitter WORTH (value − worst-at-position), which is what the
+// bidder actually prices, not on mean value.
+const HITTER_INTERACTION_SCALE = 130;
+
+function onBaseUsage(onBase) {
+  const ob = Number(onBase) || 0;
+  let total = 0;
+  for (const control of REFERENCE_STAFF_CONTROL) {
+    total += Math.max(0, Math.min(20, ob - control)) / 20;
+  }
+  return total / REFERENCE_STAFF_CONTROL.length;
+}
+
 function hitterValue(player, weights) {
   const speedComponent = Math.max(0, (Number(player.speed) || 0) - 1);
+  // The on-base weight is now the persona's read on how much reaching base is
+  // worth, applied as a lean on the usage curve — it must not scale the
+  // replacement line, or a bat-minded archetype gets a flat bonus on every bat.
+  const lean = weights.onBase / HITTER_BASE_WEIGHTS.onBase;
+  const edge = chartRate(player.chart, HITTER_CHART_VALUES) * weights.chart - REPLACEMENT_ARM_RATE;
   return (
-    (Number(player.onBase) || 0) * weights.onBase +
+    onBaseUsage(player.onBase) * lean * edge * HITTER_INTERACTION_SCALE +
     (Number(player.fielding) || 0) * weights.fielding +
-    speedComponent * weights.speed +
-    chartValue(player.chart, HITTER_CHART_VALUES) * weights.chart
+    speedComponent * weights.speed
   );
 }
 
@@ -195,4 +235,13 @@ function chartValue(chart, values) {
     (sum, entry) => sum + chartSpan(entry) * (values[entry.result] ?? 0),
     0
   );
+}
+
+function chartSlots(chart) {
+  return (chart ?? []).reduce((sum, entry) => sum + chartSpan(entry), 0);
+}
+
+function chartRate(chart, values) {
+  const slots = chartSlots(chart);
+  return slots ? chartValue(chart, values) / slots : 0;
 }
