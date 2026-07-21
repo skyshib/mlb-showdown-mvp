@@ -353,15 +353,16 @@ function fictionalPitcherBadge(card) {
       <path class="gq-proto-ball-stitches" d="M 67 12 L 77 20 M 61 26 L 71 32 M 57 42 L 69 44 M 57 58 L 69 56 M 61 74 L 71 68 M 67 88 L 77 80"></path>
     </g>
   </svg>
-  <img class="gq-proto-frame gq-proto-frame-ribbon" src="vendor/showdownbot/2004-Pitcher-BLUE-NO-FOOTER-v2.png" alt="">
+  <svg class="gq-proto-ribbon" viewBox="0 0 200 70" aria-hidden="true">
+    <path d="M 8 30 Q 100 7 192 30 L 181 64 Q 100 42 19 64 Z"></path>
+  </svg>
   <div class="gq-proto-control" aria-label="Control plus ${escapeHtml(card.control)}">
     <span class="gq-proto-control-plus">+</span>
     <span class="gq-proto-control-number">${escapeHtml(card.control)}</span>
   </div>
-  <svg class="gq-proto-control-label" viewBox="0 0 200 70" preserveAspectRatio="none" role="img" aria-label="Control">
+  <svg class="gq-proto-control-label" viewBox="0 0 200 70" role="img" aria-label="Control">
     <path id="gq-control-curve-${escapeHtml(card.id)}" d="M 15 52 Q 100 29 185 52"></path>
     <text><textPath href="#gq-control-curve-${escapeHtml(card.id)}" startOffset="50%">CONTROL</textPath></text>
-    <text class="gq-proto-control-label-bold" aria-hidden="true"><textPath href="#gq-control-curve-${escapeHtml(card.id)}" startOffset="50%">CONTROL</textPath></text>
   </svg>`;
 }
 
