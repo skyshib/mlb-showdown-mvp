@@ -490,10 +490,32 @@ export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 
 // to hunt bargains in, and a card's price is what the auction bids in.
 export function buildDraftPool(mode, seed, options = {}) {
   setUniverse(seed, mode, { priceNoise: false, temperature: options.temperature });
-  if (options.nomination === "random") {
-    return dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers);
-  }
-  return dealDraftDeck(seed, options.managerCount, options.startingPitchers);
+  const deck = options.nomination === "random"
+    ? dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers)
+    : dealDraftDeck(seed, options.managerCount, options.startingPitchers);
+  return universeKey() === "fictional" ? ensureGoldenTicket(deck, seed) : deck;
+}
+
+// Every fictional deck carries exactly one golden ticket. The deal slices a
+// 3000-card set holding a single 1-of-1, so left alone the ticket would miss
+// almost every room; when it does, it takes a dealt seat in its own group,
+// so the deal's quotas hold. The ticket is always the set's own card, never
+// a stamped copy — a room records its deck as ids and rebuilds it by lookup,
+// and a copy's stamp would not survive the trip.
+function ensureGoldenTicket(deck, seed) {
+  if (deck.some((card) => card.egg === "golden")) return deck;
+  const golden = universePool().find((card) => card.egg === "golden");
+  if (!golden) return deck;
+  const groupOf = (card) => (card.kind === "pitcher" ? card.role : card.position);
+  const seats = deck
+    .map((card, index) => ({ card, index }))
+    .filter(({ card }) => groupOf(card) === groupOf(golden));
+  if (!seats.length) return deck;
+  const rng = createRng(`golden-seat:${seed}`);
+  const seat = seats[rng.int(0, seats.length - 1)];
+  const seated = [...deck];
+  seated[seat.index] = seat.card.slot ? { ...golden, slot: seat.card.slot } : golden;
+  return seated;
 }
 
 // A deck that was already dealt, rebuilt card for card from the ids it dealt.

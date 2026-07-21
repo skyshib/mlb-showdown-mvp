@@ -219,3 +219,21 @@ test("a small room keeps the deep board, unchanged card for card", () => {
     eight.map((card) => card.id)
   );
 });
+
+test("every fictional deck seats exactly one golden ticket, and it survives an id rebuild", async () => {
+  const { deckEntry, deckFromIds } = await import("../src/data/universes.js");
+  for (const seed of ["night-a", "night-b", "golden-hunt"]) {
+    for (const nomination of ["manual", "random"]) {
+      const deck = buildDraftPool("fictional", seed, { nomination, managerCount: 3 });
+      const goldens = deck.filter((card) => card.egg === "golden");
+      assert.equal(goldens.length, 1, `${seed}/${nomination} deals ${goldens.length} golden tickets`);
+      // The room writes its deck down as ids; the ticket must come back.
+      const rebuilt = deckFromIds("fictional", seed, deck.map(deckEntry));
+      assert.equal(rebuilt.filter((card) => card.egg === "golden").length, 1, `${seed}/${nomination} rebuilt`);
+    }
+  }
+
+  // Real-player decks stay untouched: the golden printing is a fictional thing.
+  const classic = buildDraftPool("classic", "night-a");
+  assert.equal(classic.filter((card) => card.egg === "golden").length, 0);
+});

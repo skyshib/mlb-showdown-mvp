@@ -218,6 +218,27 @@ function randomBaseballSeed() {
   return `${pick(SEED_ADJECTIVES)}-${pick(SEED_NOUNS)}`;
 }
 
+// The seed the last room actually ran with, kept outside the main state so
+// "New room" (which resets state to fresh defaults) can still refill it.
+// Rerunning a good night's seed is the whole reason to remember it.
+const LAST_SEED_KEY = "mlb-showdown-mvp-last-seed";
+
+function rememberLastSeed(seed) {
+  try {
+    localStorage.setItem(LAST_SEED_KEY, seed);
+  } catch {
+    // Storage can be unavailable (private mode); the button just stays off.
+  }
+}
+
+function lastUsedSeed() {
+  try {
+    return localStorage.getItem(LAST_SEED_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 let state = loadState() ?? defaultState();
 // A restored draft carries its own dealt cards, so it never re-deals — but
 // the card faces still look the rest of the universe up (a two-way player's
@@ -881,10 +902,11 @@ function defaultState() {
     cpuManagers: [],
     universe: DEFAULT_UNIVERSE,
     draftType: "snake",
-    nomination: "manual",
+    nomination: "random",
     // A blind draft: hide every card's printed points until it is drafted, so
-    // managers pick and bid on the baseball rather than the number.
-    hidePoints: false,
+    // managers pick and bid on the baseball rather than the number. On by
+    // default — the number is the least interesting thing on the card.
+    hidePoints: true,
     auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS)),
     auctionTimer: {
       reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
@@ -1026,6 +1048,7 @@ function openRoom(roomId, room) {
   const seat = loadOnlineSeat(roomId);
   state = defaultState();
   state.seed = room.seed;
+  rememberLastSeed(state.seed);
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
   state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
@@ -1724,7 +1747,13 @@ function renderSetup(setupError = "") {
         </fieldset>
         <div class="setup-row">
           <label>
-            Seed
+            <span class="seed-label-row">
+              <span>Seed</span>
+              <span class="seed-buttons">
+                <button type="button" class="small" data-action="seed-last" title="Refill the seed the last room ran with"${lastUsedSeed() ? "" : " disabled"}>&#8634; last</button>
+                <button type="button" class="small" data-action="seed-random" title="Roll a fresh seed">&#127922;</button>
+              </span>
+            </span>
             <input name="seed" value="${escapeHtml(state.seed)}" />
           </label>
           <label>
@@ -1733,8 +1762,17 @@ function renderSetup(setupError = "") {
             <small>Each team also drafts nine hitters and two relievers.</small>
           </label>
         </div>
-        <fieldset class="pool-mode snake-clock-mode">
-          <legend>Snake clock</legend>
+      </div>
+      <div class="setup-col">
+        <h2 class="setup-h2">The draft</h2>
+      <fieldset class="pool-mode draft-type-mode">
+        <legend>Draft type</legend>
+        <label class="pool-option">
+          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
+          <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
+        </label>
+        <div class="pool-suboptions snake-suboptions" ${state.draftType === "auction" ? "hidden" : ""}>
+          <p class="suboption-heading">Snake clock</p>
           <label class="pool-option">
             <input type="radio" name="snakeClock" value="off" ${snakeClockMode(state) === "off" ? "checked" : ""} />
             <span><strong>Off</strong><small>Take as long as you like.</small></span>
@@ -1769,28 +1807,19 @@ function renderSetup(setupError = "") {
               <small>Seconds added back to the bank each time you make a pick.</small>
             </label>
           </div>
-        </fieldset>
-      </div>
-      <div class="setup-col">
-        <h2 class="setup-h2">The draft</h2>
-      <fieldset class="pool-mode draft-type-mode">
-        <legend>Draft type</legend>
-        <label class="pool-option">
-          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
-          <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
-        </label>
+        </div>
         <label class="pool-option">
           <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
           <span><strong>Auction draft</strong><small>Cards go up one at a time and everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
         </label>
         <div class="pool-suboptions auction-suboptions" ${state.draftType === "auction" ? "" : "hidden"}>
           <label class="pool-option">
-            <input type="radio" name="nomination" value="manual" ${state.nomination === "random" ? "" : "checked"} />
-            <span><strong>Managers nominate</strong><small>Each manager takes a turn putting a card of their choosing on the block.</small></span>
-          </label>
-          <label class="pool-option">
             <input type="radio" name="nomination" value="random" ${state.nomination === "random" ? "checked" : ""} />
             <span><strong>Random nomination</strong><small><span data-random-nomination-blurb>${escapeHtml(randomNominationBlurb(state.managers.length, state.startingPitchers))}</span> Nobody nominates: a hidden queue deals the cards out in random order. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
+          </label>
+          <label class="pool-option">
+            <input type="radio" name="nomination" value="manual" ${state.nomination === "random" ? "" : "checked"} />
+            <span><strong>Managers nominate</strong><small>Each manager takes a turn putting a card of their choosing on the block.</small></span>
           </label>
           <label class="auction-budget-field">
             Budget per manager ($)
@@ -1851,12 +1880,14 @@ function renderSetup(setupError = "") {
     setupForm.querySelector(".franchise-field").closest(".pool-suboptions").hidden = pick !== "franchise";
     setupForm.querySelector(".temperature-field").hidden = pick !== "fictional";
   };
-  // The auction's own sub-options — who nominates, and the budget — belong to
-  // the auction, so they only show when it is chosen; and reaching for one of
-  // them says you want an auction, so it selects it.
+  // Each draft type's sub-options — the auction's nomination and budget, the
+  // snake's clock — belong to their type, so they only show when it is
+  // chosen; and reaching for one of them says you want that type, so it
+  // selects it.
   const syncAuctionOptions = () => {
     const auction = new FormData(setupForm).get("draftType") === "auction";
     setupForm.querySelector(".auction-suboptions").hidden = !auction;
+    setupForm.querySelector(".snake-suboptions").hidden = auction;
   };
   // The snake has one clock or none, so each clock shows only its own settings —
   // and reaching for a setting says you want the clock it belongs to.
@@ -1892,7 +1923,11 @@ function renderSetup(setupError = "") {
     if (["snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
       setupForm.querySelector('input[name="snakeClock"][value="chess"]').checked = true;
     }
-    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) syncSnakeClockOptions();
+    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
+      setupForm.querySelector('input[name="draftType"][value="snake"]').checked = true;
+      syncAuctionOptions();
+      syncSnakeClockOptions();
+    }
   });
   // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
@@ -1938,9 +1973,25 @@ function renderSetup(setupError = "") {
   // Check all / uncheck all for the decade list: one button that flips to
   // whichever move is left. Reaching for it means you want decades, so it
   // selects that set the same way touching any other picker does.
+  // Both seed buttons write the box and then fire the normal change path,
+  // so the invented example follows the new seed exactly as if it were typed.
+  const fillSeed = (seed) => {
+    if (!seed) return;
+    const input = setupForm.querySelector('input[name="seed"]');
+    input.value = seed;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
   setupForm.addEventListener("click", (event) => {
     if (event.target.closest('[data-action="lottery"]')) {
       runLottery(setupForm);
+      return;
+    }
+    if (event.target.closest('[data-action="seed-random"]')) {
+      fillSeed(randomBaseballSeed());
+      return;
+    }
+    if (event.target.closest('[data-action="seed-last"]')) {
+      fillSeed(lastUsedSeed());
       return;
     }
     if (event.target.closest('[data-action="import-save"]')) {
@@ -1974,6 +2025,7 @@ function renderSetup(setupError = "") {
         .filter(Boolean)
     );
     state.seed = String(form.get("seed")).trim() || "showdown";
+    rememberLastSeed(state.seed);
     state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
     const cpuChecked = new Set(form.getAll("cpu").map(String));
     state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));

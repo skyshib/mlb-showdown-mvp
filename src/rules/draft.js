@@ -543,6 +543,7 @@ export function pickPlayer(draft, playerId, now = Date.now()) {
   draft.pickedIds.add(playerId);
   draft.pickNumber += 1;
   draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  syncCpuTeamChoices(draft);
   return draft;
 }
 
@@ -1111,10 +1112,12 @@ function closeLot(draft) {
     if (nominationQueueRemaining(draft) === 0) {
       sweepRosters(draft);
       draft.complete = true;
+      syncCpuTeamChoices(draft);
     }
     return;
   }
   draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  syncCpuTeamChoices(draft);
 }
 
 // Only an effectively untouched nomination can be canceled: instant computer
@@ -1416,6 +1419,7 @@ export function pickReplacement(draft, now = Date.now()) {
   draft.pickedIds.add(replacement.id);
   draft.pickNumber += 1;
   draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  syncCpuTeamChoices(draft);
   return draft;
 }
 
@@ -2043,6 +2047,29 @@ function bestStaffAssignment(roster, options = {}) {
   return assignment;
 }
 
+// A computer manager never opens the lineup screen, so left alone he fields
+// whatever seating his pick order happened to produce — a star bought late
+// riding the bench behind a lesser early buy. The moment a draft completes,
+// every CPU seat writes down the choices a human would set by hand: the best
+// nine seated, the best staff slotted, the order batting by value. Real
+// assignments rather than a render-time flag, so games, sims, the report
+// card, and the dock all see the same team. Deterministic, so online clients
+// replaying the same actions agree. Humans are never touched.
+export function syncCpuTeamChoices(draft) {
+  if (!draft.complete) return draft;
+  for (const manager of draft.managers) {
+    if (!manager.cpu) continue;
+    manager.lineupAssignments = bestLineupAssignment(manager.roster);
+    manager.staffAssignments = bestStaffAssignment(manager.roster, { startingPitchers: manager.startingPitchers });
+    manager.battingOrder = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
+      .filter((slot) => slot.player)
+      .map((slot) => lineupPlayer(slot))
+      .sort((a, b) => lineupRankValue(b) - lineupRankValue(a))
+      .map((player) => player.id);
+  }
+  return draft;
+}
+
 export function buildTeam(manager, options = {}) {
   // With `optimize` on, a manager who never hand-set a lineup, staff, or order
   // fields the value-optimal team instead of whatever the draft happened to seat:
@@ -2251,6 +2278,7 @@ export function repairDraftRosters(draft) {
     repairManagerRoster(draft, manager);
   }
   draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  syncCpuTeamChoices(draft);
   return draft;
 }
 

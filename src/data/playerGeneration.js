@@ -2995,23 +2995,28 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13, tempera
   const usedNames = new Set();
   let hitterCount = 0;
   let pitcherCount = 0;
+  // One in a thousand prints past the clamps the bell allows: an OB 16 bat or
+  // a Control 7 arm — ratings the rest of the pool treats as impossible. The
+  // promotion rides its own stream so the other 999 keep the exact names,
+  // charts, and ratings the main seed always dealt them.
+  const aceRng = createRng(`${seed}:aces`);
 
   for (const position of POSITIONS) {
     const copies = hitterCopiesPerPosition * (POSITION_POOL_MULTIPLIER[position] ?? 1);
     for (let copy = 0; copy < copies; copy += 1) {
       hitterCount += 1;
-      players.push(makeHitterCard(rng, hitterCount, usedNames, position, heat));
+      players.push(makeHitterCard(rng, hitterCount, usedNames, position, aceRng, heat));
     }
   }
 
   for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
     pitcherCount += 1;
-    players.push(makePitcherCard(rng, pitcherCount, usedNames, "SP", heat));
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "SP", aceRng, heat));
   }
 
   for (let copy = 0; copy < pitcherCopiesPerRole; copy += 1) {
     pitcherCount += 1;
-    players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP", heat));
+    players.push(makePitcherCard(rng, pitcherCount, usedNames, "RP", aceRng, heat));
   }
 
   // A separate stream makes versatility deterministic without perturbing the
@@ -3058,13 +3063,15 @@ function shuffleCards(players, rng) {
   return copy;
 }
 
-// The fictional randoms are one persistent league rather than a fresh
-// invention per room: the same made-up players live behind the scenes
-// (generated once from a fixed seed), and each draft deals a slice of them.
-// Rooms meet the same characters night after night without ever seeing the
-// whole league at once. Bump the version in the seed to trigger a full
-// expansion draft of new fictional players.
-const FICTIONAL_UNIVERSE_SEED = "fictional-universe-v1";
+// The fictional randoms are a fresh invention per room: the room seed makes
+// its own league — exactly what the setup screen promises — and the draft
+// deals a slice of it, so no room ever sees its whole league at once. Same
+// seed, same league, same deck: online clients rebuild identically, and the
+// hidden printings land on different players in every room. The version tag
+// prefixes every seed; bump it and each seed generates a new expansion
+// draft. Callers with no seed (card labs, tests) get the version tag alone —
+// the original league.
+const FICTIONAL_UNIVERSE_VERSION = "fictional-universe-v1";
 const FICTIONAL_UNIVERSE_TEAMS = 8;
 const FICTIONAL_DEAL_QUOTAS = [
   ["C", 10],
@@ -3078,21 +3085,49 @@ const FICTIONAL_DEAL_QUOTAS = [
   ["RP", 16]
 ];
 
+// One-entry cache: the setup screen rebuilds the pool as the seed is typed
+// and the online server hosts several rooms, but both revisit the same seed
+// over and over, and a league regenerates in a few milliseconds when they
+// don't.
 let fictionalUniverseCache = null;
 
-export function buildFictionalUniverse() {
-  fictionalUniverseCache ??= generatePlayerPool(FICTIONAL_UNIVERSE_SEED, FICTIONAL_UNIVERSE_TEAMS, 13);
-  return fictionalUniverseCache;
+export function buildFictionalUniverse(seed = "") {
+  const key = seed ? `${FICTIONAL_UNIVERSE_VERSION}:${seed}` : FICTIONAL_UNIVERSE_VERSION;
+  if (fictionalUniverseCache?.key !== key) {
+    fictionalUniverseCache = { key, pool: generatePlayerPool(key, FICTIONAL_UNIVERSE_TEAMS, 13) };
+  }
+  return fictionalUniverseCache.pool;
 }
 
 export function buildFictionalDraftPool(seed) {
-  return dealPool(buildFictionalUniverse(), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
+  const dealt = dealPool(buildFictionalUniverse(seed), FICTIONAL_DEAL_QUOTAS, `fictional-deal:${seed}`);
+  // Every deck carries exactly one golden ticket. A deal is a slice of the
+  // league, so the league's 1-of-1 can miss the cut — when it does, the deal
+  // stamps one of its own. The stamped card is a copy: the cached league
+  // keeps its original printing, and a league never holds two, so a deck
+  // never can either.
+  if (dealt.some((card) => card.egg === "golden") || !dealt.length) return dealt;
+  const rng = createRng(`fictional-golden:${seed}`);
+  const stamped = [...dealt];
+  const index = rng.int(0, stamped.length - 1);
+  stamped[index] = { ...stamped[index], egg: "golden" };
+  return stamped;
 }
 
-function makeHitterCard(rng, index, usedNames, position, heat = 0) {
+// One roll in a thousand prints past the bell's ceiling — see the aces
+// stream in generatePlayerPool.
+const ACE_CHANCE = 0.001;
+const NO_ACES = { next: () => 1 };
+
+function makeHitterCard(rng, index, usedNames, position, aceRng = NO_ACES, heat = 0) {
   const chart = makeHitterChart(rng, heat);
   const outSlots = countChartSlots(chart, [RESULTS.SO, RESULTS.GB, RESULTS.FB]);
-  const onBase = Math.max(1, normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.6, 6, 15, heat));
+  // The bell rolls off the main stream for EVERY card — an ace overrides the
+  // roll but never swallows it, or every card dealt after him would shift.
+  // Temperature widens that roll; an ace still guarantees at least the past-the-
+  // bell 16, and never drags a hotter roll back down.
+  const rolled = Math.max(1, normalInt(rng, 10.5 - (outSlots - 6) * 0.25, 1.6, 6, 15, heat));
+  const onBase = aceRng.next() < ACE_CHANCE ? Math.max(16, rolled) : rolled;
   const speed = randomSpeed(rng, position, outSlots, heat);
   const fielding = randomFielding(rng, position, heat);
   const points = onBase * 20 + fielding * 7 + speedPoints(speed) + chartPower(chart);
@@ -3110,9 +3145,10 @@ function makeHitterCard(rng, index, usedNames, position, heat = 0) {
   };
 }
 
-function makePitcherCard(rng, index, usedNames, role, heat = 0) {
+function makePitcherCard(rng, index, usedNames, role, aceRng = NO_ACES, heat = 0) {
   const isReliever = role === "RP";
-  const control = Math.max(0, normalInt(rng, 3.5, 1.5, 0, 6, heat));
+  const rolled = Math.max(0, normalInt(rng, 3.5, 1.5, 0, 6, heat));
+  const control = aceRng.next() < ACE_CHANCE ? Math.max(7, rolled) : rolled;
   const ip = isReliever ? 1 : starterIp(rng, heat);
   const chart = makePitcherChart(rng, heat);
   const points = pitcherPoints(control, ip, chart);

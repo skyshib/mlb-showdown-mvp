@@ -813,7 +813,7 @@
   position: absolute;
   z-index: 7;
   left: 10.23%;
-  top: calc(86.38% - 0.5cqw);
+  top: calc(86.38% - 0.1cqw);
   color: #ef3d1b;
   font-size: 7.75cqw;
   font-style: normal;
@@ -821,10 +821,10 @@
   line-height: 1;
   transform: translate(-50%, -50%);
   text-shadow:
-    -0.25cqw -0.25cqw 0 #080808,
-    0.25cqw -0.25cqw 0 #080808,
-    -0.25cqw 0.25cqw 0 #080808,
-    0.25cqw 0.25cqw 0 #080808;
+    -0.18cqw -0.18cqw 0 #080808,
+    0.18cqw -0.18cqw 0 #080808,
+    -0.18cqw 0.18cqw 0 #080808,
+    0.18cqw 0.18cqw 0 #080808;
 }
 
 .gq-proto-name {
@@ -1008,10 +1008,10 @@
   line-height: 1;
   transform: translate(-50%, -50%);
   text-shadow:
-    -0.25cqw -0.25cqw 0 #080808,
-    0.25cqw -0.25cqw 0 #080808,
-    -0.25cqw 0.25cqw 0 #080808,
-    0.25cqw 0.25cqw 0 #080808;
+    -0.18cqw -0.18cqw 0 #080808,
+    0.18cqw -0.18cqw 0 #080808,
+    -0.18cqw 0.18cqw 0 #080808,
+    0.18cqw 0.18cqw 0 #080808;
 }
 .gq-proto-control-number { transform: translateX(8%); }
 .gq-proto-control-plus {

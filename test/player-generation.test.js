@@ -114,36 +114,74 @@ test("generated multi-position cards retain primary ratings and valid secondary 
   }
 });
 
-test("the fictional universe is one persistent league", () => {
+test("each room seed invents its own fictional league", () => {
   const universe = buildFictionalUniverse();
-  assert.deepEqual(universe, buildFictionalUniverse(), "universe is stable across builds");
-  assert.ok(universe.length >= 150, "universe is deep enough to deal from");
+  assert.deepEqual(universe, buildFictionalUniverse(), "the no-seed league is stable across builds");
+  assert.ok(universe.length >= 150, "a league is deep enough to deal from");
   const names = universe.map((player) => player.name);
   assert.equal(new Set(names).size, names.length, "every fictional player is one person");
+
+  const nightA = buildFictionalUniverse("night-a");
+  assert.deepEqual(nightA, buildFictionalUniverse("night-a"), "same seed, same league");
+  const nightB = buildFictionalUniverse("night-b");
+  assert.notDeepEqual(
+    nightA.map((player) => player.name),
+    nightB.map((player) => player.name),
+    "two seeds invent different players"
+  );
+  assert.equal(nightA.filter((player) => player.egg === "golden").length, 1, "every league hides one golden ticket");
 });
 
-test("each fictional draft deals a seeded slice of the universe", () => {
-  const dealA = buildFictionalDraftPool("night-a");
-  const dealB = buildFictionalDraftPool("night-b");
+test("each fictional draft deals a seeded slice of its own league", () => {
+  const deal = buildFictionalDraftPool("night-a");
 
   // Same seed, same deck — required for online rooms to rebuild identically.
-  assert.deepEqual(dealA, buildFictionalDraftPool("night-a"));
+  assert.deepEqual(deal, buildFictionalDraftPool("night-a"));
 
-  const idsA = new Set(dealA.map((player) => player.id));
-  const idsB = new Set(dealB.map((player) => player.id));
-  assert.notDeepEqual([...idsA].sort(), [...idsB].sort(), "two seeds deal different decks");
+  const universe = buildFictionalUniverse("night-a");
+  assert.ok(deal.length < universe.length, "a deal is a strict slice of its league");
+  assert.ok(maxRealPoolManagers(deal) >= 8, "every deal supports eight-manager rooms");
+  for (const player of deal) {
+    assert.ok(universe.some((card) => card.id === player.id), `${player.name} comes from his league`);
+  }
 
-  // Recurring characters: the decks overlap without being identical.
-  const shared = [...idsA].filter((id) => idsB.has(id));
-  assert.ok(shared.length > 0, "some fictional players recur across decks");
+  const otherDeal = buildFictionalDraftPool("night-b");
+  assert.notDeepEqual(
+    deal.map((player) => player.name),
+    otherDeal.map((player) => player.name),
+    "two seeds deal decks of different players"
+  );
+});
 
-  const universe = buildFictionalUniverse();
-  for (const deal of [dealA, dealB]) {
-    assert.ok(deal.length < universe.length, "a deal is a strict slice of the universe");
-    assert.ok(maxRealPoolManagers(deal) >= 8, "every deal supports eight-manager rooms");
-    for (const player of deal) {
-      assert.ok(universe.some((card) => card.id === player.id), `${player.name} comes from the universe`);
+test("one roll in a thousand prints past the bell: OB 16 bats and Control 7 arms", () => {
+  let hitters = 0;
+  let pitchers = 0;
+  let ob16 = 0;
+  let ctrl7 = 0;
+  let overCeiling = 0;
+  for (let i = 0; i < 60; i += 1) {
+    for (const card of buildFictionalUniverse(`aces-${i}`)) {
+      if (card.kind === "hitter") {
+        hitters += 1;
+        if (card.onBase === 16) ob16 += 1;
+        if (card.onBase > 16) overCeiling += 1;
+      } else {
+        pitchers += 1;
+        if (card.control === 7) ctrl7 += 1;
+        if (card.control > 7) overCeiling += 1;
+      }
     }
+  }
+  // ~6,240 hitters and ~5,280 pitchers at 0.1% — a handful each, never a flood.
+  assert.ok(ob16 >= 1 && ob16 <= 20, `${ob16} OB 16 hitters in ${hitters}`);
+  assert.ok(ctrl7 >= 1 && ctrl7 <= 20, `${ctrl7} Control 7 pitchers in ${pitchers}`);
+  assert.equal(overCeiling, 0, "nothing prints past the ace ceiling");
+});
+
+test("every fictional deck carries exactly one golden ticket", () => {
+  for (const seed of ["night-a", "night-b", "night-c", "golden-hunt", "high-dinger"]) {
+    const goldens = buildFictionalDraftPool(seed).filter((card) => card.egg === "golden");
+    assert.equal(goldens.length, 1, `seed "${seed}" deals ${goldens.length} golden tickets`);
   }
 });
 

@@ -388,10 +388,12 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
 
   const jojo = trainerById("scout-jojo");
   const worldSeries = trainerById("post-worldseries");
-  // Budget mode hangs the printed ladder off the CAP: the summit shops 76% of
-  // the room between the player's cap and what the pool can actually field.
-  const { poolCeiling, budgetCap, LADDER_REFERENCE, REFERENCE_CAP } = await import("../src/adventure/packs.js");
-  const cap = budgetCap();
+  // Budget mode hangs the printed ladder off the CAP — the EXACT cap, not the
+  // rounded one, or every rung inherits the rounding error magnified: the
+  // summit shops 76% of the room between the player's cap and what the pool
+  // can actually field.
+  const { poolCeiling, exactCap, LADDER_REFERENCE, REFERENCE_CAP } = await import("../src/adventure/packs.js");
+  const cap = exactCap();
   const share = (worldSeries.pointBudget - REFERENCE_CAP) / (LADDER_REFERENCE - REFERENCE_CAP);
   assert.equal(
     npcBudget(testSave(), worldSeries),
@@ -1188,6 +1190,17 @@ test("manual pitching keeps every arm in until pulled — yours by hand, theirs 
   // The NPC mound runs manual too: their starter stays in (and tires) until
   // the AI skipper pulls him — no silent plan-based swaps.
   const npcStarter = pitcherStatus(state, "home").pitcher;
+  // Pin the two arms this scenario turns on so it tests the AI's hook, not
+  // whatever the generated NPC happens to field. A tired, beatable six-inning
+  // starter, with a clearly better fresh arm waiting: a conservative skipper
+  // pulls that. (A generated NPC can just as well field an elite ace nobody
+  // should pull, or an 8-IP workhorse only ever tired in a ninth he should
+  // finish — neither is the behaviour under test.)
+  npcStarter.control = 3;
+  npcStarter.plannedOuts = 21;
+  npcStarter.ip = 7;
+  state.home.pitchers[1].control = 6;
+  state.home.pitchers[1].ip = 1;
   state.pitching.home.outsRecorded = npcStarter.plannedOuts;
   state.pitching.home.battersFaced = npcStarter.ip * 4 + 1;
   // Put the game where an arm that deep actually IS. The bar the pen has to
@@ -2315,6 +2328,11 @@ test("the play description is the whole book of the game, ruled at the innings",
     if (battlePhase(app.screen.battle).type === "over") break;
     battleScreen.key(app, "a");
   }
+  // The loop can land on a suspense pause, and the dice screen holds the floor
+  // instead of the book. Let the play finish before reading the screen.
+  for (let i = 0; i < 12 && app.screen.mode === "drama"; i += 1) {
+    battleScreen.key(app, "a");
+  }
   const entries = app.screen.playLog;
   assert.ok(entries.length > 6, "every play went in the book, not just the last one");
 
@@ -2581,6 +2599,16 @@ test("the NPC mound visit is its own event, never smuggled into the swing", asyn
   // can't cover nine. By the eighth the math is unambiguous — pull the arm.
   battle.state.inning = 8;
   const starter = battle.state.home.pitchers[0];
+  // Pin the arms so the hook is unambiguous, not left to what the generated NPC
+  // fields: a tired, beatable six-inning starter past his planned depth by the
+  // eighth, with a clearly better fresh arm behind him. (Generation can hand the
+  // NPC an elite ace, or an 8-IP workhorse still inside his plan here — a
+  // conservative skipper rides either out, which is not the event under test.)
+  starter.control = 3;
+  starter.plannedOuts = 18;
+  starter.ip = 6;
+  battle.state.home.pitchers[1].control = 6;
+  battle.state.home.pitchers[1].ip = 1;
   battle.state.pitching.home.battersFaced = starter.ip * 4 + 4;
   // Deep into the game — his four-inning floor is long spent, so the only thing
   // deciding the hook is the fatigue math the test is about.

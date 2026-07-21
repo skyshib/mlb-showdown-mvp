@@ -446,6 +446,26 @@ td span {
   align-items: start;
 }
 
+/* The seed's two refills — last room's seed, or a fresh roll — ride the
+   header line so the box below keeps its full width for reading the seed. */
+.seed-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.seed-buttons {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.seed-buttons button {
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
 .setup-actions {
   grid-column: 1 / -1;
   display: grid;
@@ -591,6 +611,18 @@ td span {
    decade checklist and a club dropdown. Only the selected set shows one. */
 .pool-suboptions[hidden] {
   display: none;
+}
+
+/* The snake's clock options live under its radio, the way the auction's
+   sub-options live under its own; the heading stands in for the legend the
+   clock block had when it was a fieldset of its own. */
+.suboption-heading {
+  margin: 0 0 -2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 /* One column, so the decades read as a single list you run down rather than a

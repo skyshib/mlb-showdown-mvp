@@ -288,11 +288,11 @@ function legendaryPatternClass(card) {
   return ` gq-pattern-${LEGENDARY_PATTERNS[hash % LEGENDARY_PATTERNS.length]}`;
 }
 
-// A misprint: roughly one card in 64 ran through the press upside down, and
+// A misprint: roughly one card in 128 ran through the press upside down, and
 // every copy of that card prints that way — hashed off the id, like a real
 // set's error card. The league does not issue corrections.
 function misprintClass(card) {
-  return fnv1aHash(`${card.id ?? card.name ?? "player"}::misprint`) % 64 === 0
+  return fnv1aHash(`${card.id ?? card.name ?? "player"}::misprint`) % 128 === 0
     ? " gq-proto-misprint"
     : "";
 }
