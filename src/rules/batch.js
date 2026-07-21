@@ -2,13 +2,6 @@ import { distribution, rate } from "./stats.js?v=20260716-records";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260716-records";
 import { simulateGame } from "./game.js?v=20260717-draft-wpa";
 import { createRng } from "./rng.js?v=20260716-records";
-import {
-  createWinExpectancyCalibration,
-  finalizeWinExpectancyCalibration,
-  observeCalibrationGame
-} from "./wpaCalibration.js?v=20260717-draft-wpa";
-
-export { createWinExpectancyCalibration, finalizeWinExpectancyCalibration };
 
 export const DEFAULT_BATCH_RUNS = 10000;
 export const BATCH_SCHEDULE_VERSION = 2;
@@ -19,16 +12,14 @@ export function normalizeBatchRuns(value) {
   return number;
 }
 
+// One pass. Win probability comes off the MLB historical table, which is fixed,
+// so there is nothing to learn from the season before scoring it — this used to
+// simulate every game twice (once to calibrate a per-draft table, once to score
+// against it). See winProbabilityHome in game.js for why that table went away.
 export function simulateBatch(teams, options = {}) {
   const runs = normalizeBatchRuns(options.runs ?? DEFAULT_BATCH_RUNS);
   const seed = String(options.seed ?? "batch");
-  const calibration = createWinExpectancyCalibration();
-  const calibrationState = createBatchState(teams);
-  runBatchChunk(calibrationState, teams, seed, 0, runs, { calibration });
-  const winExpectancyModel = finalizeWinExpectancyCalibration(calibration);
-  const scoredState = createBatchState(teams, { winExpectancyModel });
-  runBatchChunk(scoredState, teams, seed, 0, runs, { winExpectancyModel });
-  return summarizeBatch(scoredState);
+  return summarizeBatch(runBatchChunk(createBatchState(teams), teams, seed, 0, runs));
 }
 
 export function createBatchState(teams, options = {}) {
@@ -39,8 +30,7 @@ export function createBatchState(teams, options = {}) {
     hitters: new Map(),
     pitchers: new Map(),
     topSwing: null,
-    scheduleVersion: options.scheduleVersion ?? BATCH_SCHEDULE_VERSION,
-    winExpectancyModel: options.winExpectancyModel ?? null
+    scheduleVersion: options.scheduleVersion ?? BATCH_SCHEDULE_VERSION
   };
 
   for (const team of teams) {
@@ -69,27 +59,18 @@ export function runBatchChunk(state, teams, seed, startIndex, count, options = {
     options.scheduleVersion ?? state.scheduleVersion ?? BATCH_SCHEDULE_VERSION
   );
   if (!schedule.length) return state;
-  const winExpectancyModel = options.winExpectancyModel ?? state.winExpectancyModel ?? null;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    const game = playScheduledGame(
-      schedule[index % schedule.length],
-      seed,
-      index,
-      winExpectancyModel
-    );
-    if (options.calibration) observeCalibrationGame(options.calibration, game);
-    foldGame(state, game);
+    foldGame(state, playScheduledGame(schedule[index % schedule.length], seed, index));
   }
   return state;
 }
 
-function playScheduledGame(matchup, seed, index, winExpectancyModel = null) {
+function playScheduledGame(matchup, seed, index) {
   const gameSeed = `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`;
   return simulateGame(
     teamForGame(matchup.away, gameSeed, "away"),
     teamForGame(matchup.home, gameSeed, "home"),
-    gameSeed,
-    { winExpectancyModel }
+    gameSeed
   );
 }
 
@@ -98,14 +79,7 @@ function playScheduledGame(matchup, seed, index, winExpectancyModel = null) {
 // starter, which teamForGame picks from a seed derived from the game — so the
 // review log can page through every game of a finished run without storing any
 // of them, and without replaying the games before startIndex.
-export function replayBatchGames(
-  teams,
-  seed,
-  startIndex,
-  count,
-  winExpectancyModel = null,
-  options = {}
-) {
+export function replayBatchGames(teams, seed, startIndex, count, options = {}) {
   const schedule = createSchedule(
     teams,
     options.scheduleVersion ?? BATCH_SCHEDULE_VERSION
@@ -114,29 +88,16 @@ export function replayBatchGames(
   const games = [];
   for (let index = startIndex; index < startIndex + count; index += 1) {
     const matchup = schedule[index % schedule.length];
-    games.push({ index, game: playScheduledGame(matchup, seed, index, winExpectancyModel) });
+    games.push({ index, game: playScheduledGame(matchup, seed, index) });
   }
   return games;
 }
 
 // One-game convenience over replayBatchGames, numbered from 1 the way the
 // game-log UI counts.
-export function simulateBatchGame(
-  teams,
-  seed,
-  gameNumber,
-  winExpectancyModel = null,
-  options = {}
-) {
+export function simulateBatchGame(teams, seed, gameNumber, options = {}) {
   const targetIndex = Math.max(0, Math.round(Number(gameNumber) || 1) - 1);
-  return replayBatchGames(
-    teams,
-    seed,
-    targetIndex,
-    1,
-    winExpectancyModel,
-    options
-  )[0]?.game ?? null;
+  return replayBatchGames(teams, seed, targetIndex, 1, options)[0]?.game ?? null;
 }
 
 export function batchProgressSnapshot(state) {
@@ -207,8 +168,7 @@ export function summarizeBatch(state) {
     hitters,
     pitchers,
     topSwing: state.topSwing,
-    scheduleVersion: state.scheduleVersion,
-    winExpectancyModel: state.winExpectancyModel
+    scheduleVersion: state.scheduleVersion
   };
 }
 

@@ -3,7 +3,6 @@ import { reliefDecision, lineupProfile } from "./pitching.js?v=20260716-records"
 import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
-import { calibratedWinProbability } from "./wpaCalibration.js?v=20260717-draft-wpa";
 
 // Go/no-go floors for taking a base, by outs and destination. Second and
 // home loosen as outs mount (with two gone the runner is off on contact and
@@ -45,10 +44,24 @@ export function stateLeverage(state) {
   });
 }
 
-// Probability that the home team wins from the given state. Batch replays can
-// carry a draft-specific table learned from their calibration pass; standalone
-// and interactive games fall back to MLB history (Retrosheet 1903-2025 via Greg
-// Stoll's dataset — see src/data/winExpectancy.js). Terminal states are exact.
+// Probability that the home team wins from the given state, off MLB history
+// (Retrosheet 1903-2025 via Greg Stoll's dataset — see src/data/winExpectancy.js).
+// Terminal states are exact.
+//
+// Batches used to learn their own table from a calibration pass and score
+// against that instead. It had to go: a per-league table is estimated per
+// (inning, half, outs, bases, diff) cell WITHOUT conditioning on which team is
+// batting, so in any league with a dominant offense the base-state axis becomes
+// a proxy for "the good team is up" rather than a measure of what the base is
+// worth. In one 20-runs-per-game draft that team supplied 25% of the
+// bases-empty observations but 65% of the runner-on-second ones, which priced a
+// stolen base at +0.159 win probability against +0.093 for a two-run homer and
+// +0.043 for a grand slam — the more men a homer drove in, the less the model
+// paid for it, because it valued the runners it erased above the runs it
+// scored. Scoring a run LOWERED win probability in 9.4% of cells. That is
+// composition bias, not sampling noise, so more games only sharpened the wrong
+// number. MLB history has no such skew: across 120 years every base state is
+// drawn from the same league-average mix of offenses.
 export function winProbabilityHome(state) {
   const diff = state.score.home - state.score.away;
   if (state.walkoff) return 1;
@@ -80,14 +93,7 @@ export function winProbabilityHome(state) {
     bases: view.bases,
     diff: battingHome ? diff : -diff
   });
-  const historicalHome = battingHome ? battingWin : 1 - battingWin;
-  return calibratedWinProbability(state.winExpectancyModel, {
-    inning: view.inning,
-    half: view.half,
-    outs: view.outs,
-    bases: view.bases,
-    diff
-  }, historicalHome);
+  return battingHome ? battingWin : 1 - battingWin;
 }
 
 function trackTopSwing(state, player, wpa, result) {
@@ -683,9 +689,6 @@ export function createInitialState(awayTeam, homeTeam, options = {}) {
       hitters: new Map(),
       pitchers: new Map()
     },
-    // A batch-only, JSON-safe state lookup. It is frozen after calibration and
-    // never influences dice, pitching, or baserunning decisions.
-    winExpectancyModel: options.winExpectancyModel ?? null,
     // Runs by inning, for the hand-operated board. Grows into extras.
     lineScore: { away: [], home: [] },
     lastPlayDetails: null,
