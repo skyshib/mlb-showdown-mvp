@@ -78,13 +78,24 @@ const REJECT_LIMIT = 25;
 let rosterCache = new Map();
 let rosterCachePool = null;
 
+// A trainer's roster is otherwise identical in every save that shares a pool.
+// The classic set is one fixed, unnoised deck, so its bosses came out the very
+// same on every device and every playthrough — a manager who plays the ladder
+// on a phone and a laptop meets the identical JOJO both times. Salt the team's
+// RNG with the save's own seed so each run faces its own opponents, while a
+// single run stays stable (the seed does not shift under it). Callers with no
+// save (generic previews) fall back to the shared, unsalted roster.
+function teamSalt(save) {
+  return save?.saveSeed ? `${save.saveSeed}:` : "";
+}
+
 function assembleRosterCached(trainer, save) {
   const pool = adventurePool();
   if (pool !== rosterCachePool) {
     rosterCache = new Map();
     rosterCachePool = pool;
   }
-  const key = `${trainer.id}:${npcBudget(save, trainer)}`;
+  const key = `${trainer.id}:${teamSalt(save)}${npcBudget(save, trainer)}`;
   let hit = rosterCache.get(key);
   if (!hit) {
     hit = assembleRoster(trainer, save);
@@ -106,7 +117,7 @@ function assembleRoster(trainer, save) {
   const heirloom = trainer.inherits ? assembleRosterCached(trainerById(trainer.inherits), save) : null;
   // One seeded stream feeds the slot order, the baseline fill, and every upgrade
   // draw — so a save always rebuilds the same rival, round after round.
-  const rng = createRng(`npc-team:${trainer.teamSeed}`);
+  const rng = createRng(`npc-team:${teamSalt(save)}${trainer.teamSeed}`);
   const slots = heirloom ? heirloom.slots : draftSlots(trainer, rng);
   // Bucket the pool by slot ONCE, in pool order. The minimum fill, the climb,
   // and the percentile ranking all read these buckets instead of rescanning the
