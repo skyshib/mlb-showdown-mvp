@@ -114,9 +114,9 @@ function assembleRoster(trainer, save) {
   // below see the same candidate order they always have — this is a speedup, not
   // a behavior change.
   const candidates = candidatesForSlots(pool, slots);
-  // A fresh trainer opens from the cheapest legal roster; an heir from his
+  // A fresh trainer opens from a cheap legal roster; an heir from his
   // inherited binder. The same climb spends the budget up from whichever floor.
-  const roster = heirloom ? [...heirloom.roster] : minimumRoster(candidates, slots, trainer);
+  const roster = heirloom ? [...heirloom.roster] : minimumRoster(candidates, slots, trainer, rng, pointBudget);
   const used = new Set(roster.map((card) => card.id));
   const spent = climb({ candidates, pointBudget, score, slots, roster, used, rng });
 
@@ -144,28 +144,73 @@ function draftSlots(trainer, rng) {
     : shuffled([...HITTER_SLOTS, ...PITCHER_SLOTS], rng);
 }
 
-// The cheapest legal roster: fill every slot with the least-expensive unused
-// card that fits, one era of a player per team. This floor is what the climb
-// trades up from.
-function minimumRoster(candidates, slots, trainer) {
+// How wide the bargain bin is: the fill draws seeded-randomly from a slot's
+// cheapest few, not always its single cheapest card. Every early boss used to
+// open from the SAME strict-minimum roster — the one cheapest catcher, the one
+// cheapest shortstop — and their small budgets barely lifted them off it, so
+// Route 1 fielded the same bargain-bin binder over and over. Picking among the
+// cheapest handful keeps the floor cheap (the climb still spends up from it) but
+// hands each trainer a different one, so the early ladder stops feeling cloned.
+const CHEAP_BAND = 8;
+
+// A cheap legal roster: fill every slot with a seeded pick from its cheapest
+// CHEAP_BAND unused fits, one era of a player per team. This floor is what the
+// climb trades up from — and it must stay affordable, since the climb only ever
+// spends UP from it, so an over-budget floor is repaired back down below.
+function minimumRoster(candidates, slots, trainer, rng, pointBudget) {
   const roster = [];
   const used = new Set();
   for (const slot of slots) {
-    // The cheapest legal fit: the same card the old filter-then-sort took first
-    // (points ascending, name breaking ties), found in one pass over the bucket.
-    let cheapest = null;
-    for (const card of candidates.get(slot)) {
-      if (used.has(card.id) || personConflict(roster, card)) continue;
-      if (!cheapest || card.points < cheapest.points
-        || (card.points === cheapest.points && card.name.localeCompare(cheapest.name) < 0)) {
-        cheapest = card;
-      }
-    }
-    if (!cheapest) throw new Error(`NPC team for ${trainer.id} cannot fill ${slot}`);
-    used.add(cheapest.id);
-    roster.push(cheapest);
+    // The cheapest legal fits (points ascending, name breaking ties), then a
+    // seeded draw from the cheapest handful of them.
+    const eligible = candidates.get(slot)
+      .filter((card) => !used.has(card.id) && !personConflict(roster, card))
+      .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name));
+    if (!eligible.length) throw new Error(`NPC team for ${trainer.id} cannot fill ${slot}`);
+    const pick = rng.pick(eligible.slice(0, CHEAP_BAND));
+    used.add(pick.id);
+    roster.push(pick);
   }
+  repairFloorToBudget(roster, used, candidates, slots, pointBudget);
   return roster;
+}
+
+// The diversified floor can cost more than the strict-cheapest one it replaced,
+// which would eat into — or overrun — a thin early budget. While the floor is
+// over budget, drop the slot whose card strayed FURTHEST above the cheapest it
+// could legally hold back to that cheapest card. Cost falls every swap, so this
+// terminates; worst case it walks the whole floor back to the strict minimum,
+// which is exactly the affordable roster the old code always dealt.
+function repairFloorToBudget(roster, used, candidates, slots, pointBudget) {
+  if (!Number.isFinite(pointBudget)) return; // uncapped: no floor to enforce
+  const cost = () => roster.reduce((sum, card) => sum + card.points, 0);
+  while (cost() > pointBudget) {
+    let best = null;
+    for (let index = 0; index < roster.length; index += 1) {
+      const cheaper = cheapestFit(candidates, slots, roster, used, index);
+      if (!cheaper || cheaper.points >= roster[index].points) continue;
+      const drop = roster[index].points - cheaper.points;
+      if (!best || drop > best.drop) best = { index, cheaper, drop };
+    }
+    if (!best) break; // already at the cheapest legal floor
+    applySwap(roster, used, best.index, best.cheaper);
+  }
+}
+
+// The cheapest unused legal card for a slot other than the one it currently
+// holds — the strict minimum the repair walks a strayed slot back toward.
+function cheapestFit(candidates, slots, roster, used, index) {
+  const current = roster[index];
+  let cheapest = null;
+  for (const card of candidates.get(slots[index])) {
+    if (card.id === current.id || used.has(card.id)) continue;
+    if (personConflict(roster, card, current.id)) continue;
+    if (!cheapest || card.points < cheapest.points
+      || (card.points === cheapest.points && card.name.localeCompare(cheapest.name) < 0)) {
+      cheapest = card;
+    }
+  }
+  return cheapest;
 }
 
 // The climb: from the starting roster, keep upgrading a slot at a time. The slot
