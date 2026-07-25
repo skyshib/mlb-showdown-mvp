@@ -2397,7 +2397,7 @@ function renderDraft() {
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         hidePoints: pointsHidden(),
-        replacementLevels: replacementLevelGroups(draft),
+        replacementLevels: viewReplacementLevels(draft),
         starred: watchlistOwner() ? starredIds() : null,
         flagged: watchlistOwner() ? flaggedIds() : null,
         fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
@@ -6675,6 +6675,23 @@ function replacementLevelGroups(draft) {
   return levels;
 }
 
+// What the board should badge in the current view. A position view names one
+// card: that position's own floor — which is often a card whose printed
+// positions would never pass the filter, because lineup rules let anyone
+// stand at first and the sweep fills the hole with the cheapest body, not
+// the cheapest first baseman. The "all" view keeps the full set, one floor
+// per group.
+function viewReplacementLevels(draft) {
+  const levels = replacementLevelGroups(draft);
+  const position = state.filters.position;
+  if (!position || position === "all") return levels;
+  const scoped = new Map();
+  for (const [id, groups] of levels) {
+    if (groups.includes(position)) scoped.set(id, [position]);
+  }
+  return scoped;
+}
+
 function leagueOpenGroups(draft) {
   const needed = new Set();
   for (const manager of draft.managers) {
@@ -7721,19 +7738,22 @@ function positionRankingFor(type, position) {
   const owner = watchlistOwner();
   if (!owner || !position || position === "all" || !state.draft) return null;
   const key = `${type}:${position}`;
+  // The view's own floor card is rankable here too, printed positions or not
+  // — see filteredPlayers, which admits it on the same grounds.
+  const floors = replacementLevelGroups(state.draft);
+  const positionFloorIds = new Set([...floors].filter(([, groups]) => groups.includes(position)).map(([id]) => id));
   const eligiblePlayers = state.draft.pool
     .filter((player) => player.kind === type)
-    .filter((player) => matchesPositionFilter(player, position));
+    .filter((player) => matchesPositionFilter(player, position) || positionFloorIds.has(player.id));
   const eligibleIds = eligiblePlayers.map((player) => player.id);
   const eligible = new Set(eligibleIds);
   const saved = state.draftRankings[owner.id]?.[key];
   const customized = Boolean(saved);
-  // The seed order sinks replacement-level cards below everything with a
-  // price: the free fallbacks are not rank-4 catchers, whatever their OB says.
-  const floors = replacementLevelGroups(state.draft);
+  // The seed order sinks this position's floor card below everything with a
+  // price: the free fallback is not a rank-4 catcher, whatever its OB says.
   const defaultIds = [...eligiblePlayers]
     .sort((a, b) => {
-      const sink = (floors.has(a.id) ? 1 : 0) - (floors.has(b.id) ? 1 : 0);
+      const sink = (positionFloorIds.has(a.id) ? 1 : 0) - (positionFloorIds.has(b.id) ? 1 : 0);
       if (sink) return sink;
       const result = comparePlayersBySort(a, b, "primary");
       return result ? result * -1 : a.name.localeCompare(b.name);
@@ -8521,11 +8541,18 @@ function filteredPlayers(players) {
   const search = state.filters.search.trim().toLowerCase();
   const starred = state.filters.starredOnly ? starredIds() : null;
   const flagged = state.filters.flaggedOnly ? flaggedIds() : null;
+  // A position view admits its own floor card even when its printed positions
+  // would fail the filter: the free fallback belongs on the list it backstops.
+  const positionFloors = state.draft && state.filters.position !== "all"
+    ? viewReplacementLevels(state.draft)
+    : null;
   return players.filter((player) => {
     if (player.kind !== state.filters.type) return false;
     if (starred && !starred.has(player.id)) return false;
     if (flagged && !flagged.has(player.id)) return false;
-    if (state.filters.position !== "all" && !matchesPositionFilter(player, state.filters.position)) return false;
+    if (state.filters.position !== "all"
+      && !matchesPositionFilter(player, state.filters.position)
+      && !positionFloors?.has(player.id)) return false;
     if (search && !`${player.name} ${player.team ?? ""} ${playerPosition(player)} ${player.kind}`.toLowerCase().includes(search)) return false;
     return true;
   });
@@ -8553,7 +8580,7 @@ function draftVisiblePlayers(draft) {
   // Replacement-level cards are the board's free fallbacks: whatever the sort,
   // they sit at the bottom, under everything anyone would actually pay for.
   // A manager who ranks one by hand overrides this — that order is theirs.
-  const floors = replacementLevelGroups(draft);
+  const floors = viewReplacementLevels(draft);
   const sink = (a, b) => (floors.has(a.id) ? 1 : 0) - (floors.has(b.id) ? 1 : 0);
   if (!ranking?.ids.length) return players.sort((a, b) => sink(a, b) || comparePlayers(a, b));
   return players.sort((a, b) => {
