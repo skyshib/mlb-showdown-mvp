@@ -4,6 +4,7 @@ import {
   insertTierBreak,
   loadOnlineDraftNotes,
   loadOnlineDraftRankings,
+  moveRankedAboveBreak,
   moveRankedIds,
   moveRankedWithTiers,
   normalizeDraftNotes,
@@ -108,6 +109,25 @@ test("a dragged player joins the tier of the row he was dropped on", () => {
   // A no-op drop leaves the dividers exactly where they were.
   assert.deepEqual(moveRankedWithTiers(board, "c", "c"),
     { ids: ["a", "b", "c", "d"], tiers: [3] });
+});
+
+test("dropping on a divider lands exactly above the break, jumping nobody", () => {
+  const board = { ids: ["a", "b", "c", "d"], tiers: [2] };
+  // d dropped on the tier-2 divider: last card of tier 1, b keeps his spot.
+  assert.deepEqual(moveRankedAboveBreak(board, "d", 2),
+    { ids: ["a", "b", "d", "c"], tiers: [3] });
+  // A new card on the divider joins tier 1 at its bottom.
+  assert.deepEqual(moveRankedAboveBreak(board, "new", 2),
+    { ids: ["a", "b", "new", "c", "d"], tiers: [3] });
+  // The top shelf (break 0) means rank 1, tier 1.
+  assert.deepEqual(moveRankedAboveBreak(board, "c", 0),
+    { ids: ["c", "a", "b", "d"], tiers: [3] });
+  // The last card of tier 1 dropped on its own divider stays put.
+  assert.deepEqual(moveRankedAboveBreak(board, "b", 2),
+    { ids: ["a", "b", "c", "d"], tiers: [2] });
+  // The only card below a divider climbing above it dissolves the tier.
+  assert.deepEqual(moveRankedAboveBreak({ ids: ["a", "b", "c"], tiers: [2] }, "c", 2),
+    { ids: ["a", "b", "c"], tiers: [] });
 });
 
 test("typed ranks and cleared ranks carry the dividers with them", () => {

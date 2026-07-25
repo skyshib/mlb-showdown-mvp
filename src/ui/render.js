@@ -201,7 +201,7 @@ export function renderPlayerTable(players, options = {}) {
 // merging it up into the tier above, and tier 1 has nothing above to merge into.
 function renderTierDivider(meta, columnCount) {
   if (!meta) return "";
-  return `<tr class="tier-divider-row${meta.left === 0 ? " tier-divider-empty" : ""}"><td colspan="${columnCount}">
+  return `<tr class="tier-divider-row${meta.left === 0 ? " tier-divider-empty" : ""}" data-tier-drop-break="${meta.breakAfter ?? 0}"><td colspan="${columnCount}">
       <span class="tier-divider-label">Tier ${meta.n}</span>
       <span class="tier-divider-count">${meta.left} of ${meta.total} left</span>
       ${meta.breakAfter != null ? `<button type="button" class="tier-remove" data-action="remove-tier-break" data-break="${meta.breakAfter}" title="Merge tier ${meta.n} up into tier ${meta.n - 1}" aria-label="Merge tier ${meta.n} into tier ${meta.n - 1}">&times;</button>` : ""}

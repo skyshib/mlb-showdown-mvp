@@ -2012,6 +2012,11 @@ button.roster-slot[draggable="true"]:active {
   text-decoration: line-through;
 }
 
+/* A drag hovering the divider lands the card just above the line. */
+.tier-divider-row.ranking-drag-over td {
+  box-shadow: inset 0 3px 0 var(--accent);
+}
+
 .tier-remove {
   margin-left: 10px;
   vertical-align: 1px;

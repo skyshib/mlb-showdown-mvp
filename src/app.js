@@ -173,6 +173,7 @@ import {
   insertTierBreak,
   loadOnlineDraftNotes,
   loadOnlineDraftRankings,
+  moveRankedAboveBreak,
   moveRankedWithTiers,
   normalizeDraftNotes,
   normalizeDraftRankings,
@@ -3462,14 +3463,17 @@ function bindDraftActions() {
   };
 
   app.ondragover = (event) => {
-    const rankingRow = event.target.closest("[data-ranking-drop-id]");
-    if (rankingRow && draggedRankingMove && rankingDragStillActive()) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      app.querySelectorAll(".ranking-drag-over")
-        .forEach((element) => element.classList.remove("ranking-drag-over"));
-      rankingRow.classList.add("ranking-drag-over");
-      return;
+    if (draggedRankingMove && rankingDragStillActive()) {
+      const rankingRow = event.target.closest("[data-ranking-drop-id]");
+      const tierRow = event.target.closest("[data-tier-drop-break]");
+      if (rankingRow || tierRow) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        app.querySelectorAll(".ranking-drag-over")
+          .forEach((element) => element.classList.remove("ranking-drag-over"));
+        (rankingRow ?? tierRow)?.classList.add("ranking-drag-over");
+        return;
+      }
     }
     const tile = event.target.closest("[data-order-tile]");
     if (tile && draggedOrderMove && tile.dataset.managerId === draggedOrderMove.managerId) {
@@ -3486,6 +3490,17 @@ function bindDraftActions() {
   };
 
   app.ondrop = (event) => {
+    // A divider is its own drop target: the card lands immediately above the
+    // break, and nobody above the seam gets jumped.
+    const tierRow = event.target.closest("[data-tier-drop-break]");
+    if (tierRow && draggedRankingMove && rankingDragStillActive()) {
+      event.preventDefault();
+      movePositionRankingAboveBreak(draggedRankingMove.playerId, Number(tierRow.dataset.tierDropBreak));
+      draggedRankingMove = null;
+      saveState();
+      renderDraft();
+      return;
+    }
     const rankingRow = event.target.closest("[data-ranking-drop-id]");
     if (rankingRow && draggedRankingMove && rankingDragStillActive()) {
       event.preventDefault();
@@ -7886,6 +7901,16 @@ function rankingDragStillActive() {
     && draggedRankingMove
     && ranking.managerId === draggedRankingMove.managerId
     && ranking.key === draggedRankingMove.key);
+}
+
+function movePositionRankingAboveBreak(playerId, breakAfter) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  setPositionRanking(
+    ranking.managerId,
+    ranking.key,
+    moveRankedAboveBreak(ranking, playerId, Number.isFinite(breakAfter) ? breakAfter : 0)
+  );
 }
 
 // ---- the big board ----

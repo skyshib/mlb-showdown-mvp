@@ -192,14 +192,37 @@ export function tierOfRank(tiers, rank) {
 export function moveRankedWithTiers(entry, playerId, targetId, { after = false } = {}) {
   const ids = moveRankedIds(entry.ids, playerId, targetId, { after });
   if (!entry.tiers.length) return { ids, tiers: [] };
-  const tierOf = new Map(entry.ids.map((id, index) => [id, tierOfRank(entry.tiers, index + 1)]));
+  const tierOf = tierMembership(entry);
   const lastTier = entry.tiers.length + 1;
   tierOf.set(playerId, tierOf.get(targetId) ?? lastTier);
+  return { ids, tiers: rebuildTierBreaks(ids, tierOf) };
+}
+
+// Dropping on a divider is an exact ask: put the card immediately above this
+// break, as the last card of the tier the divider closes. Nobody already
+// ranked above the seam moves. Break 0 is the board's top shelf — rank 1,
+// tier 1 — the one seam with nothing above it.
+export function moveRankedAboveBreak(entry, playerId, breakAfter) {
+  const oldIndex = entry.ids.indexOf(playerId);
+  const list = entry.ids.filter((id) => id !== playerId);
+  const seam = Math.max(0, Math.min(breakAfter - (oldIndex >= 0 && oldIndex < breakAfter ? 1 : 0), list.length));
+  list.splice(seam, 0, playerId);
+  if (!entry.tiers.length) return { ids: list, tiers: [] };
+  const tierOf = tierMembership(entry);
+  tierOf.set(playerId, tierOfRank(entry.tiers, Math.max(1, breakAfter)));
+  return { ids: list, tiers: rebuildTierBreaks(list, tierOf) };
+}
+
+function tierMembership(entry) {
+  return new Map(entry.ids.map((id, index) => [id, tierOfRank(entry.tiers, index + 1)]));
+}
+
+function rebuildTierBreaks(ids, tierOf) {
   const tiers = [];
   for (let index = 1; index < ids.length; index += 1) {
     if (tierOf.get(ids[index]) !== tierOf.get(ids[index - 1])) tiers.push(index);
   }
-  return { ids, tiers: normalizeTierBreaks(tiers, ids.length) };
+  return normalizeTierBreaks(tiers, ids.length);
 }
 
 // A typed rank takes the slot it names, so it takes that slot's tier with it;
