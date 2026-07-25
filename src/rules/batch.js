@@ -2,6 +2,11 @@ import { distribution, rate } from "./stats.js?v=20260716-records";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260716-records";
 import { simulateGame } from "./game.js?v=20260717-draft-wpa";
 import { createRng } from "./rng.js?v=20260716-records";
+import {
+  considerInterestingGame,
+  createInterestingGameState,
+  summarizeInterestingGames
+} from "./interestingGames.js?v=20260724";
 
 export const DEFAULT_BATCH_RUNS = 10000;
 export const BATCH_SCHEDULE_VERSION = 2;
@@ -30,6 +35,7 @@ export function createBatchState(teams, options = {}) {
     starterResults: new Map(),
     hitters: new Map(),
     pitchers: new Map(),
+    interestingGames: createInterestingGameState(),
     topSwing: null,
     scheduleVersion: options.scheduleVersion ?? BATCH_SCHEDULE_VERSION
   };
@@ -180,6 +186,7 @@ export function summarizeBatch(state) {
       .sort((a, b) => a.team.localeCompare(b.team) || a.rotationIndex - b.rotationIndex),
     hitters,
     pitchers,
+    interestingGames: summarizeInterestingGames(state.interestingGames),
     topSwing: state.topSwing,
     scheduleVersion: state.scheduleVersion
   };
@@ -187,6 +194,7 @@ export function summarizeBatch(state) {
 
 function foldGame(state, game) {
   state.runs += 1;
+  considerInterestingGame(state.interestingGames, game, state.runs - 1);
 
   foldTeamResult(state, game.away.name, game.away.runs, game.home.runs);
   foldTeamResult(state, game.home.name, game.home.runs, game.away.runs);

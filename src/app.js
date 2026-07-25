@@ -146,6 +146,7 @@ import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } f
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260716-records";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260716-records";
+import { buildAllStarDepthChart } from "./rules/allStars.js?v=20260724";
 import {
   basesText,
   cardRarity,
@@ -947,6 +948,10 @@ function defaultState() {
     },
     batchStatsTab: "overview",
     batchPitcherSplit: "overall",
+    batchTeamFilters: {
+      hitters: "all",
+      pitchers: "all"
+    },
     batchChartManager: null,
     // Draft-value chart axes. x defaults to what a card cost (price in an auction,
     // pick number in a snake); y to the WPA it went on to earn. Both are
@@ -3755,15 +3760,24 @@ function renderBatch() {
   const leagueWoba = tournamentWoba(summary.hitters);
   const hasPitcherSplits = summary.pitchers.some((line) => line.fresh);
   const pitcherSplit = hasPitcherSplits ? normalizeBatchPitcherSplit(state.batchPitcherSplit) : "overall";
-  const pitcherLines = pitcherSplit === "fresh"
+  const allPitcherLines = pitcherSplit === "fresh"
     ? summary.pitchers.map((line) => ({ ...line, ...(line.fresh ?? {}) }))
     : summary.pitchers;
-  const fipConstant = tournamentFipConstant(pitcherLines);
+  const teamNames = summary.teams.map((row) => row.team);
+  const hitterTeamFilter = normalizeBatchTeamFilter(state.batchTeamFilters?.hitters, teamNames);
+  const pitcherTeamFilter = normalizeBatchTeamFilter(state.batchTeamFilters?.pitchers, teamNames);
+  const hitterLines = hitterTeamFilter === "all"
+    ? summary.hitters
+    : summary.hitters.filter((line) => line.team === hitterTeamFilter);
+  const pitcherLines = pitcherTeamFilter === "all"
+    ? allPitcherLines
+    : allPitcherLines.filter((line) => line.team === pitcherTeamFilter);
+  const fipConstant = tournamentFipConstant(allPitcherLines);
   const teamGamesByName = new Map(summary.teams.map((row) => [row.team, row.games ?? teamScheduleGames(row)]));
   const sortedTeams = sortBatchRows(summary.teams, "teams", (row, sort) => batchTeamSortValue(row, sort));
   const starterResults = summary.starterResults ?? [];
   const sortedStarterResults = sortBatchRows(starterResults, "starters", (row, sort) => batchStarterSortValue(row, sort));
-  const sortedHitters = sortBatchRows(summary.hitters, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
+  const sortedHitters = sortBatchRows(hitterLines, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
   const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
   const sortedBaserunning = [...summary.teams].sort(compareTournamentBaserunning);
   const sortedDefense = [...summary.teams].sort(compareTournamentDefense);
@@ -4100,7 +4114,10 @@ function renderBatch() {
     <p class="batch-note">This simulation predates starter-result tracking. Run it again to build the starter records.</p>
   </section>`;
   const hittersSection = `<section class="panel wide">
-    <h2>Hitters, 162-game pace</h2>
+    <div class="section-title-row batch-stat-title-row">
+      <h2>Hitters, 162-game pace</h2>
+      ${renderBatchTeamFilter("hitters", hitterTeamFilter, teamNames)}
+    </div>
     <div class="table-scroll">
       <table>
         <thead><tr>
@@ -4141,9 +4158,12 @@ function renderBatch() {
           ? "Only plate appearances that began before the pitcher was tired."
           : "All plate appearances, including work after the pitcher became tired."}</p>
       </div>
-      <div class="type-filter batch-pitcher-filter" role="group" aria-label="Pitcher fatigue split">
-        <button type="button" class="type-pill ${pitcherSplit === "overall" ? "active" : ""}" data-batch-pitcher-split="overall" aria-pressed="${pitcherSplit === "overall"}">Overall</button>
-        <button type="button" class="type-pill ${pitcherSplit === "fresh" ? "active" : ""}" data-batch-pitcher-split="fresh" aria-pressed="${pitcherSplit === "fresh"}" ${hasPitcherSplits ? "" : "disabled"}>Not tired</button>
+      <div class="batch-stat-controls">
+        ${renderBatchTeamFilter("pitchers", pitcherTeamFilter, teamNames)}
+        <div class="type-filter batch-pitcher-filter" role="group" aria-label="Pitcher fatigue split">
+          <button type="button" class="type-pill ${pitcherSplit === "overall" ? "active" : ""}" data-batch-pitcher-split="overall" aria-pressed="${pitcherSplit === "overall"}">Overall</button>
+          <button type="button" class="type-pill ${pitcherSplit === "fresh" ? "active" : ""}" data-batch-pitcher-split="fresh" aria-pressed="${pitcherSplit === "fresh"}" ${hasPitcherSplits ? "" : "disabled"}>Not tired</button>
+        </div>
       </div>
     </div>
     <div class="table-scroll">
@@ -4209,6 +4229,7 @@ function renderBatch() {
   </section>`;
   const batchSections = {
     overview: overviewSection,
+    allStars: activeBatchTab === "allStars" ? renderBatchAllStars(summary, playersById) : "",
     headToHead: headToHeadSection,
     starters: starterResultsSection,
     hitters: hittersSection,
@@ -4230,6 +4251,7 @@ function renderBatch() {
   ${renderBatchStatsTabs(activeBatchTab)}
   ${batchSections[activeBatchTab]}`;
 
+  if (activeBatchTab === "allStars") hydratePhotos(app);
   bindBatchActions();
 }
 
@@ -4248,6 +4270,7 @@ function renderBatchStatsTabs(activeTab) {
 function batchStatsTabs() {
   return [
     { id: "overview", label: "Overview" },
+    { id: "allStars", label: "All-Stars" },
     { id: "headToHead", label: "Head-to-head" },
     { id: "starters", label: "By starter" },
     { id: "hitters", label: "Hitters" },
@@ -4264,6 +4287,93 @@ function normalizeBatchStatsTab(value) {
 
 function normalizeBatchPitcherSplit(value) {
   return value === "fresh" ? "fresh" : "overall";
+}
+
+function renderBatchAllStars(summary, playersById) {
+  const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
+  const slots = buildAllStarDepthChart(teams, summary);
+  const filled = slots.filter((slot) => slot.leader);
+  if (!filled.length) {
+    return `<section class="panel wide">
+      <h2>Simulation All-Stars</h2>
+      <p class="batch-note">This simulation does not have enough player WPA data to select an All-Star team.</p>
+    </section>`;
+  }
+  return `<section class="panel wide all-star-panel">
+    <div class="section-title-row">
+      <div>
+        <p class="eyebrow">Best at every position</p>
+        <h2>Simulation All-Stars</h2>
+        <p class="batch-note">The highest WPA/162 performer at each position gets the card. Open a depth chart to compare the rest of the field and see the gap from the leader.</p>
+      </div>
+      <span>${filled.length} roster spots</span>
+    </div>
+    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById)).join("")}</div>
+  </section>`;
+}
+
+function renderAllStarSlot(slot, playersById) {
+  if (!slot.leader) {
+    return `<article class="all-star-slot all-star-slot-empty">
+      <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
+      <p>No qualifying player</p>
+    </article>`;
+  }
+  const leader = slot.leader;
+  const depthRows = slot.depth.map((candidate) => `<li class="${candidate.rank === 1 ? "all-star-depth-leader" : ""}">
+    <span class="all-star-depth-rank">#${candidate.rank}</span>
+    <span class="all-star-depth-player">
+      ${renderBatchPlayerName(candidate, playersById)}
+      <small>${escapeHtml(candidate.team)}</small>
+    </span>
+    <strong>${formatWpaStat(candidate.wpaPer162)}</strong>
+    <em>${candidate.rank === 1 ? "All-Star" : `−${formatDecimal(candidate.gap, 2)}`}</em>
+  </li>`).join("");
+  return `<article class="all-star-slot">
+    <header class="all-star-slot-header">
+      <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
+      <strong>${formatWpaStat(leader.wpaPer162)} <small>WPA/162</small></strong>
+    </header>
+    <div class="all-star-card-face">${renderPlayerCard(leader.player)}</div>
+    <div class="all-star-identity">
+      <strong>${escapeHtml(leader.name)}</strong>
+      <span>${escapeHtml(leader.team)}</span>
+    </div>
+    <details class="all-star-depth">
+      <summary>Depth chart · ${slot.depth.length} ${slot.depth.length === 1 ? "player" : "players"}</summary>
+      <ol>${depthRows}</ol>
+      <p>Gap is WPA/162 behind the All-Star.</p>
+    </details>
+  </article>`;
+}
+
+function allStarPositionLabel(position) {
+  if (position === "SP") return "Starting pitcher";
+  if (position === "RP") return "Relief pitcher";
+  if (position === "DH") return "Designated hitter";
+  return position;
+}
+
+function normalizeBatchTeamFilters(value) {
+  return {
+    hitters: typeof value?.hitters === "string" ? value.hitters : "all",
+    pitchers: typeof value?.pitchers === "string" ? value.pitchers : "all"
+  };
+}
+
+function normalizeBatchTeamFilter(value, teamNames) {
+  return typeof value === "string" && teamNames.includes(value) ? value : "all";
+}
+
+function renderBatchTeamFilter(table, selected, teamNames) {
+  const label = table === "pitchers" ? "pitchers" : "hitters";
+  return `<label class="batch-team-filter">
+    <span>Team</span>
+    <select data-batch-team-filter="${label}" aria-label="Filter ${label} by team">
+      <option value="all" ${selected === "all" ? "selected" : ""}>All teams</option>
+      ${teamNames.map((team) => `<option value="${escapeHtml(team)}" ${selected === team ? "selected" : ""}>${escapeHtml(team)}</option>`).join("")}
+    </select>
+  </label>`;
 }
 
 function renderBatchHeadToHead(summary) {
@@ -4349,6 +4459,7 @@ function renderBatchGamesSection() {
   const start = page * GAME_LOG_PAGE_SIZE;
   const count = Math.min(GAME_LOG_PAGE_SIZE, runs - start);
   const games = replayBatchGames(teams, seed, start, count, replayOptions);
+  const interestingGames = renderInterestingGames(state.batch.summary?.interestingGames);
 
   const rows = games
     .map(({ index, game }) => {
@@ -4374,6 +4485,7 @@ function renderBatchGamesSection() {
       </div>
       <span>Games ${start + 1}–${start + count} of ${runs}</span>
     </div>
+    ${interestingGames}
     <div class="table-scroll">
       <table>
         <thead><tr><th>#</th><th>Matchup</th><th>Final</th><th>Biggest swing</th><th></th></tr></thead>
@@ -4385,6 +4497,43 @@ function renderBatchGamesSection() {
       <span>Page ${page + 1} of ${pageCount}</span>
       <button class="small" data-game-page="${page + 1}" ${page >= pageCount - 1 ? "disabled" : ""}>Next</button>
     </div>
+  </section>`;
+}
+
+function renderInterestingGames(games) {
+  if (!Array.isArray(games)) {
+    return `<section class="interesting-games">
+      <div class="interesting-games-heading">
+        <div>
+          <p class="eyebrow">Curated replay shelf</p>
+          <h3>Interesting games</h3>
+        </div>
+      </div>
+      <p class="batch-note">This simulation predates interesting-game tracking. Run it again to find the extremes.</p>
+    </section>`;
+  }
+  if (!games.length) return "";
+  const cards = games.map((game) => {
+    const awayWon = game.winner === game.away;
+    const homeWon = game.winner === game.home;
+    const inning = game.innings === 9 ? "" : ` · ${game.innings} inn.`;
+    return `<button type="button" class="interesting-game-card" data-game-open="${game.index}" aria-label="Open game ${game.index + 1}: ${escapeHtml(game.label)}">
+      <span class="interesting-game-label">${escapeHtml(game.label)}</span>
+      <strong class="interesting-game-metric">${escapeHtml(game.metric)}</strong>
+      <span class="interesting-game-matchup">${awayWon ? `<strong>${escapeHtml(game.away)}</strong>` : escapeHtml(game.away)} ${game.awayRuns}–${game.homeRuns} ${homeWon ? `<strong>${escapeHtml(game.home)}</strong>` : escapeHtml(game.home)}${inning}</span>
+      <span class="interesting-game-note">${escapeHtml(game.note ?? "")}</span>
+      <span class="interesting-game-number">Game ${game.index + 1} →</span>
+    </button>`;
+  }).join("");
+  return `<section class="interesting-games">
+    <div class="interesting-games-heading">
+      <div>
+        <p class="eyebrow">Curated replay shelf</p>
+        <h3>Interesting games</h3>
+      </div>
+      <span>Extremes from this simulation</span>
+    </div>
+    <div class="interesting-games-grid">${cards}</div>
   </section>`;
 }
 
@@ -4672,6 +4821,18 @@ function buildPickNumberMap(draft) {
 function bindBatchActions() {
   resetAppHandlers();
   hideHoverCard();
+  app.onchange = (event) => {
+    const teamFilter = event.target.closest("select[data-batch-team-filter]");
+    if (!teamFilter) return;
+    const table = teamFilter.dataset.batchTeamFilter === "pitchers" ? "pitchers" : "hitters";
+    const teamNames = state.batch?.summary?.teams?.map((row) => row.team) ?? [];
+    state.batchTeamFilters = {
+      ...normalizeBatchTeamFilters(state.batchTeamFilters),
+      [table]: normalizeBatchTeamFilter(teamFilter.value, teamNames)
+    };
+    saveState();
+    renderBatch();
+  };
   app.onclick = (event) => {
     // A dot on the draft-value chart pins that player's card. Clicking anywhere
     // else on the results dismisses it — hover cards were unreachable on touch,
@@ -7832,6 +7993,7 @@ function reviveState(value) {
     batchSorts,
     batchStatsTab: normalizeBatchStatsTab(value.batchStatsTab),
     batchPitcherSplit: normalizeBatchPitcherSplit(value.batchPitcherSplit),
+    batchTeamFilters: normalizeBatchTeamFilters(value.batchTeamFilters),
     rosterTab: value.rosterTab === "order" ? "order" : "roster",
     rosterManagerId: typeof value.rosterManagerId === "string" ? value.rosterManagerId : null,
     draft,

@@ -48,6 +48,9 @@ test("simulateBatch accounts for every simulated game", () => {
   assert.equal(summary.headToHead.reduce((sum, row) => sum + row.games, 0), 50);
   assert.equal(summary.starterResults.length, 8, "every team's two starters get a result line");
   assert.equal(summary.starterResults.reduce((sum, row) => sum + row.games, 0), 50, "every game records two starts");
+  assert.ok(Array.isArray(summary.interestingGames));
+  assert.ok(summary.interestingGames.length >= 4);
+  assert.ok(summary.interestingGames.every((game) => game.index >= 0 && game.index < summary.runs));
 
   for (const row of summary.teams) {
     assert.ok(Number.isFinite(row.winPct));
