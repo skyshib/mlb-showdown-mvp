@@ -2236,6 +2236,56 @@ function restoreSealedBids() {
   }
 }
 
+// With a lot live, the bid box is where fingers should land by default: any
+// repaint that leaves focus loose (on the page body, because the old focused
+// element was torn down) hands it to the first pending sealed-bid entry,
+// contents selected so typing a number starts a fresh bid. Anything that kept
+// its focus through the repaint — the search field, a rank box, the note
+// editor, the bid box itself — keeps the caret it has.
+function focusSealedBidEntry() {
+  if (editingNoteId) return;
+  const active = document.activeElement;
+  if (active && active !== document.body) return;
+  const bid = app.querySelector("[data-sealed-bid]");
+  if (!bid) return;
+  bid.focus();
+  bid.select?.();
+}
+
+// Fingers-first bidding, bound on the document because a keydown with focus
+// on the page body never bubbles through #app: while a lot is live, digits
+// typed anywhere that is not a text field land in the sealed-bid box, and
+// Enter fires the bid. Text fields keep their own keys — a note editor open
+// means Enter commits the note, not a bid — and Enter on a focused button
+// stays a button press.
+function routeSealedBidKeys(event) {
+  const target = event.target;
+  const sealedBidInput = target.closest?.("[data-sealed-bid]");
+  if (sealedBidInput) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!sealedBidInput.value.trim()) return;
+    app.querySelector(`button[data-action="seal-bid"][data-manager-id="${CSS.escape(sealedBidInput.dataset.managerId)}"]`)?.click();
+    return;
+  }
+  if (target.matches?.("input, textarea, select") || target.isContentEditable) return;
+  const bid = app.querySelector("[data-sealed-bid]");
+  if (!bid) return;
+  if (/^[0-9]$/.test(event.key)) {
+    // Focus moves on keydown; the browser's default action then types the
+    // digit into the newly focused box, replacing the selected leftovers.
+    bid.focus();
+    bid.select?.();
+    return;
+  }
+  if (event.key === "Enter" && !target.matches?.("button, a, [role='button'], summary")) {
+    if (!bid.value.trim()) return;
+    event.preventDefault();
+    app.querySelector(`button[data-action="seal-bid"][data-manager-id="${CSS.escape(bid.dataset.managerId)}"]`)?.click();
+  }
+}
+document.addEventListener("keydown", routeSealedBidKeys);
+
 // Only the masked box can say where the caret is: asking a number input for its
 // selection throws rather than answering.
 function sealedBidCaret(input) {
@@ -2427,6 +2477,7 @@ function renderDraft() {
       noteField.setSelectionRange(noteField.value.length, noteField.value.length);
     }
   }
+  focusSealedBidEntry();
   bindDraftActions();
   syncAuctionUrgency(draft, draftNow());
   pickClockTick();
