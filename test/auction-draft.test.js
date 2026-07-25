@@ -494,7 +494,7 @@ test("undoing a sale refunds the winner and restores the nominator", () => {
   assert.equal(currentManager(draft).id, alpha.id);
 });
 
-test("computer managers bid instantly when their turn comes up", () => {
+test("computer managers bid instantly even when a human is earlier in seat order", () => {
   const draft = makeAuctionDraft(
     [{ name: "Alpha", cpu: false }, { name: "Robo", cpu: true }, { name: "Bot", cpu: true }],
     makeDraftPool("trio", 32, 16)
@@ -502,11 +502,8 @@ test("computer managers bid instantly when their turn comes up", () => {
   const [alpha] = draft.managers;
   nominatePlayer(draft, draft.pool[0].id);
 
-  // Alpha is the nominator, so nothing happens until the human bids.
-  assert.equal(submitCpuSealedBids(draft), null);
-  assert.equal(sealedBidder(draft).id, alpha.id);
-
-  // A computer answers the moment it is asked. What it answers is its own
+  // Computers answer immediately even though Alpha, the human nominator, is
+  // earlier in seat order. What each computer answers is its own
   // business: a bid, or nothing at all — passing on a card it can replace for
   // the minimum is a move, not a failure to move. What it must never do is bid
   // more than it has.
@@ -515,10 +512,14 @@ test("computer managers bid instantly when their turn comes up", () => {
   assert.ok(roboBid === 0 || roboBid >= AUCTION_MIN_BID, "a bid is a real bid, or it is a pass");
   assert.ok(roboBid <= auctionMaxBid(draft, robo), "and never more than it can pay");
 
-  placeSealedBid(draft, alpha.id, 10);
   const result = submitCpuSealedBids(draft);
-  // Both computers answered, which resolved the lot.
-  assert.equal(result.sold, true);
+  assert.equal(result.sold, false);
+  assert.deepEqual(draft.auction.lot.pending, [alpha.id], "the lot now waits only on the human");
+  assert.deepEqual(Object.keys(draft.auction.lot.bids), ["team-2", "team-3"], "both computers have bid");
+
+  // The human's eventual bid is the last one owed, so it resolves the lot.
+  const sold = placeSealedBid(draft, alpha.id, 10);
+  assert.equal(sold.sold, true);
   assert.equal(draft.auction.lot, null);
   assert.equal(draft.pickNumber, 1);
 });

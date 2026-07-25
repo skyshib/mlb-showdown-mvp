@@ -35,6 +35,8 @@ test("online room lifecycle: create, join, turn enforcement, replay parity", asy
   const created = await api(base, "POST", "/api/rooms", { seed: "online-test", managers: ["Ana", "Bo"] });
   assert.equal(created.status, 201);
   const roomId = created.data.roomId;
+  assert.match(roomId, /^[a-z]+-[a-z]+-[a-z]+$/, "room codes are three readable words");
+  assert.doesNotMatch(roomId, /\d/, "room codes do not contain digits");
   assert.ok(created.data.hostToken);
   assert.deepEqual(created.data.managers.map((manager) => manager.name), ["Ana", "Bo"]);
 

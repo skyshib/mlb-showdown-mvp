@@ -936,6 +936,14 @@ export function sealedBidder(draft) {
   return pendingId ? draft.managers.find((manager) => manager.id === pendingId) ?? null : null;
 }
 
+// CPU bids do not wait behind a human earlier in seat order. A sealed lot's
+// pending list is a set, not a turn queue, so find any computer that still owes
+// the lot a bid and let it answer immediately.
+export function pendingCpuBidder(draft) {
+  const pending = draft.auction?.lot?.pending ?? [];
+  return draft.managers.find((manager) => manager.cpu && pending.includes(manager.id)) ?? null;
+}
+
 export function canPlaceSealedBid(draft, manager, amount, now = Date.now()) {
   const lot = draft.auction?.lot;
   if (!lot) return { ok: false, reason: "no card is on the block" };
@@ -1506,8 +1514,8 @@ export function cpuSealedBid(draft, manager) {
 export function submitCpuSealedBids(draft) {
   let result = null;
   for (;;) {
-    const next = sealedBidder(draft);
-    if (!next?.cpu) return result;
+    const next = pendingCpuBidder(draft);
+    if (!next) return result;
     result = placeSealedBid(draft, next.id, cpuSealedBid(draft, next));
   }
 }

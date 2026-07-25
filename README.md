@@ -63,7 +63,7 @@ Local solo play works exactly as before. To draft with friends on other machines
 Then:
 
 1. Open the app (e.g. `http://127.0.0.1:5177/index.html`) and click `Create online room` on the setup screen.
-2. Share the invite link shown in the room banner (use your LAN IP or a tunnel, e.g. `http://192.168.1.20:8790/index.html?room=ab12cd`).
+2. Share the invite link shown in the room banner (use your LAN IP or a tunnel, e.g. `http://192.168.1.20:8790/index.html?room=brisk-otter-diamond`).
 3. Each player opens the link and claims a manager seat; extra visitors can spectate.
 4. Snake picks and auction nominations are turn-gated, and you can only edit your own lineup or submit your own auction bid. The room creator's seat is the host, and can skip auction review, resolve lots, auto-finish the draft, undo actions, or act for a stalled seat.
 5. Once the draft completes, anyone can run `Sim 1000 games` locally — results are identical on every machine because all sims are seeded.

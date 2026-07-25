@@ -136,7 +136,21 @@ export function renderDraftHistoryTable(picks, options = {}) {
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
-  const rows = picks
+  const paidSortDirection = options.paidSortDirection === "asc" || options.paidSortDirection === "desc"
+    ? options.paidSortDirection
+    : null;
+  const orderedPicks = auction && paidSortDirection
+    ? [...picks].sort((a, b) => {
+        const aPaid = Number.isFinite(a.price) ? a.price : null;
+        const bPaid = Number.isFinite(b.price) ? b.price : null;
+        if (aPaid === null && bPaid !== null) return 1;
+        if (aPaid !== null && bPaid === null) return -1;
+        const priceDifference = (aPaid ?? 0) - (bPaid ?? 0);
+        if (priceDifference) return paidSortDirection === "asc" ? priceDifference : -priceDifference;
+        return a.pickNumber - b.pickNumber;
+      })
+    : picks;
+  const rows = orderedPicks
     .map(({ pickNumber, round, manager, player, price }) => `<tr class="draft-player-row">
         <td class="num">${pickNumber}</td>
         <td class="num">${round}</td>
@@ -159,7 +173,11 @@ export function renderDraftHistoryTable(picks, options = {}) {
         <th>Manager</th>
         <th>Player</th>
         <th>Pos</th>
-        ${auction ? `<th class="num">Paid ($)</th>` : ""}
+        ${auction ? `<th class="num" aria-sort="${paidSortDirection ? (paidSortDirection === "asc" ? "ascending" : "descending") : "none"}">
+          <button type="button" class="column-sort ${paidSortDirection ? "active" : ""}" data-history-paid-sort>
+            Paid ($)${paidSortDirection ? ` <span aria-hidden="true">${paidSortDirection === "asc" ? "^" : "v"}</span>` : ""}
+          </button>
+        </th>` : ""}
         <th class="num">OB/CT</th>
         ${hidePoints ? "" : `<th class="num">Pts</th>`}
         ${showWpa ? `<th class="num"><abbr title="Win probability added per 162 games in the simulation">WPA/162</abbr></th>` : ""}

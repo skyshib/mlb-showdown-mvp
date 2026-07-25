@@ -27,6 +27,7 @@ export function createBatchState(teams, options = {}) {
     runs: 0,
     teams: new Map(),
     headToHead: new Map(),
+    starterResults: new Map(),
     hitters: new Map(),
     pitchers: new Map(),
     topSwing: null,
@@ -48,6 +49,10 @@ export function createBatchState(teams, options = {}) {
     for (const player of [...(team.starters ?? []), ...(team.bullpen ?? [])]) {
       registerPitcher(state, team.name, player);
     }
+    const starters = team.starters?.length ? team.starters : team.pitchers?.slice(0, 1) ?? [];
+    starters.forEach((player, rotationIndex) => {
+      registerStarterResult(state, team.name, player, rotationIndex);
+    });
   }
 
   return state;
@@ -165,6 +170,14 @@ export function summarizeBatch(state) {
     runs: state.runs,
     teams,
     headToHead: [...state.headToHead.values()],
+    starterResults: [...state.starterResults.values()]
+      .map((row) => ({
+        ...row,
+        winPct: rate(row.wins, row.games),
+        runsForPerGame: rate(row.runsFor, row.games),
+        runsAgainstPerGame: rate(row.runsAgainst, row.games)
+      }))
+      .sort((a, b) => a.team.localeCompare(b.team) || a.rotationIndex - b.rotationIndex),
     hitters,
     pitchers,
     topSwing: state.topSwing,
@@ -177,6 +190,8 @@ function foldGame(state, game) {
 
   foldTeamResult(state, game.away.name, game.away.runs, game.home.runs);
   foldTeamResult(state, game.home.name, game.home.runs, game.away.runs);
+  foldStarterResult(state, game.away, game.away.runs, game.home.runs);
+  foldStarterResult(state, game.home, game.home.runs, game.away.runs);
   foldHeadToHead(state, game.away.name, game.home.name, game.away.runs, game.home.runs);
   foldHeadToHead(state, game.home.name, game.away.name, game.home.runs, game.away.runs);
   foldBoxScore(state, game.boxScore?.away);
@@ -219,6 +234,40 @@ function foldTeamResult(state, teamName, runsFor, runsAgainst) {
   row.losses.push(runsFor > runsAgainst ? 0 : 1);
   row.runsFor.push(runsFor);
   row.runsAgainst.push(runsAgainst);
+}
+
+function starterResultKey(teamName, starterId) {
+  return `${teamName}\u0000${starterId}`;
+}
+
+function registerStarterResult(state, teamName, starter, rotationIndex = 0) {
+  if (!starter) return null;
+  const key = starterResultKey(teamName, starter.id);
+  if (!state.starterResults.has(key)) {
+    state.starterResults.set(key, {
+      id: starter.id,
+      name: starter.name,
+      team: teamName,
+      rotationIndex,
+      games: 0,
+      wins: 0,
+      losses: 0,
+      runsFor: 0,
+      runsAgainst: 0
+    });
+  }
+  return state.starterResults.get(key);
+}
+
+function foldStarterResult(state, team, runsFor, runsAgainst) {
+  const starter = team?.pitchers?.[0];
+  if (!starter) return;
+  const row = registerStarterResult(state, team.name, starter, team.starterIndex ?? 0);
+  row.games += 1;
+  row.wins += runsFor > runsAgainst ? 1 : 0;
+  row.losses += runsFor > runsAgainst ? 0 : 1;
+  row.runsFor += runsFor;
+  row.runsAgainst += runsAgainst;
 }
 
 function foldBoxScore(state, teamBox) {

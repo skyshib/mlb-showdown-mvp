@@ -210,7 +210,7 @@ export function universePool() {
       // Real sets above never reach here, so they ignore temperature.
       const tempSalt = universeTemperature ? `:t${universeTemperature}` : "";
       const raw = generatePlayerPool(`universe:${universeSeed}${tempSalt}`, UNIVERSE_TEAMS, 13, universeTemperature);
-      poolCache = calibrateUniverse(raw, universeSeed);
+      poolCache = assignGoldenLegendary(calibrateUniverse(raw, universeSeed), universeSeed);
     }
     poolIndexCache = new Map(poolCache.map((card) => [card.id, card]));
   }
@@ -290,6 +290,24 @@ function calibrateUniverse(pool, seed, { authentic = false } = {}) {
     entry.points = Math.max(10, Math.round(entry.points * 0.6));
   }
   return pool.map((card) => ({ ...card, ...priced.get(card.id) }));
+}
+
+// The generator hides the set's single 1-of-1 before cards have rarity tiers.
+// Once the fictional set has been ranked, move that printing onto a seeded
+// legendary. It stays cosmetic and deterministic, but the chase card is now
+// always one of the set's stars instead of an arbitrary player.
+function assignGoldenLegendary(pool, seed) {
+  const legends = pool.filter((card) => card.rarity === "legend");
+  if (!legends.length) return pool;
+  const rng = createRng(`golden-legend:${seed}`);
+  const goldenId = legends[rng.int(0, legends.length - 1)].id;
+  return pool.map((card) => {
+    if (card.id === goldenId) return { ...card, egg: "golden" };
+    if (card.egg !== "golden") return card;
+    const ordinary = { ...card };
+    delete ordinary.egg;
+    return ordinary;
+  });
 }
 
 // ---- Simultaneous two-way pairs ----------------------------------------------

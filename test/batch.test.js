@@ -46,6 +46,8 @@ test("simulateBatch accounts for every simulated game", () => {
   assert.equal(summary.teams.reduce((sum, row) => sum + row.games, 0), 50);
   assert.equal(summary.headToHead.length, 12);
   assert.equal(summary.headToHead.reduce((sum, row) => sum + row.games, 0), 50);
+  assert.equal(summary.starterResults.length, 8, "every team's two starters get a result line");
+  assert.equal(summary.starterResults.reduce((sum, row) => sum + row.games, 0), 50, "every game records two starts");
 
   for (const row of summary.teams) {
     assert.ok(Number.isFinite(row.winPct));
@@ -59,6 +61,16 @@ test("simulateBatch accounts for every simulated game", () => {
     assert.ok(Number.isFinite(row.caughtStealingByDefense));
     assert.ok(Number.isFinite(row.doublePlays));
     assert.ok(Number.isFinite(row.doublePlayChances));
+    const starts = summary.starterResults.filter((starter) => starter.team === row.team);
+    assert.equal(starts.reduce((sum, starter) => sum + starter.games, 0), row.games);
+    assert.equal(starts.reduce((sum, starter) => sum + starter.wins, 0), row.wins.sum);
+    assert.equal(starts.reduce((sum, starter) => sum + starter.losses, 0), row.losses.sum);
+  }
+  for (const row of summary.starterResults) {
+    assert.equal(row.games, row.wins + row.losses);
+    assert.ok(row.winPct >= 0 && row.winPct <= 1);
+    assert.ok(Number.isFinite(row.runsForPerGame));
+    assert.ok(Number.isFinite(row.runsAgainstPerGame));
   }
   for (const row of summary.headToHead) {
     const reverse = summary.headToHead.find((candidate) => candidate.team === row.opponent && candidate.opponent === row.team);

@@ -100,6 +100,7 @@ import {
   normalizeSnakeTimerConfig,
   pauseAuction,
   pauseSnake,
+  pendingCpuBidder,
   pickPlayer,
   placeSealedBid,
   randomNominationCounts,
@@ -572,8 +573,8 @@ function advanceCpuTurns() {
     guard -= 1;
     if (isAuctionDraft(draft)) {
       if (draft.auction.lot) {
-        const next = sealedBidder(draft);
-        if (!next?.cpu) return;
+        const next = pendingCpuBidder(draft);
+        if (!next) return;
         placeSealedBid(draft, next.id, cpuSealedBid(draft, next));
         continue;
       }
@@ -929,6 +930,7 @@ function defaultState() {
     temperature: 0,
     draft: null,
     draftTab: "available",
+    draftHistoryPaidSort: null,
     rosterTab: "roster",
     // Whose roster the focus view is showing. Null follows your own board; a
     // manager id pins someone else's roster (read-only unless it is yours).
@@ -939,6 +941,7 @@ function defaultState() {
     batch: null,
     batchSorts: {
       teams: { sort: "winPct", direction: "desc" },
+      starters: { sort: "team", direction: "asc" },
       hitters: { sort: "ops", direction: "desc" },
       pitchers: { sort: "era", direction: "asc" }
     },
@@ -2269,7 +2272,10 @@ function renderDraft() {
         <button class="game-tab ${historyTab ? "active" : ""}" data-action="draft-tab" data-tab="history">Draft history</button>
       </div>
       ${historyTab
-        ? renderDraftHistoryTable(draftHistory(draft), { hidePoints: pointsHidden() })
+        ? renderDraftHistoryTable(draftHistory(draft), {
+            hidePoints: pointsHidden(),
+            paidSortDirection: state.draftHistoryPaidSort
+          })
         : boardTab
         ? renderBigBoard(boardOwner, draft)
         : `<div class="section-head">
@@ -2901,6 +2907,14 @@ function bindDraftActions() {
     const sortButton = event.target.closest("button[data-sort]");
     if (sortButton) {
       updateSort(sortButton.dataset.sort);
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const paidSortButton = event.target.closest("button[data-history-paid-sort]");
+    if (paidSortButton) {
+      toggleDraftHistoryPaidSort();
       saveState();
       renderDraft();
       return;
@@ -3747,6 +3761,8 @@ function renderBatch() {
   const fipConstant = tournamentFipConstant(pitcherLines);
   const teamGamesByName = new Map(summary.teams.map((row) => [row.team, row.games ?? teamScheduleGames(row)]));
   const sortedTeams = sortBatchRows(summary.teams, "teams", (row, sort) => batchTeamSortValue(row, sort));
+  const starterResults = summary.starterResults ?? [];
+  const sortedStarterResults = sortBatchRows(starterResults, "starters", (row, sort) => batchStarterSortValue(row, sort));
   const sortedHitters = sortBatchRows(summary.hitters, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
   const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
   const sortedBaserunning = [...summary.teams].sort(compareTournamentBaserunning);
@@ -4051,6 +4067,38 @@ function renderBatch() {
   ${raceSection}
   ${renderFormulaRevealSection(summary)}`;
   const headToHeadSection = renderBatchHeadToHead(summary);
+  const starterResultsSection = starterResults.length ? `<section class="panel wide">
+    <p class="eyebrow">${runs} simulated games</p>
+    <h2>Team results by starting pitcher</h2>
+    <p class="batch-note">Each row is the team's record in games this pitcher started. W-L is the team result, not an individual pitching decision.</p>
+    <div class="table-scroll">
+      <table class="starter-results-table">
+        <thead><tr>
+          ${renderBatchSortHeader("starters", "team", "Team")}
+          ${renderBatchSortHeader("starters", "name", "Starter")}
+          ${renderBatchSortHeader("starters", "games", "GS", "num")}
+          ${renderBatchSortHeader("starters", "wins", "W", "num")}
+          ${renderBatchSortHeader("starters", "losses", "L", "num")}
+          ${renderBatchSortHeader("starters", "winPct", "Win%", "num")}
+          ${renderBatchSortHeader("starters", "rf", "RF/G", "num")}
+          ${renderBatchSortHeader("starters", "ra", "RA/G", "num")}
+        </tr></thead>
+        <tbody>${sortedStarterResults.map((row) => `<tr>
+          <td><strong>${escapeHtml(row.team)}</strong></td>
+          <td>${renderBatchPlayerName(row, playersById)}</td>
+          <td class="num">${row.games}</td>
+          <td class="num">${row.wins}</td>
+          <td class="num">${row.losses}</td>
+          <td class="num">${formatShare(row.winPct)}</td>
+          <td class="num">${formatDecimal(row.runsForPerGame, 2)}</td>
+          <td class="num">${formatDecimal(row.runsAgainstPerGame, 2)}</td>
+        </tr>`).join("")}</tbody>
+      </table>
+    </div>
+  </section>` : `<section class="panel wide">
+    <h2>Team results by starting pitcher</h2>
+    <p class="batch-note">This simulation predates starter-result tracking. Run it again to build the starter records.</p>
+  </section>`;
   const hittersSection = `<section class="panel wide">
     <h2>Hitters, 162-game pace</h2>
     <div class="table-scroll">
@@ -4154,11 +4202,15 @@ function renderBatch() {
       </div>
       <span>${state.draft.pickNumber} picks</span>
     </div>
-    ${renderDraftHistoryTable(draftHistory(state.draft), { wpaByPlayerId: batchWpaByPlayerId(summary) })}
+    ${renderDraftHistoryTable(draftHistory(state.draft), {
+      wpaByPlayerId: batchWpaByPlayerId(summary),
+      paidSortDirection: state.draftHistoryPaidSort
+    })}
   </section>`;
   const batchSections = {
     overview: overviewSection,
     headToHead: headToHeadSection,
+    starters: starterResultsSection,
     hitters: hittersSection,
     pitchers: pitchersSection,
     skills: teamSkillsSection,
@@ -4197,6 +4249,7 @@ function batchStatsTabs() {
   return [
     { id: "overview", label: "Overview" },
     { id: "headToHead", label: "Head-to-head" },
+    { id: "starters", label: "By starter" },
     { id: "hitters", label: "Hitters" },
     { id: "pitchers", label: "Pitchers" },
     { id: "skills", label: "Team skills" },
@@ -4228,16 +4281,17 @@ function renderBatchHeadToHead(summary) {
     const cells = teams.map((opponent) => {
       if (team === opponent) return `<td class="num head-to-head-diagonal" aria-label="${escapeHtml(team)}">—</td>`;
       const row = records.get(`${team}\u0000${opponent}`);
-      if (!row) return `<td class="num" title="No games played">0-0</td>`;
-      const title = `${team} vs ${opponent}: ${row.wins}-${row.losses}, ${row.runsFor}-${row.runsAgainst} runs`;
-      return `<td class="num head-to-head-record" title="${escapeHtml(title)}"><strong>${row.wins}-${row.losses}</strong><span>${row.runsFor}-${row.runsAgainst} runs</span></td>`;
+      if (!row) return `<td class="num" title="No games played">0-0 (0%)</td>`;
+      const winPct = formatWholeShare(row.games ? row.wins / row.games : 0);
+      const title = `${team} vs ${opponent}: ${row.wins}-${row.losses} (${winPct}), ${row.runsFor}-${row.runsAgainst} runs`;
+      return `<td class="num head-to-head-record" title="${escapeHtml(title)}"><strong>${row.wins}-${row.losses} (${winPct})</strong><span>${row.runsFor}-${row.runsAgainst} runs</span></td>`;
     }).join("");
     return `<tr><th scope="row" class="head-to-head-team">${renderHeadToHeadTeamBox(team, overall.get(team))}</th>${cells}</tr>`;
   }).join("");
   return `<section class="panel wide">
     <p class="eyebrow">${summary.runs} simulated games</p>
     <h2>Head-to-head records</h2>
-    <p class="batch-note">The Team column carries each manager's overall record, win rate, and runs scored/allowed per game. Each matchup cell shows wins-losses with total runs underneath.</p>
+    <p class="batch-note">The Team column carries each manager's overall record, win rate, and runs scored/allowed per game. Each matchup cell shows wins-losses and win percentage, with total runs underneath.</p>
     <div class="table-scroll">
       <table class="head-to-head-table">
         <thead><tr><th>Team</th>${header}</tr></thead>
@@ -4516,6 +4570,18 @@ function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
   return line.ops;
 }
 
+function batchStarterSortValue(row, sort) {
+  if (sort === "team") return row.team;
+  if (sort === "name") return row.name;
+  if (sort === "games") return row.games;
+  if (sort === "wins") return row.wins;
+  if (sort === "losses") return row.losses;
+  if (sort === "winPct") return row.winPct;
+  if (sort === "rf") return row.runsForPerGame;
+  if (sort === "ra") return row.runsAgainstPerGame;
+  return row.team;
+}
+
 function batchPitcherSortValue(line, sort, fipConstant, teamGamesByName) {
   if (sort === "name") return line.name;
   if (sort === "team") return line.team;
@@ -4546,9 +4612,14 @@ function updateBatchSort(table, sort) {
     : { sort, direction: defaultBatchSortDirection(table, sort) };
 }
 
+function toggleDraftHistoryPaidSort() {
+  state.draftHistoryPaidSort = state.draftHistoryPaidSort === "desc" ? "asc" : "desc";
+}
+
 function defaultBatchSorts() {
   return {
     teams: { sort: "winPct", direction: "desc" },
+    starters: { sort: "team", direction: "asc" },
     hitters: { sort: "ops", direction: "desc" },
     pitchers: { sort: "era", direction: "asc" }
   };
@@ -4661,6 +4732,14 @@ function bindBatchActions() {
       return;
     }
 
+    const paidSortButton = event.target.closest("button[data-history-paid-sort]");
+    if (paidSortButton) {
+      toggleDraftHistoryPaidSort();
+      saveState();
+      renderBatch();
+      return;
+    }
+
     const gameOpen = event.target.closest("[data-game-open]");
     if (gameOpen && !gameOpen.disabled) {
       state.batchGameIndex = Number(gameOpen.dataset.gameOpen);
@@ -4710,6 +4789,10 @@ function bindBatchActions() {
 
 function formatShare(value) {
   return `${((Number(value) || 0) * 100).toFixed(1)}%`;
+}
+
+function formatWholeShare(value) {
+  return `${Math.round((Number(value) || 0) * 100)}%`;
 }
 
 function formatDistributionTotal(value) {
@@ -7740,6 +7823,9 @@ function reviveState(value) {
     starred: normalizeStarred(value.starred),
     flagged: normalizeStarred(value.flagged),
     heatBy: value.heatBy === "points" ? "points" : "price",
+    draftHistoryPaidSort: value.draftHistoryPaidSort === "asc" || value.draftHistoryPaidSort === "desc"
+      ? value.draftHistoryPaidSort
+      : null,
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
     myManagerId: typeof value.myManagerId === "string" ? value.myManagerId : null,
     filters,

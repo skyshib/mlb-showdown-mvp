@@ -424,9 +424,12 @@ test("computer managers nominate and bid on the server", async (t) => {
   });
 
   const playerId = firstNominatable(room);
-  await act(base, room.roomId, ana.data.token, { type: "nominate", playerId });
-  // Ana bids; Robo is the only seat left, so the server bids for it and the
-  // lot resolves without any browser doing anything.
+  const nomination = await act(base, room.roomId, ana.data.token, { type: "nominate", playerId });
+  assert.deepEqual(nomination.data.lot.bidsIn, ["team-2"], "Robo bids as soon as the lot opens");
+  assert.deepEqual(nomination.data.lot.pending, ["team-1"], "the lot waits only on Ana");
+
+  // Ana's later bid is the last one owed, so the lot resolves without any
+  // browser having to prompt Robo.
   await act(base, room.roomId, ana.data.token, { type: "seal-bid", managerId: "team-1", amount: 300 });
 
   const after = await api(base, "GET", `/api/rooms/${room.roomId}`);

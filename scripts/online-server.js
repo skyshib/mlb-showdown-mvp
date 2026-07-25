@@ -33,8 +33,8 @@ import {
   normalizeAuctionTimerConfig,
   normalizePickTimerSeconds,
   normalizeStartingPitchers,
+  pendingCpuBidder,
   rosterSizeForStartingPitchers,
-  sealedBidder,
   timedOutAuctionBidderIds,
   SIM_ACTION_TYPES
 } from "../src/rules/draft.js";
@@ -42,6 +42,44 @@ import {
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_BODY_BYTES = 64 * 1024;
 const HEARTBEAT_MS = 20000;
+
+// Room codes are meant to be spoken or typed by friends, so use three plain
+// words instead of an opaque hexadecimal fragment. The three independent
+// 64-word banks make 262,144 possible codes; newRoomId still checks the room
+// store and redraws on a collision. Old alphanumeric room ids remain valid
+// because room lookup does not impose a format.
+const ROOM_CODE_FIRST_WORDS = [
+  "amber", "autumn", "blue", "bold", "breezy", "bright", "brisk", "calm",
+  "chipper", "clear", "clever", "coral", "cosmic", "crisp", "dapper", "dawn",
+  "eager", "early", "easy", "emerald", "fair", "fancy", "fast", "festive",
+  "fresh", "friendly", "gentle", "golden", "grand", "green", "happy", "hardy",
+  "jolly", "keen", "kind", "lively", "lucky", "mellow", "merry", "misty",
+  "navy", "nimble", "noble", "orange", "peachy", "plucky", "proud", "quick",
+  "quiet", "ready", "rosy", "royal", "sandy", "silver", "sunny", "swift",
+  "teal", "tidy", "vivid", "warm", "wild", "wise", "witty", "young"
+];
+
+const ROOM_CODE_SECOND_WORDS = [
+  "alpaca", "antelope", "badger", "bear", "beaver", "bison", "bobcat", "buffalo",
+  "cardinal", "cougar", "coyote", "crane", "crow", "deer", "dolphin", "donkey",
+  "eagle", "elk", "falcon", "ferret", "finch", "fox", "gecko", "goose",
+  "heron", "horse", "husky", "ibis", "jaguar", "jay", "koala", "lark",
+  "lion", "lynx", "marlin", "moose", "mouse", "osprey", "otter", "owl",
+  "panda", "panther", "parrot", "pelican", "penguin", "puma", "rabbit", "raven",
+  "robin", "salmon", "seal", "shark", "sparrow", "stag", "swan", "tiger",
+  "trout", "turtle", "walrus", "whale", "wolf", "wren", "yak", "zebra"
+];
+
+const ROOM_CODE_THIRD_WORDS = [
+  "acorn", "alley", "apple", "ballpark", "baseline", "bleacher", "bridge", "brook",
+  "bullpen", "canyon", "cap", "castle", "clubhouse", "creek", "curveball", "diamond",
+  "dugout", "fastball", "fence", "field", "forest", "garden", "glove", "grandstand",
+  "grove", "harbor", "hill", "homer", "inning", "jersey", "lantern", "locker",
+  "maple", "meadow", "moon", "mound", "oak", "orchard", "park", "pennant",
+  "pine", "plate", "rally", "river", "road", "scoreboard", "series", "slider",
+  "stadium", "star", "stone", "sunset", "swing", "tag", "throw", "trail",
+  "turn", "valley", "victory", "walk", "wall", "wave", "willow", "wind"
+];
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -1052,8 +1090,8 @@ function runCpuAuction(store, room) {
   while (!draft.complete && guard > 0) {
     guard -= 1;
     if (draft.auction.lot) {
-      const bidder = sealedBidder(draft);
-      if (!bidder?.cpu) return;
+      const bidder = pendingCpuBidder(draft);
+      if (!bidder) return;
       const action = { type: "seal-bid", managerId: bidder.id, amount: cpuSealedBid(draft, bidder), at: Date.now() };
       applyDraftAction(draft, action);
       recordSealedBid(store, room, action);
@@ -1336,7 +1374,12 @@ function claimedSeats(room) {
 
 function newRoomId(rooms) {
   for (;;) {
-    const id = randomBytes(4).toString("hex").slice(0, 6);
+    const roll = randomBytes(3);
+    const id = [
+      ROOM_CODE_FIRST_WORDS[roll[0] % ROOM_CODE_FIRST_WORDS.length],
+      ROOM_CODE_SECOND_WORDS[roll[1] % ROOM_CODE_SECOND_WORDS.length],
+      ROOM_CODE_THIRD_WORDS[roll[2] % ROOM_CODE_THIRD_WORDS.length]
+    ].join("-");
     if (!rooms.has(id)) return id;
   }
 }

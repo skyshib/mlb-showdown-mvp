@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderBoxScore } from "../src/ui/render.js";
+import { renderBoxScore, renderDraftHistoryTable } from "../src/ui/render.js";
 import { cardPanelHtml } from "../src/ui/cardFace.js";
 
 const hitter = {
@@ -58,6 +58,25 @@ test("renderBoxScore adds hover previews when player cards can be resolved", () 
   assert.ok(html.includes('data-preview-id="h-2"'));
   assert.ok(html.includes("<th>CS</th>"));
   assert.ok(html.includes("Unknown Pitcher"));
+});
+
+test("auction draft history can sort by price paid", () => {
+  const picks = [
+    { pickNumber: 1, round: 1, manager: { name: "First" }, player: { ...hitter, id: "paid-20", name: "Twenty" }, price: 20 },
+    { pickNumber: 2, round: 1, manager: { name: "Second" }, player: { ...hitter, id: "paid-100", name: "Hundred" }, price: 100 },
+    { pickNumber: 3, round: 1, manager: { name: "Third" }, player: { ...hitter, id: "paid-50", name: "Fifty" }, price: 50 }
+  ];
+
+  const descending = renderDraftHistoryTable(picks, { paidSortDirection: "desc" });
+  assert.ok(descending.indexOf("Hundred") < descending.indexOf("Fifty"));
+  assert.ok(descending.indexOf("Fifty") < descending.indexOf("Twenty"));
+  assert.ok(descending.includes('aria-sort="descending"'));
+  assert.ok(descending.includes("data-history-paid-sort"));
+
+  const ascending = renderDraftHistoryTable(picks, { paidSortDirection: "asc" });
+  assert.ok(ascending.indexOf("Twenty") < ascending.indexOf("Fifty"));
+  assert.ok(ascending.indexOf("Fifty") < ascending.indexOf("Hundred"));
+  assert.ok(ascending.includes('aria-sort="ascending"'));
 });
 
 test("fictional card backdrops vary by id but remain deterministic", () => {

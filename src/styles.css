@@ -885,14 +885,19 @@ body.auction-clock-urgent .auction-lot-rail {
 }
 
 .auction-status-panel {
+  position: sticky;
+  top: 124px;
   display: grid;
   gap: 14px;
+  max-height: calc(100vh - 320px);
   margin-top: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-/* The utility toolbar scrolls away. The one thing that follows a manager down
-   the board is the decision they are actually making: the live card, the room's
-   bid progress, the money available to this seat, and the bid box itself. */
+/* The utility toolbar scrolls away. The live decision rail follows the board
+   alongside the compact auction desk: card, bid progress, available money,
+   and bid entry stay within reach without pinning every control on the page. */
 .auction-lot-rail {
   position: sticky;
   top: 0;
@@ -1812,6 +1817,10 @@ button.roster-slot[draggable="true"]:active {
 
 .team-stat-table {
   min-width: 640px;
+}
+
+.starter-results-table {
+  min-width: 720px;
 }
 
 /* The tight per-162 header labels carry their full meaning in a hover title;

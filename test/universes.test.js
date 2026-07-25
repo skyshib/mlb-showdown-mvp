@@ -227,9 +227,12 @@ test("every fictional deck seats exactly one golden ticket, and it survives an i
       const deck = buildDraftPool("fictional", seed, { nomination, managerCount: 3 });
       const goldens = deck.filter((card) => card.egg === "golden");
       assert.equal(goldens.length, 1, `${seed}/${nomination} deals ${goldens.length} golden tickets`);
+      assert.equal(goldens[0].rarity, "legend", `${seed}/${nomination} puts the 1-of-1 on a legendary`);
       // The room writes its deck down as ids; the ticket must come back.
       const rebuilt = deckFromIds("fictional", seed, deck.map(deckEntry));
-      assert.equal(rebuilt.filter((card) => card.egg === "golden").length, 1, `${seed}/${nomination} rebuilt`);
+      const rebuiltGoldens = rebuilt.filter((card) => card.egg === "golden");
+      assert.equal(rebuiltGoldens.length, 1, `${seed}/${nomination} rebuilt`);
+      assert.equal(rebuiltGoldens[0].rarity, "legend", `${seed}/${nomination} rebuild keeps its legendary`);
     }
   }
 
