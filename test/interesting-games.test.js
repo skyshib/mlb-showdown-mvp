@@ -6,12 +6,12 @@ import {
   summarizeInterestingGames
 } from "../src/rules/interestingGames.js";
 
-function hitter(name, sb = 0, hr = 0) {
-  return { id: name, name, sb, hr };
+function hitter(name, sb = 0, hr = 0, overrides = {}) {
+  return { id: name, name, sb, hr, wpa: 0, ...overrides };
 }
 
 function pitcher(name, overrides = {}) {
-  return { id: name, name, outs: 27, h: 8, bb: 2, so: 6, ...overrides };
+  return { id: name, name, outs: 27, h: 8, bb: 2, so: 6, wpa: 0, ...overrides };
 }
 
 function game({
@@ -43,7 +43,7 @@ test("interesting-game shelves keep the top three across varied game stories", (
     awayRuns: 10,
     homeRuns: 9,
     events: [{ inning: 9, half: "top", batter: "Slugger", result: "HR", wpa: 0.4, scoreAfter: { away: 10, home: 9 } }],
-    awayHitters: [hitter("Runner", 1, 5)],
+    awayHitters: [hitter("Runner", 1, 5, { rbi: 7, wpa: 0.8 })],
     homeHitters: [hitter("Home slugger", 0, 2)]
   }), 0);
   considerInterestingGame(state, game({
@@ -81,6 +81,9 @@ test("interesting-game shelves keep the top three across varied game stories", (
     assert.ok(summary.filter((entry) => entry.categoryKey === category).length <= 3);
   }
   assert.equal(leader("highestScoring").index, 0);
+  assert.equal(leader("heroPerformance").index, 0);
+  assert.equal(leader("heroPerformance").value, 0.8);
+  assert.match(leader("heroPerformance").note, /Runner.*5 HR.*7 RBI/);
   assert.equal(leader("biggestComeback").index, 1);
   assert.equal(leader("biggestComeback").value, 3);
   assert.equal(leader("biggestWpaSwing").index, 1);
@@ -92,4 +95,18 @@ test("interesting-game shelves keep the top three across varied game stories", (
   assert.equal(leader("pitchingGem").index, 2);
   assert.equal(leader("pitchingGem").label, "Perfect game");
   assert.match(leader("pitchingGem").note, /Perfect Pat/);
+});
+
+test("a two-way player's hitting and pitching WPA combine into one hero performance", () => {
+  const state = createInterestingGameState();
+  considerInterestingGame(state, game({
+    awayRuns: 3,
+    homeRuns: 1,
+    awayHitters: [hitter("Two-Way Star", 0, 1, { rbi: 2, wpa: 0.3 })],
+    awayPitchers: [pitcher("Two-Way Star", { id: "Two-Way Star", outs: 27, so: 10, wpa: 0.4 })]
+  }), 0);
+
+  const hero = summarizeInterestingGames(state).find((entry) => entry.categoryKey === "heroPerformance");
+  assert.ok(Math.abs(hero.value - 0.7) < 1e-9);
+  assert.match(hero.note, /1 HR.*2 RBI.*9\.0 IP.*10 K/);
 });

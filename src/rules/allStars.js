@@ -1,4 +1,5 @@
 export const ALL_STAR_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "SP", "RP"];
+const INLINE_ALL_STAR_DEPTH_LIMIT = 5;
 
 export function buildAllStarDepthChart(teams, summary) {
   const hitterLines = statLineIndex(summary?.hitters ?? []);
@@ -32,6 +33,17 @@ export function buildAllStarDepthChart(teams, summary) {
       }))
     };
   });
+}
+
+export function allStarComparisonCandidates(depth) {
+  if (!Array.isArray(depth)) return [];
+  return depth.length <= INLINE_ALL_STAR_DEPTH_LIMIT
+    ? depth.slice(1)
+    : depth.slice(1, 3);
+}
+
+export function shouldShowFullAllStarDepth(depth) {
+  return Array.isArray(depth) && depth.length > INLINE_ALL_STAR_DEPTH_LIMIT;
 }
 
 function statLineIndex(lines) {

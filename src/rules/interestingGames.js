@@ -1,6 +1,6 @@
 const CATEGORY_ORDER = [
   "highestScoring",
-  "pitchersDuel",
+  "heroPerformance",
   "biggestBlowout",
   "biggestComeback",
   "biggestWpaSwing",
@@ -14,7 +14,7 @@ const CATEGORY_ORDER = [
 
 const CATEGORY_LABELS = {
   highestScoring: "Highest scoring",
-  pitchersDuel: "Pitchers' duels",
+  heroPerformance: "Biggest hero performances",
   biggestBlowout: "Biggest blowouts",
   biggestComeback: "Biggest comebacks",
   biggestWpaSwing: "Biggest WPA swings",
@@ -46,13 +46,16 @@ export function considerInterestingGame(state, game, index) {
     value: totalRuns
   }, totalRuns, margin);
 
-  keepTop(state, "pitchersDuel", {
-    ...base,
-    label: "Pitchers' duel",
-    metric: `${totalRuns} combined run${totalRuns === 1 ? "" : "s"}`,
-    note: `${base.winner} won ${Math.max(base.awayRuns, base.homeRuns)}-${Math.min(base.awayRuns, base.homeRuns)}`,
-    value: totalRuns
-  }, -totalRuns, -margin);
+  const hero = bestSingleGameHero(game);
+  if (hero) {
+    keepTop(state, "heroPerformance", {
+      ...base,
+      label: "Biggest hero",
+      metric: `${hero.wpa >= 0 ? "+" : ""}${(hero.wpa * 100).toFixed(1)}% WPA`,
+      note: `${hero.name} · ${hero.team}${hero.detail ? ` · ${hero.detail}` : ""}`,
+      value: hero.wpa
+    }, hero.wpa, totalRuns);
+  }
 
   keepTop(state, "biggestBlowout", {
     ...base,
@@ -221,6 +224,63 @@ function biggestWpaEvent(events) {
     if (!Number.isFinite(event.wpa)) return biggest;
     return !biggest || Math.abs(event.wpa) > Math.abs(biggest.wpa) ? event : biggest;
   }, null);
+}
+
+function bestSingleGameHero(game) {
+  const candidates = [];
+  for (const side of ["away", "home"]) {
+    const teamBox = game.boxScore?.[side];
+    if (!teamBox) continue;
+    const players = new Map();
+    const addLine = (line, kind) => {
+      if (!line || !Number.isFinite(line.wpa)) return;
+      const key = line.id ?? line.name;
+      const player = players.get(key) ?? {
+        name: line.name ?? "Unknown player",
+        team: teamBox.team ?? game[side]?.name ?? side,
+        wpa: 0,
+        batting: null,
+        pitching: null
+      };
+      player.wpa += line.wpa;
+      if (kind === "hitter") {
+        player.batting = {
+          hits: line.h ?? 0,
+          homeRuns: line.hr ?? 0,
+          rbi: line.rbi ?? 0,
+          steals: line.sb ?? 0
+        };
+      } else {
+        player.pitching = {
+          outs: line.outs ?? 0,
+          strikeouts: line.so ?? 0
+        };
+      }
+      players.set(key, player);
+    };
+    for (const line of teamBox.hitters ?? []) addLine(line, "hitter");
+    for (const line of teamBox.pitchers ?? []) addLine(line, "pitcher");
+    candidates.push(...players.values());
+  }
+  const hero = candidates
+    .filter((candidate) => candidate.wpa > 0)
+    .sort((a, b) => b.wpa - a.wpa || a.name.localeCompare(b.name))[0];
+  return hero ? { ...hero, detail: heroPerformanceDetail(hero) } : null;
+}
+
+function heroPerformanceDetail(hero) {
+  const details = [];
+  if (hero.batting) {
+    if (hero.batting.homeRuns) details.push(`${hero.batting.homeRuns} HR`);
+    if (hero.batting.rbi) details.push(`${hero.batting.rbi} RBI`);
+    if (hero.batting.steals) details.push(`${hero.batting.steals} SB`);
+    if (!details.length && hero.batting.hits) details.push(`${hero.batting.hits} H`);
+  }
+  if (hero.pitching?.outs) {
+    details.push(`${Math.floor(hero.pitching.outs / 3)}.${hero.pitching.outs % 3} IP`);
+    if (hero.pitching.strikeouts) details.push(`${hero.pitching.strikeouts} K`);
+  }
+  return details.join(" · ");
 }
 
 function countLeadChanges(events) {

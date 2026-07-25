@@ -1860,6 +1860,101 @@ button.roster-slot[draggable="true"]:active {
   background: var(--panel);
 }
 
+.ranking-mode-button {
+  align-self: end;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%);
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.ranking-mode-button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ranking-mode-button span {
+  margin-left: 6px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.manual-rank-header {
+  min-width: 104px;
+}
+
+.manual-rank-cell {
+  min-width: 104px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.manual-rank-handle {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 3px 4px;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+
+.manual-rank-handle:active {
+  cursor: grabbing;
+}
+
+.manual-rank-cell > strong {
+  display: inline-block;
+  min-width: 27px;
+  color: var(--accent-dark);
+  font-size: 12px;
+}
+
+.manual-rank-buttons {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 20px);
+  gap: 2px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+.manual-rank-buttons button {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 8px;
+}
+
+.manual-rank-buttons button:disabled {
+  opacity: 0.3;
+}
+
+.manual-ranking-row {
+  transition: opacity 0.12s ease, box-shadow 0.12s ease;
+}
+
+.manual-ranking-row.ranking-dragging {
+  opacity: 0.42;
+}
+
+.manual-ranking-row.ranking-drag-over td {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
 /* A card that has already sold: still on the board, out of reach. */
 .player-table tr.sold-row {
   color: var(--muted);
@@ -3832,7 +3927,7 @@ button.roster-slot[draggable="true"]:active {
 
 .all-star-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -3882,7 +3977,7 @@ button.roster-slot[draggable="true"]:active {
 }
 
 .all-star-card-face {
-  width: min(100%, 220px);
+  width: min(100%, 198px);
   margin: 0 auto;
 }
 
@@ -3900,6 +3995,63 @@ button.roster-slot[draggable="true"]:active {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+}
+
+.all-star-comparison {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  background: color-mix(in srgb, var(--paper) 58%, transparent);
+}
+
+.all-star-comparison-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.all-star-comparison-heading > strong {
+  color: var(--accent-dark);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.all-star-comparison-heading > small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.all-star-comparison ol {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.all-star-comparison li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 58%, transparent);
+  font-size: 10px;
+}
+
+.all-star-comparison li:first-child {
+  border-top: 0;
+}
+
+.all-star-comparison li > strong {
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .all-star-depth {
@@ -4895,6 +5047,85 @@ button.interesting-game-card:focus-visible {
   margin-top: 20px;
 }
 
+.game-line-score {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 18px;
+}
+
+.game-line-score h4 {
+  margin: 0;
+}
+
+.game-line-score-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.game-line-score table {
+  width: 100%;
+  min-width: 650px;
+  border-collapse: collapse;
+  background: var(--card);
+  font-variant-numeric: tabular-nums;
+}
+
+.game-line-score th,
+.game-line-score td {
+  min-width: 34px;
+  padding: 7px 8px;
+  border-right: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  text-align: center;
+}
+
+.game-line-score tr:last-child th,
+.game-line-score tr:last-child td {
+  border-bottom: 0;
+}
+
+.game-line-score th:last-child,
+.game-line-score td:last-child {
+  border-right: 0;
+}
+
+.game-line-score thead th {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--panel) 88%, var(--line) 12%);
+}
+
+.game-line-score tbody th {
+  min-width: 130px;
+  max-width: 190px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-line-score tbody td {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.game-line-score .line-score-total {
+  border-left: 2px solid var(--ink);
+  font-weight: 950;
+}
+
+.game-line-score .line-score-total + .line-score-total {
+  border-left: 1px solid var(--line);
+}
+
+.game-line-score .line-score-unplayed {
+  color: var(--muted);
+}
+
 .batch-play-by-play {
   display: grid;
   gap: 18px;
@@ -5031,7 +5262,7 @@ button.interesting-game-card:focus-visible {
 
 .game-story-play {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(120px, auto);
+  grid-template-columns: minmax(220px, 1fr) 104px minmax(120px, auto);
   gap: 8px 16px;
   padding: 12px 14px;
   border-top: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
@@ -5047,6 +5278,38 @@ button.interesting-game-card:focus-visible {
 
 .game-story-play.leverage-play {
   box-shadow: inset 4px 0 0 color-mix(in srgb, var(--accent) 72%, var(--ink) 28%);
+}
+
+.game-story-play.runner-event {
+  position: relative;
+  margin: 5px 13px 5px 30px;
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, #2f7b57 48%, var(--line) 52%);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--card) 92%, #2f7b57 8%);
+}
+
+.game-story-play.runner-event::before {
+  position: absolute;
+  top: 50%;
+  left: -22px;
+  width: 20px;
+  color: #2f7b57;
+  font-size: 15px;
+  font-weight: 950;
+  text-align: center;
+  content: "↗";
+  transform: translateY(-50%);
+}
+
+.game-story-play.runner-event.steal-caught {
+  border-color: color-mix(in srgb, #8f3147 45%, var(--line) 55%);
+  background: color-mix(in srgb, var(--card) 94%, #8f3147 6%);
+}
+
+.game-story-play.runner-event.steal-caught::before {
+  color: #8f3147;
+  content: "×";
 }
 
 .game-story-play-copy {
@@ -5072,7 +5335,12 @@ button.interesting-game-card:focus-visible {
 }
 
 .scoring-badge,
-.leverage-badge {
+.leverage-badge,
+.steal-badge,
+.story-advantage-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   width: fit-content;
   border-radius: 999px;
   padding: 2px 7px;
@@ -5088,6 +5356,102 @@ button.interesting-game-card:focus-visible {
 
 .leverage-badge {
   background: #8f3147;
+}
+
+.steal-badge {
+  background: #2f7b57;
+}
+
+.steal-caught .steal-badge {
+  background: #8f3147;
+}
+
+.story-advantage-badge {
+  border: 1px solid currentColor;
+  background: transparent;
+}
+
+.story-advantage-badge small {
+  font-size: 8px;
+  font-weight: 950;
+  opacity: 0.78;
+}
+
+.hitter-advantage,
+.runner-advantage {
+  color: #9a5b08;
+}
+
+.pitcher-advantage,
+.catcher-advantage {
+  color: #315f91;
+}
+
+.game-story-base-state {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 2px;
+  min-width: 92px;
+}
+
+.game-story-base-label,
+.game-story-outs {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.game-story-base-diamond {
+  position: relative;
+  display: block;
+  width: 68px;
+  height: 46px;
+}
+
+.base-state-marker {
+  position: absolute;
+  width: 17px;
+  height: 17px;
+  border: 1px solid color-mix(in srgb, var(--muted) 55%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--panel) 84%, var(--line) 16%);
+  color: var(--muted);
+  transform: rotate(45deg);
+}
+
+.base-state-marker > span {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  font-size: 8px;
+  font-weight: 900;
+  transform: rotate(-45deg);
+}
+
+.base-state-marker.occupied {
+  border-color: color-mix(in srgb, var(--accent) 78%, var(--ink) 22%);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.base-state-1 {
+  right: 7px;
+  bottom: 3px;
+}
+
+.base-state-2 {
+  top: 3px;
+  left: 25px;
+}
+
+.base-state-3 {
+  bottom: 3px;
+  left: 7px;
 }
 
 .game-story-play-impact {
@@ -5154,6 +5518,12 @@ button.interesting-game-card:focus-visible {
 
   .game-story-play {
     grid-template-columns: 1fr;
+  }
+
+  .game-story-base-state {
+    justify-self: start;
+    grid-template-columns: auto 72px auto;
+    align-items: center;
   }
 
   .game-story-play-impact {

@@ -1345,7 +1345,9 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
 }
 
 function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, fielding, targetBonus = 0 }) {
-  const target = speedTarget(runner) + targetBonus;
+  const runnerSpeed = speedTarget(runner);
+  const destination = destinationKey(toIndex);
+  const target = runnerSpeed + targetBonus;
   const safeChance = advanceSafeChance(target, fielding);
   return {
     runner,
@@ -1353,9 +1355,12 @@ function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, f
     toIndex,
     outsForDecision,
     fielding,
+    runnerSpeed,
+    targetBonus,
     target,
     safeChance,
-    destination: destinationKey(toIndex)
+    destination,
+    decisionMinimum: advanceDecisionMinimum(outsForDecision, destination)
   };
 }
 
@@ -1537,6 +1542,10 @@ function describeAdvanceAttempt(candidate, outcome) {
     fielding: outcome.fielding,
     total: outcome.total,
     target: outcome.target,
+    runnerSpeed: candidate.runnerSpeed,
+    targetBonus: candidate.targetBonus,
+    destination: candidate.destination,
+    decisionMinimum: candidate.decisionMinimum,
     safeChance: candidate.safeChance,
     safe: outcome.safe,
     thrown: outcome.roll !== null,

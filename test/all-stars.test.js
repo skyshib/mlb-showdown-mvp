@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ALL_STAR_POSITIONS, buildAllStarDepthChart } from "../src/rules/allStars.js";
+import {
+  ALL_STAR_POSITIONS,
+  allStarComparisonCandidates,
+  buildAllStarDepthChart,
+  shouldShowFullAllStarDepth
+} from "../src/rules/allStars.js";
 
 function hitter(id, name, assignedPosition) {
   return { id, name, kind: "hitter", assignedPosition };
@@ -48,4 +53,14 @@ test("the simulation All-Star roster picks each positional WPA leader and ranks 
   assert.equal(chart.find((slot) => slot.position === "SP").leader.name, alphaStarter.name);
   assert.equal(chart.find((slot) => slot.position === "RP").leader.name, betaReliever.name);
   assert.equal(chart.find((slot) => slot.position === "1B").leader, null);
+});
+
+test("small All-Star fields show every challenger while large fields summarize two", () => {
+  const depth = Array.from({ length: 7 }, (_, index) => ({ rank: index + 1 }));
+
+  assert.deepEqual(allStarComparisonCandidates(depth.slice(0, 3)).map((row) => row.rank), [2, 3]);
+  assert.deepEqual(allStarComparisonCandidates(depth.slice(0, 5)).map((row) => row.rank), [2, 3, 4, 5]);
+  assert.deepEqual(allStarComparisonCandidates(depth.slice(0, 6)).map((row) => row.rank), [2, 3]);
+  assert.equal(shouldShowFullAllStarDepth(depth.slice(0, 5)), false);
+  assert.equal(shouldShowFullAllStarDepth(depth.slice(0, 6)), true);
 });

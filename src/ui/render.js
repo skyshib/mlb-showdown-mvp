@@ -30,6 +30,7 @@ export function renderPlayerTable(players, options = {}) {
   // The flag rides in the same first column as the star, so it needs no header
   // of its own.
   const flagged = options.flagged ?? null;
+  const manualRanking = options.manualRanking ?? null;
   const starHeader = starred ? [{ label: "" }] : [];
   // A blind draft strips the points column outright — the number is the one
   // thing the house rule keeps off the board.
@@ -90,6 +91,17 @@ export function renderPlayerTable(players, options = {}) {
       const starCell = starred
         ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button>${flagButton}</td>`
         : "";
+      const rank = manualRanking?.rankById?.get(player.id) ?? null;
+      const rankCell = manualRanking
+        ? `<td class="manual-rank-cell">
+            <span class="manual-rank-handle" draggable="true" data-ranking-drag-id="${escapeHtml(player.id)}" title="Drag ${escapeHtml(player.name)} to a new rank" aria-label="Drag ${escapeHtml(player.name)} to a new rank">⠿</span>
+            <strong>#${rank ?? "—"}</strong>
+            <span class="manual-rank-buttons">
+              <button type="button" data-action="ranking-up" data-player-id="${escapeHtml(player.id)}" ${rank === 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(player.name)} up">▲</button>
+              <button type="button" data-action="ranking-down" data-player-id="${escapeHtml(player.id)}" ${rank === manualRanking.ids.length ? "disabled" : ""} aria-label="Move ${escapeHtml(player.name)} down">▼</button>
+            </span>
+          </td>`
+        : "";
       const rowClass = [
         "draft-player-row",
         owner ? "sold-row" : "",
@@ -100,7 +112,8 @@ export function renderPlayerTable(players, options = {}) {
       ]
         .filter(Boolean)
         .join(" ");
-      return `<tr class="${rowClass}">
+      return `<tr class="${rowClass}${manualRanking ? " manual-ranking-row" : ""}"${manualRanking ? ` data-ranking-drop-id="${escapeHtml(player.id)}"` : ""}>
+        ${rankCell}
         ${starCell}
         <td>${action}</td>
         <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong></td>
@@ -114,6 +127,7 @@ export function renderPlayerTable(players, options = {}) {
   return `<div class="table-scroll${options.scroll ? " table-scroll-tall" : ""}"><table class="player-table ${mode}-table">
     <thead>
       <tr>
+        ${manualRanking ? `<th class="num manual-rank-header">Rank</th>` : ""}
         ${headers.map((header, index) => renderHeaderCell(header, mode, index, options)).join("")}
       </tr>
     </thead>
@@ -136,20 +150,58 @@ export function renderDraftHistoryTable(picks, options = {}) {
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
-  const paidSortDirection = options.paidSortDirection === "asc" || options.paidSortDirection === "desc"
-    ? options.paidSortDirection
-    : null;
-  const orderedPicks = auction && paidSortDirection
-    ? [...picks].sort((a, b) => {
-        const aPaid = Number.isFinite(a.price) ? a.price : null;
-        const bPaid = Number.isFinite(b.price) ? b.price : null;
-        if (aPaid === null && bPaid !== null) return 1;
-        if (aPaid !== null && bPaid === null) return -1;
-        const priceDifference = (aPaid ?? 0) - (bPaid ?? 0);
-        if (priceDifference) return paidSortDirection === "asc" ? priceDifference : -priceDifference;
-        return a.pickNumber - b.pickNumber;
-      })
-    : picks;
+  const requestedSort = ["pick", "paid", "points", "wpa"].includes(options.sort)
+    ? options.sort
+    : options.paidSortDirection
+      ? "paid"
+      : "pick";
+  const allowedSorts = new Set([
+    "pick",
+    ...(auction ? ["paid"] : []),
+    ...(!hidePoints ? ["points"] : []),
+    ...(showWpa ? ["wpa"] : [])
+  ]);
+  const requestedSortAllowed = allowedSorts.has(requestedSort);
+  const sort = requestedSortAllowed ? requestedSort : "pick";
+  const sortDirection = !requestedSortAllowed
+    ? "asc"
+    : options.sortDirection === "asc" || options.sortDirection === "desc"
+      ? options.sortDirection
+      : options.direction === "asc" || options.direction === "desc"
+        ? options.direction
+        : options.paidSortDirection === "asc" || options.paidSortDirection === "desc"
+          ? options.paidSortDirection
+          : sort === "pick"
+            ? "asc"
+            : "desc";
+  const sortValue = (pick) => {
+    if (sort === "paid") return Number.isFinite(pick.price) ? pick.price : null;
+    if (sort === "points") return Number.isFinite(pick.player.points) ? pick.player.points : null;
+    if (sort === "wpa") {
+      const value = wpaByPlayerId?.get(pick.player.id);
+      return Number.isFinite(value) ? value : null;
+    }
+    return pick.pickNumber;
+  };
+  const orderedPicks = [...picks].sort((a, b) => {
+    const aValue = sortValue(a);
+    const bValue = sortValue(b);
+    if (aValue === null && bValue !== null) return 1;
+    if (aValue !== null && bValue === null) return -1;
+    const difference = (aValue ?? 0) - (bValue ?? 0);
+    if (difference) return sortDirection === "asc" ? difference : -difference;
+    return a.pickNumber - b.pickNumber;
+  });
+  const sortHeader = (key, label, title = "") => {
+    const active = sort === key;
+    const arrow = active ? (sortDirection === "asc" ? "^" : "v") : "";
+    const content = title ? `<abbr title="${escapeHtml(title)}">${escapeHtml(label)}</abbr>` : escapeHtml(label);
+    return `<th class="num" aria-sort="${active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}">
+      <button type="button" class="column-sort ${active ? "active" : ""}" data-history-sort="${escapeHtml(key)}">
+        ${content}${arrow ? ` <span class="sort-arrow" aria-hidden="true">${arrow}</span>` : ""}
+      </button>
+    </th>`;
+  };
   const rows = orderedPicks
     .map(({ pickNumber, round, manager, player, price }) => `<tr class="draft-player-row">
         <td class="num">${pickNumber}</td>
@@ -168,19 +220,15 @@ export function renderDraftHistoryTable(picks, options = {}) {
   return `<div class="table-scroll"><table class="player-table history-table">
     <thead>
       <tr>
-        <th class="num"><abbr title="Overall pick number">#</abbr></th>
+        ${sortHeader("pick", "#", "Overall pick number")}
         <th class="num">Rnd</th>
         <th>Manager</th>
         <th>Player</th>
         <th>Pos</th>
-        ${auction ? `<th class="num" aria-sort="${paidSortDirection ? (paidSortDirection === "asc" ? "ascending" : "descending") : "none"}">
-          <button type="button" class="column-sort ${paidSortDirection ? "active" : ""}" data-history-paid-sort>
-            Paid ($)${paidSortDirection ? ` <span aria-hidden="true">${paidSortDirection === "asc" ? "^" : "v"}</span>` : ""}
-          </button>
-        </th>` : ""}
+        ${auction ? sortHeader("paid", "Paid ($)") : ""}
         <th class="num">OB/CT</th>
-        ${hidePoints ? "" : `<th class="num">Pts</th>`}
-        ${showWpa ? `<th class="num"><abbr title="Win probability added per 162 games in the simulation">WPA/162</abbr></th>` : ""}
+        ${hidePoints ? "" : sortHeader("points", "Pts")}
+        ${showWpa ? sortHeader("wpa", "WPA/162", "Win probability added per 162 games in the simulation") : ""}
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
       </tr>
     </thead>
@@ -248,11 +296,73 @@ export function cardRarity(player) {
 export function renderBoxScore(game, playersById = new Map()) {
   if (!game?.boxScore) return "";
   return `<div class="box-score">
+    ${renderLineScore(game)}
     ${renderHitterBox(game.boxScore.away, playersById)}
     ${renderHitterBox(game.boxScore.home, playersById)}
     ${renderPitcherBox(game.boxScore.away, playersById)}
     ${renderPitcherBox(game.boxScore.home, playersById)}
   </div>`;
+}
+
+export function renderLineScore(game) {
+  if (!game?.boxScore) return "";
+  const events = Array.isArray(game.events) ? game.events : [];
+  const lineScore = game.lineScore ?? {};
+  const lastEventInning = events.reduce((latest, event) => Math.max(latest, Number(event.inning) || 0), 0);
+  const innings = Math.max(
+    9,
+    Number(game.innings) || 0,
+    lastEventInning,
+    lineScore.away?.length ?? 0,
+    lineScore.home?.length ?? 0
+  );
+  const frames = Array.from({ length: innings }, (unused, index) => index + 1);
+  const teamBox = (side) => game.boxScore[side] ?? {};
+  const teamName = (side) => teamBox(side).team ?? game[side]?.name ?? (side === "away" ? "Away" : "Home");
+  const hits = (side) => (teamBox(side).hitters ?? []).reduce((sum, hitter) => sum + (Number(hitter.h) || 0), 0);
+  const totalRuns = (side) => Number.isFinite(game[side]?.runs)
+    ? game[side].runs
+    : (lineScore[side] ?? []).reduce((sum, runs) => sum + (Number(runs) || 0), 0);
+  const frame = (side, inning) => {
+    const half = side === "away" ? "top" : "bottom";
+    const inningEvents = events.filter((event) => Number(event.inning) === inning && event.half === half);
+    if (events.length && !inningEvents.length) {
+      return `<td class="line-score-unplayed" title="Did not bat">—</td>`;
+    }
+    if (inningEvents.length) {
+      const runs = inningEvents.reduce((sum, event) => sum + eventRunsForLineScore(event), 0);
+      return `<td>${runs}</td>`;
+    }
+    return `<td>${Number(lineScore[side]?.[inning - 1]) || 0}</td>`;
+  };
+  const row = (side) => `<tr>
+    <th scope="row">${escapeHtml(teamName(side))}</th>
+    ${frames.map((inning) => frame(side, inning)).join("")}
+    <td class="line-score-total">${totalRuns(side)}</td>
+    <td class="line-score-total">${hits(side)}</td>
+  </tr>`;
+
+  return `<section class="game-line-score">
+    <h4>Line score</h4>
+    <div class="game-line-score-scroll">
+      <table aria-label="Inning-by-inning line score">
+        <thead><tr>
+          <th scope="col">Team</th>
+          ${frames.map((inning) => `<th scope="col">${inning}</th>`).join("")}
+          <th scope="col" class="line-score-total" title="Runs">R</th>
+          <th scope="col" class="line-score-total" title="Hits">H</th>
+        </tr></thead>
+        <tbody>${row("away")}${row("home")}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function eventRunsForLineScore(event) {
+  if (Number.isFinite(event.runs)) return Math.max(0, event.runs);
+  const before = (Number(event.scoreBefore?.away) || 0) + (Number(event.scoreBefore?.home) || 0);
+  const after = (Number(event.scoreAfter?.away) || 0) + (Number(event.scoreAfter?.home) || 0);
+  return Math.max(0, after - before);
 }
 
 // One color per team on the win-rate race, dark enough to read against the cream

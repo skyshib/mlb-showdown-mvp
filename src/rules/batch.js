@@ -6,7 +6,7 @@ import {
   considerInterestingGame,
   createInterestingGameState,
   summarizeInterestingGames
-} from "./interestingGames.js?v=20260725-top-three";
+} from "./interestingGames.js?v=20260725-hero-games";
 
 export const DEFAULT_BATCH_RUNS = 10000;
 export const BATCH_SCHEDULE_VERSION = 2;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderBoxScore, renderDraftHistoryTable } from "../src/ui/render.js";
+import { renderBoxScore, renderDraftHistoryTable, renderLineScore } from "../src/ui/render.js";
 import { cardPanelHtml } from "../src/ui/cardFace.js";
 
 const hitter = {
@@ -60,23 +60,74 @@ test("renderBoxScore adds hover previews when player cards can be resolved", () 
   assert.ok(html.includes("Unknown Pitcher"));
 });
 
-test("auction draft history can sort by price paid", () => {
+test("the game box score opens with an inning line score and R/H totals", () => {
+  const lineGame = {
+    away: { name: "Visitors", runs: 3 },
+    home: { name: "Hosts", runs: 2 },
+    innings: 9,
+    lineScore: {
+      away: [1, 0, 0, 0, 2],
+      home: [0, 1, 0, 1]
+    },
+    events: [
+      { inning: 1, half: "top", runs: 1 },
+      { inning: 1, half: "bottom", runs: 0 },
+      ...Array.from({ length: 7 }, (unused, index) => ([
+        { inning: index + 2, half: "top", runs: index === 3 ? 2 : 0 },
+        { inning: index + 2, half: "bottom", runs: index === 0 || index === 2 ? 1 : 0 }
+      ])).flat(),
+      { inning: 9, half: "top", runs: 0 }
+    ],
+    boxScore: {
+      away: { team: "Visitors", hitters: [{ h: 2 }, { h: 4 }], pitchers: [] },
+      home: { team: "Hosts", hitters: [{ h: 3 }, { h: 2 }], pitchers: [] }
+    }
+  };
+
+  const html = renderLineScore(lineGame);
+  assert.match(html, /aria-label="Inning-by-inning line score"/);
+  assert.match(html, /<th scope="row">Visitors<\/th>/);
+  assert.match(html, /<th scope="row">Hosts<\/th>/);
+  assert.match(html, /title="Did not bat">—<\/td>/);
+  assert.match(html, /<td class="line-score-total">3<\/td>\s*<td class="line-score-total">6<\/td>/);
+  assert.match(html, /<td class="line-score-total">2<\/td>\s*<td class="line-score-total">5<\/td>/);
+  assert.ok(renderBoxScore(lineGame).indexOf("game-line-score") < renderBoxScore(lineGame).indexOf("Visitors hitters"));
+});
+
+test("draft recap can sort by pick, paid, points, and WPA", () => {
   const picks = [
-    { pickNumber: 1, round: 1, manager: { name: "First" }, player: { ...hitter, id: "paid-20", name: "Twenty" }, price: 20 },
-    { pickNumber: 2, round: 1, manager: { name: "Second" }, player: { ...hitter, id: "paid-100", name: "Hundred" }, price: 100 },
-    { pickNumber: 3, round: 1, manager: { name: "Third" }, player: { ...hitter, id: "paid-50", name: "Fifty" }, price: 50 }
+    { pickNumber: 1, round: 1, manager: { name: "First" }, player: { ...hitter, id: "paid-20", name: "Twenty", points: 200 }, price: 20 },
+    { pickNumber: 2, round: 1, manager: { name: "Second" }, player: { ...hitter, id: "paid-100", name: "Hundred", points: 300 }, price: 100 },
+    { pickNumber: 3, round: 1, manager: { name: "Third" }, player: { ...hitter, id: "paid-50", name: "Fifty", points: 400 }, price: 50 }
   ];
+  const wpaByPlayerId = new Map([
+    ["paid-20", 0.1],
+    ["paid-100", -0.2],
+    ["paid-50", 0.5]
+  ]);
 
-  const descending = renderDraftHistoryTable(picks, { paidSortDirection: "desc" });
-  assert.ok(descending.indexOf("Hundred") < descending.indexOf("Fifty"));
-  assert.ok(descending.indexOf("Fifty") < descending.indexOf("Twenty"));
-  assert.ok(descending.includes('aria-sort="descending"'));
-  assert.ok(descending.includes("data-history-paid-sort"));
+  const paid = renderDraftHistoryTable(picks, { sort: "paid", sortDirection: "desc", wpaByPlayerId });
+  assert.ok(paid.indexOf("Hundred") < paid.indexOf("Fifty"));
+  assert.ok(paid.indexOf("Fifty") < paid.indexOf("Twenty"));
+  assert.ok(paid.includes('data-history-sort="paid"'));
 
-  const ascending = renderDraftHistoryTable(picks, { paidSortDirection: "asc" });
-  assert.ok(ascending.indexOf("Twenty") < ascending.indexOf("Fifty"));
-  assert.ok(ascending.indexOf("Fifty") < ascending.indexOf("Hundred"));
-  assert.ok(ascending.includes('aria-sort="ascending"'));
+  const points = renderDraftHistoryTable(picks, { sort: "points", sortDirection: "desc", wpaByPlayerId });
+  assert.ok(points.indexOf("Fifty") < points.indexOf("Hundred"));
+  assert.ok(points.indexOf("Hundred") < points.indexOf("Twenty"));
+
+  const wpa = renderDraftHistoryTable(picks, { sort: "wpa", sortDirection: "desc", wpaByPlayerId });
+  assert.ok(wpa.indexOf("Fifty") < wpa.indexOf("Twenty"));
+  assert.ok(wpa.indexOf("Twenty") < wpa.indexOf("Hundred"));
+
+  const pick = renderDraftHistoryTable(picks, { sort: "pick", direction: "desc", wpaByPlayerId });
+  assert.ok(pick.indexOf("Fifty") < pick.indexOf("Hundred"));
+  assert.ok(pick.indexOf("Hundred") < pick.indexOf("Twenty"));
+  assert.ok(pick.includes('aria-sort="descending"'));
+
+  const hiddenPoints = renderDraftHistoryTable(picks, { sort: "points", sortDirection: "desc", hidePoints: true });
+  assert.ok(hiddenPoints.indexOf("Twenty") < hiddenPoints.indexOf("Hundred"));
+  assert.ok(hiddenPoints.indexOf("Hundred") < hiddenPoints.indexOf("Fifty"));
+  assert.ok(!hiddenPoints.includes('data-history-sort="points"'));
 });
 
 test("fictional card backdrops vary by id but remain deterministic", () => {
