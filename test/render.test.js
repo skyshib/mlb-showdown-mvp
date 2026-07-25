@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderBoxScore, renderDraftHistoryTable, renderLineScore } from "../src/ui/render.js";
+import { renderBoxScore, renderDraftHistoryTable, renderLineScore, renderPlayerTable } from "../src/ui/render.js";
 import { cardPanelHtml } from "../src/ui/cardFace.js";
 
 const hitter = {
@@ -130,6 +130,38 @@ test("draft recap can sort by pick, paid, points, and WPA", () => {
   assert.ok(!hiddenPoints.includes('data-history-sort="points"'));
 });
 
+test("draft ranking inputs are blank for unranked players and numbered for ranked players", () => {
+  const secondHitter = { ...hitter, id: "h-2", name: "Second Hitter" };
+  const manualRanking = {
+    ids: [secondHitter.id],
+    rankById: new Map([[secondHitter.id, 1]]),
+    maxRank: 2
+  };
+  const html = renderPlayerTable([secondHitter, hitter], {
+    mode: "hitter",
+    manualRanking,
+    sort: "primary",
+    sortDirection: "desc"
+  });
+
+  assert.match(html, /data-ranking-input-id="h-2"[^>]*aria-label="Rank Second Hitter"/);
+  assert.match(html, /data-ranking-input-id="h-1"[^>]*aria-label="Rank Preview Hitter"/);
+  assert.match(html, /value="1"[\s\S]*data-ranking-input-id="h-2"/);
+  assert.match(html, /value=""[\s\S]*data-ranking-input-id="h-1"/);
+  assert.match(html, /class="draft-player-row first-unranked-row manual-ranking-row"/);
+});
+
+test("the current replacement-level player is called out in the draft table", () => {
+  const html = renderPlayerTable([hitter], {
+    mode: "hitter",
+    replacementPlayerId: hitter.id
+  });
+
+  assert.match(html, /class="draft-player-row replacement-level-row"/);
+  assert.match(html, /class="replacement-level-badge"[^>]*>Replacement level<\/span>/);
+  assert.match(html, /current free fallback if a roster finishes with a hole/);
+});
+
 test("fictional card backdrops vary by id but remain deterministic", () => {
   const backdrop = (card) => /gq-backdrop-([a-z]+)/.exec(cardPanelHtml(card))?.[1];
   const first = backdrop(hitter);
@@ -151,6 +183,7 @@ test("fictional hitters and pitchers use the finalized 2005 card template", () =
   const hitterHtml = cardPanelHtml(hitter);
   const pitcherHtml = cardPanelHtml(pitcher);
   const legendaryHtml = cardPanelHtml({ ...hitter, rarity: "legend" });
+  const goldenHtml = cardPanelHtml({ ...hitter, rarity: "legend", egg: "golden" });
 
   assert.ok(hitterHtml.includes("gq-proto-card gq-proto-hitter"));
   assert.ok(hitterHtml.includes("2004-Hitter-BLUE-NO-FOOTER.png"));
@@ -171,4 +204,6 @@ test("fictional hitters and pitchers use the finalized 2005 card template", () =
 
   assert.ok(legendaryHtml.includes('class="gq-proto-rainbow-word"'));
   assert.ok(legendaryHtml.includes('aria-label="LEGENDARY"'));
+  assert.ok(goldenHtml.includes("gq-proto-rarity-legendary gq-proto-golden"));
+  assert.ok(goldenHtml.includes('<span class="gq-proto-rarity-mark">1/1</span>'));
 });

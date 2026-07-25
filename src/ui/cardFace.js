@@ -389,7 +389,7 @@ function fictionalCardHtml(card, count, hidePoints = false) {
     </div>
     <img class="gq-proto-frame gq-proto-frame-top" src="${frame}" alt="">
     <img class="gq-proto-frame gq-proto-frame-bottom" src="${frame}" alt="">
-    <span class="gq-proto-rarity-mark">${golden ? "1 OF 1" : fictionalRarityMark(rarity)}</span>
+    <span class="gq-proto-rarity-mark">${golden ? "1/1" : fictionalRarityMark(rarity)}</span>
     ${count !== null ? `<span class="gq-proto-count">x${count}</span>` : ""}
     ${rating}
     <div class="gq-proto-name" style="font-size:${fictionalNameFontSize(card.name)}cqw">${escapeHtml(card.name.toUpperCase())}</div>

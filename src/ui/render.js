@@ -1,5 +1,5 @@
 import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260716-records";
-import { cardPanelHtml } from "./cardFace.js?v=20260716-records";
+import { cardPanelHtml } from "./cardFace.js?v=20260725-golden-serial";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
@@ -31,6 +31,9 @@ export function renderPlayerTable(players, options = {}) {
   // of its own.
   const flagged = options.flagged ?? null;
   const manualRanking = options.manualRanking ?? null;
+  const firstUnrankedId = manualRanking
+    ? players.find((player) => !manualRanking.rankById?.has(player.id))?.id ?? null
+    : null;
   const starHeader = starred ? [{ label: "" }] : [];
   // A blind draft strips the points column outright — the number is the one
   // thing the house rule keeps off the board.
@@ -85,6 +88,8 @@ export function renderPlayerTable(players, options = {}) {
       const idle = options.fillsNeed && !owner ? !options.fillsNeed(player) : false;
       const isStarred = starred ? starred.has(player.id) : false;
       const isFlagged = flagged ? flagged.has(player.id) : false;
+      const isReplacementLevel = Boolean(options.replacementPlayerId)
+        && player.id === options.replacementPlayerId;
       const flagButton = flagged
         ? `<button type="button" class="flag-toggle${isFlagged ? " flagged" : ""}" data-action="toggle-flag" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isFlagged}" title="${isFlagged ? "Remove flag" : "Flag"} ${escapeHtml(player.name)}">${isFlagged ? "⚑" : "⚐"}</button>`
         : "";
@@ -94,11 +99,21 @@ export function renderPlayerTable(players, options = {}) {
       const rank = manualRanking?.rankById?.get(player.id) ?? null;
       const rankCell = manualRanking
         ? `<td class="manual-rank-cell">
-            <span class="manual-rank-handle" draggable="true" data-ranking-drag-id="${escapeHtml(player.id)}" title="Drag ${escapeHtml(player.name)} to a new rank" aria-label="Drag ${escapeHtml(player.name)} to a new rank">⠿</span>
-            <strong>#${rank ?? "—"}</strong>
+            <span class="manual-rank-handle" draggable="true" data-ranking-drag-id="${escapeHtml(player.id)}" title="${rank ? `Drag ${escapeHtml(player.name)} to a new rank` : `Drag ${escapeHtml(player.name)} into your ranking`}" aria-label="${rank ? `Drag ${escapeHtml(player.name)} to a new rank` : `Drag ${escapeHtml(player.name)} into your ranking`}">⠿</span>
+            <input
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="${manualRanking.maxRank ?? players.length}"
+              value="${rank ?? ""}"
+              placeholder="—"
+              data-ranking-input-id="${escapeHtml(player.id)}"
+              aria-label="Rank ${escapeHtml(player.name)}"
+              title="Type a rank from 1 to ${manualRanking.maxRank ?? players.length}; clear it to unrank this player"
+            />
             <span class="manual-rank-buttons">
-              <button type="button" data-action="ranking-up" data-player-id="${escapeHtml(player.id)}" ${rank === 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(player.name)} up">▲</button>
-              <button type="button" data-action="ranking-down" data-player-id="${escapeHtml(player.id)}" ${rank === manualRanking.ids.length ? "disabled" : ""} aria-label="Move ${escapeHtml(player.name)} down">▼</button>
+              <button type="button" data-action="ranking-up" data-player-id="${escapeHtml(player.id)}" ${rank === null || rank === 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(player.name)} up">▲</button>
+              <button type="button" data-action="ranking-down" data-player-id="${escapeHtml(player.id)}" ${rank === null || rank === manualRanking.ids.length ? "disabled" : ""} aria-label="Move ${escapeHtml(player.name)} down">▼</button>
             </span>
           </td>`
         : "";
@@ -108,6 +123,9 @@ export function renderPlayerTable(players, options = {}) {
         onBlock ? "on-block-row" : "",
         isStarred ? "starred-row" : "",
         isFlagged ? "flagged-row" : "",
+        isReplacementLevel ? "replacement-level-row" : "",
+        rank ? "ranked-player-row" : "",
+        manualRanking?.ids.length && player.id === firstUnrankedId ? "first-unranked-row" : "",
         idle ? "idle-row" : ""
       ]
         .filter(Boolean)
@@ -116,7 +134,7 @@ export function renderPlayerTable(players, options = {}) {
         ${rankCell}
         ${starCell}
         <td>${action}</td>
-        <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong></td>
+        <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong>${isReplacementLevel ? `<span class="replacement-level-badge" title="The lowest-point card still available at this position—the current free fallback if a roster finishes with a hole">Replacement level</span>` : ""}</td>
         ${detailCells}
         ${hidePoints ? "" : `<td class="card-stat num">${player.points}</td>`}
         ${renderOutcomeCells(player, outcomes)}

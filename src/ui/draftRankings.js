@@ -1,4 +1,7 @@
-const ONLINE_RANKINGS_STORAGE_PREFIX = "mlb-showdown-online-rankings-v1:";
+// v2 is the private per-room/per-seat ranking namespace. Missing position keys
+// now mean "use the editable OB/Control starting order"; explicit arrays,
+// including empty arrays, are user customizations and must survive reconnects.
+const ONLINE_RANKINGS_STORAGE_PREFIX = "mlb-showdown-online-rankings-v2:";
 
 export function normalizeDraftRankings(value) {
   if (!value || typeof value !== "object") return {};
@@ -9,7 +12,7 @@ export function normalizeDraftRankings(value) {
     for (const [key, ids] of Object.entries(rankings)) {
       if (!Array.isArray(ids)) continue;
       const clean = [...new Set(ids.filter((id) => typeof id === "string"))];
-      if (clean.length) managerRankings[key] = clean;
+      managerRankings[key] = clean;
     }
     if (Object.keys(managerRankings).length) normalized[managerId] = managerRankings;
   }
@@ -50,13 +53,13 @@ function onlineRankingsStorageKey(roomId, managerId) {
 }
 
 export function moveRankedIds(ids, playerId, targetId, { after = false } = {}) {
-  const list = [...ids];
-  const from = list.indexOf(playerId);
+  const list = [...ids].filter((id) => id !== playerId);
   const target = list.indexOf(targetId);
-  if (from < 0 || target < 0 || from === target) return list;
-  list.splice(from, 1);
-  const adjustedTarget = list.indexOf(targetId);
-  list.splice(adjustedTarget + (after ? 1 : 0), 0, playerId);
+  if (playerId === targetId) return ids.includes(playerId) ? [...ids] : [...ids, playerId];
+  // Dropping onto an unranked row adds or moves the player to the end of the
+  // ranked group. Dropping onto a ranked row inserts on the indicated side.
+  const insertion = target < 0 ? list.length : target + (after ? 1 : 0);
+  list.splice(insertion, 0, playerId);
   return list;
 }
 
@@ -67,4 +70,20 @@ export function nudgeRankedIds(ids, playerId, delta) {
   if (from < 0 || to < 0 || to >= list.length) return list;
   [list[from], list[to]] = [list[to], list[from]];
   return list;
+}
+
+export function rankIdAt(ids, playerId, requestedRank) {
+  const parsed = Math.trunc(Number(requestedRank));
+  if (!Number.isFinite(parsed) || parsed < 1) return [...ids];
+  const list = [...ids].filter((id) => id !== playerId);
+  // Manual ranks are compact. Asking for #10 with only three ranked players
+  // means "last in my ranked group", which is #4—not six empty ranks that
+  // would misleadingly sit above the unranked board.
+  const insertion = Math.min(parsed - 1, list.length);
+  list.splice(insertion, 0, playerId);
+  return list;
+}
+
+export function removeRankedId(ids, playerId) {
+  return ids.filter((id) => id !== playerId);
 }

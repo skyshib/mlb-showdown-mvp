@@ -5,6 +5,8 @@ import {
   moveRankedIds,
   normalizeDraftRankings,
   nudgeRankedIds,
+  rankIdAt,
+  removeRankedId,
   saveOnlineDraftRankings
 } from "../src/ui/draftRankings.js";
 
@@ -12,12 +14,14 @@ test("draft rankings normalize into private manager and position lists", () => {
   assert.deepEqual(normalizeDraftRankings({
     managerA: {
       "hitter:C": ["a", "b", "a", null],
+      "hitter:1B": [],
       "pitcher:SP": "not a list"
     },
     managerB: null
   }), {
     managerA: {
-      "hitter:C": ["a", "b"]
+      "hitter:C": ["a", "b"],
+      "hitter:1B": []
     }
   });
 });
@@ -26,6 +30,9 @@ test("ranked players can be dragged before or after another player", () => {
   const ids = ["a", "b", "c", "d"];
   assert.deepEqual(moveRankedIds(ids, "d", "b"), ["a", "d", "b", "c"]);
   assert.deepEqual(moveRankedIds(ids, "a", "c", { after: true }), ["b", "c", "a", "d"]);
+  assert.deepEqual(moveRankedIds(["a", "b"], "new", "b"), ["a", "new", "b"]);
+  assert.deepEqual(moveRankedIds(["a", "b"], "new", "unranked"), ["a", "b", "new"]);
+  assert.deepEqual(moveRankedIds(["a", "b"], "a", "unranked"), ["b", "a"]);
   assert.deepEqual(ids, ["a", "b", "c", "d"], "the saved source list is not mutated");
 });
 
@@ -33,6 +40,15 @@ test("ranking arrow controls nudge a player without crossing the ends", () => {
   assert.deepEqual(nudgeRankedIds(["a", "b", "c"], "b", -1), ["b", "a", "c"]);
   assert.deepEqual(nudgeRankedIds(["a", "b", "c"], "a", -1), ["a", "b", "c"]);
   assert.deepEqual(nudgeRankedIds(["a", "b", "c"], "c", 1), ["a", "b", "c"]);
+});
+
+test("typing a rank inserts the player and shifts everyone below them", () => {
+  assert.deepEqual(rankIdAt(["a", "b", "c"], "new", 2), ["a", "new", "b", "c"]);
+  assert.deepEqual(rankIdAt(["a", "b", "c"], "a", 2), ["b", "a", "c"]);
+  assert.deepEqual(rankIdAt(["a", "b"], "new", 10), ["a", "b", "new"]);
+  assert.deepEqual(rankIdAt(["a", "b"], "new", 0), ["a", "b"]);
+  assert.deepEqual(rankIdAt(["a", "b"], "a", 0), ["a", "b"]);
+  assert.deepEqual(removeRankedId(["a", "b", "c"], "b"), ["a", "c"]);
 });
 
 test("online rankings persist privately by room and manager seat", () => {
@@ -45,7 +61,8 @@ test("online rankings persist privately by room and manager seat", () => {
   const rankings = {
     managerA: {
       "hitter:C": ["a", "b"],
-      "pitcher:SP": ["p1", "p2"]
+      "pitcher:SP": ["p1", "p2"],
+      "hitter:CF": []
     },
     managerB: {
       "hitter:C": ["secret"]

@@ -166,15 +166,17 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260716-records";
+} from "./ui/render.js?v=20260725-replacement-row";
 import { formatAdvanceAttempt, renderBaseDiamond, storyAdvantage, storyHeadline } from "./ui/gameStory.js?v=20260725-throw-labels";
 import {
   loadOnlineDraftRankings,
   moveRankedIds,
   normalizeDraftRankings,
   nudgeRankedIds,
+  rankIdAt,
+  removeRankedId,
   saveOnlineDraftRankings
-} from "./ui/draftRankings.js?v=20260725-online-persistence";
+} from "./ui/draftRankings.js?v=20260725-rank-inputs";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -986,6 +988,7 @@ function defaultState() {
     // and so on; the value is the player's manual order. Like stars, these
     // never leave this browser or get sent to an online room.
     draftRankings: {},
+    draftRankingsVersion: 2,
     // Whether an auction board colours by what a card cost or what it is worth.
     heatBy: "price",
     // When the clock on the current pick runs out — published for the board on
@@ -2093,6 +2096,10 @@ function renderSetup(setupError = "") {
       timer: state.auctionTimer,
       snakeTimer: snakeTimerConfig(state, state.draftType)
     });
+    // A new local room gets a fresh private board. Otherwise an override keyed
+    // to the same manager/position from the previous room could filter down to
+    // zero matching card ids and hide the new OB/Control starting ranks.
+    state.draftRankings = {};
     if (isAuctionDraft(state.draft)) startAuctionReview(state.draft, draftNow());
     // The gun. Both clocks start when the board is dealt, not when somebody
     // first looks at it.
@@ -2235,7 +2242,9 @@ function renderDraft() {
     state.filters.sort = "primary";
     state.filters.sortDirection = "desc";
   }
-  if (state.filters.sort === "manual" && !activePositionRanking()) {
+  // Old saves used "manual" as a standalone sort. Rankings are now always the
+  // primary layer, with this dropdown controlling only the unranked players.
+  if (state.filters.sort === "manual") {
     state.filters.sort = "primary";
     state.filters.sortDirection = "desc";
   }
@@ -2315,6 +2324,7 @@ function renderDraft() {
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         hidePoints: pointsHidden(),
+        replacementPlayerId: currentReplacementLevelPlayer(draft)?.id ?? null,
         starred: watchlistOwner() ? starredIds() : null,
         flagged: watchlistOwner() ? flaggedIds() : null,
         fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
@@ -2329,7 +2339,7 @@ function renderDraft() {
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
-        manualRanking: state.filters.sort === "manual" ? activePositionRanking() : null,
+        manualRanking: activePositionRanking(),
         // Both boards are the whole deck at once, so they scroll in place
         // rather than pushing the rosters off the bottom of the screen.
         scroll: true,
@@ -2701,7 +2711,7 @@ function renderAuctionDecisionRail(draft) {
       <div class="auction-lot-rail-player">
         <p class="eyebrow">Pool review</p>
         <h2>Inspect the cards before bidding starts</h2>
-        <p class="auction-lot-rail-meta">The auction rail will stay here when the first card goes on the block.</p>
+        <p class="auction-lot-rail-meta">Choose a position on the player board to adjust your OB/Control rankings now. They carry into the auction.</p>
       </div>
       <div class="auction-lot-rail-state">
         <small>Review remaining</small>
@@ -2911,11 +2921,9 @@ function bindDraftActions() {
       return;
     }
 
-    const rankingAction = event.target.closest("button[data-action='seed-position-ranking'], button[data-action='use-position-ranking'], button[data-action='clear-position-ranking']");
+    const rankingAction = event.target.closest("button[data-action='reset-position-ranking']");
     if (rankingAction) {
-      if (rankingAction.dataset.action === "seed-position-ranking") seedPositionRanking();
-      if (rankingAction.dataset.action === "use-position-ranking") state.filters.sort = "manual";
-      if (rankingAction.dataset.action === "clear-position-ranking") clearPositionRanking();
+      resetPositionRanking();
       saveState();
       renderDraft();
       return;
@@ -3260,15 +3268,20 @@ function bindDraftActions() {
     if (input.dataset.filter === "sort") {
       state.filters.sortDirection = defaultSortDirection(input.value);
     }
-    if (input.dataset.filter === "position" && state.filters.sort === "manual" && !activePositionRanking()) {
-      state.filters.sort = "primary";
-      state.filters.sortDirection = "desc";
-    }
     saveState();
     renderDraft();
   };
 
-  app.onchange = app.oninput;
+  app.onchange = (event) => {
+    const rankingInput = event.target.closest("[data-ranking-input-id]");
+    if (rankingInput) {
+      setPlayerPositionRank(rankingInput.dataset.rankingInputId, rankingInput.value);
+      saveState();
+      renderDraft();
+      return;
+    }
+    app.oninput(event);
+  };
 
   bindHoverCardPreviews(() => {
     selectedLineupMove = null;
@@ -3476,6 +3489,14 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handleKeyDown = (event) => {
+    const rankingInput = event.target.closest?.("[data-ranking-input-id]");
+    if (rankingInput && event.key === "Enter") {
+      event.preventDefault();
+      setPlayerPositionRank(rankingInput.dataset.rankingInputId, rankingInput.value);
+      saveState();
+      renderDraft();
+      return;
+    }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       const carouselSlot = event.target.closest?.(".dock-carousel-slot")
         ?? hoveredPreviewRow?.closest?.(".dock-carousel-slot");
@@ -6469,6 +6490,18 @@ function poolGroupEligible(player, group) {
   return canPlayerFillLineupSlot(player, group);
 }
 
+// The cheapest card still available at the selected position is the current
+// free fallback: if the room leaves a roster hole there, this is the floor the
+// closing sweep reaches first. Keep the calculation beside renderPoolFloor so
+// the highlighted table row and the auction desk's "floor" chip cannot disagree.
+function currentReplacementLevelPlayer(draft) {
+  const group = state.filters.position;
+  if (!draft || !group || group === "all") return null;
+  return availablePlayers(draft)
+    .filter((player) => poolGroupEligible(player, group))
+    .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0] ?? null;
+}
+
 function leagueOpenGroups(draft) {
   const needed = new Set();
   for (const manager of draft.managers) {
@@ -7324,9 +7357,6 @@ function renderFilters() {
     ? sortOptions
     : [[state.filters.sort, columnSortLabel(state.filters.sort)], ...sortOptions];
   const ranking = activePositionRanking();
-  if (ranking && !displayedSortOptions.some(([value]) => value === "manual")) {
-    displayedSortOptions.unshift(["manual", "My ranking"]);
-  }
   const typeOptions = [
     ["hitter", "Hitters"],
     ["pitcher", "Pitchers"]
@@ -7360,12 +7390,8 @@ function renderFilters() {
       </button>`
     : "";
   const rankingKey = currentPositionRankingKey();
-  const rankingButton = owner && rankingKey
-    ? ranking
-      ? state.filters.sort === "manual"
-        ? `<button type="button" class="ranking-mode-button active" data-action="clear-position-ranking" title="Delete this saved ranking and return to OB/CTRL order">Ranking ${escapeHtml(state.filters.position)} · drag to reorder <span>Clear</span></button>`
-        : `<button type="button" class="ranking-mode-button" data-action="use-position-ranking">Use my ${escapeHtml(state.filters.position)} ranking</button>`
-      : `<button type="button" class="ranking-mode-button" data-action="seed-position-ranking" title="Copy the visible order, then drag players into your preferred ranking">Rank this ${escapeHtml(state.filters.position)} order</button>`
+  const rankingButton = owner && rankingKey && ranking
+    ? `<button type="button" class="ranking-mode-button active" data-action="reset-position-ranking" title="Restore the ${escapeHtml(state.filters.position)} ranking to its starting OB/Control order"><strong>${ranking.ids.length}</strong> ranked <span>${ranking.customized ? "Reset OB/CTRL" : "OB/CTRL start"}</span></button>`
     : "";
 
   return `<div class="filters">
@@ -7382,7 +7408,7 @@ function renderFilters() {
       </select>
     </label>
     <label class="filter-sort">
-      Sort
+      Sort unranked
       <select data-filter="sort">
         ${displayedSortOptions.map(([value, label]) => `<option value="${value}" ${state.filters.sort === value ? "selected" : ""}>${label}</option>`).join("")}
       </select>
@@ -7503,10 +7529,11 @@ function toggleFlag(playerId) {
 
 // ---- private position rankings ----
 //
-// A ranking starts as whatever order is currently on screen — OB, chart,
-// points, or any sortable column — and then becomes its own manual order.
-// Rankings are per manager and per position, so moving a multi-position player
-// at shortstop does not disturb where the same card sits at second base.
+// A position board starts as the full OB/Control order. It remains an editable
+// compact ranking: typing, dragging, or using the arrows stores a private
+// override, and clearing one player leaves that player in the secondary-sorted
+// unranked group. Rankings are per manager and per position, so moving a
+// multi-position player at shortstop does not disturb their second-base rank.
 function currentPositionRankingKey() {
   const position = state.filters.position;
   if (!position || position === "all") return null;
@@ -7516,14 +7543,28 @@ function currentPositionRankingKey() {
 function activePositionRanking() {
   const owner = watchlistOwner();
   const key = currentPositionRankingKey();
-  if (!owner || !key) return null;
-  const ids = state.draftRankings[owner.id]?.[key];
-  if (!Array.isArray(ids) || !ids.length) return null;
+  if (!owner || !key || !state.draft) return null;
+  const eligiblePlayers = state.draft.pool
+    .filter((player) => player.kind === state.filters.type)
+    .filter((player) => matchesPositionFilter(player, state.filters.position));
+  const eligibleIds = eligiblePlayers.map((player) => player.id);
+  const eligible = new Set(eligibleIds);
+  const savedIds = state.draftRankings[owner.id]?.[key];
+  const customized = Array.isArray(savedIds);
+  const defaultIds = [...eligiblePlayers]
+    .sort((a, b) => {
+      const result = comparePlayersBySort(a, b, "primary");
+      return result ? result * -1 : a.name.localeCompare(b.name);
+    })
+    .map((player) => player.id);
+  const ids = (customized ? savedIds : defaultIds).filter((id) => eligible.has(id));
   return {
     managerId: owner.id,
     key,
     ids,
-    rankById: new Map(ids.map((id, index) => [id, index + 1]))
+    rankById: new Map(ids.map((id, index) => [id, index + 1])),
+    maxRank: eligibleIds.length,
+    customized
   };
 }
 
@@ -7535,39 +7576,28 @@ function setPositionRanking(ownerId, key, ids) {
   };
 }
 
-function seedPositionRanking() {
-  const owner = watchlistOwner();
-  const key = currentPositionRankingKey();
-  if (!owner || !key || !state.draft) return;
-  // Seed the whole position, even when a temporary search or watchlist filter
-  // hides part of it. Otherwise those hidden players would come back unranked
-  // and could not be dragged into the saved order later.
-  const ids = state.draft.pool
-    .filter((player) => player.kind === state.filters.type)
-    .filter((player) => matchesPositionFilter(player, state.filters.position))
-    .sort(comparePlayers)
-    .map((player) => player.id);
-  if (!ids.length) return;
-  setPositionRanking(owner.id, key, ids);
-  state.filters.sort = "manual";
-  state.filters.sortDirection = "asc";
+function resetPositionRanking() {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  const managerRankings = { ...(state.draftRankings[ranking.managerId] ?? {}) };
+  delete managerRankings[ranking.key];
+  if (Object.keys(managerRankings).length) state.draftRankings[ranking.managerId] = managerRankings;
+  else delete state.draftRankings[ranking.managerId];
 }
 
-function clearPositionRanking() {
-  const owner = watchlistOwner();
-  const key = currentPositionRankingKey();
-  if (!owner || !key) return;
-  const rankings = { ...(state.draftRankings[owner.id] ?? {}) };
-  delete rankings[key];
-  if (Object.keys(rankings).length) state.draftRankings[owner.id] = rankings;
-  else delete state.draftRankings[owner.id];
-  state.filters.sort = "primary";
-  state.filters.sortDirection = "desc";
+function setPlayerPositionRank(playerId, value) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  const trimmed = String(value ?? "").trim();
+  const ids = trimmed
+    ? rankIdAt(ranking.ids, playerId, Math.min(Number(trimmed), ranking.maxRank))
+    : removeRankedId(ranking.ids, playerId);
+  setPositionRanking(ranking.managerId, ranking.key, ids);
 }
 
 function nudgePositionRanking(playerId, delta) {
   const ranking = activePositionRanking();
-  if (!ranking) return;
+  if (!ranking?.rankById.has(playerId)) return;
   setPositionRanking(ranking.managerId, ranking.key, nudgeRankedIds(ranking.ids, playerId, delta));
 }
 
@@ -8175,13 +8205,15 @@ function canSimulate(draft) {
 // took it, and what it went for) is half of what the board is telling you.
 function draftVisiblePlayers(draft) {
   const players = filteredPlayers(draft.pool);
-  if (state.filters.sort !== "manual") return players.sort(comparePlayers);
   const ranking = activePositionRanking();
-  if (!ranking) return players.sort(comparePlayers);
+  if (!ranking?.ids.length) return players.sort(comparePlayers);
   return players.sort((a, b) => {
-    const aRank = ranking.rankById.get(a.id) ?? Number.POSITIVE_INFINITY;
-    const bRank = ranking.rankById.get(b.id) ?? Number.POSITIVE_INFINITY;
-    return aRank - bRank || a.name.localeCompare(b.name);
+    const aRank = ranking.rankById.get(a.id);
+    const bRank = ranking.rankById.get(b.id);
+    if (aRank !== undefined && bRank === undefined) return -1;
+    if (aRank === undefined && bRank !== undefined) return 1;
+    if (aRank !== undefined && bRank !== undefined) return aRank - bRank;
+    return comparePlayers(a, b);
   });
 }
 
@@ -8407,6 +8439,7 @@ function reviveState(value) {
   const filters = { ...defaultState().filters, ...(value.filters ?? {}) };
   const batchSorts = normalizeBatchSorts(value.batchSorts);
   if (filters.type === "all") filters.type = "hitter";
+  if (filters.sort === "manual") filters.sort = "primary";
   filters.sortDirection = filters.sortDirection ?? defaultSortDirection(filters.sort);
   const savedStartingPitchers = normalizeStartingPitchers(
     value.draft?.startingPitchers ?? value.startingPitchers ?? Number(value.draft?.rosterSize) - 11
@@ -8459,7 +8492,8 @@ function reviveState(value) {
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     flagged: normalizeStarred(value.flagged),
-    draftRankings: normalizeDraftRankings(value.draftRankings),
+    draftRankings: value.draftRankingsVersion === 2 ? normalizeDraftRankings(value.draftRankings) : {},
+    draftRankingsVersion: 2,
     heatBy: value.heatBy === "points" ? "points" : "price",
     draftHistorySort: normalizeDraftHistorySort(value.draftHistorySort, value.draftHistoryPaidSort),
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
