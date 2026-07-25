@@ -166,17 +166,25 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260725-replacement-row";
+} from "./ui/render.js?v=20260725-prep-tiers";
 import { formatAdvanceAttempt, renderBaseDiamond, storyAdvantage, storyHeadline } from "./ui/gameStory.js?v=20260725-throw-labels";
 import {
+  MAX_NOTE_LENGTH,
+  insertTierBreak,
+  loadOnlineDraftNotes,
   loadOnlineDraftRankings,
-  moveRankedIds,
+  moveRankedWithTiers,
+  normalizeDraftNotes,
   normalizeDraftRankings,
-  nudgeRankedIds,
-  rankIdAt,
-  removeRankedId,
-  saveOnlineDraftRankings
-} from "./ui/draftRankings.js?v=20260725-rank-inputs";
+  normalizeTierBreaks,
+  nudgeRankedWithTiers,
+  rankAtWithTiers,
+  removeRankedWithTiers,
+  removeTierBreak,
+  saveOnlineDraftNotes,
+  saveOnlineDraftRankings,
+  tierOfRank
+} from "./ui/draftRankings.js?v=20260725-prep-tiers";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -262,6 +270,9 @@ let draggedLineupMove = null;
 let selectedOrderMove = null;
 let draggedOrderMove = null;
 let draggedRankingMove = null;
+// The one note editor open on the board, if any: a player id. Transient UI
+// state like the drag above — it never serializes.
+let editingNoteId = null;
 // The open game, if one is being played. A game is a sitting rather than a
 // save: it holds live engine state (the seeded rng included), so it lives in
 // memory only and a reload puts you back on the draft board.
@@ -985,10 +996,13 @@ function defaultState() {
     // a separate shortlist you can keep on the same board.
     flagged: {},
     // Private, manager-owned position boards. Each key is hitter:C, pitcher:SP,
-    // and so on; the value is the player's manual order. Like stars, these
-    // never leave this browser or get sent to an online room.
+    // and so on; the value is the manual order plus the tier breaks cut into
+    // it. Like stars, these never leave this browser or get sent to a room.
     draftRankings: {},
-    draftRankingsVersion: 2,
+    draftRankingsVersion: 3,
+    // One short private line per card, keyed like the boards: manager id, then
+    // player id. Same channel as the rankings, same privacy.
+    draftNotes: {},
     // Whether an auction board colours by what a card cost or what it is worth.
     heatBy: "price",
     // When the clock on the current pick runs out — published for the board on
@@ -1111,6 +1125,7 @@ function openRoom(roomId, room) {
   // Keep this seat's copy in this browser instead, namespaced by room and
   // manager so a refresh restores it without showing it to another seat.
   state.draftRankings = loadOnlineDraftRankings(localStorage, roomId, seat?.managerId);
+  state.draftNotes = loadOnlineDraftNotes(localStorage, roomId, seat?.managerId);
   rebuildOnlineDraft(room);
   subscribeOnline();
   renderCurrentScreen();
@@ -2100,6 +2115,8 @@ function renderSetup(setupError = "") {
     // to the same manager/position from the previous room could filter down to
     // zero matching card ids and hide the new OB/Control starting ranks.
     state.draftRankings = {};
+    state.draftNotes = {};
+    editingNoteId = null;
     if (isAuctionDraft(state.draft)) startAuctionReview(state.draft, draftNow());
     // The gun. Both clocks start when the board is dealt, not when somebody
     // first looks at it.
@@ -2324,7 +2341,7 @@ function renderDraft() {
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         hidePoints: pointsHidden(),
-        replacementPlayerId: currentReplacementLevelPlayer(draft)?.id ?? null,
+        replacementLevels: replacementLevelGroups(draft),
         starred: watchlistOwner() ? starredIds() : null,
         flagged: watchlistOwner() ? flaggedIds() : null,
         fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
@@ -2340,6 +2357,8 @@ function renderDraft() {
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
         manualRanking: activePositionRanking(),
+        notes: watchlistOwner() ? state.draftNotes[watchlistOwner().id] ?? {} : null,
+        editingNoteId,
         // Both boards are the whole deck at once, so they scroll in place
         // rather than pushing the rosters off the bottom of the screen.
         scroll: true,
@@ -2399,6 +2418,15 @@ function renderDraft() {
     const list = app.querySelector(".table-scroll-tall");
     if (list) list.scrollTop = listScrollTop;
   }
+  // A freshly opened note editor takes the caret; re-renders while already
+  // typing are handled by captureTypingFocus above.
+  if (editingNoteId && document.activeElement?.dataset?.noteInputId !== editingNoteId) {
+    const noteField = app.querySelector(`[data-note-input-id="${CSS.escape(editingNoteId)}"]`);
+    if (noteField) {
+      noteField.focus();
+      noteField.setSelectionRange(noteField.value.length, noteField.value.length);
+    }
+  }
   bindDraftActions();
   syncAuctionUrgency(draft, draftNow());
   pickClockTick();
@@ -2431,18 +2459,22 @@ function syncAuctionPositionFilter(draft) {
 // because the node itself does not survive the render.
 function captureTypingFocus() {
   const active = document.activeElement;
-  const key = active?.dataset?.filter;
-  if (!key) return null;
+  const filterKey = active?.dataset?.filter;
+  const noteKey = active?.dataset?.noteInputId;
+  if (!filterKey && !noteKey) return null;
+  const selector = filterKey
+    ? `[data-filter="${filterKey}"]`
+    : `[data-note-input-id="${CSS.escape(noteKey)}"]`;
   // Only text fields have a caret to keep; a select just wants its focus back.
   const caret = typeof active.setSelectionRange === "function" && active.selectionStart !== null
     ? { start: active.selectionStart, end: active.selectionEnd }
     : null;
-  return { key, caret };
+  return { selector, caret };
 }
 
 function restoreTypingFocus(typing) {
   if (!typing) return;
-  const field = document.querySelector(`[data-filter="${typing.key}"]`);
+  const field = document.querySelector(typing.selector);
   if (!field) return;
   field.focus();
   if (typing.caret && typeof field.setSelectionRange === "function") {
@@ -2769,6 +2801,7 @@ function renderAuctionDecisionRail(draft) {
       <p class="eyebrow">${lot.round === 2 ? `Tie break at ${money(lot.tie.amount)}` : "On the block"}</p>
       <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}</h2>
       <p class="auction-lot-rail-meta">${escapeHtml(playerPosition(player))}${pointsHidden() ? "" : ` &middot; ${player.points} pts`} &middot; ${source}</p>
+      ${renderPrepReadout(player)}
     </div>
     ${timed ? `<div class="auction-lot-rail-state auction-lot-rail-time" aria-label="Time left to bid">
       <small>Time left</small>
@@ -2925,6 +2958,30 @@ function bindDraftActions() {
     if (rankingAction) {
       resetPositionRanking();
       saveState();
+      renderDraft();
+      return;
+    }
+
+    const tierAdd = event.target.closest("button[data-action='add-tier-break']");
+    if (tierAdd) {
+      addTierBreakAt(Number(tierAdd.dataset.break));
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const tierRemove = event.target.closest("button[data-action='remove-tier-break']");
+    if (tierRemove) {
+      removeTierBreakAt(Number(tierRemove.dataset.break));
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    // Opening a note editor is pure UI: nothing to save until the note lands.
+    const noteEdit = event.target.closest("button[data-action='edit-note']");
+    if (noteEdit) {
+      editingNoteId = editingNoteId === noteEdit.dataset.playerId ? null : noteEdit.dataset.playerId;
       renderDraft();
       return;
     }
@@ -3280,7 +3337,23 @@ function bindDraftActions() {
       renderDraft();
       return;
     }
+    const noteInput = event.target.closest("[data-note-input-id]");
+    if (noteInput) {
+      commitPlayerNote(noteInput.dataset.noteInputId, noteInput.value);
+      return;
+    }
     app.oninput(event);
+  };
+
+  // Change only fires when the text actually changed; clicking away from an
+  // untouched note editor still has to close it. Escape re-renders before the
+  // input loses focus, so a cancelled editor is gone from the DOM by the time
+  // this runs and cannot commit.
+  app.onfocusout = (event) => {
+    const noteInput = event.target.closest?.("[data-note-input-id]");
+    if (noteInput && noteInput.isConnected && editingNoteId) {
+      commitPlayerNote(noteInput.dataset.noteInputId, noteInput.value);
+    }
   };
 
   bindHoverCardPreviews(() => {
@@ -3489,6 +3562,20 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handleKeyDown = (event) => {
+    const noteInput = event.target.closest?.("[data-note-input-id]");
+    if (noteInput) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitPlayerNote(noteInput.dataset.noteInputId, noteInput.value);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        editingNoteId = null;
+        renderDraft();
+        return;
+      }
+    }
     const rankingInput = event.target.closest?.("[data-ranking-input-id]");
     if (rankingInput && event.key === "Enter") {
       event.preventDefault();
@@ -6490,16 +6577,23 @@ function poolGroupEligible(player, group) {
   return canPlayerFillLineupSlot(player, group);
 }
 
-// The cheapest card still available at the selected position is the current
-// free fallback: if the room leaves a roster hole there, this is the floor the
-// closing sweep reaches first. Keep the calculation beside renderPoolFloor so
-// the highlighted table row and the auction desk's "floor" chip cannot disagree.
-function currentReplacementLevelPlayer(draft) {
-  const group = state.filters.position;
-  if (!draft || !group || group === "all") return null;
-  return availablePlayers(draft)
-    .filter((player) => poolGroupEligible(player, group))
-    .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0] ?? null;
+// The cheapest card still available in each position group is that group's
+// replacement level: the floor the closing sweep reaches first if the room
+// leaves a roster hole there. One card can stand floor for several groups —
+// a cheap C/1B, or the cheapest hitter of all covering the DH slot. Kept
+// beside renderPoolFloor so the badged rows and the desk's "floor" chips
+// cannot disagree.
+function replacementLevelGroups(draft) {
+  const levels = new Map();
+  if (!draft) return levels;
+  const available = availablePlayers(draft);
+  for (const group of BOARD_POSITION_GROUPS) {
+    const floor = available
+      .filter((player) => poolGroupEligible(player, group))
+      .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0];
+    if (floor) levels.set(floor.id, [...(levels.get(floor.id) ?? []), group]);
+  }
+  return levels;
 }
 
 function leagueOpenGroups(draft) {
@@ -7391,7 +7485,7 @@ function renderFilters() {
     : "";
   const rankingKey = currentPositionRankingKey();
   const rankingButton = owner && rankingKey && ranking
-    ? `<button type="button" class="ranking-mode-button active" data-action="reset-position-ranking" title="Restore the ${escapeHtml(state.filters.position)} ranking to its starting OB/Control order"><strong>${ranking.ids.length}</strong> ranked <span>${ranking.customized ? "Reset OB/CTRL" : "OB/CTRL start"}</span></button>`
+    ? `<button type="button" class="ranking-mode-button active" data-action="reset-position-ranking" title="Restore the ${escapeHtml(state.filters.position)} ranking to its starting OB/Control order and clear its tier lines"><strong>${ranking.ids.length}</strong> ranked <span>${ranking.customized ? "Reset OB/CTRL" : "OB/CTRL start"}</span></button>`
     : "";
 
   return `<div class="filters">
@@ -7541,38 +7635,75 @@ function currentPositionRankingKey() {
 }
 
 function activePositionRanking() {
+  return positionRankingFor(state.filters.type, state.filters.position);
+}
+
+function positionRankingFor(type, position) {
   const owner = watchlistOwner();
-  const key = currentPositionRankingKey();
-  if (!owner || !key || !state.draft) return null;
+  if (!owner || !position || position === "all" || !state.draft) return null;
+  const key = `${type}:${position}`;
   const eligiblePlayers = state.draft.pool
-    .filter((player) => player.kind === state.filters.type)
-    .filter((player) => matchesPositionFilter(player, state.filters.position));
+    .filter((player) => player.kind === type)
+    .filter((player) => matchesPositionFilter(player, position));
   const eligibleIds = eligiblePlayers.map((player) => player.id);
   const eligible = new Set(eligibleIds);
-  const savedIds = state.draftRankings[owner.id]?.[key];
-  const customized = Array.isArray(savedIds);
+  const saved = state.draftRankings[owner.id]?.[key];
+  const customized = Boolean(saved);
+  // The seed order sinks replacement-level cards below everything with a
+  // price: the free fallbacks are not rank-4 catchers, whatever their OB says.
+  const floors = replacementLevelGroups(state.draft);
   const defaultIds = [...eligiblePlayers]
     .sort((a, b) => {
+      const sink = (floors.has(a.id) ? 1 : 0) - (floors.has(b.id) ? 1 : 0);
+      if (sink) return sink;
       const result = comparePlayersBySort(a, b, "primary");
       return result ? result * -1 : a.name.localeCompare(b.name);
     })
     .map((player) => player.id);
-  const ids = (customized ? savedIds : defaultIds).filter((id) => eligible.has(id));
+  const ids = (customized ? saved.ids : defaultIds).filter((id) => eligible.has(id));
+  const tiers = customized ? normalizeTierBreaks(saved.tiers, ids.length) : [];
   return {
     managerId: owner.id,
     key,
     ids,
+    tiers,
     rankById: new Map(ids.map((id, index) => [id, index + 1])),
     maxRank: eligibleIds.length,
-    customized
+    customized,
+    ...tierAccounting(ids, tiers)
   };
 }
 
-function setPositionRanking(ownerId, key, ids) {
-  const clean = [...new Set(ids.filter((id) => typeof id === "string"))];
+// The running arithmetic a tiered board shows: which tier each rank sits in,
+// how much of each tier is still gettable, and the one card that is the last
+// of its tier standing — the scarcity light the dividers exist to shine.
+function tierAccounting(ids, tiers) {
+  if (!tiers.length) return { tierMeta: [], tierByRank: null, lastOfTierIds: null };
+  const picked = state.draft.pickedIds;
+  const tierByRank = new Map();
+  const lastOfTierIds = new Set();
+  const bounds = [0, ...tiers, ids.length];
+  const tierMeta = bounds.slice(0, -1).map((start, index) => {
+    const end = bounds[index + 1];
+    const segment = ids.slice(start, end);
+    for (let rank = start + 1; rank <= end; rank += 1) tierByRank.set(rank, index + 1);
+    const gettable = segment.filter((id) => !picked.has(id));
+    if (gettable.length === 1) lastOfTierIds.add(gettable[0]);
+    return {
+      n: index + 1,
+      total: segment.length,
+      left: gettable.length,
+      breakAfter: index >= 1 ? tiers[index - 1] : null
+    };
+  });
+  return { tierMeta, tierByRank, lastOfTierIds };
+}
+
+function setPositionRanking(ownerId, key, entry) {
+  const clean = [...new Set(entry.ids.filter((id) => typeof id === "string"))];
   state.draftRankings[ownerId] = {
     ...(state.draftRankings[ownerId] ?? {}),
-    [key]: clean
+    [key]: { ids: clean, tiers: normalizeTierBreaks(entry.tiers, clean.length) }
   };
 }
 
@@ -7589,16 +7720,16 @@ function setPlayerPositionRank(playerId, value) {
   const ranking = activePositionRanking();
   if (!ranking) return;
   const trimmed = String(value ?? "").trim();
-  const ids = trimmed
-    ? rankIdAt(ranking.ids, playerId, Math.min(Number(trimmed), ranking.maxRank))
-    : removeRankedId(ranking.ids, playerId);
-  setPositionRanking(ranking.managerId, ranking.key, ids);
+  const entry = trimmed
+    ? rankAtWithTiers(ranking, playerId, Math.min(Number(trimmed), ranking.maxRank))
+    : removeRankedWithTiers(ranking, playerId);
+  setPositionRanking(ranking.managerId, ranking.key, entry);
 }
 
 function nudgePositionRanking(playerId, delta) {
   const ranking = activePositionRanking();
   if (!ranking?.rankById.has(playerId)) return;
-  setPositionRanking(ranking.managerId, ranking.key, nudgeRankedIds(ranking.ids, playerId, delta));
+  setPositionRanking(ranking.managerId, ranking.key, nudgeRankedWithTiers(ranking, playerId, delta));
 }
 
 function movePositionRanking(playerId, targetId, after) {
@@ -7607,8 +7738,95 @@ function movePositionRanking(playerId, targetId, after) {
   setPositionRanking(
     ranking.managerId,
     ranking.key,
-    moveRankedIds(ranking.ids, playerId, targetId, { after })
+    moveRankedWithTiers(ranking, playerId, targetId, { after })
   );
+}
+
+function addTierBreakAt(afterCount) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  setPositionRanking(ranking.managerId, ranking.key, {
+    ids: ranking.ids,
+    tiers: insertTierBreak(ranking.tiers, afterCount, ranking.ids.length)
+  });
+}
+
+function removeTierBreakAt(afterCount) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  setPositionRanking(ranking.managerId, ranking.key, {
+    ids: ranking.ids,
+    tiers: removeTierBreak(ranking.tiers, afterCount)
+  });
+}
+
+// ---- private card notes ----
+//
+// A note is a word or two a manager leaves himself on a card — "$30 max",
+// "weird chart" — private like the rankings and riding the same storage.
+// Committing an empty line deletes the note.
+function setPlayerNote(playerId, value) {
+  const owner = watchlistOwner();
+  if (!owner) return;
+  const trimmed = String(value ?? "").trim().slice(0, MAX_NOTE_LENGTH);
+  const notes = { ...(state.draftNotes[owner.id] ?? {}) };
+  if (trimmed) notes[playerId] = trimmed;
+  else delete notes[playerId];
+  if (Object.keys(notes).length) state.draftNotes[owner.id] = notes;
+  else delete state.draftNotes[owner.id];
+}
+
+function commitPlayerNote(playerId, value) {
+  setPlayerNote(playerId, value);
+  editingNoteId = null;
+  saveState();
+  renderDraft();
+}
+
+// What your prep says about the card on the block, surfaced at the moment of
+// decision: your best rank for him across the positions he plays, the tier
+// that rank sits in, and the note you left yourself. Private like everything
+// it reads from — online this rail renders per-browser, and on a hotseat it
+// follows the same owner the stars already do.
+function prepReadout(player) {
+  const owner = watchlistOwner();
+  if (!owner || !state.draft || !player) return null;
+  const buckets = player.kind === "pitcher"
+    ? ["SP", "RP"]
+    : ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH"];
+  let best = null;
+  for (const position of buckets.filter((bucket) => matchesPositionFilter(player, bucket))) {
+    const ranking = positionRankingFor(player.kind, position);
+    const rank = ranking?.rankById.get(player.id);
+    if (!rank) continue;
+    if (!best || rank < best.rank) best = { position, rank, ranking };
+  }
+  const note = state.draftNotes[owner.id]?.[player.id] ?? "";
+  if (!best) return note ? { note } : null;
+  const tier = best.ranking.tiers.length ? tierOfRank(best.ranking.tiers, best.rank) : null;
+  const meta = tier ? best.ranking.tierMeta[tier - 1] : null;
+  return {
+    position: best.position,
+    rank: best.rank,
+    total: best.ranking.ids.length,
+    customized: best.ranking.customized,
+    tier,
+    tierLeft: meta?.left ?? null,
+    tierTotal: meta?.total ?? null,
+    lastOfTier: best.ranking.lastOfTierIds?.has(player.id) ?? false,
+    note
+  };
+}
+
+function renderPrepReadout(player) {
+  const prep = prepReadout(player);
+  if (!prep) return "";
+  const rankBit = prep.rank
+    ? `${prep.customized ? "Your board" : "OB/CTRL board"}: <strong>#${prep.rank}</strong> of ${prep.total} ${escapeHtml(prep.position)}${prep.tier ? ` &middot; tier ${prep.tier} (${prep.tierLeft} of ${prep.tierTotal} left)` : ""}`
+    : "";
+  const lastBit = prep.lastOfTier ? `<span class="lot-prep-last">last of tier ${prep.tier}</span>` : "";
+  const noteBit = prep.note ? `<span class="lot-prep-note">&ldquo;${escapeHtml(prep.note)}&rdquo;</span>` : "";
+  return `<p class="auction-lot-rail-meta lot-prep">${[rankBit, lastBit, noteBit].filter(Boolean).join(" ")}</p>`;
 }
 
 function rankingDragStillActive() {
@@ -8206,14 +8424,19 @@ function canSimulate(draft) {
 function draftVisiblePlayers(draft) {
   const players = filteredPlayers(draft.pool);
   const ranking = activePositionRanking();
-  if (!ranking?.ids.length) return players.sort(comparePlayers);
+  // Replacement-level cards are the board's free fallbacks: whatever the sort,
+  // they sit at the bottom, under everything anyone would actually pay for.
+  // A manager who ranks one by hand overrides this — that order is theirs.
+  const floors = replacementLevelGroups(draft);
+  const sink = (a, b) => (floors.has(a.id) ? 1 : 0) - (floors.has(b.id) ? 1 : 0);
+  if (!ranking?.ids.length) return players.sort((a, b) => sink(a, b) || comparePlayers(a, b));
   return players.sort((a, b) => {
     const aRank = ranking.rankById.get(a.id);
     const bRank = ranking.rankById.get(b.id);
     if (aRank !== undefined && bRank === undefined) return -1;
     if (aRank === undefined && bRank !== undefined) return 1;
     if (aRank !== undefined && bRank !== undefined) return aRank - bRank;
-    return comparePlayers(a, b);
+    return sink(a, b) || comparePlayers(a, b);
   });
 }
 
@@ -8309,6 +8532,12 @@ function saveState() {
       state.online.roomId,
       state.online.managerId,
       state.draftRankings
+    );
+    saveOnlineDraftNotes(
+      localStorage,
+      state.online.roomId,
+      state.online.managerId,
+      state.draftNotes
     );
     return;
   }
@@ -8492,8 +8721,13 @@ function reviveState(value) {
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     flagged: normalizeStarred(value.flagged),
-    draftRankings: value.draftRankingsVersion === 2 ? normalizeDraftRankings(value.draftRankings) : {},
-    draftRankingsVersion: 2,
+    // v2 boards were bare arrays, v3 adds tier breaks; both normalize into the
+    // v3 shape. Anything older predates compact-ranking semantics entirely.
+    draftRankings: value.draftRankingsVersion === 2 || value.draftRankingsVersion === 3
+      ? normalizeDraftRankings(value.draftRankings)
+      : {},
+    draftRankingsVersion: 3,
+    draftNotes: normalizeDraftNotes(value.draftNotes),
     heatBy: value.heatBy === "points" ? "points" : "price",
     draftHistorySort: normalizeDraftHistorySort(value.draftHistorySort, value.draftHistoryPaidSort),
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,

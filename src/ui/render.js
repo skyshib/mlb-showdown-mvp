@@ -1,5 +1,6 @@
 import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260716-records";
 import { cardPanelHtml } from "./cardFace.js?v=20260725-golden-serial";
+import { MAX_NOTE_LENGTH } from "./draftRankings.js?v=20260725-prep-tiers";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
@@ -34,6 +35,13 @@ export function renderPlayerTable(players, options = {}) {
   const firstUnrankedId = manualRanking
     ? players.find((player) => !manualRanking.rankById?.has(player.id))?.id ?? null
     : null;
+  // Notes and tier dividers only exist where a manager owns the board.
+  const notes = options.notes ?? null;
+  const editingNoteId = options.editingNoteId ?? null;
+  const tiers = manualRanking?.tiers ?? [];
+  const tierMeta = manualRanking?.tierMeta ?? [];
+  const tierByRank = manualRanking?.tierByRank ?? null;
+  const lastOfTierIds = manualRanking?.lastOfTierIds ?? null;
   const starHeader = starred ? [{ label: "" }] : [];
   // A blind draft strips the points column outright — the number is the one
   // thing the house rule keeps off the board.
@@ -62,6 +70,8 @@ export function renderPlayerTable(players, options = {}) {
         ...outcomes.map((outcome) => ({ label: outcome, sort: `chart:${outcome}` }))
       ];
 
+  const columnCount = headers.length + (manualRanking ? 1 : 0);
+  let previousTier = null;
   const rows = players
     .map((player) => {
       // A card someone already owns keeps its place on the board, greyed out and
@@ -88,8 +98,8 @@ export function renderPlayerTable(players, options = {}) {
       const idle = options.fillsNeed && !owner ? !options.fillsNeed(player) : false;
       const isStarred = starred ? starred.has(player.id) : false;
       const isFlagged = flagged ? flagged.has(player.id) : false;
-      const isReplacementLevel = Boolean(options.replacementPlayerId)
-        && player.id === options.replacementPlayerId;
+      const replacementGroups = options.replacementLevels?.get(player.id) ?? null;
+      const isReplacementLevel = Boolean(replacementGroups?.length);
       const flagButton = flagged
         ? `<button type="button" class="flag-toggle${isFlagged ? " flagged" : ""}" data-action="toggle-flag" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isFlagged}" title="${isFlagged ? "Remove flag" : "Flag"} ${escapeHtml(player.name)}">${isFlagged ? "⚑" : "⚐"}</button>`
         : "";
@@ -97,6 +107,36 @@ export function renderPlayerTable(players, options = {}) {
         ? `<td class="star-cell"><button type="button" class="star-toggle${isStarred ? " starred" : ""}" data-action="toggle-star" data-player-id="${escapeHtml(player.id)}" aria-pressed="${isStarred}" title="${isStarred ? "Stop watching" : "Keep an eye on"} ${escapeHtml(player.name)}">${isStarred ? "★" : "☆"}</button>${flagButton}</td>`
         : "";
       const rank = manualRanking?.rankById?.get(player.id) ?? null;
+      // A divider opens every tier, the first one included — the header row is
+      // what carries the "N of M left" count. Dividers sit between the rows the
+      // board is actually showing, but the counts always speak for the whole
+      // tier, filtered view or not.
+      let tierDivider = "";
+      if (tiers.length && rank && tierByRank) {
+        const tier = tierByRank.get(rank);
+        if (tier !== previousTier) {
+          tierDivider = renderTierDivider(tierMeta[tier - 1], columnCount);
+          previousTier = tier;
+        }
+      }
+      const note = notes?.[player.id] ?? "";
+      const editingNote = Boolean(notes) && editingNoteId === player.id;
+      const canStartTier = Boolean(manualRanking) && rank !== null && rank >= 2 && !tiers.includes(rank - 1);
+      const isLastOfTier = lastOfTierIds?.has(player.id) ?? false;
+      const lastTierBadge = isLastOfTier && rank && tierByRank
+        ? `<span class="tier-last-badge" title="The last card of tier ${tierByRank.get(rank)} still gettable">last of tier ${tierByRank.get(rank)}</span>`
+        : "";
+      const rowTools = notes && !editingNote
+        ? `<span class="row-tools">
+            <button type="button" class="row-tool" data-action="edit-note" data-player-id="${escapeHtml(player.id)}" title="${note ? `Edit the note on ${escapeHtml(player.name)}` : `Add a note to ${escapeHtml(player.name)}`}" aria-label="${note ? `Edit the note on ${escapeHtml(player.name)}` : `Add a note to ${escapeHtml(player.name)}`}">&#9998;</button>
+            ${canStartTier ? `<button type="button" class="row-tool" data-action="add-tier-break" data-break="${rank - 1}" title="Start a new tier at ${escapeHtml(player.name)}" aria-label="Start a new tier at ${escapeHtml(player.name)}">&#9986;</button>` : ""}
+          </span>`
+        : "";
+      const noteLine = editingNote
+        ? `<input class="player-note-input" data-note-input-id="${escapeHtml(player.id)}" value="${escapeHtml(note)}" maxlength="${MAX_NOTE_LENGTH}" placeholder="a word or two" spellcheck="false" aria-label="Note on ${escapeHtml(player.name)}" />`
+        : note
+        ? `<span class="player-note" title="${escapeHtml(note)}">${escapeHtml(note)}</span>`
+        : "";
       const rankCell = manualRanking
         ? `<td class="manual-rank-cell">
             <span class="manual-rank-handle" draggable="true" data-ranking-drag-id="${escapeHtml(player.id)}" title="${rank ? `Drag ${escapeHtml(player.name)} to a new rank` : `Drag ${escapeHtml(player.name)} into your ranking`}" aria-label="${rank ? `Drag ${escapeHtml(player.name)} to a new rank` : `Drag ${escapeHtml(player.name)} into your ranking`}">⠿</span>
@@ -125,16 +165,17 @@ export function renderPlayerTable(players, options = {}) {
         isFlagged ? "flagged-row" : "",
         isReplacementLevel ? "replacement-level-row" : "",
         rank ? "ranked-player-row" : "",
+        isLastOfTier ? "tier-last-row" : "",
         manualRanking?.ids.length && player.id === firstUnrankedId ? "first-unranked-row" : "",
         idle ? "idle-row" : ""
       ]
         .filter(Boolean)
         .join(" ");
-      return `<tr class="${rowClass}${manualRanking ? " manual-ranking-row" : ""}"${manualRanking ? ` data-ranking-drop-id="${escapeHtml(player.id)}"` : ""}>
+      return `${tierDivider}<tr class="${rowClass}${manualRanking ? " manual-ranking-row" : ""}"${manualRanking ? ` data-ranking-drop-id="${escapeHtml(player.id)}"` : ""}>
         ${rankCell}
         ${starCell}
         <td>${action}</td>
-        <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong>${isReplacementLevel ? `<span class="replacement-level-badge" title="The lowest-point card still available at this position—the current free fallback if a roster finishes with a hole">Replacement level</span>` : ""}</td>
+        <td class="player-cell"><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong>${lastTierBadge}${isReplacementLevel ? `<span class="replacement-level-badge" title="The lowest-point card still available at ${escapeHtml(replacementGroups.join(" and "))}—the current free fallback if a roster finishes with a hole">Replacement level</span>` : ""}${rowTools}${noteLine}</td>
         ${detailCells}
         ${hidePoints ? "" : `<td class="card-stat num">${player.points}</td>`}
         ${renderOutcomeCells(player, outcomes)}
@@ -151,6 +192,20 @@ export function renderPlayerTable(players, options = {}) {
     </thead>
     <tbody>${rows}</tbody>
   </table></div>`;
+}
+
+// A tier header names the tier and counts what is left in it — the count runs
+// on the whole tier, drafted cards included in the denominator, because "1 of
+// 4 left" is the panic signal the divider exists to give. Only tiers after the
+// first carry a remove button: deleting the divider that OPENS a tier means
+// merging it up into the tier above, and tier 1 has nothing above to merge into.
+function renderTierDivider(meta, columnCount) {
+  if (!meta) return "";
+  return `<tr class="tier-divider-row${meta.left === 0 ? " tier-divider-empty" : ""}"><td colspan="${columnCount}">
+      <span class="tier-divider-label">Tier ${meta.n}</span>
+      <span class="tier-divider-count">${meta.left} of ${meta.total} left</span>
+      ${meta.breakAfter != null ? `<button type="button" class="tier-remove" data-action="remove-tier-break" data-break="${meta.breakAfter}" title="Merge tier ${meta.n} up into tier ${meta.n - 1}" aria-label="Merge tier ${meta.n} into tier ${meta.n - 1}">&times;</button>` : ""}
+    </td></tr>`;
 }
 
 export function renderDraftHistoryTable(picks, options = {}) {

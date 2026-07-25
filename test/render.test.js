@@ -151,14 +151,15 @@ test("draft ranking inputs are blank for unranked players and numbered for ranke
   assert.match(html, /class="draft-player-row first-unranked-row manual-ranking-row"/);
 });
 
-test("the current replacement-level player is called out in the draft table", () => {
+test("replacement-level players are called out in the draft table, naming their groups", () => {
   const html = renderPlayerTable([hitter], {
     mode: "hitter",
-    replacementPlayerId: hitter.id
+    replacementLevels: new Map([[hitter.id, ["C", "DH"]]])
   });
 
   assert.match(html, /class="draft-player-row replacement-level-row"/);
   assert.match(html, /class="replacement-level-badge"[^>]*>Replacement level<\/span>/);
+  assert.match(html, /still available at C and DH/);
   assert.match(html, /current free fallback if a roster finishes with a hole/);
 });
 

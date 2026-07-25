@@ -1977,6 +1977,162 @@ button.roster-slot[draggable="true"]:active {
   border-top: 3px solid color-mix(in srgb, var(--accent) 52%, var(--line));
 }
 
+/* ---- tier dividers on the position board ---- */
+
+/* The cell spans every column, including the ones scrolled out of view, so
+   its content pins left where it is always on screen. Selectors carry the
+   .player-table prefix to outrank the board's own centred-cell rules. */
+.player-table .tier-divider-row td {
+  padding: 4px 10px;
+  border-top: 2px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 86%, var(--navy) 14%);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.player-table .tier-divider-label {
+  display: inline-block;
+  margin-right: 10px;
+  color: var(--navy);
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.player-table .tier-divider-count {
+  display: inline-block;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A tier that has been drafted clean: the shelf stays, marked empty. */
+.tier-divider-empty .tier-divider-label {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.tier-remove {
+  margin-left: 10px;
+  vertical-align: 1px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.tier-remove:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+/* The last card of a tier still gettable: the board's scarcity light. */
+.tier-last-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.tier-last-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+/* ---- private card notes ---- */
+
+.player-note {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-note-input {
+  display: block;
+  width: min(240px, 95%);
+  margin-top: 2px;
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.row-tools {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+  vertical-align: 1px;
+  visibility: hidden;
+}
+
+tr:hover .row-tools,
+tr:focus-within .row-tools {
+  visibility: visible;
+}
+
+.row-tool {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.row-tool:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+/* ---- the prep readout on the lot rail ---- */
+
+.lot-prep strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.lot-prep-last {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent-dark);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.lot-prep-note {
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* A card that has already sold: still on the board, out of reach. */
 .player-table tr.sold-row {
   color: var(--muted);
