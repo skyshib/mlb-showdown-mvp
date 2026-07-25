@@ -271,6 +271,11 @@ let draggedLineupMove = null;
 let selectedOrderMove = null;
 let draggedOrderMove = null;
 let draggedRankingMove = null;
+// The edge-scroll loop for a live ranking drag: the pane being scrolled, the
+// pointer's last known height, and the interval driving it.
+let rankingDragPane = null;
+let rankingDragY = null;
+let rankingDragScrollTimer = null;
 // The one note editor open on the board, if any: a player id. Transient UI
 // state like the drag above — it never serializes.
 let editingNoteId = null;
@@ -3428,6 +3433,7 @@ function bindDraftActions() {
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", rankingHandle.dataset.rankingDragId);
       rankingHandle.closest("[data-ranking-drop-id]")?.classList.add("ranking-dragging");
+      startRankingDragScroll(rankingHandle.closest(".table-scroll"));
       return;
     }
     const tile = event.target.closest("[data-order-tile]");
@@ -3466,9 +3472,13 @@ function bindDraftActions() {
     if (draggedRankingMove && rankingDragStillActive()) {
       const rankingRow = event.target.closest("[data-ranking-drop-id]");
       const tierRow = event.target.closest("[data-tier-drop-break]");
-      if (rankingRow || tierRow) {
+      // Anywhere over the board pane keeps the drag alive and feeds the
+      // edge-scroll loop, so a card can ride the pane to a rank that started
+      // off screen without the cursor flashing "no drop" between rows.
+      if (rankingRow || tierRow || rankingDragPane?.contains(event.target)) {
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
+        rankingDragY = event.clientY;
         app.querySelectorAll(".ranking-drag-over")
           .forEach((element) => element.classList.remove("ranking-drag-over"));
         (rankingRow ?? tierRow)?.classList.add("ranking-drag-over");
@@ -3497,6 +3507,7 @@ function bindDraftActions() {
       event.preventDefault();
       movePositionRankingAboveBreak(draggedRankingMove.playerId, Number(tierRow.dataset.tierDropBreak));
       draggedRankingMove = null;
+      stopRankingDragScroll();
       saveState();
       renderDraft();
       return;
@@ -3511,6 +3522,7 @@ function bindDraftActions() {
         event.clientY > bounds.top + bounds.height / 2
       );
       draggedRankingMove = null;
+      stopRankingDragScroll();
       saveState();
       renderDraft();
       return;
@@ -3544,6 +3556,7 @@ function bindDraftActions() {
     draggedLineupMove = null;
     draggedOrderMove = null;
     draggedRankingMove = null;
+    stopRankingDragScroll();
     app.querySelectorAll(".ranking-dragging, .ranking-drag-over")
       .forEach((element) => element.classList.remove("ranking-dragging", "ranking-drag-over"));
   };
@@ -7911,6 +7924,43 @@ function movePositionRankingAboveBreak(playerId, breakAfter) {
     ranking.key,
     moveRankedAboveBreak(ranking, playerId, Number.isFinite(breakAfter) ? breakAfter : 0)
   );
+}
+
+// Native drag never scrolls an inner pane, so a long move used to stall at
+// the board's edge. While a ranking drag is live, a frame loop eases the pane
+// along whenever the pointer sits in the top or bottom scroll band — speed
+// grows with depth into the band, capped gently enough to aim by.
+function startRankingDragScroll(pane) {
+  stopRankingDragScroll();
+  rankingDragPane = pane ?? null;
+  // A 16ms interval rather than an animation frame: it holds frame rate while
+  // the tab is visible, and it self-stops below the moment the drag dies.
+  if (rankingDragPane) rankingDragScrollTimer = setInterval(rankingDragScrollTick, 16);
+}
+
+function rankingDragScrollTick() {
+  if (!draggedRankingMove || !rankingDragPane) {
+    stopRankingDragScroll();
+    return;
+  }
+  if (rankingDragY === null) return;
+  const rect = rankingDragPane.getBoundingClientRect();
+  const band = 72;
+  const maxStep = 18;
+  if (rankingDragY < rect.top + band) {
+    const depth = Math.min(1, (rect.top + band - rankingDragY) / band);
+    rankingDragPane.scrollTop -= Math.ceil(depth * maxStep);
+  } else if (rankingDragY > rect.bottom - band) {
+    const depth = Math.min(1, (rankingDragY - (rect.bottom - band)) / band);
+    rankingDragPane.scrollTop += Math.ceil(depth * maxStep);
+  }
+}
+
+function stopRankingDragScroll() {
+  if (rankingDragScrollTimer !== null) clearInterval(rankingDragScrollTimer);
+  rankingDragScrollTimer = null;
+  rankingDragPane = null;
+  rankingDragY = null;
 }
 
 // ---- the big board ----
