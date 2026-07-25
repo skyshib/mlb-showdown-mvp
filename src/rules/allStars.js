@@ -28,8 +28,7 @@ export function buildAllStarDepthChart(teams, summary) {
       leader,
       depth: depth.map((candidate, index) => ({
         ...candidate,
-        rank: index + 1,
-        gap: leader ? leader.wpaPer162 - candidate.wpaPer162 : 0
+        rank: index + 1
       }))
     };
   });

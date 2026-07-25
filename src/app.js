@@ -140,7 +140,7 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260717-draft-wpa";
+} from "./rules/batch.js?v=20260725-starter-matchups";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
@@ -4081,6 +4081,7 @@ function renderBatch() {
   ${raceSection}
   ${renderFormulaRevealSection(summary)}`;
   const headToHeadSection = renderBatchHeadToHead(summary);
+  const starterMatchupSection = renderBatchStarterMatchups(summary, playersById);
   const starterResultsSection = starterResults.length ? `<section class="panel wide">
     <p class="eyebrow">${runs} simulated games</p>
     <h2>Team results by starting pitcher</h2>
@@ -4231,7 +4232,7 @@ function renderBatch() {
     overview: overviewSection,
     allStars: activeBatchTab === "allStars" ? renderBatchAllStars(summary, playersById) : "",
     headToHead: headToHeadSection,
-    starters: starterResultsSection,
+    starters: `${starterResultsSection}${starterMatchupSection}`,
     hitters: hittersSection,
     pitchers: pitchersSection,
     skills: teamSkillsSection,
@@ -4292,6 +4293,7 @@ function normalizeBatchPitcherSplit(value) {
 function renderBatchAllStars(summary, playersById) {
   const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
   const slots = buildAllStarDepthChart(teams, summary);
+  const pricePaidMap = buildPricePaidMap(state.draft);
   const filled = slots.filter((slot) => slot.leader);
   if (!filled.length) {
     return `<section class="panel wide">
@@ -4304,15 +4306,15 @@ function renderBatchAllStars(summary, playersById) {
       <div>
         <p class="eyebrow">Best at every position</p>
         <h2>Simulation All-Stars</h2>
-        <p class="batch-note">The highest WPA/162 performer at each position gets the card. Open a depth chart to compare the rest of the field and see the gap from the leader.</p>
+        <p class="batch-note">The highest WPA/162 performer at each position gets the card. Open a depth chart to compare the rest of the field.</p>
       </div>
       <span>${filled.length} roster spots</span>
     </div>
-    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById)).join("")}</div>
+    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap)).join("")}</div>
   </section>`;
 }
 
-function renderAllStarSlot(slot, playersById) {
+function renderAllStarSlot(slot, playersById, pricePaidMap) {
   if (!slot.leader) {
     return `<article class="all-star-slot all-star-slot-empty">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
@@ -4320,6 +4322,7 @@ function renderAllStarSlot(slot, playersById) {
     </article>`;
   }
   const leader = slot.leader;
+  const pricePaid = pricePaidMap[leader.id];
   const depthRows = slot.depth.map((candidate) => `<li class="${candidate.rank === 1 ? "all-star-depth-leader" : ""}">
     <span class="all-star-depth-rank">#${candidate.rank}</span>
     <span class="all-star-depth-player">
@@ -4327,7 +4330,6 @@ function renderAllStarSlot(slot, playersById) {
       <small>${escapeHtml(candidate.team)}</small>
     </span>
     <strong>${formatWpaStat(candidate.wpaPer162)}</strong>
-    <em>${candidate.rank === 1 ? "All-Star" : `−${formatDecimal(candidate.gap, 2)}`}</em>
   </li>`).join("");
   return `<article class="all-star-slot">
     <header class="all-star-slot-header">
@@ -4337,12 +4339,11 @@ function renderAllStarSlot(slot, playersById) {
     <div class="all-star-card-face">${renderPlayerCard(leader.player)}</div>
     <div class="all-star-identity">
       <strong>${escapeHtml(leader.name)}</strong>
-      <span>${escapeHtml(leader.team)}</span>
+      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; Paid ${money(pricePaid)}` : ""}</span>
     </div>
     <details class="all-star-depth">
       <summary>Depth chart · ${slot.depth.length} ${slot.depth.length === 1 ? "player" : "players"}</summary>
       <ol>${depthRows}</ol>
-      <p>Gap is WPA/162 behind the All-Star.</p>
     </details>
   </article>`;
 }
@@ -4405,6 +4406,51 @@ function renderBatchHeadToHead(summary) {
     <div class="table-scroll">
       <table class="head-to-head-table">
         <thead><tr><th>Team</th>${header}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderBatchStarterMatchups(summary, playersById) {
+  const starters = summary.starterResults ?? [];
+  const records = new Map((summary.starterMatchups ?? []).map((row) => [
+    `${row.team}\u0000${row.starterId}\u0000${row.opponentTeam}\u0000${row.opponentStarterId}`,
+    row
+  ]));
+  if (!records.size) {
+    return `<section class="panel wide">
+      <h2>Starter head-to-head records</h2>
+      <p class="batch-note">This simulation predates starter-matchup tracking. Run it again to build the starter matrix.</p>
+    </section>`;
+  }
+  const starterLabel = (starter) => `<span class="starter-matchup-name">${renderBatchPlayerName({
+    id: starter.id,
+    name: starter.name,
+    team: starter.team
+  }, playersById)}<small>${escapeHtml(starter.team)}</small></span>`;
+  const header = starters.map((starter) => `<th class="num" title="${escapeHtml(`${starter.name} · ${starter.team}`)}">${starterLabel(starter)}</th>`).join("");
+  const rows = starters.map((starter) => {
+    const cells = starters.map((opponent) => {
+      if (starter.team === opponent.team) {
+        return `<td class="num head-to-head-diagonal" aria-label="Same team">—</td>`;
+      }
+      const row = records.get(`${starter.team}\u0000${starter.id}\u0000${opponent.team}\u0000${opponent.id}`);
+      if (!row) return `<td class="num" title="No games played">0-0 (0%)</td>`;
+      const winPct = formatWholeShare(row.games ? row.wins / row.games : 0);
+      const title = `${starter.name} (${starter.team}) vs ${opponent.name} (${opponent.team}): ${row.wins}-${row.losses} (${winPct}), ${row.runsFor}-${row.runsAgainst} runs`;
+      return `<td class="num head-to-head-record" title="${escapeHtml(title)}"><strong>${row.wins}-${row.losses} (${winPct})</strong><span>${row.runsFor}-${row.runsAgainst} runs</span></td>`;
+    }).join("");
+    return `<tr><th scope="row" class="head-to-head-team">${starterLabel(starter)}</th>${cells}</tr>`;
+  }).join("");
+  const tableWidth = Math.max(900, 170 + starters.length * 118);
+  return `<section class="panel wide">
+    <p class="eyebrow">${summary.runs} simulated games</p>
+    <h2>Starter head-to-head records</h2>
+    <p class="batch-note">Each cell is the team record when the row starter faced the column starter. It shows wins-losses and win percentage, with total runs underneath.</p>
+    <div class="table-scroll">
+      <table class="head-to-head-table starter-matchup-table" style="min-width:${tableWidth}px">
+        <thead><tr><th>Starter</th>${header}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -4513,27 +4559,45 @@ function renderInterestingGames(games) {
     </section>`;
   }
   if (!games.length) return "";
-  const cards = games.map((game) => {
+  const groups = [];
+  const groupsByKey = new Map();
+  for (const game of games) {
+    const key = game.categoryKey ?? game.label;
+    if (!groupsByKey.has(key)) {
+      const group = {
+        label: game.categoryLabel ?? game.label,
+        games: []
+      };
+      groupsByKey.set(key, group);
+      groups.push(group);
+    }
+    groupsByKey.get(key).games.push(game);
+  }
+  const card = (game) => {
     const awayWon = game.winner === game.away;
     const homeWon = game.winner === game.home;
     const inning = game.innings === 9 ? "" : ` · ${game.innings} inn.`;
     return `<button type="button" class="interesting-game-card" data-game-open="${game.index}" aria-label="Open game ${game.index + 1}: ${escapeHtml(game.label)}">
-      <span class="interesting-game-label">${escapeHtml(game.label)}</span>
+      <span class="interesting-game-label">${game.place ? `#${game.place} · ` : ""}${escapeHtml(game.label)}</span>
       <strong class="interesting-game-metric">${escapeHtml(game.metric)}</strong>
       <span class="interesting-game-matchup">${awayWon ? `<strong>${escapeHtml(game.away)}</strong>` : escapeHtml(game.away)} ${game.awayRuns}–${game.homeRuns} ${homeWon ? `<strong>${escapeHtml(game.home)}</strong>` : escapeHtml(game.home)}${inning}</span>
       <span class="interesting-game-note">${escapeHtml(game.note ?? "")}</span>
       <span class="interesting-game-number">Game ${game.index + 1} →</span>
     </button>`;
-  }).join("");
+  };
+  const shelves = groups.map((group) => `<section class="interesting-game-group">
+    <h4>${escapeHtml(group.label)}</h4>
+    <div class="interesting-games-grid">${group.games.map(card).join("")}</div>
+  </section>`).join("");
   return `<section class="interesting-games">
     <div class="interesting-games-heading">
       <div>
         <p class="eyebrow">Curated replay shelf</p>
         <h3>Interesting games</h3>
       </div>
-      <span>Extremes from this simulation</span>
+      <span>Top three on every axis</span>
     </div>
-    <div class="interesting-games-grid">${cards}</div>
+    <div class="interesting-games-groups">${shelves}</div>
   </section>`;
 }
 
@@ -4556,7 +4620,8 @@ function renderBatchGameDetail(game, index, runs) {
     ${renderWinProbabilityChart(game)}
     <h3>Box score</h3>
     ${renderBoxScore(game, draftedPlayersById())}
-    <h3>Play-by-play</h3>
+    <h3>Game story</h3>
+    <p class="batch-note">The biggest swings come first. Open any half-inning for the complete sequence; scoring innings, late innings, and high-leverage spots start expanded.</p>
     ${renderGameLog(game)}
   </section>`;
 }
@@ -5176,7 +5241,7 @@ function renderGameDetail(game) {
     <h3>${escapeHtml(game.away.name)} ${game.away.runs}, ${escapeHtml(game.home.name)} ${game.home.runs}</h3>
     <h4>Box score</h4>
     ${renderBoxScore(game, draftedPlayersById())}
-    <h4>Play-by-play</h4>
+    <h4>Game story</h4>
     ${renderGameLog(game)}
   </div>`;
 }
@@ -5648,38 +5713,150 @@ function formatInnings(outs) {
 }
 
 function renderGameLog(game) {
-  const rows = game.events
-    .map(
-      (event) => `<tr${Math.abs(event.wpa ?? 0) >= 0.1 ? ' class="wpa-swing"' : ""}>
-        <td>${event.inning}${event.half === "top" ? "T" : "B"}</td>
-        <td>${renderEventMatchup(event)}</td>
-        <td>${renderControlResult(event)}</td>
-        <td>${renderEventResult(event)}</td>
-        <td>${event.outsBefore} to ${event.outsAfter}</td>
-        <td>${escapeHtml(basesText(event.basesBefore))} to ${escapeHtml(basesText(event.basesAfter))}</td>
-        <td>${event.scoreAfter.away}-${event.scoreAfter.home}</td>
-        ${renderEventWinProbability(event)}
-      </tr>`
-    )
-    .join("");
+  const events = game.events ?? [];
+  if (!events.length) return `<p class="batch-note">No play-by-play is available for this game.</p>`;
 
-  return `<div class="game-log">
-    <table>
-      <thead><tr><th>Inn</th><th>Matchup</th><th>Control</th><th>Result</th><th>Outs</th><th>Bases</th><th>Score</th><th class="num">Home WP</th><th class="num">WPA</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
+  const keyMoments = [...events]
+    .filter((event) => Number.isFinite(event.wpa))
+    .sort((a, b) => Math.abs(b.wpa) - Math.abs(a.wpa))
+    .slice(0, 3);
+  const momentCards = keyMoments.map((event, index) => `<article class="game-story-moment">
+    <span>#${index + 1} swing · ${halfInningLabel(event)}</span>
+    <strong>${playHeadline(event)}</strong>
+    <small>${event.scoreAfter?.away ?? 0}-${event.scoreAfter?.home ?? 0} · ${formatWpaPercent(event.wpa)} WPA</small>
+  </article>`).join("");
+
+  const halfInnings = [];
+  const halfInningsByKey = new Map();
+  for (const event of events) {
+    const key = `${event.inning}\u0000${event.half}`;
+    if (!halfInningsByKey.has(key)) {
+      const group = { inning: Number(event.inning) || 1, half: event.half, events: [] };
+      halfInningsByKey.set(key, group);
+      halfInnings.push(group);
+    }
+    halfInningsByKey.get(key).events.push(event);
+  }
+
+  const innings = halfInnings.map((group) => {
+    const runs = group.events.reduce((sum, event) => sum + eventRunsScored(event), 0);
+    const leverage = Math.max(0, ...group.events.map((event) => Math.abs(Number(event.wpa) || 0)));
+    const open = runs > 0 || group.inning >= 7 || leverage >= 0.1;
+    const battingTeam = group.half === "top" ? game.away?.name : game.home?.name;
+    const plays = group.events.map(renderStoryPlay).join("");
+    const result = runs
+      ? `<strong>${runs} run${runs === 1 ? "" : "s"}</strong>`
+      : `<span>Scoreless</span>`;
+    return `<details class="game-story-inning${runs ? " scoring-inning" : ""}" ${open ? "open" : ""}>
+      <summary>
+        <span><strong>${halfInningLabel(group)}</strong><small>${escapeHtml(battingTeam ?? "")} batting · ${group.events.length} plays</small></span>
+        ${result}
+      </summary>
+      <div class="game-story-plays">${plays}</div>
+    </details>`;
+  }).join("");
+
+  return `<div class="batch-play-by-play">
+    <section class="game-story-key-moments">
+      <div class="game-story-heading">
+        <div>
+          <p class="eyebrow">Turning points</p>
+          <h4>Biggest swings</h4>
+        </div>
+        <span>WPA from the batting side</span>
+      </div>
+      <div class="game-story-moment-grid">${momentCards}</div>
+    </section>
+    <section class="game-story-timeline">
+      <div class="game-story-heading">
+        <div>
+          <p class="eyebrow">Inning by inning</p>
+          <h4>Complete play-by-play</h4>
+        </div>
+        <span>${events.length} plays</span>
+      </div>
+      ${innings}
+    </section>
   </div>`;
 }
 
-// Home team's win probability around the play, plus the play's WPA from the
-// batting side's perspective — the amount credited to the batter (or runner)
-// and debited from the pitcher.
-function renderEventWinProbability(event) {
-  if (event.wpBefore == null || event.wpAfter == null) return `<td></td><td></td>`;
-  const wpa = event.wpa ?? 0;
+function renderStoryPlay(event) {
+  const runs = eventRunsScored(event);
+  const wpa = Number(event.wpa) || 0;
+  const highLeverage = Math.abs(wpa) >= 0.1;
   const tone = wpa > 0.0005 ? "wpa-pos" : wpa < -0.0005 ? "wpa-neg" : "";
-  return `<td class="num wp-cell">${formatWinProb(event.wpBefore)} → ${formatWinProb(event.wpAfter)}</td>
-    <td class="num ${tone}">${formatWpaPercent(wpa)}</td>`;
+  const score = `${event.scoreAfter?.away ?? 0}-${event.scoreAfter?.home ?? 0}`;
+  const winProbability = event.wpBefore == null || event.wpAfter == null
+    ? ""
+    : `<span>Home WP ${formatWinProb(event.wpBefore)} → ${formatWinProb(event.wpAfter)}</span>`;
+  return `<article class="game-story-play${runs ? " scoring-play" : ""}${highLeverage ? " leverage-play" : ""}">
+    <div class="game-story-play-copy">
+      <div class="game-story-play-flags">
+        ${runs ? `<span class="scoring-badge">${runs} RUN${runs === 1 ? "" : "S"}</span>` : ""}
+        ${highLeverage ? `<span class="leverage-badge">HIGH LEVERAGE</span>` : ""}
+      </div>
+      <strong>${playHeadline(event)}</strong>
+      <small>${renderEventMatchup(event)}</small>
+    </div>
+    <div class="game-story-play-impact">
+      <strong>${score}</strong>
+      ${winProbability}
+      <span class="${tone}">${formatWpaPercent(wpa)} WPA</span>
+    </div>
+    <details class="game-story-play-details">
+      <summary>Dice, fielding &amp; baserunning</summary>
+      <div>
+        <span><strong>Control</strong>${renderControlResult(event)}</span>
+        <span><strong>Resolution</strong>${renderEventResult(event)}</span>
+        <span><strong>Situation</strong>${event.outsBefore} → ${event.outsAfter} outs · ${escapeHtml(basesText(event.basesBefore))} → ${escapeHtml(basesText(event.basesAfter))}</span>
+      </div>
+    </details>
+  </article>`;
+}
+
+function playHeadline(event) {
+  if (event.playDetails?.kind === "steal") {
+    const attempt = event.playDetails.stealAttempt;
+    return `${escapeHtml(attempt.runner)} — ${attempt.safe ? "stolen base" : "caught stealing"}`;
+  }
+  const resultLabels = {
+    SO: "strikeout",
+    GB: "ground out",
+    FB: "fly out",
+    BB: "walk",
+    "1B": "single",
+    "1B+": "single and advance",
+    "2B": "double",
+    "3B": "triple",
+    HR: "home run"
+  };
+  return `${escapeHtml(event.batter ?? "Batter")} — ${resultLabels[event.result] ?? escapeHtml(event.result ?? "play")}`;
+}
+
+function halfInningLabel(event) {
+  return `${event.half === "bottom" ? "Bottom" : "Top"} ${inningOrdinal(event.inning)}`;
+}
+
+function inningOrdinal(value) {
+  const number = Number(value) || 0;
+  const mod100 = number % 100;
+  const suffix = mod100 >= 11 && mod100 <= 13
+    ? "th"
+    : number % 10 === 1
+      ? "st"
+      : number % 10 === 2
+        ? "nd"
+        : number % 10 === 3
+          ? "rd"
+          : "th";
+  return `${number}${suffix}`;
+}
+
+function eventRunsScored(event) {
+  if (Number.isFinite(event.runs)) return Math.max(0, event.runs);
+  const before = (Number(event.scoreBefore?.away) || 0) + (Number(event.scoreBefore?.home) || 0);
+  const after = (Number(event.scoreAfter?.away) || 0) + (Number(event.scoreAfter?.home) || 0);
+  return Math.max(0, after - before);
 }
 
 function formatWinProb(value) {

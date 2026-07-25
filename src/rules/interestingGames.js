@@ -1,11 +1,32 @@
 const CATEGORY_ORDER = [
   "highestScoring",
+  "pitchersDuel",
+  "biggestBlowout",
   "biggestComeback",
   "biggestWpaSwing",
+  "mostLeadChanges",
+  "walkOff",
+  "mostHomeRuns",
   "mostSteals",
   "longestGame",
   "pitchingGem"
 ];
+
+const CATEGORY_LABELS = {
+  highestScoring: "Highest scoring",
+  pitchersDuel: "Pitchers' duels",
+  biggestBlowout: "Biggest blowouts",
+  biggestComeback: "Biggest comebacks",
+  biggestWpaSwing: "Biggest WPA swings",
+  mostLeadChanges: "Most lead changes",
+  walkOff: "Walk-off finishes",
+  mostHomeRuns: "Home-run derbies",
+  mostSteals: "Most steals",
+  longestGame: "Longest games",
+  pitchingGem: "Pitching gems"
+};
+
+const GAMES_PER_CATEGORY = 3;
 
 export function createInterestingGameState() {
   return new Map();
@@ -17,7 +38,7 @@ export function considerInterestingGame(state, game, index) {
   const totalRuns = base.awayRuns + base.homeRuns;
   const margin = Math.abs(base.awayRuns - base.homeRuns);
 
-  keepBest(state, "highestScoring", {
+  keepTop(state, "highestScoring", {
     ...base,
     label: "Highest scoring",
     metric: `${totalRuns} combined runs`,
@@ -25,9 +46,25 @@ export function considerInterestingGame(state, game, index) {
     value: totalRuns
   }, totalRuns, margin);
 
+  keepTop(state, "pitchersDuel", {
+    ...base,
+    label: "Pitchers' duel",
+    metric: `${totalRuns} combined run${totalRuns === 1 ? "" : "s"}`,
+    note: `${base.winner} won ${Math.max(base.awayRuns, base.homeRuns)}-${Math.min(base.awayRuns, base.homeRuns)}`,
+    value: totalRuns
+  }, -totalRuns, -margin);
+
+  keepTop(state, "biggestBlowout", {
+    ...base,
+    label: "Biggest blowout",
+    metric: `${margin}-run margin`,
+    note: `${base.winner} scored ${Math.max(base.awayRuns, base.homeRuns)}`,
+    value: margin
+  }, margin, totalRuns);
+
   const comeback = largestWinnerDeficit(game);
   if (comeback > 0) {
-    keepBest(state, "biggestComeback", {
+    keepTop(state, "biggestComeback", {
       ...base,
       label: "Biggest comeback",
       metric: `${comeback}-run comeback`,
@@ -40,13 +77,35 @@ export function considerInterestingGame(state, game, index) {
   if (swing) {
     const half = swing.half === "bottom" ? "Bot" : "Top";
     const player = swing.batter ?? swing.runner ?? swing.name ?? "A play";
-    keepBest(state, "biggestWpaSwing", {
+    keepTop(state, "biggestWpaSwing", {
       ...base,
       label: "Biggest WPA swing",
       metric: `${(Math.abs(swing.wpa) * 100).toFixed(1)}% swing`,
       note: `${player} · ${swing.result ?? "play"}, ${half} ${swing.inning ?? "?"}`,
       value: Math.abs(swing.wpa)
     }, Math.abs(swing.wpa), totalRuns);
+  }
+
+  const leadChanges = countLeadChanges(game.events ?? []);
+  if (leadChanges > 0) {
+    keepTop(state, "mostLeadChanges", {
+      ...base,
+      label: "Most lead changes",
+      metric: `${leadChanges} lead change${leadChanges === 1 ? "" : "s"}`,
+      note: `${totalRuns} combined runs`,
+      value: leadChanges
+    }, leadChanges, totalRuns);
+  }
+
+  const walkOff = walkOffFinish(game);
+  if (walkOff) {
+    keepTop(state, "walkOff", {
+      ...base,
+      label: "Walk-off finish",
+      metric: `${ordinal(walkOff.inning)}-inning walk-off`,
+      note: `${walkOff.player} · ${walkOff.result}`,
+      value: walkOff.inning
+    }, walkOff.inning, Math.abs(walkOff.wpa));
   }
 
   const stealLines = [
@@ -56,7 +115,7 @@ export function considerInterestingGame(state, game, index) {
   const steals = stealLines.reduce((sum, line) => sum + (line.sb ?? 0), 0);
   if (steals > 0) {
     const topThief = [...stealLines].sort((a, b) => (b.sb ?? 0) - (a.sb ?? 0))[0];
-    keepBest(state, "mostSteals", {
+    keepTop(state, "mostSteals", {
       ...base,
       label: "Most steals",
       metric: `${steals} stolen base${steals === 1 ? "" : "s"}`,
@@ -65,7 +124,19 @@ export function considerInterestingGame(state, game, index) {
     }, steals, totalRuns);
   }
 
-  keepBest(state, "longestGame", {
+  const homers = stealLines.reduce((sum, line) => sum + (line.hr ?? 0), 0);
+  if (homers > 0) {
+    const topSlugger = [...stealLines].sort((a, b) => (b.hr ?? 0) - (a.hr ?? 0))[0];
+    keepTop(state, "mostHomeRuns", {
+      ...base,
+      label: "Home-run derby",
+      metric: `${homers} home run${homers === 1 ? "" : "s"}`,
+      note: topSlugger?.hr ? `${topSlugger.name} hit ${topSlugger.hr}` : "",
+      value: homers
+    }, homers, totalRuns);
+  }
+
+  keepTop(state, "longestGame", {
     ...base,
     label: "Longest game",
     metric: `${base.innings} innings`,
@@ -75,7 +146,7 @@ export function considerInterestingGame(state, game, index) {
 
   const gem = bestPitchingGem(game);
   if (gem) {
-    keepBest(state, "pitchingGem", {
+    keepTop(state, "pitchingGem", {
       ...base,
       label: gem.kind,
       metric: `${gem.strikeouts} K · ${gem.hits} H · ${gem.walks} BB`,
@@ -88,10 +159,16 @@ export function considerInterestingGame(state, game, index) {
 
 export function summarizeInterestingGames(state) {
   if (!(state instanceof Map)) return [];
-  return CATEGORY_ORDER
-    .map((key) => state.get(key))
-    .filter(Boolean)
-    .map(({ rank, tieBreaker, ...entry }) => entry);
+  return CATEGORY_ORDER.flatMap((key) => {
+    const stored = state.get(key);
+    const entries = Array.isArray(stored) ? stored : stored ? [stored] : [];
+    return entries.map(({ rank, tieBreaker, ...entry }, index) => ({
+      ...entry,
+      categoryKey: key,
+      categoryLabel: CATEGORY_LABELS[key],
+      place: index + 1
+    }));
+  });
 }
 
 function gameSummary(game, index) {
@@ -110,16 +187,19 @@ function gameSummary(game, index) {
   };
 }
 
-function keepBest(state, key, candidate, rank, tieBreaker = 0) {
-  const current = state.get(key);
-  if (
-    !current
-    || rank > current.rank
-    || (rank === current.rank && tieBreaker > current.tieBreaker)
-    || (rank === current.rank && tieBreaker === current.tieBreaker && candidate.index < current.index)
-  ) {
-    state.set(key, { ...candidate, rank, tieBreaker });
-  }
+function keepTop(state, key, candidate, rank, tieBreaker = 0) {
+  const stored = state.get(key);
+  const current = Array.isArray(stored) ? [...stored] : stored ? [stored] : [];
+  const next = { ...candidate, rank, tieBreaker };
+  const duplicate = current.findIndex((entry) => entry.index === candidate.index);
+  if (duplicate >= 0) current.splice(duplicate, 1);
+  current.push(next);
+  current.sort(compareRankedGames);
+  state.set(key, current.slice(0, GAMES_PER_CATEGORY));
+}
+
+function compareRankedGames(a, b) {
+  return b.rank - a.rank || b.tieBreaker - a.tieBreaker || a.index - b.index;
 }
 
 function finalInning(events) {
@@ -141,6 +221,51 @@ function biggestWpaEvent(events) {
     if (!Number.isFinite(event.wpa)) return biggest;
     return !biggest || Math.abs(event.wpa) > Math.abs(biggest.wpa) ? event : biggest;
   }, null);
+}
+
+function countLeadChanges(events) {
+  let leader = null;
+  let changes = 0;
+  for (const event of events) {
+    const away = Number(event.scoreAfter?.away) || 0;
+    const home = Number(event.scoreAfter?.home) || 0;
+    const nextLeader = away === home ? null : away > home ? "away" : "home";
+    if (!nextLeader) continue;
+    if (leader && leader !== nextLeader) changes += 1;
+    leader = nextLeader;
+  }
+  return changes;
+}
+
+function walkOffFinish(game) {
+  const event = (game.events ?? []).at(-1);
+  if (
+    !event
+    || event.half !== "bottom"
+    || Number(event.inning) < 9
+    || Number(event.scoreAfter?.home) <= Number(event.scoreAfter?.away)
+  ) return null;
+  return {
+    inning: Number(event.inning),
+    player: event.batter ?? event.runner ?? "Home team",
+    result: event.result ?? "winning play",
+    wpa: Number(event.wpa) || 0
+  };
+}
+
+function ordinal(value) {
+  const number = Number(value) || 0;
+  const mod100 = number % 100;
+  const suffix = mod100 >= 11 && mod100 <= 13
+    ? "th"
+    : number % 10 === 1
+      ? "st"
+      : number % 10 === 2
+        ? "nd"
+        : number % 10 === 3
+          ? "rd"
+          : "th";
+  return `${number}${suffix}`;
 }
 
 function bestPitchingGem(game) {

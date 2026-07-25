@@ -6,8 +6,8 @@ import {
   summarizeInterestingGames
 } from "../src/rules/interestingGames.js";
 
-function hitter(name, sb = 0) {
-  return { id: name, name, sb };
+function hitter(name, sb = 0, hr = 0) {
+  return { id: name, name, sb, hr };
 }
 
 function pitcher(name, overrides = {}) {
@@ -37,13 +37,14 @@ function game({
   };
 }
 
-test("interesting-game leaders cover scoring, comebacks, WPA, steals, length, and pitching gems", () => {
+test("interesting-game shelves keep the top three across varied game stories", () => {
   const state = createInterestingGameState();
   considerInterestingGame(state, game({
     awayRuns: 10,
     homeRuns: 9,
     events: [{ inning: 9, half: "top", batter: "Slugger", result: "HR", wpa: 0.4, scoreAfter: { away: 10, home: 9 } }],
-    awayHitters: [hitter("Runner", 1)]
+    awayHitters: [hitter("Runner", 1, 5)],
+    homeHitters: [hitter("Home slugger", 0, 2)]
   }), 0);
   considerInterestingGame(state, game({
     awayRuns: 4,
@@ -60,14 +61,35 @@ test("interesting-game leaders cover scoring, comebacks, WPA, steals, length, an
     events: [{ inning: 9, half: "bottom", batter: "Last out", result: "SO", wpa: 0.1, scoreAfter: { away: 1, home: 0 } }],
     awayPitchers: [pitcher("Perfect Pat", { h: 0, bb: 0, so: 12 })]
   }), 2);
+  considerInterestingGame(state, game({
+    awayRuns: 7,
+    homeRuns: 6,
+    events: [{ inning: 9, half: "bottom", batter: "Final batter", result: "GB", wpa: -0.2, scoreAfter: { away: 7, home: 6 } }]
+  }), 3);
+  considerInterestingGame(state, game({
+    awayRuns: 6,
+    homeRuns: 5,
+    events: [{ inning: 9, half: "bottom", batter: "Final batter", result: "FB", wpa: -0.15, scoreAfter: { away: 6, home: 5 } }]
+  }), 4);
 
-  const leaders = new Map(summarizeInterestingGames(state).map((entry) => [entry.label, entry]));
-  assert.equal(leaders.get("Highest scoring").index, 0);
-  assert.equal(leaders.get("Biggest comeback").index, 1);
-  assert.equal(leaders.get("Biggest comeback").value, 3);
-  assert.equal(leaders.get("Biggest WPA swing").index, 1);
-  assert.equal(leaders.get("Most steals").index, 1);
-  assert.equal(leaders.get("Longest game").index, 1);
-  assert.equal(leaders.get("Perfect game").index, 2);
-  assert.match(leaders.get("Perfect game").note, /Perfect Pat/);
+  const summary = summarizeInterestingGames(state);
+  const leader = (category) => summary.find((entry) => entry.categoryKey === category);
+  const highestScoring = summary.filter((entry) => entry.categoryKey === "highestScoring");
+  assert.deepEqual(highestScoring.map((entry) => entry.index), [0, 3, 4]);
+  assert.deepEqual(highestScoring.map((entry) => entry.place), [1, 2, 3]);
+  for (const category of new Set(summary.map((entry) => entry.categoryKey))) {
+    assert.ok(summary.filter((entry) => entry.categoryKey === category).length <= 3);
+  }
+  assert.equal(leader("highestScoring").index, 0);
+  assert.equal(leader("biggestComeback").index, 1);
+  assert.equal(leader("biggestComeback").value, 3);
+  assert.equal(leader("biggestWpaSwing").index, 1);
+  assert.equal(leader("mostLeadChanges").index, 1);
+  assert.equal(leader("walkOff").index, 1);
+  assert.equal(leader("mostHomeRuns").index, 0);
+  assert.equal(leader("mostSteals").index, 1);
+  assert.equal(leader("longestGame").index, 1);
+  assert.equal(leader("pitchingGem").index, 2);
+  assert.equal(leader("pitchingGem").label, "Perfect game");
+  assert.match(leader("pitchingGem").note, /Perfect Pat/);
 });

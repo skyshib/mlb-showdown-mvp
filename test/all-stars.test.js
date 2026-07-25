@@ -43,7 +43,7 @@ test("the simulation All-Star roster picks each positional WPA leader and ranks 
   const catcher = chart.find((slot) => slot.position === "C");
   assert.equal(catcher.leader.name, betaCatcher.name);
   assert.equal(catcher.depth[1].name, alphaCatcher.name);
-  assert.ok(Math.abs(catcher.depth[1].gap - 1.7) < 1e-9);
+  assert.equal(catcher.depth[1].rank, 2);
   assert.equal(chart.find((slot) => slot.position === "SS").leader.name, alphaShortstop.name);
   assert.equal(chart.find((slot) => slot.position === "SP").leader.name, alphaStarter.name);
   assert.equal(chart.find((slot) => slot.position === "RP").leader.name, betaReliever.name);
