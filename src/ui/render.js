@@ -666,7 +666,7 @@ function renderHitterBox(teamBox, playersById) {
   return `<section>
     <h4>${escapeHtml(teamBox.team)} hitters</h4>
     <table>
-      <thead><tr><th>Name</th><th>AB</th><th>R</th><th>H</th><th>BB</th><th>SO</th><th>HR</th><th>SB</th><th>CS</th><th>RBI</th></tr></thead>
+      <thead><tr><th>Name</th><th class="num">AB</th><th class="num">R</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">SB</th><th class="num">CS</th><th class="num">RBI</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </section>`;
@@ -689,7 +689,7 @@ function renderPitcherBox(teamBox, playersById) {
   return `<section>
     <h4>${escapeHtml(teamBox.team)} pitchers</h4>
     <table>
-      <thead><tr><th>Name</th><th>IP</th><th>H</th><th>BB</th><th>SO</th><th>HR</th><th>R</th></tr></thead>
+      <thead><tr><th>Name</th><th class="num">IP</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">R</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </section>`;

@@ -56,7 +56,7 @@ test("renderBoxScore adds hover previews when player cards can be resolved", () 
   assert.ok(html.includes('data-preview-id="h-1"'));
   assert.ok(html.includes('data-preview-id="p-1"'));
   assert.ok(html.includes('data-preview-id="h-2"'));
-  assert.ok(html.includes("<th>CS</th>"));
+  assert.ok(html.includes('<th class="num">CS</th>'));
   assert.ok(html.includes("Unknown Pitcher"));
 });
 
