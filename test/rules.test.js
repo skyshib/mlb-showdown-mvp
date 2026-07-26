@@ -307,6 +307,10 @@ test("runner can steal second before the plate appearance", () => {
   );
   assert.equal(state.lineupIndex.away, 0);
   assert.equal(event.playDetails.stealAttempt.to, "2B");
+  assert.equal(event.playDetails.stealAttempt.runnerSpeed, 20);
+  assert.equal(event.playDetails.stealAttempt.targetBonus, 0);
+  assert.equal(event.playDetails.stealAttempt.destination, "second");
+  assert.equal(event.playDetails.stealAttempt.decisionMinimum, 0.9);
   assert.equal(state.stats.hitters.get("away:a-h-0").sb, 1);
 });
 
@@ -345,7 +349,12 @@ test("stealing third fights the shorter throw: +5 to the catcher, not the runner
   assert.equal(event.outsAfter, 2);
   assert.deepEqual(state.bases, [null, null, null]);
   assert.equal(event.playDetails.stealAttempt.fielding, 5);
+  assert.equal(event.playDetails.stealAttempt.runnerSpeed, 15);
+  assert.equal(event.playDetails.stealAttempt.targetBonus, -5);
   assert.equal(event.playDetails.stealAttempt.target, 10);
+  assert.equal(event.playDetails.stealAttempt.destination, "third");
+  assert.equal(event.playDetails.stealAttempt.decisionMinimum, 0.75);
+  assert.equal(event.playDetails.stealAttempt.safeChance, 0.25);
   assert.equal(event.playDetails.stealAttempt.total, 21);
   assert.equal(state.stats.pitchers.get("home:sc-p").outs, 1);
 });

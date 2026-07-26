@@ -6,7 +6,7 @@ import {
   considerInterestingGame,
   createInterestingGameState,
   summarizeInterestingGames
-} from "./interestingGames.js?v=20260724";
+} from "./interestingGames.js?v=20260725-hero-games";
 
 export const DEFAULT_BATCH_RUNS = 10000;
 export const BATCH_SCHEDULE_VERSION = 2;
@@ -33,6 +33,7 @@ export function createBatchState(teams, options = {}) {
     teams: new Map(),
     headToHead: new Map(),
     starterResults: new Map(),
+    starterMatchups: new Map(),
     hitters: new Map(),
     pitchers: new Map(),
     interestingGames: createInterestingGameState(),
@@ -184,6 +185,7 @@ export function summarizeBatch(state) {
         runsAgainstPerGame: rate(row.runsAgainst, row.games)
       }))
       .sort((a, b) => a.team.localeCompare(b.team) || a.rotationIndex - b.rotationIndex),
+    starterMatchups: [...state.starterMatchups.values()],
     hitters,
     pitchers,
     interestingGames: summarizeInterestingGames(state.interestingGames),
@@ -200,6 +202,8 @@ function foldGame(state, game) {
   foldTeamResult(state, game.home.name, game.home.runs, game.away.runs);
   foldStarterResult(state, game.away, game.away.runs, game.home.runs);
   foldStarterResult(state, game.home, game.home.runs, game.away.runs);
+  foldStarterMatchup(state, game.away, game.home, game.away.runs, game.home.runs);
+  foldStarterMatchup(state, game.home, game.away, game.home.runs, game.away.runs);
   foldHeadToHead(state, game.away.name, game.home.name, game.away.runs, game.home.runs);
   foldHeadToHead(state, game.home.name, game.away.name, game.home.runs, game.away.runs);
   foldBoxScore(state, game.boxScore?.away);
@@ -276,6 +280,32 @@ function foldStarterResult(state, team, runsFor, runsAgainst) {
   row.losses += runsFor > runsAgainst ? 0 : 1;
   row.runsFor += runsFor;
   row.runsAgainst += runsAgainst;
+}
+
+function foldStarterMatchup(state, team, opponent, runsFor, runsAgainst) {
+  const starter = team?.pitchers?.[0];
+  const opponentStarter = opponent?.pitchers?.[0];
+  if (!starter || !opponentStarter) return;
+  const key = `${team.name}\u0000${starter.id}\u0000${opponent.name}\u0000${opponentStarter.id}`;
+  const row = state.starterMatchups.get(key) ?? {
+    starterId: starter.id,
+    starterName: starter.name,
+    team: team.name,
+    opponentStarterId: opponentStarter.id,
+    opponentStarterName: opponentStarter.name,
+    opponentTeam: opponent.name,
+    games: 0,
+    wins: 0,
+    losses: 0,
+    runsFor: 0,
+    runsAgainst: 0
+  };
+  row.games += 1;
+  row.wins += runsFor > runsAgainst ? 1 : 0;
+  row.losses += runsFor > runsAgainst ? 0 : 1;
+  row.runsFor += runsFor;
+  row.runsAgainst += runsAgainst;
+  state.starterMatchups.set(key, row);
 }
 
 function foldBoxScore(state, teamBox) {

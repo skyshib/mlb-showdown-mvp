@@ -140,15 +140,18 @@ import {
   replayBatchGames,
   runBatchChunk,
   summarizeBatch
-} from "./rules/batch.js?v=20260717-draft-wpa";
+} from "./rules/batch.js?v=20260725-starter-matchups";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260716-records";
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260716-records";
-import { buildAllStarDepthChart } from "./rules/allStars.js?v=20260724";
 import {
-  basesText,
+  allStarComparisonCandidates,
+  buildAllStarDepthChart,
+  shouldShowFullAllStarDepth
+} from "./rules/allStars.js?v=20260725-inline-depth";
+import {
   cardRarity,
   escapeHtml,
   playerPosition,
@@ -163,7 +166,26 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderWinProbabilityChart
-} from "./ui/render.js?v=20260716-records";
+} from "./ui/render.js?v=20260725-prep-tiers";
+import { formatAdvanceAttempt, renderBaseDiamond, storyAdvantage, storyHeadline } from "./ui/gameStory.js?v=20260725-throw-labels";
+import {
+  MAX_NOTE_LENGTH,
+  insertTierBreak,
+  loadOnlineDraftNotes,
+  loadOnlineDraftRankings,
+  moveRankedAboveBreak,
+  moveRankedWithTiers,
+  normalizeDraftNotes,
+  normalizeDraftRankings,
+  normalizeTierBreaks,
+  nudgeRankedWithTiers,
+  rankAtWithTiers,
+  removeRankedWithTiers,
+  removeTierBreak,
+  saveOnlineDraftNotes,
+  saveOnlineDraftRankings,
+  tierOfRank
+} from "./ui/draftRankings.js?v=20260725-prep-tiers";
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -248,6 +270,15 @@ let selectedLineupMove = null;
 let draggedLineupMove = null;
 let selectedOrderMove = null;
 let draggedOrderMove = null;
+let draggedRankingMove = null;
+// The edge-scroll loop for a live ranking drag: the pane being scrolled, the
+// pointer's last known height, and the interval driving it.
+let rankingDragPane = null;
+let rankingDragY = null;
+let rankingDragScrollTimer = null;
+// The one note editor open on the board, if any: a player id. Transient UI
+// state like the drag above — it never serializes.
+let editingNoteId = null;
 // The open game, if one is being played. A game is a sitting rather than a
 // save: it holds live engine state (the seeded rng included), so it lives in
 // memory only and a reload puts you back on the draft board.
@@ -931,7 +962,7 @@ function defaultState() {
     temperature: 0,
     draft: null,
     draftTab: "available",
-    draftHistoryPaidSort: null,
+    draftHistorySort: { sort: "pick", direction: "asc" },
     rosterTab: "roster",
     // Whose roster the focus view is showing. Null follows your own board; a
     // manager id pins someone else's roster (read-only unless it is yours).
@@ -970,6 +1001,14 @@ function defaultState() {
     // A second watchlist that works exactly like the stars, keyed the same way:
     // a separate shortlist you can keep on the same board.
     flagged: {},
+    // Private, manager-owned position boards. Each key is hitter:C, pitcher:SP,
+    // and so on; the value is the manual order plus the tier breaks cut into
+    // it. Like stars, these never leave this browser or get sent to a room.
+    draftRankings: {},
+    draftRankingsVersion: 3,
+    // One short private line per card, keyed like the boards: manager id, then
+    // player id. Same channel as the rankings, same privacy.
+    draftNotes: {},
     // Whether an auction board colours by what a card cost or what it is worth.
     heatBy: "price",
     // When the clock on the current pick runs out — published for the board on
@@ -1088,6 +1127,11 @@ function openRoom(roomId, room) {
     // he sends it to.
     lanOrigin: room.lanOrigin ?? null
   };
+  // Rankings are private notes, so they do not belong in the shared room log.
+  // Keep this seat's copy in this browser instead, namespaced by room and
+  // manager so a refresh restores it without showing it to another seat.
+  state.draftRankings = loadOnlineDraftRankings(localStorage, roomId, seat?.managerId);
+  state.draftNotes = loadOnlineDraftNotes(localStorage, roomId, seat?.managerId);
   rebuildOnlineDraft(room);
   subscribeOnline();
   renderCurrentScreen();
@@ -2073,6 +2117,12 @@ function renderSetup(setupError = "") {
       timer: state.auctionTimer,
       snakeTimer: snakeTimerConfig(state, state.draftType)
     });
+    // A new local room gets a fresh private board. Otherwise an override keyed
+    // to the same manager/position from the previous room could filter down to
+    // zero matching card ids and hide the new OB/Control starting ranks.
+    state.draftRankings = {};
+    state.draftNotes = {};
+    editingNoteId = null;
     if (isAuctionDraft(state.draft)) startAuctionReview(state.draft, draftNow());
     // The gun. Both clocks start when the board is dealt, not when somebody
     // first looks at it.
@@ -2192,6 +2242,56 @@ function restoreSealedBids() {
   }
 }
 
+// With a lot live, the bid box is where fingers should land by default: any
+// repaint that leaves focus loose (on the page body, because the old focused
+// element was torn down) hands it to the first pending sealed-bid entry,
+// contents selected so typing a number starts a fresh bid. Anything that kept
+// its focus through the repaint — the search field, a rank box, the note
+// editor, the bid box itself — keeps the caret it has.
+function focusSealedBidEntry() {
+  if (editingNoteId) return;
+  const active = document.activeElement;
+  if (active && active !== document.body) return;
+  const bid = app.querySelector("[data-sealed-bid]");
+  if (!bid) return;
+  bid.focus();
+  bid.select?.();
+}
+
+// Fingers-first bidding, bound on the document because a keydown with focus
+// on the page body never bubbles through #app: while a lot is live, digits
+// typed anywhere that is not a text field land in the sealed-bid box, and
+// Enter fires the bid. Text fields keep their own keys — a note editor open
+// means Enter commits the note, not a bid — and Enter on a focused button
+// stays a button press.
+function routeSealedBidKeys(event) {
+  const target = event.target;
+  const sealedBidInput = target.closest?.("[data-sealed-bid]");
+  if (sealedBidInput) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!sealedBidInput.value.trim()) return;
+    app.querySelector(`button[data-action="seal-bid"][data-manager-id="${CSS.escape(sealedBidInput.dataset.managerId)}"]`)?.click();
+    return;
+  }
+  if (target.matches?.("input, textarea, select") || target.isContentEditable) return;
+  const bid = app.querySelector("[data-sealed-bid]");
+  if (!bid) return;
+  if (/^[0-9]$/.test(event.key)) {
+    // Focus moves on keydown; the browser's default action then types the
+    // digit into the newly focused box, replacing the selected leftovers.
+    bid.focus();
+    bid.select?.();
+    return;
+  }
+  if (event.key === "Enter" && !target.matches?.("button, a, [role='button'], summary")) {
+    if (!bid.value.trim()) return;
+    event.preventDefault();
+    app.querySelector(`button[data-action="seal-bid"][data-manager-id="${CSS.escape(bid.dataset.managerId)}"]`)?.click();
+  }
+}
+document.addEventListener("keydown", routeSealedBidKeys);
+
 // Only the masked box can say where the caret is: asking a number input for its
 // selection throws rather than answering.
 function sealedBidCaret(input) {
@@ -2212,6 +2312,12 @@ function renderDraft() {
   // ordering — and any points sort a manager left set from an earlier draft —
   // falls back to the closest neutral one.
   if (pointsHidden() && state.filters.sort === "points") {
+    state.filters.sort = "primary";
+    state.filters.sortDirection = "desc";
+  }
+  // Old saves used "manual" as a standalone sort. Rankings are now always the
+  // primary layer, with this dropdown controlling only the unranked players.
+  if (state.filters.sort === "manual") {
     state.filters.sort = "primary";
     state.filters.sortDirection = "desc";
   }
@@ -2279,7 +2385,7 @@ function renderDraft() {
       ${historyTab
         ? renderDraftHistoryTable(draftHistory(draft), {
             hidePoints: pointsHidden(),
-            paidSortDirection: state.draftHistoryPaidSort
+            ...normalizeDraftHistorySort(state.draftHistorySort)
           })
         : boardTab
         ? renderBigBoard(boardOwner, draft)
@@ -2291,6 +2397,7 @@ function renderDraft() {
       ${renderPlayerTable(playerRows, {
         mode: state.filters.type,
         hidePoints: pointsHidden(),
+        replacementLevels: viewReplacementLevels(draft),
         starred: watchlistOwner() ? starredIds() : null,
         flagged: watchlistOwner() ? flaggedIds() : null,
         fillsNeed: rosterOpenings(boardManager, draft)?.fills ?? null,
@@ -2305,6 +2412,9 @@ function renderDraft() {
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
+        manualRanking: activePositionRanking(),
+        notes: watchlistOwner() ? state.draftNotes[watchlistOwner().id] ?? {} : null,
+        editingNoteId,
         // Both boards are the whole deck at once, so they scroll in place
         // rather than pushing the rosters off the bottom of the screen.
         scroll: true,
@@ -2364,6 +2474,16 @@ function renderDraft() {
     const list = app.querySelector(".table-scroll-tall");
     if (list) list.scrollTop = listScrollTop;
   }
+  // A freshly opened note editor takes the caret; re-renders while already
+  // typing are handled by captureTypingFocus above.
+  if (editingNoteId && document.activeElement?.dataset?.noteInputId !== editingNoteId) {
+    const noteField = app.querySelector(`[data-note-input-id="${CSS.escape(editingNoteId)}"]`);
+    if (noteField) {
+      noteField.focus();
+      noteField.setSelectionRange(noteField.value.length, noteField.value.length);
+    }
+  }
+  focusSealedBidEntry();
   bindDraftActions();
   syncAuctionUrgency(draft, draftNow());
   pickClockTick();
@@ -2396,18 +2516,22 @@ function syncAuctionPositionFilter(draft) {
 // because the node itself does not survive the render.
 function captureTypingFocus() {
   const active = document.activeElement;
-  const key = active?.dataset?.filter;
-  if (!key) return null;
+  const filterKey = active?.dataset?.filter;
+  const noteKey = active?.dataset?.noteInputId;
+  if (!filterKey && !noteKey) return null;
+  const selector = filterKey
+    ? `[data-filter="${filterKey}"]`
+    : `[data-note-input-id="${CSS.escape(noteKey)}"]`;
   // Only text fields have a caret to keep; a select just wants its focus back.
   const caret = typeof active.setSelectionRange === "function" && active.selectionStart !== null
     ? { start: active.selectionStart, end: active.selectionEnd }
     : null;
-  return { key, caret };
+  return { selector, caret };
 }
 
 function restoreTypingFocus(typing) {
   if (!typing) return;
-  const field = document.querySelector(`[data-filter="${typing.key}"]`);
+  const field = document.querySelector(typing.selector);
   if (!field) return;
   field.focus();
   if (typing.caret && typeof field.setSelectionRange === "function") {
@@ -2676,7 +2800,7 @@ function renderAuctionDecisionRail(draft) {
       <div class="auction-lot-rail-player">
         <p class="eyebrow">Pool review</p>
         <h2>Inspect the cards before bidding starts</h2>
-        <p class="auction-lot-rail-meta">The auction rail will stay here when the first card goes on the block.</p>
+        <p class="auction-lot-rail-meta">Choose a position on the player board to adjust your OB/Control rankings now. They carry into the auction.</p>
       </div>
       <div class="auction-lot-rail-state">
         <small>Review remaining</small>
@@ -2734,6 +2858,7 @@ function renderAuctionDecisionRail(draft) {
       <p class="eyebrow">${lot.round === 2 ? `Tie break at ${money(lot.tie.amount)}` : "On the block"}</p>
       <h2>${renderPlayerPreviewName(player, player.name, "strong", "lot-player-name")}</h2>
       <p class="auction-lot-rail-meta">${escapeHtml(playerPosition(player))}${pointsHidden() ? "" : ` &middot; ${player.points} pts`} &middot; ${source}</p>
+      ${renderPrepReadout(player)}
     </div>
     ${timed ? `<div class="auction-lot-rail-state auction-lot-rail-time" aria-label="Time left to bid">
       <small>Time left</small>
@@ -2878,6 +3003,46 @@ function bindDraftActions() {
       return;
     }
 
+    const rankingMove = event.target.closest("button[data-action='ranking-up'], button[data-action='ranking-down']");
+    if (rankingMove) {
+      nudgePositionRanking(rankingMove.dataset.playerId, rankingMove.dataset.action === "ranking-up" ? -1 : 1);
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const rankingAction = event.target.closest("button[data-action='reset-position-ranking']");
+    if (rankingAction) {
+      resetPositionRanking();
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const tierAdd = event.target.closest("button[data-action='add-tier-break']");
+    if (tierAdd) {
+      addTierBreakAt(Number(tierAdd.dataset.break));
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const tierRemove = event.target.closest("button[data-action='remove-tier-break']");
+    if (tierRemove) {
+      removeTierBreakAt(Number(tierRemove.dataset.break));
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    // Opening a note editor is pure UI: nothing to save until the note lands.
+    const noteEdit = event.target.closest("button[data-action='edit-note']");
+    if (noteEdit) {
+      editingNoteId = editingNoteId === noteEdit.dataset.playerId ? null : noteEdit.dataset.playerId;
+      renderDraft();
+      return;
+    }
+
     const starFilter = event.target.closest("button[data-action='toggle-starred-only']");
     if (starFilter) {
       state.filters.starredOnly = !state.filters.starredOnly;
@@ -2917,9 +3082,9 @@ function bindDraftActions() {
       return;
     }
 
-    const paidSortButton = event.target.closest("button[data-history-paid-sort]");
-    if (paidSortButton) {
-      toggleDraftHistoryPaidSort();
+    const historySortButton = event.target.closest("button[data-history-sort]");
+    if (historySortButton) {
+      updateDraftHistorySort(historySortButton.dataset.historySort);
       saveState();
       renderDraft();
       return;
@@ -3221,7 +3386,32 @@ function bindDraftActions() {
     renderDraft();
   };
 
-  app.onchange = app.oninput;
+  app.onchange = (event) => {
+    const rankingInput = event.target.closest("[data-ranking-input-id]");
+    if (rankingInput) {
+      setPlayerPositionRank(rankingInput.dataset.rankingInputId, rankingInput.value);
+      saveState();
+      renderDraft();
+      return;
+    }
+    const noteInput = event.target.closest("[data-note-input-id]");
+    if (noteInput) {
+      commitPlayerNote(noteInput.dataset.noteInputId, noteInput.value);
+      return;
+    }
+    app.oninput(event);
+  };
+
+  // Change only fires when the text actually changed; clicking away from an
+  // untouched note editor still has to close it. Escape re-renders before the
+  // input loses focus, so a cancelled editor is gone from the DOM by the time
+  // this runs and cannot commit.
+  app.onfocusout = (event) => {
+    const noteInput = event.target.closest?.("[data-note-input-id]");
+    if (noteInput && noteInput.isConnected && editingNoteId) {
+      commitPlayerNote(noteInput.dataset.noteInputId, noteInput.value);
+    }
+  };
 
   bindHoverCardPreviews(() => {
     selectedLineupMove = null;
@@ -3229,6 +3419,23 @@ function bindDraftActions() {
   });
 
   app.ondragstart = (event) => {
+    const rankingHandle = event.target.closest("[data-ranking-drag-id]");
+    if (rankingHandle) {
+      const ranking = activePositionRanking();
+      const owner = watchlistOwner();
+      const key = currentPositionRankingKey();
+      if (!ranking || !owner || !key) {
+        event.preventDefault();
+        return;
+      }
+      hideHoverCard();
+      draggedRankingMove = { managerId: owner.id, key, playerId: rankingHandle.dataset.rankingDragId };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", rankingHandle.dataset.rankingDragId);
+      rankingHandle.closest("[data-ranking-drop-id]")?.classList.add("ranking-dragging");
+      startRankingDragScroll(rankingHandle.closest(".table-scroll"));
+      return;
+    }
     const tile = event.target.closest("[data-order-tile]");
     if (tile) {
       if (!canManageRoster(tile.dataset.managerId)) {
@@ -3262,6 +3469,22 @@ function bindDraftActions() {
   };
 
   app.ondragover = (event) => {
+    if (draggedRankingMove && rankingDragStillActive()) {
+      const rankingRow = event.target.closest("[data-ranking-drop-id]");
+      const tierRow = event.target.closest("[data-tier-drop-break]");
+      // Anywhere over the board pane keeps the drag alive and feeds the
+      // edge-scroll loop, so a card can ride the pane to a rank that started
+      // off screen without the cursor flashing "no drop" between rows.
+      if (rankingRow || tierRow || rankingDragPane?.contains(event.target)) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        rankingDragY = event.clientY;
+        app.querySelectorAll(".ranking-drag-over")
+          .forEach((element) => element.classList.remove("ranking-drag-over"));
+        (rankingRow ?? tierRow)?.classList.add("ranking-drag-over");
+        return;
+      }
+    }
     const tile = event.target.closest("[data-order-tile]");
     if (tile && draggedOrderMove && tile.dataset.managerId === draggedOrderMove.managerId) {
       event.preventDefault();
@@ -3277,6 +3500,33 @@ function bindDraftActions() {
   };
 
   app.ondrop = (event) => {
+    // A divider is its own drop target: the card lands immediately above the
+    // break, and nobody above the seam gets jumped.
+    const tierRow = event.target.closest("[data-tier-drop-break]");
+    if (tierRow && draggedRankingMove && rankingDragStillActive()) {
+      event.preventDefault();
+      movePositionRankingAboveBreak(draggedRankingMove.playerId, Number(tierRow.dataset.tierDropBreak));
+      draggedRankingMove = null;
+      stopRankingDragScroll();
+      saveState();
+      renderDraft();
+      return;
+    }
+    const rankingRow = event.target.closest("[data-ranking-drop-id]");
+    if (rankingRow && draggedRankingMove && rankingDragStillActive()) {
+      event.preventDefault();
+      const bounds = rankingRow.getBoundingClientRect();
+      movePositionRanking(
+        draggedRankingMove.playerId,
+        rankingRow.dataset.rankingDropId,
+        event.clientY > bounds.top + bounds.height / 2
+      );
+      draggedRankingMove = null;
+      stopRankingDragScroll();
+      saveState();
+      renderDraft();
+      return;
+    }
     const tile = event.target.closest("[data-order-tile]");
     if (tile && draggedOrderMove && tile.dataset.managerId === draggedOrderMove.managerId) {
       event.preventDefault();
@@ -3305,6 +3555,10 @@ function bindDraftActions() {
     if (draggedOrderMove) selectedOrderMove = null;
     draggedLineupMove = null;
     draggedOrderMove = null;
+    draggedRankingMove = null;
+    stopRankingDragScroll();
+    app.querySelectorAll(".ranking-dragging, .ranking-drag-over")
+      .forEach((element) => element.classList.remove("ranking-dragging", "ranking-drag-over"));
   };
 }
 
@@ -3387,6 +3641,28 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handleKeyDown = (event) => {
+    const noteInput = event.target.closest?.("[data-note-input-id]");
+    if (noteInput) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        commitPlayerNote(noteInput.dataset.noteInputId, noteInput.value);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        editingNoteId = null;
+        renderDraft();
+        return;
+      }
+    }
+    const rankingInput = event.target.closest?.("[data-ranking-input-id]");
+    if (rankingInput && event.key === "Enter") {
+      event.preventDefault();
+      setPlayerPositionRank(rankingInput.dataset.rankingInputId, rankingInput.value);
+      saveState();
+      renderDraft();
+      return;
+    }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       const carouselSlot = event.target.closest?.(".dock-carousel-slot")
         ?? hoveredPreviewRow?.closest?.(".dock-carousel-slot");
@@ -4081,6 +4357,7 @@ function renderBatch() {
   ${raceSection}
   ${renderFormulaRevealSection(summary)}`;
   const headToHeadSection = renderBatchHeadToHead(summary);
+  const starterMatchupSection = renderBatchStarterMatchups(summary, playersById);
   const starterResultsSection = starterResults.length ? `<section class="panel wide">
     <p class="eyebrow">${runs} simulated games</p>
     <h2>Team results by starting pitcher</h2>
@@ -4224,14 +4501,14 @@ function renderBatch() {
     </div>
     ${renderDraftHistoryTable(draftHistory(state.draft), {
       wpaByPlayerId: batchWpaByPlayerId(summary),
-      paidSortDirection: state.draftHistoryPaidSort
+      ...normalizeDraftHistorySort(state.draftHistorySort)
     })}
   </section>`;
   const batchSections = {
     overview: overviewSection,
     allStars: activeBatchTab === "allStars" ? renderBatchAllStars(summary, playersById) : "",
     headToHead: headToHeadSection,
-    starters: starterResultsSection,
+    starters: `${starterResultsSection}${starterMatchupSection}`,
     hitters: hittersSection,
     pitchers: pitchersSection,
     skills: teamSkillsSection,
@@ -4292,6 +4569,7 @@ function normalizeBatchPitcherSplit(value) {
 function renderBatchAllStars(summary, playersById) {
   const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
   const slots = buildAllStarDepthChart(teams, summary);
+  const pricePaidMap = buildPricePaidMap(state.draft);
   const filled = slots.filter((slot) => slot.leader);
   if (!filled.length) {
     return `<section class="panel wide">
@@ -4304,15 +4582,15 @@ function renderBatchAllStars(summary, playersById) {
       <div>
         <p class="eyebrow">Best at every position</p>
         <h2>Simulation All-Stars</h2>
-        <p class="batch-note">The highest WPA/162 performer at each position gets the card. Open a depth chart to compare the rest of the field and see the gap from the leader.</p>
+        <p class="batch-note">Each card shows the WPA/162 leader and closest competition with their draft prices. Larger fields also include a full depth chart.</p>
       </div>
       <span>${filled.length} roster spots</span>
     </div>
-    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById)).join("")}</div>
+    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap)).join("")}</div>
   </section>`;
 }
 
-function renderAllStarSlot(slot, playersById) {
+function renderAllStarSlot(slot, playersById, pricePaidMap) {
   if (!slot.leader) {
     return `<article class="all-star-slot all-star-slot-empty">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
@@ -4320,14 +4598,17 @@ function renderAllStarSlot(slot, playersById) {
     </article>`;
   }
   const leader = slot.leader;
+  const pricePaid = pricePaidMap[leader.id];
+  const closestCompetition = allStarComparisonCandidates(slot.depth);
+  const comparisonRows = closestCompetition.map((candidate) => renderAllStarComparisonRow(candidate, playersById, pricePaidMap)).join("");
+  const showFullDepth = shouldShowFullAllStarDepth(slot.depth);
   const depthRows = slot.depth.map((candidate) => `<li class="${candidate.rank === 1 ? "all-star-depth-leader" : ""}">
     <span class="all-star-depth-rank">#${candidate.rank}</span>
     <span class="all-star-depth-player">
       ${renderBatchPlayerName(candidate, playersById)}
-      <small>${escapeHtml(candidate.team)}</small>
+      <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap)}</small>
     </span>
     <strong>${formatWpaStat(candidate.wpaPer162)}</strong>
-    <em>${candidate.rank === 1 ? "All-Star" : `−${formatDecimal(candidate.gap, 2)}`}</em>
   </li>`).join("");
   return `<article class="all-star-slot">
     <header class="all-star-slot-header">
@@ -4337,14 +4618,36 @@ function renderAllStarSlot(slot, playersById) {
     <div class="all-star-card-face">${renderPlayerCard(leader.player)}</div>
     <div class="all-star-identity">
       <strong>${escapeHtml(leader.name)}</strong>
-      <span>${escapeHtml(leader.team)}</span>
+      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; Paid ${money(pricePaid)}` : ""}</span>
     </div>
-    <details class="all-star-depth">
-      <summary>Depth chart · ${slot.depth.length} ${slot.depth.length === 1 ? "player" : "players"}</summary>
+    ${comparisonRows ? `<section class="all-star-comparison" aria-label="Closest competition at ${escapeHtml(allStarPositionLabel(slot.position))}">
+      <div class="all-star-comparison-heading">
+        <strong>Next in line</strong>
+        <small>WPA/162</small>
+      </div>
+      <ol>${comparisonRows}</ol>
+    </section>` : ""}
+    ${showFullDepth ? `<details class="all-star-depth">
+      <summary>Full depth chart · ${slot.depth.length} ${slot.depth.length === 1 ? "player" : "players"}</summary>
       <ol>${depthRows}</ol>
-      <p>Gap is WPA/162 behind the All-Star.</p>
-    </details>
+    </details>` : ""}
   </article>`;
+}
+
+function renderAllStarComparisonRow(candidate, playersById, pricePaidMap) {
+  return `<li>
+    <span class="all-star-depth-rank">#${candidate.rank}</span>
+    <span class="all-star-depth-player">
+      ${renderBatchPlayerName(candidate, playersById)}
+      <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap)}</small>
+    </span>
+    <strong>${formatWpaStat(candidate.wpaPer162)}</strong>
+  </li>`;
+}
+
+function renderAllStarPrice(candidate, pricePaidMap) {
+  const pricePaid = pricePaidMap[candidate.id];
+  return Number.isFinite(pricePaid) ? ` &middot; Paid ${money(pricePaid)}` : "";
 }
 
 function allStarPositionLabel(position) {
@@ -4405,6 +4708,51 @@ function renderBatchHeadToHead(summary) {
     <div class="table-scroll">
       <table class="head-to-head-table">
         <thead><tr><th>Team</th>${header}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderBatchStarterMatchups(summary, playersById) {
+  const starters = summary.starterResults ?? [];
+  const records = new Map((summary.starterMatchups ?? []).map((row) => [
+    `${row.team}\u0000${row.starterId}\u0000${row.opponentTeam}\u0000${row.opponentStarterId}`,
+    row
+  ]));
+  if (!records.size) {
+    return `<section class="panel wide">
+      <h2>Starter head-to-head records</h2>
+      <p class="batch-note">This simulation predates starter-matchup tracking. Run it again to build the starter matrix.</p>
+    </section>`;
+  }
+  const starterLabel = (starter) => `<span class="starter-matchup-name">${renderBatchPlayerName({
+    id: starter.id,
+    name: starter.name,
+    team: starter.team
+  }, playersById)}<small>${escapeHtml(starter.team)}</small></span>`;
+  const header = starters.map((starter) => `<th class="num" title="${escapeHtml(`${starter.name} · ${starter.team}`)}">${starterLabel(starter)}</th>`).join("");
+  const rows = starters.map((starter) => {
+    const cells = starters.map((opponent) => {
+      if (starter.team === opponent.team) {
+        return `<td class="num head-to-head-diagonal" aria-label="Same team">—</td>`;
+      }
+      const row = records.get(`${starter.team}\u0000${starter.id}\u0000${opponent.team}\u0000${opponent.id}`);
+      if (!row) return `<td class="num" title="No games played">0-0 (0%)</td>`;
+      const winPct = formatWholeShare(row.games ? row.wins / row.games : 0);
+      const title = `${starter.name} (${starter.team}) vs ${opponent.name} (${opponent.team}): ${row.wins}-${row.losses} (${winPct}), ${row.runsFor}-${row.runsAgainst} runs`;
+      return `<td class="num head-to-head-record" title="${escapeHtml(title)}"><strong>${row.wins}-${row.losses} (${winPct})</strong><span>${row.runsFor}-${row.runsAgainst} runs</span></td>`;
+    }).join("");
+    return `<tr><th scope="row" class="head-to-head-team">${starterLabel(starter)}</th>${cells}</tr>`;
+  }).join("");
+  const tableWidth = Math.max(900, 170 + starters.length * 118);
+  return `<section class="panel wide">
+    <p class="eyebrow">${summary.runs} simulated games</p>
+    <h2>Starter head-to-head records</h2>
+    <p class="batch-note">Each cell is the team record when the row starter faced the column starter. It shows wins-losses and win percentage, with total runs underneath.</p>
+    <div class="table-scroll">
+      <table class="head-to-head-table starter-matchup-table" style="min-width:${tableWidth}px">
+        <thead><tr><th>Starter</th>${header}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -4513,27 +4861,45 @@ function renderInterestingGames(games) {
     </section>`;
   }
   if (!games.length) return "";
-  const cards = games.map((game) => {
+  const groups = [];
+  const groupsByKey = new Map();
+  for (const game of games) {
+    const key = game.categoryKey ?? game.label;
+    if (!groupsByKey.has(key)) {
+      const group = {
+        label: game.categoryLabel ?? game.label,
+        games: []
+      };
+      groupsByKey.set(key, group);
+      groups.push(group);
+    }
+    groupsByKey.get(key).games.push(game);
+  }
+  const card = (game) => {
     const awayWon = game.winner === game.away;
     const homeWon = game.winner === game.home;
     const inning = game.innings === 9 ? "" : ` · ${game.innings} inn.`;
     return `<button type="button" class="interesting-game-card" data-game-open="${game.index}" aria-label="Open game ${game.index + 1}: ${escapeHtml(game.label)}">
-      <span class="interesting-game-label">${escapeHtml(game.label)}</span>
+      <span class="interesting-game-label">${game.place ? `#${game.place} · ` : ""}${escapeHtml(game.label)}</span>
       <strong class="interesting-game-metric">${escapeHtml(game.metric)}</strong>
       <span class="interesting-game-matchup">${awayWon ? `<strong>${escapeHtml(game.away)}</strong>` : escapeHtml(game.away)} ${game.awayRuns}–${game.homeRuns} ${homeWon ? `<strong>${escapeHtml(game.home)}</strong>` : escapeHtml(game.home)}${inning}</span>
       <span class="interesting-game-note">${escapeHtml(game.note ?? "")}</span>
       <span class="interesting-game-number">Game ${game.index + 1} →</span>
     </button>`;
-  }).join("");
+  };
+  const shelves = groups.map((group) => `<section class="interesting-game-group">
+    <h4>${escapeHtml(group.label)}</h4>
+    <div class="interesting-games-grid">${group.games.map(card).join("")}</div>
+  </section>`).join("");
   return `<section class="interesting-games">
     <div class="interesting-games-heading">
       <div>
         <p class="eyebrow">Curated replay shelf</p>
         <h3>Interesting games</h3>
       </div>
-      <span>Extremes from this simulation</span>
+      <span>Top three on every axis</span>
     </div>
-    <div class="interesting-games-grid">${cards}</div>
+    <div class="interesting-games-groups">${shelves}</div>
   </section>`;
 }
 
@@ -4556,7 +4922,8 @@ function renderBatchGameDetail(game, index, runs) {
     ${renderWinProbabilityChart(game)}
     <h3>Box score</h3>
     ${renderBoxScore(game, draftedPlayersById())}
-    <h3>Play-by-play</h3>
+    <h3>Game story</h3>
+    <p class="batch-note">The biggest swings come first. Each diamond shows the situation before the play; steals appear between at-bats as separate basepath events. Scoring innings, late innings, and high-leverage spots start expanded.</p>
     ${renderGameLog(game)}
   </section>`;
 }
@@ -4761,8 +5128,25 @@ function updateBatchSort(table, sort) {
     : { sort, direction: defaultBatchSortDirection(table, sort) };
 }
 
-function toggleDraftHistoryPaidSort() {
-  state.draftHistoryPaidSort = state.draftHistoryPaidSort === "desc" ? "asc" : "desc";
+function updateDraftHistorySort(sort) {
+  if (!["pick", "paid", "points", "wpa"].includes(sort)) return;
+  const current = normalizeDraftHistorySort(state.draftHistorySort);
+  state.draftHistorySort = current.sort === sort
+    ? { sort, direction: current.direction === "asc" ? "desc" : "asc" }
+    : { sort, direction: sort === "pick" ? "asc" : "desc" };
+}
+
+function normalizeDraftHistorySort(value, legacyPaidSort = null) {
+  if (value && ["pick", "paid", "points", "wpa"].includes(value.sort)) {
+    return {
+      sort: value.sort,
+      direction: value.direction === "asc" ? "asc" : "desc"
+    };
+  }
+  if (legacyPaidSort === "asc" || legacyPaidSort === "desc") {
+    return { sort: "paid", direction: legacyPaidSort };
+  }
+  return { sort: "pick", direction: "asc" };
 }
 
 function defaultBatchSorts() {
@@ -4893,9 +5277,9 @@ function bindBatchActions() {
       return;
     }
 
-    const paidSortButton = event.target.closest("button[data-history-paid-sort]");
-    if (paidSortButton) {
-      toggleDraftHistoryPaidSort();
+    const historySortButton = event.target.closest("button[data-history-sort]");
+    if (historySortButton) {
+      updateDraftHistorySort(historySortButton.dataset.historySort);
       saveState();
       renderBatch();
       return;
@@ -5176,7 +5560,7 @@ function renderGameDetail(game) {
     <h3>${escapeHtml(game.away.name)} ${game.away.runs}, ${escapeHtml(game.home.name)} ${game.home.runs}</h3>
     <h4>Box score</h4>
     ${renderBoxScore(game, draftedPlayersById())}
-    <h4>Play-by-play</h4>
+    <h4>Game story</h4>
     ${renderGameLog(game)}
   </div>`;
 }
@@ -5648,38 +6032,144 @@ function formatInnings(outs) {
 }
 
 function renderGameLog(game) {
-  const rows = game.events
-    .map(
-      (event) => `<tr${Math.abs(event.wpa ?? 0) >= 0.1 ? ' class="wpa-swing"' : ""}>
-        <td>${event.inning}${event.half === "top" ? "T" : "B"}</td>
-        <td>${renderEventMatchup(event)}</td>
-        <td>${renderControlResult(event)}</td>
-        <td>${renderEventResult(event)}</td>
-        <td>${event.outsBefore} to ${event.outsAfter}</td>
-        <td>${escapeHtml(basesText(event.basesBefore))} to ${escapeHtml(basesText(event.basesAfter))}</td>
-        <td>${event.scoreAfter.away}-${event.scoreAfter.home}</td>
-        ${renderEventWinProbability(event)}
-      </tr>`
-    )
-    .join("");
+  const events = game.events ?? [];
+  if (!events.length) return `<p class="batch-note">No play-by-play is available for this game.</p>`;
 
-  return `<div class="game-log">
-    <table>
-      <thead><tr><th>Inn</th><th>Matchup</th><th>Control</th><th>Result</th><th>Outs</th><th>Bases</th><th>Score</th><th class="num">Home WP</th><th class="num">WPA</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
+  const keyMoments = [...events]
+    .filter((event) => Number.isFinite(event.wpa))
+    .sort((a, b) => Math.abs(b.wpa) - Math.abs(a.wpa))
+    .slice(0, 3);
+  const momentCards = keyMoments.map((event, index) => `<article class="game-story-moment">
+    <span>#${index + 1} swing · ${halfInningLabel(event)}</span>
+    <strong>${playHeadline(event)}</strong>
+    <small>${event.scoreAfter?.away ?? 0}-${event.scoreAfter?.home ?? 0} · ${formatWpaPercent(event.wpa)} WPA</small>
+  </article>`).join("");
+
+  const halfInnings = [];
+  const halfInningsByKey = new Map();
+  for (const event of events) {
+    const key = `${event.inning}\u0000${event.half}`;
+    if (!halfInningsByKey.has(key)) {
+      const group = { inning: Number(event.inning) || 1, half: event.half, events: [] };
+      halfInningsByKey.set(key, group);
+      halfInnings.push(group);
+    }
+    halfInningsByKey.get(key).events.push(event);
+  }
+
+  const innings = halfInnings.map((group) => {
+    const runs = group.events.reduce((sum, event) => sum + eventRunsScored(event), 0);
+    const leverage = Math.max(0, ...group.events.map((event) => Math.abs(Number(event.wpa) || 0)));
+    const open = runs > 0 || group.inning >= 7 || leverage >= 0.1;
+    const battingTeam = group.half === "top" ? game.away?.name : game.home?.name;
+    const plays = group.events.map((event) => renderStoryPlay(event, game.home?.name)).join("");
+    const result = runs
+      ? `<strong>${runs} run${runs === 1 ? "" : "s"}</strong>`
+      : `<span>Scoreless</span>`;
+    return `<details class="game-story-inning${runs ? " scoring-inning" : ""}" ${open ? "open" : ""}>
+      <summary>
+        <span><strong>${halfInningLabel(group)}</strong><small>${escapeHtml(battingTeam ?? "")} batting · ${group.events.length} plays</small></span>
+        ${result}
+      </summary>
+      <div class="game-story-plays">${plays}</div>
+    </details>`;
+  }).join("");
+
+  return `<div class="batch-play-by-play">
+    <section class="game-story-key-moments">
+      <div class="game-story-heading">
+        <div>
+          <p class="eyebrow">Turning points</p>
+          <h4>Biggest swings</h4>
+        </div>
+        <span>WPA from the batting side</span>
+      </div>
+      <div class="game-story-moment-grid">${momentCards}</div>
+    </section>
+    <section class="game-story-timeline">
+      <div class="game-story-heading">
+        <div>
+          <p class="eyebrow">Inning by inning</p>
+          <h4>Complete play-by-play</h4>
+        </div>
+        <span>${events.length} plays</span>
+      </div>
+      ${innings}
+    </section>
   </div>`;
 }
 
-// Home team's win probability around the play, plus the play's WPA from the
-// batting side's perspective — the amount credited to the batter (or runner)
-// and debited from the pitcher.
-function renderEventWinProbability(event) {
-  if (event.wpBefore == null || event.wpAfter == null) return `<td></td><td></td>`;
-  const wpa = event.wpa ?? 0;
+function renderStoryPlay(event, homeTeamName = "Home") {
+  const runs = eventRunsScored(event);
+  const wpa = Number(event.wpa) || 0;
+  const highLeverage = Math.abs(wpa) >= 0.1;
   const tone = wpa > 0.0005 ? "wpa-pos" : wpa < -0.0005 ? "wpa-neg" : "";
-  return `<td class="num wp-cell">${formatWinProb(event.wpBefore)} → ${formatWinProb(event.wpAfter)}</td>
-    <td class="num ${tone}">${formatWpaPercent(wpa)}</td>`;
+  const steal = event.playDetails?.kind === "steal";
+  const stealSafe = Boolean(event.playDetails?.stealAttempt?.safe);
+  const advantage = storyAdvantage(event);
+  const advantageBadge = advantage
+    ? `<span class="story-advantage-badge ${advantage.key}-advantage" title="${escapeHtml(advantage.detail)}">${escapeHtml(advantage.label)}${advantage.detail ? `<small>${escapeHtml(advantage.detail)}</small>` : ""}</span>`
+    : "";
+  const score = `${event.scoreAfter?.away ?? 0}-${event.scoreAfter?.home ?? 0}`;
+  const winProbability = event.wpBefore == null || event.wpAfter == null
+    ? ""
+    : `<span>${escapeHtml(homeTeamName)} WP ${formatWinProb(event.wpBefore)} → ${formatWinProb(event.wpAfter)}</span>`;
+  return `<article class="game-story-play${runs ? " scoring-play" : ""}${highLeverage ? " leverage-play" : ""}${steal ? ` runner-event ${stealSafe ? "steal-safe" : "steal-caught"}` : ""}">
+    <div class="game-story-play-copy">
+      <div class="game-story-play-flags">
+        ${steal ? `<span class="steal-badge">${stealSafe ? "STOLEN BASE" : "CAUGHT STEALING"}</span>` : ""}
+        ${runs ? `<span class="scoring-badge">${runs} RUN${runs === 1 ? "" : "S"}</span>` : ""}
+        ${highLeverage ? `<span class="leverage-badge">HIGH LEVERAGE</span>` : ""}
+        ${advantageBadge}
+      </div>
+      <strong>${playHeadline(event)}</strong>
+      <small>${renderEventMatchup(event)}</small>
+    </div>
+    ${renderBaseDiamond(event.basesBefore, { label: "Before", outs: event.outsBefore })}
+    <div class="game-story-play-impact">
+      <strong>${score}</strong>
+      ${winProbability}
+      <span class="${tone}">${formatWpaPercent(wpa)} WPA</span>
+    </div>
+    <details class="game-story-play-details">
+      <summary>Dice, fielding &amp; baserunning</summary>
+      <div>
+        <span><strong>${steal ? "Steal odds" : "Control"}</strong>${renderControlResult(event)}</span>
+        <span><strong>Resolution</strong>${renderEventResult(event)}</span>
+        <span><strong>Situation</strong>${renderBaseSituation(event)}</span>
+      </div>
+    </details>
+  </article>`;
+}
+
+function playHeadline(event) {
+  return escapeHtml(storyHeadline(event));
+}
+
+function halfInningLabel(event) {
+  return `${event.half === "bottom" ? "Bottom" : "Top"} ${inningOrdinal(event.inning)}`;
+}
+
+function inningOrdinal(value) {
+  const number = Number(value) || 0;
+  const mod100 = number % 100;
+  const suffix = mod100 >= 11 && mod100 <= 13
+    ? "th"
+    : number % 10 === 1
+      ? "st"
+      : number % 10 === 2
+        ? "nd"
+        : number % 10 === 3
+          ? "rd"
+          : "th";
+  return `${number}${suffix}`;
+}
+
+function eventRunsScored(event) {
+  if (Number.isFinite(event.runs)) return Math.max(0, event.runs);
+  const before = (Number(event.scoreBefore?.away) || 0) + (Number(event.scoreBefore?.home) || 0);
+  const after = (Number(event.scoreAfter?.away) || 0) + (Number(event.scoreAfter?.home) || 0);
+  return Math.max(0, after - before);
 }
 
 function formatWinProb(value) {
@@ -5689,52 +6179,107 @@ function formatWinProb(value) {
 function renderEventMatchup(event) {
   if (event.playDetails?.kind === "steal") {
     const attempt = event.playDetails.stealAttempt;
-    return `${escapeHtml(attempt.runner)} steal attempt`;
+    return `${escapeHtml(attempt.runner)} takes off before ${escapeHtml(event.batter)}'s pitch`;
   }
   return `${escapeHtml(event.batter)} vs ${escapeHtml(event.pitcher)}`;
 }
 
 function renderControlResult(event) {
-  if (event.playDetails?.kind === "steal") return "Before pitch";
+  if (event.playDetails?.kind === "steal") {
+    const attempt = event.playDetails.stealAttempt ?? {};
+    const target = Number(attempt.target);
+    const fielding = Number(attempt.fielding);
+    const safeChance = Number.isFinite(attempt.safeChance)
+      ? attempt.safeChance
+      : Number.isFinite(target) && Number.isFinite(fielding)
+        ? Math.max(0, Math.min(20, target - fielding)) / 20
+        : null;
+    const speed = Number(attempt.runnerSpeed);
+    const bonus = Number(attempt.targetBonus);
+    const chance = safeChance == null ? "Unknown chance" : `${Math.round(safeChance * 100)}% chance of being safe`;
+    const speedText = Number.isFinite(speed)
+      ? `SPD ${speed}${Number.isFinite(bonus) && bonus !== 0 ? ` ${bonus < 0 ? "−" : "+"} ${Math.abs(bonus)} for ${attempt.to ?? "the destination"}` : ""}`
+      : Number.isFinite(target) ? `run target ${target}` : "runner speed unavailable";
+    const matchup = Number.isFinite(fielding)
+      ? `${speedText} vs catcher ${fielding >= 0 ? "+" : ""}${fielding}`
+      : speedText;
+    const outs = Number(attempt.outsForDecision);
+    const minimum = Number(attempt.decisionMinimum);
+    const destination = stealDestination(attempt.destination ?? attempt.to);
+    const decision = Number.isFinite(outs) && Number.isFinite(minimum)
+      ? ` With ${outs} out${outs === 1 ? "" : "s"}, the auto-runner needs at least ${Math.round(minimum * 100)}% to try for ${destination}.`
+      : "";
+    return `${chance} (${matchup}).${decision}`;
+  }
   const effectiveControl = event.effectiveControl ?? event.controlTotal - event.controlRoll;
   const fatigue = event.fatiguePenalty ? `, fatigue -${event.fatiguePenalty}` : "";
   return `${event.controlRoll}+${effectiveControl}=${event.controlTotal} vs OB ${event.onBase}. ${event.chartOwner}${fatigue}`;
+}
+
+function stealDestination(value) {
+  return {
+    second: "second",
+    third: "third",
+    home: "home",
+    "2B": "second",
+    "3B": "third"
+  }[value] ?? "the next base";
 }
 
 function renderEventResult(event) {
   if (event.playDetails?.kind === "steal") {
     const attempt = event.playDetails.stealAttempt;
     const outcome = attempt.safe ? "SB" : "CS";
-    return `${outcome}; ${renderAdvanceAttempts([attempt])}`;
+    return `${outcome}; ${renderAdvanceAttempts([attempt], "catcher defense")}`;
   }
 
   const base = `${event.resultRoll} => ${event.result}`;
   if (event.playDetails?.kind === "groundout" && event.playDetails.doublePlayAttempt) {
     const attempt = event.playDetails.doublePlayAttempt;
     const outcome = attempt.batterOut ? "DP" : "batter safe";
-    return `${base}; ${outcome} (${attempt.roll}+${attempt.fielding}=${attempt.total} vs SPD ${attempt.target})`;
+    if (attempt.roll == null) {
+      return `${base}; ${outcome} — no roll needed; the result was automatic (batter SPD target ${attempt.target} vs infield defense ${signedModifier(attempt.fielding)})`;
+    }
+    const comparison = attempt.batterOut ? ">" : "≤";
+    return `${base}; ${outcome} — d20 roll ${attempt.roll} + infield defense ${signedModifier(attempt.fielding)} = ${attempt.total}; ${attempt.total} ${comparison} batter SPD target ${attempt.target}`;
   }
 
   if (event.playDetails?.kind === "flyout" && event.playDetails.tagUpAttempts?.length) {
-    return `${base}; tag-up: ${renderAdvanceAttempts(event.playDetails.tagUpAttempts)}`;
+    return `${base}; tag-up: ${renderAdvanceAttempts(event.playDetails.tagUpAttempts, "outfield defense")}`;
   }
 
   if (event.playDetails?.kind === "hit" && event.playDetails.extraBaseAttempts?.length) {
-    return `${base}; extra base: ${renderAdvanceAttempts(event.playDetails.extraBaseAttempts)}`;
+    return `${base}; extra base: ${renderAdvanceAttempts(event.playDetails.extraBaseAttempts, "outfield defense")}`;
   }
 
   return base;
 }
 
-function renderAdvanceAttempts(attempts) {
+function renderAdvanceAttempts(attempts, defenseLabel = "defense") {
   return attempts
-    .map((attempt) => {
-      const outcome = attempt.safe ? "safe" : "out";
-      const runner = escapeHtml(attempt.runner);
-      if (!attempt.thrown) return `${runner} ${attempt.from}-${attempt.to} ${outcome} (no throw)`;
-      return `${runner} ${attempt.from}-${attempt.to} ${outcome} (${attempt.roll}+${attempt.fielding}=${attempt.total} vs SPD ${attempt.target})`;
-    })
+    .map((attempt) => formatAdvanceAttempt(attempt, defenseLabel))
     .join("; ");
+}
+
+function signedModifier(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "?";
+  return number >= 0 ? `+${number}` : String(number);
+}
+
+function renderBaseSituation(event) {
+  const before = Array.isArray(event.basesBefore) ? event.basesBefore : [];
+  const after = Number(event.outsAfter) >= 3
+    ? [null, null, null]
+    : Array.isArray(event.basesAfter) ? event.basesAfter : [];
+  const describe = (bases) => {
+    const labels = ["1B", "2B", "3B"];
+    const occupied = bases
+      .map((runner, index) => runner ? `${labels[index]} ${escapeHtml(runner)}` : null)
+      .filter(Boolean);
+    return occupied.length ? occupied.join(", ") : "empty";
+  };
+  return `${event.outsBefore} → ${event.outsAfter} outs · ${describe(before)} → ${describe(after)}`;
 }
 
 // The blind-draft rule, asked once and answered the same everywhere: keep a
@@ -6109,6 +6654,42 @@ function poolGroupEligible(player, group) {
   if (player.kind !== "hitter") return false;
   if (group === "LF/RF") return canPlayerFillLineupSlot(player, "LF");
   return canPlayerFillLineupSlot(player, group);
+}
+
+// The cheapest card still available in each position group is that group's
+// replacement level: the floor the closing sweep reaches first if the room
+// leaves a roster hole there. One card can stand floor for several groups —
+// a cheap C/1B, or the cheapest hitter of all covering the DH slot. Kept
+// beside renderPoolFloor so the badged rows and the desk's "floor" chips
+// cannot disagree.
+function replacementLevelGroups(draft) {
+  const levels = new Map();
+  if (!draft) return levels;
+  const available = availablePlayers(draft);
+  for (const group of BOARD_POSITION_GROUPS) {
+    const floor = available
+      .filter((player) => poolGroupEligible(player, group))
+      .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0];
+    if (floor) levels.set(floor.id, [...(levels.get(floor.id) ?? []), group]);
+  }
+  return levels;
+}
+
+// What the board should badge in the current view. A position view names one
+// card: that position's own floor — which is often a card whose printed
+// positions would never pass the filter, because lineup rules let anyone
+// stand at first and the sweep fills the hole with the cheapest body, not
+// the cheapest first baseman. The "all" view keeps the full set, one floor
+// per group.
+function viewReplacementLevels(draft) {
+  const levels = replacementLevelGroups(draft);
+  const position = state.filters.position;
+  if (!position || position === "all") return levels;
+  const scoped = new Map();
+  for (const [id, groups] of levels) {
+    if (groups.includes(position)) scoped.set(id, [position]);
+  }
+  return scoped;
 }
 
 function leagueOpenGroups(draft) {
@@ -6965,6 +7546,7 @@ function renderFilters() {
   const displayedSortOptions = sortOptions.some(([value]) => value === state.filters.sort)
     ? sortOptions
     : [[state.filters.sort, columnSortLabel(state.filters.sort)], ...sortOptions];
+  const ranking = activePositionRanking();
   const typeOptions = [
     ["hitter", "Hitters"],
     ["pitcher", "Pitchers"]
@@ -6997,6 +7579,10 @@ function renderFilters() {
         ${flagCount ? `<span class="star-filter-count">${flagCount}</span>` : ""}
       </button>`
     : "";
+  const rankingKey = currentPositionRankingKey();
+  const rankingButton = owner && rankingKey && ranking
+    ? `<button type="button" class="ranking-mode-button active" data-action="reset-position-ranking" title="Restore the ${escapeHtml(state.filters.position)} ranking to its starting OB/Control order and clear its tier lines"><strong>${ranking.ids.length}</strong> ranked <span>${ranking.customized ? "Reset OB/CTRL" : "OB/CTRL start"}</span></button>`
+    : "";
 
   return `<div class="filters">
     <div class="type-filter" role="group" aria-label="Player type">
@@ -7004,6 +7590,7 @@ function renderFilters() {
     </div>
     ${starFilter}
     ${flagFilter}
+    ${rankingButton}
     <label class="filter-position">
       Position
       <select data-filter="position">
@@ -7011,7 +7598,7 @@ function renderFilters() {
       </select>
     </label>
     <label class="filter-sort">
-      Sort
+      Sort unranked
       <select data-filter="sort">
         ${displayedSortOptions.map(([value, label]) => `<option value="${value}" ${state.filters.sort === value ? "selected" : ""}>${label}</option>`).join("")}
       </select>
@@ -7031,6 +7618,7 @@ function columnSortLabel(sort) {
     speed: "Column: Speed",
     throws: "Column: Throws"
   };
+  if (sort === "manual") return "My ranking";
   return labels[sort] ?? "Column sort";
 }
 
@@ -7127,6 +7715,272 @@ function toggleFlag(playerId) {
     : [...list, playerId];
   if (next.length) state.flagged[owner.id] = next;
   else delete state.flagged[owner.id];
+}
+
+// ---- private position rankings ----
+//
+// A position board starts as the full OB/Control order. It remains an editable
+// compact ranking: typing, dragging, or using the arrows stores a private
+// override, and clearing one player leaves that player in the secondary-sorted
+// unranked group. Rankings are per manager and per position, so moving a
+// multi-position player at shortstop does not disturb their second-base rank.
+function currentPositionRankingKey() {
+  const position = state.filters.position;
+  if (!position || position === "all") return null;
+  return `${state.filters.type}:${position}`;
+}
+
+function activePositionRanking() {
+  return positionRankingFor(state.filters.type, state.filters.position);
+}
+
+function positionRankingFor(type, position) {
+  const owner = watchlistOwner();
+  if (!owner || !position || position === "all" || !state.draft) return null;
+  const key = `${type}:${position}`;
+  // The view's own floor card is rankable here too, printed positions or not
+  // — see filteredPlayers, which admits it on the same grounds.
+  const floors = replacementLevelGroups(state.draft);
+  const positionFloorIds = new Set([...floors].filter(([, groups]) => groups.includes(position)).map(([id]) => id));
+  const eligiblePlayers = state.draft.pool
+    .filter((player) => player.kind === type)
+    .filter((player) => matchesPositionFilter(player, position) || positionFloorIds.has(player.id));
+  const eligibleIds = eligiblePlayers.map((player) => player.id);
+  const eligible = new Set(eligibleIds);
+  const saved = state.draftRankings[owner.id]?.[key];
+  const customized = Boolean(saved);
+  // The seed order sinks this position's floor card below everything with a
+  // price: the free fallback is not a rank-4 catcher, whatever its OB says.
+  const defaultIds = [...eligiblePlayers]
+    .sort((a, b) => {
+      const sink = (positionFloorIds.has(a.id) ? 1 : 0) - (positionFloorIds.has(b.id) ? 1 : 0);
+      if (sink) return sink;
+      const result = comparePlayersBySort(a, b, "primary");
+      return result ? result * -1 : a.name.localeCompare(b.name);
+    })
+    .map((player) => player.id);
+  const ids = (customized ? saved.ids : defaultIds).filter((id) => eligible.has(id));
+  const tiers = customized ? normalizeTierBreaks(saved.tiers, ids.length) : [];
+  return {
+    managerId: owner.id,
+    key,
+    ids,
+    tiers,
+    rankById: new Map(ids.map((id, index) => [id, index + 1])),
+    maxRank: eligibleIds.length,
+    customized,
+    ...tierAccounting(ids, tiers)
+  };
+}
+
+// The running arithmetic a tiered board shows: which tier each rank sits in,
+// how much of each tier is still gettable, and the one card that is the last
+// of its tier standing — the scarcity light the dividers exist to shine.
+function tierAccounting(ids, tiers) {
+  if (!tiers.length) return { tierMeta: [], tierByRank: null, lastOfTierIds: null };
+  const picked = state.draft.pickedIds;
+  const tierByRank = new Map();
+  const lastOfTierIds = new Set();
+  const bounds = [0, ...tiers, ids.length];
+  const tierMeta = bounds.slice(0, -1).map((start, index) => {
+    const end = bounds[index + 1];
+    const segment = ids.slice(start, end);
+    for (let rank = start + 1; rank <= end; rank += 1) tierByRank.set(rank, index + 1);
+    const gettable = segment.filter((id) => !picked.has(id));
+    if (gettable.length === 1) lastOfTierIds.add(gettable[0]);
+    return {
+      n: index + 1,
+      total: segment.length,
+      left: gettable.length,
+      breakAfter: index >= 1 ? tiers[index - 1] : null
+    };
+  });
+  return { tierMeta, tierByRank, lastOfTierIds };
+}
+
+function setPositionRanking(ownerId, key, entry) {
+  const clean = [...new Set(entry.ids.filter((id) => typeof id === "string"))];
+  state.draftRankings[ownerId] = {
+    ...(state.draftRankings[ownerId] ?? {}),
+    [key]: { ids: clean, tiers: normalizeTierBreaks(entry.tiers, clean.length) }
+  };
+}
+
+function resetPositionRanking() {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  const managerRankings = { ...(state.draftRankings[ranking.managerId] ?? {}) };
+  delete managerRankings[ranking.key];
+  if (Object.keys(managerRankings).length) state.draftRankings[ranking.managerId] = managerRankings;
+  else delete state.draftRankings[ranking.managerId];
+}
+
+function setPlayerPositionRank(playerId, value) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  const trimmed = String(value ?? "").trim();
+  const entry = trimmed
+    ? rankAtWithTiers(ranking, playerId, Math.min(Number(trimmed), ranking.maxRank))
+    : removeRankedWithTiers(ranking, playerId);
+  setPositionRanking(ranking.managerId, ranking.key, entry);
+}
+
+function nudgePositionRanking(playerId, delta) {
+  const ranking = activePositionRanking();
+  if (!ranking?.rankById.has(playerId)) return;
+  setPositionRanking(ranking.managerId, ranking.key, nudgeRankedWithTiers(ranking, playerId, delta));
+}
+
+function movePositionRanking(playerId, targetId, after) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  setPositionRanking(
+    ranking.managerId,
+    ranking.key,
+    moveRankedWithTiers(ranking, playerId, targetId, { after })
+  );
+}
+
+function addTierBreakAt(afterCount) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  setPositionRanking(ranking.managerId, ranking.key, {
+    ids: ranking.ids,
+    tiers: insertTierBreak(ranking.tiers, afterCount, ranking.ids.length)
+  });
+}
+
+function removeTierBreakAt(afterCount) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  setPositionRanking(ranking.managerId, ranking.key, {
+    ids: ranking.ids,
+    tiers: removeTierBreak(ranking.tiers, afterCount)
+  });
+}
+
+// ---- private card notes ----
+//
+// A note is a word or two a manager leaves himself on a card — "$30 max",
+// "weird chart" — private like the rankings and riding the same storage.
+// Committing an empty line deletes the note.
+function setPlayerNote(playerId, value) {
+  const owner = watchlistOwner();
+  if (!owner) return;
+  const trimmed = String(value ?? "").trim().slice(0, MAX_NOTE_LENGTH);
+  const notes = { ...(state.draftNotes[owner.id] ?? {}) };
+  if (trimmed) notes[playerId] = trimmed;
+  else delete notes[playerId];
+  if (Object.keys(notes).length) state.draftNotes[owner.id] = notes;
+  else delete state.draftNotes[owner.id];
+}
+
+function commitPlayerNote(playerId, value) {
+  setPlayerNote(playerId, value);
+  editingNoteId = null;
+  saveState();
+  renderDraft();
+}
+
+// What your prep says about the card on the block, surfaced at the moment of
+// decision: your best rank for him across the positions he plays, the tier
+// that rank sits in, and the note you left yourself. Private like everything
+// it reads from — online this rail renders per-browser, and on a hotseat it
+// follows the same owner the stars already do.
+function prepReadout(player) {
+  const owner = watchlistOwner();
+  if (!owner || !state.draft || !player) return null;
+  const buckets = player.kind === "pitcher"
+    ? ["SP", "RP"]
+    : ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH"];
+  let best = null;
+  for (const position of buckets.filter((bucket) => matchesPositionFilter(player, bucket))) {
+    const ranking = positionRankingFor(player.kind, position);
+    const rank = ranking?.rankById.get(player.id);
+    if (!rank) continue;
+    if (!best || rank < best.rank) best = { position, rank, ranking };
+  }
+  const note = state.draftNotes[owner.id]?.[player.id] ?? "";
+  if (!best) return note ? { note } : null;
+  const tier = best.ranking.tiers.length ? tierOfRank(best.ranking.tiers, best.rank) : null;
+  const meta = tier ? best.ranking.tierMeta[tier - 1] : null;
+  return {
+    position: best.position,
+    rank: best.rank,
+    total: best.ranking.ids.length,
+    customized: best.ranking.customized,
+    tier,
+    tierLeft: meta?.left ?? null,
+    tierTotal: meta?.total ?? null,
+    lastOfTier: best.ranking.lastOfTierIds?.has(player.id) ?? false,
+    note
+  };
+}
+
+function renderPrepReadout(player) {
+  const prep = prepReadout(player);
+  if (!prep) return "";
+  const rankBit = prep.rank
+    ? `${prep.customized ? "Your board" : "OB/CTRL board"}: <strong>#${prep.rank}</strong> of ${prep.total} ${escapeHtml(prep.position)}${prep.tier ? ` &middot; tier ${prep.tier} (${prep.tierLeft} of ${prep.tierTotal} left)` : ""}`
+    : "";
+  const lastBit = prep.lastOfTier ? `<span class="lot-prep-last">last of tier ${prep.tier}</span>` : "";
+  const noteBit = prep.note ? `<span class="lot-prep-note">&ldquo;${escapeHtml(prep.note)}&rdquo;</span>` : "";
+  return `<p class="auction-lot-rail-meta lot-prep">${[rankBit, lastBit, noteBit].filter(Boolean).join(" ")}</p>`;
+}
+
+function rankingDragStillActive() {
+  const ranking = activePositionRanking();
+  return Boolean(ranking
+    && draggedRankingMove
+    && ranking.managerId === draggedRankingMove.managerId
+    && ranking.key === draggedRankingMove.key);
+}
+
+function movePositionRankingAboveBreak(playerId, breakAfter) {
+  const ranking = activePositionRanking();
+  if (!ranking) return;
+  setPositionRanking(
+    ranking.managerId,
+    ranking.key,
+    moveRankedAboveBreak(ranking, playerId, Number.isFinite(breakAfter) ? breakAfter : 0)
+  );
+}
+
+// Native drag never scrolls an inner pane, so a long move used to stall at
+// the board's edge. While a ranking drag is live, a frame loop eases the pane
+// along whenever the pointer sits in the top or bottom scroll band — speed
+// grows with depth into the band, capped gently enough to aim by.
+function startRankingDragScroll(pane) {
+  stopRankingDragScroll();
+  rankingDragPane = pane ?? null;
+  // A 16ms interval rather than an animation frame: it holds frame rate while
+  // the tab is visible, and it self-stops below the moment the drag dies.
+  if (rankingDragPane) rankingDragScrollTimer = setInterval(rankingDragScrollTick, 16);
+}
+
+function rankingDragScrollTick() {
+  if (!draggedRankingMove || !rankingDragPane) {
+    stopRankingDragScroll();
+    return;
+  }
+  if (rankingDragY === null) return;
+  const rect = rankingDragPane.getBoundingClientRect();
+  const band = 72;
+  const maxStep = 18;
+  if (rankingDragY < rect.top + band) {
+    const depth = Math.min(1, (rect.top + band - rankingDragY) / band);
+    rankingDragPane.scrollTop -= Math.ceil(depth * maxStep);
+  } else if (rankingDragY > rect.bottom - band) {
+    const depth = Math.min(1, (rankingDragY - (rect.bottom - band)) / band);
+    rankingDragPane.scrollTop += Math.ceil(depth * maxStep);
+  }
+}
+
+function stopRankingDragScroll() {
+  if (rankingDragScrollTimer !== null) clearInterval(rankingDragScrollTimer);
+  rankingDragScrollTimer = null;
+  rankingDragPane = null;
+  rankingDragY = null;
 }
 
 // ---- the big board ----
@@ -7687,11 +8541,18 @@ function filteredPlayers(players) {
   const search = state.filters.search.trim().toLowerCase();
   const starred = state.filters.starredOnly ? starredIds() : null;
   const flagged = state.filters.flaggedOnly ? flaggedIds() : null;
+  // A position view admits its own floor card even when its printed positions
+  // would fail the filter: the free fallback belongs on the list it backstops.
+  const positionFloors = state.draft && state.filters.position !== "all"
+    ? viewReplacementLevels(state.draft)
+    : null;
   return players.filter((player) => {
     if (player.kind !== state.filters.type) return false;
     if (starred && !starred.has(player.id)) return false;
     if (flagged && !flagged.has(player.id)) return false;
-    if (state.filters.position !== "all" && !matchesPositionFilter(player, state.filters.position)) return false;
+    if (state.filters.position !== "all"
+      && !matchesPositionFilter(player, state.filters.position)
+      && !positionFloors?.has(player.id)) return false;
     if (search && !`${player.name} ${player.team ?? ""} ${playerPosition(player)} ${player.kind}`.toLowerCase().includes(search)) return false;
     return true;
   });
@@ -7714,7 +8575,22 @@ function canSimulate(draft) {
 // gone stay in their place, greyed out, because what is off the board (and who
 // took it, and what it went for) is half of what the board is telling you.
 function draftVisiblePlayers(draft) {
-  return filteredPlayers(draft.pool).sort(comparePlayers);
+  const players = filteredPlayers(draft.pool);
+  const ranking = activePositionRanking();
+  // Replacement-level cards are the board's free fallbacks: whatever the sort,
+  // they sit at the bottom, under everything anyone would actually pay for.
+  // A manager who ranks one by hand overrides this — that order is theirs.
+  const floors = viewReplacementLevels(draft);
+  const sink = (a, b) => (floors.has(a.id) ? 1 : 0) - (floors.has(b.id) ? 1 : 0);
+  if (!ranking?.ids.length) return players.sort((a, b) => sink(a, b) || comparePlayers(a, b));
+  return players.sort((a, b) => {
+    const aRank = ranking.rankById.get(a.id);
+    const bRank = ranking.rankById.get(b.id);
+    if (aRank !== undefined && bRank === undefined) return -1;
+    if (aRank === undefined && bRank !== undefined) return 1;
+    if (aRank !== undefined && bRank !== undefined) return aRank - bRank;
+    return sink(a, b) || comparePlayers(a, b);
+  });
 }
 
 function comparePlayers(a, b) {
@@ -7803,7 +8679,21 @@ function rosterCounts(roster) {
 }
 
 function saveState() {
-  if (state.online) return;
+  if (state.online) {
+    saveOnlineDraftRankings(
+      localStorage,
+      state.online.roomId,
+      state.online.managerId,
+      state.draftRankings
+    );
+    saveOnlineDraftNotes(
+      localStorage,
+      state.online.roomId,
+      state.online.managerId,
+      state.draftNotes
+    );
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState(state)));
 }
 
@@ -7931,6 +8821,7 @@ function reviveState(value) {
   const filters = { ...defaultState().filters, ...(value.filters ?? {}) };
   const batchSorts = normalizeBatchSorts(value.batchSorts);
   if (filters.type === "all") filters.type = "hitter";
+  if (filters.sort === "manual") filters.sort = "primary";
   filters.sortDirection = filters.sortDirection ?? defaultSortDirection(filters.sort);
   const savedStartingPitchers = normalizeStartingPitchers(
     value.draft?.startingPitchers ?? value.startingPitchers ?? Number(value.draft?.rosterSize) - 11
@@ -7983,10 +8874,15 @@ function reviveState(value) {
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     flagged: normalizeStarred(value.flagged),
+    // v2 boards were bare arrays, v3 adds tier breaks; both normalize into the
+    // v3 shape. Anything older predates compact-ranking semantics entirely.
+    draftRankings: value.draftRankingsVersion === 2 || value.draftRankingsVersion === 3
+      ? normalizeDraftRankings(value.draftRankings)
+      : {},
+    draftRankingsVersion: 3,
+    draftNotes: normalizeDraftNotes(value.draftNotes),
     heatBy: value.heatBy === "points" ? "points" : "price",
-    draftHistoryPaidSort: value.draftHistoryPaidSort === "asc" || value.draftHistoryPaidSort === "desc"
-      ? value.draftHistoryPaidSort
-      : null,
+    draftHistorySort: normalizeDraftHistorySort(value.draftHistorySort, value.draftHistoryPaidSort),
     pickDeadline: Number.isFinite(value.pickDeadline) ? value.pickDeadline : null,
     myManagerId: typeof value.myManagerId === "string" ? value.myManagerId : null,
     filters,

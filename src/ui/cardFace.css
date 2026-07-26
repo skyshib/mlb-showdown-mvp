@@ -770,6 +770,15 @@
   color: transparent;
   text-shadow: none;
 }
+/* A golden ticket is also legendary. Its plain 1/1 mark must win over the
+   transparent legendary wrapper used by the rainbow-letter wordmark. */
+.gq-proto-rarity-legendary.gq-proto-golden .gq-proto-rarity-mark {
+  color: #6d5312;
+  text-shadow:
+    -0.2cqw -0.2cqw 0 rgba(255, 244, 200, 0.75),
+    0.2cqw 0.2cqw 0 rgba(88, 61, 7, 0.35),
+    0 0.5cqw 1.25cqw rgba(255, 244, 200, 0.8);
+}
 .gq-proto-rainbow-word {
   display: inline-flex;
   white-space: nowrap;
