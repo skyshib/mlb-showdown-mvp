@@ -35,6 +35,7 @@ import {
   timesBeaten,
   grantBadge,
   addCardToCollection,
+  recordCardClaim,
   rosterCards,
   ownedCount,
   addLog,
@@ -1741,6 +1742,10 @@ export const claimCardScreen = {
     if (key === "a") {
       const card = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       addCardToCollection(app.save, card.id);
+      // It comes off HIS roster, not just onto yours: the ledger strikes the man
+      // from this trainer's binder for good, so the rematch is against whoever
+      // he scraped up to fill the hole.
+      recordCardClaim(app.save, trainer.id, card.id);
       addLog(app.save, `Claimed ${card.name} from ${trainer.name}.`);
       persistSave(app.save);
       leaveClaim(app); // navigates away, which rerenders

@@ -41,7 +41,9 @@ import {
   seriesNeeded,
   attemptNumber,
   grantCoins,
-  spendCoins
+  spendCoins,
+  recordCardClaim,
+  claimedFrom
 } from "../src/adventure/state.js";
 import { TRAINERS, trainerById, isTrainerUnlocked, rewardCoins, pendingAmbush, ambushSprung, springAmbush } from "../src/adventure/region.js";
 import { buildNpcTeam } from "../src/adventure/npcTeams.js";
@@ -464,6 +466,53 @@ test("beating a trainer for the first time earns a card claim; repeats do not", 
   const stolen = boss.roster[0];
   addCardToCollection(save, stolen.id);
   assert.equal(ownedCount(save, stolen.id) >= 1, true);
+});
+
+test("a claimed card comes off the rival's roster; a bargain-bin body fills the hole", async () => {
+  const { claimCardScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const save = testSave();
+  const trainer = trainerById("scout-jojo");
+  const before = buildNpcTeam(trainer, save);
+  const taken = before.roster[0];
+
+  const app = { save, screen: { name: "claimCard", trainerId: trainer.id, index: 0 }, go() {}, rerender() {} };
+  claimCardScreen.key(app, "a");
+  assert.deepEqual(claimedFrom(save, trainer.id), [taken.id], "the ledger remembers who you took");
+
+  const after = buildNpcTeam(trainer, save);
+  assert.ok(!after.roster.some((card) => card.id === taken.id), "he does not field the man you took");
+  assert.equal(after.roster.length, before.roster.length, "the slot is filled, not left empty");
+  assert.ok(after.points < before.points, "and filled cheap — the claim costs him");
+  // Only the robbed slot moves: the rest of the binder is the team you beat.
+  const oldMen = before.roster.map((card) => card.id).filter((id) => id !== taken.id);
+  const survivors = after.roster.map((card) => card.id).filter((id) => oldMen.includes(id));
+  assert.equal(survivors.length, oldMen.length, "every other man is the one who was there");
+});
+
+// A rival who inherits opens from the binder he already owns, so a card taken
+// off his younger self is missing from the binder his older self inherits. He
+// is free to spend the new season's money putting somebody back in that slot —
+// even the same man — but he no longer starts holding him.
+test("a card claimed off an early rival leaves a hole in the binder his later self inherits", () => {
+  const save = testSave();
+  const route1 = trainerById("rival-1");
+  const summit = trainerById("rival-4");
+  const inherited = new Set(buildNpcTeam(summit, save).roster.map((card) => card.id));
+  const stolen = buildNpcTeam(route1, save).roster.find((card) => inherited.has(card.id));
+  assert.ok(stolen, "the summit Cam still fields men he had on Route 1");
+
+  recordCardClaim(save, route1.id, stolen.id);
+  assert.ok(
+    !buildNpcTeam(route1, save).roster.some((card) => card.id === stolen.id),
+    "Route 1 Cam has lost him"
+  );
+  const later = buildNpcTeam(summit, save).roster;
+  assert.notDeepEqual(
+    later.map((card) => card.id),
+    [...inherited],
+    "and the summit Cam is rebuilt around the loss, not served from a stale cache"
+  );
+  assert.equal(later.length, 13, "he still turns up with a full squad");
 });
 
 test("the postseason chain runs division series, championship, then world series", () => {

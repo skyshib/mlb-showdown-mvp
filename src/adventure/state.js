@@ -521,6 +521,23 @@ export function recordTrainerLoss(save) {
   save.progress.counters.battlesLost += 1;
 }
 
+// ---- Claimed cards ----------------------------------------------------------
+//
+// The winner's pick costs the loser the card. A man taken off a beaten rival is
+// struck from HIS binder too — the rematch is against whoever he signed to fill
+// the hole (npcTeams.js does the replacing). Older saves predate the ledger, so
+// it grows in place rather than invalidating them.
+export function claimedFrom(save, trainerId) {
+  return save?.progress?.claimedCards?.[trainerId] ?? [];
+}
+
+export function recordCardClaim(save, trainerId, cardId) {
+  if (!save.progress.claimedCards) save.progress.claimedCards = {};
+  const taken = save.progress.claimedCards[trainerId] ?? (save.progress.claimedCards[trainerId] = []);
+  if (!taken.includes(cardId)) taken.push(cardId);
+  return taken;
+}
+
 export function grantBadge(save, badge) {
   if (!save.player.badges.includes(badge)) save.player.badges.push(badge);
 }

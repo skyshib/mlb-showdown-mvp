@@ -3,6 +3,7 @@ import { adventurePool } from "./packs.js?v=20260716-records";
 import { npcBudget, trainerById } from "./region.js?v=20260716-records";
 import { createRng } from "../rules/rng.js?v=20260716-records";
 import { personConflict, playsPosition } from "../rules/cards.js?v=20260716-records";
+import { claimedFrom } from "./state.js?v=20260716-records";
 
 // One roster slot per required lineup spot plus the four-man staff. "HITTER"
 // is the DH: any bat qualifies.
@@ -95,7 +96,7 @@ function assembleRosterCached(trainer, save) {
     rosterCache = new Map();
     rosterCachePool = pool;
   }
-  const key = `${trainer.id}:${teamSalt(save)}${npcBudget(save, trainer)}`;
+  const key = `${trainer.id}:${teamSalt(save)}${npcBudget(save, trainer)}:${claimKey(save, trainer)}`;
   let hit = rosterCache.get(key);
   if (!hit) {
     hit = assembleRoster(trainer, save);
@@ -129,9 +130,56 @@ function assembleRoster(trainer, save) {
   // inherited binder. The same climb spends the budget up from whichever floor.
   const roster = heirloom ? [...heirloom.roster] : minimumRoster(candidates, slots, trainer, rng, pointBudget);
   const used = new Set(roster.map((card) => card.id));
-  const spent = climb({ candidates, pointBudget, score, slots, roster, used, rng });
+  climb({ candidates, pointBudget, score, slots, roster, used, rng });
+  // The winner's pick is paid out of THIS roster, so it is settled last: the
+  // trainer shops his whole budget, then hands over the men you took off him.
+  replaceClaimedCards({ trainer, save, candidates, slots, roster, used });
+  const spent = roster.reduce((total, card) => total + card.points, 0);
 
   return { roster, slots, spent };
+}
+
+// A card claimed off a beaten trainer is GONE from his binder: he turns up to
+// the rematch with a bargain-bin body in that slot, and his roster is that much
+// poorer for it. The replacement is drawn the way the opening floor is — a
+// seeded pick from the cheapest few legal fits — off its own RNG stream, so
+// losing a man changes that slot and nothing else about the team.
+//
+// An heir inherits the hole: his heirloom roster already carries the fill-in,
+// and his new budget is free to climb out of it — including, if the draws fall
+// that way, by signing the very man you took. That is a rival going shopping
+// with a season's money, not the claim failing to land: the card is off the
+// binder by default, and it is his own budget that has to put anything back.
+function replaceClaimedCards({ trainer, save, candidates, slots, roster, used }) {
+  for (const cardId of claimedFrom(save, trainer.id)) {
+    const index = roster.findIndex((card) => card.id === cardId);
+    if (index < 0) continue; // already claimed off a predecessor, or never his
+    const taken = roster[index];
+    const rng = createRng(`npc-claimed:${teamSalt(save)}${trainer.teamSeed}:${cardId}`);
+    const eligible = candidates.get(slots[index])
+      .filter((card) => !used.has(card.id) && !personConflict(roster, card, taken.id))
+      .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name));
+    // Nothing legal left at the slot — a league too thin to field a
+    // replacement. He keeps the man rather than taking the field short.
+    if (!eligible.length) continue;
+    applySwap(roster, used, index, rng.pick(eligible.slice(0, CHEAP_BAND)));
+    // applySwap frees the man who left the roster. He did not go back on the
+    // market — he went into your binder — so he stays spoken for, and a second
+    // claim at another slot cannot re-sign him as its fill-in.
+    used.add(taken.id);
+  }
+}
+
+// Claims belong in the roster cache key — a team is only a pure function of its
+// inputs once they are one. The whole inherits chain counts: an heir opens from
+// a binder his predecessor may have been robbed of after this heir was built.
+function claimKey(save, trainer) {
+  const parts = [];
+  for (let link = trainer; link; link = link.inherits ? trainerById(link.inherits) : null) {
+    const taken = claimedFrom(save, link.id);
+    if (taken.length) parts.push(`${link.id}=${taken.join(",")}`);
+  }
+  return parts.join("|");
 }
 
 // The pool split into per-slot buckets, each holding every card that can fill
