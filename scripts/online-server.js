@@ -1197,6 +1197,18 @@ function denyAction(draft, seat, isHost, action) {
     if (type === "resume" && !isDraftPaused(draft)) return "The draft is not paused";
     return null;
   }
+  // Granting time is a repair, and the room is usually stopped while it is
+  // made, so it is cleared before the paused check rather than after it. It
+  // spends no clock — it is the one move that only ever hands clock back.
+  if (type === "grant-time") {
+    if (!isHost) return "Only the host can grant time";
+    if (draft.complete) return "The draft is already complete";
+    if (isAuctionDraft(draft)) return "Auction rooms have no snake clock to grant";
+    if (!snakeClockEnabled(draft)) return "This room has no snake clock";
+    if (!draft.managers.some((manager) => manager.id === action?.managerId)) return "No such manager";
+    if (!Number.isFinite(Number(action?.ms)) || Number(action?.ms) === 0) return "Grant a number of milliseconds";
+    return null;
+  }
   // A paused room is a room holding still: the clocks are stopped, so no move
   // that would spend one may land. Setting a lineup is not a move on the draft,
   // and stays open — a break is exactly when people tinker with their team.

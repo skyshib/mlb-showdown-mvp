@@ -659,6 +659,78 @@ test("pausing an online snake room freezes its authoritative chess clock", async
   assert.equal(running.data.snakeClock.pausedAt, null);
 });
 
+test("the host can grant a manager time, and only the host can", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "snake-clock-grant",
+    managers: ["Ana", "Bo"],
+    snakeTimer: { bankMs: 60000, incrementMs: 0 }
+  });
+  const roomId = created.data.roomId;
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  const bo = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+
+  // Bo is a player, not the host, and cannot write himself a bank.
+  const stolen = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: bo.data.token,
+    action: { type: "grant-time", managerId: "team-2", ms: 240000 }
+  });
+  assert.equal(stolen.status, 409);
+  assert.match(stolen.data.error, /Only the host can grant time/);
+
+  // The room is stopped first — the ordinary way a repair is made — and the
+  // grant still lands, unlike every other move on a paused draft.
+  await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "pause" }
+  });
+  const before = await api(base, "GET", `/api/rooms/${roomId}`);
+  const banked = before.data.snakeClock.banks["team-2"];
+
+  const grant = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "grant-time", managerId: "team-2", ms: 240000 }
+  });
+  assert.equal(grant.status, 200);
+  const after = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(after.data.snakeClock.banks["team-2"], banked + 240000);
+  assert.equal(after.data.snakeClock.banks["team-1"], before.data.snakeClock.banks["team-1"]);
+
+  // A grant is a logged action, so every replica derives the same bank the
+  // server is holding — a browser replaying the log must not disagree.
+  const replica = createDraft(
+    after.data.managers.map((manager) => ({ name: manager.name, cpu: manager.cpu })),
+    deckFromIds(after.data.universe, after.data.seed, after.data.deck, after.data.temperature),
+    after.data.rosterSize,
+    after.data.seed,
+    {
+      startingPitchers: after.data.startingPitchers,
+      snakeTimer: after.data.snakeTimer
+    }
+  );
+  for (const entry of after.data.actions) applyDraftAction(replica, entry.action);
+  assert.equal(replica.clock.banks["team-2"], after.data.snakeClock.banks["team-2"]);
+
+  // And it survives a restart, which is the point of putting it in the log.
+  // Saves are chained off the request, so give the room a beat to reach disk.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const restarted = await startServer(t, dataDir);
+  const revived = await api(restarted, "GET", `/api/rooms/${roomId}`);
+  assert.equal(revived.data.snakeClock.banks["team-2"], after.data.snakeClock.banks["team-2"]);
+
+  // A bad grant is undone by its opposite; a bank never goes into debt.
+  await api(restarted, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "grant-time", managerId: "team-2", ms: -999999999 }
+  });
+  const floored = await api(restarted, "GET", `/api/rooms/${roomId}`);
+  assert.equal(floored.data.snakeClock.banks["team-2"], 0);
+});
+
 test("shared sim actions are logged after the draft completes and survive restarts", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
   const base = await startServer(t, dataDir);

@@ -788,6 +788,27 @@ export function restoreSnakeClockState(draft, saved) {
   return true;
 }
 
+// Put time on a manager's clock that he did not earn. Nothing in the draft
+// hands out time — this is the host reaching in, for the afternoons when the
+// room owes somebody the minutes it took from them: a dropped connection, a
+// pick the server ate, a clock that ran while nobody was on it.
+//
+// The grant lands on the BANK, not on the current turn, so it is worth the same
+// whether or not the man is on the clock. If he is, snakeTimeRemainingMs goes on
+// charging him for this pick — out of a bank that is now bigger.
+//
+// A negative grant takes time back, which is what makes a mistaken grant
+// fixable; either way the bank floors at zero rather than going into debt.
+export function grantSnakeTime(draft, managerId, ms) {
+  if (!snakeClockEnabled(draft) || draft.complete) return false;
+  const manager = draft.managers.find((entry) => entry.id === managerId);
+  if (!manager) return false;
+  const amount = Number(ms);
+  if (!Number.isFinite(amount) || amount === 0) return false;
+  draft.clock.banks[manager.id] = Math.max(0, snakeClockBankMs(draft, manager) + amount);
+  return true;
+}
+
 // What is left on a manager's clock right now: his bank, less the time he has
 // been sitting on this pick. Only the man on the clock is spending.
 export function snakeTimeRemainingMs(draft, manager, now = Date.now()) {
@@ -1363,6 +1384,9 @@ export function applyDraftAction(draft, action) {
     case "resume":
       if (isAuctionDraft(draft)) resumeAuction(draft, action.at);
       else resumeSnake(draft, action.at);
+      return;
+    case "grant-time":
+      grantSnakeTime(draft, action.managerId, action.ms);
       return;
     case "seat":
       setManagerCpu(draft, action.managerId, action.cpu);
