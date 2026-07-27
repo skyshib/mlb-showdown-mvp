@@ -23,6 +23,7 @@ import {
   currentManager,
   isAuctionDraft,
   isAuctionPaused,
+  isDraftPaused,
   auctionStepGuard,
   isPendingBidder,
   isRandomNomination,
@@ -1143,18 +1144,19 @@ function broadcastLot(room) {
 // always be moved along.
 function denyAction(draft, seat, isHost, action) {
   const type = action?.type;
+  // Every room can be stopped, snake included: the whistle belongs to the
+  // format-agnostic host, not to the auction.
   if (type === "pause" || type === "resume") {
-    if (!isAuctionDraft(draft)) return "This room is not an auction draft";
     if (!isHost) return `Only the host can ${type} the draft`;
     if (draft.complete) return "The draft is already complete";
-    if (type === "pause" && isAuctionPaused(draft)) return "The draft is already paused";
-    if (type === "resume" && !isAuctionPaused(draft)) return "The draft is not paused";
+    if (type === "pause" && isDraftPaused(draft)) return "The draft is already paused";
+    if (type === "resume" && !isDraftPaused(draft)) return "The draft is not paused";
     return null;
   }
   // A paused room is a room holding still: the clocks are stopped, so no move
   // that would spend one may land. Setting a lineup is not a move on the draft,
   // and stays open — a break is exactly when people tinker with their team.
-  if (isAuctionPaused(draft) && type !== "lineup" && type !== "staff" && !SIM_ACTION_TYPES.has(type)) {
+  if (isDraftPaused(draft) && type !== "lineup" && type !== "staff" && !SIM_ACTION_TYPES.has(type)) {
     return "The draft is paused";
   }
   if (type === "pick" || type === "autopick") {

@@ -668,6 +668,9 @@ export function resumeSnake(draft, now = Date.now()) {
     draft.clock.turnStartedAt = normalizeTimestamp(now);
   }
   draft.pausedAt = null;
+  // The remainder has been handed back to whoever is resuming; a room replayed
+  // from its log must not come back holding a clock that already restarted.
+  draft.pausedRemainingMs = null;
   return true;
 }
 

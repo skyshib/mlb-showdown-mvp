@@ -702,3 +702,107 @@ test("the host can hand back a seat somebody has lost", async (t) => {
   });
   assert.equal(withNewToken.status, 200);
 });
+
+test("the host can pause a snake room, and nobody picks until it resumes", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "paused-snake",
+    managers: ["Ana", "Bo"],
+    pickTimer: 60
+  });
+  const roomId = created.data.roomId;
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  const bo = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+
+  // The whistle is the host's in a snake room too — it was an auction-only
+  // button, and a guest pressing it got told the room was the wrong kind.
+  const guestPause = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: bo.data.token,
+    action: { type: "pause" }
+  });
+  assert.equal(guestPause.status, 409);
+  assert.match(guestPause.data.error, /Only the host can pause/);
+
+  const paused = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "pause", remainingMs: 42000 }
+  });
+  assert.equal(paused.status, 200);
+
+  // Ana is on the clock and cannot use it: the room is holding still.
+  const pickWhilePaused = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(pickWhilePaused.status, 409);
+  assert.equal(pickWhilePaused.data.error, "The draft is paused");
+
+  const twice = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "pause" }
+  });
+  assert.equal(twice.status, 409);
+  assert.match(twice.data.error, /already paused/);
+
+  // Setting a lineup is not a move on the draft; a break is when people tinker.
+  const lineup = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: bo.data.token,
+    action: { type: "lineup", managerId: "team-2", assignments: {} }
+  });
+  assert.equal(lineup.status, 200);
+
+  // The pause is in the shared log, carrying what was left on the clock, so
+  // every replica stops on the same second — and comes back on it.
+  const snapshot = await api(base, "GET", `/api/rooms/${roomId}`);
+  const replica = createDraft(
+    snapshot.data.managers.map((manager) => manager.name),
+    deckFromIds(snapshot.data.universe, snapshot.data.seed, snapshot.data.deck),
+    snapshot.data.rosterSize,
+    snapshot.data.seed
+  );
+  for (const entry of snapshot.data.actions) applyDraftAction(replica, entry.action);
+  assert.notEqual(replica.pausedAt, null, "the replica is paused too");
+  assert.equal(replica.pausedRemainingMs, 42000, "and holding the clock it stopped");
+
+  // A room that comes back from a restart comes back paused.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const second = await startServer(t, dataDir);
+  const stillPaused = await api(second, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(stillPaused.data.error, "The draft is paused");
+
+  const guestResume = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: bo.data.token,
+    action: { type: "resume" }
+  });
+  assert.equal(guestResume.status, 409);
+
+  assert.equal((await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "resume" }
+  })).status, 200);
+
+  const picked = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(picked.status, 200, "the room is running again");
+
+  const after = await api(base, "GET", `/api/rooms/${roomId}`);
+  const resumed = createDraft(
+    after.data.managers.map((manager) => manager.name),
+    deckFromIds(after.data.universe, after.data.seed, after.data.deck),
+    after.data.rosterSize,
+    after.data.seed
+  );
+  for (const entry of after.data.actions) applyDraftAction(resumed, entry.action);
+  assert.equal(resumed.pausedAt, null);
+  assert.equal(resumed.pausedRemainingMs, null, "the resume hands the remainder back exactly once");
+  assert.equal(resumed.managers[0].roster.length, 1);
+});

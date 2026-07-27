@@ -317,8 +317,8 @@ setInterval(auctionClockTick, 100);
 
 // Coming back from a break, the clock picks up where it stopped rather than
 // handing the manager a fresh minute he did not earn.
-function restartPickClock(draft) {
-  const left = draft?.pausedRemainingMs;
+function restartPickClock(draft, remainingMs = draft?.pausedRemainingMs) {
+  const left = remainingMs;
   pickClockKey = null;
   pickClockTimeoutKey = null;
   pickClockWarned = false;
@@ -1176,13 +1176,20 @@ function rebuildOnlineDraft(room) {
   // carries the rest of it.
   state.online.lot = room.lot ?? null;
   let lastSim = null;
+  // A resume the room has since drafted past is a break that is over: the clock
+  // it stopped belonged to a turn nobody is on any more. Only a resume with
+  // nothing after it still owes the current turn the time it was holding.
+  let carriedMs = null;
   for (const entry of room.actions) {
     if (SIM_ACTION_TYPES.has(entry.action?.type)) {
       lastSim = entry.action;
     } else {
+      const resumingSnake = entry.action?.type === "resume" && !isAuctionDraft(state.draft);
+      carriedMs = resumingSnake ? state.draft.pausedRemainingMs : null;
       applyDraftAction(state.draft, entry.action);
     }
   }
+  if (Number.isFinite(carriedMs)) restartPickClock(state.draft, carriedMs);
   state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
   // Your own team, not the first name in the room. Everybody was landing on
   // manager one's roster and staring at somebody else's cards.
@@ -1222,12 +1229,18 @@ function subscribeOnline() {
         applySharedSim(entry.action);
         return;
       }
+      // The snake's clock lives in each browser, so the room's resume has to
+      // restart it here — with the time that was left on it when the host
+      // called the break, which the pause put on the draft.
+      const resumingSnake = entry.action?.type === "resume" && !isAuctionDraft(state.draft);
+      const carriedMs = resumingSnake ? state.draft.pausedRemainingMs : null;
       try {
         applyDraftAction(state.draft, entry.action);
       } catch {
         resyncOnlineRoom();
         return;
       }
+      if (resumingSnake) restartPickClock(state.draft, carriedMs);
       online.appliedSeq = entry.seq;
       online.status = "";
       // An undo means someone is rewinding on purpose; hold computer picks
@@ -3179,8 +3192,9 @@ function bindDraftActions() {
         if (snake) pauseSnake(state.draft, left, draftNow());
         else pauseAuction(state.draft, draftNow());
       } else if (snake) {
+        const carried = state.draft.pausedRemainingMs;
         resumeSnake(state.draft);
-        restartPickClock(state.draft);
+        restartPickClock(state.draft, carried);
       } else {
         resumeAuction(state.draft, draftNow());
       }
