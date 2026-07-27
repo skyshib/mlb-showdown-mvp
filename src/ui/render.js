@@ -1,4 +1,6 @@
 import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260716-records";
+// Same query string batch.js uses, so the browser keeps one copy of the engine.
+import { eventLeverage } from "../rules/game.js?v=20260717-draft-wpa";
 import { cardPanelHtml } from "./cardFace.js?v=20260725-golden-serial";
 import { MAX_NOTE_LENGTH } from "./draftRankings.js?v=20260725-prep-tiers";
 
@@ -743,8 +745,59 @@ function formatAxisNumber(value) {
   return String(Math.round(number));
 }
 
-// Home team's win probability across one game's plays. Big swings
-// (|WPA| >= 10%) get a marker; every play carries a native tooltip.
+// Where the chart starts shading, and where a play earns the high-leverage
+// badge. Leverage is measured against an average plate appearance (1.0), so
+// these are not arbitrary: across 200 simulated games the median play sits at
+// 0.71, 16% clear 1.5, and 9% clear 2.0 — the same shape MLB history has.
+// 2.0 is the conventional high-leverage line; 1.5 is where a stretch is worth
+// pointing at, so every badged play falls inside a shaded band.
+export const TENSE_LEVERAGE = 1.5;
+export const HIGH_LEVERAGE = 2;
+
+// The plays that moved the game most, as a Map of event index to rank (1 is the
+// biggest). The chart and the game story both mark the same three plays, so
+// they rank them the same way here rather than each sorting for itself — index
+// breaks ties, so a tie resolves to whichever came first.
+export function topSwingRanks(events, limit = 3) {
+  return new Map(
+    (events ?? [])
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => Number.isFinite(event.wpa))
+      .sort((a, b) => Math.abs(b.event.wpa) - Math.abs(a.event.wpa) || a.index - b.index)
+      .slice(0, limit)
+      .map(({ index }, rank) => [index, rank + 1])
+  );
+}
+
+// Consecutive plays at or above `threshold` leverage, merged into runs. A tense
+// stretch is a stretch — one shaded block over "second and third, nobody out,
+// one run in it" reads as the jam it was, where a stripe per play reads as a
+// barcode.
+function leverageBands(events, threshold = TENSE_LEVERAGE) {
+  const bands = [];
+  let open = null;
+  events.forEach((event, index) => {
+    const leverage = eventLeverage(event);
+    if (leverage != null && leverage >= threshold) {
+      if (open) {
+        open.end = index;
+        open.peak = Math.max(open.peak, leverage);
+      } else {
+        open = { start: index, end: index, peak: leverage };
+      }
+    } else if (open) {
+      bands.push(open);
+      open = null;
+    }
+  });
+  if (open) bands.push(open);
+  return bands;
+}
+
+// Home team's win probability across one game's plays. Tense stretches are
+// shaded behind the line, the three biggest swings are numbered, big swings
+// (|WPA| >= 10%) get a plain marker, and clicking anywhere jumps to that play
+// in the story below.
 export function renderWinProbabilityChart(game) {
   const events = game?.events ?? [];
   if (events.length < 2 || events[0].wpBefore == null) return "";
@@ -798,22 +851,62 @@ export function renderWinProbabilityChart(game) {
     return `${event.inning}${event.half === "top" ? "T" : "B"} · ${label}`;
   };
 
-  const hoverZones = events.map((event, index) =>
-    `<rect x="${xFor(index).toFixed(1)}" y="${margin.top}" width="${(plotWidth / events.length).toFixed(2)}" height="${plotHeight}" fill="transparent" class="wp-hover-zone" data-wp-value="${escapeHtml(describeValue(event))}" data-wp-play="${escapeHtml(describePlay(event))}" />`);
+  // Shaded first, so everything else draws on top of it.
+  const bands = leverageBands(events).map((band) => {
+    // 1.5 barely tints; 4.0 and up is as dark as it gets. Past that the number
+    // keeps climbing (a bases-loaded tie in the ninth is over 10) but the eye
+    // has stopped reading the difference.
+    const weight = Math.min(1, (band.peak - TENSE_LEVERAGE) / (4 - TENSE_LEVERAGE));
+    const x = xFor(band.start);
+    const bandWidth = Math.max(1.5, xFor(band.end + 1) - x);
+    return `<rect x="${x.toFixed(1)}" y="${margin.top}" width="${bandWidth.toFixed(1)}" height="${plotHeight}" class="wp-leverage-band" fill-opacity="${(0.07 + weight * 0.13).toFixed(3)}" />`;
+  });
 
+  const zoneWidth = plotWidth / events.length;
+  const jumpLabel = (event, index) => `Jump to play ${index + 1}: ${describePlay(event)}`;
+  const hoverZones = events.map((event, index) =>
+    `<rect x="${xFor(index).toFixed(1)}" y="${margin.top}" width="${zoneWidth.toFixed(2)}" height="${plotHeight}" fill="transparent" class="wp-hover-zone" data-wp-play-index="${index}" data-wp-value="${escapeHtml(describeValue(event))}" data-wp-play="${escapeHtml(describePlay(event))}" />`);
+
+  // The three biggest swings are numbered to match the story's turning-point
+  // cards; anything else past 10% keeps the plain dot it always had.
+  const ranks = topSwingRanks(events);
   const swingMarkers = events
     .map((event, index) => ({ event, index }))
-    .filter(({ event }) => Math.abs(event.wpa ?? 0) >= 0.1)
-    .map(({ event, index }) =>
-      `<circle cx="${xFor(index + 1).toFixed(1)}" cy="${yFor(event.wpAfter).toFixed(1)}" r="4.5" class="wp-swing-dot" />`);
+    .filter(({ event, index }) => ranks.has(index) || Math.abs(event.wpa ?? 0) >= 0.1)
+    .map(({ event, index }) => {
+      const cx = xFor(index + 1);
+      const cy = yFor(event.wpAfter);
+      const rank = ranks.get(index);
+      const shared = `data-wp-play-index="${index}" data-wp-value="${escapeHtml(describeValue(event))}" data-wp-play="${escapeHtml(describePlay(event))}"`;
+      if (!rank) {
+        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.5" class="wp-swing-dot" ${shared} />`;
+      }
+      // The badge sits above the point where there is room and below where the
+      // line is already near the top, so it never covers the curve it labels.
+      const above = cy > margin.top + 26;
+      const badgeY = above ? cy - 15 : cy + 15;
+      return `<g class="wp-swing-marker" tabindex="0" role="button" aria-label="${escapeHtml(jumpLabel(event, index))}" ${shared}>
+        <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5.5" class="wp-swing-dot wp-swing-dot-top" />
+        <circle cx="${cx.toFixed(1)}" cy="${badgeY.toFixed(1)}" r="8" class="wp-swing-badge" />
+        <text x="${cx.toFixed(1)}" y="${(badgeY + 3.5).toFixed(1)}" text-anchor="middle" class="wp-swing-rank">${rank}</text>
+      </g>`;
+    });
 
-  return `<svg viewBox="0 0 ${width} ${height}" class="race-chart wp-chart" role="img" aria-label="Home team win probability after each play; the table below lists every play">
-    ${gridLines.join("")}
-    ${inningMarks.join("")}
-    <polyline points="${points.join(" ")}" fill="none" class="wp-line" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
-    ${swingMarkers.join("")}
-    ${hoverZones.join("")}
-  </svg>`;
+  return `<figure class="wp-figure">
+    <svg viewBox="0 0 ${width} ${height}" class="race-chart wp-chart" aria-label="Home team win probability after each play. Shaded stretches are high-leverage; numbered markers are the three biggest swings. Every play is listed in the story below.">
+      ${bands.join("")}
+      ${gridLines.join("")}
+      ${inningMarks.join("")}
+      <polyline points="${points.join(" ")}" fill="none" class="wp-line" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+      ${hoverZones.join("")}
+      ${swingMarkers.join("")}
+    </svg>
+    <figcaption class="wp-legend">
+      <span><i class="wp-legend-band"></i>Shaded: leverage ${TENSE_LEVERAGE}+, where a plate appearance swung more than 1½ average ones</span>
+      <span><i class="wp-legend-swing">1</i>The three biggest swings</span>
+      <span class="wp-legend-hint">Click the chart to jump to that play</span>
+    </figcaption>
+  </figure>`;
 }
 
 export function basesText(bases) {

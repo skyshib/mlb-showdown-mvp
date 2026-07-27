@@ -87,15 +87,32 @@ function repeatingRng(...rolls) {
   };
 }
 
+// The lineups whole games are simulated with. They need one thing the bare
+// `hitter` fixture does not have: a way to make an out. A nine-man order that
+// cannot be retired is not a slow ball game, it is an unending one — the pitcher
+// tires without bound, the batter's advantage becomes permanent, and the half
+// inning has no exit. Games here used to escape it by accident, on runners
+// thrown out taking bases they had no business taking.
+// The out sits on 20 so every other roll lands where the bare fixture's chart
+// put it, and the tests that spell out a die keep meaning what they meant.
+const simHitter = {
+  ...hitter,
+  chart: [
+    { from: 1, to: 10, result: RESULTS.SINGLE },
+    { from: 11, to: 19, result: RESULTS.HR },
+    { from: 20, to: 20, result: RESULTS.GB }
+  ]
+};
+
 const teamA = {
   name: "A",
-  lineup: Array.from({ length: 9 }, (_, index) => ({ ...hitter, id: `a-h-${index}`, name: `A Hitter ${index}` })),
+  lineup: Array.from({ length: 9 }, (_, index) => ({ ...simHitter, id: `a-h-${index}`, name: `A Hitter ${index}` })),
   pitchers: [{ ...pitcher, id: "a-p", name: "A Pitcher" }]
 };
 
 const teamB = {
   name: "B",
-  lineup: Array.from({ length: 9 }, (_, index) => ({ ...hitter, id: `b-h-${index}`, name: `B Hitter ${index}` })),
+  lineup: Array.from({ length: 9 }, (_, index) => ({ ...simHitter, id: `b-h-${index}`, name: `B Hitter ${index}` })),
   pitchers: [{ ...pitcher, id: "b-p", name: "B Pitcher" }]
 };
 
@@ -310,7 +327,12 @@ test("runner can steal second before the plate appearance", () => {
   assert.equal(event.playDetails.stealAttempt.runnerSpeed, 20);
   assert.equal(event.playDetails.stealAttempt.targetBonus, 0);
   assert.equal(event.playDetails.stealAttempt.destination, "second");
-  assert.equal(event.playDetails.stealAttempt.decisionMinimum, 0.9);
+  // First inning, nobody out, tied: the win column asks for 71% here, which is
+  // what a century of baseball asks of a stolen base.
+  assert.ok(
+    Math.abs(event.playDetails.stealAttempt.decisionMinimum - 0.71) < 0.005,
+    `bar was ${event.playDetails.stealAttempt.decisionMinimum}`
+  );
   assert.equal(state.stats.hitters.get("away:a-h-0").sb, 1);
 });
 
@@ -338,7 +360,7 @@ test("stealing third fights the shorter throw: +5 to the catcher, not the runner
   state.outs = 1;
   state.bases = [null, { name: "Runner 2", speed: 15 }, null];
 
-  // The penalized odds fall below the decision matrix, so the auto-runner
+  // The penalized odds fall below what the base is worth, so the auto-runner
   // now declines this jump...
   assert.equal(playStealAttempt(state, { d20: () => 16 }), null);
 
@@ -353,7 +375,10 @@ test("stealing third fights the shorter throw: +5 to the catcher, not the runner
   assert.equal(event.playDetails.stealAttempt.targetBonus, -5);
   assert.equal(event.playDetails.stealAttempt.target, 10);
   assert.equal(event.playDetails.stealAttempt.destination, "third");
-  assert.equal(event.playDetails.stealAttempt.decisionMinimum, 0.75);
+  assert.ok(
+    Math.abs(event.playDetails.stealAttempt.decisionMinimum - 0.71) < 0.005,
+    `bar was ${event.playDetails.stealAttempt.decisionMinimum}`
+  );
   assert.equal(event.playDetails.stealAttempt.safeChance, 0.25);
   assert.equal(event.playDetails.stealAttempt.total, 21);
   assert.equal(state.stats.pitchers.get("home:sc-p").outs, 1);
@@ -375,7 +400,9 @@ test("low-probability steal attempts are skipped by the decision matrix", () => 
 test("caught stealing for the third out advances the half inning without a plate appearance", () => {
   const state = createInitialState(teamA, weakDefense);
   state.outs = 2;
-  state.bases = [{ name: "Runner 1", speed: 14 }, null, null];
+  // 75%, which clears the 71% second base is worth here — the bar the runner
+  // has to beat, not a fixed rate.
+  state.bases = [{ name: "Runner 1", speed: 15 }, null, null];
 
   const event = playGameEvent(state, { d20: () => 20 });
 
@@ -517,9 +544,11 @@ test("failed flyout tag-up records the extra out and clears the runner", () => {
 test("runner tagging home scores when defense throws out another tag-up for the third out", () => {
   const state = createInitialState(teamA, weakDefense);
   state.outs = 1;
-  // SPD 18 clears the tightened two-out bar for third (85%) yet stays the
-  // shakiest runner, so the forced-20 throw cuts him down while home scores.
-  state.bases = [null, { name: "Runner 2", speed: 18 }, { name: "Runner 3", speed: 20 }];
+  // SPD 19 clears what third is worth behind a runner who has already scored
+  // (90% with two down — the run is in, and the third out is the whole rest of
+  // the inning) yet stays the shakiest runner, so the forced-20 throw cuts him
+  // down while home scores.
+  state.bases = [null, { name: "Runner 2", speed: 19 }, { name: "Runner 3", speed: 20 }];
 
   const runs = applyFlyout(state, makeHitter({ id: "fly-b", name: "Fly Batter" }), "away", "home", { d20: () => 20 });
 

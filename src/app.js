@@ -15,6 +15,7 @@ import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool, MAX_TEMPERATURE, normalizeTemperature } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml } from "./ui/cardFace.js?v=20260716-records";
+import { eventLeverage } from "./rules/game.js?v=20260717-draft-wpa";
 import { canEnterAuctionBid, nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
   isMuted,
@@ -166,7 +167,9 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart,
-  renderWinProbabilityChart
+  renderWinProbabilityChart,
+  topSwingRanks,
+  HIGH_LEVERAGE
 } from "./ui/render.js?v=20260725-prep-tiers";
 import { formatAdvanceAttempt, renderBaseDiamond, storyAdvantage, storyHeadline } from "./ui/gameStory.js?v=20260725-throw-labels";
 import {
@@ -5308,6 +5311,14 @@ function bindBatchActions() {
       return;
     }
 
+    // The chart and the turning-point cards both address plays by index; either
+    // one scrolls the story to that play.
+    const jumpSource = event.target.closest("[data-wp-play-index], [data-jump-play]");
+    if (jumpSource) {
+      jumpToStoryPlay(jumpSource.dataset.wpPlayIndex ?? jumpSource.dataset.jumpPlay);
+      return;
+    }
+
     const gameOpen = event.target.closest("[data-game-open]");
     if (gameOpen && !gameOpen.disabled) {
       state.batchGameIndex = Number(gameOpen.dataset.gameOpen);
@@ -5353,6 +5364,38 @@ function bindBatchActions() {
     }
   };
   bindHoverCardPreviews();
+  // After bindHoverCardPreviews, which clears app.onkeydown for its own use.
+  // An SVG marker is not a <button>, so Enter and Space have to be wired by
+  // hand or the swing markers can be focused and then do nothing.
+  app.onkeydown = (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const marker = event.target.closest?.("[data-wp-play-index][role='button']");
+    if (!marker) return;
+    event.preventDefault();
+    jumpToStoryPlay(marker.dataset.wpPlayIndex);
+  };
+}
+
+// Scroll the play-by-play to one play and mark it. The half-inning it lives in
+// may be collapsed — a quiet inning starts closed — so it is opened first, or
+// the browser would scroll to a summary bar with nothing under it.
+//
+// The highlight is removed and re-added rather than left on, so clicking the
+// same play twice flashes twice instead of doing nothing visible.
+function jumpToStoryPlay(index) {
+  const play = app.querySelector(`[data-play-index="${CSS.escape(String(index))}"]`);
+  if (!play) return;
+  for (let node = play.closest("details"); node; node = node.parentElement?.closest("details")) {
+    node.open = true;
+  }
+  play.scrollIntoView({ behavior: "smooth", block: "center" });
+  for (const marked of app.querySelectorAll(".play-jump-target")) marked.classList.remove("play-jump-target");
+  // Reading a layout property between the remove and the add forces the style
+  // to flush, which is what restarts the animation when the same play is
+  // clicked twice. requestAnimationFrame would do the same job, but it does not
+  // run at all in a background tab — the highlight would simply never appear.
+  void play.offsetWidth;
+  play.classList.add("play-jump-target");
 }
 
 function formatShare(value) {
@@ -6058,15 +6101,23 @@ function renderGameLog(game) {
   const events = game.events ?? [];
   if (!events.length) return `<p class="batch-note">No play-by-play is available for this game.</p>`;
 
-  const keyMoments = [...events]
-    .filter((event) => Number.isFinite(event.wpa))
-    .sort((a, b) => Math.abs(b.wpa) - Math.abs(a.wpa))
-    .slice(0, 3);
-  const momentCards = keyMoments.map((event, index) => `<article class="game-story-moment">
-    <span>#${index + 1} swing · ${halfInningLabel(event)}</span>
-    <strong>${playHeadline(event)}</strong>
-    <small>${event.scoreAfter?.away ?? 0}-${event.scoreAfter?.home ?? 0} · ${formatWpaPercent(event.wpa)} WPA</small>
-  </article>`).join("");
+  // The chart numbers the same three plays off the same ranking, and clicking
+  // either the card or its marker scrolls to the play itself.
+  const ranks = topSwingRanks(events);
+  const momentCards = [...ranks.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .map(([index, rank]) => {
+      const event = events[index];
+      return `<button type="button" class="game-story-moment" data-jump-play="${index}">
+        <span>#${rank} swing · ${halfInningLabel(event)}</span>
+        <strong>${playHeadline(event)}</strong>
+        <small>${event.scoreAfter?.away ?? 0}-${event.scoreAfter?.home ?? 0} · ${formatWpaPercent(event.wpa)} WPA</small>
+      </button>`;
+    }).join("");
+
+  // Plays are addressed by their position in the game's event list, which is
+  // the same number the chart's markers carry, so a click on either lands here.
+  const indexByEvent = new Map(events.map((event, index) => [event, index]));
 
   const halfInnings = [];
   const halfInningsByKey = new Map();
@@ -6082,10 +6133,13 @@ function renderGameLog(game) {
 
   const innings = halfInnings.map((group) => {
     const runs = group.events.reduce((sum, event) => sum + eventRunsScored(event), 0);
-    const leverage = Math.max(0, ...group.events.map((event) => Math.abs(Number(event.wpa) || 0)));
-    const open = runs > 0 || group.inning >= 7 || leverage >= 0.1;
+    // "High-leverage spots start expanded" now means what it says: the half
+    // opens if any plate appearance in it was worth 2 average ones, whether or
+    // not the swing that followed amounted to anything.
+    const peakLeverage = Math.max(0, ...group.events.map((event) => eventLeverage(event) ?? 0));
+    const open = runs > 0 || group.inning >= 7 || peakLeverage >= HIGH_LEVERAGE;
     const battingTeam = group.half === "top" ? game.away?.name : game.home?.name;
-    const plays = group.events.map((event) => renderStoryPlay(event, game.home?.name)).join("");
+    const plays = group.events.map((event) => renderStoryPlay(event, game.home?.name, indexByEvent.get(event))).join("");
     const result = runs
       ? `<strong>${runs} run${runs === 1 ? "" : "s"}</strong>`
       : `<span>Scoreless</span>`;
@@ -6122,10 +6176,18 @@ function renderGameLog(game) {
   </div>`;
 }
 
-function renderStoryPlay(event, homeTeamName = "Home") {
+function renderStoryPlay(event, homeTeamName = "Home", playIndex = null) {
   const runs = eventRunsScored(event);
   const wpa = Number(event.wpa) || 0;
-  const highLeverage = Math.abs(wpa) >= 0.1;
+  // Two different claims, and the badges used to make only one of them under
+  // the other's name. Leverage is what the spot was worth BEFORE the pitch —
+  // the MLB index, where 1.0 is an average plate appearance. A big swing is
+  // what the play actually did to the game. A bases-loaded jam escaped on one
+  // pitch is high leverage and no swing; a grand slam in a 10-run game is a
+  // swing of nothing in a spot worth nothing.
+  const leverage = eventLeverage(event);
+  const highLeverage = leverage != null && leverage >= HIGH_LEVERAGE;
+  const bigSwing = Math.abs(wpa) >= 0.1;
   const tone = wpa > 0.0005 ? "wpa-pos" : wpa < -0.0005 ? "wpa-neg" : "";
   const steal = event.playDetails?.kind === "steal";
   const stealSafe = Boolean(event.playDetails?.stealAttempt?.safe);
@@ -6137,12 +6199,13 @@ function renderStoryPlay(event, homeTeamName = "Home") {
   const winProbability = event.wpBefore == null || event.wpAfter == null
     ? ""
     : `<span>${escapeHtml(homeTeamName)} WP ${formatWinProb(event.wpBefore)} → ${formatWinProb(event.wpAfter)}</span>`;
-  return `<article class="game-story-play${runs ? " scoring-play" : ""}${highLeverage ? " leverage-play" : ""}${steal ? ` runner-event ${stealSafe ? "steal-safe" : "steal-caught"}` : ""}">
+  return `<article class="game-story-play${runs ? " scoring-play" : ""}${highLeverage ? " leverage-play" : ""}${steal ? ` runner-event ${stealSafe ? "steal-safe" : "steal-caught"}` : ""}"${playIndex == null ? "" : ` data-play-index="${playIndex}"`}>
     <div class="game-story-play-copy">
       <div class="game-story-play-flags">
         ${steal ? `<span class="steal-badge">${stealSafe ? "STOLEN BASE" : "CAUGHT STEALING"}</span>` : ""}
         ${runs ? `<span class="scoring-badge">${runs} RUN${runs === 1 ? "" : "S"}</span>` : ""}
-        ${highLeverage ? `<span class="leverage-badge">HIGH LEVERAGE</span>` : ""}
+        ${highLeverage ? `<span class="leverage-badge" title="Leverage ${leverage.toFixed(2)} — this plate appearance was worth ${leverage.toFixed(1)} average ones">HIGH LEVERAGE ${leverage.toFixed(1)}</span>` : ""}
+        ${bigSwing ? `<span class="swing-badge">BIG SWING</span>` : ""}
         ${advantageBadge}
       </div>
       <strong>${playHeadline(event)}</strong>

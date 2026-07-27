@@ -3,22 +3,86 @@ import { reliefDecision, lineupProfile } from "./pitching.js?v=20260716-records"
 import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
+import { advanceBreakeven } from "./breakeven.js?v=20260716-records";
 
-// Go/no-go floors for taking a base, by outs and destination. Second and
-// home loosen as outs mount (with two gone the runner is off on contact and
-// has nothing to lose — 40% sends him), but third TIGHTENS: with nobody out
-// there's a whole inning to cash him from third, and never, ever make the
-// third out there.
+// Go/no-go floors for taking a base, by outs and destination.
+//
+// This was the whole decision once. It is now only the backstop: every candidate
+// gets its own break-even figured off the win expectancy for the situation it is
+// actually in (see breakeven.js and annotateAdvanceChain), and these numbers are
+// what a candidate falls back on if it was built without a game around it.
+//
+// They are kept because they were a decent guess, and because they read as what
+// the derived numbers turn out to say: second and home loosen as the outs mount,
+// third tightens, and nobody makes the third out there.
 const ADVANCE_DECISION_MATRIX = {
   0: { second: 0.9, third: 0.65, home: 0.75 },
   1: { second: 0.8, third: 0.75, home: 0.65 },
   2: { second: 0.7, third: 0.85, home: 0.4 }
 };
 
-// Exported so AI layers (the NPC skipper's personality) can bend this same
-// table instead of replacing it with their own thresholds.
 export function advanceDecisionMinimum(outs, destination) {
   return ADVANCE_DECISION_MATRIX[outs]?.[destination] ?? 1;
+}
+
+// The batting team's score edge — the currency every win-probability question in
+// this file is asked in.
+function battingEdge(state) {
+  const battingSide = state.half === "top" ? "away" : "home";
+  const fieldingSide = battingSide === "away" ? "home" : "away";
+  return state.score[battingSide] - state.score[fieldingSide];
+}
+
+// Hang each candidate's own go/no-go number on it: how often this runner has to
+// beat this throw for the base to be worth what it risks, in this ball game.
+//
+// Sends are a CHAIN. A trailing runner can only go if every man ahead of him
+// goes too, so the world his number is figured in is the one where they already
+// have — the lead runner off the bases, his base filled, his run in. That is the
+// same prefix the send itself resolves under (see leadPrefixAttempts), and it is
+// also the question the interactive layer is really asking when it offers to
+// send two men: the second man's price assumes the first one went.
+function annotateAdvanceChain(state, candidates) {
+  const { half, inning } = state;
+  let bases = state.bases;
+  let diff = battingEdge(state);
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    priceAdvance(candidate, half, inning, bases, diff);
+    if (index === candidates.length - 1) break;
+    const after = [...bases];
+    after[candidate.fromIndex] = null;
+    if (candidate.toIndex >= 3) {
+      diff += 1;
+    } else {
+      after[candidate.toIndex] = candidate.runner;
+    }
+    bases = after;
+  }
+
+  return candidates;
+}
+
+// Steals are not a chain — the two of them are alternatives, and only one man is
+// going — so each is priced against the bases as they stand.
+function annotateAdvanceOptions(state, candidates) {
+  const { half, inning } = state;
+  const diff = battingEdge(state);
+  for (const candidate of candidates) priceAdvance(candidate, half, inning, state.bases, diff);
+  return candidates;
+}
+
+function priceAdvance(candidate, half, inning, bases, diff) {
+  candidate.decisionMinimum = advanceBreakeven({
+    half,
+    inning,
+    outs: candidate.outsForDecision,
+    bases,
+    diff,
+    fromIndex: candidate.fromIndex,
+    toIndex: candidate.toIndex
+  });
 }
 
 // How much this plate appearance MATTERS, looked up in the same MLB history the
@@ -41,6 +105,25 @@ export function stateLeverage(state) {
     outs: Math.min(state.outs, 2),
     bases: state.bases,
     diff: state.score[battingSide] - state.score[fieldingSide]
+  });
+}
+
+// The same number for a play already in the books, read off the state the play
+// STARTED from. Leverage is what was at stake going in, so it is a fact about
+// the situation and not about how the swing turned out — a bases-loaded pop-up
+// in a tie ninth was a huge moment that happened to produce nothing, and a
+// three-run homer in a 12-0 game was no moment at all.
+//
+// A pitching change carries no base-out state of its own, so it has no leverage
+// to report and returns null rather than a misleading zero.
+export function eventLeverage(event) {
+  if (!event?.basesBefore || !event.scoreBefore || !Number.isFinite(event.outsBefore)) return null;
+  return stateLeverage({
+    half: event.half,
+    inning: event.inning,
+    outs: event.outsBefore,
+    bases: event.basesBefore,
+    score: event.scoreBefore
   });
 }
 
@@ -248,7 +331,7 @@ export function playStealAttempt(state, rng) {
 }
 
 // Every steal opportunity on the current bases, unfiltered by the auto-play
-// decision matrix, so an interactive layer can offer (and force) attempts the
+// break-even, so an interactive layer can offer (and force) attempts the
 // auto-runner would decline. Auto play never calls this.
 export function stealCandidates(state) {
   if (state.outs >= 3 || state.pendingAdvance) return [];
@@ -281,12 +364,12 @@ export function stealCandidates(state) {
     }));
   }
 
-  return candidates;
+  return annotateAdvanceOptions(state, candidates);
 }
 
 // Force a steal attempt for the runner on the given base index, regardless of
-// the auto-play decision matrix. Returns the steal event, or null when that
-// runner has no open base ahead.
+// what the break-even says. Returns the steal event, or null when that runner
+// has no open base ahead.
 export function attemptSteal(state, fromIndex, rng) {
   const candidate = stealCandidates(state).find((item) => item.fromIndex === fromIndex);
   if (!candidate) return null;
@@ -698,7 +781,7 @@ export function createInitialState(awayTeam, homeTeam, options = {}) {
     // book keeps the luckiest afternoon (see rollD20 and the twenties-game record).
     twenties: 0,
     // Interactive-layer flags. Auto play leaves both null: pitching plans run
-    // themselves and extra-base advances resolve by the decision matrix.
+    // themselves and extra-base advances resolve by their own break-evens.
     manualPitchingFor: null,
     deferAdvancesFor: null,
     pendingAdvance: null,
@@ -1172,8 +1255,8 @@ function runnerFor(player, responsiblePitcher = null) {
   };
 }
 
-// All tag-up opportunities, lead runner first, unfiltered by the decision
-// matrix — the interactive layer offers every legal send.
+// All tag-up opportunities, lead runner first, unfiltered by the break-even —
+// the interactive layer offers every legal send.
 function tagUpCandidates(state, pitchingSide, outsForDecision) {
   if (outsForDecision >= 3) return [];
   const candidates = [];
@@ -1203,7 +1286,7 @@ function tagUpCandidates(state, pitchingSide, outsForDecision) {
     }));
   }
 
-  return candidates;
+  return annotateAdvanceChain(state, candidates);
 }
 
 function chooseTagUpAttempts(state, pitchingSide, outsForDecision) {
@@ -1212,7 +1295,7 @@ function chooseTagUpAttempts(state, pitchingSide, outsForDecision) {
 
 // A trailing runner can only advance if every runner ahead of him goes too —
 // otherwise he'd run into an occupied base. Candidates arrive lead first, so
-// take the prefix that clears the decision matrix.
+// take the prefix that clears its own break-even.
 function leadPrefixAttempts(candidates) {
   const attempts = [];
   for (const candidate of candidates) {
@@ -1251,7 +1334,7 @@ function chooseStealAttempt(state, pitchingSide) {
     }));
   }
 
-  return candidates
+  return annotateAdvanceOptions(state, candidates)
     .filter((candidate) => shouldAttemptAdvance(candidate))
     .sort((a, b) => b.safeChance - a.safeChance || b.toIndex - a.toIndex)[0] ?? null;
 }
@@ -1290,7 +1373,9 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
   if (!pitchingSide || !rng || state.outs >= 3) return 0;
   const fielding = totalOutfieldFielding(state[pitchingSide]);
   const twoOutBonus = outsBefore >= 2 ? 5 : 0;
-  const allCandidates = candidates
+  // Sorted lead runner first BEFORE the break-evens are figured: each man's
+  // number assumes everyone ahead of him has gone.
+  const allCandidates = annotateAdvanceChain(state, candidates
     .filter(Boolean)
     .map((candidate) => createAdvanceCandidate({
       ...candidate,
@@ -1298,7 +1383,7 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
       fielding,
       targetBonus: (candidate.toIndex >= 3 ? 5 : 0) + twoOutBonus
     }))
-    .sort((a, b) => b.toIndex - a.toIndex);
+    .sort((a, b) => b.toIndex - a.toIndex));
 
   // Ask only when there is something to ask. If every man who could go is going
   // for free, the play resolves itself — the autopilot below sends anybody whose
@@ -1360,12 +1445,15 @@ function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, f
     target,
     safeChance,
     destination,
+    // The backstop, overwritten by the situation's own break-even the moment
+    // this candidate is priced against a ball game (see annotateAdvanceChain).
+    // Every builder in this file does that before anyone reads it.
     decisionMinimum: advanceDecisionMinimum(outsForDecision, destination)
   };
 }
 
 function shouldAttemptAdvance(candidate) {
-  return candidate.safeChance >= advanceDecisionMinimum(candidate.outsForDecision, candidate.destination);
+  return candidate.safeChance >= candidate.decisionMinimum;
 }
 
 // A die is worth throwing only when it could land on either side of the target.

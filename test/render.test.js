@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderBoxScore, renderDraftHistoryTable, renderLineScore, renderPlayerTable } from "../src/ui/render.js";
+import { renderBoxScore, renderDraftHistoryTable, renderLineScore, renderPlayerTable, renderWinProbabilityChart, topSwingRanks } from "../src/ui/render.js";
 import { cardPanelHtml } from "../src/ui/cardFace.js";
 
 const hitter = {
@@ -92,6 +92,87 @@ test("the game box score opens with an inning line score and R/H totals", () => 
   assert.match(html, /<td class="line-score-total">3<\/td>\s*<td class="line-score-total">6<\/td>/);
   assert.match(html, /<td class="line-score-total">2<\/td>\s*<td class="line-score-total">5<\/td>/);
   assert.ok(renderBoxScore(lineGame).indexOf("game-line-score") < renderBoxScore(lineGame).indexOf("Visitors hitters"));
+});
+
+// Leverage comes off the MLB table, so these situations carry real numbers: a
+// first-inning plate appearance with the bases empty is 0.86, a tie in the
+// bottom of the ninth with a man on second is 4.01, and the bases loaded down
+// one with two gone is 10.39 — the biggest spot the game has.
+const quiet = { inning: 1, half: "top", outsBefore: 0, basesBefore: [null, null, null], scoreBefore: { away: 0, home: 0 } };
+const blowout = { inning: 8, half: "top", outsBefore: 0, basesBefore: [null, null, null], scoreBefore: { away: 12, home: 3 } };
+const jam = { inning: 9, half: "bottom", outsBefore: 1, basesBefore: [null, "Runner", null], scoreBefore: { away: 3, home: 3 } };
+const loaded = { inning: 9, half: "bottom", outsBefore: 2, basesBefore: ["A", "B", "C"], scoreBefore: { away: 4, home: 3 } };
+// 1.84: over the shading line, well under the ceiling, so it shades lighter.
+const middling = { inning: 6, half: "bottom", outsBefore: 1, basesBefore: ["Runner", null, null], scoreBefore: { away: 2, home: 2 } };
+
+function chartEvent(situation, wpa, wpBefore) {
+  return {
+    ...situation,
+    batter: "Batter",
+    pitcher: "Pitcher",
+    result: "1B",
+    wpa,
+    wpBefore,
+    wpAfter: wpBefore + wpa
+  };
+}
+
+// Ordered so the two tense plays are adjacent (they must merge into one band)
+// and the third sits apart (it must not).
+const chartGame = {
+  events: [
+    chartEvent(quiet, 0.02, 0.5),
+    chartEvent(jam, 0.3, 0.52),
+    chartEvent(loaded, -0.3, 0.82),
+    chartEvent(blowout, 0.05, 0.52),
+    chartEvent(middling, 0.12, 0.57),
+    chartEvent(blowout, 0.11, 0.69)
+  ]
+};
+
+test("the biggest swings are ranked by how far they moved the game, ties by order", () => {
+  assert.deepEqual([...topSwingRanks(chartGame.events).entries()], [[1, 1], [2, 2], [4, 3]]);
+  assert.equal(topSwingRanks(chartGame.events, 1).size, 1);
+  assert.equal(topSwingRanks([]).size, 0);
+  // A play the engine never scored can't be ranked against the ones it did.
+  assert.equal(topSwingRanks([{ wpa: null }, { wpa: undefined }]).size, 0);
+});
+
+test("the win probability chart shades tense stretches and numbers the biggest swings", () => {
+  const html = renderWinProbabilityChart(chartGame);
+
+  // Two bands, not three: the adjacent pair is one stretch.
+  assert.equal((html.match(/class="wp-leverage-band"/g) ?? []).length, 2);
+  // Darker for the bigger jam, and never past the ceiling.
+  const opacities = [...html.matchAll(/fill-opacity="([\d.]+)"/g)].map((match) => Number(match[1]));
+  assert.equal(opacities.length, 2);
+  assert.ok(opacities.every((value) => value >= 0.07 && value <= 0.2), `bands out of range: ${opacities}`);
+  assert.ok(opacities[0] > opacities[1], "the ninth-inning jam shades darker than the sixth-inning spot");
+  // The ninth-inning pair peaks at 10.39, far past the 4.0 ceiling, and stops
+  // there — the darkest band is a fixed shade, not an unbounded one.
+  assert.equal(opacities[0], 0.2);
+
+  // Three numbered markers, and the plain dot for the fourth big swing.
+  assert.match(html, /class="wp-swing-rank">1</);
+  assert.match(html, /class="wp-swing-rank">2</);
+  assert.match(html, /class="wp-swing-rank">3</);
+  assert.doesNotMatch(html, /class="wp-swing-rank">4</);
+  assert.equal((html.match(/class="wp-swing-dot"/g) ?? []).length, 1);
+
+  // Every play is a jump target, markers included, and the markers take focus.
+  for (let index = 0; index < chartGame.events.length; index += 1) {
+    assert.ok(html.includes(`data-wp-play-index="${index}"`), `play ${index} has no jump target`);
+  }
+  assert.match(html, /class="wp-swing-marker" tabindex="0" role="button"/);
+  assert.match(html, /aria-label="Jump to play 2:/);
+});
+
+test("a game with nothing at stake gets no shading", () => {
+  const html = renderWinProbabilityChart({
+    events: [chartEvent(blowout, 0.01, 0.9), chartEvent(blowout, 0.01, 0.91), chartEvent(quiet, 0.01, 0.92)]
+  });
+  assert.ok(html.includes("wp-chart"));
+  assert.doesNotMatch(html, /wp-leverage-band/);
 });
 
 test("draft recap can sort by pick, paid, points, and WPA", () => {

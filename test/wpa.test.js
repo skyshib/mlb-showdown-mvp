@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
 import { autopick, buildTeam, createDraft } from "../src/rules/draft.js";
-import { simulateGame, winProbabilityHome, createInitialState } from "../src/rules/game.js";
+import { simulateGame, winProbabilityHome, createInitialState, eventLeverage } from "../src/rules/game.js";
 
 function draftTeams(seed, teamCount = 4) {
   const managers = Array.from({ length: teamCount }, (_, index) => `Team ${index + 1}`);
@@ -92,6 +92,43 @@ test("the top swing is the biggest single positive event in the game", () => {
   assert.ok(result.topSwing);
   const maxDelta = Math.max(...result.events.map((event) => event.wpa));
   assert.ok(Math.abs(result.topSwing.wpa - maxDelta) < 1e-9);
+});
+
+test("a play's leverage is read off the state it started from", () => {
+  const play = (situation) => eventLeverage({ ...situation, batter: "Batter", result: "1B" });
+  const empty = [null, null, null];
+
+  // The MLB table's own landmarks: the first pitch of a ball game, and the
+  // biggest spot in baseball.
+  assert.equal(
+    play({ inning: 1, half: "top", outsBefore: 0, basesBefore: empty, scoreBefore: { away: 0, home: 0 } }),
+    0.86
+  );
+  const biggest = play({ inning: 9, half: "bottom", outsBefore: 2, basesBefore: ["A", "B", "C"], scoreBefore: { away: 4, home: 3 } });
+  assert.ok(biggest > 10, `bases loaded, two out, down one in the ninth should be over 10, got ${biggest}`);
+
+  // Leverage is about the spot, not the swing: a blowout is worth nothing no
+  // matter what happens in it.
+  const garbage = play({ inning: 8, half: "top", outsBefore: 0, basesBefore: empty, scoreBefore: { away: 12, home: 3 } });
+  assert.ok(garbage < 0.1, `a nine-run lead in the 8th should be dead, got ${garbage}`);
+
+  // A pitching change has no base-out state, so it reports nothing rather than
+  // a zero that would read as "no leverage".
+  assert.equal(eventLeverage({ type: "pitching-change", inning: 5, half: "top" }), null);
+  assert.equal(eventLeverage(null), null);
+});
+
+test("every play in a simulated game can be scored for leverage", () => {
+  const result = playGame("wpa-leverage");
+  const plays = result.events.filter((event) => event.type !== "pitching-change");
+  assert.ok(plays.length > 20, "expected a full game of plays");
+  for (const event of plays) {
+    const leverage = eventLeverage(event);
+    assert.ok(
+      Number.isFinite(leverage) && leverage >= 0,
+      `${event.inning}${event.half} ${event.result} scored ${leverage}`
+    );
+  }
 });
 
 test("winProbabilityHome respects terminal and dominant states", () => {

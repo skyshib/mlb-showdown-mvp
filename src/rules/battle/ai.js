@@ -1,7 +1,7 @@
-import { stealCandidates, attemptSteal, advanceDecisionMinimum, pitcherStatus, autoRelieve, AUTO_PULL_BIAS } from "../game.js?v=20260716-records";
+import { stealCandidates, attemptSteal, pitcherStatus, autoRelieve, AUTO_PULL_BIAS } from "../game.js?v=20260716-records";
 
-// Profiles bend the two NPC decisions: stealBias shifts the league's
-// advance-decision matrix (negative = greener lights) rather than replacing it,
+// Profiles bend the two NPC decisions: stealBias shifts the break-even the
+// situation asks for (negative = greener lights) rather than replacing it,
 // and pullBias shifts the bar the pen has to clear before the skipper walks out
 // there — in control points, the currency reliefDecision thinks in.
 //
@@ -33,13 +33,14 @@ export function profileFor(name) {
 }
 
 // Called before an NPC plate appearance. Returns the steal event if the NPC
-// sends a runner, else null. The go/no-go bar is the same decision matrix
-// auto play uses, shifted by the trainer's personality.
+// sends a runner, else null. The go/no-go bar is the same break-even auto play
+// uses — the runner's own, off the win expectancy for the spot he is in —
+// shifted by the trainer's personality.
 export function npcMaybeSteal(state, rng, profile) {
   const candidates = stealCandidates(state);
   if (!candidates.length) return null;
   const best = [...candidates].sort((a, b) => b.safeChance - a.safeChance || b.toIndex - a.toIndex)[0];
-  const minimum = advanceDecisionMinimum(best.outsForDecision, best.destination) + (profile.stealBias ?? 0);
+  const minimum = best.decisionMinimum + (profile.stealBias ?? 0);
   if (best.safeChance < minimum) return null;
   return attemptSteal(state, best.fromIndex, rng);
 }

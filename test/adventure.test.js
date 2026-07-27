@@ -1112,10 +1112,12 @@ test("stealCandidates lists every open-base runner; attemptSteal forces the run"
   assert.equal(attemptSteal(state, 2, createRng("x")), null, "no candidate on that base");
 });
 
-test("third tightens as outs mount; NPC profiles bend the matrix, not replace it", async () => {
+test("the fallback matrix still says what it said; NPC profiles bend the live bar, not replace it", async () => {
   const { advanceDecisionMinimum } = await import("../src/rules/game.js");
   const { npcMaybeSteal, AI_PROFILES } = await import("../src/rules/battle/ai.js");
 
+  // The old hand-written floors are the backstop now — what a candidate falls
+  // back on with no ball game around it — but they still hold their shape.
   assert.equal(advanceDecisionMinimum(0, "third"), 0.65, "bold to third early");
   assert.equal(advanceDecisionMinimum(1, "third"), 0.75);
   assert.equal(advanceDecisionMinimum(2, "third"), 0.85, "never make the third out at third");
@@ -1123,9 +1125,9 @@ test("third tightens as outs mount; NPC profiles bend the matrix, not replace it
   assert.equal(advanceDecisionMinimum(0, "second"), 0.9);
   assert.equal(advanceDecisionMinimum(5, "second"), 1, "unknown rows never go");
 
-  // NPC steals read the same table, shifted by personality. Find a runner
-  // speed whose safe chance sits between the aggressive and balanced bars
-  // for stealing second at 0 outs (0.78 vs 0.9).
+  // NPC steals read the same break-even the auto-runner does — the one the
+  // situation itself sets — shifted by personality. Find a runner whose safe
+  // chance sits in the gap the aggressive skipper's thumb opens up.
   const { player, npc } = hookTeams();
   const battle = createBattle({ playerManager: player, npcManager: npc, trainer: trainerById("scout-jojo"), seed: "steal-bias" });
   const state = battle.state;
@@ -1134,7 +1136,12 @@ test("third tightens as outs mount; NPC profiles bend the matrix, not replace it
   for (let speed = 8; speed <= 28 && chance === null; speed += 1) {
     state.bases = [{ id: "swiper", name: "Swiper", speed }, null, null];
     const [candidate] = stealCandidates(state);
-    if (candidate && candidate.safeChance > 0.79 && candidate.safeChance < 0.89) chance = candidate.safeChance;
+    if (!candidate) continue;
+    const bar = candidate.decisionMinimum;
+    assert.ok(bar > 0 && bar <= 1, "the bar is a probability the spot asked for");
+    if (candidate.safeChance < bar && candidate.safeChance >= bar + AI_PROFILES.aggressive.stealBias) {
+      chance = candidate.safeChance;
+    }
   }
   assert.ok(chance !== null, "found a runner in the gap between profiles");
   assert.equal(npcMaybeSteal(state, createRng("bias-roll"), AI_PROFILES.balanced), null, "the balanced skipper holds him");

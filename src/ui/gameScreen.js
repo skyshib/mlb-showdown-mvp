@@ -183,8 +183,8 @@ function actionsHtml(phase) {
       relief.index));
     }
   }
-  // The autopilot plays both dugouts by the book — the decision matrix on the
-  // bases, the pen at fatigue 2 — and gives the game back when it matters:
+  // The autopilot plays both dugouts by the book — what the win column says a
+  // base is worth, the pen at fatigue 2 — and gives the game back when it matters:
   // the 8th inning on, or a runner in scoring position in a one-run game.
   buttons.push(`<button class="game-action fast-forward" data-game-action="fast-forward">
     Fast forward <small>Autopilot to the next big moment</small>

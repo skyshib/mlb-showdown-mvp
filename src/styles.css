@@ -4988,6 +4988,91 @@ button.interesting-game-card:focus-visible {
   fill: rgba(11, 107, 83, 0.08);
 }
 
+.wp-hover-zone,
+.wp-swing-marker {
+  cursor: pointer;
+}
+
+/* The tense stretches, sitting behind the line. Warm against the green line so
+   a jam reads as heat rather than as more chart. Opacity is set per band from
+   its peak leverage, so the shade is the measurement — the rule here only says
+   which colour is being faded. */
+.wp-leverage-band {
+  fill: #c2472f;
+  pointer-events: none;
+}
+
+.wp-swing-dot-top {
+  stroke-width: 2.5;
+}
+
+.wp-swing-badge {
+  fill: var(--accent);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+
+.wp-swing-rank {
+  fill: var(--panel);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.wp-swing-marker:focus-visible {
+  outline: none;
+}
+
+.wp-swing-marker:focus-visible .wp-swing-badge,
+.wp-swing-marker:hover .wp-swing-badge {
+  fill: var(--ink);
+}
+
+.wp-figure {
+  margin: 0;
+}
+
+.wp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.wp-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wp-legend-band {
+  width: 22px;
+  height: 11px;
+  border-radius: 2px;
+  background: rgba(194, 71, 47, 0.18);
+}
+
+.wp-legend-swing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.wp-legend-hint {
+  margin-left: auto;
+  font-style: italic;
+}
+
 .chart-tip {
   position: fixed;
   z-index: 20;
@@ -5395,6 +5480,8 @@ button.interesting-game-card:focus-visible {
   gap: 9px;
 }
 
+/* A button now — each card scrolls the story to the play it describes — but it
+   keeps the panel look it had as an article. */
 .game-story-moment {
   display: grid;
   gap: 5px;
@@ -5403,6 +5490,15 @@ button.interesting-game-card:focus-visible {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--card);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.game-story-moment:hover,
+.game-story-moment:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line) 45%);
+  background: color-mix(in srgb, var(--card) 92%, var(--accent) 8%);
 }
 
 .game-story-moment > span {
@@ -5507,6 +5603,29 @@ button.interesting-game-card:focus-visible {
   box-shadow: inset 4px 0 0 color-mix(in srgb, var(--accent) 72%, var(--ink) 28%);
 }
 
+/* Where a click on the chart lands. It fades on its own: the point is to catch
+   the eye at the end of the scroll, not to leave the row marked afterwards. */
+.game-story-play.play-jump-target {
+  animation: play-jump-flash 1.8s ease-out;
+}
+
+@keyframes play-jump-flash {
+  0%, 35% {
+    background: color-mix(in srgb, var(--card) 62%, #c2472f 38%);
+  }
+
+  100% {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-story-play.play-jump-target {
+    animation-duration: 0.01s;
+    background: color-mix(in srgb, var(--card) 72%, #c2472f 28%);
+  }
+}
+
 .game-story-play.runner-event {
   position: relative;
   margin: 5px 13px 5px 30px;
@@ -5563,6 +5682,7 @@ button.interesting-game-card:focus-visible {
 
 .scoring-badge,
 .leverage-badge,
+.swing-badge,
 .steal-badge,
 .story-advantage-badge {
   display: inline-flex;
@@ -5583,6 +5703,12 @@ button.interesting-game-card:focus-visible {
 
 .leverage-badge {
   background: #8f3147;
+}
+
+/* What the play did, as against what the spot was worth — a different claim
+   from HIGH LEVERAGE, so a different colour. */
+.swing-badge {
+  background: #c2472f;
 }
 
 .steal-badge {

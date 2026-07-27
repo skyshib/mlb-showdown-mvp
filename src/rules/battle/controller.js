@@ -300,7 +300,7 @@ export function isDramaticMoment(state) {
   return stateLeverage(state) >= DRAMA_LEVERAGE;
 }
 
-// Auto-resolve on engine autopilot (decision matrix steals and advances,
+// Auto-resolve on engine autopilot (break-even steals and advances,
 // fatigue-based pitching for both sides, NPC profile moves) until the next
 // leverage moment or the end of the game.
 export function fastForward(battle, { maxEvents = 500 } = {}) {
@@ -310,7 +310,7 @@ export function fastForward(battle, { maxEvents = 500 } = {}) {
   let guard = maxEvents;
 
   // Autopilot takes the wheel: no deferred decisions while it runs, and any
-  // decision already waiting resolves by the matrix.
+  // decision already waiting resolves by the break-even.
   const deferredFor = state.deferAdvancesFor;
   state.deferAdvancesFor = null;
   const pendingEvent = resolveAdvanceDecision(state, "auto", battle.rng);
