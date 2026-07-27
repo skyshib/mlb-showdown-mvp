@@ -1029,7 +1029,8 @@ function defaultState() {
       sortDirection: "desc",
       search: "",
       starredOnly: false,
-      flaggedOnly: false
+      flaggedOnly: false,
+      hideTaken: false
     }
   };
 }
@@ -3081,6 +3082,28 @@ function bindDraftActions() {
     if (flagFilter) {
       state.filters.flaggedOnly = !state.filters.flaggedOnly;
       if (state.filters.flaggedOnly) state.filters.starredOnly = false;
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const hideTakenButton = event.target.closest("button[data-action='toggle-hide-taken']");
+    if (hideTakenButton) {
+      state.filters.hideTaken = !state.filters.hideTaken;
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    // A need chip is a filter you can click: it puts the board on the type and
+    // position that fills the hole, and clicking the lit one gives the board
+    // back.
+    const needChip = event.target.closest("button[data-action='filter-need']");
+    if (needChip) {
+      const { needType, needPosition } = needChip.dataset;
+      const alreadyThere = state.filters.type === needType && state.filters.position === needPosition;
+      state.filters.type = needType;
+      state.filters.position = alreadyThere ? "all" : needPosition;
       saveState();
       renderDraft();
       return;
@@ -7665,6 +7688,20 @@ function renderFilters() {
         ${flagCount ? `<span class="star-filter-count">${flagCount}</span>` : ""}
       </button>`
     : "";
+  // Drafted cards stay on the board, greyed, because who took what is half of
+  // what the board is saying. By the late rounds that history is most of the
+  // list, so this sweeps it off and leaves only what can still be had. It only
+  // appears once there is something of this type to sweep.
+  const takenCount = state.draft
+    ? state.draft.pool.filter((player) => player.kind === state.filters.type && state.draft.pickedIds.has(player.id)).length
+    : 0;
+  const takenFilter = takenCount
+    ? `<button type="button" class="star-filter taken-filter${state.filters.hideTaken ? " active" : ""}" data-action="toggle-hide-taken" aria-pressed="${Boolean(state.filters.hideTaken)}" title="${state.filters.hideTaken ? "Put the drafted cards back on the board" : "Take the drafted cards off the board"}">
+        <span class="star-filter-mark">${state.filters.hideTaken ? "⊘" : "⊙"}</span>
+        <span>Hide taken</span>
+        <span class="star-filter-count">${takenCount}</span>
+      </button>`
+    : "";
   const rankingKey = currentPositionRankingKey();
   const rankingButton = owner && rankingKey && ranking
     ? `<button type="button" class="ranking-mode-button active" data-action="reset-position-ranking" title="Restore the ${escapeHtml(state.filters.position)} ranking to its starting OB/Control order and clear its tier lines"><strong>${ranking.ids.length}</strong> ranked <span>${ranking.customized ? "Reset OB/CTRL" : "OB/CTRL start"}</span></button>`
@@ -7676,6 +7713,7 @@ function renderFilters() {
     </div>
     ${starFilter}
     ${flagFilter}
+    ${takenFilter}
     ${rankingButton}
     <label class="filter-position">
       Position
@@ -8607,6 +8645,17 @@ function renderBigBoard(manager, draft) {
     <ol class="big-board">${rows}</ol>`;
 }
 
+// A hole in the roster is also the search you were about to type, so each chip
+// is the filter for it. An open corner outfield spot points at the LF/RF view
+// the board actually offers; an open DH points at every bat, because that is
+// who can fill it.
+function needSlotFilter(slot) {
+  if (slot === "SP" || slot === "RP") return { type: "pitcher", position: slot };
+  if (slot === "DH") return { type: "hitter", position: "all" };
+  if (isCornerOutfielder(slot)) return { type: "hitter", position: CORNER_OUTFIELD_POSITION };
+  return { type: "hitter", position: slot };
+}
+
 // The slots still open, said plainly, above the board they apply to. Repeats
 // collapse into a count — two open starters is "SP x2", not "SP · SP".
 function renderNeedsStrip(manager, draft) {
@@ -8615,7 +8664,15 @@ function renderNeedsStrip(manager, draft) {
   const counts = new Map();
   for (const slot of openings.slots) counts.set(slot, (counts.get(slot) ?? 0) + 1);
   const chips = [...counts.entries()]
-    .map(([slot, count]) => `<span class="need-chip">${escapeHtml(slot)}${count > 1 ? `<em>&times;${count}</em>` : ""}</span>`)
+    .map(([slot, count]) => {
+      const filter = needSlotFilter(slot);
+      // "All hitters" is the board's resting state, so the DH chip never lights
+      // up as the active filter — it would be lit before anyone clicked it.
+      const active = filter.position !== "all"
+        && state.filters.type === filter.type
+        && state.filters.position === filter.position;
+      return `<button type="button" class="need-chip${active ? " active" : ""}" data-action="filter-need" data-need-type="${filter.type}" data-need-position="${escapeHtml(filter.position)}" aria-pressed="${active}" title="${active ? "Show every card again" : `Show only ${escapeHtml(slot)} cards`}">${escapeHtml(slot)}${count > 1 ? `<em>&times;${count}</em>` : ""}</button>`;
+    })
     .join("");
   return `<div class="needs-strip">
     <span class="needs-label">${escapeHtml(manager.name)} still needs</span>
@@ -8632,8 +8689,12 @@ function filteredPlayers(players) {
   const positionFloors = state.draft && state.filters.position !== "all"
     ? viewReplacementLevels(state.draft)
     : null;
+  // A card on the block is still gettable, so it stays on the list even while
+  // the drafted ones are swept off.
+  const taken = state.filters.hideTaken ? state.draft?.pickedIds ?? null : null;
   return players.filter((player) => {
     if (player.kind !== state.filters.type) return false;
+    if (taken?.has(player.id)) return false;
     if (starred && !starred.has(player.id)) return false;
     if (flagged && !flagged.has(player.id)) return false;
     if (state.filters.position !== "all"

@@ -3844,10 +3844,15 @@ tr:focus-within .row-tools {
   gap: 6px;
 }
 
+/* Each chip is the filter for the hole it names, so it looks and behaves like
+   something you can press. */
 .need-chip {
   display: inline-flex;
   align-items: baseline;
   gap: 3px;
+  min-height: 0;
+  border: 2px solid transparent;
+  border-radius: 0;
   padding: 4px 9px 5px;
   background: var(--accent-bright);
   color: var(--accent-ink);
@@ -3858,6 +3863,17 @@ tr:focus-within .row-tools {
   letter-spacing: 0.07em;
   line-height: 1;
   text-transform: uppercase;
+  cursor: pointer;
+}
+
+.need-chip:hover {
+  border-color: var(--navy);
+}
+
+.need-chip.active {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
 }
 
 .need-chip em {
