@@ -1862,7 +1862,7 @@ function renderSetup(setupError = "") {
           </div>
           <label class="pool-option">
             <input type="radio" name="snakeClock" value="chess" ${snakeClockMode(state) === "chess" ? "checked" : ""} />
-            <span><strong>Chess clock</strong><small>One bank of time for the whole draft, plus an increment paid back on every pick &mdash; the model the auction uses. Your clock runs only on your turn, so a long think in the third round is a short one in the tenth. Run the bank out and your picks are made for you from there.</small></span>
+            <span><strong>Chess clock</strong><small>One bank of time for the whole draft, plus an increment paid back on every pick &mdash; the model the auction uses. Your clock runs only on your turn, so a long think in the third round is a short one in the tenth. Run the bank out and that pick is made for you; its increment gives you another chance next turn.</small></span>
           </label>
           <div class="pool-suboptions snake-chess-suboptions" ${snakeClockMode(state) === "chess" ? "" : "hidden"}>
             <label class="auction-budget-field">

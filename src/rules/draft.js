@@ -799,23 +799,23 @@ export function snakeTimeRemainingMs(draft, manager, now = Date.now()) {
   return Math.max(0, bank - elapsed);
 }
 
-// Out of time. His picks are made for him from here on — the increment cannot
-// bring him back, because a bank that refilled itself every turn would never
-// have run out in the first place.
+// Out of time on this pick. The room makes the pick for him, then the normal
+// increment gives him another chance to act when his next turn comes around.
 export function snakeClockFlagged(draft, manager, now = Date.now()) {
   return snakeClockEnabled(draft) && snakeTimeRemainingMs(draft, manager, now) <= 0;
 }
 
 // The pick is made: charge the man who made it for the time he took, pay him
-// his increment, and start the next man's clock at the same instant. A manager
-// who has already flagged gets no increment — he is out of time for good.
+// his increment, and start the next man's clock at the same instant. Timeout
+// autopicks earn the same increment as manual picks, so flagging one turn does
+// not leave a manager permanently stuck at zero.
 function chargeSnakeClock(draft, now) {
   if (!snakeClockEnabled(draft) || draft.clock.turnStartedAt === null) return;
   const manager = currentManager(draft);
   if (!manager) return;
   const timestamp = normalizeTimestamp(now);
   const remaining = snakeTimeRemainingMs(draft, manager, timestamp);
-  draft.clock.banks[manager.id] = remaining > 0 ? remaining + draft.clock.timer.incrementMs : 0;
+  draft.clock.banks[manager.id] = remaining + draft.clock.timer.incrementMs;
   draft.clock.turnStartedAt = timestamp;
 }
 

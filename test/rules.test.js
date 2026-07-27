@@ -1793,7 +1793,7 @@ test("the chess clock spends the man on the clock, and only him", () => {
   assert.equal(snakeTimeRemainingMs(draft, ana, t0 + 25_000), 50_000, "hers is parked where she left it");
 });
 
-test("a manager who runs out of time keeps drafting — the picks are just made for him", () => {
+test("a timeout autopick awards the increment and gives the manager another chance", () => {
   const draft = clockDraft();
   const [ana] = draft.managers;
   const t0 = 2_000_000;
@@ -1806,12 +1806,16 @@ test("a manager who runs out of time keeps drafting — the picks are just made 
   const before = ana.roster.length;
   autopick(draft, late);
   assert.equal(ana.roster.length, before + 1, "the pick is made for her");
-  assert.equal(snakeClockBankMs(draft, ana), 0, "and the increment does not bring her back");
+  assert.equal(snakeClockBankMs(draft, ana), 10_000, "the automatic pick still earns her increment");
 
-  // Round 2 comes back to her (snake): still flagged, still automatic.
+  // Bo picks and the snake comes back through him once more. Ana's increment
+  // is parked until it is her turn again.
   autopick(draft, late + 1000);
-  assert.equal(snakeClockBankMs(draft, ana), 0, "a flagged manager stays flagged");
-  assert.equal(snakeClockFlagged(draft, ana, late + 2000), true);
+  autopick(draft, late + 2000);
+  assert.equal(currentManager(draft).id, ana.id);
+  assert.equal(snakeClockBankMs(draft, ana), 10_000);
+  assert.equal(snakeClockFlagged(draft, ana, late + 2_000), false, "she can act during the bonus window");
+  assert.equal(snakeClockFlagged(draft, ana, late + 12_000), true, "only the new increment runs out");
 });
 
 test("pausing a chess-clocked snake costs the man on the clock nothing", () => {

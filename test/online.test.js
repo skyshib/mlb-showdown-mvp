@@ -599,7 +599,7 @@ test("the room server expires snake chess clocks without a browser driving them"
   const created = await api(base, "POST", "/api/rooms", {
     seed: "snake-clock-expiry",
     managers: ["Ana", "Bo"],
-    snakeTimer: { bankMs: 50, incrementMs: 0 }
+    snakeTimer: { bankMs: 50, incrementMs: 100 }
   });
   assert.equal(created.status, 201);
   const startedAt = created.data.actions[0].action.at;
@@ -614,7 +614,7 @@ test("the room server expires snake chess clocks without a browser driving them"
   assert.ok(timeouts.length >= 1);
   assert.equal(timeouts[0].action.managerId, "team-1");
   assert.equal(timeouts[0].action.at, startedAt + 50);
-  assert.equal(room.data.snakeClock.banks["team-1"], 0);
+  assert.equal(room.data.snakeClock.banks["team-1"], 100, "the timeout autopick awards the increment");
 });
 
 test("pausing an online snake room freezes its authoritative chess clock", async (t) => {
