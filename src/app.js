@@ -108,6 +108,7 @@ import {
   rosterSizeForStartingPitchers,
   resumeAuction,
   resumeSnake,
+  restoreSnakeClockState,
   sealedBidder,
   setManagerCpu,
   snakeClockBankMs,
@@ -569,6 +570,10 @@ function handlePickClockExpiry(turn) {
     afterLocalDraftAction();
     return;
   }
+  // Online chess clocks belong to the room server. Browsers render the shared
+  // deadline but never decide that it expired; otherwise a skewed or lagging
+  // laptop can autopick its own seat before the room's clock is actually down.
+  if (snakeClockEnabled(state.draft)) return;
   const myTurn = online.managerId === turn.current.id;
   // Whoever is on the clock times themselves out. The host covers a seat that
   // has gone quiet, a beat later so the two don't race.
@@ -1189,6 +1194,7 @@ function rebuildOnlineDraft(room) {
       applyDraftAction(state.draft, entry.action);
     }
   }
+  restoreSnakeClockState(state.draft, room.snakeClock);
   if (Number.isFinite(carriedMs)) restartPickClock(state.draft, carriedMs);
   state.online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
   // Your own team, not the first name in the room. Everybody was landing on

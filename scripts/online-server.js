@@ -16,7 +16,10 @@ import {
   auctionReviewComplete,
   auctionTimerEnabled,
   normalizeSnakeTimerConfig,
+  restoreSnakeClockState,
+  snakeClockBankMs,
   snakeClockEnabled,
+  snakeClockState,
   canCancelLot,
   cpuSealedBid,
   createDraft,
@@ -254,6 +257,7 @@ function reviveRoom(saved) {
   for (const entry of actions) {
     if (!SIM_ACTION_TYPES.has(entry.action?.type)) applyDraftAction(draft, entry.action);
   }
+  restoreSnakeClockState(draft, saved.snakeClock);
   // Bids for a lot that had not sold yet never made it into the action log (see
   // recordSealedBid), so they are saved separately and replayed after it.
   const pendingBids = Array.isArray(saved.pendingBids) ? saved.pendingBids : [];
@@ -306,6 +310,7 @@ function persistRoom(store, room) {
     realPool: room.realPool,
     pickTimer: room.pickTimer,
     snakeTimer: room.snakeTimer ?? null,
+    snakeClock: snakeClockState(room.draft),
     draftType: room.draftType,
     nomination: room.nomination ?? "manual",
     hidePoints: Boolean(room.hidePoints),
@@ -933,7 +938,7 @@ async function postAction(store, room, request, response) {
   const isHost = Boolean(seat?.isHost) || (Boolean(body.token) && body.token === room.hostToken);
   if (!seat && !isHost) return sendJson(response, 403, { error: "Join a seat before acting" });
 
-  syncRoomAuctionTimer(store, room, action?.at);
+  syncRoomTimer(store, room, action?.at);
   runCpuAuction(store, room);
   const denial = denyAction(room.draft, seat, isHost, action);
   if (denial) return sendJson(response, 409, { error: denial });
@@ -984,9 +989,12 @@ async function postAction(store, room, request, response) {
 
 function canonicalizeAction(draft, action) {
   if (!action || typeof action !== "object") return action;
-  if (!isAuctionDraft(draft)) return { ...action };
+  // The room's wall clock is the only wall clock that enters the shared log.
+  // If a snake pick is left unstamped, applyDraftAction falls back to Date.now
+  // independently on the server and in every browser; network delay and laptop
+  // clock skew then become different clock banks for different players.
   const canonical = { ...action, at: Date.now() };
-  if (canonical.type === "seal-bid") canonical.timedOut = false;
+  if (isAuctionDraft(draft) && canonical.type === "seal-bid") canonical.timedOut = false;
   return canonical;
 }
 
@@ -1048,6 +1056,35 @@ function syncRoomAuctionTimer(store, room, now = Date.now()) {
   return changed;
 }
 
+function syncRoomSnakeTimer(store, room, now = Date.now()) {
+  const draft = room.draft;
+  if (!snakeClockEnabled(draft) || isDraftPaused(draft) || draft.complete) return false;
+  const timestamp = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  let changed = false;
+  // A room can wake after several zero-bank managers should have picked. Catch
+  // all of them up in one pass, bounded by every pick the draft could still owe.
+  let guard = draft.managers.length * draft.rosterSize + 1;
+  while (!draft.complete && guard > 0) {
+    guard -= 1;
+    const manager = currentManager(draft);
+    const startedAt = Number(draft.clock?.turnStartedAt);
+    if (!manager || !Number.isFinite(startedAt)) break;
+    const deadline = startedAt + snakeClockBankMs(draft, manager);
+    if (timestamp < deadline) break;
+    const action = { type: "autopick", managerId: manager.id, timedOut: true, at: deadline };
+    applyDraftAction(draft, action);
+    appendAction(store, room, action);
+    changed = true;
+  }
+  return changed;
+}
+
+function syncRoomTimer(store, room, now = Date.now()) {
+  return isAuctionDraft(room.draft)
+    ? syncRoomAuctionTimer(store, room, now)
+    : syncRoomSnakeTimer(store, room, now);
+}
+
 function scheduleRoomTimer(store, room) {
   if (room.timer) clearTimeout(room.timer);
   room.timer = null;
@@ -1055,7 +1092,7 @@ function scheduleRoomTimer(store, room) {
   if (deadline === null) return;
   room.timer = setTimeout(() => {
     room.timer = null;
-    syncRoomAuctionTimer(store, room, Date.now());
+    syncRoomTimer(store, room, Date.now());
     runCpuAuction(store, room);
     broadcastLot(room);
     scheduleRoomTimer(store, room);
@@ -1064,7 +1101,14 @@ function scheduleRoomTimer(store, room) {
 }
 
 function nextRoomTimerDeadline(draft) {
-  if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) return null;
+  if (!isAuctionDraft(draft)) {
+    if (!snakeClockEnabled(draft) || isDraftPaused(draft) || draft.complete) return null;
+    const manager = currentManager(draft);
+    const startedAt = Number(draft.clock?.turnStartedAt);
+    if (!manager || !Number.isFinite(startedAt)) return null;
+    return startedAt + snakeClockBankMs(draft, manager);
+  }
+  if (!auctionTimerEnabled(draft) || draft.complete) return null;
   if (isAuctionPaused(draft)) return null;
   const review = draft.auction.review;
   if (review?.completedAt === null && Number.isFinite(review.endsAt)) return review.endsAt;
@@ -1349,6 +1393,7 @@ function roomSnapshot(room, port = null) {
     realPool: room.realPool ?? "stars",
     pickTimer: room.pickTimer ?? 0,
     snakeTimer: room.snakeTimer ?? null,
+    snakeClock: snakeClockState(room.draft),
     draftType: room.draftType ?? "snake",
     nomination: room.nomination ?? "manual",
     hidePoints: Boolean(room.hidePoints),

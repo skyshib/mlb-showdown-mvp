@@ -7,7 +7,13 @@ import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
 import { buildDraftPool, deckFromIds, setUniverse, universePool } from "../src/data/universes.js";
-import { applyDraftAction, createDraft, currentManager } from "../src/rules/draft.js";
+import {
+  applyDraftAction,
+  createDraft,
+  currentManager,
+  restoreSnakeClockState,
+  snakeClockState
+} from "../src/rules/draft.js";
 
 async function startServer(t, dataDir) {
   const roomsDir = dataDir ?? (await mkdtemp(join(tmpdir(), "showdown-rooms-")));
@@ -526,6 +532,131 @@ test("pick timer is normalized, returned in snapshots, and survives restarts", a
   const second = await startServer(t, dataDir);
   const revived = await api(second, "GET", `/api/rooms/${created.data.roomId}`);
   assert.equal(revived.data.pickTimer, 60);
+});
+
+test("online snake chess clocks use server timestamps and authoritative snapshots", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "snake-clock-sync",
+    managers: ["Ana", "Bo"],
+    snakeTimer: { bankSeconds: 60, incrementSeconds: 10 }
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.actions[0].action.type, "start-clock");
+  assert.ok(Number.isFinite(created.data.actions[0].action.at));
+  assert.deepEqual(created.data.snakeClock.banks, { "team-1": 60000, "team-2": 60000 });
+
+  const ana = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  const picked = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
+    token: ana.data.token,
+    // A browser's wall clock is untrusted. The room must replace this value.
+    action: { type: "autopick", at: 1 }
+  });
+  assert.equal(picked.status, 200);
+
+  const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  const pickAction = room.data.actions.find((entry) => entry.action.type === "autopick").action;
+  assert.ok(Number.isFinite(pickAction.at));
+  assert.notEqual(pickAction.at, 1, "the server replaces the browser timestamp");
+
+  const rebuild = () => {
+    const replica = createDraft(
+      room.data.managers.map((manager) => ({ name: manager.name, cpu: manager.cpu })),
+      deckFromIds(room.data.universe, room.data.seed, room.data.deck, room.data.temperature),
+      room.data.rosterSize,
+      room.data.seed,
+      {
+        startingPitchers: room.data.startingPitchers,
+        snakeTimer: room.data.snakeTimer
+      }
+    );
+    for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
+    return replica;
+  };
+  const firstReplica = rebuild();
+  const secondReplica = rebuild();
+  assert.deepEqual(snakeClockState(firstReplica), snakeClockState(secondReplica), "replays cannot drift");
+  assert.deepEqual(firstReplica.clock.banks, room.data.snakeClock.banks);
+  assert.equal(firstReplica.clock.turnStartedAt, room.data.snakeClock.turnStartedAt);
+
+  // The settled state is persisted as a recovery point, not reconstructed from
+  // whatever time the restarted process happens to replay the room.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const restarted = await startServer(t, dataDir);
+  const revived = await api(restarted, "GET", `/api/rooms/${created.data.roomId}`);
+  const revivedReplica = rebuild();
+  restoreSnakeClockState(revivedReplica, revived.data.snakeClock);
+  assert.deepEqual(snakeClockState(revivedReplica), revived.data.snakeClock);
+  assert.deepEqual(revived.data.snakeClock, room.data.snakeClock);
+});
+
+test("the room server expires snake chess clocks without a browser driving them", async (t) => {
+  const base = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "snake-clock-expiry",
+    managers: ["Ana", "Bo"],
+    snakeTimer: { bankMs: 50, incrementMs: 0 }
+  });
+  assert.equal(created.status, 201);
+  const startedAt = created.data.actions[0].action.at;
+
+  // Nobody joins. The room itself owns the deadline and makes the expired
+  // picks, just as a timed auction continues without a host tab backstopping it.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 175));
+  const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  const timeouts = room.data.actions.filter(
+    (entry) => entry.action.type === "autopick" && entry.action.timedOut
+  );
+  assert.ok(timeouts.length >= 1);
+  assert.equal(timeouts[0].action.managerId, "team-1");
+  assert.equal(timeouts[0].action.at, startedAt + 50);
+  assert.equal(room.data.snakeClock.banks["team-1"], 0);
+});
+
+test("pausing an online snake room freezes its authoritative chess clock", async (t) => {
+  const base = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "snake-clock-pause",
+    managers: ["Ana", "Bo"],
+    snakeTimer: { bankMs: 200, incrementMs: 0 }
+  });
+  const ana = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+  const pause = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "pause", at: 1 }
+  });
+  assert.equal(pause.status, 200);
+  const paused = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  assert.ok(Number.isFinite(paused.data.snakeClock.pausedAt));
+  assert.notEqual(paused.data.snakeClock.pausedAt, 1, "the room stamps the pause");
+  const frozen = paused.data.snakeClock.banks["team-1"];
+
+  // Wait longer than the original bank. A leaked wall clock would flag Ana and
+  // append an autopick; a real pause leaves both the bank and log untouched.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  const stillPaused = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  assert.equal(stillPaused.data.snakeClock.banks["team-1"], frozen);
+  assert.equal(
+    stillPaused.data.actions.some((entry) => entry.action.timedOut),
+    false
+  );
+
+  const resume = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "resume" }
+  });
+  assert.equal(resume.status, 200);
+  const running = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  assert.equal(running.data.snakeClock.pausedAt, null);
 });
 
 test("shared sim actions are logged after the draft completes and survive restarts", async (t) => {

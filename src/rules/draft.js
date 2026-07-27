@@ -753,6 +753,41 @@ export function snakeClockBankMs(draft, manager) {
   return Math.max(0, Number(draft?.clock?.banks?.[manager?.id] ?? 0));
 }
 
+// The action log is the durable history, but a room snapshot also carries the
+// server's already-settled clock. That lets a reconnect join the authoritative
+// clock immediately and, more importantly, lets rooms created before snake
+// actions were server-timestamped survive a restart without replaying their
+// old missing timestamps against a new wall clock.
+export function snakeClockState(draft) {
+  if (!snakeClockEnabled(draft)) return null;
+  return {
+    banks: { ...draft.clock.banks },
+    turnStartedAt: finiteTimestampOrNull(draft.clock.turnStartedAt),
+    pausedAt: finiteTimestampOrNull(draft.pausedAt),
+    pausedRemainingMs: draft.pausedRemainingMs !== null
+      && draft.pausedRemainingMs !== undefined
+      && Number.isFinite(Number(draft.pausedRemainingMs))
+      ? Math.max(0, Number(draft.pausedRemainingMs))
+      : null
+  };
+}
+
+export function restoreSnakeClockState(draft, saved) {
+  if (!snakeClockEnabled(draft) || !saved || typeof saved !== "object") return false;
+  for (const manager of draft.managers) {
+    const bank = Number(saved.banks?.[manager.id]);
+    if (Number.isFinite(bank)) draft.clock.banks[manager.id] = Math.max(0, bank);
+  }
+  draft.clock.turnStartedAt = finiteTimestampOrNull(saved.turnStartedAt);
+  draft.pausedAt = finiteTimestampOrNull(saved.pausedAt);
+  draft.pausedRemainingMs = saved.pausedRemainingMs !== null
+    && saved.pausedRemainingMs !== undefined
+    && Number.isFinite(Number(saved.pausedRemainingMs))
+    ? Math.max(0, Number(saved.pausedRemainingMs))
+    : null;
+  return true;
+}
+
 // What is left on a manager's clock right now: his bank, less the time he has
 // been sitting on this pick. Only the man on the clock is spending.
 export function snakeTimeRemainingMs(draft, manager, now = Date.now()) {
@@ -830,6 +865,12 @@ export function syncAuctionTimer(draft, now = Date.now()) {
 function normalizeTimestamp(now) {
   const timestamp = Number(now);
   return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function finiteTimestampOrNull(value) {
+  if (value === null || value === undefined) return null;
+  const timestamp = Number(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 export function canNominatePlayer(draft, manager, player, now = Date.now()) {
