@@ -2410,6 +2410,9 @@ function renderDraft() {
           : undefined,
         action: auction ? "nominate" : "pick",
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
+        // Nothing on an auction board is ever pickable except by nomination, so
+        // a column of dead "Blocked" buttons is only clutter.
+        hideBlocked: auction,
         sort: state.filters.sort,
         sortDirection: state.filters.sortDirection,
         manualRanking: activePositionRanking(),
