@@ -1,11 +1,46 @@
-// Regenerates src/data/winExpectancy.js from scripts/data/probs.txt.
+// Regenerates src/data/winExpectancy.js from
+// scripts/data/simulated-win-probabilities.csv.
 //
-// probs.txt is Greg Stoll's win-expectancy dataset
-// (https://github.com/gregstoll/baseballstats, built from Retrosheet event
-// files, MLB 1903-2025). Row format:
-//   "V"|"H", inning, outs, runnerCode, scoreDiff, samples, battingTeamWins
-// where "V" means the visiting team is batting (top half), runnerCode is
-// 1 + first + 2*second + 4*third, and scoreDiff is batting minus fielding.
+// The source is a SIMULATED win-expectancy surface: every base/out/score/inning
+// state played forward many times rather than counted out of history. It
+// replaced a Retrosheet-derived empirical table (1903-2025, Greg Stoll's
+// dataset; see git history for that build, which read scripts/data/probs.txt —
+// still vendored, because build-leverage.js takes its sample counts from it).
+//
+// WHY THE SWAP. Two reasons, both of which the empirical table got wrong for
+// this game:
+//
+// 1. NOISE. History has thin cells, and thin cells do not divide. The old table
+//    was monotone in score and outs but not in BASES: 2,734 of its cells rated
+//    a state worse for the batting team after adding a runner. Break-evens are
+//    ratios of differences between neighboring cells (see src/rules/breakeven.js)
+//    and that noise made them unusable — the break-even for stealing second
+//    swung from -100% to +757% across neighboring cells. The simulated surface
+//    has 58 such inversions, none bigger than 0.007, and every one of them is
+//    real baseball rather than sampling: they are the double-play states, where
+//    putting a man on first with one out genuinely costs the batting team.
+//
+// 2. HOME FIELD ADVANTAGE. The empirical table opened the home team at 54%,
+//    because real home teams win 54% of the time. This game has no such thumb
+//    on the scale — the same nine cards score the same either way — and the
+//    same team playing itself here wins 49.5% of the time at home (n=20,000).
+//    Every win probability and every WPA in the app was carrying a four-point
+//    bias that the ball game itself never produced. The simulated surface is
+//    neutral: the visitors open at exactly 0.5000.
+//
+// EXTRA INNINGS. The source's inning-10 rows model the modern automatic runner
+// on second — its "top 10, runner on second, nobody out, tied" is exactly
+// 0.5000, the giveaway. This game plays classic extras (advanceHalfInning
+// clears the bases), so those rows are DISCARDED and the extras band is filled
+// from the source's 9th, which is the structurally identical inning: the
+// visitors bat, the home team answers, and a home lead ends it. That inning's
+// own numbers do assume any further extras are played with the automatic
+// runner, which costs nothing here — the rule is symmetric, so the value of
+// reaching another inning tied is 0.5 under either version.
+//
+// Nothing is smoothed, shrunk, or monotonized on the way in. A simulated
+// surface is already the answer to the question the table asks, and the places
+// where it bends are places baseball bends.
 //
 // Usage: node scripts/build-win-expectancy.js
 
@@ -14,168 +49,84 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const sourcePath = path.join(here, "data", "probs.txt");
+const sourcePath = path.join(here, "data", "simulated-win-probabilities.csv");
 const outputPath = path.join(here, "..", "src", "data", "winExpectancy.js");
 
-const MAX_DIFF = 10; // score diffs beyond ±10 pool into the edge cells
-const EXTRA_BAND = 10; // innings 10+ pool into one structurally identical band
+const MAX_DIFF = 10; // the source is built to ±10 and clamps there
+const EXTRA_BAND = 10; // innings 10+ share one band
+const EXTRAS_SOURCE_INNING = 9; // ...filled from the 9th, not the source's 10th
 const DIFFS = MAX_DIFF * 2 + 1;
-const PRIOR_WEIGHT = 60; // pseudo-samples of the pooled (half, inning, diff) curve
-
-function emptyCells() {
-  // cells[halfIdx][inningBand 0-9][outs][runnerCode-1][diffIdx] = {n, wins}
-  return Array.from({ length: 2 }, () =>
-    Array.from({ length: EXTRA_BAND }, () =>
-      Array.from({ length: 3 }, () =>
-        Array.from({ length: 8 }, () =>
-          Array.from({ length: DIFFS }, () => ({ n: 0, wins: 0 }))
-        )
-      )
-    )
-  );
-}
 
 function parseRows(text) {
-  return text
-    .trim()
-    .split("\n")
-    .map((line) => {
-      const [half, inning, outs, code, diff, n, wins] = line.split(",");
-      return {
-        half: half === '"V"' ? 0 : 1,
-        inning: Number(inning),
-        outs: Number(outs),
-        code: Number(code),
-        diff: Number(diff),
-        n: Number(n),
-        wins: Number(wins)
-      };
+  const [headerLine, ...lines] = text.trim().split("\n");
+  const header = headerLine.split(",");
+  return lines.map((line) => {
+    const values = line.split(",");
+    const row = {};
+    header.forEach((name, index) => {
+      row[name] = Number(values[index]);
     });
+    return row;
+  });
 }
 
-const cells = emptyCells();
-for (const row of parseRows(fs.readFileSync(sourcePath, "utf8"))) {
-  const inningBand = Math.min(row.inning, EXTRA_BAND) - 1;
-  const diffIdx = Math.max(-MAX_DIFF, Math.min(MAX_DIFF, row.diff)) + MAX_DIFF;
-  const cell = cells[row.half][inningBand][row.outs][row.code - 1][diffIdx];
-  cell.n += row.n;
-  cell.wins += row.wins;
+// table[half][inningBand][outs][runnerCode - 1][diff + MAX_DIFF]
+const table = Array.from({ length: 2 }, () =>
+  Array.from({ length: EXTRA_BAND }, () =>
+    Array.from({ length: 3 }, () =>
+      Array.from({ length: 8 }, () => Array.from({ length: DIFFS }, () => null))
+    )
+  )
+);
+
+const rows = parseRows(fs.readFileSync(sourcePath, "utf8"));
+for (const row of rows) {
+  // The source speaks in HOME terms: score_diff is home minus away and
+  // home_win_prob is the home team's. The table speaks in BATTING terms.
+  const battingIsHome = row.is_top_inning === 0;
+  const halfIndex = battingIsHome ? 1 : 0;
+  const battingDiff = battingIsHome ? row.score_diff : -row.score_diff;
+  const battingWin = battingIsHome ? row.home_win_prob : 1 - row.home_win_prob;
+  const code = row.is_runner_on_first + 2 * row.is_runner_on_second + 4 * row.is_runner_on_third;
+  const rounded = Math.round(battingWin * 10000) / 10000;
+
+  const bands = [];
+  if (row.inning <= EXTRA_BAND - 1) bands.push(row.inning - 1);
+  if (row.inning === EXTRAS_SOURCE_INNING) bands.push(EXTRA_BAND - 1);
+  for (const band of bands) {
+    table[halfIndex][band][row.outs][code][battingDiff + MAX_DIFF] = rounded;
+  }
 }
 
-// Weighted isotonic regression (pool adjacent violators), increasing.
-function isotonic(values, weights) {
-  const blocks = values.map((value, i) => ({ value, weight: weights[i], span: 1 }));
-  for (let i = 0; i < blocks.length - 1; ) {
-    if (blocks[i].value > blocks[i + 1].value + 1e-12) {
-      const a = blocks[i];
-      const b = blocks[i + 1];
-      const weight = a.weight + b.weight;
-      blocks.splice(i, 2, {
-        value: (a.value * a.weight + b.value * b.weight) / weight,
-        weight,
-        span: a.span + b.span
-      });
-      if (i > 0) i -= 1;
-    } else {
-      i += 1;
-    }
-  }
-  return blocks.flatMap((block) => Array.from({ length: block.span }, () => block.value));
-}
-
-// Pooled batting-team win rate by (half, inningBand, diff) — the shrinkage
-// prior. Gaps (huge early-inning diffs) interpolate between observed
-// neighbors and the hard bounds just past the table edges.
-function pooledCurve(half, inningBand) {
-  const totals = Array.from({ length: DIFFS }, () => ({ n: 0, wins: 0 }));
-  for (const outs of [0, 1, 2]) {
-    for (let code = 0; code < 8; code += 1) {
-      for (let d = 0; d < DIFFS; d += 1) {
-        const cell = cells[half][inningBand][outs][code][d];
-        totals[d].n += cell.n;
-        totals[d].wins += cell.wins;
-      }
-    }
-  }
-  const anchors = [{ d: -1, p: 0.002 }];
-  for (let d = 0; d < DIFFS; d += 1) {
-    if (totals[d].n >= 50) anchors.push({ d, p: totals[d].wins / totals[d].n });
-  }
-  anchors.push({ d: DIFFS, p: 0.998 });
-  const curve = [];
-  for (let d = 0; d < DIFFS; d += 1) {
-    let before = anchors[0];
-    let after = anchors[anchors.length - 1];
-    for (const anchor of anchors) {
-      if (anchor.d <= d && anchor.d >= before.d) before = anchor;
-      if (anchor.d >= d && anchor.d <= after.d) after = anchor;
-    }
-    curve.push(
-      before.d === after.d
-        ? before.p
-        : before.p + ((after.p - before.p) * (d - before.d)) / (after.d - before.d)
-    );
-  }
-  return isotonic(curve, curve.map(() => 1));
-}
-
-const table = emptyCells();
-for (const half of [0, 1]) {
-  for (let inningBand = 0; inningBand < EXTRA_BAND; inningBand += 1) {
-    const prior = pooledCurve(half, inningBand);
-    const series = [];
-    for (const outs of [0, 1, 2]) {
-      for (let code = 0; code < 8; code += 1) {
-        const raw = cells[half][inningBand][outs][code];
-        const shrunk = raw.map(
-          (cell, d) => (cell.wins + PRIOR_WEIGHT * prior[d]) / (cell.n + PRIOR_WEIGHT)
-        );
-        const weights = raw.map((cell) => cell.n + PRIOR_WEIGHT);
-        series.push({ outs, code, values: shrunk, weights });
-      }
-    }
-    // Two passes: more outs can't help the batting team at fixed runners/diff,
-    // then re-impose monotonicity in score diff.
-    for (let pass = 0; pass < 2; pass += 1) {
-      for (let code = 0; code < 8; code += 1) {
-        for (let d = 0; d < DIFFS; d += 1) {
-          const byOuts = [0, 1, 2].map(
-            (outs) => series.find((s) => s.outs === outs && s.code === code)
-          );
-          const descending = isotonic(
-            byOuts.map((s) => -s.values[d]),
-            byOuts.map((s) => s.weights[d])
-          );
-          byOuts.forEach((s, i) => {
-            s.values[d] = -descending[i];
-          });
+for (const [halfIndex, half] of table.entries()) {
+  for (const [band, innings] of half.entries()) {
+    for (const [outs, outRow] of innings.entries()) {
+      for (const [code, cells] of outRow.entries()) {
+        const hole = cells.findIndex((cell) => cell === null);
+        if (hole >= 0) {
+          throw new Error(`no source row for half ${halfIndex}, band ${band}, ${outs} out, code ${code}, diff ${hole - MAX_DIFF}`);
         }
       }
-      for (const s of series) {
-        s.values = isotonic(s.values, s.weights);
-      }
-    }
-    for (const s of series) {
-      table[half][inningBand][s.outs][s.code] = s.values.map(
-        (p) => Math.round(Math.min(0.998, Math.max(0.002, p)) * 10000) / 10000
-      );
     }
   }
 }
 
 const header = `// Generated by scripts/build-win-expectancy.js — do not edit by hand.
 //
-// MLB historical win expectancy, 1903-2025, from Greg Stoll's dataset
-// (https://github.com/gregstoll/baseballstats) built on Retrosheet event
-// files. The information used here was obtained free of charge from and is
-// copyrighted by Retrosheet (https://www.retrosheet.org).
+// SIMULATED win expectancy: each state played forward many times rather than
+// counted out of history, which is what keeps it smooth enough to take
+// differences of (see src/rules/breakeven.js) and neutral enough to describe
+// this game, where the home team gets no advantage but the last at-bat.
 //
 // WIN_EXPECTANCY[half][inning - 1][outs][runnerCode - 1][diff + ${MAX_DIFF}] is the
 // probability that the BATTING team wins, where half is 0 for the top and
 // 1 for the bottom, innings past ${EXTRA_BAND} share the inning-${EXTRA_BAND} band, runnerCode
 // is 1 + first + 2*second + 4*third, and diff is batting minus fielding
-// score, clamped to ±${MAX_DIFF}. Cells are shrunk toward a pooled per-inning curve
-// and kept monotone in score diff and outs.
+// score, clamped to ±${MAX_DIFF}.
+//
+// The visitors open a ball game at exactly .5000, a home lead in the ninth is
+// exactly 1, and the extras band is the ninth's — this game plays classic
+// extra innings, with nobody spotted on second.
 `;
 
 const body = `export const WIN_EXPECTANCY_MAX_DIFF = ${MAX_DIFF};
@@ -194,4 +145,4 @@ export function winExpectancy({ half, inning, outs, bases, diff }) {
 
 fs.writeFileSync(outputPath, `${header}\n${body}`);
 const size = fs.statSync(outputPath).size;
-console.log(`wrote ${outputPath} (${(size / 1024).toFixed(0)}KB)`);
+console.log(`wrote ${outputPath} (${(size / 1024).toFixed(0)}KB) from ${rows.length} source rows`);

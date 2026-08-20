@@ -1,138 +1,107 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { advanceBreakeven, baseRunValues } from "../src/rules/breakeven.js";
+import { advanceBreakeven } from "../src/rules/breakeven.js";
 
-const R = { id: "runner" };
-const EMPTY = [null, null, null];
+const R = "runner";
 
-function steal(fromIndex, situation) {
-  return advanceBreakeven({
-    half: "top",
-    inning: 4,
-    diff: 0,
-    ...situation,
-    bases: situation.bases ?? (fromIndex === 0 ? [R, null, null] : [null, R, null]),
-    fromIndex,
-    toIndex: fromIndex + 1
-  });
+function bar(situation) {
+  return advanceBreakeven({ half: "top", inning: 4, diff: 0, outs: 0, ...situation });
 }
 
-// The run values are the whole model's foundation, and they were derived from
-// win probabilities without ever seeing a run expectancy table. That they land
-// anywhere near one is the check that the derivation is sound.
-test("the base states price themselves in runs, against the run table", () => {
-  const values = baseRunValues();
-
-  // 2010-2015 MLB run expectancy, each state against an empty diamond with the
-  // same outs. A man on first or second is worth what the run table says he is.
-  for (const { outs, code, runs } of [
-    { outs: 0, code: 1, runs: 0.378 },
-    { outs: 0, code: 2, runs: 0.619 },
-    { outs: 1, code: 1, runs: 0.255 },
-    { outs: 1, code: 2, runs: 0.410 },
-    { outs: 2, code: 1, runs: 0.126 },
-    { outs: 2, code: 2, runs: 0.221 }
-  ]) {
-    const derived = values[outs][code];
-    assert.ok(
-      Math.abs(derived - runs) < 0.09,
-      `${outs} out, base code ${code}: derived ${derived.toFixed(3)} vs ${runs} in the run table`
-    );
-  }
-
-  // The states that hold a lot of unbanked scoring — a man ninety feet away,
-  // a full diamond — come in UNDER their run value, and should. A score edge is
-  // money in the bank; a runner is a runner. The win surface pays for the first
-  // and only partly for the second, which is the whole reason these are called
-  // win-equivalent runs.
-  for (const { outs, code, runs } of [
-    { outs: 0, code: 4, runs: 0.869 },
-    { outs: 0, code: 7, runs: 1.811 },
-    { outs: 1, code: 7, runs: 1.287 }
-  ]) {
-    const derived = values[outs][code];
-    assert.ok(derived < runs, `${outs} out, code ${code}: ${derived.toFixed(3)} should sit under ${runs}`);
-    assert.ok(derived > runs * 0.6, `${outs} out, code ${code}: ${derived.toFixed(3)} is too deep a discount`);
-  }
-
-  assert.equal(values[0][0], 0, "an empty diamond is the zero of the scale");
-  for (const outs of [0, 1, 2]) {
-    for (let code = 1; code < 8; code += 1) {
-      assert.ok(values[outs][code] > values[outs][0], "any man on beats nobody on");
-    }
-    assert.ok(values[outs][4] > values[outs][2], "third beats second");
-    assert.ok(values[outs][2] > values[outs][1], "second beats first");
-    assert.ok(values[outs][7] > values[outs][4], "a full diamond beats one man home-ready");
-  }
-});
+const STEAL_SECOND = { bases: [R, null, null], fromIndex: 0, toIndex: 1 };
+const STEAL_THIRD = { bases: [null, R, null], fromIndex: 1, toIndex: 2 };
+const TAG_HOME = { bases: [null, null, R], fromIndex: 2, toIndex: 3 };
 
 test("a stolen base has to work about seven times in ten, the way it always has", () => {
   for (const outs of [0, 1, 2]) {
-    const bar = steal(0, { outs });
-    assert.ok(bar > 0.6 && bar < 0.8, `${outs} out: ${bar}`);
+    const asked = bar({ ...STEAL_SECOND, outs });
+    assert.ok(asked > 0.6 && asked < 0.8, `${outs} out: ${asked}`);
   }
 });
 
-// The two rules the old hand-written matrix was built to encode. Neither is
-// written down anywhere now; both fall out of the division.
-test("never make the third out at third, and with two down send him home", () => {
-  const thirdWithTwoOut = steal(1, { outs: 2 });
-  assert.ok(thirdWithTwoOut > 0.85, `two down, stealing third: ${thirdWithTwoOut}`);
+// Third base is the one the old hand-written matrix had backwards. Its shape is
+// not a slope but a window: with nobody out there is a whole inning to be
+// driven in and no need to risk it, with two outs the out ends everything, and
+// in between is the one moment the ninety feet are worth having.
+test("stealing third is a window at one out, not a slope", () => {
+  const [nobodyOut, oneOut, twoOut] = [0, 1, 2].map((outs) => bar({ ...STEAL_THIRD, outs }));
+  assert.ok(oneOut < nobodyOut, `one out ${oneOut} should be the greener light over ${nobodyOut}`);
+  assert.ok(oneOut < twoOut, `one out ${oneOut} should be the greener light over ${twoOut}`);
+  assert.ok(twoOut > 0.85, `never make the third out at third: ${twoOut}`);
+  assert.ok(oneOut < 0.7, `one out is the window: ${oneOut}`);
+});
 
-  const thirdWithNobodyOut = steal(1, { outs: 0 });
-  assert.ok(thirdWithNobodyOut > 0.85, "nobody out, there is a whole inning to cash him in");
-
-  const thirdWithOneOut = steal(1, { outs: 1 });
-  assert.ok(thirdWithOneOut < 0.8, `one out is the window: ${thirdWithOneOut}`);
-
-  const homeWithTwoOut = advanceBreakeven({
-    half: "top", inning: 4, outs: 2, diff: 0, bases: [null, null, R], fromIndex: 2, toIndex: 3
-  });
-  assert.ok(homeWithTwoOut < 0.45, `two down, send him: ${homeWithTwoOut}`);
-
-  const homeWithNobodyOut = advanceBreakeven({
-    half: "top", inning: 4, outs: 0, diff: 0, bases: [null, null, R], fromIndex: 2, toIndex: 3
-  });
-  assert.ok(homeWithNobodyOut > homeWithTwoOut + 0.2, "with nobody out he stays put and waits to be driven in");
+test("with two down, send him", () => {
+  const twoOut = bar({ ...TAG_HOME, outs: 2 });
+  const nobodyOut = bar({ ...TAG_HOME, outs: 0 });
+  assert.ok(twoOut < 0.4, `two down, send him: ${twoOut}`);
+  assert.ok(nobodyOut > twoOut + 0.4, `with nobody out he waits to be driven in: ${nobodyOut}`);
 });
 
 // The thing the static matrix could not say at all.
 test("the same runner is a different decision in a different ball game", () => {
-  const tie = steal(0, { half: "bottom", inning: 9, outs: 0 });
-  const downFour = steal(0, { half: "bottom", inning: 9, outs: 0, diff: -4 });
-  assert.notEqual(tie, downFour, "the ninth in a tie is not the ninth down four");
+  const tied = bar({ ...STEAL_SECOND, inning: 9, outs: 1 });
+  const downTwo = bar({ ...STEAL_SECOND, inning: 9, outs: 1, diff: -2 });
+  assert.ok(
+    downTwo > tied + 0.2,
+    `down two in the ninth you need the baserunner, not the base: ${downTwo} vs ${tied}`
+  );
 
-  // Down one in the last of the ninth with two out, a man on second is a
-  // different animal from the same man in the second inning: the inning is the
-  // ball game, and the base he is standing on is nearly free.
-  const lastChance = advanceBreakeven({
-    half: "bottom", inning: 9, outs: 2, diff: -1, bases: [null, R, null], fromIndex: 1, toIndex: 2
-  });
-  const early = advanceBreakeven({
-    half: "top", inning: 2, outs: 2, diff: -1, bases: [null, R, null], fromIndex: 1, toIndex: 2
-  });
-  assert.ok(lastChance < early, `${lastChance} should be a greener light than ${early}`);
+  // A run behind is a different game again from two behind: the man on second
+  // is the tying run, and he is worth going after.
+  const downOne = bar({ ...STEAL_SECOND, inning: 9, outs: 1, diff: -1 });
+  assert.ok(downOne < downTwo, `${downOne} should be greener than ${downTwo}`);
 });
 
 test("a run in the home ninth ends it, and the break-even knows", () => {
-  // Tagging home from third, bottom of the ninth, tied. The run wins the game,
-  // so the only thing on the other side of the scale is the out.
-  const walkoff = advanceBreakeven({
-    half: "bottom", inning: 9, outs: 1, diff: 0, bases: [null, null, R], fromIndex: 2, toIndex: 3
-  });
-  const sameSpotEarly = advanceBreakeven({
-    half: "bottom", inning: 4, outs: 1, diff: 0, bases: [null, null, R], fromIndex: 2, toIndex: 3
-  });
+  const walkoff = advanceBreakeven({ half: "bottom", inning: 9, outs: 1, diff: 0, ...TAG_HOME });
+  const sameSpotEarly = advanceBreakeven({ half: "bottom", inning: 4, outs: 1, diff: 0, ...TAG_HOME });
   assert.ok(walkoff < sameSpotEarly, `${walkoff} should be greener than ${sameSpotEarly}`);
 });
 
-test("a decided game still plays baseball", () => {
-  // Thirteen runs up in the third, every outcome wins and the ratio is a zero
-  // over a zero. The answer falls back to how the game is played when it counts
-  // rather than freezing every runner where he stands.
-  const laugher = steal(0, { inning: 3, outs: 0, diff: 13 });
-  const tie = steal(0, { inning: 3, outs: 0, diff: 0 });
-  assert.equal(laugher, tie, "the blowout borrows the tie game's answer");
+test("a decided game plays like the nearest ball game, not like a tie", () => {
+  // Down nine in the ninth every outcome loses, so the ratio has nothing to
+  // divide. The answer comes from the nearest score that is still a game — a
+  // side that needs baserunners — and NOT from a tie, which would say run.
+  const hopeless = bar({ ...STEAL_SECOND, inning: 9, outs: 1, diff: -9 });
+  const tied = bar({ ...STEAL_SECOND, inning: 9, outs: 1, diff: 0 });
+  const downSome = bar({ ...STEAL_SECOND, inning: 9, outs: 1, diff: -3 });
+  assert.ok(hopeless > tied, `a laugher should not read like a tie: ${hopeless} vs ${tied}`);
+  assert.ok(Math.abs(hopeless - downSome) < 0.1, `it should read like the game it resembles: ${hopeless} vs ${downSome}`);
+});
+
+test("the bar comes down as a deficit closes, and bottoms out at the tie", () => {
+  // Behind, outs are dear and a team needs men on base more than it needs them
+  // ninety feet further along, so the bar is high and comes down every run it
+  // closes. Once ahead it flattens, and never climbs back to what a team a run
+  // down is asked for.
+  for (const inning of [2, 5, 8]) {
+    let previous = 1;
+    for (const diff of [-4, -3, -2, -1, 0]) {
+      const asked = bar({ ...STEAL_SECOND, inning, diff });
+      assert.ok(asked < previous, `inning ${inning}, diff ${diff}: ${asked} did not come down from ${previous}`);
+      previous = asked;
+    }
+    const downOne = bar({ ...STEAL_SECOND, inning, diff: -1 });
+    for (const diff of [1, 2, 3, 4]) {
+      const ahead = bar({ ...STEAL_SECOND, inning, diff });
+      assert.ok(ahead < downOne, `inning ${inning}, up ${diff}: ${ahead} should sit under a run down (${downOne})`);
+    }
+  }
+});
+
+// Late, the tie stops being just another point on the slope. The runner going
+// to second in a tie IS the winning run going into scoring position, and no
+// lead buys that back — so the bar bottoms there and ticks up on the other
+// side. Early it is still a plain slope: in the second inning runs are runs.
+test("late in a tie game the go-ahead run is the one worth moving", () => {
+  const lateTie = bar({ ...STEAL_SECOND, inning: 8, diff: 0 });
+  const lateUpOne = bar({ ...STEAL_SECOND, inning: 8, diff: 1 });
+  assert.ok(lateTie < lateUpOne, `eighth inning: tie ${lateTie} should be the greenest light, under ${lateUpOne}`);
+
+  const earlyTie = bar({ ...STEAL_SECOND, inning: 2, diff: 0 });
+  const earlyUpOne = bar({ ...STEAL_SECOND, inning: 2, diff: 1 });
+  assert.ok(earlyUpOne < earlyTie, `second inning: a lead is simply better, ${earlyUpOne} vs ${earlyTie}`);
 });
 
 test("every break-even is a probability, in every state the game can reach", () => {
@@ -146,12 +115,12 @@ test("every break-even is a probability, in every state the game can reach", () 
             [[R, R, null], 1, 2],
             [[R, null, R], 2, 3],
             [[R, R, R], 2, 3],
-            [EMPTY.slice(0, 2).concat([R]), 2, 3]
+            [[null, null, R], 2, 3]
           ]) {
-            const bar = advanceBreakeven({ half, inning, outs, diff, bases, fromIndex, toIndex });
+            const asked = advanceBreakeven({ half, inning, outs, diff, bases, fromIndex, toIndex });
             assert.ok(
-              Number.isFinite(bar) && bar >= 0 && bar <= 1,
-              `${half} ${inning}, ${outs} out, ${diff} runs, ${fromIndex}->${toIndex}: ${bar}`
+              Number.isFinite(asked) && asked >= 0 && asked <= 1,
+              `${half} ${inning}, ${outs} out, ${diff} runs, ${fromIndex}->${toIndex}: ${asked}`
             );
           }
         }
