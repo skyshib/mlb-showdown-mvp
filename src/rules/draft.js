@@ -2459,12 +2459,20 @@ export function assignLineupSlots(roster, assignments = {}) {
 // earlier card to one of its other spots to make room. Returns a Map of
 // label -> player. 1B only matches cards that actually LIST first base —
 // the anyone-covers-1B rule stays a fallback outside the matching.
+//
+// First base is matched in a SECOND pass, over the players the required slots
+// left over, because anyone can cover first at -1 while nobody else can cover
+// short. Seating a 3B/1B card at first in one combined pass would strand a
+// required slot for free — a 3B/2B and a 3B/1B card must come out 2B and 3B,
+// not 3B and 1B with second base reported empty. Augmenting paths never empty
+// a slot they already filled, so the 1B pass cannot cost required coverage.
 function matchExactSlots(slots, hitters, used) {
-  const openLabels = [...EXACT_REQUIRED_POSITIONS, "1B", ...CORNER_OUTFIELD_SLOTS]
-    .filter((label) => {
-      const slot = slots.find((item) => item.label === label);
-      return slot && !slot.player && !slot.lockedEmpty;
-    });
+  const isOpen = (label) => {
+    const slot = slots.find((item) => item.label === label);
+    return Boolean(slot) && !slot.player && !slot.lockedEmpty;
+  };
+  const requiredLabels = [...EXACT_REQUIRED_POSITIONS, ...CORNER_OUTFIELD_SLOTS].filter(isOpen);
+  let openLabels = requiredLabels;
   const fits = (player, label) =>
     CORNER_OUTFIELD_SLOTS.includes(label) ? cardIsCornerOutfielder(player) : playsPosition(player, label);
   const primaryFirst = (player) => {
@@ -2497,8 +2505,16 @@ function matchExactSlots(slots, hitters, used) {
   const primarySlot = (player) =>
     EXACT_REQUIRED_POSITIONS.includes(player.position) || player.position === "1B" || isCornerOutfielder(player.position);
   const order = [...hitters.filter(primarySlot), ...hitters.filter((player) => !primarySlot(player))];
-  for (const player of order) {
-    if (!used.has(player.id)) tryPlace(player, new Set());
+  const candidates = order.filter((player) => !used.has(player.id));
+  for (const player of candidates) {
+    tryPlace(player, new Set());
+  }
+  if (isOpen("1B")) {
+    openLabels = [...requiredLabels, "1B"];
+    const seatedIds = new Set([...seated.values()].map((player) => player.id));
+    for (const player of candidates) {
+      if (!seatedIds.has(player.id)) tryPlace(player, new Set());
+    }
   }
   return seated;
 }

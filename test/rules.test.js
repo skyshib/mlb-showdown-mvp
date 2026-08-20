@@ -267,7 +267,9 @@ test("single uses two-out bonus for runner trying to score from second", () => {
 
 test("double can send runner from first home on an extra-base attempt", () => {
   const state = createInitialState(teamA, weakDefense);
-  state.bases = [{ name: "Runner 1", speed: 12 }, null, null];
+  // 90%, and it takes that much: nobody out with a man behind him, an out at
+  // the plate costs a rally the win column values at 88 cents on the dollar.
+  state.bases = [{ name: "Runner 1", speed: 13 }, null, null];
 
   const runs = applyDouble(state, hitter, "away", "home", { d20: () => 17 });
 
@@ -327,10 +329,10 @@ test("runner can steal second before the plate appearance", () => {
   assert.equal(event.playDetails.stealAttempt.runnerSpeed, 20);
   assert.equal(event.playDetails.stealAttempt.targetBonus, 0);
   assert.equal(event.playDetails.stealAttempt.destination, "second");
-  // First inning, nobody out, tied: the win column asks for 71% here, which is
+  // First inning, nobody out, tied: the win column asks for 72% here, which is
   // what a century of baseball asks of a stolen base.
   assert.ok(
-    Math.abs(event.playDetails.stealAttempt.decisionMinimum - 0.71) < 0.005,
+    Math.abs(event.playDetails.stealAttempt.decisionMinimum - 0.72) < 0.005,
     `bar was ${event.playDetails.stealAttempt.decisionMinimum}`
   );
   assert.equal(state.stats.hitters.get("away:a-h-0").sb, 1);
@@ -375,8 +377,10 @@ test("stealing third fights the shorter throw: +5 to the catcher, not the runner
   assert.equal(event.playDetails.stealAttempt.targetBonus, -5);
   assert.equal(event.playDetails.stealAttempt.target, 10);
   assert.equal(event.playDetails.stealAttempt.destination, "third");
+  // Third with one out is the one window where the jump pays: 67%, the lowest
+  // bar any steal gets, and these odds are nowhere near it.
   assert.ok(
-    Math.abs(event.playDetails.stealAttempt.decisionMinimum - 0.71) < 0.005,
+    Math.abs(event.playDetails.stealAttempt.decisionMinimum - 0.67) < 0.005,
     `bar was ${event.playDetails.stealAttempt.decisionMinimum}`
   );
   assert.equal(event.playDetails.stealAttempt.safeChance, 0.25);
@@ -995,6 +999,68 @@ test("corner outfielders can fill left or right field", () => {
 
   const slots = assignLineupSlots(manager.roster).slots;
   assert.equal(slots.find((slot) => slot.label === "RF").player.name, "Left Two");
+});
+
+test("a 3B/1B card covers third before first, leaving second base to the 2B card", () => {
+  // The bug: matching first base alongside the required slots let the 3B/1B
+  // card take first, which pushed the 3B/2B card to third and reported the
+  // roster "missing 2B" even though it fields a legal nine.
+  const manager = {
+    name: "Corner Infield",
+    roster: [
+      makeHitter({ id: "ci-c", position: "C" }),
+      makeHitter({
+        id: "ci-3b-2b",
+        name: "Utility Infielder",
+        position: "3B",
+        positions: [{ pos: "3B", fielding: 1 }, { pos: "2B", fielding: 0 }]
+      }),
+      makeHitter({
+        id: "ci-3b-1b",
+        name: "Corner Infielder",
+        position: "3B",
+        positions: [{ pos: "3B", fielding: 2 }, { pos: "1B", fielding: 0 }]
+      }),
+      makeHitter({ id: "ci-ss", position: "SS" }),
+      makeHitter({ id: "ci-cf", position: "CF" }),
+      makeHitter({ id: "ci-lf", position: "LF" }),
+      makeHitter({ id: "ci-rf", position: "RF" }),
+      makeHitter({ id: "ci-of-a", name: "Fourth Outfielder", position: "LF" }),
+      makeHitter({ id: "ci-of-b", name: "Fifth Outfielder", position: "RF" }),
+      makePitcher({ id: "ci-sp-1", role: "SP" }),
+      makePitcher({ id: "ci-sp-2", role: "SP" }),
+      makePitcher({ id: "ci-rp-1", role: "RP", ip: 1 }),
+      makePitcher({ id: "ci-rp-2", role: "RP", ip: 1 })
+    ]
+  };
+
+  assert.deepEqual(validateRoster(manager), []);
+
+  const seated = assignLineupSlots(manager.roster).slots;
+  const at = (label) => seated.find((slot) => slot.label === label).player?.name;
+  assert.equal(at("2B"), "Utility Infielder");
+  assert.equal(at("3B"), "Corner Infielder");
+  // First base still fills — with a spare outfielder, out of position.
+  assert.ok(at("1B"));
+});
+
+test("a card that only plays first base still gets first base", () => {
+  const roster = [
+    makeHitter({ id: "fb-c", position: "C" }),
+    makeHitter({ id: "fb-1b", name: "True First Baseman", position: "1B" }),
+    makeHitter({ id: "fb-2b", position: "2B" }),
+    makeHitter({ id: "fb-3b", position: "3B" }),
+    makeHitter({ id: "fb-ss", position: "SS" }),
+    makeHitter({ id: "fb-cf", position: "CF" }),
+    makeHitter({ id: "fb-lf", position: "LF" }),
+    makeHitter({ id: "fb-rf", position: "RF" }),
+    makeHitter({ id: "fb-dh", position: "C" })
+  ];
+
+  const seated = assignLineupSlots(roster).slots;
+  const firstBase = seated.find((slot) => slot.label === "1B");
+  assert.equal(firstBase.player.name, "True First Baseman");
+  assert.equal(firstBase.outOfPosition, false);
 });
 
 test("createDraft lumps bare LF and RF card labels into the LF/RF pool", () => {
