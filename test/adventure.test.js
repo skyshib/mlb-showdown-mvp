@@ -851,6 +851,60 @@ test("WHO SITS names each man by the spot he is standing in", async () => {
   void rotationSlotOf;
 });
 
+test("WHO SITS reads in batting order, and names the bench the bench", async () => {
+  const { binderScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = await fullTestSave("who-sits-order-seed");
+  const spare = adventurePool().find((card) =>
+    card.kind === "hitter" && !save.roster.cardIds.includes(card.id) && card.rarity === "common");
+  addCardToCollection(save, spare.id);
+  const app = { save, screen: { name: "binder", index: 0, filter: "ALL", mode: "team-swap", pickIndex: 0 }, go() {}, rerender() {} };
+  const surnameOf = (card) => card.name.split(" ").pop().toUpperCase();
+  let html = null;
+  for (let index = 0; index < Object.keys(save.collection).length + 2; index += 1) {
+    app.screen.index = index;
+    const rendered = binderScreen.render(app);
+    if (rendered.includes("WHO SITS FOR") && rendered.includes(surnameOf(spare))) {
+      html = rendered;
+      break;
+    }
+  }
+  assert.ok(html, "the spare bat asks the question");
+
+  // The nine read in the order they BAT, not the order they were bought.
+  const lineup = buildTeam(managerFor(save)).lineup;
+  const spots = [...html.matchAll(/gq-swap-spot">([^<]*)<\/span>/g)].map((match) => match[1]);
+  const seatOf = (player) => player.assignedPosition ?? player.position;
+  const battingSpots = lineup.map(seatOf);
+  assert.deepEqual(spots.slice(0, battingSpots.length), battingSpots,
+    "the list walks the batting order, spot for spot");
+
+  // And the reserves are named for the job they actually hold.
+  const benched = spots.slice(battingSpots.length);
+  assert.ok(benched.length >= 1, "a full roster carries a bench");
+  assert.ok(benched.every((spot) => spot === "BENCH"), `every reserve reads BENCH (${benched.join(",")})`);
+  assert.equal(spots.filter((spot) => spot === "BENCH").length, benched.length, "and nobody in the order does");
+
+  // An arm is named by his rank in the pool, never by a start he may not make.
+  const arm = adventurePool().find((card) =>
+    card.role === "SP" && !save.roster.cardIds.includes(card.id) && card.rarity === "common");
+  addCardToCollection(save, arm.id);
+  const armApp = { save, screen: { name: "binder", index: 0, filter: "ALL", mode: "team-swap", pickIndex: 0 }, go() {}, rerender() {} };
+  let armHtml = null;
+  for (let index = 0; index < Object.keys(save.collection).length + 2; index += 1) {
+    armApp.screen.index = index;
+    const rendered = binderScreen.render(armApp);
+    if (rendered.includes("WHO SITS FOR") && rendered.includes(surnameOf(arm))) {
+      armHtml = rendered;
+      break;
+    }
+  }
+  assert.ok(armHtml, "the spare arm asks the question too");
+  const armSpots = [...armHtml.matchAll(/gq-swap-spot">([^<]*)<\/span>/g)].map((match) => match[1]);
+  assert.deepEqual(armSpots.slice(0, 4), ["SP1", "SP2", "SP3", "SP4"], "the rotation reads by rank");
+  assert.ok(armSpots.slice(4).every((spot) => spot === "RP"), "and the pen reads RP");
+  assert.ok(!armHtml.includes("GAME 1"), "no arm is promised a start the draw has not made");
+});
+
 test("stars flag keepers in binder and catalog; the sell sweeps can spare them", async () => {
   const { binderScreen, catalogScreen, sellScreen, sellAllCards, sellAllDuplicates } = await import("../src/adventure/ui/collectionScreens.js");
   const { isStarred } = await import("../src/adventure/state.js");

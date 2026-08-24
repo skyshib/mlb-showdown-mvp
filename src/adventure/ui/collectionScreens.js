@@ -693,20 +693,55 @@ function defaultSwapIndex(save, incoming, targets) {
   return anySpotHeCanFill >= 0 ? anySpotHeCanFill : 0;
 }
 
-// Where a rostered man is standing right now: the position a bat is playing (the
-// LF/RF man in left reads LF, the DH reads DH), or the game an arm is taking. A
-// bat the lineup could not seat falls back to what is printed on his card.
+// Where a rostered man is standing right now — the job he holds on THIS team,
+// never what his card happens to be printed at. A bat plays the slot the
+// lineup seats him in (the LF/RF man in left reads LF, the DH reads DH); a
+// bat the lineup does not seat is on the BENCH, which is a real job in the
+// full-roster format and the honest answer to "where does he play". An arm
+// takes a game in a classic rotation, or holds a rank in a full-format one —
+// where the rotation is a pool the draw picks from, so "GAME 2" would name a
+// start he may never make.
 function currentSpot(save, card) {
+  const full = rosterFormat(save).key === "full";
   if (card.kind === "pitcher") {
-    return rotationSlotOf(save, card) ?? card.role;
+    if (card.role !== "SP") return "RP";
+    if (!full) return rotationSlotOf(save, card) ?? card.role;
+    const rank = rotationCards(save).findIndex((arm) => arm.id === card.id);
+    return rank < 0 ? "SP" : `SP${rank + 1}`;
   }
-  return lineupSlotOf(save, card) ?? positionsLabel(card);
+  const slot = lineupSlotOf(save, card);
+  if (slot) return slot;
+  return full ? "BENCH" : positionsLabel(card);
+}
+
+// The men a new card could sit, in the order the CLUB reads: the nine in
+// batting order, then the bench behind them; the rotation by rank, then the
+// pen. Roster order is arrival order — the order cards happened to be
+// bought — and it tells a manager nothing about the team he is changing.
+function swapOrder(save, kind) {
+  const ids = [];
+  if (kind === "hitter") {
+    // The lineup as it actually bats, then the reserves.
+    for (const player of buildTeam(managerFor(save)).lineup) ids.push(player.id);
+    for (const card of rosterCards(save)) {
+      if (card.kind === "hitter" && !ids.includes(card.id)) ids.push(card.id);
+    }
+  } else {
+    for (const arm of rotationCards(save)) ids.push(arm.id);
+    for (const card of rosterCards(save)) {
+      if (card.kind === "pitcher" && !ids.includes(card.id)) ids.push(card.id);
+    }
+  }
+  return new Map(ids.map((id, index) => [id, index]));
 }
 
 function swapTargets(save, card) {
   const roster = rosterCards(save);
-  return roster.filter((target) =>
-    target.kind === card.kind && target.id !== card.id && !personConflict(roster, card, target.id));
+  const order = swapOrder(save, card.kind);
+  const rank = (target) => order.get(target.id) ?? Number.MAX_SAFE_INTEGER;
+  return roster
+    .filter((target) => target.kind === card.kind && target.id !== card.id && !personConflict(roster, card, target.id))
+    .sort((a, b) => rank(a) - rank(b));
 }
 
 function binderActions(app, card) {
