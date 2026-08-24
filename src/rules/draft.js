@@ -2189,6 +2189,12 @@ export function buildTeam(manager, options = {}) {
     : bestStaffAssignment(manager.roster, staffOptions);
   const staff = assignStaffSlots(manager.roster, staffAssignments, staffOptions);
   const starters = staff.filter((slot) => slot.role === "SP" && slot.player).map((slot) => slot.player);
+  // Full-format rotations are RANKED, not ordered: slot N is the club's
+  // Nth-best arm by points, so a drawn rank means the same thing in both
+  // dugouts — the 1s face the 1s (see the shared draw in the callers).
+  if ((options.rosterFormat ?? manager.rosterFormat) === "full") {
+    starters.sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0) || a.name.localeCompare(b.name));
+  }
   const bullpen = staff.filter((slot) => slot.role === "RP" && slot.player).map((slot) => slot.player);
   const starterIndex = starters.length ? Number(options.starterIndex ?? 0) % starters.length : 0;
   const activeStarter = starters[starterIndex];

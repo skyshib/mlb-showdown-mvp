@@ -456,26 +456,29 @@ export function runSimSeries({ playerManager, npcManager, bestOf, seed }) {
   let playerWins = 0;
   let npcWins = 0;
 
-  // Full-format rotations are drawn, not walked: a seeded random starter per
-  // dugout per game, no arm starting more than its ceil(bestOf/4) share.
-  // Classic managers keep the fixed turn — game N is rotation slot N.
-  const starterCounts = { player: {}, npc: {} };
-  const starterFor = (manager, who, gameNumber) => {
-    if (manager.rosterFormat !== "full") return gameNumber - 1;
-    const counts = starterCounts[who];
+  // Full-format rotations are drawn, not walked: ONE seeded draw per game,
+  // shared by both dugouts — rotations are ranked by points (buildTeam), so
+  // the drawn rank pits each club's Nth-best arm against the other's. No
+  // rank starts more than its ceil(bestOf/4) share. Classic managers keep
+  // the fixed turn — game N is rotation slot N.
+  const starterCounts = {};
+  const drawRank = (gameNumber) => {
     const pick = pickRandomStarter({
-      rng: createRng(`${seed}:starter:g${gameNumber}:${who}`),
-      starterCount: manager.startingPitchers ?? 4,
-      priorStartCounts: counts,
+      rng: createRng(`${seed}:starter:g${gameNumber}`),
+      starterCount: playerManager.startingPitchers ?? 4,
+      priorStartCounts: starterCounts,
       bestOf
     });
-    counts[pick] = (counts[pick] ?? 0) + 1;
+    starterCounts[pick] = (starterCounts[pick] ?? 0) + 1;
     return pick;
   };
 
   for (let gameNumber = 1; playerWins < needed && npcWins < needed; gameNumber += 1) {
-    const playerTeam = buildTeam(playerManager, { starterIndex: starterFor(playerManager, "player", gameNumber) });
-    const npcTeam = buildTeam(npcManager, { starterIndex: starterFor(npcManager, "npc", gameNumber) });
+    const full = playerManager.rosterFormat === "full" || npcManager.rosterFormat === "full";
+    const rank = full ? drawRank(gameNumber) : null;
+    const starterFor = (manager) => (manager.rosterFormat === "full" ? rank : gameNumber - 1);
+    const playerTeam = buildTeam(playerManager, { starterIndex: starterFor(playerManager) });
+    const npcTeam = buildTeam(npcManager, { starterIndex: starterFor(npcManager) });
     const playerIsAway = gameNumber % 2 === 1;
     const result = simulateGame(
       playerIsAway ? playerTeam : npcTeam,

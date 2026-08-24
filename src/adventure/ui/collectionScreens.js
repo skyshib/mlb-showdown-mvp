@@ -882,7 +882,13 @@ export const binderScreen = {
 // The starting rotation is the roster's SP order: the first arm takes game 1
 // (and odd games of a series). Exported for tests.
 export function rotationCards(save) {
-  return rosterCards(save).filter((card) => card.kind === "pitcher" && card.role === "SP");
+  const arms = rosterCards(save).filter((card) => card.kind === "pitcher" && card.role === "SP");
+  // Full-format rotations RANK by points — the same order buildTeam fields,
+  // so the list reads as the ranks the game-day draw picks from.
+  if (rosterFormat(save).key === "full") {
+    return [...arms].sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0) || a.name.localeCompare(b.name));
+  }
+  return arms;
 }
 
 // Swap the first two starters: the other arm takes game 1 now.
@@ -1101,18 +1107,47 @@ function benchLabel(save, anchor, filter) {
     return `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}`;
   }
   if (anchor.kind === "pitcher") return `SPARE ${anchor.role} ONLY`;
+  const mates = rosterSwapMates(save, anchor).length;
   const slot = lineupSlotOf(save, anchor) ?? anchor.position;
+  if (mates) {
+    return lineupSlotOf(save, anchor)
+      ? `SPARE ${slot === "DH" ? "BATS" : slot} + YOUR BENCH`
+      : `SPARE BATS + THE LINEUP`;
+  }
   // Every bat can DH, and any glove covers first — say so rather than promise
   // a filter that isn't filtering.
   if (slot === "DH" || slot === "1B") return `ANY BAT CAN ${slot === "DH" ? "DH" : "PLAY 1B"}`;
   return `SPARE ${slot} ONLY`;
 }
 
-// The replacement picker's rows: the bench candidates plus the incumbent
-// himself, everyone sorted into point order so he reads at his true rank.
-function pickRowsFor(save, anchor, filter) {
+// Roster-internal trades: in the full format a seated bat and a bench bat
+// can swap SPOTS — the bench man takes the seat, the seated man takes the
+// bench — without any card leaving the roster. The picker lists them
+// alongside the collection's spares, so "who plays" and "who's on the team"
+// are one menu. Exported for tests.
+export function rosterSwapMates(save, anchor) {
+  if (rosterFormat(save).key !== "full" || anchor?.kind !== "hitter") return [];
+  const roster = rosterCards(save);
+  const slot = lineupSlotOf(save, anchor);
+  if (slot) {
+    // A seated man's mates: every bench bat who could take his spot.
+    return roster.filter((card) => card.kind === "hitter" && card.id !== anchor.id
+      && !lineupSlotOf(save, card) && canPlayerFillLineupSlot(card, slot));
+  }
+  // A bench man's mates: every seated bat whose spot he could take.
+  return roster.filter((card) => {
+    if (card.kind !== "hitter" || card.id === anchor.id) return false;
+    const seat = lineupSlotOf(save, card);
+    return Boolean(seat) && canPlayerFillLineupSlot(anchor, seat);
+  });
+}
+
+// The replacement picker's rows: the bench candidates, the roster's own
+// swap mates, and the incumbent himself, everyone sorted into point order so
+// he reads at his true rank. Exported for tests.
+export function pickRowsFor(save, anchor, filter) {
   if (!anchor) return [];
-  return [...benchCards(save, anchor, filter), anchor]
+  return [...benchCards(save, anchor, filter), ...rosterSwapMates(save, anchor), anchor]
     .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
 }
 
@@ -1173,8 +1208,9 @@ function teamCardActions(app, card) {
   // instead of offering a switch that means nothing.
   if (card.role === "SP") {
     if (rosterFormat(save).key === "full") {
+      const rank = rotationCards(save).findIndex((arm) => arm.id === card.id) + 1;
       actions.push({
-        label: `ROTATION POOL <span class="gq-dim">STARTERS DRAWN AT RANDOM</span>`,
+        label: `ROTATION #${rank} BY POINTS <span class="gq-dim">FACES THEIR #${rank} WHEN DRAWN</span>`,
         disabled: true,
         run: () => {}
       });
@@ -1241,7 +1277,13 @@ export const teamScreen = {
       const anchorId = anchor?.id;
       list = `<h3>${benchLabel(save, anchor, filter)}</h3>${menuHtml(
         [
-          ...pickRows.map((card) => ({ html: `${cardLine(card)}${card.id === anchorId ? " &#9670;" : ""}${starMark(save, card)}` })),
+          ...pickRows.map((card) => ({
+            html: `${cardLine(card)}${card.id === anchorId
+              ? " &#9670;"
+              : save.roster.cardIds.includes(card.id)
+                ? ` <span class="gq-dim">&#8646; SWAPS SPOTS</span>`
+                : ""}${starMark(save, card)}`
+          })),
           { label: "CANCEL" }
         ],
         pickIndex
@@ -1331,9 +1373,22 @@ export const teamScreen = {
         const pick = rows[app.screen.pickIndex ?? 0];
         // Picking the incumbent (or CANCEL) keeps him; anyone else swaps in.
         if (pick && pick.id !== anchor.id) {
-          const cardIds = save.roster.cardIds.map((id) => (id === anchor.id ? pick.id : id));
-          setRoster(save, cardIds);
-          persistSave(save);
+          if (save.roster.cardIds.includes(pick.id)) {
+            // A roster-internal trade of SPOTS: the bench man is pinned at
+            // the seated man's slot, and the seated man takes the bench (or
+            // re-seats wherever else his glove still fits).
+            const benched = lineupSlotOf(save, pick) ? anchor : pick;
+            const seated = benched === pick ? anchor : pick;
+            const slot = lineupSlotOf(save, seated);
+            if (slot && switchPositionTo(save, benched, slot)) {
+              addLog(save, `${benched.name} takes ${slot} from ${seated.name}.`);
+              persistSave(save);
+            }
+          } else {
+            const cardIds = save.roster.cardIds.map((id) => (id === anchor.id ? pick.id : id));
+            setRoster(save, cardIds);
+            persistSave(save);
+          }
         }
         app.screen.mode = "roster";
       } else if (key === "b") {

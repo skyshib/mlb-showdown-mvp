@@ -576,10 +576,11 @@ export function startSeries(save, trainerId, bestOf) {
     wins: 0,
     losses: 0,
     nextGame: 1,
-    // Full-format starters are drawn per game; the ledger records each draw
-    // (index into the rotation, per dugout) so a resumed save re-fields the
-    // same arm and the series cap counts every start already made.
-    starterPicks: { player: [], npc: [] }
+    // Full-format starters are drawn per game — ONE draw, shared by both
+    // dugouts (rotations rank by points, so the 1s face the 1s). The ledger
+    // records each drawn rank so a resumed save re-fields the same arms and
+    // the series cap counts every start already made.
+    starterPicks: []
   };
   return save.activeSeries;
 }

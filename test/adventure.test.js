@@ -5185,15 +5185,58 @@ test("a full-format sim series draws starters and manages both benches", async (
   const subTypes = ["pinch-hitter", "pinch-runner", "defensive-sub"];
   const subEvents = series.games.flatMap((game) => game.events.filter((event) => subTypes.includes(event.type)));
   assert.ok(subEvents.every((event) => event.inning >= 7), "no bench opens before the seventh");
-  // Starters are drawn from the four, never more than ceil(7/4)=2 starts each.
-  for (const who of ["player", "npc"]) {
-    const starters = series.games.map((game) => {
-      const box = who === "player"
-        ? (game.playerIsAway ? game.boxScore.away : game.boxScore.home)
-        : (game.playerIsAway ? game.boxScore.home : game.boxScore.away);
-      return box.pitchers[0].id;
-    });
-    const counts = starters.reduce((tally, id) => (tally[id] = (tally[id] ?? 0) + 1, tally), {});
-    assert.ok(Math.max(...Object.values(counts)) <= 2, `${who}: no arm starts three games of a best-of-7`);
+  // Starters are drawn from the four, never more than ceil(7/4)=2 starts
+  // each — and the draw is SHARED: rotations rank by points, so each game
+  // pits the clubs' same-ranked arms against each other.
+  const rankOf = (manager, starterId) => {
+    const arms = manager.roster
+      .filter((card) => card.role === "SP")
+      .sort((a, b) => (b.points || 0) - (a.points || 0) || a.name.localeCompare(b.name));
+    return arms.findIndex((arm) => arm.id === starterId);
+  };
+  const playerManager = managerFor(save);
+  const npcManager = buildNpcTeam(boss, save);
+  const ranks = { player: [], npc: [] };
+  for (const game of series.games) {
+    const playerBox = game.playerIsAway ? game.boxScore.away : game.boxScore.home;
+    const npcBox = game.playerIsAway ? game.boxScore.home : game.boxScore.away;
+    const playerRank = rankOf(playerManager, playerBox.pitchers[0].id);
+    const npcRank = rankOf(npcManager, npcBox.pitchers[0].id);
+    assert.equal(playerRank, npcRank, `game ${game.gameNumber}: the ${playerRank + 1}s face the ${npcRank + 1}s`);
+    ranks.player.push(playerRank);
+    ranks.npc.push(npcRank);
   }
+  const counts = ranks.player.reduce((tally, rank) => (tally[rank] = (tally[rank] ?? 0) + 1, tally), {});
+  assert.ok(Math.max(...Object.values(counts)) <= 2, "no rank starts three games of a best-of-7");
+});
+
+test("the swap picker offers roster bench mates that trade spots", async () => {
+  const { pickRowsFor, rosterSwapMates, teamScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = await fullTestSave("bench-swap-picker-seed");
+  // The DH is the sure case: any bench bat can take that seat.
+  const lineup = buildTeam(managerFor(save)).lineup;
+  const anchor = lineup.find((player) => player.assignedPosition === "DH");
+  const anchorCard = rosterCards(save).find((card) => card.id === anchor.id);
+  const mates = rosterSwapMates(save, anchorCard);
+  assert.ok(mates.length >= 1, "every bench bat is a mate for the DH");
+  const rows = pickRowsFor(save, anchorCard, "position");
+  const mate = rows.find((card) => card.id !== anchorCard.id && save.roster.cardIds.includes(card.id));
+  assert.ok(mate, "the picker lists a roster bench mate among the spares");
+
+  // Picking him trades SPOTS: he seats, no card leaves the roster.
+  const bats = rosterCards(save).filter((card) => card.kind === "hitter");
+  // The bats page lists the seated nine in slot order (C first, DH ninth).
+  const app = {
+    save,
+    screen: { name: "team", page: "bats", index: 8, mode: "pick", pickFilter: "position", pickIndex: rows.indexOf(mate) },
+    go() {},
+    rerender() {}
+  };
+  const idsBefore = [...save.roster.cardIds].sort();
+  teamScreen.key(app, "a");
+  assert.deepEqual([...save.roster.cardIds].sort(), idsBefore, "no card left the roster");
+  const seatedNow = buildTeam(managerFor(save)).lineup.map((player) => player.id);
+  assert.ok(seatedNow.includes(mate.id), "the bench mate took a seat");
+  assert.equal(seatedNow.length, 9, "and the lineup is still nine");
+  assert.equal(bats.length, rosterCards(save).filter((card) => card.kind === "hitter").length, "the flex split did not change");
 });

@@ -117,35 +117,36 @@ export function startTrainerBattle(app, trainer) {
 }
 
 // Which rotation slot starts this game. Classic walks the rotation in order
-// — game N is slot N. Full-format saves DRAW each dugout's starter from the
-// four, seeded off the save so a resumed series re-draws identically, and
-// capped so no arm starts more than its ceil(bestOf/4) share. Every draw is
-// recorded in the series ledger the moment it is made: the pick for game N
-// is settled once, and coming back to the game finds it, never re-rolls it.
+// — game N is slot N. Full-format saves DRAW the game's rotation RANK once,
+// for both dugouts: rotations rank by points (see buildTeam), so the draw
+// pits each club's Nth-best arm against the other's — the 1s face the 1s.
+// Seeded off the save so a resumed series re-draws identically, capped so no
+// rank starts more than its ceil(bestOf/4) share, and every draw is recorded
+// in the series ledger the moment it is made: the pick for game N is settled
+// once, and coming back to the game finds it, never re-rolls it.
 function resolveSeriesStarters(save, trainer, series) {
   if (rosterFormat(save).key !== "full") {
-    return { starterIndex: series.nextGame - 1, npcStarterIndex: null };
+    return { starterIndex: series.nextGame - 1 };
   }
-  const picks = series.starterPicks ?? (series.starterPicks = { player: [], npc: [] });
-  const rotation = rosterFormat(save).startingPitchers;
-  const counts = (list) => list.reduce((tally, index) => {
-    tally[index] = (tally[index] ?? 0) + 1;
-    return tally;
-  }, {});
-  for (const [who, list] of [["you", picks.player], ["them", picks.npc]]) {
-    while (list.length < series.nextGame) {
-      list.push(pickRandomStarter({
-        rng: createRng(deriveSeed(save, "starter", trainer.id, `a${series.attempt}`, `g${list.length + 1}`, who)),
-        starterCount: rotation,
-        priorStartCounts: counts(list),
-        bestOf: series.bestOf
-      }));
-    }
+  // Ledgers written before the shared-draw change held per-dugout lists;
+  // carry the player's forward rather than re-roll a live series.
+  if (!Array.isArray(series.starterPicks)) {
+    series.starterPicks = Array.isArray(series.starterPicks?.player) ? [...series.starterPicks.player] : [];
   }
-  return {
-    starterIndex: picks.player[series.nextGame - 1],
-    npcStarterIndex: picks.npc[series.nextGame - 1]
-  };
+  const picks = series.starterPicks;
+  while (picks.length < series.nextGame) {
+    const counts = picks.reduce((tally, index) => {
+      tally[index] = (tally[index] ?? 0) + 1;
+      return tally;
+    }, {});
+    picks.push(pickRandomStarter({
+      rng: createRng(deriveSeed(save, "starter", trainer.id, `a${series.attempt}`, `g${picks.length + 1}`)),
+      starterCount: rosterFormat(save).startingPitchers,
+      priorStartCounts: counts,
+      bestOf: series.bestOf
+    }));
+  }
+  return { starterIndex: picks[series.nextGame - 1] };
 }
 
 function launchSeriesGame(app, trainer) {
@@ -153,14 +154,15 @@ function launchSeriesGame(app, trainer) {
   const series = save.activeSeries;
   // Series alternate ballparks: the player visits in odd games, hosts evens.
   const playerIsAway = series.bestOf <= 1 || series.nextGame % 2 === 1;
-  const { starterIndex, npcStarterIndex } = resolveSeriesStarters(save, trainer, series);
+  // One starterIndex for both dugouts: the drawn rank (createBattle's
+  // npcStarterIndex defaults to it).
+  const { starterIndex } = resolveSeriesStarters(save, trainer, series);
   const battle = createBattle({
     playerManager: managerFor(save),
     npcManager: buildNpcTeam(trainer, save),
     trainer,
     seed: deriveSeed(save, "battle", trainer.id, `a${series.attempt}`, `g${series.nextGame}`),
     starterIndex,
-    npcStarterIndex,
     playerIsAway
   });
   const lines = [
