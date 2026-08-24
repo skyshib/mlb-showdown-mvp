@@ -85,6 +85,21 @@ function holderText(record, entry) {
   return `${escapeHtml(entry.player)} <span class="gq-dim">&middot; ${manager}</span>`;
 }
 
+// When it was set. Every line the league sends up is stamped with the day it was
+// filed, and a record book that only says WHO is half a record book: a mark from
+// April and a mark from this morning read exactly alike without it, and the older
+// one is the one that has been standing there all year.
+//
+// A line with no stamp on it simply does not get one — an old mark filed before
+// the book kept dates, or your own best sitting on the board before the league has
+// heard of it, are both cases where inventing a date would be inventing a fact.
+function dateText(entry) {
+  if (!Number.isFinite(entry?.at)) return "";
+  return new Date(entry.at)
+    .toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    .toUpperCase();
+}
+
 // The current page of the book, and the records on it.
 function currentPage(app) {
   return RECORD_PAGES[clampIndex(app.screen.pageIndex ?? 0, RECORD_PAGES.length)];
@@ -133,7 +148,10 @@ function boardHtml(row, app, active) {
   }
   const cursor = clampIndex(app.screen.boardIndex ?? 0, board.top.length);
   const lines = board.top.map((entry, place) => {
-    const text = `${place + 1}. <b>${valueText(record, entry.value)}</b> ${holderText(record, entry)}`;
+    const when = dateText(entry);
+    const text = `${place + 1}. <b>${valueText(record, entry.value)}</b> ${holderText(record, entry)}${
+      when ? `<span class="gq-dim gq-record-date">${escapeHtml(when)}</span>` : ""
+    }`;
     if (!active) return `<p class="gq-dim">${text}</p>`;
     return `<p class="gq-board-row${place === cursor ? " gq-cursor" : ""}" data-menu-index="${place}">${
       place === cursor ? "&#9654; " : "&nbsp;&nbsp;"

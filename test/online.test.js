@@ -1009,3 +1009,43 @@ test("the host can pause a snake room, and nobody picks until it resumes", async
   assert.equal(resumed.pausedRemainingMs, null, "the resume hands the remainder back exactly once");
   assert.equal(resumed.managers[0].roster.length, 1);
 });
+
+// A record is a number, a name, and a DAY, and the day has to survive being
+// looked at. The book goes up again on every visit to the records screen, so a
+// mark you already hold arrives over and over — restamping it made every standing
+// record read as though it had been set this morning.
+test("the record book keeps the day a mark was set, not the day it was last sent", async (t) => {
+  const base = await startServer(t);
+
+  const file = async (records, extra = {}) => api(base, "POST", "/api/records", {
+    name: "ANA", saveSeed: "sq-ana", mode: "budget", records, ...extra
+  });
+  const board = async (key) => (await api(base, "GET", "/api/records")).data.records[key];
+
+  // Set in April, and the client says so.
+  const april = Date.UTC(2026, 3, 2);
+  assert.equal((await file({ "runs-game": { value: 12, day: 7, opponent: "JOJO", at: april } })).status, 201);
+  assert.equal((await board("runs-game"))[0].at, april, "the day it was set is the day that is filed");
+
+  // The same twelve, sent up again on a later visit. Same record, same day.
+  await file({ "runs-game": { value: 12, day: 7, opponent: "JOJO", at: Date.now() } });
+  assert.equal((await board("runs-game"))[0].value, 12);
+  assert.equal((await board("runs-game"))[0].at, april, "resending a mark you already hold does not redate it");
+
+  // Beating it is a new record, and gets its own day.
+  const may = Date.UTC(2026, 4, 9);
+  await file({ "runs-game": { value: 15, day: 20, opponent: "MABEL", at: may } });
+  const beaten = (await board("runs-game"))[0];
+  assert.equal(beaten.value, 15);
+  assert.equal(beaten.at, may, "and beating it stamps the day you beat it");
+
+  // A day nobody could have set it on is not evidence of anything: the book
+  // falls back to the day it heard about it.
+  const before = Date.now();
+  await api(base, "POST", "/api/records", {
+    name: "BO", saveSeed: "sq-bo", mode: "budget",
+    records: { "runs-game": { value: 9, day: 1, opponent: "PETRA", at: Date.now() + 86_400_000 } }
+  });
+  const bo = (await board("runs-game")).find((row) => row.name === "BO");
+  assert.ok(bo.at >= before && bo.at <= Date.now(), "a date in the future is filed as today");
+});

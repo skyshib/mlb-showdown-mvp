@@ -856,7 +856,10 @@ export function updatePersonalRecords(save, storage = personalStorage()) {
     const previous = book[key];
     const better = !previous || (record.better === "max" ? mark.value > previous.value : mark.value < previous.value);
     if (!better) continue;
-    book[key] = { ...mark, name: save.player.name, saveSeed: save.saveSeed, mode: save.mode ?? "budget" };
+    // Stamped with the day it was set, not the day it is next read: this line only
+    // moves when the mark is actually beaten, so the date on it is the date of the
+    // afternoon that put it there, and it goes up to the league with it.
+    book[key] = { ...mark, name: save.player.name, saveSeed: save.saveSeed, mode: save.mode ?? "budget", at: Date.now() };
     changed.push(key);
   }
   if (changed.length) storage?.setItem(PERSONAL_KEY, JSON.stringify(book));
@@ -930,7 +933,7 @@ export function submitPersonalRecords() {
   for (const [key, mark] of Object.entries(loadPersonalRecords())) {
     if (!mark?.saveSeed || !mark?.name) continue;
     const group = bySeed.get(mark.saveSeed) ?? { name: mark.name, mode: mark.mode ?? "budget", records: {} };
-    group.records[key] = { value: mark.value, player: mark.player, day: mark.day, opponent: mark.opponent };
+    group.records[key] = { value: mark.value, player: mark.player, day: mark.day, opponent: mark.opponent, at: mark.at };
     bySeed.set(mark.saveSeed, group);
   }
   const posts = [...bySeed.entries()].map(([saveSeed, group]) =>
@@ -966,7 +969,9 @@ export function submitRunRecords(run) {
   const records = {};
   for (const key of RUN_RECORD_KEYS) {
     const value = runRecordValue(key, run);
-    if (value !== null) records[key] = { value };
+    // A title-run record was set on the day the run ended, whenever the book gets
+    // to hear about it — which for a run finished offline can be weeks later.
+    if (value !== null) records[key] = { value, at: run.finishedAt };
   }
   return postRecordBook(run.name, run.saveSeed, run.mode ?? "budget", records);
 }
@@ -1020,7 +1025,7 @@ function localRunMarks(record) {
   for (const run of loadHallOfFame()) {
     const value = runRecordValue(record.key, run);
     if (value === null) continue;
-    marks.push({ value, name: run.name, saveSeed: run.saveSeed, mode: run.mode ?? "budget", you: true });
+    marks.push({ value, name: run.name, saveSeed: run.saveSeed, mode: run.mode ?? "budget", at: run.finishedAt, you: true });
   }
   return marks;
 }
@@ -1051,7 +1056,10 @@ export function leaderboard(record, globals, save, limit = 5) {
       already.you = true;
       // The board can be behind what has just been done on this machine.
       if (record.better === "max" ? mark.value > already.value : mark.value < already.value) {
-        Object.assign(already, mark);
+        // Your copy is the better number, but it is not always the better DATE: a
+        // mark you have held for months carries no stamp of its own if it was set
+        // before the book kept them. Keep the league's day rather than losing it.
+        Object.assign(already, mark, { at: mark.at ?? already.at });
       }
     } else {
       rows.push(mark);

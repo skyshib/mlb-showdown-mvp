@@ -687,12 +687,33 @@ function fileRecord(store, key, row) {
   const previous = (store.records[key] ?? []).find((existing) => recordRowKey(existing) === recordRowKey(row));
   // Keep whichever of the two is actually better — a resubmission of an older,
   // worse number must not erase a standing record.
+  // STRICTLY better, because a resubmission of a mark you already hold is not a
+  // new record — it is the same one, sent up again the next time the screen was
+  // opened. Taking the newer copy on a tie kept restamping the date, so a mark
+  // that had stood since April read as this morning's the moment its holder
+  // looked at the board. The line that got there first keeps the day it did it.
   const best = !previous ? row
-    : direction === "max" ? (row.value >= previous.value ? row : previous)
-      : (row.value <= previous.value ? row : previous);
+    : direction === "max" ? (row.value > previous.value ? row : previous)
+      : (row.value < previous.value ? row : previous);
   list.push(best);
   list.sort((a, b) => (direction === "max" ? b.value - a.value : a.value - b.value) || a.at - b.at);
   store.records[key] = list.slice(0, RECORDS_MAX_PER_KEY);
+}
+
+// The day a mark was set. The client knows it — a personal best is stamped the
+// moment it is set, and a run's marks carry the day the run ended — and that is
+// better than the day it happened to reach us, which for an offline run, or one
+// finished before this board existed, can be months late.
+//
+// Trusted only as far as it is plausible: a date in the future or from before the
+// game existed is nobody's record day, and those fall back to now. This is a
+// record book for a baseball game, so the check is a sanity check and not a
+// security one.
+const RECORDS_EPOCH = Date.UTC(2025, 0, 1);
+
+function recordStamp(at) {
+  const now = Date.now();
+  return Number.isFinite(at) && at >= RECORDS_EPOCH && at <= now ? at : now;
 }
 
 async function postRecords(store, request, response) {
@@ -720,7 +741,7 @@ async function postRecords(store, request, response) {
       player: hofString(entry.player, 40),
       day: hofNumber(entry.day, 1e6),
       opponent: hofString(entry.opponent, 40),
-      at: Date.now()
+      at: recordStamp(entry.at)
     });
     filed += 1;
   }
