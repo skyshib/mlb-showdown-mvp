@@ -708,6 +708,9 @@ h1.gq-logo {
 .gq-strip-spot { flex: none; color: var(--gb-dark); }
 .gq-strip-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gq-strip-ob { flex: none; color: var(--gb-dark); }
+/* The spot he is standing at, quiet, between the name and his number. */
+.gq-strip-pos { flex: none; color: var(--gb-dark); opacity: 0.75; }
+.gq-strip-now .gq-strip-pos { color: var(--gb-light); }
 
 /* The man in the box wears the cursor's fill. The club in the field gets the
    quieter mark on whoever leads off when they come up — a lift off the tan,

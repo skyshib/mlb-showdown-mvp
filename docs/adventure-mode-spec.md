@@ -334,6 +334,13 @@ would strand the defense are refused — the CPU never makes one — except the
 home side batting in the 9th+ (`walkoffSpot`), where the battle UI allows the
 gamble behind an explicit confirm.
 
+Full-format games open on the `rotationDraw` screen: the spin over the four
+points-ranked matchups that lands on tonight's shared rank. X there is a
+rain check (`abandonSeriesGame`): the stash is torn up, the drawn rank is
+voided, the retry re-draws off an entry-salted seed — and the day is spent
+(`seasonStats.games` advances). Tab-close resume is unaffected. The battle
+HUD's lineup strips show each man's live defensive position.
+
 ### 5.4 NPC AI
 
 Simple profile-driven policies over the same decision set:

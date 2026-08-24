@@ -6,7 +6,8 @@ import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260716-records";
 import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen,
   formatSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260716-records";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260716-records";
-import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen, resumeBattle } from "./ui/battleScreen.js?v=20260716-records";
+import { battleScreen,
+  rotationDrawScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen, resumeBattle } from "./ui/battleScreen.js?v=20260716-records";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260716-records";
 import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, trophyScreen } from "./ui/statsScreens.js?v=20260716-records";
 import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260716-records";
@@ -47,6 +48,7 @@ const SCREENS = {
   trainerIntro: trainerIntroScreen,
   ambush: ambushScreen,
   battle: battleScreen,
+  rotationDraw: rotationDrawScreen,
   gameOver: gameOverScreen,
   seriesBreak: seriesBreakScreen,
   battleResult: battleResultScreen,

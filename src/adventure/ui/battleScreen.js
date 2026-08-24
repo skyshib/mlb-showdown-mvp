@@ -139,8 +139,13 @@ function resolveSeriesStarters(save, trainer, series) {
       tally[index] = (tally[index] ?? 0) + 1;
       return tally;
     }, {});
+    const gameNumber = picks.length + 1;
+    // A rain check voids the game's pick and salts tomorrow's re-draw (see
+    // abandonSeriesGame): the ledger drops back a slot, the entry count goes
+    // up, and this seed is a NEW seed — same game number, different day.
+    const entry = series.entries?.[gameNumber] ?? 0;
     picks.push(pickRandomStarter({
-      rng: createRng(deriveSeed(save, "starter", trainer.id, `a${series.attempt}`, `g${picks.length + 1}`)),
+      rng: createRng(deriveSeed(save, "starter", trainer.id, `a${series.attempt}`, `g${gameNumber}`, ...(entry ? [`e${entry}`] : []))),
       starterCount: rosterFormat(save).startingPitchers,
       priorStartCounts: counts,
       bestOf: series.bestOf
@@ -157,11 +162,15 @@ function launchSeriesGame(app, trainer) {
   // One starterIndex for both dugouts: the drawn rank (createBattle's
   // npcStarterIndex defaults to it).
   const { starterIndex } = resolveSeriesStarters(save, trainer, series);
+  const npcManager = buildNpcTeam(trainer, save);
+  const entry = series.entries?.[series.nextGame] ?? 0;
   const battle = createBattle({
     playerManager: managerFor(save),
-    npcManager: buildNpcTeam(trainer, save),
+    npcManager,
     trainer,
-    seed: deriveSeed(save, "battle", trainer.id, `a${series.attempt}`, `g${series.nextGame}`),
+    // A rain-checked game re-deals: the entry salt makes the retry its own
+    // ball game, not a replay of the one walked away from.
+    seed: deriveSeed(save, "battle", trainer.id, `a${series.attempt}`, `g${series.nextGame}`, ...(entry ? [`e${entry}`] : [])),
     starterIndex,
     playerIsAway
   });
@@ -171,7 +180,7 @@ function launchSeriesGame(app, trainer) {
   ];
   stashBattle(save, trainer.id, battle, lines);
   persistSave(save);
-  app.go("battle", {
+  const payload = {
     trainerId: trainer.id,
     battle,
     lines,
@@ -179,9 +188,141 @@ function launchSeriesGame(app, trainer) {
     playLog: [{ half: "top", inning: 1, score: { away: 0, home: 0 }, lines }],
     menuIndex: 0,
     mode: "menu"
-  });
+  };
+  // Full format opens on the rotation draw — the spin that says which ranks
+  // take the ball tonight. Classic goes straight to the plate.
+  if (rosterFormat(save).key === "full") {
+    const yours = rosterCards(save)
+      .filter((card) => card.kind === "pitcher" && card.role === "SP")
+      .sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0) || a.name.localeCompare(b.name));
+    const theirs = npcManager.roster.filter((card) => card.role === "SP");
+    app.go("rotationDraw", {
+      ...payload,
+      draw: {
+        gameNumber: series.nextGame,
+        bestOf: series.bestOf,
+        rank: starterIndex,
+        yours,
+        theirs
+      }
+    });
+  } else {
+    app.go("battle", payload);
+  }
   app.rerender();
 }
+
+// A rain check: walk away from a game already dealt. The stash is torn up,
+// the game's drawn rank is voided (tomorrow's launch re-draws off a fresh
+// seed), and THE DAY IS SPENT — walking away from a ballpark is not free,
+// it is a day of the season like any other.
+export function abandonSeriesGame(app, trainer) {
+  const save = app.save;
+  const series = save.activeSeries;
+  if (series) {
+    if (Array.isArray(series.starterPicks) && series.starterPicks.length >= series.nextGame) {
+      series.starterPicks.length = series.nextGame - 1;
+    }
+    if (!series.entries) series.entries = {};
+    series.entries[series.nextGame] = (series.entries[series.nextGame] ?? 0) + 1;
+  }
+  save.activeBattle = null;
+  ensureSeasonStats(save).games += 1;
+  addLog(save, `Took a rain check on ${trainer.name}. The day is spent.`);
+  persistSave(save);
+  app.go("map");
+  app.rerender();
+}
+
+// ---- The rotation draw -------------------------------------------------------
+//
+// The pre-game beat of the full-roster format: rotations are RANKED by
+// points and one drawn rank starts for both clubs, so the screen spins a
+// cursor down the four matchups — your #1 against theirs, your #2 against
+// theirs — and lands it on tonight's. Z takes the mound; X is the rain
+// check, priced right on the screen.
+let rotationSpinTimer = null;
+
+function stopRotationSpin() {
+  clearInterval(rotationSpinTimer);
+  rotationSpinTimer = null;
+}
+
+const SPIN_STEPS = 12;
+
+export const rotationDrawScreen = {
+  render(app) {
+    const trainer = trainerById(app.screen.trainerId);
+    const draw = app.screen.draw;
+    const settled = Boolean(app.screen.settled);
+    const highlight = settled ? draw.rank : (app.screen.spinStep ?? 0) % draw.yours.length;
+    const arm = (card) => card
+      ? `${escapeHtml(shortName(card.name))} <span class="gq-dim">CTRL${card.control}</span>`
+      : `<span class="gq-dim">&mdash;</span>`;
+    const rows = draw.yours.map((yourArm, index) => {
+      const lit = index === highlight;
+      return `<p class="${lit ? "" : "gq-dim"}">${lit ? "&#9654;" : "&nbsp;"} #${index + 1} ${arm(yourArm)} <span class="gq-dim">v</span> ${arm(draw.theirs[index])}</p>`;
+    }).join("");
+    const starter = draw.yours[draw.rank];
+    const opponent = draw.theirs[draw.rank];
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>ROTATION DRAW</span><span>GAME ${draw.gameNumber}${draw.bestOf > 1 ? ` OF ${draw.bestOf}` : ""}</span></div>
+      <div class="gq-body"><div class="gq-columns gq-columns-pen">
+        <div class="gq-frame"><h3>YOU &middot; VS ${escapeHtml(trainer.name)}</h3>${rows}</div>
+        <div class="gq-card-side">
+          <p class="gq-dim">${settled ? "TAKES THE BALL" : "&nbsp;"}</p>
+          ${settled && starter ? cardPanelHtml(starter) : ""}
+        </div>
+      </div></div>
+      <div class="gq-textbox">
+        ${settled
+          ? `<p>RANK #${draw.rank + 1}! ${escapeHtml(shortName(starter?.name ?? ""))} takes the ball against ${escapeHtml(shortName(opponent?.name ?? ""))}.</p>
+             <p class="gq-blink">Z &mdash; PLAY BALL</p>
+             <p class="gq-dim">X &mdash; RAIN CHECK: the day is spent, and tomorrow re-draws.</p>`
+          : `<p>The league spins the rotation&hellip;</p>
+             <p class="gq-dim">Z skips the spin &middot; X takes a rain check (the day is spent).</p>`}
+      </div>
+    </div>`;
+  },
+  mounted(app) {
+    if (app.screen.settled || app.screen.spinStarted) return;
+    app.screen.spinStarted = true;
+    const total = SPIN_STEPS + (app.screen.draw?.rank ?? 0);
+    rotationSpinTimer = setInterval(() => {
+      app.screen.spinStep = (app.screen.spinStep ?? 0) + 1;
+      if (app.screen.spinStep >= total) {
+        stopRotationSpin();
+        app.screen.settled = true;
+      }
+      app.rerender();
+    }, 130);
+  },
+  hoverCard(app) {
+    return app.screen.settled ? app.screen.draw?.yours?.[app.screen.draw.rank] ?? null : null;
+  },
+  key(app, key) {
+    if (key === "a") {
+      if (!app.screen.settled) {
+        stopRotationSpin();
+        app.screen.settled = true;
+      } else {
+        app.go("battle", {
+          trainerId: app.screen.trainerId,
+          battle: app.screen.battle,
+          lines: app.screen.lines,
+          playLog: app.screen.playLog,
+          menuIndex: 0,
+          mode: "menu"
+        });
+      }
+    } else if (key === "b") {
+      stopRotationSpin();
+      abandonSeriesGame(app, trainerById(app.screen.trainerId));
+      return;
+    }
+    app.rerender();
+  }
+};
 
 // ---- A game you can walk away from mid-inning --------------------------------
 
@@ -1732,15 +1873,18 @@ function renderHud(battle, phase) {
 // control where the hitters read their on-base, with his workload under his
 // name. Every row carries its card id, so the whole club is hoverable.
 function lineupStripHtml(team, { litId, nextId, mound, mine = true }) {
-  const line = (spot, player, value) => `
+  // Each bat carries the position he is PLAYING right now — live, because
+  // substitutions and the between-innings realignment can move men around.
+  const line = (spot, player, value, pos = null) => `
       <span class="gq-strip-spot">${spot}</span>
       <span class="gq-strip-name">${escapeHtml(surname(player.name))}</span>
+      ${pos ? `<span class="gq-strip-pos">${escapeHtml(pos)}</span>` : ""}
       <span class="gq-strip-ob">${value}</span>`;
   const mark = (player) =>
     player.id === litId ? " gq-strip-now" : player.id === nextId ? " gq-strip-next" : "";
   const bats = team.lineup.map((player, index) =>
     `<li class="gq-strip-bat${mark(player)}" data-card-id="${escapeHtml(player.id)}">${
-      line(index + 1, player, player.onBase)
+      line(index + 1, player, player.onBase, player.assignedPosition ?? player.position)
     }</li>`).join("");
   const pitcher = mound?.pitcher;
   const arm = pitcher

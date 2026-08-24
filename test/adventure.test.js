@@ -5240,3 +5240,37 @@ test("the swap picker offers roster bench mates that trade spots", async () => {
   assert.equal(seatedNow.length, 9, "and the lineup is still nine");
   assert.equal(bats.length, rosterCards(save).filter((card) => card.kind === "hitter").length, "the flex split did not change");
 });
+
+test("the rotation draw fronts full-format games; a rain check spends the day and re-draws", async () => {
+  const { startTrainerBattle, rotationDrawScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const save = await fullTestSave("rain-check-seed");
+  const app = { save, screen: {}, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+  const trainer = trainerById("scout-jojo");
+  startTrainerBattle(app, trainer);
+  assert.equal(app.screen.name, "rotationDraw", "full format opens on the draw");
+  assert.equal(app.screen.draw.rank, app.screen.battle.starterIndex, "the shown rank is the fielded rank");
+  assert.equal(app.screen.draw.yours.length, 4, "all four ranks on the board");
+  const firstSeed = app.screen.battle.seed;
+  const day0 = ensureSeasonStats(save).games;
+
+  // X is the rain check: the day is spent, the stash torn up, the pick voided.
+  rotationDrawScreen.key(app, "b");
+  assert.equal(app.screen.name, "map", "back to the map");
+  assert.equal(ensureSeasonStats(save).games, day0 + 1, "the day is spent");
+  assert.equal(save.activeBattle, null, "nothing to resume");
+  assert.equal(save.activeSeries.entries[1], 1, "the entry is on the ledger");
+  assert.equal(save.activeSeries.starterPicks.length, 0, "the drawn rank is voided");
+
+  // Tomorrow re-draws off a fresh seed — a new game, not a replay.
+  startTrainerBattle(app, trainer);
+  assert.equal(app.screen.name, "rotationDraw");
+  assert.notEqual(app.screen.battle.seed, firstSeed, "the retry is its own ball game");
+  assert.equal(save.activeSeries.starterPicks.length, 1, "a fresh rank is on the ledger");
+
+  // Z settles the spin, then takes the mound.
+  rotationDrawScreen.key(app, "a");
+  assert.equal(app.screen.settled, true, "the spin settles");
+  rotationDrawScreen.key(app, "a");
+  assert.equal(app.screen.name, "battle", "play ball");
+  assert.ok(save.activeBattle, "and the game is stashed for a resume");
+});
