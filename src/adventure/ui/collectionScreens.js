@@ -16,6 +16,7 @@ import {
   rosterCards,
   rosterPoints,
   pointCap,
+  rosterLocked,
   setRoster,
   setBattingOrder,
   managerFor,
@@ -749,7 +750,7 @@ function binderActions(app, card) {
   const rostered = app.save.roster.cardIds.includes(card.id);
   const targets = swapTargets(app.save, card);
   const blocked = rostered ? "ALREADY ON THE TEAM"
-    : app.save.activeSeries ? "SERIES IN PROGRESS"
+    : rosterLocked(app.save) ? (app.save.activeSeries ? "SERIES IN PROGRESS" : "LOCKED FOR THE RUN")
     : targets.length === 0 ? "NO LEGAL SPOT"
     : null;
   const actions = [
@@ -1381,8 +1382,8 @@ export const teamScreen = {
             ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels."
             : switching
               ? "Z gives them the spot; the one who had it takes theirs. X cancels."
-              : save.activeSeries
-                ? `SERIES IN PROGRESS — swaps wait until it ends. &#9664;/&#9654; ${page === "arms" ? "the bats" : "the arms"}.`
+              : rosterLocked(save)
+                ? `${save.activeSeries ? "SERIES IN PROGRESS — swaps wait until it ends." : "THE RUN HAS STARTED — this is your club now."} &#9664;/&#9654; ${page === "arms" ? "the bats" : "the arms"}.`
                 : `Z opens a card's actions &middot; &#9664;/&#9654; ${page === "arms" ? "THE BATS" : "THE ARMS"}. X to leave.`
         }</p>
       </div>
@@ -1653,7 +1654,7 @@ function packActions(app, card, cards) {
   const targets = swapTargets(save, card);
   const blocked = sold ? "SOLD"
     : rostered ? "ALREADY ON THE TEAM"
-    : save.activeSeries ? "SERIES IN PROGRESS"
+    : rosterLocked(save) ? (save.activeSeries ? "SERIES IN PROGRESS" : "LOCKED FOR THE RUN")
     : targets.length === 0 ? "NO LEGAL SPOT"
     : null;
   actions.push({

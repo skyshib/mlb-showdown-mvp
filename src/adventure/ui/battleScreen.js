@@ -48,7 +48,10 @@ import {
   ensureSeasonStats,
   recordAlmanacGame,
   addTrophies,
-  clearSeries
+  clearSeries,
+  gauntletRun,
+  lockGauntletRoster,
+  recordGauntletRound
 } from "../state.js?v=20260716-records";
 import {
   createBattle,
@@ -71,6 +74,18 @@ import {
   serializeBattle,
   restoreBattle
 } from "../../rules/battle/controller.js?v=20260716-records";
+
+// Every gauntlet round is the same length, whatever the club prints on the
+// campaign ladder: a best-of-three. A longer series is the FAVORITE'S friend,
+// and in this mode the favorite is never you — running the bosses at their
+// printed best-of-sevens would quietly make the back half harder than the
+// tier it was tuned to.
+const GAUNTLET_BEST_OF = 3;
+
+export function seriesLengthFor(save, trainer) {
+  if (save?.mode === "gauntlet") return GAUNTLET_BEST_OF;
+  return trainer.battleFormat.bestOf ?? 1;
+}
 
 export function startTrainerBattle(app, trainer) {
   const save = app.save;
@@ -111,7 +126,7 @@ export function startTrainerBattle(app, trainer) {
   }
 
   if (!save.activeSeries || save.activeSeries.trainerId !== trainer.id) {
-    startSeries(save, trainer.id, trainer.battleFormat.bestOf ?? 1);
+    startSeries(save, trainer.id, seriesLengthFor(save, trainer));
   }
   launchSeriesGame(app, trainer);
 }
@@ -174,6 +189,9 @@ function launchSeriesGame(app, trainer) {
     starterIndex,
     playerIsAway
   });
+  // The gauntlet's roster locks on the first pitch of the run: the club you
+  // walked in with is the club you walk out with, however deep you get.
+  lockGauntletRoster(save);
   const lines = [
     series.bestOf > 1 ? `GAME ${series.nextGame} of the best-of-${series.bestOf}.` : "One game. Winner takes the coins.",
     playerIsAway ? "You're the visitors. Top 1 — grab a bat." : "Your ballpark tonight. Take the mound."
@@ -1321,6 +1339,16 @@ function resolveGameEnd(app, phase) {
   } else {
     const outcome = applyOutcome(app, trainer, status === "won");
     clearSeries(save);
+    // In the gauntlet a decided series is a round: won moves you along, lost
+    // ends the run where it stands.
+    const run = recordGauntletRound(save, trainer.id, status === "won");
+    if (run) {
+      outcome.gauntlet = { round: run.cleared.length, total: 6, over: run.over };
+      addLog(save, run.over
+        ? `The run ends against ${trainer.name} — ${run.cleared.length} of 6 cleared.`
+        : `${trainer.name} put away. ${run.cleared.length} of 6.`);
+      if (!run.over && run.cleared.length >= 6) recordCompletedRun(save);
+    }
     persistSave(save);
     next = { name: "battleResult", data: { trainerId: trainer.id, outcome, score: phase.score, playerSide: battle.playerSide, page: 0 } };
   }

@@ -432,7 +432,80 @@ export const REMATCH_RATE = 0.1;
 // Uncapped saves still swing harder: budgets grow on a power-1.5 curve
 // anchored at the first scout's rung, capped at the pool ceiling scaled to
 // the trainer's rung so mid-ladder bosses don't max out small universes.
+// ---- The gauntlet ------------------------------------------------------------
+//
+// Six clubs, no routes, no shopping: the two gyms and the four postseason
+// bosses, in the order the campaign meets them. Every one of them builds at
+// the SUMMIT budget — the World Series club's — so the first round is already
+// the hardest thing the campaign ever asks, and it never lets up. A manager
+// who owns the whole league still gives away better than two points to one at
+// every position, and the roster he brings on day one is the roster he
+// finishes with. Nobody is expected to run the table; how deep you got is the
+// score (see the hall of fame).
+export const GAUNTLET_TRAINER_IDS = [
+  "gym-garrick",
+  "gym-quince",
+  "boss-vale",
+  "post-division",
+  "post-championship",
+  "post-worldseries"
+];
+
+export function gauntletTrainers() {
+  return GAUNTLET_TRAINER_IDS.map((id) => trainerById(id)).filter(Boolean);
+}
+
+// How far above your own cap the gauntlet's clubs build. Measured against a
+// value-optimal 5000-point club in the classic set, over the six rounds:
+//
+//   CONTENDER  1.1x  ~72-81% a game, ~38% to run the table
+//   ELITE      1.4x  ~62-70% a game, ~15% to run the table
+//   IMMORTAL   summit (2.04x) — ~21-37% a game, ~0.004%. Round one alone is a
+//              one-in-eight proposition. It is not a difficulty so much as a
+//              wall, kept because somebody should be able to say they got past
+//              the second club of it.
+export const GAUNTLET_TIERS = {
+  contender: {
+    key: "contender",
+    name: "CONTENDER",
+    capMultiple: 1.1,
+    blurb: "Clubs a shade richer than you. Every round is yours to lose, and running the whole table is a good afternoon's work."
+  },
+  elite: {
+    key: "elite",
+    name: "ELITE",
+    capMultiple: 1.4,
+    blurb: "Clubs half again your budget. You are favored in every round and safe in none — a title here is a real one."
+  },
+  immortal: {
+    key: "immortal",
+    name: "IMMORTAL",
+    capMultiple: null,
+    blurb: "Every club built at the World Series budget — better than two points to your one, at every position. Nobody is expected to finish. How far you got is the score."
+  }
+};
+
+export function gauntletTier(save) {
+  return GAUNTLET_TIERS[save?.gauntletTier] ?? GAUNTLET_TIERS.elite;
+}
+
+// The one budget every gauntlet club builds to. The named tiers hang off the
+// PLAYER'S cap, so they mean the same thing in a deep league and a thin one;
+// IMMORTAL hangs off the summit rung instead, which is the richest thing the
+// ladder knows how to print.
+export function gauntletBudget(save) {
+  const format = rosterFormat(save).key;
+  const tier = gauntletTier(save);
+  if (!tier.capMultiple) {
+    const summit = Math.max(...TRAINERS.map((trainer) => trainer.pointBudget));
+    return laddered(summit, format);
+  }
+  return Math.round((exactCap(format) * tier.capMultiple) / 50) * 50;
+}
+
 export function npcBudget(save, trainer) {
+  // Every club in the gauntlet is a summit club, whichever rung it printed at.
+  if (save?.mode === "gauntlet") return gauntletBudget(save);
   // The whole ladder is denominated in the save's roster format: a full-
   // roster save has a higher cap and a bench-weighted ceiling, so every rung
   // — and the uncapped curve — is priced in that same currency.

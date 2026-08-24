@@ -31,13 +31,20 @@ export const SAVE_VERSION = 2;
 // against something honest.
 export const LOSS_FEE = 0;
 
-export function createSave({ name, saveSeed, universe = "fictional", mode = "budget", rosterFormat = "classic" }) {
+export function createSave({ name, saveSeed, universe = "fictional", mode = "budget", rosterFormat = "classic", gauntletTier = "elite" }) {
   return {
     version: SAVE_VERSION,
     saveSeed,
     universe,
     mode,
     rosterFormat,
+    // GAUNTLET mode: the whole league is yours from the first day, and the
+    // only thing standing between you and a title is the cap and six elite
+    // clubs. Nothing is bought, sold, or pulled from a wrapper, so the
+    // collection is not a list of cards owned — it is every card there is.
+    ownsEverything: mode === "gauntlet",
+    gauntletTier: mode === "gauntlet" ? gauntletTier : null,
+    gauntlet: mode === "gauntlet" ? { round: 0, cleared: [], over: false, locked: false } : null,
     player: {
       name,
       coins: 0,
@@ -81,7 +88,9 @@ export function hydrateUniverse(save) {
   const options = {
     seed: save.saveSeed,
     mode: save.universe ?? "fictional",
-    priceNoise: save.mode !== "uncapped"
+    // Bargain-hunting is a game about BUYING cards. Nobody buys anything in
+    // the gauntlet, so its prices tell the truth.
+    priceNoise: save.mode === "budget"
   };
   if (Array.isArray(save.universeCards) && save.universeCards.length) {
     installUniversePool(save.universeCards, options);
@@ -220,7 +229,15 @@ function noteCatalogComplete(save) {
   addLog(save, "THE CATALOG IS COMPLETE. Every card in the league is yours.");
 }
 
+export function ownsEverything(save) {
+  return Boolean(save?.ownsEverything);
+}
+
 export function ownedCount(save, cardId) {
+  // A gauntlet manager owns one of everything the league prints. Answering
+  // from the pool rather than materialising ten thousand entries into the
+  // save keeps the save small and the answer always current.
+  if (ownsEverything(save)) return cardById(cardId) ? 1 : 0;
   return save.collection[cardId] ?? 0;
 }
 
@@ -245,6 +262,12 @@ export function removeCardFromCollection(save, cardId) {
 }
 
 export function collectionCards(save) {
+  if (ownsEverything(save)) {
+    return adventurePool()
+      .filter((card) => dualPrimaryId(card.id) === card.id)
+      .map((card) => ({ card, count: 1 }))
+      .sort((a, b) => b.card.points - a.card.points || a.card.name.localeCompare(b.card.name));
+  }
   return Object.entries(save.collection)
     .map(([id, count]) => ({ card: cardById(id), count }))
     .filter((entry) => entry.card)
@@ -611,4 +634,43 @@ export function recordSeriesGame(save, playerWon) {
 
 export function clearSeries(save) {
   save.activeSeries = null;
+}
+
+// ---- The gauntlet run --------------------------------------------------------
+//
+// Six clubs in order, one life. The roster locks the moment the first pitch of
+// round one is thrown — the team you built is the team you finish with — and a
+// series lost ends the run where it stands. What survives is the depth: how
+// many of them you put away before one of them put you away.
+
+export function gauntletRun(save) {
+  if (save?.mode !== "gauntlet") return null;
+  if (!save.gauntlet) save.gauntlet = { round: 0, cleared: [], over: false, locked: false };
+  return save.gauntlet;
+}
+
+// The roster is yours to rebuild until the run starts, and nobody's after.
+export function rosterLocked(save) {
+  if (save?.activeSeries) return true;
+  const run = gauntletRun(save);
+  return Boolean(run?.locked);
+}
+
+export function lockGauntletRoster(save) {
+  const run = gauntletRun(save);
+  if (run) run.locked = true;
+  return run;
+}
+
+// A round survived, or the run ended. Returns the run.
+export function recordGauntletRound(save, trainerId, won) {
+  const run = gauntletRun(save);
+  if (!run || run.over) return run;
+  if (won) {
+    if (!run.cleared.includes(trainerId)) run.cleared.push(trainerId);
+    run.round = run.cleared.length;
+  } else {
+    run.over = true;
+  }
+  return run;
 }

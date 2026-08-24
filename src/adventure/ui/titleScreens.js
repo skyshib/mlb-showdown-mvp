@@ -1,6 +1,7 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260716-records";
 import { resumeBattle } from "./battleScreen.js?v=20260716-records";
 import { starterPack, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig, canFieldFullRoster, setUniverseSeed } from "../packs.js?v=20260716-records";
+import { GAUNTLET_TIERS } from "../region.js?v=20260716-records";
 import {
   createSave,
   hydrateUniverse,
@@ -367,6 +368,11 @@ const MODES = [
     key: "uncapped",
     label: "UNCAPPED",
     blurb: "No roster limit, and sticker prices tell the truth. Stack every legend you can afford — the bosses' checkbooks grow a lot faster out here."
+  },
+  {
+    key: "gauntlet",
+    label: "THE GAUNTLET",
+    blurb: "Every card in the league is yours on day one. No shops, no packs, no coins — just your cap, one team you build and never change, and six elite clubs in a row. Lose a series and the run is over."
   }
 ];
 
@@ -442,6 +448,17 @@ export const formatSelectScreen = {
     } else if (key === "a") {
       const format = FORMATS[clampIndex(app.screen.menuIndex ?? 0, FORMATS.length)];
       if (format.key === "full" && app.screen.fullAvailable === false) return;
+      if (app.screen.mode === "gauntlet") {
+        app.go("tierSelect", {
+          playerName: app.screen.playerName,
+          universe: app.screen.universe,
+          mode: app.screen.mode,
+          rosterFormat: format.key,
+          menuIndex: 1
+        });
+        app.rerender();
+        return;
+      }
       finishNewGame(app, app.screen.playerName, app.screen.universe, app.screen.mode, format.key);
     } else if (key === "b") {
       app.go("modeSelect", { playerName: app.screen.playerName, universe: app.screen.universe, menuIndex: 0 });
@@ -450,17 +467,58 @@ export const formatSelectScreen = {
   }
 };
 
+// How hard should the six be? The tiers hang off your own cap, and the blurbs
+// say what each one actually costs you — measured, not guessed (see
+// region.GAUNTLET_TIERS).
+const TIER_KEYS = ["contender", "elite", "immortal"];
+
+export const tierSelectScreen = {
+  render(app) {
+    const index = clampIndex(app.screen.menuIndex ?? 0, TIER_KEYS.length);
+    const tier = GAUNTLET_TIERS[TIER_KEYS[index]];
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>HOW ELITE?</span><span>${index + 1}/${TIER_KEYS.length}</span></div>
+      <div class="gq-body">
+        <div class="gq-frame">${menuHtml(TIER_KEYS.map((key) => ({ label: GAUNTLET_TIERS[key].name })), index)}</div>
+        <div class="gq-frame"><p class="gq-dim">${escapeHtml(tier.blurb)}</p></div>
+      </div>
+      <div class="gq-textbox"><p>Z picks. X backs out to the roster size.</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key === "up" || key === "down") {
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), TIER_KEYS.length);
+    } else if (key === "a") {
+      const tier = TIER_KEYS[clampIndex(app.screen.menuIndex ?? 0, TIER_KEYS.length)];
+      finishNewGame(app, app.screen.playerName, app.screen.universe, app.screen.mode, app.screen.rosterFormat, tier);
+    } else if (key === "b") {
+      app.go("formatSelect", { playerName: app.screen.playerName, universe: app.screen.universe, mode: app.screen.mode, menuIndex: 0 });
+    }
+    app.rerender();
+  }
+};
+
 // A new save is a whole new universe: fresh seed, the chosen league's card
 // pool, fresh sealed starter pack. Nothing carries over but the player's wits.
-function finishNewGame(app, playerName, universe, mode = "budget", rosterFormat = "classic") {
+function finishNewGame(app, playerName, universe, mode = "budget", rosterFormat = "classic", gauntletTier = "elite") {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
-  const save = createSave({ name: playerName, saveSeed, universe, mode, rosterFormat });
+  const save = createSave({ name: playerName, saveSeed, universe, mode, rosterFormat, gauntletTier });
   // Build this league's pool and freeze it into the save at birth, so its cards
   // never re-derive as the generators change.
   hydrateUniverse(save);
   const roster = starterPack(saveSeed, rosterFormat);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));
+  if (mode === "gauntlet") {
+    // Nothing is opened and nothing is bought here: the whole league is
+    // already yours. The dealt roster is only a legal starting point — the
+    // team screen is the game until you throw the first pitch.
+    addLog(save, "The whole league is yours. Build the club that survives the six.");
+    app.save = persistSave(save);
+    app.go("map");
+    app.rerender();
+    return;
+  }
   grantCoins(save, STARTING_COINS);
   addLog(save, "Opened the starter pack.");
   app.save = persistSave(save);

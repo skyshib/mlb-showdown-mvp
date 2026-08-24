@@ -1,6 +1,6 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260716-records";
-import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260716-records";
-import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, seasonTeam, persistSave } from "../state.js?v=20260716-records";
+import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone , gauntletTrainers, gauntletBudget, gauntletTier } from "../region.js?v=20260716-records";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, seasonTeam, persistSave, gauntletRun } from "../state.js?v=20260716-records";
 
 // What the club has actually done, which is the one thing the bar never said. The
 // day counts afternoons; the purse and the roster count money and points; none of
@@ -48,6 +48,8 @@ function mapItems(app) {
     });
   }
 
+  if (save.mode === "gauntlet") return gauntletItems(save, items);
+
   for (const trainer of TRAINERS) {
     const beaten = timesBeaten(save, trainer.id) > 0;
     // Ambush trainers don't exist on the map until they've jumped the player,
@@ -78,6 +80,54 @@ function mapItems(app) {
   items.push({ section: "YOUR CLUB", label: "TROPHY ROOM", run: (a) => a.go("trophies", { index: 0 }) });
   items.push({ section: "YOUR CLUB", label: "BINDER", run: (a) => a.go("binder", { index: 0 }) });
   return items;
+}
+
+// The gauntlet's board: six clubs in a column, the ones you have put away
+// ticked, the one in front of you live, the rest waiting. No shop, no packs,
+// no coins — there is nothing to buy when you already own the league, and
+// nothing to win but the next round.
+function gauntletItems(save, items) {
+  const run = gauntletRun(save);
+  const budget = gauntletBudget(save);
+  const clubs = gauntletTrainers();
+  const done = run?.over;
+  const heading = `THE GAUNTLET &middot; ${gauntletTier(save).name} &middot; ${run.cleared.length}/6`;
+  clubs.forEach((trainer, index) => {
+    const cleared = run.cleared.includes(trainer.id);
+    const current = !done && index === run.cleared.length;
+    const mark = cleared ? "&#10003; CLEARED" : current ? `${budget} PT &middot; BO3` : done ? "&mdash;" : "WAITING";
+    items.push({
+      section: heading,
+      html: `${index + 1}. ${escapeHtml(trainer.name)} <span class="gq-dim">${mark}</span>`,
+      disabled: !current || Boolean(save.activeSeries),
+      battle: true,
+      beaten: cleared,
+      run: (a) => a.go("trainerIntro", { trainerId: trainer.id, page: 0 })
+    });
+  });
+  items.push({ section: "YOUR CLUB", html: rosterLockLabel(save), run: (a) => a.go("team", { index: 0, mode: "roster" }) });
+  items.push({ section: "YOUR CLUB", label: "BATTING ORDER", run: (a) => a.go("lineup", { index: 0 }) });
+  items.push({ section: "YOUR CLUB", label: "BINDER", run: (a) => a.go("binder", { index: 0 }) });
+  items.push({ section: "YOUR CLUB", label: "SEASON STATS", run: (a) => a.go("seasonStats", { index: 0, view: "hitters" }) });
+  items.push({ section: "YOUR CLUB", label: "ALMANAC", run: (a) => a.go("almanac", { index: 0 }) });
+  return items;
+}
+
+// What the board says, which is a different thing in a mode with no money and
+// one life: before the first pitch it is an invitation to build; after it, a
+// scoreboard for a run that only goes one way.
+function gauntletWord(save) {
+  const run = gauntletRun(save);
+  if (run.over) return `The run is over — ${run.cleared.length} of 6 cleared. NEW GAME starts another.`;
+  if (run.cleared.length >= 6) return "SIX FOR SIX. Nobody left to beat.";
+  if (!run.locked) return "The whole league is yours. Build the club that survives all six, then start — it locks on the first pitch.";
+  return `${run.cleared.length} down, ${6 - run.cleared.length} to go. Lose a series and that is the run.`;
+}
+
+// The team screen is the whole game until the first pitch, and a museum after.
+function rosterLockLabel(save) {
+  const run = gauntletRun(save);
+  return run?.locked ? "TEAM <span class=\"gq-dim\">LOCKED FOR THE RUN</span>" : "TEAM <span class=\"gq-dim\">BUILD IT NOW</span>";
 }
 
 function formatTag(trainer) {
@@ -158,13 +208,17 @@ export const mapScreen = {
     return `<div class="gq-screen">
       <div class="gq-topbar">
         <span>${escapeHtml(save.player.name)} &middot; DAY ${ensureSeasonStats(save).games + 1} &middot; ${recordLabel(save)}</span>
-        <span class="gq-map-purse">$${save.player.coins} &middot; ${pointsLabel(save)} &middot; <span class="gq-badgeline">${badgeLine(save)}</span></span>
+        <span class="gq-map-purse">${save.mode === "gauntlet"
+          ? pointsLabel(save)
+          : `$${save.player.coins} &middot; ${pointsLabel(save)} &middot; <span class="gq-badgeline">${badgeLine(save)}</span>`}</span>
       </div>
       <div class="gq-body">${html}</div>
       <div class="gq-textbox">${
         problems.length
           ? `<p>! ROSTER NOT GAME-READY: ${escapeHtml(problems.join(", "))}. Fix it in TEAM.</p>`
-          : `<p>${escapeHtml(dayWhimsy(ensureSeasonStats(save).games + 1) ?? "Pick a place to go. Trainers pay cash; the gym pays a badge.")}</p>`
+          : save.mode === "gauntlet"
+            ? `<p>${escapeHtml(gauntletWord(save))}</p>`
+            : `<p>${escapeHtml(dayWhimsy(ensureSeasonStats(save).games + 1) ?? "Pick a place to go. Trainers pay cash; the gym pays a badge.")}</p>`
       }</div>
     </div>`;
   },

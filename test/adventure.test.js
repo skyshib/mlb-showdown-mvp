@@ -5388,3 +5388,134 @@ function shortNameOf(name) {
   if (parts.length < 2) return name.toUpperCase();
   return `${parts[0][0]}.${parts.slice(1).join(" ")}`.toUpperCase();
 }
+
+// ---- The gauntlet ------------------------------------------------------------
+
+test("a gauntlet save owns the league, prices honestly, and carries no economy", async () => {
+  const { ownedCount, collectionCards, ownsEverything } = await import("../src/adventure/state.js");
+  const { gauntletBudget, gauntletTrainers, GAUNTLET_TIERS } = await import("../src/adventure/region.js");
+  try {
+    const save = createSave({ name: "G", saveSeed: "gauntlet-own", universe: "classic", mode: "gauntlet", rosterFormat: "full" });
+    hydrateUniverse(save);
+    const pool = adventurePool();
+    assert.equal(ownsEverything(save), true);
+    assert.equal(ownedCount(save, pool[0].id), 1, "every card in the league is his");
+    assert.equal(ownedCount(save, pool[pool.length - 1].id), 1);
+    assert.equal(ownedCount(save, "no-such-card"), 0, "and nothing that was never printed");
+    assert.ok(collectionCards(save).length > 1000, "the binder holds the whole set");
+    // The whole league, and the save is still a few hundred bytes: ownership is
+    // answered from the pool, never written down card by card.
+    assert.equal(Object.keys(save.collection).length, 0, "nothing is materialised into the save");
+    // Nobody buys anything here, so the stickers tell the truth.
+    assert.ok(pool.every((card) => card.points === card.truePoints), "honest prices");
+
+    // Six clubs, every one of them at the tier's budget.
+    const clubs = gauntletTrainers();
+    assert.equal(clubs.length, 6, "two gyms and four bosses");
+    const budget = gauntletBudget(save);
+    for (const trainer of clubs) {
+      const npc = buildNpcTeam(trainer, save);
+      assert.deepEqual(validateRoster(npc), [], `${trainer.id} fields a legal club`);
+      assert.ok(npc.points <= budget, `${trainer.id} inside the budget`);
+      assert.ok(npc.points > budget * 0.95, `${trainer.id} spends what it is given (${npc.points}/${budget})`);
+    }
+    // The tiers are ordered, and they hang off the player's own cap.
+    const budgetFor = (tier) => gauntletBudget({ ...save, gauntletTier: tier });
+    assert.ok(budgetFor("contender") < budgetFor("elite"), "contender is the kind one");
+    assert.ok(budgetFor("elite") < budgetFor("immortal"), "immortal is the wall");
+    assert.equal(budgetFor("contender"), 5500);
+    assert.equal(budgetFor("elite"), 7000);
+    assert.equal(budgetFor("immortal"), 10200);
+    assert.equal(Object.keys(GAUNTLET_TIERS).length, 3);
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("a gauntlet run locks the roster, advances on a win, and ends on a loss", async () => {
+  const { gauntletRun, lockGauntletRoster, recordGauntletRound, rosterLocked } = await import("../src/adventure/state.js");
+  const { gauntletTrainers } = await import("../src/adventure/region.js");
+  try {
+    setUniverseSeed("gauntlet-run", "classic");
+    const save = createSave({ name: "G", saveSeed: "gauntlet-run", universe: "classic", mode: "gauntlet", rosterFormat: "full" });
+    hydrateUniverse(save);
+    const pack = starterPack(save.saveSeed, "full");
+    setRoster(save, pack.map((card) => card.id));
+    const clubs = gauntletTrainers();
+
+    // Before the first pitch the club is yours to rebuild.
+    assert.equal(rosterLocked(save), false, "build freely until the run starts");
+    lockGauntletRoster(save);
+    assert.equal(rosterLocked(save), true, "and never again after it");
+
+    // Four cleared, then one lost: the run stops where it stopped.
+    for (const trainer of clubs.slice(0, 4)) recordGauntletRound(save, trainer.id, true);
+    let run = gauntletRun(save);
+    assert.equal(run.cleared.length, 4);
+    assert.equal(run.over, false);
+    run = recordGauntletRound(save, clubs[4].id, false);
+    assert.equal(run.over, true, "a series lost ends it");
+    assert.equal(run.cleared.length, 4, "four is the depth that stands");
+    // A dead run cannot be walked any further.
+    recordGauntletRound(save, clubs[5].id, true);
+    assert.equal(gauntletRun(save).cleared.length, 4, "no rounds after the last one");
+
+    // A clean sweep clears all six.
+    const swept = createSave({ name: "S", saveSeed: "sweep", universe: "classic", mode: "gauntlet", rosterFormat: "full" });
+    for (const trainer of clubs) recordGauntletRound(swept, trainer.id, true);
+    assert.equal(gauntletRun(swept).cleared.length, 6, "the whole table");
+    assert.equal(gauntletRun(swept).over, false);
+
+    // Budget-mode saves have no run at all, and no lock.
+    const budget = createSave({ name: "B", saveSeed: "b", universe: "classic" });
+    assert.equal(gauntletRun(budget), null);
+    assert.equal(rosterLocked(budget), false);
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("the gauntlet board offers one club at a time and no shopping", async () => {
+  const { mapScreen } = await import("../src/adventure/ui/mapScreen.js");
+  const { lockGauntletRoster, recordGauntletRound } = await import("../src/adventure/state.js");
+  const { gauntletTrainers } = await import("../src/adventure/region.js");
+  try {
+    setUniverseSeed("gauntlet-board", "classic");
+    const save = createSave({ name: "G", saveSeed: "gauntlet-board", universe: "classic", mode: "gauntlet", rosterFormat: "full" });
+    hydrateUniverse(save);
+    setRoster(save, starterPack(save.saveSeed, "full").map((card) => card.id));
+    const app = { save, screen: { name: "map", index: 0 }, go() {}, rerender() {} };
+    const html = mapScreen.render(app);
+    const clubs = gauntletTrainers();
+    for (const trainer of clubs) assert.ok(html.includes(trainer.name), `${trainer.name} is on the board`);
+    assert.ok(!html.includes("CARD SHOP"), "nothing to buy when you own the league");
+    assert.ok(html.includes("THE GAUNTLET"), "the board says what it is");
+    assert.ok(html.includes("BUILD IT NOW"), "and points at the team screen");
+
+    // Clear two and the third is the live one.
+    recordGauntletRound(save, clubs[0].id, true);
+    recordGauntletRound(save, clubs[1].id, true);
+    lockGauntletRoster(save);
+    const later = mapScreen.render(app);
+    assert.ok(later.includes("CLEARED"), "the ones you put away are ticked");
+    assert.ok(later.includes("LOCKED FOR THE RUN"), "and the club is locked");
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("every gauntlet round is a best-of-three, whatever the club prints", async () => {
+  const { seriesLengthFor } = await import("../src/adventure/ui/battleScreen.js");
+  const { gauntletTrainers } = await import("../src/adventure/region.js");
+  const gauntlet = createSave({ name: "G", saveSeed: "bo3", universe: "classic", mode: "gauntlet", rosterFormat: "full" });
+  const campaign = createSave({ name: "C", saveSeed: "bo3c", universe: "classic" });
+  const clubs = gauntletTrainers();
+  // The postseason clubs print best-of-5s and 7s on the campaign ladder. A
+  // longer series favors the stronger club, and here that is never the player.
+  const printed = clubs.map((trainer) => trainer.battleFormat.bestOf ?? 1);
+  assert.ok(printed.some((best) => best > 3), "the ladder really does print longer series");
+  for (const trainer of clubs) {
+    assert.equal(seriesLengthFor(gauntlet, trainer), 3, `${trainer.id} is a best-of-3 in the gauntlet`);
+    assert.equal(seriesLengthFor(campaign, trainer), trainer.battleFormat.bestOf ?? 1, `${trainer.id} keeps its own length in the campaign`);
+  }
+});
