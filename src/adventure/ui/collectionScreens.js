@@ -1066,10 +1066,12 @@ function teamActions() {
 // roster.cardIds to make this screen read nicely would silently reshuffle who
 // starts game 1.
 function teamRosterCards(save) {
+  // The bats read in the order they BAT — the same order the WHO SITS picker
+  // and the lineup screen use, and the one the game itself sends them up in.
+  // Filing them down the diamond instead (C, 1B, 2B...) named a fielding
+  // chart nobody bats from.
   const seat = new Map();
-  lineupSlots(save).forEach((slot, index) => {
-    if (slot.player) seat.set(slot.player.id, index);
-  });
+  battingOrderCards(save).forEach((player, index) => seat.set(player.id, index));
   const rotation = new Map(rotationCards(save).map((arm, index) => [arm.id, index]));
   // [group, place-within-group]; ties hold their roster order, since sort is stable.
   const rank = (card) => {
@@ -1085,6 +1087,20 @@ function teamRosterCards(save) {
     const right = rank(b);
     return left[0] - right[0] || left[1] - right[1];
   });
+}
+
+// The nine as they bat, in order. buildTeam applies the manager's saved
+// batting order (or the seated order when he has never set one), so this is
+// literally the order the game will send them to the plate.
+function battingOrderCards(save) {
+  return buildTeam(managerFor(save)).lineup;
+}
+
+// A seated bat's place in the order, 1-9. Null for an arm or a bench bat.
+function battingSpotOf(save, card) {
+  if (card?.kind !== "hitter") return null;
+  const index = battingOrderCards(save).findIndex((player) => player.id === card.id);
+  return index < 0 ? null : index + 1;
 }
 
 // The club reads as two pages, and left/right turns between them.
@@ -1336,10 +1352,13 @@ export const teamScreen = {
         [
           ...roster.map((card) => {
             const benched = full && card.kind === "hitter" && !slotById.has(card.id);
+            const spot = battingSpotOf(save, card);
+            // The batting spot leads the row, the way a lineup card is written.
+            const order = spot ? `<span class="gq-team-order">${spot}</span>` : "";
             return {
-              html: benched
-                ? `${cardLine(card, { slot: "BENCH", points: benchPrice(card.points) })}`
-                : cardLine(card, { slot: slotById.get(card.id) ?? null })
+              html: order + (benched
+                ? cardLine(card, { slot: "BENCH", points: benchPrice(card.points) })
+                : cardLine(card, { slot: slotById.get(card.id) ?? null }))
             };
           }),
           ...actions.map((action) => ({ html: action.html, disabled: action.disabled }))

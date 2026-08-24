@@ -5347,3 +5347,44 @@ test("the rotation draw fronts full-format games; a rain check spends the day an
   assert.equal(app.screen.name, "battle", "play ball");
   assert.ok(save.activeBattle, "and the game is stashed for a resume");
 });
+
+test("the Team screen bats page reads in batting order and numbers the spots", async () => {
+  const { teamScreen } = await import("../src/adventure/ui/collectionScreens.js");
+  const { setBattingOrder } = await import("../src/adventure/state.js");
+  const save = await fullTestSave("team-order-seed");
+  const app = { save, screen: { name: "team", page: "bats", index: 0 }, go() {}, rerender() {} };
+  const namesIn = (html) => [...html.matchAll(/<span class="gq-team-order">(\d)<\/span>([^<]+)/g)]
+    .map((match) => ({ spot: Number(match[1]), name: match[2].trim() }));
+
+  const lineup = buildTeam(managerFor(save)).lineup;
+  const first = namesIn(teamScreen.render(app));
+  assert.equal(first.length, 9, "the nine carry a batting spot");
+  assert.deepEqual(first.map((row) => row.spot), [1, 2, 3, 4, 5, 6, 7, 8, 9], "numbered down the order");
+  assert.deepEqual(
+    first.map((row) => row.name),
+    lineup.map((player) => shortNameOf(player.name)),
+    "and listed in the order they bat"
+  );
+
+  // Bat them backwards and the page follows: it is the ORDER, not the diamond.
+  setBattingOrder(save, [...lineup].reverse().map((player) => player.id));
+  const flipped = namesIn(teamScreen.render(app));
+  assert.deepEqual(
+    flipped.map((row) => row.name),
+    [...lineup].reverse().map((player) => shortNameOf(player.name)),
+    "the leadoff man is whoever the manager put there"
+  );
+
+  // The bench sits after the order, carrying no batting spot at all.
+  const html = teamScreen.render(app);
+  const benchRows = (html.match(/BENCH/g) ?? []).length;
+  assert.ok(benchRows >= 1, "the reserves are on the page");
+  assert.equal(namesIn(html).length, 9, "but none of them is given a spot in the order");
+});
+
+// The Team screen shortens names the way the roster rows do.
+function shortNameOf(name) {
+  const parts = name.split(" ");
+  if (parts.length < 2) return name.toUpperCase();
+  return `${parts[0][0]}.${parts.slice(1).join(" ")}`.toUpperCase();
+}

@@ -323,6 +323,14 @@ h1.gq-logo {
    the pen's bare names: it takes the room out of the cards, which have it. */
 .gq-columns-swap { grid-template-columns: 1.75fr 1fr 1fr; }
 .gq-columns-swap .gq-menu { font-size: 2.7cqw; }
+/* The batting spot leads a Team-screen row, in a fixed column so the names
+   line up under each other however wide the number is. */
+.gq-team-order {
+  display: inline-block;
+  min-width: 1.6ch;
+  color: var(--gb-dark);
+}
+.gq-cursor .gq-team-order { color: var(--gb-light); }
 /* ---- The rotation draw ----
    All eight arms on one board: your four in a block on the left, the
    opponent's on the right, rank for rank. The spin lights the same rank in
