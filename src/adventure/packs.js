@@ -1,6 +1,7 @@
 import { createRng } from "../rules/rng.js?v=20260716-records";
 import { cardPerson, personConflict, playsPosition } from "../rules/cards.js?v=20260716-records";
 import { RARITY_REFERENCE, setUniverse, universePool, snapshotUniversePool, installUniversePool } from "../data/universes.js";
+import { ROSTER_FORMATS, discountedRosterCost } from "./rosterFormats.js?v=20260716-records";
 
 // The adventure's economy on top of the shared card universes: what a card
 // is worth at the shop counter, what a booster pulls, what the sealed
@@ -102,43 +103,61 @@ export const REFERENCE_CAP = 3500;
 // and a 19% one in a franchise, with the deep leagues untouched at ~10%.
 //
 // Lives here rather than state.js so the starter pack can deal under it.
-export function budgetCap() {
-  return Math.round(exactCap() / 50) * 50;
+export function budgetCap(format = "classic") {
+  return Math.round(exactCap(format) / 50) * 50;
 }
 
 // The cap before it is rounded off. The ladder hangs every rung off THIS, not
 // off the rounded figure: round the cap first and each rung inherits the error
 // magnified — a 23-point rounding on the cap moved the first scout 50 points
 // and bought him a different pitching staff.
-export function exactCap() {
-  return Math.max(poolMean(), poolCeiling() * REFERENCE_CAP / LADDER_REFERENCE);
+export function exactCap(format = "classic") {
+  // Full-roster capCalibration buys a somewhat richer-than-mean team — the
+  // constant that puts the classic universe's twenty-man cap at the real
+  // game's 5000 (see rosterFormats.FULL_CAP_CALIBRATION). Classic stays 1.
+  const shape = ROSTER_FORMATS[format] ?? ROSTER_FORMATS.classic;
+  return Math.max(
+    poolMean(format) * shape.capCalibration,
+    poolCeiling(format) * REFERENCE_CAP / LADDER_REFERENCE
+  );
 }
 
 // Keyed on the pool itself: a new universe — or the same one under a new
 // save seed — rebuilds the pool, and a fresh array means a stale number.
-let poolCeilingCache = null;
+// One figure per roster format (the shapes price differently), so the
+// caches are maps keyed by format and flushed together when the pool moves.
+let poolCeilingCache = new Map();
 let poolCeilingFor = null;
-let poolMeanCache = null;
+let poolMeanCache = new Map();
 let poolMeanFor = null;
-const CEILING_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER", "SP", "SP", "RP", "RP"];
 
-export function poolCeiling() {
+// The format's roster shape as the economy prices it: [group, weight] per
+// slot, full-price slots first so the greedy ceiling draws its stars before
+// the discounted bench prices what's left.
+function priceSlots(format) {
+  return (ROSTER_FORMATS[format] ?? ROSTER_FORMATS.classic).priceSlots;
+}
+
+export function poolCeiling(format = "classic") {
   const pool = adventurePool();
-  if (poolCeilingCache == null || poolCeilingFor !== pool) {
+  if (poolCeilingFor !== pool) {
+    poolCeilingCache = new Map();
+    poolCeilingFor = pool;
+  }
+  if (!poolCeilingCache.has(format)) {
     const taken = new Set();
     let total = 0;
-    for (const slot of CEILING_SLOTS) {
+    for (const [slot, weight] of priceSlots(format)) {
       const best = pool
         .filter((card) => !taken.has(card.id) && slotMatches(slot, card))
         .sort((a, b) => b.truePoints - a.truePoints || a.name.localeCompare(b.name))[0];
       if (!best) continue;
       taken.add(best.id);
-      total += best.truePoints;
+      total += weight * best.truePoints;
     }
-    poolCeilingCache = total;
-    poolCeilingFor = pool;
+    poolCeilingCache.set(format, total);
   }
-  return poolCeilingCache;
+  return poolCeilingCache.get(format);
 }
 
 // What an average legal 13-card roster costs: the mean TRUE price of every
@@ -147,12 +166,16 @@ export function poolCeiling() {
 // Unlike the ceiling this draws no cards, so a slot's mean is the mean of its
 // whole shelf: a card that qualifies at two positions is priced into both,
 // which is right, since either is a roster it could fill.
-export function poolMean() {
+export function poolMean(format = "classic") {
   const pool = adventurePool();
-  if (poolMeanCache == null || poolMeanFor !== pool) {
+  if (poolMeanFor !== pool) {
+    poolMeanCache = new Map();
+    poolMeanFor = pool;
+  }
+  if (!poolMeanCache.has(format)) {
     const means = new Map();
     let total = 0;
-    for (const slot of CEILING_SLOTS) {
+    for (const [slot, weight] of priceSlots(format)) {
       if (!means.has(slot)) {
         const shelf = pool.filter((card) => slotMatches(slot, card));
         const mean = shelf.length
@@ -160,12 +183,11 @@ export function poolMean() {
           : 0;
         means.set(slot, mean);
       }
-      total += means.get(slot);
+      total += weight * means.get(slot);
     }
-    poolMeanCache = total;
-    poolMeanFor = pool;
+    poolMeanCache.set(format, total);
   }
-  return poolMeanCache;
+  return poolMeanCache.get(format);
 }
 
 function cardsOfRarity(rarity) {
@@ -231,15 +253,31 @@ export function shopStock(saveSeed, townId, cycle, count = 4) {
   return stock;
 }
 
+// Can this pool field a full-format roster at all? A greedy era-legal fill
+// over the twenty slots — the same question minimumRoster answers for an NPC,
+// asked before the new-game screen offers the format. Thin franchise pools
+// (a handful of arms, a short bench shelf) are the ones that fail.
+export function canFieldFullRoster(pool = adventurePool()) {
+  const taken = new Set();
+  const held = [];
+  for (const [slot] of ROSTER_FORMATS.full.priceSlots) {
+    const fit = pool.find((card) =>
+      !taken.has(card.id) && slotMatches(slot, card) && !personConflict(held, card));
+    if (!fit) return false;
+    taken.add(fit.id);
+    held.push(fit);
+  }
+  return true;
+}
+
 // ---- Starter pack ------------------------------------------------------------
 
-// One slot per required lineup spot plus the DH and the four-man staff, so the
-// sealed pack is always a legal 13-card roster.
-const STARTER_PACK_SLOTS = [
-  "C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER",
-  "SP", "SP", "RP", "RP"
-];
-const STARTER_RARE_COUNT = 2;
+// One slot per roster slot of the chosen format — the same shape the economy
+// prices — so the sealed pack is always a legal roster: thirteen cards in the
+// classic format, twenty (with a three-man pen and a four-bat bench) in full.
+function starterPackSlots(format) {
+  return priceSlots(format).map(([group]) => group);
+}
 
 function slotMatches(slot, card) {
   if (slot === "HITTER") return card.kind === "hitter";
@@ -247,19 +285,21 @@ function slotMatches(slot, card) {
   return card.kind === "hitter" && playsPosition(card, slot);
 }
 
-// The sealed starter deck: like the real product, two rares and the rest
-// commons, randomized per save. Which two slots get the rares is part of the
+// The sealed starter deck: like the real product, a couple of rares and the
+// rest commons, randomized per save. Which slots get the rares is part of the
 // luck of the draw — but only slots that actually stock a rare are in the
 // running, so thin pools (small franchises, old decades) still deal a pack.
-function dealStarterPack(seed) {
+function dealStarterPack(seed, format = "classic") {
   const rng = createRng(`starter-pack:${seed}`);
   const pool = adventurePool();
-  const rareable = STARTER_PACK_SLOTS
+  const slots = starterPackSlots(format);
+  const rareCount = (ROSTER_FORMATS[format] ?? ROSTER_FORMATS.classic).rareCount;
+  const rareable = slots
     .map((slot, index) => (pool.some((card) => card.rarity === "rare" && slotMatches(slot, card)) ? index : null))
     .filter((index) => index !== null);
   const rareSlots = new Set();
   let guard = 60;
-  while (rareSlots.size < Math.min(STARTER_RARE_COUNT, rareable.length) && guard-- > 0) {
+  while (rareSlots.size < Math.min(rareCount, rareable.length) && guard-- > 0) {
     rareSlots.add(rareable[rng.int(0, rareable.length - 1)]);
   }
   const used = new Set();
@@ -267,7 +307,7 @@ function dealStarterPack(seed) {
   // The pack doubles as the opening roster, so it obeys the roster rule
   // too: one era of a player — never two decades of the same man.
   const dealable = (card) => !used.has(card.id) && !personConflict(dealt, card);
-  return STARTER_PACK_SLOTS.map((slot, index) => {
+  return slots.map((slot, index) => {
     const rarity = rareSlots.has(index) ? "rare" : "common";
     let fits = pool.filter((card) => dealable(card) && card.rarity === rarity && slotMatches(slot, card));
     if (!fits.length) {
@@ -292,13 +332,17 @@ function dealStarterPack(seed) {
 // preserving swaps run dry does the repair break rarity (a thin pool can
 // price even commons dearly). Greedy and deterministic, so the same seed
 // still deals the same pack.
-export function starterPack(seed) {
-  const pack = dealStarterPack(seed);
+export function starterPack(seed, format = "classic") {
+  const pack = dealStarterPack(seed, format);
   const pool = adventurePool();
-  const cap = budgetCap();
-  const overCap = () => pack.reduce((sum, card) => sum + card.points, 0) > cap;
+  const slots = starterPackSlots(format);
+  const cap = budgetCap(format);
+  // What the pack costs is what the ROSTER it becomes costs: seated bats and
+  // every arm at sticker, the bench at its discount — the same arithmetic the
+  // cap check runs (see rosterFormats.discountedRosterCost).
+  const overCap = () => discountedRosterCost(pack, {}, format) > cap;
   for (const keepRarity of [true, false]) {
-    let guard = STARTER_PACK_SLOTS.length * 2;
+    let guard = slots.length * 2;
     while (overCap() && guard-- > 0) {
       const order = [...pack.keys()].sort((a, b) => pack[b].points - pack[a].points);
       let swapped = false;
@@ -307,7 +351,7 @@ export function starterPack(seed) {
         const cheaper = pool
           .filter((card) => card.points < pack[at].points &&
             (!keepRarity || card.rarity === pack[at].rarity) &&
-            slotMatches(STARTER_PACK_SLOTS[at], card) &&
+            slotMatches(slots[at], card) &&
             !others.some((held) => held.id === card.id) &&
             !personConflict(others, card))
           .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name))[0];

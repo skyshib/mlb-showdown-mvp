@@ -312,9 +312,27 @@ Runners send lead-first: a trailing runner can only go if everyone ahead of him
 goes. Fast-forward switches all of these back to the decision-matrix autopilot
 (and manages your pen at fatigue 2) until the next leverage moment.
 
-Deferred (engine gaps, listed in README): hit-and-run, pinch-hitting (no bench
-concept yet), strategy cards. The decision-hook interface should be designed so these
-slot in later without reworking the battle UI.
+Deferred (engine gaps, listed in README): hit-and-run, strategy cards. The
+decision-hook interface should be designed so these slot in later without
+reworking the battle UI.
+
+Substitutions shipped with the FULL ROSTER format (`save.rosterFormat`):
+20-card rosters (9 starting bats, 4 SP drawn at random per game with a
+ceil(bestOf/4)-starts series cap, 7 flex seats split freely between RP and
+bench bats at 1/5 price), and pinch hit / pinch run / defensive replacement
+from the 7th inning on — `pinchHit`/`pinchRun`/`defensiveSub` in game.js,
+decision rules in `src/rules/substitutions.js`, recorded as `ph`/`pr`/`ds`
+actions in the battle controller. Classic 13-card saves are untouched.
+
+Defensive legality: a defense must cover all eight positions with men whose
+cards play them (any glove may take 1B at the literal -1; the DH slot takes
+anyone). `coverageAssignment` (substitutions.js) answers it as a matching;
+`realignDefense` (game.js) reseats the nine at each inning turn, completes
+double-switches off the bench (forced `defensive-sub` events), and forfeits
+the game (`state.forfeitedBy`) when no coverage exists. Substitutions that
+would strand the defense are refused — the CPU never makes one — except the
+home side batting in the 9th+ (`walkoffSpot`), where the battle UI allows the
+gamble behind an explicit confirm.
 
 ### 5.4 NPC AI
 

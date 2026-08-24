@@ -1,6 +1,15 @@
 import {
   createInitialState,
   playPlateAppearance,
+  pinchHit,
+  pinchRun,
+  defensiveSub,
+  availableBench,
+  substitutionEligibility,
+  autoSubstituteFor,
+  pinchSubKeepsDefense,
+  defensiveSubFits,
+  walkoffSpot,
   playStealAttempt,
   stealCandidates,
   attemptSteal,
@@ -17,7 +26,7 @@ import {
   resolveAdvanceDecision,
   stateLeverage
 } from "../game.js?v=20260716-records";
-import { buildTeam } from "../draft.js?v=20260716-records";
+import { buildTeam, pickRandomStarter } from "../draft.js?v=20260716-records";
 import { createRng } from "../rng.js?v=20260716-records";
 import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js?v=20260716-records";
 
@@ -25,9 +34,11 @@ import { npcMaybeSteal, npcMaybePullPitcher, profileFor } from "./ai.js?v=202607
 // every plate appearance so the humans (well, one human) can manage.
 // Single games put the player on the road (you are the one traveling);
 // series alternate home and away game to game, like a real series.
-export function createBattle({ playerManager, npcManager, trainer, seed, starterIndex = 0, playerIsAway = true }) {
+export function createBattle({ playerManager, npcManager, trainer, seed, starterIndex = 0, npcStarterIndex = null, playerIsAway = true }) {
   const playerTeam = buildTeam(playerManager, { starterIndex });
-  const npcTeam = buildTeam(npcManager, { starterIndex });
+  // The full-roster format draws each dugout's starter separately; classic
+  // callers pass nothing and the NPC opens with the same rotation slot.
+  const npcTeam = buildTeam(npcManager, { starterIndex: npcStarterIndex ?? starterIndex });
   const playerSide = playerIsAway ? "away" : "home";
   const npcSide = playerIsAway ? "home" : "away";
   const state = createInitialState(
@@ -46,6 +57,7 @@ export function createBattle({ playerManager, npcManager, trainer, seed, starter
     playerSide,
     npcSide,
     starterIndex,
+    npcStarterIndex,
     playerIsAway,
     profile: profileFor(trainer?.aiProfile),
     state,
@@ -68,6 +80,7 @@ export function serializeBattle(battle) {
   return {
     seed: battle.seed,
     starterIndex: battle.starterIndex,
+    npcStarterIndex: battle.npcStarterIndex ?? null,
     playerIsAway: battle.playerIsAway,
     eventCount: battle.eventCount,
     actions: battle.actions.map((action) => ({ ...action }))
@@ -82,6 +95,9 @@ const REPLAY = {
   advance: (battle, action) => actAdvance(battle, action.send),
   iwalk: (battle) => actIntentionalWalk(battle),
   pen: (battle, action) => actChangePitcher(battle, action.index),
+  ph: (battle, action) => actPinchHit(battle, action.id),
+  pr: (battle, action) => actPinchRun(battle, action.id, action.base),
+  ds: (battle, action) => actDefensiveSub(battle, action.id, action.target),
   fastForward: (battle) => fastForward(battle)
 };
 
@@ -89,15 +105,15 @@ const REPLAY = {
 // because they always followed from the seed. Returns null if the recording
 // cannot be replayed onto this engine — a save from an older build, say —
 // so a bad restore reads as "no game to resume" rather than a wrong one.
-export function restoreBattle({ playerManager, npcManager, trainer, seed, starterIndex, playerIsAway, actions, eventCount }) {
-  const battle = createBattle({ playerManager, npcManager, trainer, seed, starterIndex, playerIsAway });
+export function restoreBattle({ playerManager, npcManager, trainer, seed, starterIndex, npcStarterIndex = null, playerIsAway, actions, eventCount }) {
+  const battle = createBattle({ playerManager, npcManager, trainer, seed, starterIndex, npcStarterIndex, playerIsAway });
   for (const action of actions ?? []) {
     const replay = REPLAY[action.type];
     if (!replay) return null;
     replay(battle, action);
-    // The UI gives the NPC skipper his look at the mound after every action,
+    // The UI gives the NPC skipper his look at the dugout after every action,
     // so the replay has to give him the same look, at the same points.
-    npcMoundVisit(battle);
+    npcDugoutVisit(battle);
   }
   return typeof eventCount === "number" && battle.eventCount !== eventCount ? null : battle;
 }
@@ -116,7 +132,12 @@ export function battlePhase(battle) {
   if (isGameOver(state)) {
     return {
       type: "over",
-      playerWon: state.score[battle.playerSide] > state.score[battle.npcSide],
+      // A forfeit outranks the scoreboard: the club that could not field a
+      // legal defense loses, whatever the score reads.
+      playerWon: state.forfeitedBy
+        ? state.forfeitedBy === battle.npcSide
+        : state.score[battle.playerSide] > state.score[battle.npcSide],
+      forfeitedBy: state.forfeitedBy ?? null,
       score: { ...state.score }
     };
   }
@@ -134,6 +155,12 @@ export function battlePhase(battle) {
       stealOptions: stealCandidates(state),
       canBunt: canBunt(state),
       buntChance: buntSuccessChance(state),
+      bench: availableBench(state, battle.playerSide),
+      subEligibility: substitutionEligibility(state, battle.playerSide),
+      // Occupied bases a pinch-runner could take, innermost first.
+      pinchRunBases: state.bases
+        .map((runner, base) => (runner ? { base, runner } : null))
+        .filter(Boolean),
       // Full mound status, so the UI can show the NPC arm's fatigue — the
       // tiredness rules are the same for both sides.
       opposingMound: pitcherStatus(state, battle.npcSide),
@@ -147,7 +174,11 @@ export function battlePhase(battle) {
     onDeck: npcTeam.lineup[(state.lineupIndex[battle.npcSide] + 1) % npcTeam.lineup.length],
     battingSpot: (state.lineupIndex[battle.npcSide] % npcTeam.lineup.length) + 1,
     mound: pitcherStatus(state, battle.playerSide),
-    bullpen: availableRelievers(battle)
+    bullpen: availableRelievers(battle),
+    bench: availableBench(state, battle.playerSide),
+    subEligibility: substitutionEligibility(state, battle.playerSide),
+    // The nine on the field, for a defensive-replacement pick.
+    defenseTargets: state[battle.playerSide].lineup.map((player) => ({ player }))
   };
 }
 
@@ -166,6 +197,16 @@ function pushEvent(battle, event) {
   battle.events.push(event);
   battle.eventCount += 1;
   return event;
+}
+
+// Engine events generated between plays — a forced double-switch at the turn
+// of an inning, a forfeit — into the book, after whatever play queued them.
+// Every action drains, so a replayed recording books them at the same points.
+function drainEngineEvents(battle) {
+  const queued = battle.state.pendingSubEvents ?? [];
+  const events = [];
+  while (queued.length) events.push(pushEvent(battle, queued.shift()));
+  return events;
 }
 
 // The decision goes in the book before the dice are thrown for it, so an action
@@ -187,17 +228,45 @@ export function npcMoundVisit(battle) {
   return pushEvent(battle, pitchingChangeEvent(battle, battle.npcSide, pulled));
 }
 
+// The NPC's trip to its bench, on either side of the ball: pinch moves when
+// it bats, a defensive glove when it fields. Same decision rules as auto
+// play, bent by the trainer's temperament (subBias); rng-free, so a replay
+// makes the identical trips. Loops so a pinch-hitter AND a pinch-runner can
+// both come on in one visit, each as its own event.
+export function npcBenchVisit(battle) {
+  const events = [];
+  let guard = 4;
+  while (guard-- > 0) {
+    const phase = battlePhase(battle);
+    if (phase.type !== "player-batting" && phase.type !== "player-pitching") break;
+    const event = autoSubstituteFor(battle.state, battle.npcSide, battle.profile.subBias ?? 1);
+    if (!event) break;
+    events.push(pushEvent(battle, event));
+  }
+  return events;
+}
+
+// Every between-actions look the NPC skipper gets: the bench first, then the
+// mound. The interactive layer and the replay call this at the same points,
+// which is what keeps a restored recording's eventCount honest.
+export function npcDugoutVisit(battle) {
+  const events = npcBenchVisit(battle);
+  const mound = npcMoundVisit(battle);
+  if (mound) events.push(mound);
+  return events;
+}
+
 // Player action while batting: let the plate appearance rip.
 export function actSwing(battle) {
   record(battle, { type: "swing" });
-  return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng))];
+  return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng)), ...drainEngineEvents(battle)];
 }
 
 // Player action while batting: send the runner on the chosen base.
 export function actSteal(battle, fromIndex) {
   record(battle, { type: "steal", from: fromIndex });
   const event = attemptSteal(battle.state, fromIndex, battle.rng);
-  return event ? [pushEvent(battle, event)] : [];
+  return event ? [pushEvent(battle, event), ...drainEngineEvents(battle)] : drainEngineEvents(battle);
 }
 
 // Player action while batting: lay down a sacrifice bunt (traditional
@@ -205,7 +274,7 @@ export function actSteal(battle, fromIndex) {
 export function actBunt(battle) {
   record(battle, { type: "bunt" });
   const event = attemptBunt(battle.state);
-  return event ? [pushEvent(battle, event)] : [];
+  return event ? [pushEvent(battle, event), ...drainEngineEvents(battle)] : drainEngineEvents(battle);
 }
 
 // Player decision after their own hit or fly ball: send the first `sendCount`
@@ -213,7 +282,7 @@ export function actBunt(battle) {
 export function actAdvance(battle, sendCount) {
   record(battle, { type: "advance", send: sendCount });
   const event = resolveAdvanceDecision(battle.state, sendCount, battle.rng);
-  return event ? [pushEvent(battle, event)] : [];
+  return event ? [pushEvent(battle, event), ...drainEngineEvents(battle)] : drainEngineEvents(battle);
 }
 
 // Player action while pitching: put the batter on for free.
@@ -229,8 +298,8 @@ export function actIntentionalWalk(battle) {
 export function actPitch(battle) {
   record(battle, { type: "pitch" });
   const steal = npcMaybeSteal(battle.state, battle.rng, battle.profile);
-  if (steal) return [pushEvent(battle, steal)];
-  return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng))];
+  if (steal) return [pushEvent(battle, steal), ...drainEngineEvents(battle)];
+  return [pushEvent(battle, playPlateAppearance(battle.state, battle.rng)), ...drainEngineEvents(battle)];
 }
 
 // Player action while pitching: go to the pen. Pass a staff index to bring
@@ -240,6 +309,26 @@ export function actChangePitcher(battle, targetIndex = null) {
   const pitcher = changePitcher(battle.state, battle.playerSide, targetIndex);
   if (!pitcher) return [];
   return [pushEvent(battle, pitchingChangeEvent(battle, battle.playerSide, pitcher))];
+}
+
+// Player substitutions. Recorded by CARD ID — bench order shifts as men
+// leave it, so an index would replay as a different man.
+export function actPinchHit(battle, cardId) {
+  record(battle, { type: "ph", id: cardId });
+  const event = pinchHit(battle.state, battle.playerSide, cardId);
+  return event ? [pushEvent(battle, event)] : [];
+}
+
+export function actPinchRun(battle, cardId, baseIndex) {
+  record(battle, { type: "pr", id: cardId, base: baseIndex });
+  const event = pinchRun(battle.state, battle.playerSide, cardId, baseIndex);
+  return event ? [pushEvent(battle, event)] : [];
+}
+
+export function actDefensiveSub(battle, cardId, targetId) {
+  record(battle, { type: "ds", id: cardId, target: targetId });
+  const event = defensiveSub(battle.state, battle.playerSide, cardId, targetId);
+  return event ? [pushEvent(battle, event)] : [];
 }
 
 function pitchingChangeEvent(battle, side, pitcher) {
@@ -318,6 +407,15 @@ export function fastForward(battle, { maxEvents = 500 } = {}) {
 
   while (!isGameOver(state) && guard > 0) {
     guard -= 1;
+    // Both benches run on the same autopilot the sim uses — the NPC with its
+    // temperament, the player's dugout on the balanced rule (the exact
+    // precedent the pen sets below). One sub per pass; the loop comes around.
+    const subEvent = autoSubstituteFor(state, battle.npcSide, battle.profile.subBias ?? 1)
+      ?? autoSubstituteFor(state, battle.playerSide);
+    if (subEvent) {
+      events.push(pushEvent(battle, subEvent));
+      continue;
+    }
     if (battingSide(battle) === battle.playerSide) {
       const pulled = npcMaybePullPitcher(state, battle.npcSide, battle.profile);
       if (pulled) events.push(pushEvent(battle, pitchingChangeEvent(battle, battle.npcSide, pulled)));
@@ -340,6 +438,7 @@ export function fastForward(battle, { maxEvents = 500 } = {}) {
     }
     const event = playStealAttempt(state, battle.rng) ?? playPlateAppearance(state, battle.rng);
     events.push(pushEvent(battle, event));
+    events.push(...drainEngineEvents(battle));
     if (isLeverageMoment(state)) break;
   }
 
@@ -357,10 +456,26 @@ export function runSimSeries({ playerManager, npcManager, bestOf, seed }) {
   let playerWins = 0;
   let npcWins = 0;
 
+  // Full-format rotations are drawn, not walked: a seeded random starter per
+  // dugout per game, no arm starting more than its ceil(bestOf/4) share.
+  // Classic managers keep the fixed turn — game N is rotation slot N.
+  const starterCounts = { player: {}, npc: {} };
+  const starterFor = (manager, who, gameNumber) => {
+    if (manager.rosterFormat !== "full") return gameNumber - 1;
+    const counts = starterCounts[who];
+    const pick = pickRandomStarter({
+      rng: createRng(`${seed}:starter:g${gameNumber}:${who}`),
+      starterCount: manager.startingPitchers ?? 4,
+      priorStartCounts: counts,
+      bestOf
+    });
+    counts[pick] = (counts[pick] ?? 0) + 1;
+    return pick;
+  };
+
   for (let gameNumber = 1; playerWins < needed && npcWins < needed; gameNumber += 1) {
-    const starterIndex = gameNumber - 1;
-    const playerTeam = buildTeam(playerManager, { starterIndex });
-    const npcTeam = buildTeam(npcManager, { starterIndex });
+    const playerTeam = buildTeam(playerManager, { starterIndex: starterFor(playerManager, "player", gameNumber) });
+    const npcTeam = buildTeam(npcManager, { starterIndex: starterFor(npcManager, "npc", gameNumber) });
     const playerIsAway = gameNumber % 2 === 1;
     const result = simulateGame(
       playerIsAway ? playerTeam : npcTeam,

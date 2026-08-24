@@ -4,6 +4,9 @@ import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 import { advanceBreakeven } from "./breakeven.js?v=20260716-records";
+import { SUB_MIN_INNING, benchSlotFielding, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
+
+export { SUB_MIN_INNING };
 
 // Go/no-go floors for taking a base, by outs and destination.
 //
@@ -201,12 +204,16 @@ export function simulateGame(awayTeam, homeTeam, seed = "showdown", options = {}
     const event = playGameEvent(state, rng);
     events.push(event);
   }
+  // A forfeit ends the loop with its event still queued; put it in the book.
+  events.push(...state.pendingSubEvents.splice(0));
 
   return {
     seed,
     away: summarizeTeam(state, "away"),
     home: summarizeTeam(state, "home"),
-    winner: state.score.away > state.score.home ? state.away.name : state.home.name,
+    winner: state.forfeitedBy
+      ? state[state.forfeitedBy === "away" ? "home" : "away"].name
+      : state.score.away > state.score.home ? state.away.name : state.home.name,
     boxScore: buildBoxScore(state),
     events,
     innings: inningsPlayed(state),
@@ -234,7 +241,10 @@ export function inningsPlayed(state) {
 }
 
 export function playGameEvent(state, rng) {
-  return playStealAttempt(state, rng) ?? playPlateAppearance(state, rng);
+  // Between-play engine events first: a forced double-switch at the turn of
+  // an inning, or the forfeit that ends the game.
+  if (state.pendingSubEvents?.length) return state.pendingSubEvents.shift();
+  return autoSubstitute(state) ?? playStealAttempt(state, rng) ?? playPlateAppearance(state, rng);
 }
 
 export function playPlateAppearance(state, rng) {
@@ -263,11 +273,18 @@ export function playPlateAppearance(state, rng) {
   if (state.pendingAdvance) state.pendingAdvance.batter = { id: batter.id, name: batter.name };
 
   const outsOnPlay = Math.max(0, state.outs - outsBefore);
-  recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay, pitcherWasFresh);
+  recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay, pitcherWasFresh, { controlRoll, resultRoll });
   battingTeam.plateAppearances += 1;
   state.lineupIndex[battingSide] += 1;
   // The at-bat is over: every runner's steal attempt refreshes.
-  state.stealAttemptsThisPA = [];
+  //
+  // Except the man who just trotted into second on a 1B+. He has taken a base on
+  // this play already — uncontested, no throw, no die — and letting him break for
+  // third before a pitch is thrown turns the free base into a down payment on
+  // another one. It is one advance per hit: the base he walked into spends the
+  // steal he would have had, and the at-bat after that hands it back.
+  const trotted = result === RESULTS.SINGLE_PLUS && state.bases[1]?.id === batter.id;
+  state.stealAttemptsThisPA = trotted ? [batter.id] : [];
   state.pitching[pitchingSide].outsRecorded += outsOnPlay;
   state.pitching[pitchingSide].battersFaced += 1;
 
@@ -671,6 +688,12 @@ export function resolveAdvanceDecision(state, sendCount, rng) {
   const lead = chosen[0].runner;
 
   const attemptResult = resolveAdvanceAttempts(state, chosen, battingSide, pitchingSide, rng);
+  // A 1B+ batter held at first while this call was pending: the send has now
+  // emptied second, one way or the other, so he takes it as part of this play.
+  // The at-bat is over by the time this resolves, so the base spends his steal
+  // here rather than at the end of it — same rule, later doorway.
+  const trotted = pending.batterTakesSecond ? takeUncontestedSecond(state) : null;
+  if (trotted) state.stealAttemptsThisPA = [...(state.stealAttemptsThisPA ?? []), trotted.id];
   if (batter?.id && attemptResult.runs > 0) {
     ensureHitterLine(state, batter).rbi += attemptResult.runs;
   }
@@ -787,7 +810,18 @@ export function createInitialState(awayTeam, homeTeam, options = {}) {
     pendingAdvance: null,
     // Runner ids that already attempted a steal during the current at-bat —
     // one green light per runner per batter, safe or not.
-    stealAttemptsThisPA: []
+    stealAttemptsThisPA: [],
+    // Substituted-out player ids, per side. Baseball's one-way door: a man
+    // who leaves the game does not come back into it.
+    removed: { away: [], home: [] },
+    // Events the engine generates BETWEEN plays — forced double-switch
+    // completions at an inning turn, a forfeit — waiting for the caller to
+    // read them into the book (playGameEvent and the battle controller both
+    // drain this).
+    pendingSubEvents: [],
+    // The side that could not field a legal defense. Set with gameOver: the
+    // game ends and the other club wins, whatever the score reads.
+    forfeitedBy: null
   };
 }
 
@@ -802,6 +836,8 @@ function createRuntimeTeam(team) {
     ...team,
     plateAppearances: 0,
     lineup: team.lineup.map((player) => ({ ...player })),
+    // Only full-roster teams carry one; everyone else's dugout is just the nine.
+    bench: (team.bench ?? []).map((player) => ({ ...player })),
     pitchers: buildPitchingPlan(team.pitchers)
   };
 }
@@ -834,6 +870,319 @@ export function changePitcher(state, side, targetIndex = null) {
   runtime.outsRecorded = 0;
   runtime.battersFaced = 0;
   return team.pitchers[runtime.pitcherIndex];
+}
+
+// ---- Substitutions -----------------------------------------------------------
+//
+// The bench opens in the seventh (SUB_MIN_INNING and the decision rules live
+// in substitutions.js). From the seventh on, a bench bat can hit for the man
+// due up, run for a man on base, or take the field for a defender. Every
+// door is one-way: the man who comes out is out for good.
+
+// The bench bats still in the dugout: never entered, never removed.
+export function availableBench(state, side) {
+  const team = state[side];
+  const removed = state.removed?.[side] ?? [];
+  const inLineup = new Set(team.lineup.map((player) => player.id));
+  return (team.bench ?? []).filter((card) => !removed.includes(card.id) && !inLineup.has(card.id));
+}
+
+export function substitutionEligibility(state, side) {
+  if (isGameOver(state)) return { allowed: false, reason: "the game is over" };
+  if (state.inning < SUB_MIN_INNING) return { allowed: false, reason: `the bench opens in the ${SUB_MIN_INNING}th` };
+  // A play mid-resolution (runners waiting on a send call) is not a moment
+  // anybody steps out of the dugout — and the due batter the HUD shows is
+  // not the man the lineup index points at until the call resolves.
+  if (state.pendingAdvance) return { allowed: false, reason: "the play is still live" };
+  if (!availableBench(state, side).length) return { allowed: false, reason: "no bench left" };
+  return { allowed: true, reason: "" };
+}
+
+// The runtime shape a bench card takes entering the lineup: he inherits the
+// outgoing man's defensive slot (there are no mid-game position shuffles),
+// rated by his own card at that spot.
+function benchLineupPlayer(card, outgoing) {
+  const label = outgoing.assignedPosition ?? outgoing.defensivePosition ?? outgoing.position;
+  const glove = benchSlotFielding(card, label);
+  return {
+    ...card,
+    cardPosition: card.position,
+    defensivePosition: label,
+    assignedPosition: label,
+    fielding: glove.value,
+    outOfPosition: glove.outOfPosition
+  };
+}
+
+// Put a bench man into the lineup at `index`, in the outgoing man's spot in
+// the order. The lineup is REPLACED, not mutated: relief decisions memoize
+// their read of the opposing nine on the array's identity (see
+// pitching.lineupProfile), and the nine just changed.
+function applyLineupSub(state, side, index, sub) {
+  const team = state[side];
+  const outgoing = team.lineup[index];
+  const entering = benchLineupPlayer(sub, outgoing);
+  team.lineup = team.lineup.map((player, at) => (at === index ? entering : player));
+  team.bench = (team.bench ?? []).filter((card) => card.id !== sub.id);
+  state.removed[side].push(outgoing.id);
+  return { entering, outgoing };
+}
+
+function substitutionEvent(state, side, type, entering, outgoing, extra = {}) {
+  return {
+    type,
+    side,
+    team: state[side].name,
+    in: { id: entering.id, name: entering.name },
+    out: { id: outgoing.id, name: outgoing.name },
+    inning: state.inning,
+    half: state.half,
+    ...extra
+  };
+}
+
+// The one spot where a club may LEGALLY strand its own defense: the home
+// side batting in the ninth or later. Win it right here and the field never
+// has to be taken; fail to, and the turn of the inning forfeits the game
+// (see realignDefense). Everywhere else a sub that leaves no coverable
+// defense is refused outright.
+export function walkoffSpot(state, side) {
+  return side === "home" && state.half === "bottom" && state.inning >= 9;
+}
+
+// Would the club still be able to field a legal defense after `benchId`
+// replaces `outgoingId` — counting the bench men who could come on later to
+// cover (the double-switch)? The gate on every batting-side substitution,
+// and the question the UI's warnings ask.
+export function pinchSubKeepsDefense(state, side, benchId, outgoingId) {
+  const team = state[side];
+  const sub = availableBench(state, side).find((card) => card.id === benchId);
+  const index = team.lineup.findIndex((player) => player.id === outgoingId);
+  if (!sub || index < 0) return false;
+  const nextLineup = team.lineup.map((player, at) => (at === index ? sub : player));
+  const remainingBench = availableBench(state, side).filter((card) => card.id !== sub.id);
+  return canCoverField(nextLineup, remainingBench);
+}
+
+// Can `benchId` take the field for `targetPlayerId` RIGHT NOW — the nine that
+// results must cover the eight positions by itself (shuffles allowed; the
+// realignment seats everyone). A defensive sub has no walk-off to hide
+// behind, so there is no exception.
+export function defensiveSubFits(state, side, benchId, targetPlayerId) {
+  const team = state[side];
+  const sub = availableBench(state, side).find((card) => card.id === benchId);
+  const index = team.lineup.findIndex((player) => player.id === targetPlayerId);
+  if (!sub || index < 0) return false;
+  return coverageAssignment(team.lineup.map((player, at) => (at === index ? sub : player))) !== null;
+}
+
+// Seat the nine per a coverage assignment: each matched man takes his label
+// at his own rating there, whoever is unmatched bats on as the DH.
+function applyDefenseAssignment(lineup, assignment) {
+  const labelById = new Map();
+  for (const [label, player] of assignment) labelById.set(player.id, label);
+  for (const player of lineup) {
+    const label = labelById.get(player.id) ?? "DH";
+    const glove = benchSlotFielding(player, label);
+    player.defensivePosition = label;
+    player.assignedPosition = label;
+    player.fielding = glove.value;
+    player.outOfPosition = glove.outOfPosition;
+  }
+}
+
+// The turn of an inning puts a defense on the field, and this is where the
+// club must actually HAVE one. A nine standing legally is left alone. A nine
+// broken by pinch moves is reseated — the double-switch: bench men come on
+// (as recorded defensive subs) for the bats that stranded the alignment, and
+// every glove lands where it legally can. A club that cannot cover the field
+// even off its bench FORFEITS: out-of-position is not a penalty, it is not a
+// team.
+function realignDefense(state, side) {
+  const team = state[side];
+  if (!team.lineup.length || alignmentLegal(team.lineup)) return;
+  let assignment = coverageAssignment(team.lineup);
+  if (!assignment) {
+    const bench = availableBench(state, side);
+    const pooled = coverageAssignment([...team.lineup, ...bench]);
+    if (!pooled) {
+      state.gameOver = true;
+      state.forfeitedBy = side;
+      state.pendingSubEvents.push({
+        type: "forfeit",
+        side,
+        team: team.name,
+        inning: state.inning,
+        half: state.half
+      });
+      return;
+    }
+    const matched = new Set([...pooled.values()].map((player) => player.id));
+    const entering = bench.filter((card) => matched.has(card.id));
+    const unmatched = team.lineup.filter((player) => !matched.has(player.id));
+    // One unmatched man stays on to DH — the best bat among them; the rest
+    // leave for the men who can actually cover the field.
+    const keep = [...unmatched].sort((a, b) =>
+      roughBatValue(b) - roughBatValue(a) || String(a.id).localeCompare(String(b.id)))[0];
+    const leaving = unmatched.filter((player) => player !== keep);
+    entering.forEach((card, at) => {
+      const out = leaving[at];
+      const index = team.lineup.findIndex((player) => player.id === out.id);
+      const swapped = applyLineupSub(state, side, index, card);
+      ensureHitterLine(state, swapped.entering, side);
+      state.pendingSubEvents.push(substitutionEvent(state, side, "defensive-sub", swapped.entering, swapped.outgoing, {
+        slot: [...pooled].find(([, player]) => player.id === card.id)?.[0] ?? null,
+        forced: true
+      }));
+    });
+    assignment = coverageAssignment(team.lineup);
+    if (!assignment) return; // cannot happen: the pooled matching promised it
+  }
+  applyDefenseAssignment(team.lineup, assignment);
+}
+
+// A bench bat hits for the man due up. Returns the event, or null when the
+// swap is illegal — the caller asked at the wrong moment or for the wrong
+// man, or the move would strand the defense outside the walk-off spot.
+export function pinchHit(state, side, benchId) {
+  const battingSide = state.half === "top" ? "away" : "home";
+  if (side !== battingSide) return null;
+  if (!substitutionEligibility(state, side).allowed) return null;
+  const sub = availableBench(state, side).find((card) => card.id === benchId);
+  if (!sub) return null;
+  const team = state[side];
+  const index = state.lineupIndex[side] % team.lineup.length;
+  if (!pinchSubKeepsDefense(state, side, benchId, team.lineup[index].id) && !walkoffSpot(state, side)) return null;
+  const { entering, outgoing } = applyLineupSub(state, side, index, sub);
+  return substitutionEvent(state, side, "pinch-hitter", entering, outgoing);
+}
+
+// A bench man runs for the man standing at `baseIndex`. He takes the base AND
+// the lineup spot; the run he might score still belongs to the pitcher who
+// put the original man on (the responsibility fields ride the base).
+export function pinchRun(state, side, benchId, baseIndex) {
+  const battingSide = state.half === "top" ? "away" : "home";
+  if (side !== battingSide) return null;
+  if (!substitutionEligibility(state, side).allowed) return null;
+  const runner = state.bases[baseIndex];
+  if (!runner) return null;
+  const team = state[side];
+  const index = team.lineup.findIndex((player) => player.id === runner.id);
+  if (index < 0) return null;
+  const sub = availableBench(state, side).find((card) => card.id === benchId);
+  if (!sub) return null;
+  if (!pinchSubKeepsDefense(state, side, benchId, runner.id) && !walkoffSpot(state, side)) return null;
+  const { entering, outgoing } = applyLineupSub(state, side, index, sub);
+  state.bases[baseIndex] = {
+    id: entering.id,
+    name: entering.name,
+    speed: Number(entering.speed) || 0,
+    responsiblePitcherId: runner.responsiblePitcherId ?? null,
+    responsiblePitcherFresh: runner.responsiblePitcherFresh ?? null
+  };
+  // A green light already spent on this base is spent: the fresh legs do not
+  // mint a second steal attempt in the same at-bat.
+  if ((state.stealAttemptsThisPA ?? []).includes(outgoing.id)) {
+    state.stealAttemptsThisPA.push(entering.id);
+  }
+  return substitutionEvent(state, side, "pinch-runner", entering, outgoing, { base: baseLabel(baseIndex) });
+}
+
+// A bench man takes the field for a defender, while this side pitches. His
+// box-score line is seeded on entry — a glove man who never bats would
+// otherwise play the whole ninth and appear nowhere.
+export function defensiveSub(state, side, benchId, targetPlayerId) {
+  const fieldingSide = state.half === "top" ? "home" : "away";
+  if (side !== fieldingSide) return null;
+  if (!substitutionEligibility(state, side).allowed) return null;
+  const team = state[side];
+  const index = team.lineup.findIndex((player) => player.id === targetPlayerId);
+  if (index < 0) return null;
+  const sub = availableBench(state, side).find((card) => card.id === benchId);
+  if (!sub) return null;
+  // The nine that results must cover the field on its own — shuffles
+  // allowed, forfeits not. The realignment seats everyone afterwards, so a
+  // corner-capable center fielder slides over when the new man takes center.
+  if (!defensiveSubFits(state, side, benchId, targetPlayerId)) return null;
+  const { entering, outgoing } = applyLineupSub(state, side, index, sub);
+  ensureHitterLine(state, entering, side);
+  applyDefenseAssignment(team.lineup, coverageAssignment(team.lineup));
+  return substitutionEvent(state, side, "defensive-sub", entering, outgoing, {
+    slot: entering.assignedPosition ?? entering.position
+  });
+}
+
+// How many innings this side still has to take the field — the horizon a
+// pinch-hitter's glove is priced over. The home side fields tops, so in the
+// bottom of the ninth its answer is zero and a bat swings free.
+function inningsLeftToField(state, side) {
+  const horizon = Math.max(state.inning, 9);
+  if (side === "home") return Math.max(0, horizon - state.inning + (state.half === "top" ? 1 : 0));
+  return Math.max(0, horizon - state.inning + 1);
+}
+
+// The CPU skipper's trip to the bench for ONE side: run the decision rules
+// (substitutions.js) and execute the first move that clears its bar. At most
+// one substitution per call — callers loop by calling again. bias widens or
+// narrows every bar (an NPC temperament; see ai.js subBias).
+export function autoSubstituteFor(state, side, bias = 1) {
+  if (!substitutionEligibility(state, side).allowed) return null;
+  const battingSide = state.half === "top" ? "away" : "home";
+  const leverage = stateLeverage(state);
+  const bench = availableBench(state, side);
+  if (side === battingSide) {
+    const fieldingSide = side === "away" ? "home" : "away";
+    const runtime = state.pitching[fieldingSide];
+    const pitcher = state[fieldingSide].pitchers[runtime.pitcherIndex];
+    const team = state[side];
+    const dueBatter = team.lineup[state.lineupIndex[side] % team.lineup.length];
+    // The CPU never strands its own defense: every candidate is checked
+    // against the coverage the club would still have (bench cover counted).
+    const keepsDefense = (card, outgoingId) => pinchSubKeepsDefense(state, side, card.id, outgoingId);
+    const hit = pinchHitDecision({
+      bench: bench.filter((card) => keepsDefense(card, dueBatter.id)),
+      dueBatter,
+      pitcher,
+      fatigue: pitcherFatigue(runtime, pitcher),
+      leverage,
+      inning: state.inning,
+      inningsLeftToField: inningsLeftToField(state, side),
+      bias
+    });
+    if (hit) return pinchHit(state, side, hit.sub.id);
+    const run = pinchRunDecision({
+      bases: state.bases,
+      bench,
+      diff: battingEdge(state),
+      leverage,
+      inning: state.inning,
+      bias,
+      canCover: keepsDefense
+    });
+    if (run) return pinchRun(state, side, run.sub.id, run.baseIndex);
+    return null;
+  }
+  const other = side === "away" ? "home" : "away";
+  const glove = defensiveSubDecision({
+    lineup: state[side].lineup,
+    bench,
+    lead: state.score[side] - state.score[other],
+    inning: state.inning,
+    bias,
+    canCover: (card, targetId) => defensiveSubFits(state, side, card.id, targetId)
+  });
+  if (glove) return defensiveSub(state, side, glove.sub.id, glove.targetId);
+  return null;
+}
+
+// Auto play's bench manager, mirroring how steals pre-empt the plate
+// appearance in playGameEvent: the fielding side protects its lead first,
+// then the batting side goes to its bench. Silent for every team that
+// carries no bench — the batch sim, tournaments, and classic saves.
+export function autoSubstitute(state) {
+  const battingSide = state.half === "top" ? "away" : "home";
+  const fieldingSide = battingSide === "away" ? "home" : "away";
+  return autoSubstituteFor(state, fieldingSide) ?? autoSubstituteFor(state, battingSide);
 }
 
 // Snapshot of the current pitcher for an interactive layer: who is on the
@@ -1149,20 +1498,35 @@ export function applySingle(state, batter, battingSide, pitchingSide = null, rng
   // 1B+: the real cards' auto-advance — the batter takes second uncontested, no
   // roll, no decision, PROVIDED second is open.
   //
-  // Open WHEN is the whole question, and it is asked here, at the end, because
-  // the play is what opens the base. The man who was on first is standing on
-  // second the moment the ball lands, so asking before the throw is settled
-  // said "occupied" and pinned the batter to first — even when that runner then
-  // went on to third, or was thrown out there, and left second empty behind him.
-  // The extra base is taken once the dust settles, on the base as it then is.
+  // Open WHEN is the whole question, and the answer is at the END of the play,
+  // because the play is what opens the base. The man who was on first is
+  // standing on second the moment the ball lands, so asking before the throw is
+  // settled says "occupied" and pins the batter to first — even when that runner
+  // then goes on to third, or is thrown out there, and leaves second empty
+  // behind him. The extra base is taken once the dust settles, on the base as it
+  // then is.
   //
-  // A third out ends the half before anyone can trot anywhere, so a dead inning
-  // moves nobody.
-  if (extraBase && state.bases[0] && !state.bases[1] && state.outs < 3) {
-    state.bases[1] = state.bases[0];
-    state.bases[0] = null;
+  // The attempts above have already been resolved by now, so second is as it
+  // will finish — UNLESS the send was handed to a manager, in which case the
+  // play is still open and the batter's base has to wait for the call. Nothing
+  // on a single ever moves INTO second, so a base open now stays open: only the
+  // occupied case can still change, and only that case defers.
+  if (extraBase) {
+    if (state.pendingAdvance && state.bases[1]) state.pendingAdvance.batterTakesSecond = true;
+    else takeUncontestedSecond(state);
   }
   return runs;
+}
+
+// The 1B+ trot to second, applied against the bases as they stand. A third out
+// ends the half before anyone can trot anywhere, so a dead inning moves nobody.
+// Hands back the man who moved, because taking that base costs him something —
+// see the steal green light at the end of playPlateAppearance.
+function takeUncontestedSecond(state) {
+  if (!state.bases[0] || state.bases[1] || state.outs >= 3) return null;
+  state.bases[1] = state.bases[0];
+  state.bases[0] = null;
+  return state.bases[1];
 }
 
 export function applyDouble(state, batter, battingSide, pitchingSide = null, rng = null, pitcher = null) {
@@ -1716,13 +2080,19 @@ function advanceHalfInning(state) {
     state.half = "top";
     state.inning += 1;
   }
+  // The side coming out to field has to legally HAVE a defense — pinch moves
+  // may have broken it. Only if there is a next half to play: nobody
+  // realigns, double-switches, or forfeits after the final out.
+  if (shouldContinue(state)) {
+    realignDefense(state, state.half === "top" ? "home" : "away");
+  }
 }
 
 function snapshotBases(state) {
   return state.bases.map((runner) => (runner ? runner.name : null));
 }
 
-function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay, pitcherWasFresh = false) {
+function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, runs, outsOnPlay, pitcherWasFresh = false, rolls = null) {
   const hitterLine = ensureHitterLine(state, batter);
   const pitcherLine = ensurePitcherLine(state, pitcher);
   const freshLine = pitcherWasFresh ? pitcherLine.fresh : null;
@@ -1730,6 +2100,20 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   pitcherLine.bf += 1;
   if (freshLine) freshLine.bf += 1;
   hitterLine.rbi += runs;
+  // Each man's own die, kept as a running total so the box score can average it.
+  // A plate appearance throws two: the PITCH, which is the arm's, and the SWING,
+  // which is the bat's. Whose CHART the swing lands on is decided by the pitch and
+  // is not the batter's doing — the number on his die is his either way, and that
+  // is the whole point of the column: it says whether the afternoon was the man or
+  // the dice.
+  if (Number.isFinite(rolls?.resultRoll)) {
+    hitterLine.rolls += 1;
+    hitterLine.rollTotal += rolls.resultRoll;
+  }
+  if (Number.isFinite(rolls?.controlRoll)) {
+    pitcherLine.rolls += 1;
+    pitcherLine.rollTotal += rolls.controlRoll;
+  }
 
   if ([RESULTS.SINGLE, RESULTS.SINGLE_PLUS, RESULTS.DOUBLE, RESULTS.TRIPLE, RESULTS.HR].includes(result)) {
     hitterLine.h += 1;
@@ -1808,7 +2192,10 @@ function ensureHitterLine(state, hitter, side = state.half === "top" ? "away" : 
       csCaught: 0,
       rbi: 0,
       gidp: 0,
-      wpa: 0
+      wpa: 0,
+      // His swing dice: how many he has thrown, and what they add up to.
+      rolls: 0,
+      rollTotal: 0
     });
   }
   return state.stats.hitters.get(key);
@@ -1831,6 +2218,9 @@ function ensurePitcherLine(state, pitcher) {
       hr: 0,
       r: 0,
       wpa: 0,
+      // His pitch dice, the same way (see recordStats).
+      rolls: 0,
+      rollTotal: 0,
       fresh: emptyPitcherTotals()
     });
   }

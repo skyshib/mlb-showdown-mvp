@@ -4,7 +4,7 @@ import { escapeHtml, shortName } from "../../ui/cardFace.js?v=20260716-records";
 // The card face and the booth are shared with the draft app (src/ui). What
 // lives here is the Game Boy shell around them: cursor menus, the compact
 // list lines, and the diamond.
-export { cardPanelHtml, escapeHtml, eraYear, rarityTag, shortName, stripCardYear, surname } from "../../ui/cardFace.js?v=20260716-records";
+export { cardPanelHtml, cardScanUrl, escapeHtml, eraYear, rarityTag, shortName, stripCardYear, surname } from "../../ui/cardFace.js?v=20260716-records";
 export { describeEvent, halfLabel } from "../../ui/playByPlay.js?v=20260716-records";
 
 export function clampIndex(index, length) {
@@ -31,11 +31,11 @@ export function menuHtml(items, selectedIndex, { className = "", offset = 0 } = 
 
 // `slot` overrides the printed position with the one the man actually fills
 // in the lineup — the DH reads as DH, not as the glove on his card.
-export function cardLine(card, { slot = null } = {}) {
+export function cardLine(card, { slot = null, points = null } = {}) {
   const stat = card.kind === "pitcher"
     ? `${card.role} CTRL${card.control} IP${card.ip}`
     : `${escapeHtml(slot ?? positionsLabel(card))} OB${card.onBase} SPD${card.speed}`;
-  return `${escapeHtml(shortName(card.name))} <span class="gq-dim">${stat} ${card.points}PT</span>`;
+  return `${escapeHtml(shortName(card.name))} <span class="gq-dim">${stat} ${points ?? card.points}PT</span>`;
 }
 
 // Occupied bases carry the runner's card id so hovering the icon floats the

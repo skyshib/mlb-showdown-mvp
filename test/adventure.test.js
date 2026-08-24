@@ -433,8 +433,8 @@ test("uncapped mode drops the player's cap and swells boss budgets", async () =>
   }
 });
 
-test("the opening menus offer budget and uncapped rules", async () => {
-  const { modeSelectScreen, leagueSelectScreen } = await import("../src/adventure/ui/titleScreens.js");
+test("the opening menus offer budget and uncapped rules, then the roster format", async () => {
+  const { modeSelectScreen, leagueSelectScreen, formatSelectScreen } = await import("../src/adventure/ui/titleScreens.js");
   try {
     const app = { save: null, screen: { name: "leagueSelect", playerName: "TEST", menuIndex: 4 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
     leagueSelectScreen.key(app, "a"); // pick FICTIONAL PLAYERS, last on the list
@@ -443,9 +443,26 @@ test("the opening menus offer budget and uncapped rules", async () => {
     assert.ok(html.includes("BUDGET LEAGUE") && html.includes("UNCAPPED"), "both rule sets are offered");
     modeSelectScreen.key(app, "down");
     modeSelectScreen.key(app, "a");
-    assert.equal(app.screen.name, "starterReveal", "picking rules opens the starter pack");
-    assert.equal(app.save.mode, "uncapped", "the choice lands on the save");
+    assert.equal(app.screen.name, "formatSelect", "picking rules leads to the roster format");
+    formatSelectScreen.mounted(app);
+    assert.equal(app.screen.fullAvailable, true, "the fictional league can stock twenty men");
+    const formatHtml = formatSelectScreen.render(app);
+    assert.ok(formatHtml.includes("CLASSIC") && formatHtml.includes("FULL ROSTER"), "both formats are offered");
+    formatSelectScreen.key(app, "a"); // CLASSIC, first on the list
+    assert.equal(app.screen.name, "starterReveal", "picking a format opens the starter pack");
+    assert.equal(app.save.mode, "uncapped", "the rules choice lands on the save");
+    assert.equal(app.save.rosterFormat, "classic", "so does the format");
     assert.equal(pointCap(app.save), Infinity);
+    assert.equal(app.save.roster.cardIds.length, 13, "a classic pack deals thirteen");
+
+    // The full format deals a twenty-man pack and prices its bench.
+    const fullApp = { save: null, screen: { name: "formatSelect", playerName: "FULL", universe: "fictional", mode: "budget", menuIndex: 0 }, go(name, data = {}) { this.screen = { name, ...data }; }, rerender() {} };
+    formatSelectScreen.mounted(fullApp);
+    formatSelectScreen.key(fullApp, "down");
+    formatSelectScreen.key(fullApp, "a");
+    assert.equal(fullApp.screen.name, "starterReveal");
+    assert.equal(fullApp.save.rosterFormat, "full", "the format lands on the save");
+    assert.equal(fullApp.save.roster.cardIds.length, 20, "a full pack deals twenty");
   } finally {
     setUniverseSeed("test-seed");
   }
@@ -2202,6 +2219,28 @@ test("every run reaches the board, in the inning it was scored", async () => {
   assert.ok(state.lineScore.home.length <= state.inning);
 });
 
+// The bar counted the day, the purse and the points, and never once said how the
+// club was actually doing. A record is the first thing anybody asks.
+test("the map's top bar carries the club's record", async () => {
+  const { mapScreen } = await import("../src/adventure/ui/mapScreen.js");
+  const save = testSave();
+  const game = (mine, theirs, extra = {}) => ({
+    day: 1, opponent: "JOJO", innings: 9, playerSide: "away",
+    won: mine > theirs, score: { away: mine, home: theirs },
+    boxScore: { away: { team: "ME", hitters: [], pitchers: [] }, home: { team: "JOJO", hitters: [], pitchers: [] } },
+    ...extra
+  });
+  save.almanac = [game(5, 1), game(2, 8), game(4, 3), game(0, 6), game(9, 2)];
+
+  const app = { save, screen: { name: "map" }, go() {}, rerender() {} };
+  assert.match(mapScreen.render(app), /3-2/, "three won, two lost, on the bar with the day");
+
+  // A grind against a trainer already beaten is a day you played, not a game on
+  // the season — the same line the stats screen draws (see almanacGames).
+  save.almanac.push(game(20, 0, { replay: true }));
+  assert.match(mapScreen.render(app), /3-2/, "a replay does not pad the record");
+});
+
 test("the walk-on survives the render that lands on top of it", async () => {
   const { mapScreen, trainerIntroScreen } = await import("../src/adventure/ui/mapScreen.js");
   const save = testSave();
@@ -2917,6 +2956,38 @@ test("the finished game's log carries the win-probability line, dotted at the sw
   // A game with nothing to plot draws nothing rather than a degenerate line.
   assert.equal(winProbChartHtml([events[0]], "home", 0), "", "one play is not a chart");
   assert.equal(winProbChartHtml([], "home", 0), "");
+});
+
+// Four hits off an average of 17 is a day the dice had; the same four off a 9 is a
+// day the man had. The box score could not tell you which until it kept the dice.
+test("the box score averages each man's own die", async () => {
+  const { gameStatsScreen } = await import("../src/adventure/ui/statsScreens.js");
+  const boxScore = {
+    away: {
+      team: "ME",
+      hitters: [{ id: "h1", name: "HOT HAND", pa: 4, ab: 4, h: 4, wpa: 0.3, rolls: 4, rollTotal: 68 }],
+      pitchers: [{ id: "p1", name: "COLD ARM", bf: 20, outs: 18, rolls: 20, rollTotal: 130 }]
+    },
+    home: {
+      team: "JOJO",
+      // A game played before the box score kept dice: nothing to average.
+      hitters: [{ id: "h2", name: "OLD LINE", pa: 3, ab: 3, h: 1 }],
+      pitchers: [{ id: "p2", name: "OLD ARM", bf: 12, outs: 9 }]
+    }
+  };
+  const app = {
+    save: testSave(),
+    screen: {
+      name: "gameStats", view: "box", events: [], boxScore, stars: [], feats: [],
+      playerSide: "away", score: { away: 4, home: 1 }, trainerId: "scout-jojo", index: 0
+    }
+  };
+
+  const html = gameStatsScreen.render(app);
+  assert.match(html, /ROLL/, "the column is on the board");
+  assert.match(html, /17\.0/, "68 over four swings is a seventeen — that was the dice");
+  assert.match(html, /6\.5/, "and the arm was throwing sixes all afternoon");
+  assert.match(html, /gq-box-nil/, "a line with no dice behind it prints a dash, not a nought");
 });
 
 test("the game log shows the dice and the running win probability", async () => {
@@ -4490,6 +4561,51 @@ test("the record book has two pages, and left/right turns it", async () => {
   assert.ok(recordsScreen.render(app).includes("MANAGER RECORDS"), "and left turns back");
 });
 
+// A record is a number, a name, and a DAY. Two lines with the same number read
+// exactly alike without the day, and the older of them is the one that has been
+// standing there all season.
+test("every line of the board says when the mark was set", async () => {
+  const { RECORDS, leaderboard, updatePersonalRecords, loadPersonalRecords } = await import("../src/adventure/records.js");
+  const { recordsScreen } = await import("../src/adventure/ui/recordsScreen.js");
+  localStorage.removeItem("showdown-quest-records-local");
+  const homers = RECORDS.find((row) => row.key === "player-homers");
+  const stamp = (at) => new Date(at)
+    .toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    .toUpperCase();
+
+  const save = sluggerSave();
+  const before = Date.now();
+  updatePersonalRecords(save);
+  const mark = loadPersonalRecords()["player-homers"];
+  assert.ok(mark.at >= before && mark.at <= Date.now(), "your book stamps a best with the day you set it");
+
+  // The league's line keeps the league's day, and yours keeps your own.
+  const april = Date.UTC(2026, 3, 2);
+  const board = leaderboard(homers, {
+    "player-homers": [{ value: 40, name: "ANA", player: "PETRA", saveSeed: "sq-a", at: april }]
+  }, save);
+  assert.equal(board.top[0].at, april, "a mark set in April is a mark set in April");
+  assert.equal(board.top[1].at, mark.at, "and yours carries the day you set yours");
+
+  // A line the book has no day for is left alone rather than given a made-up one.
+  const undated = leaderboard(homers, {
+    "player-homers": [{ value: 40, name: "ANA", player: "PETRA", saveSeed: "sq-a" }]
+  }, save);
+  assert.equal(undated.top[0].at, undefined, "an old mark filed before the book kept dates has no day, and is not invented one");
+
+  // And the screen prints it beside the man.
+  const app = { save, screen: { name: "records", index: 0, synced: true }, go() {}, rerender() {} };
+  recordsScreen.key(app, "right");
+  // Down to MOST HOMERS, CAREER — the record the book above is about.
+  for (let step = 0; step < 5; step += 1) recordsScreen.key(app, "down");
+  const players = recordsScreen.render(app);
+  assert.ok(players.includes("MOST HOMERS, CAREER"), "the board on screen is the one we set");
+  assert.ok(players.includes("MAYA"), "the man who did it");
+  assert.ok(players.includes(stamp(mark.at)), "and the day he did it");
+
+  localStorage.removeItem("showdown-quest-records-local");
+});
+
 // Two afternoons, written down the way the almanac writes them. The first is a
 // comeback: JOJO is up 4-0 before ME scores at all, and ME wins it 5-4 with a
 // four-run eighth. PIP throws a nine-inning no-hitter in the second, which is won
@@ -4874,4 +4990,210 @@ test("an opponent's book folds counts and reckons the rates fresh", async () => 
   assert.equal(foe.losses, 1);
   assert.equal(foe.runsFor, 6);
   assert.equal(foe.runsAgainst, 6);
+});
+
+// ---- The full-roster format --------------------------------------------------
+
+async function fullTestSave(seed = "full-test-seed") {
+  setUniverseSeed(seed, "fictional");
+  const save = createSave({ name: "FULL", saveSeed: seed, rosterFormat: "full" });
+  const roster = starterPack(save.saveSeed, "full");
+  for (const card of roster) addCardToCollection(save, card.id);
+  setRoster(save, roster.map((card) => card.id));
+  return save;
+}
+
+test("the full-roster cap prices the classic universe at the real game's 5000", async () => {
+  const { budgetCap } = await import("../src/adventure/packs.js");
+  try {
+    setUniverseSeed("full-cap-probe", "classic");
+    assert.equal(budgetCap("full"), 5000, "authentic cards, authentic cap");
+    assert.equal(budgetCap(), 3200, "and the classic 13-man cap is untouched");
+    setUniverseSeed("full-cap-probe", "fictional");
+    const fictional = budgetCap("full");
+    assert.ok(fictional > budgetCap() && fictional < 5000,
+      `the fictional league scales off its own pool (${fictional})`);
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("the full starter pack deals a legal twenty-man roster", async () => {
+  const { duplicateEraPeople } = await import("../src/rules/draft.js");
+  const { discountedRosterCost } = await import("../src/adventure/rosterFormats.js");
+  const { budgetCap } = await import("../src/adventure/packs.js");
+  try {
+    setUniverseSeed("full-pack-probe", "fictional");
+    const pack = starterPack("full-pack-probe", "full");
+    assert.equal(pack.length, 20, "twenty cards");
+    assert.equal(pack.filter((card) => card.rarity === "rare").length, 3, "three rares");
+    assert.equal(pack.filter((card) => card.role === "SP").length, 4, "a four-man rotation");
+    assert.equal(duplicateEraPeople(pack).length, 0, "era-clean");
+    assert.deepEqual(
+      validateRoster({ roster: pack, lineupAssignments: {}, rosterFormat: "full", rosterSize: 20, startingPitchers: 4, bullpenSlots: 0 }),
+      [],
+      "a legal roster out of the wrapper"
+    );
+    assert.ok(discountedRosterCost(pack, {}, "full") <= budgetCap("full"), "under the cap at bench prices");
+    assert.deepEqual(
+      starterPack("full-pack-probe", "full").map((card) => card.id),
+      pack.map((card) => card.id),
+      "the same seed deals the same pack"
+    );
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("a full-format trainer benches the men his discount bought", async () => {
+  const { ROSTER_BENCH_KEY } = await import("../src/rules/draft.js");
+  const { npcBudget } = await import("../src/adventure/region.js");
+  const save = await fullTestSave("npc-full-seed");
+  const boss = trainerById("post-worldseries");
+  const npc = buildNpcTeam(boss, save);
+  assert.equal(npc.roster.length, 20, "a twenty-man binder");
+  assert.equal(npc.roster.filter((card) => card.role === "SP").length, 4, "four starters");
+  assert.deepEqual(validateRoster(npc), [], "and it is legal");
+  const benched = npc.lineupAssignments[ROSTER_BENCH_KEY] ?? [];
+  assert.ok(benched.length >= 1 && benched.length <= 4, "the bench-slot buys sit");
+  assert.ok(npc.points <= npcBudget(save, boss), "the discounted spend stays inside the budget");
+  const team = buildTeam(npc, { starterIndex: 0 });
+  assert.equal(team.lineup.length, 9, "nine take the field");
+  assert.deepEqual(
+    team.bench.map((card) => card.id).sort(),
+    [...benched].sort(),
+    "the game's bench is exactly the men bought for it"
+  );
+  assert.deepEqual(
+    buildNpcTeam(boss, save).roster.map((card) => card.id),
+    npc.roster.map((card) => card.id),
+    "deterministic, same as every trainer"
+  );
+});
+
+test("bench bats count a fifth against the cap, until they start", async () => {
+  const { benchPrice, discountedRosterCost } = await import("../src/adventure/rosterFormats.js");
+  const { positionSwitchOptions, switchPositionTo } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = await fullTestSave("bench-price-seed");
+  const roster = rosterCards(save);
+  const manager = managerFor(save);
+  const seated = new Set(buildTeam(manager).lineup.map((card) => card.id));
+  const benchBats = roster.filter((card) => card.kind === "hitter" && !seated.has(card.id));
+  assert.ok(benchBats.length >= 1, "the pack dealt a bench");
+  const expected = roster.reduce((sum, card) =>
+    sum + (card.kind === "hitter" && !seated.has(card.id) ? benchPrice(card.points) : card.points), 0);
+  assert.equal(rosterPoints(save), expected, "the cap sees bench bats at a fifth");
+  assert.equal(discountedRosterCost(roster, save.roster.lineupAssignments, "full"), rosterPoints(save),
+    "one arithmetic everywhere");
+  // Start a bench bat: he seats, someone else takes the bench, and the bill
+  // re-itemizes off the NEW seating — his full sticker on, the displaced
+  // man's fifth off.
+  const starter = benchBats[0];
+  const options = positionSwitchOptions(save, starter);
+  assert.ok(options.length, "a bench bat can take a starting job");
+  assert.ok(switchPositionTo(save, starter, options[0].label));
+  const seatedAfter = new Set(buildTeam(managerFor(save)).lineup.map((card) => card.id));
+  assert.ok(seatedAfter.has(starter.id), "the bench bat starts");
+  const expectedAfter = roster.reduce((sum, card) =>
+    sum + (card.kind === "hitter" && !seatedAfter.has(card.id) ? benchPrice(card.points) : card.points), 0);
+  assert.equal(rosterPoints(save), expectedAfter, "the bill re-itemizes off the new seating");
+});
+
+test("a battle with substitutions rebuilds from its recording", async () => {
+  const { npcDugoutVisit, actPinchHit, actDefensiveSub } = await import("../src/rules/battle/controller.js");
+  const { pinchSubKeepsDefense, defensiveSubFits } = await import("../src/rules/game.js");
+  const save = await fullTestSave("sub-replay-seed");
+  const player = managerFor(save);
+  const trainer = trainerById("gym-garrick");
+  const npc = buildNpcTeam(trainer, save);
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "sub-replay", starterIndex: 1, npcStarterIndex: 3 });
+  let phSpent = false;
+  let dsSpent = false;
+  for (let i = 0; i < 300; i += 1) {
+    const phase = battlePhase(battle);
+    if (phase.type === "over") break;
+    if (phase.type === "advance-decision") actAdvance(battle, 0);
+    else if (phase.type === "player-batting") {
+      // Substitutions must leave a coverable defense, so the manager picks a
+      // legal man — exactly what the bench door's greying enforces.
+      const legal = phase.subEligibility?.allowed
+        ? phase.bench.find((card) => pinchSubKeepsDefense(battle.state, battle.playerSide, card.id, phase.batter.id))
+        : null;
+      if (!phSpent && legal) {
+        actPinchHit(battle, legal.id);
+        phSpent = true;
+      } else {
+        actSwing(battle);
+      }
+    } else {
+      let move = null;
+      if (!dsSpent && phase.subEligibility?.allowed) {
+        for (const { player: man } of phase.defenseTargets) {
+          if ((man.assignedPosition ?? man.position) === "DH") continue;
+          const card = phase.bench.find((c) => defensiveSubFits(battle.state, battle.playerSide, c.id, man.id));
+          if (card) { move = { card, target: man }; break; }
+        }
+      }
+      if (move) {
+        actDefensiveSub(battle, move.card.id, move.target.id);
+        dsSpent = true;
+      } else {
+        actPitch(battle);
+      }
+    }
+    npcDugoutVisit(battle);
+  }
+  assert.ok(phSpent, "a pinch-hitter went in");
+  assert.ok(dsSpent, "and a glove");
+  const kinds = new Set(battle.actions.map((action) => action.type));
+  assert.ok(kinds.has("ph") && kinds.has("ds"), "both decisions are in the recording");
+  const subTypes = ["pinch-hitter", "pinch-runner", "defensive-sub"];
+  const subEvents = battle.events.filter((event) => subTypes.includes(event.type));
+  assert.ok(subEvents.length >= 2, "the substitutions are events");
+  assert.ok(subEvents.every((event) => event.inning >= 7), "and none entered before the seventh");
+
+  const stashed = JSON.parse(JSON.stringify(serializeBattle(battle)));
+  assert.equal(stashed.npcStarterIndex, 3, "the NPC's drawn starter rides the stash");
+  const resumed = restoreBattle({ playerManager: player, npcManager: npc, trainer, ...stashed });
+  assert.ok(resumed, "the recording replays");
+  assert.deepEqual(resumed.state.score, battle.state.score, "same score");
+  assert.equal(resumed.events.length, battle.events.length, "same book");
+  assert.deepEqual(
+    resumed.state.away.lineup.map((card) => card.id),
+    battle.state.away.lineup.map((card) => card.id),
+    "the same nine stand on the field, subs included"
+  );
+  assert.deepEqual(resumed.state.removed, battle.state.removed, "the same men are out of the game");
+});
+
+test("a full-format sim series draws starters and manages both benches", async () => {
+  const save = await fullTestSave("sim-full-seed");
+  const boss = trainerById("post-worldseries");
+  const run = () => runSimSeries({
+    playerManager: managerFor(save),
+    npcManager: buildNpcTeam(boss, save),
+    bestOf: 7,
+    seed: "sim-full-series"
+  });
+  const series = run();
+  const again = run();
+  assert.deepEqual(
+    series.games.map((game) => [game.playerRuns, game.npcRuns]),
+    again.games.map((game) => [game.playerRuns, game.npcRuns]),
+    "the series is a pure function of its seed"
+  );
+  const subTypes = ["pinch-hitter", "pinch-runner", "defensive-sub"];
+  const subEvents = series.games.flatMap((game) => game.events.filter((event) => subTypes.includes(event.type)));
+  assert.ok(subEvents.every((event) => event.inning >= 7), "no bench opens before the seventh");
+  // Starters are drawn from the four, never more than ceil(7/4)=2 starts each.
+  for (const who of ["player", "npc"]) {
+    const starters = series.games.map((game) => {
+      const box = who === "player"
+        ? (game.playerIsAway ? game.boxScore.away : game.boxScore.home)
+        : (game.playerIsAway ? game.boxScore.home : game.boxScore.away);
+      return box.pitchers[0].id;
+    });
+    const counts = starters.reduce((tally, id) => (tally[id] = (tally[id] ?? 0) + 1, tally), {});
+    assert.ok(Math.max(...Object.values(counts)) <= 2, `${who}: no arm starts three games of a best-of-7`);
+  }
 });

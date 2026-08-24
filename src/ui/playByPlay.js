@@ -72,6 +72,20 @@ export function describeEvent(event, playerSide = "away") {
   if (event.type === "pitching-change") {
     return [`${playName(event.team)} goes to the pen: ${playName(event.pitcher)} takes the hill.`];
   }
+  if (event.type === "pinch-hitter") {
+    return [`${playName(event.team)} goes to the bench: ${playName(event.in.name)} hits for ${playName(event.out.name)}.`];
+  }
+  if (event.type === "pinch-runner") {
+    return [`${playName(event.in.name)} comes in to run for ${playName(event.out.name)} at ${event.base ?? "base"}.`];
+  }
+  if (event.type === "defensive-sub") {
+    return [event.forced
+      ? `${playName(event.team)} must cover the field: ${playName(event.in.name)} comes on at ${event.slot ?? "the field"} for ${playName(event.out.name)}.`
+      : `${playName(event.team)} tightens the defense: ${playName(event.in.name)} takes over at ${event.slot ?? "the field"} for ${playName(event.out.name)}.`];
+  }
+  if (event.type === "forfeit") {
+    return [`${playName(event.team)} cannot put a legal defense on the field. FORFEIT — the game is over.`];
+  }
   if (event.type === "intentional-walk") {
     const lines = [`${playName(event.batter)} is waved down to first. Intentional walk.`];
     if (event.runs > 0) lines.push(`That forces in a run! ${scoreCall(event, playerSide)}`);
@@ -127,6 +141,13 @@ export function describeEvent(event, playerSide = "away") {
     lines.push(`${playName(event.batter)} ${RESULT_LINES[event.result] ?? event.result}`);
   }
   if (event.result === "1B+" && event.basesAfter?.[1] === event.batter) {
+    lines.push(`${playName(event.batter)} alertly takes second, uncontested!`);
+  }
+  // The same trot, called one play late: when the send was the manager's to make,
+  // the 1B+ batter is still on first when the hit is announced, and second only
+  // comes open once the send is settled. He moves up on THIS play, so he is
+  // called on this one.
+  if (event.type === "advance" && event.basesBefore?.[0] === event.batter && event.basesAfter?.[1] === event.batter) {
     lines.push(`${playName(event.batter)} alertly takes second, uncontested!`);
   }
   const doublePlay = event.playDetails?.doublePlayAttempt;

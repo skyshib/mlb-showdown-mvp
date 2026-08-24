@@ -3,12 +3,28 @@ import { adventurePool } from "./packs.js?v=20260716-records";
 import { npcBudget, trainerById } from "./region.js?v=20260716-records";
 import { createRng } from "../rules/rng.js?v=20260716-records";
 import { personConflict, playsPosition } from "../rules/cards.js?v=20260716-records";
+import { ROSTER_BENCH_KEY } from "../rules/draft.js?v=20260716-records";
 import { claimedFrom } from "./state.js?v=20260716-records";
+import { rosterFormat, formatManagerFields, benchPrice } from "./rosterFormats.js?v=20260716-records";
 
-// One roster slot per required lineup spot plus the four-man staff. "HITTER"
-// is the DH: any bat qualifies.
+// One roster slot per required lineup spot plus the staff. "HITTER" is the
+// DH: any bat qualifies. "BENCH" is a full-format reserve bat — also any
+// hitter, but paid at the bench discount and drafted last, after the men who
+// actually take the field.
 const HITTER_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "LF/RF", "CF", "HITTER"];
 const PITCHER_SLOTS = ["SP", "SP", "RP", "RP"];
+const FULL_PITCHER_SLOTS = ["SP", "SP", "SP", "SP", "RP", "RP", "RP"];
+const FULL_BENCH_SLOTS = ["BENCH", "BENCH", "BENCH", "BENCH"];
+
+// What a slot pays for its card: bench slots buy at the discount, the same
+// arithmetic the player's own cap check runs (rosterFormats.benchPrice).
+function slotCost(slot, card) {
+  return slot === "BENCH" ? benchPrice(card.points) : card.points;
+}
+
+function rosterCost(roster, slots) {
+  return roster.reduce((total, card, index) => total + slotCost(slots[index], card), 0);
+}
 
 // Archetype scoring biases which card wins a slot; the budget keeps the roster
 // legal and affordable either way. Scoring reads the PRINTED price the trainer
@@ -32,7 +48,7 @@ function chartSlots(card, result) {
 }
 
 function slotMatches(slot, card) {
-  if (slot === "HITTER") return card.kind === "hitter";
+  if (slot === "HITTER" || slot === "BENCH") return card.kind === "hitter";
   if (slot === "SP" || slot === "RP") return card.role === slot;
   return card.kind === "hitter" && playsPosition(card, slot);
 }
@@ -41,7 +57,7 @@ function slotMatches(slot, card) {
 // without one the printed budget stands. Team identity (seeded slot order,
 // weights, picks) only shifts when the budget itself does.
 export function buildNpcTeam(trainer, save = null) {
-  const { roster, spent } = assembleRosterCached(trainer, save);
+  const { roster, slots, spent } = assembleRosterCached(trainer, save);
 
   // Present (and bat) the squad best-first: hitters by printed points, then
   // pitchers by printed points, so the top starter also opens game 1.
@@ -49,13 +65,24 @@ export function buildNpcTeam(trainer, save = null) {
   const hitters = roster.filter((card) => card.kind === "hitter").sort(byPoints);
   const pitchers = roster.filter((card) => card.kind === "pitcher").sort(byPoints);
 
+  // A man BOUGHT for a bench slot SITS on the bench — that is the seat his
+  // discounted price paid for. Without this pin the lineup would seat the
+  // roster best-first, and a star bought at a fifth of sticker would start
+  // while a full-price scrub sat: the budget and the team would disagree.
+  const benchIds = roster.filter((card, index) => slots[index] === "BENCH").map((card) => card.id);
+  const lineupAssignments = benchIds.length ? { [ROSTER_BENCH_KEY]: benchIds } : {};
+  const benched = new Set(benchIds);
+
   return {
     id: trainer.id,
     name: trainer.name,
     roster: [...hitters, ...pitchers],
-    lineupAssignments: {},
-    battingOrder: hitters.map((card) => card.id),
-    points: spent
+    lineupAssignments,
+    battingOrder: hitters.filter((card) => !benched.has(card.id)).map((card) => card.id),
+    points: spent,
+    // Full-format saves hand buildTeam the whole shape: the four-man
+    // rotation, however many relievers the flex bought, and the bench.
+    ...formatManagerFields(save?.rosterFormat, [...hitters, ...pitchers])
   };
 }
 
@@ -96,7 +123,7 @@ function assembleRosterCached(trainer, save) {
     rosterCache = new Map();
     rosterCachePool = pool;
   }
-  const key = `${trainer.id}:${teamSalt(save)}${npcBudget(save, trainer)}:${claimKey(save, trainer)}`;
+  const key = `${trainer.id}:${rosterFormat(save).key}:${teamSalt(save)}${npcBudget(save, trainer)}:${claimKey(save, trainer)}`;
   let hit = rosterCache.get(key);
   if (!hit) {
     hit = assembleRoster(trainer, save);
@@ -119,7 +146,7 @@ function assembleRoster(trainer, save) {
   // One seeded stream feeds the slot order, the baseline fill, and every upgrade
   // draw — so a save always rebuilds the same rival, round after round.
   const rng = createRng(`npc-team:${teamSalt(save)}${trainer.teamSeed}`);
-  const slots = heirloom ? heirloom.slots : draftSlots(trainer, rng);
+  const slots = heirloom ? heirloom.slots : draftSlots(trainer, rng, rosterFormat(save).key);
   // Bucket the pool by slot ONCE, in pool order. The minimum fill, the climb,
   // and the percentile ranking all read these buckets instead of rescanning the
   // whole pool per slot per pass. Pool order is kept exactly so the seeded draws
@@ -127,16 +154,22 @@ function assembleRoster(trainer, save) {
   // a behavior change.
   const candidates = candidatesForSlots(pool, slots);
   // A fresh trainer opens from a cheap legal roster; an heir from his
-  // inherited binder. The same climb spends the budget up from whichever floor.
-  const roster = heirloom ? [...heirloom.roster] : minimumRoster(candidates, slots, trainer, rng, pointBudget);
+  // inherited binder. The same climb spends the budget up from whichever
+  // floor. The minimum fill may prune a bench slot a thin pool cannot stock,
+  // so the slot list the rest of the assembly walks is the one it returns.
+  const floor = heirloom
+    ? { roster: [...heirloom.roster], slots: heirloom.slots }
+    : minimumRoster(candidates, slots, trainer, rng, pointBudget);
+  const roster = floor.roster;
+  const filledSlots = floor.slots;
   const used = new Set(roster.map((card) => card.id));
-  climb({ candidates, pointBudget, score, slots, roster, used, rng });
+  climb({ candidates, pointBudget, score, slots: filledSlots, roster, used, rng });
   // The winner's pick is paid out of THIS roster, so it is settled last: the
   // trainer shops his whole budget, then hands over the men you took off him.
-  replaceClaimedCards({ trainer, save, candidates, slots, roster, used });
-  const spent = roster.reduce((total, card) => total + card.points, 0);
+  replaceClaimedCards({ trainer, save, candidates, slots: filledSlots, roster, used });
+  const spent = rosterCost(roster, filledSlots);
 
-  return { roster, slots, spent };
+  return { roster, slots: filledSlots, spent };
 }
 
 // A card claimed off a beaten trainer is GONE from his binder: he turns up to
@@ -197,10 +230,15 @@ function candidatesForSlots(pool, slots) {
 // which position lands the star is part of the trainer's identity, not always
 // the catcher. Ace staffs still shop for pitching first so the budget lands on
 // the mound.
-function draftSlots(trainer, rng) {
-  return trainer.archetype === "ace"
-    ? [...shuffled(PITCHER_SLOTS, rng), ...shuffled(HITTER_SLOTS, rng)]
-    : shuffled([...HITTER_SLOTS, ...PITCHER_SLOTS], rng);
+function draftSlots(trainer, rng, format = "classic") {
+  const pitcherSlots = format === "full" ? FULL_PITCHER_SLOTS : PITCHER_SLOTS;
+  const benchSlots = format === "full" ? FULL_BENCH_SLOTS : [];
+  // Bench slots always draft last: the reserve is bought out of what is left
+  // after the men who take the field, never instead of them.
+  const active = trainer.archetype === "ace"
+    ? [...shuffled(pitcherSlots, rng), ...shuffled(HITTER_SLOTS, rng)]
+    : shuffled([...HITTER_SLOTS, ...pitcherSlots], rng);
+  return [...active, ...benchSlots];
 }
 
 // How wide the bargain bin is: the fill draws seeded-randomly from a slot's
@@ -218,6 +256,7 @@ const CHEAP_BAND = 8;
 // spends UP from it, so an over-budget floor is repaired back down below.
 function minimumRoster(candidates, slots, trainer, rng, pointBudget) {
   const roster = [];
+  const filled = [];
   const used = new Set();
   for (const slot of slots) {
     // The cheapest legal fits (points ascending, name breaking ties), then a
@@ -225,13 +264,20 @@ function minimumRoster(candidates, slots, trainer, rng, pointBudget) {
     const eligible = candidates.get(slot)
       .filter((card) => !used.has(card.id) && !personConflict(roster, card))
       .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name));
-    if (!eligible.length) throw new Error(`NPC team for ${trainer.id} cannot fill ${slot}`);
+    if (!eligible.length) {
+      // A bench seat a thin pool cannot stock is left empty — a short reserve
+      // beats no team at all. A slot the team takes the FIELD with still throws:
+      // that pool cannot host this format, and the caller must know.
+      if (slot === "BENCH") continue;
+      throw new Error(`NPC team for ${trainer.id} cannot fill ${slot}`);
+    }
     const pick = rng.pick(eligible.slice(0, CHEAP_BAND));
     used.add(pick.id);
     roster.push(pick);
+    filled.push(slot);
   }
-  repairFloorToBudget(roster, used, candidates, slots, pointBudget);
-  return roster;
+  repairFloorToBudget(roster, used, candidates, filled, pointBudget);
+  return { roster, slots: filled };
 }
 
 // The diversified floor can cost more than the strict-cheapest one it replaced,
@@ -242,13 +288,13 @@ function minimumRoster(candidates, slots, trainer, rng, pointBudget) {
 // which is exactly the affordable roster the old code always dealt.
 function repairFloorToBudget(roster, used, candidates, slots, pointBudget) {
   if (!Number.isFinite(pointBudget)) return; // uncapped: no floor to enforce
-  const cost = () => roster.reduce((sum, card) => sum + card.points, 0);
+  const cost = () => rosterCost(roster, slots);
   while (cost() > pointBudget) {
     let best = null;
     for (let index = 0; index < roster.length; index += 1) {
       const cheaper = cheapestFit(candidates, slots, roster, used, index);
       if (!cheaper || cheaper.points >= roster[index].points) continue;
-      const drop = roster[index].points - cheaper.points;
+      const drop = slotCost(slots[index], roster[index]) - slotCost(slots[index], cheaper);
       if (!best || drop > best.drop) best = { index, cheaper, drop };
     }
     if (!best) break; // already at the cheapest legal floor
@@ -281,7 +327,7 @@ function cheapestFit(candidates, slots, roster, used, index) {
 // power squad's bats and an ace's arm. A pick that would breach the budget is
 // rejected; REJECT_LIMIT rejections in a row end the climb.
 function climb({ candidates, pointBudget, score, slots, roster, used, rng }) {
-  let spent = roster.reduce((total, card) => total + card.points, 0);
+  let spent = rosterCost(roster, slots);
   const percentileOf = positionalPercentile(candidates, slots);
   let rejects = 0;
   while (rejects < REJECT_LIMIT) {
@@ -295,7 +341,7 @@ function climb({ candidates, pointBudget, score, slots, roster, used, rng }) {
     if (!openSlots.length) break;
     const slotPick = weightedPick(openSlots, rng);
     const cardPick = weightedPick(slotPick.upgrades, rng);
-    const delta = cardPick.card.points - roster[slotPick.index].points;
+    const delta = slotCost(slots[slotPick.index], cardPick.card) - slotCost(slots[slotPick.index], roster[slotPick.index]);
     if (spent + delta > pointBudget) {
       rejects += 1;
       continue;

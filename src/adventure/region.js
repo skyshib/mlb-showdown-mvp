@@ -1,5 +1,6 @@
 import { timesBeaten } from "./state.js?v=20260716-records";
 import { poolCeiling, exactCap, LADDER_REFERENCE, REFERENCE_CAP } from "./packs.js?v=20260716-records";
+import { rosterFormat } from "./rosterFormats.js?v=20260716-records";
 
 // The Cascade League: one town so far, with routes climbing past it. Trainers
 // are pure data — teams build deterministically from teamSeed + pointBudget.
@@ -432,22 +433,26 @@ export const REMATCH_RATE = 0.1;
 // anchored at the first scout's rung, capped at the pool ceiling scaled to
 // the trainer's rung so mid-ladder bosses don't max out small universes.
 export function npcBudget(save, trainer) {
-  const printed = laddered(trainer.pointBudget);
+  // The whole ladder is denominated in the save's roster format: a full-
+  // roster save has a higher cap and a bench-weighted ceiling, so every rung
+  // — and the uncapped curve — is priced in that same currency.
+  const format = rosterFormat(save).key;
+  const printed = laddered(trainer.pointBudget, format);
   if (save?.mode !== "uncapped") return printed;
-  const scale = poolCeiling() / LADDER_REFERENCE;
+  const scale = poolCeiling(format) / LADDER_REFERENCE;
   const curve = Math.round((2500 * scale * Math.pow(trainer.pointBudget / 2500, 1.5)) / 50) * 50;
   const maxPrinted = Math.max(...TRAINERS.map((t) => t.pointBudget));
-  const rung = Math.round((poolCeiling() * trainer.pointBudget / maxPrinted) / 50) * 50;
+  const rung = Math.round((poolCeiling(format) * trainer.pointBudget / maxPrinted) / 50) * 50;
   return Math.max(printed, Math.min(curve, rung));
 }
 
 // One printed rung, placed in this pool. Continuous at REFERENCE_CAP (both
 // arms hand back the cap itself) and monotone in the rung, so the ladder
 // climbs in the same order it always did.
-function laddered(rung) {
-  const cap = exactCap();
+function laddered(rung, format = "classic") {
+  const cap = exactCap(format);
   if (rung <= REFERENCE_CAP) return Math.round((cap * rung / REFERENCE_CAP) / 50) * 50;
-  const headroom = Math.max(0, poolCeiling() - cap);
+  const headroom = Math.max(0, poolCeiling(format) - cap);
   const share = (rung - REFERENCE_CAP) / (LADDER_REFERENCE - REFERENCE_CAP);
   return Math.round((cap + share * headroom) / 50) * 50;
 }

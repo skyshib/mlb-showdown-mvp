@@ -18,8 +18,10 @@ import { longestHitStreak, updatePersonalRecords, setsOpenableGameRecord } from 
 import { uploadGame } from "../gameArchive.js?v=20260716-records";
 import { compactGame } from "../gameLog.js?v=20260716-records";
 import { cardById } from "../packs.js?v=20260716-records";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver } from "../../rules/game.js?v=20260716-records";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver, pinchSubKeepsDefense, defensiveSubFits, walkoffSpot } from "../../rules/game.js?v=20260716-records";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260716-records";
+import { rosterFormat, pickRandomStarter } from "../rosterFormats.js?v=20260716-records";
+import { createRng } from "../../rules/rng.js?v=20260716-records";
 import { gameFeats } from "../feats.js?v=20260716-records";
 import { buildNpcTeam } from "../npcTeams.js?v=20260716-records";
 import { positionsOverlap } from "../../rules/cards.js?v=20260716-records";
@@ -58,11 +60,14 @@ import {
   actIntentionalWalk,
   actPitch,
   actChangePitcher,
+  actPinchHit,
+  actPinchRun,
+  actDefensiveSub,
   fastForward,
   runSimSeries,
   isDramaticMoment,
   DRAMA_LEVERAGE,
-  npcMoundVisit,
+  npcDugoutVisit,
   serializeBattle,
   restoreBattle
 } from "../../rules/battle/controller.js?v=20260716-records";
@@ -111,17 +116,51 @@ export function startTrainerBattle(app, trainer) {
   launchSeriesGame(app, trainer);
 }
 
+// Which rotation slot starts this game. Classic walks the rotation in order
+// — game N is slot N. Full-format saves DRAW each dugout's starter from the
+// four, seeded off the save so a resumed series re-draws identically, and
+// capped so no arm starts more than its ceil(bestOf/4) share. Every draw is
+// recorded in the series ledger the moment it is made: the pick for game N
+// is settled once, and coming back to the game finds it, never re-rolls it.
+function resolveSeriesStarters(save, trainer, series) {
+  if (rosterFormat(save).key !== "full") {
+    return { starterIndex: series.nextGame - 1, npcStarterIndex: null };
+  }
+  const picks = series.starterPicks ?? (series.starterPicks = { player: [], npc: [] });
+  const rotation = rosterFormat(save).startingPitchers;
+  const counts = (list) => list.reduce((tally, index) => {
+    tally[index] = (tally[index] ?? 0) + 1;
+    return tally;
+  }, {});
+  for (const [who, list] of [["you", picks.player], ["them", picks.npc]]) {
+    while (list.length < series.nextGame) {
+      list.push(pickRandomStarter({
+        rng: createRng(deriveSeed(save, "starter", trainer.id, `a${series.attempt}`, `g${list.length + 1}`, who)),
+        starterCount: rotation,
+        priorStartCounts: counts(list),
+        bestOf: series.bestOf
+      }));
+    }
+  }
+  return {
+    starterIndex: picks.player[series.nextGame - 1],
+    npcStarterIndex: picks.npc[series.nextGame - 1]
+  };
+}
+
 function launchSeriesGame(app, trainer) {
   const save = app.save;
   const series = save.activeSeries;
   // Series alternate ballparks: the player visits in odd games, hosts evens.
   const playerIsAway = series.bestOf <= 1 || series.nextGame % 2 === 1;
+  const { starterIndex, npcStarterIndex } = resolveSeriesStarters(save, trainer, series);
   const battle = createBattle({
     playerManager: managerFor(save),
     npcManager: buildNpcTeam(trainer, save),
     trainer,
     seed: deriveSeed(save, "battle", trainer.id, `a${series.attempt}`, `g${series.nextGame}`),
-    starterIndex: series.nextGame - 1,
+    starterIndex,
+    npcStarterIndex,
     playerIsAway
   });
   const lines = [
@@ -320,6 +359,8 @@ function battleMenuItems(app, phase) {
         run: (a) => resolveWithDrama(a, () => actSteal(a.screen.battle, option.fromIndex))
       });
     }
+    const bench = benchMenuItem(app, phase, "BENCH");
+    if (bench) items.push(bench);
     items.push(rostersItem(), gameLogItem(), fastForwardItem());
     return items;
   }
@@ -336,8 +377,172 @@ function battleMenuItems(app, phase) {
       a.screen.penIndex = 0;
     }
   });
+  const defense = benchMenuItem(app, phase, "DEFENSE");
+  if (defense) items.push(defense);
   items.push(rostersItem(), gameLogItem(), fastForwardItem());
   return items;
+}
+
+// The BENCH door (batting: pinch-hit, pinch-run) and the DEFENSE door
+// (fielding: a glove off the bench). Only full-roster dugouts have one at
+// all — a classic team shows no row. Before the seventh the row sits
+// disabled and says why, so the rule teaches itself.
+function benchMenuItem(app, phase, label) {
+  const battle = app.screen.battle;
+  const team = battle.state[battle.playerSide];
+  const hadBench = (team.bench?.length ?? 0) > 0 || (battle.state.removed?.[battle.playerSide]?.length ?? 0) > 0;
+  if (!hadBench) return null;
+  const eligibility = phase.subEligibility ?? { allowed: false, reason: "" };
+  return {
+    html: eligibility.allowed
+      ? `${label} <span class="gq-dim">${phase.bench.length} AVAILABLE</span>`
+      : `${label} <span class="gq-dim">${escapeHtml(eligibility.reason.toUpperCase())}</span>`,
+    disabled: !eligibility.allowed,
+    run: (a) => {
+      a.screen.mode = "bench";
+      a.screen.benchStage = "target";
+      a.screen.benchIndex = 0;
+      a.screen.benchTarget = null;
+    }
+  };
+}
+
+// What the sub would DO — the first of the bench door's two questions. The
+// second (which man does it) is benchManRows.
+function benchTargetRows(battle, phase) {
+  if (phase.type === "player-batting") {
+    const rows = [{
+      kind: "ph",
+      html: `PINCH HIT FOR ${escapeHtml(shortName(phase.batter.name))}`,
+      out: phase.batter
+    }];
+    for (const { base, runner } of phase.pinchRunBases ?? []) {
+      const lineupMan = battle.state[battle.playerSide].lineup.find((player) => player.id === runner.id);
+      // A runner whose lineup man can't be found (never happens in practice)
+      // gets no row rather than a broken swap.
+      if (!lineupMan) continue;
+      rows.push({
+        kind: "pr",
+        base,
+        html: `PINCH RUN FOR ${escapeHtml(shortName(runner.name))} <span class="gq-dim">AT ${["1B", "2B", "3B"][base]} &middot; SPD ${runner.speed}</span>`,
+        out: lineupMan
+      });
+    }
+    return rows;
+  }
+  return (phase.defenseTargets ?? []).map(({ player }) => ({
+    kind: "ds",
+    target: player.id,
+    html: `${escapeHtml(player.assignedPosition ?? player.position)} ${escapeHtml(shortName(player.name))} <span class="gq-dim">FLD ${(Number(player.fielding) || 0) >= 0 ? "+" : ""}${Number(player.fielding) || 0}</span>`,
+    out: player
+  }));
+}
+
+// The bench candidates for one chosen move, each judged for what he leaves
+// BEHIND him: a man whose entry would strand the defense is disabled — except
+// in the walk-off spot (home side, ninth or later), where he is offered under
+// a warning and a confirm step. Out-of-position is a forfeit, not a penalty,
+// so the door says so before the man is through it.
+function benchManRows(battle, phase, target) {
+  const state = battle.state;
+  const side = battle.playerSide;
+  return (phase.bench ?? []).map((card) => {
+    const stat = `OB${card.onBase} SPD${card.speed} FLD${(Number(card.fielding) || 0) >= 0 ? "+" : ""}${Number(card.fielding) || 0}`;
+    let risky = false;
+    let disabled = false;
+    let note = "";
+    if (target?.kind === "ds") {
+      disabled = !defensiveSubFits(state, side, card.id, target.out.id);
+      if (disabled) note = "CAN'T COVER THE FIELD";
+    } else if (target) {
+      const covered = pinchSubKeepsDefense(state, side, card.id, target.out.id);
+      if (!covered) {
+        if (walkoffSpot(state, side)) {
+          risky = true;
+          note = "&#9888; NO DEFENSE LEFT";
+        } else {
+          disabled = true;
+          note = "NO LEGAL DEFENSE";
+        }
+      }
+    }
+    return {
+      card,
+      risky,
+      disabled,
+      html: `${escapeHtml(shortName(card.name))} <span class="gq-dim">${stat}${note ? ` &middot; ${note}` : ""}</span>`
+    };
+  });
+}
+
+// The walk-off gamble spelled out before it is taken: win now, or forfeit
+// the moment this club must take the field again.
+function renderBenchConfirm(app, battle, trainer, target, card) {
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>&#9888; FORFEIT RISK</span><span>${halfLabel(battle.state)}</span></div>
+    <div class="gq-body"><div class="gq-columns gq-columns-pen">
+      <div class="gq-frame">
+        <h3>&#9888; NO DEFENSE BEHIND THIS</h3>
+        <p>If ${escapeHtml(shortName(card.name))} goes in for ${escapeHtml(shortName(target.out.name))}, this club can NO LONGER field a legal defense &mdash; not even off the bench.</p>
+        <p class="gq-mt">WIN IT RIGHT HERE and you never take the field again.</p>
+        <p class="gq-mt">If the inning ends without the win, <b>YOU FORFEIT THE GAME.</b></p>
+      </div>
+      <div class="gq-card-side">
+        <p class="gq-dim">COMING IN</p>
+        ${cardPanelHtml(card)}
+      </div>
+    </div></div>
+    <div class="gq-textbox"><p class="gq-blink">Z — SEND HIM UP ANYWAY &middot; X — THINK BETTER OF IT</p></div>
+  </div>`;
+}
+
+function runBenchSub(app, target, card) {
+  const battle = app.screen.battle;
+  app.screen.mode = "menu";
+  app.screen.menuIndex = 0;
+  if (target.kind === "ph") afterAction(app, actPinchHit(battle, card.id));
+  else if (target.kind === "pr") afterAction(app, actPinchRun(battle, card.id, target.base));
+  else afterAction(app, actDefensiveSub(battle, card.id, target.target));
+}
+
+// The bench door opens like the pen: the choices down the left, the two cards
+// — the man going in, the man coming out — side by side where their charts
+// can be read against each other.
+function renderBench(app, battle, trainer, phase) {
+  const stage = app.screen.benchStage ?? "target";
+  if (stage === "confirm" && app.screen.benchTarget && app.screen.benchChoice) {
+    return renderBenchConfirm(app, battle, trainer, app.screen.benchTarget, app.screen.benchChoice);
+  }
+  const targets = benchTargetRows(battle, phase);
+  const men = benchManRows(battle, phase, stage === "target" ? null : app.screen.benchTarget);
+  const rows = stage === "target" ? targets : men;
+  const index = clampIndex(app.screen.benchIndex ?? 0, rows.length + 1);
+  const target = stage === "target" ? targets[index] : app.screen.benchTarget;
+  const incoming = stage === "man" ? men[index]?.card ?? null : null;
+  const outgoing = target?.out ?? null;
+  const title = phase.type === "player-batting" ? "BENCH" : "DEFENSE";
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>${title} &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
+    <div class="gq-body"><div class="gq-columns gq-columns-pen">
+      <div class="gq-frame gq-scroll"><h3>${stage === "target" ? (phase.type === "player-batting" ? "THE MOVE" : "REPLACE WHO?") : "OFF THE BENCH"}</h3>${menuHtml(
+        [...rows.map((row) => ({ html: row.html, disabled: row.disabled })), { label: "NEVER MIND" }],
+        index
+      )}</div>
+      <div class="gq-card-side">
+        <p class="gq-dim">${incoming ? "COMING IN" : "&nbsp;"}</p>
+        ${incoming ? cardPanelHtml(incoming) : ""}
+      </div>
+      <div class="gq-card-side">
+        <p class="gq-dim">${outgoing ? "COMING OUT" : "&nbsp;"}</p>
+        ${outgoing ? cardPanelHtml(outgoing) : ""}
+      </div>
+    </div></div>
+    <div class="gq-textbox"><p class="gq-dim">${
+      stage === "target"
+        ? "Pick the move. A man who leaves the game is gone for good. X backs out."
+        : "Pick the man. A greyed man would leave no legal defense. X goes back a step."
+    }</p></div>
+  </div>`;
 }
 
 // The send-or-hold menu after the player's hit or fly ball. Runners are lead
@@ -842,16 +1047,17 @@ export function rebuildPlayLog(battle) {
 function afterAction(app, events, presetLines = null) {
   const playerSide = app.screen.battle.playerSide;
   const lines = presetLines ?? events.filter(Boolean).flatMap((event) => describeEvent(event, playerSide));
-  // The NPC's between-batters mound visit is its own beat: it announces
-  // itself here, before the player picks an action against the new arm.
-  const visit = npcMoundVisit(app.screen.battle);
-  if (visit) lines.push(...describeEvent(visit, playerSide));
+  // The NPC's between-batters dugout visit — bench moves and the mound — is
+  // its own beat: it announces itself here, before the player picks an
+  // action against the new men.
+  const visits = npcDugoutVisit(app.screen.battle);
+  for (const visit of visits) lines.push(...describeEvent(visit, playerSide));
   // Every play comes through here, so this is where the diamond learns what to
   // act out. The id is what stops a cursor keypress from replaying it.
   app.screen.motion = { id: (app.screen.motion?.id ?? 0) + 1, ...playMotion(events) };
   // Rings only if there is a game left to ring about — see fatigueAlarm.
   callTheBullpenPhone(app);
-  logPlay(app, lines, [...events, visit]);
+  logPlay(app, lines, [...events, ...visits]);
   app.screen.lines = lines.length ? lines : app.screen.lines;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
@@ -889,6 +1095,7 @@ export const gameOverScreen = {
         <div class="gq-frame gq-title-frame">
           <b style="font-size:7cqw">${phase.playerWon ? "&#9733; YOU WIN! &#9733;" : "YOU LOSE..."}</b>
           <p class="gq-mt" style="font-size:4.6cqw"><b>YOU ${you} &middot; THEM ${them}</b></p>
+          ${phase.forfeitedBy ? `<p><b>${phase.forfeitedBy === battle.playerSide ? "YOU COULD NOT FIELD A LEGAL DEFENSE. FORFEIT." : "THEY COULD NOT FIELD A LEGAL DEFENSE. FORFEIT."}</b></p>` : ""}
           <p class="gq-dim">${battle.state.walkoff ? "WALK-OFF! " : ""}${innings !== 9 ? `${innings} INNINGS` : "9 INNINGS"} &middot; ${battle.playerSide === "home" ? "YOUR PARK" : "ON THE ROAD"}</p>
         </div>
         <div class="gq-frame" style="text-align:left">
@@ -1075,6 +1282,7 @@ export const battleScreen = {
     if (app.screen.mode === "drama") return renderDrama(app, trainer);
     const phase = battlePhase(battle);
     if (app.screen.mode === "pen" && phase.type !== "over") return renderPen(app, battle, trainer, phase);
+    if (app.screen.mode === "bench" && phase.type !== "over") return renderBench(app, battle, trainer, phase);
     const series = app.save.activeSeries;
     // The board, then the game, then the clubs. What you are DOING — the menu you
     // are choosing from and the call of the play you just made — sits in the
@@ -1094,6 +1302,14 @@ export const battleScreen = {
   hoverCard(app, index) {
     if (app.screen.mode === "pen") {
       return battlePhase(app.screen.battle).bullpen?.[index]?.pitcher ?? null;
+    }
+    if (app.screen.mode === "bench") {
+      const phase = battlePhase(app.screen.battle);
+      const stage = app.screen.benchStage ?? "target";
+      if (stage === "confirm") return app.screen.benchChoice ?? null;
+      return stage === "target"
+        ? benchTargetRows(app.screen.battle, phase)[index]?.out ?? null
+        : benchManRows(app.screen.battle, phase, app.screen.benchTarget)[index]?.card ?? null;
     }
     if (app.screen.mode !== "rosters") return null;
     return rosterRows(app.screen.battle)[index]?.card ?? null;
@@ -1150,6 +1366,57 @@ export const battleScreen = {
       return;
     }
     if (phase.type === "over") return;
+    if (app.screen.mode === "bench") {
+      const stage = app.screen.benchStage ?? "target";
+      if (stage === "confirm") {
+        if (key === "a") runBenchSub(app, app.screen.benchTarget, app.screen.benchChoice);
+        else if (key === "b") {
+          app.screen.benchStage = "man";
+          app.screen.benchChoice = null;
+        }
+        app.rerender();
+        return;
+      }
+      const rows = stage === "target"
+        ? benchTargetRows(app.screen.battle, phase)
+        : benchManRows(app.screen.battle, phase, app.screen.benchTarget);
+      const items = rows.length + 1;
+      if (key === "up" || key === "down") {
+        app.screen.benchIndex = clampIndex((app.screen.benchIndex ?? 0) + (key === "down" ? 1 : -1), items);
+      } else if (key === "a") {
+        const index = app.screen.benchIndex ?? 0;
+        if (index >= rows.length) {
+          // NEVER MIND backs out a step, then out of the door.
+          if (stage === "man") {
+            app.screen.benchStage = "target";
+            app.screen.benchIndex = 0;
+          } else {
+            app.screen.mode = "menu";
+          }
+        } else if (stage === "target") {
+          app.screen.benchTarget = rows[index];
+          app.screen.benchStage = "man";
+          app.screen.benchIndex = 0;
+        } else if (rows[index].disabled) {
+          // A man who leaves no legal defense doesn't go in from here.
+        } else if (rows[index].risky) {
+          // The walk-off gamble gets its own screen and its own keypress.
+          app.screen.benchChoice = rows[index].card;
+          app.screen.benchStage = "confirm";
+        } else {
+          runBenchSub(app, app.screen.benchTarget, rows[index].card);
+        }
+      } else if (key === "b") {
+        if (stage === "man") {
+          app.screen.benchStage = "target";
+          app.screen.benchIndex = 0;
+        } else {
+          app.screen.mode = "menu";
+        }
+      }
+      app.rerender();
+      return;
+    }
     if (app.screen.mode === "pen") {
       const options = phase.bullpen ?? [];
       const items = options.length + 1;

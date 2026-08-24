@@ -116,6 +116,7 @@ Implemented:
 - Steal attempts using catcher fielding.
 - Bullpen planning, pitcher fatigue, extra innings, and run-charged fatigue penalties.
 - Interactive single games with the full decision set (steal, sacrifice bunt, intentional walk, pitching changes, send-or-hold) and a fast-forward autopilot that returns the wheel at the leverage moments.
+- Adventure roster formats: the classic 13-card team, or the FULL ROSTER format — twenty cards with a four-man rotation drawn at random each game (capped at ceil(games/4) starts per arm in a series), seven flex slots split any way between relievers and bench bats, bench bats at a fifth of their points against the cap, and in-game substitutions (pinch hit, pinch run, defensive replacement) from the 7th inning on, made strategically by both dugouts. Defensive legality is enforced: out-of-position (beyond anyone-at-1B) is illegal, positions reshuffle and double-switches complete off the bench at each inning turn, a club that cannot cover the field forfeits — and only the home side batting in the 9th or later may knowingly gamble its defense on a walk-off, behind a heavy warning.
 - Batch game simulator (`Sim 1000 games`): deterministic balanced matchup streams with win percentage, 162-game pace stats, per-player aggregate stats (AVG/OBP/SLG/OPS, RA/9, K/9, BB/9), and sim awards (MVP, ace, HR king).
 - Duplicate manager names are auto-suffixed so standings and stats never merge two managers.
 - A watchlist and a ranked big board per manager: star cards, put them in order, and an expired clock takes the top one still standing instead of guessing.
@@ -139,7 +140,6 @@ Not implemented yet:
 
 - Strategy cards.
 - Hit-and-run.
-- Pinch hitting (there is no bench concept yet).
 - Official fielding checks beyond the simplified fielding sums currently used.
 - Full official-rule verification by edition.
 - Trades, in the draft or after it.

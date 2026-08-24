@@ -22,10 +22,13 @@ import { stealCandidates, attemptSteal, pitcherStatus, autoRelieve, AUTO_PULL_BI
 // of aggression is bigger than the bar it is bending. That is how an eleventh
 // inning ends up with a control 2 arm on the mound and a control 4 arm warm: not
 // because the skipper judged it, but because his personality outweighed the rule.
+// subBias multiplies every bench-decision bar (see substitutions.js): under 1
+// spends the bench readily, over 1 hoards it. The same one-knob philosophy as
+// pullBias — a temperament is a thumb on the scale, not a second rulebook.
 export const AI_PROFILES = {
-  balanced: { stealBias: 0, pullBias: AUTO_PULL_BIAS },
-  aggressive: { stealBias: -0.12, pullBias: 0.5 },
-  conservative: { stealBias: 0.1, pullBias: -0.5 }
+  balanced: { stealBias: 0, pullBias: AUTO_PULL_BIAS, subBias: 1 },
+  aggressive: { stealBias: -0.12, pullBias: 0.5, subBias: 0.8 },
+  conservative: { stealBias: 0.1, pullBias: -0.5, subBias: 1.25 }
 };
 
 export function profileFor(name) {

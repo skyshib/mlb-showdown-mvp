@@ -1,4 +1,4 @@
-import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardLine, rarityTag, shortName } from "./helpers.js?v=20260716-records";
+import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, cardScanUrl, cardLine, rarityTag, shortName } from "./helpers.js?v=20260716-records";
 import { PACKS, RARITIES, openPack, shopStock, cardById, adventurePool, dualPartnerCard, dualPrimaryId } from "../packs.js?v=20260716-records";
 import { packEggs } from "../feats.js?v=20260716-records";
 import {
@@ -21,6 +21,7 @@ import {
   managerFor,
   addLog
 } from "../state.js?v=20260716-records";
+import { rosterFormat, benchPrice } from "../rosterFormats.js?v=20260716-records";
 import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260716-records";
 import { hitterPositions, personConflict, playsPosition, positionsLabel, positionsOverlap } from "../../rules/cards.js?v=20260716-records";
 import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260716-records";
@@ -956,7 +957,15 @@ export function positionSwitchOptions(save, card) {
   if (card?.kind !== "hitter") return [];
   const slots = lineupSlots(save);
   const from = slots.find((slot) => slot.player?.id === card.id);
-  if (!from) return [];
+  if (!from) {
+    // A full-format bench bat taking a starting job: any seated slot he can
+    // fill. The man he displaces trades nothing back — he takes the bench
+    // (or re-seats wherever else his glove still fits).
+    if (rosterFormat(save).key !== "full") return [];
+    return slots
+      .filter((slot) => canPlayerFillLineupSlot(card, slot.label))
+      .map((slot) => ({ label: slot.label, player: slot.player, card, from: null }));
+  }
   return slots
     .filter((slot) => slot.label !== from.label)
     .filter((slot) => canPlayerFillLineupSlot(card, slot.label))
@@ -972,8 +981,12 @@ export function switchPositionTo(save, card, label) {
   const option = positionSwitchOptions(save, card).find((item) => item.label === label);
   if (!option) return false;
   const assignments = { ...save.roster.lineupAssignments, [label]: card.id };
-  if (option.player) assignments[option.from] = option.player.id;
-  else delete assignments[option.from];
+  // A seated man switching trades slots; a bench man starting has no slot to
+  // trade back, so the displaced player simply loses his pin.
+  if (option.from) {
+    if (option.player) assignments[option.from] = option.player.id;
+    else delete assignments[option.from];
+  }
   save.roster.lineupAssignments = assignments;
   return true;
 }
@@ -984,7 +997,7 @@ function switchLine(option) {
   const outOfPosition = option.label === "1B" && !playsPosition(option.card, "1B");
   return `${escapeHtml(option.label)}${outOfPosition ? ` <span class="gq-dim">FLD -1</span>` : ""}${
     option.player
-      ? ` <span class="gq-dim">${escapeHtml(shortName(option.player.name))} TAKES ${escapeHtml(option.from)}</span>`
+      ? ` <span class="gq-dim">${escapeHtml(shortName(option.player.name))} ${option.from ? `TAKES ${escapeHtml(option.from)}` : "SITS"}</span>`
       : ""
   }`;
 }
@@ -1035,7 +1048,7 @@ function teamRosterCards(save) {
 
 // The club reads as two pages, and left/right turns between them.
 //
-// Thirteen men in one column meant the arms lived below the fold: to change who
+// A whole club in one column meant the arms lived below the fold: to change who
 // starts game 1 you scrolled past nine bats to get to him. They are two
 // different jobs asked in two different vocabularies — a bat has a POSITION and a
 // spot in the order, an arm has a ROLE and a start — and the roster is really a
@@ -1059,9 +1072,15 @@ function teamPageLabel(page, count) {
 // for tests.
 export function benchCards(save, anchor, filter = "position") {
   const roster = rosterCards(save);
+  // A full-format FLEX seat — a reliever, or a bat the lineup doesn't seat —
+  // can hold either kind, so its widened picker crosses kinds: every spare
+  // bat and every spare reliever (never a starter; the rotation is exactly
+  // four). That crossing is HOW the 0-7 pen split is chosen.
+  const flexAnchor = rosterFormat(save).key === "full" && filter === "all" &&
+    (anchor.kind === "pitcher" ? anchor.role === "RP" : !lineupSlotOf(save, anchor));
   const spares = collectionCards(save)
     .map(({ card }) => card)
-    .filter((card) => card.kind === anchor.kind && !save.roster.cardIds.includes(card.id))
+    .filter((card) => (flexAnchor ? card.role !== "SP" : card.kind === anchor.kind) && !save.roster.cardIds.includes(card.id))
     .filter((card) => !personConflict(roster, card, anchor.id));
   if (filter === "all") return spares;
   if (anchor.kind === "pitcher") return spares.filter((card) => card.role === anchor.role);
@@ -1075,7 +1094,12 @@ export function benchCards(save, anchor, filter = "position") {
 }
 
 function benchLabel(save, anchor, filter) {
-  if (filter === "all") return `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}`;
+  if (filter === "all") {
+    const flexAnchor = rosterFormat(save).key === "full" &&
+      (anchor.kind === "pitcher" ? anchor.role === "RP" : !lineupSlotOf(save, anchor));
+    if (flexAnchor) return "ANY SPARE BAT OR RELIEVER";
+    return `ALL SPARE ${anchor.kind === "pitcher" ? "ARMS" : "BATS"}`;
+  }
   if (anchor.kind === "pitcher") return `SPARE ${anchor.role} ONLY`;
   const slot = lineupSlotOf(save, anchor) ?? anchor.position;
   // Every bat can DH, and any glove covers first — say so rather than promise
@@ -1128,9 +1152,12 @@ function teamCardActions(app, card) {
   ];
   if (card.kind === "hitter") {
     const switches = positionSwitchOptions(save, card);
+    const fromBench = !slot && rosterFormat(save).key === "full";
     actions.push({
       label: switches.length
-        ? `SWITCH POSITION <span class="gq-dim">NOW AT ${escapeHtml(slot ?? "&mdash;")}</span>`
+        ? fromBench
+          ? `PUT IN THE LINEUP <span class="gq-dim">NOW ON THE BENCH</span>`
+          : `SWITCH POSITION <span class="gq-dim">NOW AT ${escapeHtml(slot ?? "&mdash;")}</span>`
         : `SWITCH POSITION <span class="gq-dim">NO LEGAL SWITCH</span>`,
       disabled: !switches.length,
       run: () => {
@@ -1140,20 +1167,31 @@ function teamCardActions(app, card) {
     });
     actions.push({ label: "BATTING ORDER", run: () => app.go("lineup", { returnTo: "team", index: 0 }) });
   }
-  // The same move, asked of an arm: which game does he take?
+  // The same move, asked of an arm: which game does he take? A full-format
+  // rotation has no order to change — the four are a pool the dice draw
+  // from, each capped at ceil(games/4) starts a series — so the row says so
+  // instead of offering a switch that means nothing.
   if (card.role === "SP") {
-    const starts = rotationSwitchOptions(save, card);
-    const now = rotationSlotOf(save, card);
-    actions.push({
-      label: starts.length
-        ? `CHANGE ROTATION SLOT <span class="gq-dim">NOW ${escapeHtml(now ?? "&mdash;")}</span>`
-        : `CHANGE ROTATION SLOT <span class="gq-dim">NO SECOND STARTER</span>`,
-      disabled: !starts.length,
-      run: () => {
-        app.screen.mode = "switchPos";
-        app.screen.pickIndex = 0;
-      }
-    });
+    if (rosterFormat(save).key === "full") {
+      actions.push({
+        label: `ROTATION POOL <span class="gq-dim">STARTERS DRAWN AT RANDOM</span>`,
+        disabled: true,
+        run: () => {}
+      });
+    } else {
+      const starts = rotationSwitchOptions(save, card);
+      const now = rotationSlotOf(save, card);
+      actions.push({
+        label: starts.length
+          ? `CHANGE ROTATION SLOT <span class="gq-dim">NOW ${escapeHtml(now ?? "&mdash;")}</span>`
+          : `CHANGE ROTATION SLOT <span class="gq-dim">NO SECOND STARTER</span>`,
+        disabled: !starts.length,
+        run: () => {
+          app.screen.mode = "switchPos";
+          app.screen.pickIndex = 0;
+        }
+      });
+    }
   }
   const sell = sellAction(app, card);
   if (sell) actions.push(sell);
@@ -1214,9 +1252,19 @@ export const teamScreen = {
         pickIndex
       )}`;
     } else {
+      // Full-format bats the lineup doesn't seat are the BENCH: labeled so,
+      // and priced at the fifth they actually count against the cap.
+      const full = rosterFormat(save).key === "full";
       list = menuHtml(
         [
-          ...roster.map((card) => ({ html: cardLine(card, { slot: slotById.get(card.id) ?? null }) })),
+          ...roster.map((card) => {
+            const benched = full && card.kind === "hitter" && !slotById.has(card.id);
+            return {
+              html: benched
+                ? `${cardLine(card, { slot: "BENCH", points: benchPrice(card.points) })}`
+                : cardLine(card, { slot: slotById.get(card.id) ?? null })
+            };
+          }),
           ...actions.map((action) => ({ html: action.html, disabled: action.disabled }))
         ],
         rosterIndex
@@ -1229,7 +1277,9 @@ export const teamScreen = {
         <div class="gq-card-side">${preview ? cardPanelHtml(preview, { count: ownedCount(save, preview.id) || null }) + seasonStatsHtml(save, preview) : `<p class="gq-dim">NO SWAP AVAILABLE.</p>`}</div>
       </div></div>
       <div class="gq-textbox">
-        ${issues.length ? `<p>! ${escapeHtml(issues.join(", "))}</p>` : `<p>ROSTER IS GAME-READY.</p>`}
+        ${issues.length ? `<p>! ${escapeHtml(issues.join(", "))}</p>` : rosterFormat(save).key === "full" && page === "bats"
+          ? `<p>READY. BENCH BATS COUNT 1/5 &middot; THEY CAN ENTER FROM THE 7TH.</p>`
+          : `<p>ROSTER IS GAME-READY.</p>`}
         <p class="gq-dim">${
           picking
             ? "Pick a replacement. &#9664;/&#9654; position only &middot; everyone. X cancels."
@@ -1640,9 +1690,22 @@ export const packOpenScreen = {
       </div>
     </div>`;
   },
-  // The curtain drops on its own. Nothing the player can press hurries it, and
-  // nothing it does can be pressed through — the whole point is the wait.
   mounted(app) {
+    // Every face in the pack is known the moment it is dealt, and the player is
+    // still looking at a sealed wrapper. Fetch all five now, into that gap: a
+    // reveal that has to go get its scan paints the card's black backdrop first
+    // and fills it in afterwards, which on a slow line is a black card sitting
+    // where a Hall of Famer should be. Warmed, the reveal is the photo.
+    const pending = app.save.pendingPacks[0];
+    if (pending && app.screen.warmedPack !== pending.seed) {
+      app.screen.warmedPack = pending.seed;
+      for (const card of openPack(pending.packId, pending.seed)) {
+        const url = cardScanUrl(card);
+        if (url) new Image().src = url;
+      }
+    }
+    // The curtain drops on its own. Nothing the player can press hurries it, and
+    // nothing it does can be pressed through — the whole point is the wait.
     if (!app.screen.curtain || app.screen.curtainRunning === app.screen.curtain) return;
     app.screen.curtainRunning = app.screen.curtain;
     setTimeout(() => {

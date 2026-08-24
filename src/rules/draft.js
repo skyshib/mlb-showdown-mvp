@@ -71,6 +71,18 @@ function startingPitcherTarget(options = {}) {
   return normalizeStartingPitchers(options?.startingPitchers);
 }
 
+// The pen's slot count. Fixed at two for every draft room; the adventure's
+// full-roster format hands whole rosters over, where the pen is however many
+// relievers the twenty cards hold — zero to seven of them.
+export const MAX_BULLPEN_SLOTS = 7;
+
+function bullpenSlotTarget(options = {}) {
+  const value = options?.bullpenSlots;
+  if (value == null) return BULLPEN_TARGET;
+  const count = Math.round(Number(value) || 0);
+  return Math.min(MAX_BULLPEN_SLOTS, Math.max(0, count));
+}
+
 // The designated hitter is a slot, not a position: ANY bat fills it, and
 // whole card sets print nobody at "DH" at all — the dead-ball decades never
 // had the rule. So the DH slot draws on the hitters at large rather than on a
@@ -80,7 +92,7 @@ export const ANY_HITTER = "HITTER";
 // The active roster, slot by slot. Every slot needs a supply of cards that can
 // fill it, which is what sizes a board. The exported ROSTER_SLOTS is the
 // default 13-card version; rosterSlots() builds the configured rotation.
-export function rosterSlots(startingPitchers = DEFAULT_STARTING_PITCHERS) {
+export function rosterSlots(startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
   return [
   ["C", 1],
   ["1B", 1],
@@ -93,7 +105,7 @@ export function rosterSlots(startingPitchers = DEFAULT_STARTING_PITCHERS) {
   // first, and the DH slot draws from whoever is left.
   [ANY_HITTER, 1],
   ["SP", normalizeStartingPitchers(startingPitchers)],
-  ["RP", BULLPEN_TARGET]
+  ["RP", bullpenSlots]
   ];
 }
 
@@ -1960,11 +1972,10 @@ const valuationModels = new Map();
 // choice makes itself; an unlimited one can hold a dozen, and then WHICH
 // starters and which two relievers suit up is the manager's call — the same
 // call the lineup slots ask about the bats. staffAssignments answers it.
-export function staffSlotLabels(startingPitchers = DEFAULT_STARTING_PITCHERS) {
+export function staffSlotLabels(startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
   return [
     ...Array.from({ length: normalizeStartingPitchers(startingPitchers) }, (_, index) => `SP${index + 1}`),
-    "RP1",
-    "RP2"
+    ...Array.from({ length: bullpenSlots }, (_, index) => `RP${index + 1}`)
   ];
 }
 
@@ -1975,7 +1986,7 @@ const staffSlotRole = (label) => (label.startsWith("SP") ? "SP" : "RP");
 export function assignStaffSlots(roster, assignments = {}, options = {}) {
   const benched = explicitBenchIds(assignments);
   const pitchers = roster.filter((player) => player.kind === "pitcher" && !benched.has(player.id));
-  const slots = staffSlotLabels(startingPitcherTarget(options))
+  const slots = staffSlotLabels(startingPitcherTarget(options), bullpenSlotTarget(options))
     .map((label) => ({
       label,
       role: staffSlotRole(label),
@@ -2033,8 +2044,9 @@ function lineupRankValue(player) {
 
 // Minimum-cost assignment (Kuhn–Munkres) of rows to distinct columns, rows ≤
 // columns. Returns rowToCol[row] = col. Costs are tiny (nine slots), so the
-// classic O(n²m) form is plenty.
-function minCostAssignment(cost) {
+// classic O(n²m) form is plenty. Exported: the in-game defense realignment
+// (substitutions.js) seats gloves with the same math.
+export function minCostAssignment(cost) {
   const n = cost.length;
   const m = cost[0].length;
   const u = new Array(n + 1).fill(0);
@@ -2115,7 +2127,7 @@ function bestStaffAssignment(roster, options = {}) {
     SP: byValue(starters),
     RP: byValue(bullpen)
   };
-  for (const label of staffSlotLabels(startingPitcherTarget(options))) {
+  for (const label of staffSlotLabels(startingPitcherTarget(options), bullpenSlotTarget(options))) {
     const role = staffSlotRole(label);
     const player = ranked[role].shift();
     if (player) assignment[label] = player.id;
@@ -2168,7 +2180,10 @@ export function buildTeam(manager, options = {}) {
   // The staff is the arms the manager put in the slots — not simply the first
   // pitchers in roster order. On an unlimited roster that is the difference
   // between the two relievers you chose and the two you happened to buy first.
-  const staffOptions = { startingPitchers: options.startingPitchers ?? manager.startingPitchers };
+  const staffOptions = {
+    startingPitchers: options.startingPitchers ?? manager.startingPitchers,
+    bullpenSlots: options.bullpenSlots ?? manager.bullpenSlots
+  };
   const staffAssignments = hasStaff || !optimize
     ? manager.staffAssignments
     : bestStaffAssignment(manager.roster, staffOptions);
@@ -2177,7 +2192,7 @@ export function buildTeam(manager, options = {}) {
   const bullpen = staff.filter((slot) => slot.role === "RP" && slot.player).map((slot) => slot.player);
   const starterIndex = starters.length ? Number(options.starterIndex ?? 0) % starters.length : 0;
   const activeStarter = starters[starterIndex];
-  return {
+  const team = {
     name: manager.name,
     lineup,
     starters,
@@ -2185,6 +2200,41 @@ export function buildTeam(manager, options = {}) {
     starterIndex,
     pitchers: [activeStarter, ...bullpen].filter(Boolean)
   };
+  // The bench rides along only when asked for. Rosters that carry one (the
+  // adventure's full-roster format) say so; every other consumer — the batch
+  // sim, tournaments, the draft rooms — gets the exact team it always got.
+  if (options.bench ?? manager.includeBench) {
+    const seatedIds = new Set(seated.map((player) => player.id));
+    team.bench = manager.roster.filter((player) => player.kind === "hitter" && !seatedIds.has(player.id));
+  }
+  return team;
+}
+
+// ---- The full-format rotation draw ------------------------------------------
+//
+// Full-roster starters are a POOL, not an order: each game's starter is drawn
+// at random from the rotation, and across a series no man starts more than
+// his share — ceil(games/4), so a best-of-3 uses three different arms and a
+// best-of-7 lets an ace go at most twice. Lives here rather than in the
+// adventure because the sim-series runner draws the same way.
+
+export function maxSeriesStarts(bestOf) {
+  return Math.ceil(Math.max(1, Number(bestOf) || 1) / 4);
+}
+
+// Draw one starter index. priorStartCounts maps index -> starts already made
+// this series. Eligible arms are those under the cap; if a malformed ledger
+// leaves nobody eligible, the least-used arm goes rather than nobody.
+export function pickRandomStarter({ rng, starterCount, priorStartCounts = {}, bestOf = 1 }) {
+  const count = Math.max(1, Number(starterCount) || 1);
+  const cap = maxSeriesStarts(bestOf);
+  const starts = (index) => Number(priorStartCounts[index]) || 0;
+  let eligible = Array.from({ length: count }, (_, index) => index).filter((index) => starts(index) < cap);
+  if (!eligible.length) {
+    const fewest = Math.min(...Array.from({ length: count }, (_, index) => starts(index)));
+    eligible = Array.from({ length: count }, (_, index) => index).filter((index) => starts(index) === fewest);
+  }
+  return eligible[rng.int(0, eligible.length - 1)];
 }
 
 // Reorder a built lineup to the manager's preferred batting order (a list of
@@ -2228,6 +2278,11 @@ export function duplicateEraPeople(roster) {
 // "too many" complaint only applies to rooms that cap the roster.
 export function validateRoster(manager, options = {}) {
   const unlimited = Boolean(options.unlimitedRoster);
+  // The adventure's full-roster format: twenty cards, exactly the configured
+  // rotation, and seven flex slots split any way between relievers and bench
+  // bats. Surplus hitters are the bench, not a problem; a pen of zero is a
+  // choice, not a hole.
+  const full = (options.rosterFormat ?? manager.rosterFormat) === "full";
   const starterTarget = startingPitcherTarget({
     startingPitchers: options.startingPitchers ?? manager.startingPitchers
   });
@@ -2238,9 +2293,17 @@ export function validateRoster(manager, options = {}) {
   if (eraDupes.length) issues.push(`two eras of ${eraDupes.join("/")}`);
   if (lineup.hitters.length < HITTER_TARGET) issues.push(`needs ${HITTER_TARGET - lineup.hitters.length} more hitter${HITTER_TARGET - lineup.hitters.length === 1 ? "" : "s"}`);
   if (lineup.missingPositions.length) issues.push(`missing ${lineup.missingPositions.join("/")}`);
-  if (!unlimited && lineup.extraDuplicates.length) issues.push(`too many ${lineup.extraDuplicates.join("/")} hitters`);
+  if (!unlimited && !full && lineup.extraDuplicates.length) issues.push(`too many ${lineup.extraDuplicates.join("/")} hitters`);
   if (staff.starters.length < starterTarget) issues.push(`needs ${starterTarget - staff.starters.length} more starter${starterTarget - staff.starters.length === 1 ? "" : "s"}`);
-  if (staff.bullpen.length < BULLPEN_TARGET) issues.push(`needs ${BULLPEN_TARGET - staff.bullpen.length} more bullpen pitcher${BULLPEN_TARGET - staff.bullpen.length === 1 ? "" : "s"}`);
+  if (full) {
+    const targetSize = Number(options.rosterSize ?? manager.rosterSize) || 20;
+    const flexHitterCap = HITTER_TARGET + Math.max(0, targetSize - HITTER_TARGET - starterTarget);
+    if (manager.roster.length !== targetSize) issues.push(`roster must be ${targetSize} cards (has ${manager.roster.length})`);
+    if (staff.starters.length > starterTarget) issues.push(`too many starters (${staff.starters.length} of ${starterTarget})`);
+    if (lineup.hitters.length > flexHitterCap) issues.push(`too many bench hitters`);
+  } else if (staff.bullpen.length < BULLPEN_TARGET) {
+    issues.push(`needs ${BULLPEN_TARGET - staff.bullpen.length} more bullpen pitcher${BULLPEN_TARGET - staff.bullpen.length === 1 ? "" : "s"}`);
+  }
   return issues;
 }
 

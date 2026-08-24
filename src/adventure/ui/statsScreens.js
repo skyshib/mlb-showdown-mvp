@@ -104,6 +104,13 @@ export function gameLogLine(event, playerSide) {
   if (event.type === "pitching-change") {
     return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.team))} GO TO THE PEN: ${escapeHtml(shortName(event.pitcher))}</span>`;
   }
+  if (event.type === "forfeit") {
+    return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.team))} CANNOT FIELD A DEFENSE &mdash; <b>FORFEIT</b></span>`;
+  }
+  if (event.type === "pinch-hitter" || event.type === "pinch-runner" || event.type === "defensive-sub") {
+    const verb = event.type === "pinch-hitter" ? "HITS FOR" : event.type === "pinch-runner" ? "RUNS FOR" : `TAKES ${escapeHtml(event.slot ?? "THE FIELD")} FROM`;
+    return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.in?.name ?? ""))} ${verb} ${escapeHtml(shortName(event.out?.name ?? ""))}</span>`;
+  }
   const isSteal = event.type === "steal";
   const steal = event.playDetails?.stealAttempt;
   const actor = isSteal ? steal?.runner ?? event.batter : event.batter;
@@ -217,11 +224,11 @@ function gameStatRows(app) {
 //
 // H-AB rather than AB and H apart: "2-4" is how a line is read aloud, and it
 // costs one column instead of two on a screen that has none to spare.
-const HITTER_COLUMNS = ["WPA", "H-AB", "HR", "BB", "K", "RBI", "R", "SB", "CS"];
+const HITTER_COLUMNS = ["WPA", "H-AB", "HR", "BB", "K", "RBI", "R", "SB", "CS", "ROLL"];
 // BF before IP, the way a scorebook reads it: how many men he had to get, and
 // then how many he got. IP is the OUTS he recorded; BF is the traffic he faced,
 // and the gap between them is the whole story of a bad afternoon.
-const PITCHER_COLUMNS = ["WPA", "BF", "IP", "H", "R", "K", "BB"];
+const PITCHER_COLUMNS = ["WPA", "BF", "IP", "H", "R", "K", "BB", "ROLL"];
 
 // A zero is noise. The eye is hunting for the numbers that HAPPENED, and a column
 // of dim dots lets it skip everything else — which is the entire reason a real
@@ -229,6 +236,20 @@ const PITCHER_COLUMNS = ["WPA", "BF", "IP", "H", "R", "K", "BB"];
 function num(value) {
   const number = Number(value) || 0;
   return number === 0 ? `<span class="gq-box-nil">&middot;</span>` : String(number);
+}
+
+// The man's own die, averaged over the afternoon: the SWING for a bat, the PITCH
+// for an arm (see recordStats). A d20 averages 10.5 over a long enough game, and
+// four plate appearances is not a long enough game — which is the point of having
+// it on the line. A four-hit day off an average of 17 is a day the dice had; the
+// same four hits off a 9 is a day the MAN had.
+//
+// Games played before the box score counted dice carry none, and a column that
+// cannot be filled prints the same dash as a nought.
+function rollText(line) {
+  const rolls = Number(line.rolls) || 0;
+  if (!rolls) return `<span class="gq-box-nil">&middot;</span>`;
+  return ((Number(line.rollTotal) || 0) / rolls).toFixed(1);
 }
 
 function hitterCells(line) {
@@ -241,7 +262,8 @@ function hitterCells(line) {
     num(line.rbi),
     num(line.r),
     num(line.sb),
-    num(line.cs)
+    num(line.cs),
+    rollText(line)
   ];
 }
 
@@ -253,7 +275,8 @@ function pitcherCells(line) {
     num(line.h),
     num(line.r),
     num(line.so),
-    num(line.bb)
+    num(line.bb),
+    rollText(line)
   ];
 }
 

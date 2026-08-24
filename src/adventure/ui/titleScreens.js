@@ -1,6 +1,6 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260716-records";
 import { resumeBattle } from "./battleScreen.js?v=20260716-records";
-import { starterPack, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig } from "../packs.js?v=20260716-records";
+import { starterPack, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig, canFieldFullRoster, setUniverseSeed } from "../packs.js?v=20260716-records";
 import {
   createSave,
   hydrateUniverse,
@@ -18,7 +18,7 @@ import {
 const INTRO_PAGES = [
   ["Welcome to the CASCADE LEAGUE!", "I'm PROF. OAKMONT, the region's official scorekeeper."],
   ["Out here, managers settle everything the right way:", "nine innings of SHOWDOWN cards."],
-  ["Every rookie gets a sealed STARTER PACK.", "Thirteen cards. Two rares. The rest... character."],
+  ["Every rookie gets a sealed STARTER PACK.", "A couple of rares. The rest... character."],
   ["Mind the sticker prices — the printers had a rough year.", "Some cards cost twice what they're worth.", "Some are steals. A sharp eye builds a cheap pennant."],
   ["Win games, claim cards off the managers you beat,", "and climb the routes to the summit."],
   ["One bit of league paperwork:", "card scans appear courtesy of ShowdownCards.com,", "player photos come courtesy of Wikipedia,", "and the record books from the Baseball Databank (CC BY-SA).", "Now — what's your name, rookie?"]
@@ -387,7 +387,7 @@ export const modeSelectScreen = {
       app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), MODES.length);
     } else if (key === "a") {
       const mode = MODES[clampIndex(app.screen.menuIndex ?? 0, MODES.length)];
-      finishNewGame(app, app.screen.playerName, app.screen.universe, mode.key);
+      app.go("formatSelect", { playerName: app.screen.playerName, universe: app.screen.universe, mode: mode.key, menuIndex: 0 });
     } else if (key === "b") {
       app.go("leagueSelect", { playerName: app.screen.playerName, menuIndex: 0 });
     }
@@ -395,15 +395,70 @@ export const modeSelectScreen = {
   }
 };
 
+// How big is a team? CLASSIC is the thirteen the adventure has always dealt.
+// FULL ROSTER is the real product's twenty: a bench, a four-man rotation the
+// dice pick from, and a pen as deep as you choose to make it.
+const FORMATS = [
+  {
+    key: "classic",
+    label: "CLASSIC · 13 CARDS",
+    blurb: "Nine bats who play all nine innings, two starters who alternate, two relievers. No bench — the men you field are the men you finish with."
+  },
+  {
+    key: "full",
+    label: "FULL ROSTER · 20 CARDS",
+    blurb: "Nine starting bats plus a bench, a four-man rotation drawn at random each game, and seven flex seats split any way between relievers and reserve bats. Bench bats count a fifth of their price — and from the 7th inning they can enter the game."
+  }
+];
+
+export const formatSelectScreen = {
+  mounted(app) {
+    // Can this league even stock a twenty-man roster? Build its pool once to
+    // ask. The probe clobbers the active pool, so a loaded save's frozen
+    // universe is reinstalled behind it before anything else reads a card.
+    if (app.screen.fullAvailable == null) {
+      setUniverseSeed(`format-probe:${app.screen.universe}`, app.screen.universe, { priceNoise: false });
+      app.screen.fullAvailable = canFieldFullRoster();
+      if (app.save) hydrateUniverse(app.save);
+      app.rerender();
+    }
+  },
+  render(app) {
+    const index = clampIndex(app.screen.menuIndex ?? 0, FORMATS.length);
+    const format = FORMATS[index];
+    const thin = format.key === "full" && app.screen.fullAvailable === false;
+    return `<div class="gq-screen">
+      <div class="gq-topbar"><span>CHOOSE YOUR ROSTER</span><span>${index + 1}/${FORMATS.length}</span></div>
+      <div class="gq-body">
+        <div class="gq-frame">${menuHtml(FORMATS.map((entry) => ({ label: entry.label + (entry.key === "full" && app.screen.fullAvailable === false ? " — TOO THIN" : "") })), index)}</div>
+        <div class="gq-frame"><p class="gq-dim">${escapeHtml(thin ? "This league cannot stock twenty distinct men — pick CLASSIC, or a deeper league." : format.blurb)}</p></div>
+      </div>
+      <div class="gq-textbox"><p>Z picks. X backs out to the rules.</p></div>
+    </div>`;
+  },
+  key(app, key) {
+    if (key === "up" || key === "down") {
+      app.screen.menuIndex = clampIndex((app.screen.menuIndex ?? 0) + (key === "down" ? 1 : -1), FORMATS.length);
+    } else if (key === "a") {
+      const format = FORMATS[clampIndex(app.screen.menuIndex ?? 0, FORMATS.length)];
+      if (format.key === "full" && app.screen.fullAvailable === false) return;
+      finishNewGame(app, app.screen.playerName, app.screen.universe, app.screen.mode, format.key);
+    } else if (key === "b") {
+      app.go("modeSelect", { playerName: app.screen.playerName, universe: app.screen.universe, menuIndex: 0 });
+    }
+    app.rerender();
+  }
+};
+
 // A new save is a whole new universe: fresh seed, the chosen league's card
 // pool, fresh sealed starter pack. Nothing carries over but the player's wits.
-function finishNewGame(app, playerName, universe, mode = "budget") {
+function finishNewGame(app, playerName, universe, mode = "budget", rosterFormat = "classic") {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
-  const save = createSave({ name: playerName, saveSeed, universe, mode });
+  const save = createSave({ name: playerName, saveSeed, universe, mode, rosterFormat });
   // Build this league's pool and freeze it into the save at birth, so its cards
   // never re-derive as the generators change.
   hydrateUniverse(save);
-  const roster = starterPack(saveSeed);
+  const roster = starterPack(saveSeed, rosterFormat);
   for (const card of roster) addCardToCollection(save, card.id);
   setRoster(save, roster.map((card) => card.id));
   grantCoins(save, STARTING_COINS);

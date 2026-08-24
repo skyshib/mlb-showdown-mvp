@@ -76,7 +76,13 @@ export function compactEvent(event) {
     playDetails: trimDetails(event.playDetails),
     // Steals and advances are their own kind of event and carry their own names.
     runnerId: event.runnerId,
-    team: event.team
+    team: event.team,
+    // Substitutions: who came in, who went out, and where.
+    in: event.in,
+    out: event.out,
+    base: event.base,
+    slot: event.slot,
+    forced: event.forced
   };
   // An undefined field still costs its key in JSON.stringify's eyes only if it is
   // present, so drop them: most events are not steals and have no runnerId.

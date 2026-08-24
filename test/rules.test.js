@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, normalizeCardPosition, pauseSnake, pickPlayer, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, maxSeriesStarts, normalizeCardPosition, pauseSnake, pickPlayer, pickRandomStarter, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, staffSlotLabels, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
   applyDouble,
@@ -13,13 +13,25 @@ import {
   attemptSteal,
   autoRelieve,
   createInitialState,
+  isGameOver,
   pitcherStatus,
   playGameEvent,
   playPlateAppearance,
   playStealAttempt,
+  resolveAdvanceDecision,
+  stealCandidates,
   simulateGame,
-  STARTER_MIN_OUTS
+  STARTER_MIN_OUTS,
+  SUB_MIN_INNING,
+  availableBench,
+  substitutionEligibility,
+  pinchHit,
+  pinchRun,
+  defensiveSub,
+  autoSubstituteFor
 } from "../src/rules/game.js";
+import { batterRunsPerPa, benchSlotFielding, pinchHitDecision, pinchRunDecision, defensiveSubDecision } from "../src/rules/substitutions.js";
+import { createRng } from "../src/rules/rng.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
 const hitter = {
@@ -1971,6 +1983,96 @@ test("1B+ takes second after the lead runner vacates it, not before", () => {
   assert.equal(state.bases[0], null, "so nobody is left standing on first");
 });
 
+// One advance per hit. The 1B+ trot is a base taken on the play — uncontested,
+// unthrown-at — and a man who has just walked into second does not then get to
+// break for third before a pitch is thrown.
+test("the 1B+ trot spends the batter's steal", () => {
+  const quiet = [{ from: 1, to: 20, result: RESULTS.SO }];
+  const plus = makeHitter({ id: "plus-h", name: "Plus Hitter", speed: 20, chart: [{ from: 1, to: 20, result: RESULTS.SINGLE_PLUS }] });
+  const nextUp = makeHitter({ id: "quiet-h", name: "Quiet Hitter", chart: quiet });
+  const away = { name: "A", lineup: [plus, nextUp, ...teamA.lineup.slice(2)], pitchers: teamA.pitchers };
+  // A defense that cannot throw anybody out, so nothing but the rule stops him.
+  const defense = { ...weakDefense, pitchers: [makePitcher({ id: "wd-p", name: "Weak Pitcher", chart: quiet })] };
+  const state = createInitialState(away, defense);
+
+  playPlateAppearance(state, repeatingRng(1, 1));
+  assert.equal(state.bases[1]?.name, "Plus Hitter", "he trotted into second on the hit");
+  assert.deepEqual(stealCandidates(state), [], "and third is not his for the taking on the same trip");
+  assert.equal(playStealAttempt(state, repeatingRng(1)), null, "the auto-runner does not go either");
+
+  // The next at-bat hands the green light back: a strikeout, nobody moves.
+  playPlateAppearance(state, repeatingRng(1, 1));
+  assert.equal(state.bases[1]?.name, "Plus Hitter", "still standing on second");
+  assert.deepEqual(
+    stealCandidates(state).map((candidate) => candidate.runner.name), ["Plus Hitter"],
+    "a pitch has been thrown since, and now he can run"
+  );
+});
+
+// Same rule, one step further out: when the send is the PLAYER's call, the play
+// is not over when the hit lands — it is over when he answers. Asking about
+// second before that pins the batter to first on a base the manager is about to
+// empty, so the trot waits for the call and then reads the bases it left.
+test("a 1B+ batter waits on the send call before taking second", () => {
+  const setUp = () => {
+    const state = createInitialState(teamA, weakDefense);
+    state.away.lineup[0] = makeHitter({ id: "plus-h", name: "Plus Hitter", chart: [{ from: 1, to: 20, result: RESULTS.SINGLE_PLUS }] });
+    // A runner who CAN be thrown out at third, so the send is a decision, and a
+    // manager on the hook for making it.
+    state.deferAdvancesFor = "away";
+    state.bases = [makeHitter({ id: "lead-r", name: "Lead Runner" }), null, null];
+    playPlateAppearance(state, repeatingRng(1, 1));
+    return state;
+  };
+
+  const asked = setUp();
+  assert.ok(asked.pendingAdvance, "the manager is on the clock");
+  assert.equal(asked.bases[0]?.name, "Plus Hitter", "and the batter holds at first while he thinks");
+
+  const sent = setUp();
+  resolveAdvanceDecision(sent, 1, repeatingRng(1));
+  assert.equal(sent.bases[2]?.name, "Lead Runner", "sent, and safe at third");
+  assert.equal(sent.bases[1]?.name, "Plus Hitter", "so the batter takes the second base the send opened");
+  assert.equal(sent.bases[0], null, "and first is empty behind him");
+
+  const gunnedDown = setUp();
+  resolveAdvanceDecision(gunnedDown, 1, repeatingRng(20));
+  assert.equal(gunnedDown.outs, 1, "sent, and thrown out at third");
+  assert.equal(gunnedDown.bases[1]?.name, "Plus Hitter", "second is empty either way, and the trot is uncontested either way");
+  // And the base he trotted into costs him the same thing here as anywhere: third
+  // is now standing empty, and it is still not his until a pitch is thrown.
+  assert.deepEqual(stealCandidates(gunnedDown), [], "the late trot spends his steal too");
+
+  const held = setUp();
+  resolveAdvanceDecision(held, 0, repeatingRng(1));
+  assert.equal(held.bases[1]?.name, "Lead Runner", "held at second");
+  assert.equal(held.bases[0]?.name, "Plus Hitter", "which leaves the batter nowhere to go — a plain single");
+});
+
+// Every plate appearance throws two dice, and each of them belongs to somebody:
+// the PITCH is the arm's and the SWING is the bat's. The box score keeps them so
+// it can say whether an afternoon was the man or the dice.
+test("a plate appearance files each man's own die on his line", () => {
+  const quiet = [{ from: 1, to: 20, result: RESULTS.SO }];
+  const batter = makeHitter({ id: "dice-h", name: "Dice Hitter", chart: quiet });
+  const arm = makePitcher({ id: "dice-p", name: "Dice Arm", chart: quiet });
+  const state = createInitialState({ ...teamA, lineup: [batter, ...teamA.lineup.slice(1)] }, { ...teamB, pitchers: [arm] });
+
+  // A strikeout either way, so the only dice thrown are the two that matter.
+  playPlateAppearance(state, repeatingRng(4, 18));
+
+  const hitter = state.stats.hitters.get("away:dice-h");
+  const pitcher = state.stats.pitchers.get("home:dice-p");
+  assert.deepEqual([hitter.rolls, hitter.rollTotal], [1, 18], "the swing is the batter's, whosever chart it lands on");
+  assert.deepEqual([pitcher.rolls, pitcher.rollTotal], [1, 4], "and the pitch is the arm's");
+
+  // A second turn through, and the totals are totals.
+  state.lineupIndex.away = 0;
+  playPlateAppearance(state, repeatingRng(6, 12));
+  assert.deepEqual([hitter.rolls, hitter.rollTotal], [2, 30], "two swings, added up");
+  assert.deepEqual([pitcher.rolls, pitcher.rollTotal], [2, 10], "two pitches, the same way");
+});
+
 // ---- The hook -----------------------------------------------------------------
 // The two ways a skipper embarrasses himself, one test each.
 
@@ -2142,4 +2244,391 @@ test("only a 100% runner takes the base unasked; 95% is still a gamble, and it i
   // Only the leading run of genuinely free men is taken without asking.
   assert.equal(freeAdvanceCount([{ safeChance: 1 }, { safeChance: 1 }, { safeChance: 0.9 }]), 2);
   assert.equal(freeAdvanceCount([{ safeChance: 0.95 }, { safeChance: 1 }]), 0, "the lead man is the one who has to be free");
+});
+
+// ---- Full-roster format: slots, validation, rotation draw --------------------
+
+function fullFormatRoster() {
+  const spots = ["C", "1B", "2B", "3B", "SS", "LF", "RF", "CF", "1B"];
+  const hitters = spots.map((pos, index) => makeHitter({
+    id: `fr-h-${index}`, name: `FR Hitter ${index}`, position: pos, points: 300 - index * 10
+  }));
+  const benchBats = ["C", "SS", "LF", "CF"].map((pos, index) => makeHitter({
+    id: `fr-b-${index}`, name: `FR Bench ${index}`, position: pos, points: 100 + index
+  }));
+  const starters = Array.from({ length: 4 }, (_, index) => makePitcher({
+    id: `fr-sp-${index}`, name: `FR Starter ${index}`, role: "SP", points: 200 - index
+  }));
+  const relievers = Array.from({ length: 3 }, (_, index) => makePitcher({
+    id: `fr-rp-${index}`, name: `FR Reliever ${index}`, role: "RP", ip: 1, points: 80 - index
+  }));
+  return { hitters, benchBats, starters, relievers };
+}
+
+function fullFormatManager(overrides = {}) {
+  const { hitters, benchBats, starters, relievers } = fullFormatRoster();
+  return {
+    id: "full",
+    name: "Full Roster Club",
+    roster: [...hitters, ...benchBats, ...starters, ...relievers],
+    lineupAssignments: {},
+    rosterFormat: "full",
+    rosterSize: 20,
+    startingPitchers: 4,
+    bullpenSlots: 3,
+    includeBench: true,
+    ...overrides
+  };
+}
+
+test("staff slots grow with a configured bullpen", () => {
+  assert.deepEqual(staffSlotLabels(4, 7), ["SP1", "SP2", "SP3", "SP4", "RP1", "RP2", "RP3", "RP4", "RP5", "RP6", "RP7"]);
+  assert.deepEqual(staffSlotLabels(), ["SP1", "SP2", "RP1", "RP2"], "the default stays the classic four");
+  const team = buildTeam(fullFormatManager(), { starterIndex: 2 });
+  assert.equal(team.starters.length, 4, "the whole rotation suits up");
+  assert.equal(team.bullpen.length, 3, "and the whole pen");
+  assert.equal(team.pitchers[0].id, "fr-sp-2", "the asked-for starter opens");
+});
+
+test("buildTeam emits a bench only when asked", () => {
+  const manager = fullFormatManager();
+  const team = buildTeam(manager);
+  assert.deepEqual(team.bench.map((card) => card.id).sort(), ["fr-b-0", "fr-b-1", "fr-b-2", "fr-b-3"],
+    "the unseated bats are the bench");
+  const classic = buildTeam({ ...manager, includeBench: false });
+  assert.equal(classic.bench, undefined, "nobody else's team grows a field");
+});
+
+test("a full-format roster validates the twenty-man shape", () => {
+  const manager = fullFormatManager();
+  assert.deepEqual(validateRoster(manager), [], "the fixture is legal");
+  // The flex splits freely: zero relievers is a choice, not a hole.
+  const { relievers } = fullFormatRoster();
+  const noPen = fullFormatManager();
+  noPen.roster = noPen.roster.filter((card) => card.role !== "RP");
+  noPen.roster.push(
+    makeHitter({ id: "fr-x-0", name: "Extra Bat 0", position: "2B", points: 50 }),
+    makeHitter({ id: "fr-x-1", name: "Extra Bat 1", position: "3B", points: 51 }),
+    makeHitter({ id: "fr-x-2", name: "Extra Bat 2", position: "RF", points: 52 })
+  );
+  noPen.bullpenSlots = 0;
+  assert.deepEqual(validateRoster(noPen), [], "an all-bench flex is legal");
+  // A fifth starter is not.
+  const fiveSp = fullFormatManager();
+  fiveSp.roster = [...fiveSp.roster.filter((card) => card.role !== "RP"),
+    makePitcher({ id: "fr-sp-4", name: "FR Starter 4", role: "SP", points: 10 }),
+    ...relievers.slice(0, 2)];
+  assert.ok(validateRoster(fiveSp).some((issue) => issue.includes("too many starters")), "five starters flagged");
+  // Twenty-one cards is not twenty.
+  const oversized = fullFormatManager();
+  oversized.roster = [...oversized.roster, makeHitter({ id: "fr-extra", name: "Twenty First", position: "C" })];
+  assert.ok(validateRoster(oversized).some((issue) => issue.includes("20 cards")), "size is enforced");
+  // Classic managers are untouched: a tenth hitter still complains.
+  const classic = { name: "C", roster: [...fullFormatRoster().hitters, makeHitter({ id: "extra-c", position: "C" })], lineupAssignments: {} };
+  assert.ok(validateRoster(classic).some((issue) => issue.includes("too many")), "classic keeps its complaint");
+});
+
+test("the rotation draw is seeded and honors the series cap", () => {
+  assert.equal(maxSeriesStarts(3), 1);
+  assert.equal(maxSeriesStarts(5), 2);
+  assert.equal(maxSeriesStarts(7), 2);
+  const draw = (seedPrefix, bestOf, games) => {
+    const counts = {};
+    const picks = [];
+    for (let game = 1; game <= games; game += 1) {
+      const pick = pickRandomStarter({
+        rng: createRng(`${seedPrefix}:${game}`), starterCount: 4, priorStartCounts: counts, bestOf
+      });
+      counts[pick] = (counts[pick] ?? 0) + 1;
+      picks.push(pick);
+    }
+    return { picks, counts };
+  };
+  const bo3 = draw("bo3", 3, 3);
+  assert.equal(new Set(bo3.picks).size, 3, "a best-of-3 uses three different arms");
+  const bo7 = draw("bo7", 7, 7);
+  assert.ok(Math.max(...Object.values(bo7.counts)) <= 2, "no arm starts more than twice in a best-of-7");
+  assert.deepEqual(draw("bo7", 7, 7).picks, bo7.picks, "the same seeds draw the same rotation");
+});
+
+// ---- In-game substitutions ---------------------------------------------------
+
+function subTeam(prefix, { bench } = {}) {
+  return {
+    name: prefix.toUpperCase(),
+    lineup: strongDefense.lineup.map((player, index) => ({
+      ...player,
+      id: `${prefix}-h-${index}`,
+      name: `${prefix} Hitter ${index}`,
+      assignedPosition: ["1B", "2B", "3B", "SS", "C", "LF", "CF", "RF", "DH"][index]
+    })),
+    pitchers: [{ ...pitcher, id: `${prefix}-p`, name: `${prefix} Pitcher` }],
+    bench: bench ?? [
+      makeHitter({ id: `${prefix}-bench-0`, name: `${prefix} Bench Bat`, position: "1B", onBase: 14, speed: 20 }),
+      makeHitter({ id: `${prefix}-bench-1`, name: `${prefix} Bench Legs`, position: "SS", speed: 20, onBase: 6 })
+    ]
+  };
+}
+
+test("a pinch-hitter replaces the due batter in place, from the seventh on", () => {
+  const state = createInitialState(subTeam("away"), subTeam("home"));
+  const due = state.away.lineup[0];
+  assert.equal(substitutionEligibility(state, "away").allowed, false, "the bench is closed in the first");
+  assert.equal(pinchHit(state, "away", "away-bench-0"), null, "and the mutator says no");
+  state.inning = SUB_MIN_INNING;
+  const lineupBefore = state.away.lineup;
+  state.pendingAdvance = { candidates: [] };
+  assert.equal(pinchHit(state, "away", "away-bench-0"), null, "a live play blocks the door");
+  state.pendingAdvance = null;
+  const event = pinchHit(state, "away", "away-bench-0");
+  assert.equal(event.type, "pinch-hitter");
+  assert.equal(event.out.id, due.id);
+  assert.equal(state.away.lineup[0].id, "away-bench-0", "the sub bats in the same spot");
+  assert.equal(state.away.lineup.length, 9, "nine men, still");
+  assert.notEqual(state.away.lineup, lineupBefore, "the lineup is a NEW array (the relief memo must refresh)");
+  assert.equal(state.away.lineup[0].assignedPosition, due.assignedPosition, "he inherits the slot");
+  assert.deepEqual(state.removed.away, [due.id], "the man who left is written down");
+  assert.equal(availableBench(state, "away").some((card) => card.id === "away-bench-0"), false, "and the sub is off the bench");
+  assert.equal(pinchHit(state, "home", "home-bench-0"), null, "the fielding side cannot pinch hit");
+});
+
+test("a pinch-runner takes the base, the lineup spot, and the pitcher's tab", () => {
+  const state = createInitialState(subTeam("away"), subTeam("home"));
+  state.inning = 9;
+  const runner = state.away.lineup[3];
+  state.bases[0] = { id: runner.id, name: runner.name, speed: runner.speed, responsiblePitcherId: "home-p", responsiblePitcherFresh: true };
+  state.stealAttemptsThisPA = [runner.id];
+  const event = pinchRun(state, "away", "away-bench-1", 0);
+  assert.equal(event.type, "pinch-runner");
+  assert.equal(state.bases[0].id, "away-bench-1", "the base changes feet");
+  assert.equal(state.bases[0].speed, 20, "and gains the speed");
+  assert.equal(state.bases[0].responsiblePitcherId, "home-p", "the run still belongs to the arm that allowed it");
+  assert.equal(state.bases[0].responsiblePitcherFresh, true);
+  assert.equal(state.away.lineup[3].id, "away-bench-1", "the lineup spot follows");
+  assert.ok(state.stealAttemptsThisPA.includes("away-bench-1"), "a spent green light stays spent");
+});
+
+test("a defensive replacement changes the glove the engine reads", () => {
+  const state = createInitialState(subTeam("away"), subTeam("home"));
+  state.inning = 8;
+  state.half = "top"; // home fields
+  const target = state.home.lineup.find((player) => player.assignedPosition === "SS");
+  const glove = makeHitter({ id: "home-glove", name: "Home Glove", position: "SS", fielding: 5 });
+  state.home.bench.push({ ...glove });
+  const event = defensiveSub(state, "home", "home-glove", target.id);
+  assert.equal(event.type, "defensive-sub");
+  assert.equal(event.slot, "SS");
+  const fielding = state.home.lineup.find((player) => player.id === "home-glove");
+  assert.equal(fielding.assignedPosition, "SS");
+  assert.equal(fielding.fielding, 5, "his own glove rates the slot");
+  const box = buildTeamLine(state);
+  assert.ok(box.some((line) => line.id === "home-glove"), "the glove man is in the box score without ever batting");
+  assert.equal(defensiveSub(state, "away", "away-bench-0", state.away.lineup[0].id), null, "the batting side cannot field a glove");
+});
+
+function buildTeamLine(state) {
+  return [...state.stats.hitters.values()].filter((line) => line.side === "home");
+}
+
+test("bench gloves rate the slot they inherit, or a flat -1 off their card", () => {
+  const ss = makeHitter({ position: "SS", fielding: 4 });
+  assert.deepEqual(benchSlotFielding(ss, "SS"), { value: 4, outOfPosition: false });
+  assert.deepEqual(benchSlotFielding(ss, "C"), { value: -1, outOfPosition: true }, "a shortstop behind the plate is a -1");
+  assert.deepEqual(benchSlotFielding(ss, "DH"), { value: 4, outOfPosition: false }, "the DH slot rates nothing");
+  const corner = makeHitter({ position: "LF/RF", fielding: 2 });
+  assert.equal(benchSlotFielding(corner, "RF").value, 2, "corners lump, as everywhere");
+});
+
+test("the substituted man is out of the game for good", () => {
+  const state = createInitialState(subTeam("away"), subTeam("home"));
+  state.inning = 7;
+  const due = state.away.lineup[0];
+  pinchHit(state, "away", "away-bench-0");
+  // Put the removed man back on the bench by hand: the ledger still bars him.
+  state.away.bench.push({ ...due });
+  assert.equal(availableBench(state, "away").some((card) => card.id === due.id), false,
+    "a removed man never reads as available");
+  assert.equal(pinchHit(state, "away", due.id), null, "and cannot re-enter");
+});
+
+// ---- The bench decisions -----------------------------------------------------
+
+const singlesChart = [{ from: 1, to: 20, result: RESULTS.SINGLE }];
+const strikeoutChart = [{ from: 1, to: 20, result: RESULTS.SO }];
+
+test("a pinch-hitter fires on a real upgrade at real leverage, and holds otherwise", () => {
+  const arm = makePitcher({ control: 4, chart: strikeoutChart });
+  const due = makeHitter({ id: "due", onBase: 8, chart: singlesChart, assignedPosition: "DH" });
+  const slugger = makeHitter({ id: "slugger", onBase: 14, chart: singlesChart });
+  const fired = pinchHitDecision({ bench: [slugger], dueBatter: due, pitcher: arm, leverage: 2, inning: 7, inningsLeftToField: 0 });
+  assert.equal(fired?.sub.id, "slugger", "a big upgrade in a big moment fires");
+  assert.equal(pinchHitDecision({ bench: [slugger], dueBatter: due, pitcher: arm, leverage: 0.3, inning: 7, inningsLeftToField: 0 }), null,
+    "a blowout keeps the bench seated");
+  assert.ok(pinchHitDecision({ bench: [slugger], dueBatter: due, pitcher: arm, leverage: 0.3, inning: 9, inningsLeftToField: 0 }),
+    "the ninth spends freely");
+  // The last bench bat needs to be twice the man before the ninth.
+  const modest = makeHitter({ id: "modest", onBase: 9, chart: singlesChart });
+  const gain = batterRunsPerPa(modest, arm) - batterRunsPerPa(due, arm);
+  const bar = 0.045;
+  assert.ok(gain > bar / 1 / 2 && gain < bar * 2, "fixture sanity: a modest, single-bar upgrade");
+  assert.ok(pinchHitDecision({ bench: [modest, slugger], dueBatter: due, pitcher: arm, leverage: 1, inning: 8, inningsLeftToField: 0 }),
+    "with a bench behind him the modest bar clears");
+});
+
+test("the aggressive skipper spends the bench where the balanced one holds", () => {
+  const arm = makePitcher({ control: 4, chart: strikeoutChart });
+  const due = makeHitter({ id: "due", onBase: 10, chart: singlesChart, assignedPosition: "DH" });
+  const slight = makeHitter({ id: "slight", onBase: 11, chart: singlesChart });
+  const gain = batterRunsPerPa(slight, arm) - batterRunsPerPa(due, arm);
+  assert.ok(gain > 0.045 * 0.8 && gain < 0.045, `fixture sanity: gain ${gain.toFixed(3)} sits between the two bars`);
+  assert.equal(pinchHitDecision({ bench: [slight, slight], dueBatter: due, pitcher: arm, leverage: 1, inning: 7, inningsLeftToField: 0, bias: 1 }), null,
+    "balanced holds");
+  assert.ok(pinchHitDecision({ bench: [slight, slight], dueBatter: due, pitcher: arm, leverage: 1, inning: 7, inningsLeftToField: 0, bias: 0.8 }),
+    "aggressive fires");
+});
+
+test("fresh legs come on for a slow man whose run matters, late and close", () => {
+  const slow = { id: "slow", name: "Slow", speed: 8 };
+  const legs = makeHitter({ id: "legs", speed: 20, points: 40 });
+  const bat = makeHitter({ id: "bat", speed: 20, points: 400 });
+  const fired = pinchRunDecision({ bases: [slow, null, null], bench: [bat, legs], diff: 0, leverage: 2, inning: 8 });
+  assert.equal(fired?.sub.id, "legs", "the CHEAPEST bat that runs is the one spent");
+  assert.equal(fired?.baseIndex, 0);
+  assert.equal(pinchRunDecision({ bases: [slow, null, null], bench: [bat, legs], diff: 0, leverage: 1, inning: 8 }), null,
+    "a quiet moment keeps the bench");
+  assert.equal(pinchRunDecision({ bases: [slow, null, null], bench: [bat, legs], diff: -4, leverage: 2, inning: 8 }), null,
+    "a run that does not matter is not bought");
+  assert.equal(pinchRunDecision({ bases: [slow, null, null], bench: [legs], diff: 0, leverage: 2, inning: 8 }), null,
+    "the last bench bat is not spent on legs before the ninth");
+  assert.ok(pinchRunDecision({ bases: [slow, null, null], bench: [legs], diff: 0, leverage: 2, inning: 9 }),
+    "in the ninth he is");
+});
+
+test("a glove comes on to protect a lead", () => {
+  const shaky = makeHitter({ id: "shaky", position: "SS", assignedPosition: "SS", fielding: 0 });
+  const glove = makeHitter({ id: "glove", position: "SS", fielding: 4, onBase: 6 });
+  const fired = defensiveSubDecision({ lineup: [shaky], bench: [glove], lead: 2, inning: 8 });
+  assert.equal(fired?.sub.id, "glove");
+  assert.equal(fired?.targetId, "shaky");
+  assert.equal(defensiveSubDecision({ lineup: [shaky], bench: [glove], lead: 0, inning: 8 }), null, "no lead, no protecting");
+  assert.equal(defensiveSubDecision({ lineup: [shaky], bench: [glove], lead: 5, inning: 8 }), null, "a blowout needs none");
+  assert.equal(defensiveSubDecision({ lineup: [shaky], bench: [glove], lead: 2, inning: 7 }), null, "the eighth is the earliest trip");
+});
+
+test("auto play only substitutes for teams that carry a bench", () => {
+  const result = simulateGame(teamA, teamB, "no-bench-sim");
+  const subTypes = ["pinch-hitter", "pinch-runner", "defensive-sub"];
+  assert.equal(result.events.filter((event) => subTypes.includes(event.type)).length, 0,
+    "a benchless game never substitutes");
+  // And the executor itself declines politely.
+  const state = createInitialState(teamA, teamB);
+  state.inning = 9;
+  assert.equal(autoSubstituteFor(state, "away"), null);
+});
+
+// ---- Defensive legality: coverage, double-switches, forfeits -----------------
+
+// Every plate appearance is an out (all-SO pitcher chart beats OB 1 bats),
+// so a half-inning is exactly three PAs — the clock these tests need.
+function outsOnlyTeam(prefix, bench) {
+  const spots = ["1B", "2B", "3B", "SS", "C", "LF", "CF", "RF", "1B"];
+  return {
+    name: prefix.toUpperCase(),
+    lineup: spots.map((pos, index) => makeHitter({
+      id: `${prefix}-h-${index}`,
+      name: `${prefix} Hitter ${index}`,
+      position: pos,
+      assignedPosition: index === 8 ? "DH" : pos,
+      onBase: 1,
+      chart: [{ from: 1, to: 20, result: RESULTS.SO }]
+    })),
+    pitchers: [makePitcher({ id: `${prefix}-p`, name: `${prefix} Pitcher`, control: 10, chart: [{ from: 1, to: 20, result: RESULTS.SO }] })],
+    bench
+  };
+}
+
+test("a pinch-hitter who strands the defense is refused outside the walk-off spot", () => {
+  const bench = () => [makeHitter({ id: "gamble", name: "Gamble Bat", position: "1B", onBase: 14 })];
+  const state = createInitialState(outsOnlyTeam("away", bench()), outsOnlyTeam("home", bench()));
+  state.inning = 7;
+  state.lineupIndex.away = 4; // the catcher is due, and nobody on the bench can catch
+  assert.equal(pinchHit(state, "away", "gamble"), null, "the road club may not strand its defense");
+  state.inning = 9;
+  assert.equal(pinchHit(state, "away", "gamble"), null, "not even in the ninth — it will field again");
+});
+
+test("the walk-off gamble: allowed in the bottom of the ninth, forfeited at the turn", () => {
+  const bench = () => [makeHitter({ id: "gamble", name: "Gamble Bat", position: "1B", onBase: 14, chart: [{ from: 1, to: 20, result: RESULTS.SO }] })];
+  const state = createInitialState(outsOnlyTeam("away", []), outsOnlyTeam("home", bench()));
+  state.inning = 9;
+  state.half = "bottom";
+  state.score = { away: 4, home: 4 };
+  state.lineupIndex.home = 4; // the catcher is due
+  const event = pinchHit(state, "home", "gamble");
+  assert.equal(event?.type, "pinch-hitter", "the home ninth may gamble the defense");
+  // The gamble fails: three outs, the inning turns, and the club must field.
+  const rng = createRng("walkoff-gamble");
+  for (let i = 0; i < 3; i += 1) playPlateAppearance(state, rng);
+  assert.equal(state.gameOver, true, "the game is over");
+  assert.equal(state.forfeitedBy, "home", "because the home club cannot field");
+  assert.equal(state.pendingSubEvents.some((queued) => queued.type === "forfeit"), true, "and the forfeit is announced");
+  assert.equal(isGameOver(state), true);
+});
+
+test("the double-switch: the bench covers the hole a pinch-hitter left", () => {
+  const bench = () => [
+    makeHitter({ id: "big-bat", name: "Big Bat", position: "1B", onBase: 14, chart: [{ from: 1, to: 20, result: RESULTS.SO }] }),
+    makeHitter({ id: "backup-c", name: "Backup Catcher", position: "C", fielding: 1, onBase: 1, chart: [{ from: 1, to: 20, result: RESULTS.SO }] })
+  ];
+  const state = createInitialState(outsOnlyTeam("away", []), outsOnlyTeam("home", bench()));
+  state.inning = 8;
+  state.half = "bottom";
+  state.lineupIndex.home = 4;
+  assert.equal(pinchHit(state, "home", "big-bat")?.type, "pinch-hitter",
+    "legal anywhere: the backup catcher can cover the hole later");
+  const rng = createRng("double-switch");
+  for (let i = 0; i < 3; i += 1) playPlateAppearance(state, rng);
+  assert.equal(state.gameOver, undefined, "no forfeit — the bench covered it");
+  const catcher = state.home.lineup.find((player) => player.assignedPosition === "C");
+  assert.equal(catcher?.id, "backup-c", "the backup catcher came on at the turn");
+  const forced = state.pendingSubEvents.find((queued) => queued.type === "defensive-sub" && queued.forced);
+  assert.ok(forced, "the forced switch is announced");
+  assert.equal(forced.in.id, "backup-c");
+  assert.ok(state.home.lineup.some((player) => player.id === "big-bat"), "the pinch-hitter stays in the game");
+  assert.ok(state.removed.home.length >= 2, "the man he hit for AND the man who left for the catcher are out");
+});
+
+test("a defensive sub can shuffle the men already out there", () => {
+  const flexCf = makeHitter({
+    id: "flex-cf", name: "Flex CF", position: "CF",
+    positions: [{ pos: "CF", fielding: 2 }, { pos: "LF/RF", fielding: 1 }]
+  });
+  const home = outsOnlyTeam("home", [makeHitter({ id: "pure-cf", name: "Pure CF", position: "CF", fielding: 3 })]);
+  home.lineup[6] = { ...flexCf, assignedPosition: "CF" };
+  const state = createInitialState(outsOnlyTeam("away", []), home);
+  state.inning = 8;
+  state.half = "top"; // home fields
+  const leftFielder = state.home.lineup.find((player) => player.assignedPosition === "LF");
+  const event = defensiveSub(state, "home", "pure-cf", leftFielder.id);
+  assert.equal(event?.type, "defensive-sub", "the pure CF may replace the left fielder");
+  const byLabel = (label) => state.home.lineup.find((player) => player.assignedPosition === label)?.id;
+  assert.equal(byLabel("CF"), "pure-cf", "he plays center");
+  const flexLabel = state.home.lineup.find((player) => player.id === "flex-cf")?.assignedPosition;
+  assert.ok(flexLabel === "LF" || flexLabel === "RF", `the corner-capable man slides to a corner (${flexLabel})`);
+  // A man nobody can cover for is refused outright — no forfeit door here.
+  const ssOnly = makeHitter({ id: "ss-only", name: "SS Only", position: "SS" });
+  state.home.bench.push({ ...ssOnly });
+  const catcher = state.home.lineup.find((player) => player.assignedPosition === "C");
+  assert.equal(defensiveSub(state, "home", "ss-only", catcher.id), null, "a shortstop cannot take the plate gear");
+});
+
+test("the CPU never subs its way out of a legal defense", () => {
+  const bench = () => [makeHitter({ id: "temptation", name: "Temptation", position: "1B", onBase: 16 })];
+  const state = createInitialState(outsOnlyTeam("away", bench()), outsOnlyTeam("home", []));
+  state.inning = 9;
+  state.half = "top";
+  state.lineupIndex.away = 4; // the catcher due, a monster bat on the bench, nobody to cover
+  state.bases = [null, { id: "away-h-2", name: "away Hitter 2", speed: 8 }, null];
+  assert.equal(autoSubstituteFor(state, "away"), null, "the slugger stays seated");
+  assert.equal(state.away.lineup[4].id, "away-h-4", "the catcher stays in the game");
 });

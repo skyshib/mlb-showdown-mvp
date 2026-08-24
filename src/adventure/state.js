@@ -8,6 +8,7 @@ import {
   snapshotUniversePool,
   installUniversePool
 } from "./packs.js?v=20260716-records";
+import { rosterFormat, discountedRosterCost, formatManagerFields } from "./rosterFormats.js?v=20260716-records";
 
 const SAVE_KEY = "showdown-quest-save";
 // v2: per-save card universes, flat point cap, starter packs. v1 saves point
@@ -15,7 +16,9 @@ const SAVE_KEY = "showdown-quest-save";
 export const SAVE_VERSION = 2;
 
 // The roster budget in BUDGET mode is what an average legal roster costs in
-// the save's pool: the mean price at each of the thirteen slots, summed. So
+// the save's pool: the mean price at each of the format's slots, summed (a
+// fifth of it for full-format bench seats, and the full-format cap runs a
+// calibrated notch richer — see packs.exactCap). So
 // every universe — the fictional league, the all-time set, a thin franchise
 // — hands you the same kind of team, a middling one. Getting ahead means
 // finding bargains, not raising the cap. UNCAPPED saves have no limit at
@@ -28,12 +31,13 @@ export const SAVE_VERSION = 2;
 // against something honest.
 export const LOSS_FEE = 0;
 
-export function createSave({ name, saveSeed, universe = "fictional", mode = "budget" }) {
+export function createSave({ name, saveSeed, universe = "fictional", mode = "budget", rosterFormat = "classic" }) {
   return {
     version: SAVE_VERSION,
     saveSeed,
     universe,
     mode,
+    rosterFormat,
     player: {
       name,
       coins: 0,
@@ -52,9 +56,10 @@ export function createSave({ name, saveSeed, universe = "fictional", mode = "bud
   };
 }
 
-// Older saves predate modes and read as "budget".
+// Older saves predate modes and read as "budget", and predate roster
+// formats and read as "classic" — the shapes they are.
 export function pointCap(save) {
-  return save?.mode === "uncapped" ? Infinity : budgetCap();
+  return save?.mode === "uncapped" ? Infinity : budgetCap(rosterFormat(save).key);
 }
 
 export function deriveSeed(save, ...parts) {
@@ -252,18 +257,26 @@ export function rosterCards(save) {
   return save.roster.cardIds.map((id) => cardById(id)).filter(Boolean);
 }
 
+// What the roster costs against the cap. In the full-roster format the
+// unseated hitters are the bench and price at a fifth of sticker; classic
+// rosters seat everyone, so this is the plain sum it always was.
 export function rosterPoints(save) {
-  return rosterCards(save).reduce((sum, card) => sum + card.points, 0);
+  return discountedRosterCost(rosterCards(save), save.roster.lineupAssignments, rosterFormat(save).key);
 }
 
-// A manager object in the shape src/rules/draft.js expects.
+// A manager object in the shape src/rules/draft.js expects. Full-format
+// saves carry their shape along — the four-man rotation, the whole flex pen,
+// and the bench — so buildTeam and validateRoster field the right team
+// without every call site re-deriving it.
 export function managerFor(save) {
+  const roster = rosterCards(save);
   return {
     id: "player",
     name: save.player.name,
-    roster: rosterCards(save),
+    roster,
     lineupAssignments: save.roster.lineupAssignments,
-    battingOrder: save.roster.battingOrder ?? []
+    battingOrder: save.roster.battingOrder ?? [],
+    ...formatManagerFields(save?.rosterFormat, roster)
   };
 }
 
@@ -273,8 +286,14 @@ export function setRoster(save, cardIds, lineupAssignments = null) {
   // every assignment that still points at a rostered card unless the caller
   // supplies a fresh mapping.
   const kept = lineupAssignments ?? save.roster?.lineupAssignments ?? {};
+  // The reserved bench key holds an ARRAY of ids; filter it to the cards that
+  // remain rather than dropping it wholesale (an array never equals a card id).
   const assignments = Object.fromEntries(
-    Object.entries(kept).filter(([, cardId]) => cardIds.includes(cardId))
+    Object.entries(kept)
+      .map(([slot, value]) => (Array.isArray(value)
+        ? [slot, value.filter((cardId) => cardIds.includes(cardId))]
+        : [slot, value]))
+      .filter(([, value]) => Array.isArray(value) ? value.length : cardIds.includes(value))
   );
   save.roster = { cardIds: [...cardIds], lineupAssignments: assignments, battingOrder };
 }
@@ -556,7 +575,11 @@ export function startSeries(save, trainerId, bestOf) {
     attempt: attemptNumber(save, trainerId),
     wins: 0,
     losses: 0,
-    nextGame: 1
+    nextGame: 1,
+    // Full-format starters are drawn per game; the ledger records each draw
+    // (index into the rotation, per dugout) so a resumed save re-fields the
+    // same arm and the series cap counts every start already made.
+    starterPicks: { player: [], npc: [] }
   };
   return save.activeSeries;
 }

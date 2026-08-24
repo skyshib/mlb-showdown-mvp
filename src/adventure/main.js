@@ -3,7 +3,8 @@ import { cardById } from "./packs.js?v=20260716-records";
 import { hydratePhotos } from "../ui/photos.js?v=20260716-records";
 import { applyFranchisePalette } from "../ui/franchisePalette.js?v=20260716-records";
 import { cardPanelHtml, escapeHtml } from "./ui/helpers.js?v=20260716-records";
-import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260716-records";
+import { titleScreen, introScreen, nameEntryScreen, leagueSelectScreen, modeSelectScreen,
+  formatSelectScreen, starterRevealScreen, exportSaveScreen, importSaveScreen } from "./ui/titleScreens.js?v=20260716-records";
 import { mapScreen, trainerIntroScreen, ambushScreen } from "./ui/mapScreen.js?v=20260716-records";
 import { battleScreen, gameOverScreen, seriesBreakScreen, battleResultScreen, simSeriesScreen, claimCardScreen, resumeBattle } from "./ui/battleScreen.js?v=20260716-records";
 import { shopScreen, sellScreen, binderScreen, teamScreen, lineupScreen, packOpenScreen, catalogScreen, compareScreen } from "./ui/collectionScreens.js?v=20260716-records";
@@ -38,6 +39,7 @@ const SCREENS = {
   nameEntry: nameEntryScreen,
   leagueSelect: leagueSelectScreen,
   modeSelect: modeSelectScreen,
+  formatSelect: formatSelectScreen,
   starterReveal: starterRevealScreen,
   exportSave: exportSaveScreen,
   importSave: importSaveScreen,
@@ -84,7 +86,7 @@ const KEY_MAP = {
 
 // Setting up a new game belongs to no club: the old save is still loaded until
 // the new league is picked, and these are the screens where you pick it.
-const SETUP_SCREENS = new Set(["intro", "nameEntry", "leagueSelect", "modeSelect"]);
+const SETUP_SCREENS = new Set(["intro", "nameEntry", "leagueSelect", "modeSelect", "formatSelect"]);
 
 // Screens in the middle of handing something over. A game in progress is written
 // to the save after every decision, so walking out of one costs nothing — but
