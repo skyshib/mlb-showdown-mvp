@@ -309,6 +309,13 @@ h1.gq-logo {
    rather than glance at. */
 .gq-columns-records { grid-template-columns: 1.7fr 1fr; }
 .gq-columns-records .gq-menu { font-size: 2.5cqw; }
+/* The board beside the list carries a number, a name AND the day it was set on
+   every line, which is a sentence's worth of text in the narrow column: it reads
+   the same size smaller for the same reason. The date is one word however long it
+   is — a line that breaks between AUG and 20 is not a date, it is two halves of
+   one. */
+.gq-columns-records .gq-scroll p { font-size: 2.5cqw; }
+.gq-record-date { display: block; white-space: nowrap; }
 
 .gq-columns-pen,
 .gq-columns-swap { grid-template-columns: 1.25fr 1fr 1fr; }
@@ -1558,14 +1565,21 @@ html.club .gq-exit:focus-visible {
    TEXT: the widest thing in a column is not the number (2 digits) but the LABEL
    over it — "H-AB" is four characters and "+100%" is five. Sized for the digits,
    the header ran its labels into each other: WPAH-AHR BB. */
-.gq-box-row { display: grid; align-items: baseline; gap: 0.4ch; width: 100%; font-size: 2.5cqw; }
+/* A size smaller than it was, because the row grew a column: ROLL costs the NAMES
+   their room, and the names are the one column that cannot be abbreviated any
+   further than the box already abbreviates them. Shrinking the type shrinks the
+   ch-sized number columns with it and hands the difference back to the name. */
+.gq-box-row { display: grid; align-items: baseline; gap: 0.4ch; width: 100%; font-size: 2.4cqw; }
 /* Each column is only as wide as the widest thing IN it — which is the label, not
    the number. WPA holds "+100%", H-AB holds "10-10"; the rest hold two digits and
    a three-letter label. Sized as one uniform column they were fat enough for the
    widest of them and the NAMES paid for it: S.ALOMA…, S.PODSE…. A box score whose
    men cannot be told apart is not a box score. */
-.gq-box-bats { grid-template-columns: minmax(0, 1fr) 5.4ch 5.2ch repeat(7, 3.4ch); }
-.gq-box-arms { grid-template-columns: minmax(0, 1fr) 5.4ch 3.4ch 3.8ch repeat(4, 3.4ch); }
+/* ROLL is the widest of the plain columns: the label is four characters and so is
+   the number under it ("11.8"), where the rest hold two digits and a three-letter
+   head. */
+.gq-box-bats { grid-template-columns: minmax(0, 1fr) 5.4ch 5.2ch repeat(7, 3.4ch) 4.4ch; }
+.gq-box-arms { grid-template-columns: minmax(0, 1fr) 5.4ch 3.4ch 3.8ch repeat(4, 3.4ch) 4.4ch; }
 .gq-box-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gq-box-cell { text-align: right; white-space: nowrap; }
 /* A zero is noise; the eye is hunting for what happened. */

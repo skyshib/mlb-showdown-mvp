@@ -398,16 +398,29 @@ function fictionalCardHtml(card, count, hidePoints = false) {
   </div></div>`;
 }
 
+// The printed scan's URL, or null for a card that never had one. Exported so a
+// screen that knows which cards are coming can warm them before they render:
+// the face sits on a black backdrop, so an unloaded scan is not a blank card,
+// it is a black one.
+export function cardScanUrl(card) {
+  const scan = CARD_IMAGE_FILES[card.id];
+  return scan ? `assets/cards/${scan}` : null;
+}
+
 export function cardPanelHtml(card, { count = null, hidePoints = false } = {}) {
   // Classic cards with a real scan ARE the card: the printed scan fills the
   // frame (courtesy of ShowdownCards.com), with just a compact chart tray
   // below at the scan's width — no rarity chip, no set tag; the print
   // already says everything else.
-  const scan = CARD_IMAGE_FILES[card.id];
-  if (scan) {
+  const scanUrl = cardScanUrl(card);
+  if (scanUrl) {
+    // Loaded eagerly, not lazily. A panel is never one of a thousand thumbnails
+    // in a grid — it is the card you are looking at — and `lazy` hides it from
+    // the preload scanner, so the fetch cannot start until after layout has
+    // already painted the black box it is meant to fill.
     return `<div class="${cardShell(card, " gq-card-has-scan")}"><div class="gq-face">
       <div class="gq-scan-wrap">
-        <img class="gq-card-scan" src="assets/cards/${escapeHtml(scan)}" alt="" loading="lazy">
+        <img class="gq-card-scan" src="${escapeHtml(scanUrl)}" alt="">
         ${count !== null ? `<span class="gq-photo-tag">x${count}</span>` : ""}
       </div>
       <div class="gq-scan-tray"><div class="gq-stat-line">${statLineHtml(card, { rating: true, hidePoints })}</div>${chartRows(card)}</div>

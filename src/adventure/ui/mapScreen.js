@@ -1,6 +1,18 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260716-records";
 import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone } from "../region.js?v=20260716-records";
-import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, persistSave } from "../state.js?v=20260716-records";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, seasonTeam, persistSave } from "../state.js?v=20260716-records";
+
+// What the club has actually done, which is the one thing the bar never said. The
+// day counts afternoons; the purse and the roster count money and points; none of
+// them is the answer to "how are we doing". A record is.
+//
+// It is the club's own record — the one the season-stats screen keeps — so a
+// replay of a beaten trainer does not move it (see almanacGames). That is a day
+// you played, and the bar counts it as one, but it is not a game on the season.
+export function recordLabel(save) {
+  const { wins, losses } = seasonTeam(save);
+  return `${wins}-${losses}`;
+}
 
 // "1973/3500 PT" under the cap; uncapped saves just count.
 export function pointsLabel(save) {
@@ -145,7 +157,7 @@ export const mapScreen = {
     }
     return `<div class="gq-screen">
       <div class="gq-topbar">
-        <span>${escapeHtml(save.player.name)} &middot; DAY ${ensureSeasonStats(save).games + 1}</span>
+        <span>${escapeHtml(save.player.name)} &middot; DAY ${ensureSeasonStats(save).games + 1} &middot; ${recordLabel(save)}</span>
         <span class="gq-map-purse">$${save.player.coins} &middot; ${pointsLabel(save)} &middot; <span class="gq-badgeline">${badgeLine(save)}</span></span>
       </div>
       <div class="gq-body">${html}</div>
