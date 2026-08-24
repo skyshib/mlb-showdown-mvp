@@ -5250,6 +5250,14 @@ test("the rotation draw fronts full-format games; a rain check spends the day an
   assert.equal(app.screen.name, "rotationDraw", "full format opens on the draw");
   assert.equal(app.screen.draw.rank, app.screen.battle.starterIndex, "the shown rank is the fielded rank");
   assert.equal(app.screen.draw.yours.length, 4, "all four ranks on the board");
+  assert.equal(app.screen.draw.theirs.length, 4, "and the opponent's four beside them");
+  // Settled, the screen shows BOTH starters — yours and theirs, same graphic.
+  app.screen.settled = true;
+  const drawHtml = rotationDrawScreen.render(app);
+  assert.ok(drawHtml.includes("YOUR BALL") && drawHtml.includes("THEIR BALL"), "both clubs' arms are shown");
+  assert.ok(drawHtml.includes(app.screen.draw.yours[app.screen.draw.rank].id), "your starter's card is on the screen");
+  assert.ok(drawHtml.includes(app.screen.draw.theirs[app.screen.draw.rank].id), "so is theirs");
+  app.screen.settled = false;
   const firstSeed = app.screen.battle.seed;
   const day0 = ensureSeasonStats(save).games;
 

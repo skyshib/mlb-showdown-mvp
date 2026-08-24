@@ -21,9 +21,22 @@ export const RESULTS = {
 // recognize him. A two-way player's bat and arm halves share a slice —
 // same person, same era — and are the one legal pairing; his windowed tw
 // printing is a different era, so it conflicts with his career cards.
+// Both readings below are pure functions of a card's id (and, for the
+// Showdown sets, its name) — and they are asked a LOT: the NPC's climb runs
+// personConflict over every candidate in every slot's bucket on every pass,
+// which is tens of thousands of id parses per team. Parsing is regex work,
+// so the answers are memoized by id. Ids are stable strings within a pool;
+// the caches are bounded by the number of distinct cards ever seen.
+const identityCache = new Map();
+const personCache = new Map();
+
 export function playerIdentity(id) {
-  const match = /^mlb-([^-]+)-([^-]+?)(-bat)?$/.exec(id ?? "");
-  return match ? { person: match[2], slice: match[1] } : null;
+  const key = id ?? "";
+  if (identityCache.has(key)) return identityCache.get(key);
+  const match = /^mlb-([^-]+)-([^-]+?)(-bat)?$/.exec(key);
+  const identity = match ? { person: match[2], slice: match[1] } : null;
+  identityCache.set(key, identity);
+  return identity;
 }
 
 // The human behind a card, however his league names him. MLB pools spell the
@@ -32,10 +45,17 @@ export function playerIdentity(id) {
 // man. A deal uses this to put each person on the board once — and a board
 // that holds one Ken Griffey needs no roster rule about the other three.
 export function cardPerson(card) {
+  const key = card?.id ?? "";
+  if (key && personCache.has(key)) return personCache.get(key);
   const identity = playerIdentity(card?.id);
-  if (identity) return identity.person;
-  const name = String(card?.name ?? "").replace(/\s+'\d{2,4}$/, "").trim();
-  return name ? `name:${name.toLowerCase()}` : null;
+  const person = identity
+    ? identity.person
+    : (() => {
+        const name = String(card?.name ?? "").replace(/\s+'\d{2,4}$/, "").trim();
+        return name ? `name:${name.toLowerCase()}` : null;
+      })();
+  if (key) personCache.set(key, person);
+  return person;
 }
 
 // The rostered player that makes `player` illegal to add: the same human
@@ -56,16 +76,59 @@ export function cardPerson(card) {
 // his arm are one card in two halves, same person, same slice, and the one legal
 // pairing. It only applies where both cards carry an era in the id, because that
 // is the only pool that cuts a player in half. Elsewhere a man is himself, once.
+// The same rule asked many times over one roster — which is exactly how the
+// NPC's climb asks it: thousands of candidates against the same twenty men.
+// Building the roster's side of the question ONCE turns each candidate check
+// from a roster scan into a map lookup. personIndex + conflictsWithIndex are
+// exactly personConflict, split in two; see the equivalence test in
+// test/rules.test.js.
+export function personIndex(roster, excludeId = null) {
+  const index = new Map();
+  for (const card of roster) {
+    if (card.id === excludeId) continue;
+    const person = cardPerson(card);
+    if (!person) continue;
+    let entry = index.get(person);
+    if (!entry) index.set(person, (entry = { ids: new Set(), slices: new Set(), bare: false }));
+    entry.ids.add(card.id);
+    const identity = playerIdentity(card.id);
+    if (identity) entry.slices.add(identity.slice);
+    else entry.bare = true;
+  }
+  return index;
+}
+
+export function conflictsWithIndex(index, player) {
+  const person = cardPerson(player);
+  if (!person) return false;
+  const entry = index.get(person);
+  if (!entry) return false;
+  const identity = playerIdentity(player?.id);
+  // A card whose id carries no era (the Showdown sets) is the man himself,
+  // once: any other rostered card of his conflicts.
+  if (!identity) {
+    for (const id of entry.ids) if (id !== player?.id) return true;
+    return false;
+  }
+  // He carries an era. A rostered card of his with no era at all conflicts;
+  // so does one from a DIFFERENT era. Same era is the two-way pairing.
+  if (entry.bare) return true;
+  for (const slice of entry.slices) if (slice !== identity.slice) return true;
+  return false;
+}
+
 export function personConflict(roster, player, excludeId = null) {
   const person = cardPerson(player);
   if (!person) return null;
   const identity = playerIdentity(player?.id);
-  return roster.find((rostered) => {
-    if (rostered.id === player.id || rostered.id === excludeId) return false;
-    if (cardPerson(rostered) !== person) return false;
+  const playerId = player?.id;
+  for (const rostered of roster) {
+    if (rostered.id === playerId || rostered.id === excludeId) continue;
+    if (cardPerson(rostered) !== person) continue;
     const other = playerIdentity(rostered.id);
-    return identity && other ? other.slice !== identity.slice : true;
-  }) ?? null;
+    if (identity && other ? other.slice !== identity.slice : true) return rostered;
+  }
+  return null;
 }
 
 // A hitter's defensive eligibility, primary spot first: [{ pos, fielding }].

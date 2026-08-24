@@ -323,6 +323,12 @@ h1.gq-logo {
    the pen's bare names: it takes the room out of the cards, which have it. */
 .gq-columns-swap { grid-template-columns: 1.75fr 1fr 1fr; }
 .gq-columns-swap .gq-menu { font-size: 2.7cqw; }
+/* The rotation draw stands the two clubs across from each other: your arm on
+   the left, the board of ranked matchups between them, theirs on the right —
+   both cards the same size, drawn the same way, landing together. */
+.gq-columns-draw { grid-template-columns: 1fr 1.4fr 1fr; }
+.gq-columns-draw .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
+.gq-columns-draw .gq-frame p { margin: 0.25cqw 0; }
 .gq-columns-pen .gq-card-side > p,
 .gq-columns-swap .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
 .gq-columns-pen .gq-card-side > p:last-child { margin: 0.6cqw 0 0; }

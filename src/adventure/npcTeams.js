@@ -2,7 +2,7 @@ import { chartSpan } from "../rules/cards.js?v=20260716-records";
 import { adventurePool } from "./packs.js?v=20260716-records";
 import { npcBudget, trainerById } from "./region.js?v=20260716-records";
 import { createRng } from "../rules/rng.js?v=20260716-records";
-import { personConflict, playsPosition } from "../rules/cards.js?v=20260716-records";
+import { personConflict, personIndex, conflictsWithIndex, playsPosition } from "../rules/cards.js?v=20260716-records";
 import { ROSTER_BENCH_KEY } from "../rules/draft.js?v=20260716-records";
 import { claimedFrom } from "./state.js?v=20260716-records";
 import { rosterFormat, formatManagerFields, benchPrice } from "./rosterFormats.js?v=20260716-records";
@@ -261,8 +261,9 @@ function minimumRoster(candidates, slots, trainer, rng, pointBudget) {
   for (const slot of slots) {
     // The cheapest legal fits (points ascending, name breaking ties), then a
     // seeded draw from the cheapest handful of them.
+    const held = personIndex(roster);
     const eligible = candidates.get(slot)
-      .filter((card) => !used.has(card.id) && !personConflict(roster, card))
+      .filter((card) => !used.has(card.id) && !conflictsWithIndex(held, card))
       .sort((a, b) => a.points - b.points || a.name.localeCompare(b.name));
     if (!eligible.length) {
       // A bench seat a thin pool cannot stock is left empty — a short reserve
@@ -306,10 +307,11 @@ function repairFloorToBudget(roster, used, candidates, slots, pointBudget) {
 // holds — the strict minimum the repair walks a strayed slot back toward.
 function cheapestFit(candidates, slots, roster, used, index) {
   const current = roster[index];
+  const held = personIndex(roster, current.id);
   let cheapest = null;
   for (const card of candidates.get(slots[index])) {
     if (card.id === current.id || used.has(card.id)) continue;
-    if (personConflict(roster, card, current.id)) continue;
+    if (conflictsWithIndex(held, card)) continue;
     if (!cheapest || card.points < cheapest.points
       || (card.points === cheapest.points && card.name.localeCompare(cheapest.name) < 0)) {
       cheapest = card;
@@ -360,11 +362,15 @@ function slotUpgrades({ candidates, score, slots, roster, used, index }) {
   const current = roster[index];
   const slot = slots[index];
   const moves = [];
+  // The roster's side of the era rule, built once for the whole bucket: this
+  // runs over every candidate at every slot on every pass of the climb, and
+  // it was the single most expensive thing the adventure did.
+  const held = personIndex(roster, current.id);
   // The slot's bucket is in pool order, so the moves come out in the same order
   // the old full-pool scan produced — the weighted draw downstream is unchanged.
   for (const card of candidates.get(slot)) {
     if (used.has(card.id) || card.points <= current.points) continue;
-    if (personConflict(roster, card, current.id)) continue;
+    if (conflictsWithIndex(held, card)) continue;
     const gain = score(card) - score(current);
     if (gain <= 0) continue;
     moves.push({ card, weight: gain });

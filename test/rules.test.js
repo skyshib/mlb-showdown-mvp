@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compactChart, RESULTS, resolveChart } from "../src/rules/cards.js";
+import { compactChart, conflictsWithIndex, personConflict, personIndex, RESULTS, resolveChart } from "../src/rules/cards.js";
 import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, maxSeriesStarts, normalizeCardPosition, pauseSnake, pickPlayer, pickRandomStarter, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, staffSlotLabels, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
@@ -2631,4 +2631,42 @@ test("the CPU never subs its way out of a legal defense", () => {
   state.bases = [null, { id: "away-h-2", name: "away Hitter 2", speed: 8 }, null];
   assert.equal(autoSubstituteFor(state, "away"), null, "the slugger stays seated");
   assert.equal(state.away.lineup[4].id, "away-h-4", "the catcher stays in the game");
+});
+
+test("the person index answers exactly what a roster scan answers", () => {
+  // personIndex/conflictsWithIndex exist only to make the era rule cheap for
+  // the NPC's climb, which asks it thousands of times against one roster.
+  // They must never disagree with personConflict — that would silently deal
+  // different teams. Cases: a Showdown-set name pair, two MLB eras of one
+  // man, a two-way pairing (same era, legal), and the exclude-id swap seam.
+  const sosa00 = { id: "sd-1", name: "Sammy Sosa '00", kind: "hitter" };
+  const sosa01 = { id: "sd-2", name: "Sammy Sosa '01", kind: "hitter" };
+  const other = { id: "sd-3", name: "Brant Brown '98", kind: "hitter" };
+  const bonds90 = { id: "mlb-1990-bondsba01", name: "Barry Bonds", kind: "hitter" };
+  const bonds00 = { id: "mlb-2000-bondsba01", name: "Barry Bonds", kind: "hitter" };
+  const ruthArm = { id: "mlb-tw-ruthba01", name: "Babe Ruth", kind: "pitcher" };
+  const ruthBat = { id: "mlb-tw-ruthba01-bat", name: "Babe Ruth", kind: "hitter" };
+  const ruthCareer = { id: "mlb-alltime-ruthba01", name: "Babe Ruth", kind: "hitter" };
+  const pool = [sosa00, sosa01, other, bonds90, bonds00, ruthArm, ruthBat, ruthCareer];
+  const rosters = [
+    [], [sosa00], [sosa00, other], [bonds90], [bonds90, bonds00], [ruthArm],
+    [ruthArm, ruthBat], [ruthCareer], [ruthArm, ruthCareer], [sosa00, bonds90, ruthArm]
+  ];
+  for (const roster of rosters) {
+    for (const excludeId of [null, ...roster.map((card) => card.id)]) {
+      const index = personIndex(roster, excludeId);
+      for (const card of pool) {
+        assert.equal(
+          conflictsWithIndex(index, card),
+          Boolean(personConflict(roster, card, excludeId)),
+          `roster [${roster.map((c) => c.id)}] exclude ${excludeId} candidate ${card.id}`
+        );
+      }
+    }
+  }
+  // The pairing the rule exists to permit, and the era clash it exists to stop.
+  assert.equal(conflictsWithIndex(personIndex([ruthArm]), ruthBat), false, "a two-way man's halves are one card");
+  assert.equal(conflictsWithIndex(personIndex([ruthArm]), ruthCareer), true, "his career printing is another era");
+  assert.equal(conflictsWithIndex(personIndex([sosa00]), sosa01), true, "one Sosa to a club");
+  assert.equal(conflictsWithIndex(personIndex([sosa00], "sd-1"), sosa01), false, "unless the first is the man leaving");
 });

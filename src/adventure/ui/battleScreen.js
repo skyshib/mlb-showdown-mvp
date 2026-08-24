@@ -261,17 +261,24 @@ export const rotationDrawScreen = {
       : `<span class="gq-dim">&mdash;</span>`;
     const rows = draw.yours.map((yourArm, index) => {
       const lit = index === highlight;
-      return `<p class="${lit ? "" : "gq-dim"}">${lit ? "&#9654;" : "&nbsp;"} #${index + 1} ${arm(yourArm)} <span class="gq-dim">v</span> ${arm(draw.theirs[index])}</p>`;
+      return `<p class="${lit ? "" : "gq-dim"}">${lit ? "&#9654;" : "&nbsp;"} #${index + 1} ${arm(yourArm)} <span class="gq-dim">v</span> ${arm(draw.theirs[index])}${lit && settled ? " &#9664;" : ""}</p>`;
     }).join("");
     const starter = draw.yours[draw.rank];
     const opponent = draw.theirs[draw.rank];
+    // Both arms land at once, the same way, facing each other across the
+    // board — yours on the left, theirs on the right, the way the two clubs
+    // stand in every other screen in the game.
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>ROTATION DRAW</span><span>GAME ${draw.gameNumber}${draw.bestOf > 1 ? ` OF ${draw.bestOf}` : ""}</span></div>
-      <div class="gq-body"><div class="gq-columns gq-columns-pen">
-        <div class="gq-frame"><h3>YOU &middot; VS ${escapeHtml(trainer.name)}</h3>${rows}</div>
+      <div class="gq-body"><div class="gq-columns gq-columns-draw">
         <div class="gq-card-side">
-          <p class="gq-dim">${settled ? "TAKES THE BALL" : "&nbsp;"}</p>
+          <p class="gq-dim">${settled ? "YOUR BALL" : "&nbsp;"}</p>
           ${settled && starter ? cardPanelHtml(starter) : ""}
+        </div>
+        <div class="gq-frame"><h3>THE DRAW &middot; VS ${escapeHtml(trainer.name)}</h3>${rows}</div>
+        <div class="gq-card-side gq-card-side-away">
+          <p class="gq-dim">${settled ? "THEIR BALL" : "&nbsp;"}</p>
+          ${settled && opponent ? cardPanelHtml(opponent) : ""}
         </div>
       </div></div>
       <div class="gq-textbox">
@@ -298,7 +305,8 @@ export const rotationDrawScreen = {
     }, 130);
   },
   hoverCard(app) {
-    return app.screen.settled ? app.screen.draw?.yours?.[app.screen.draw.rank] ?? null : null;
+    if (!app.screen.settled) return null;
+    return app.screen.draw?.yours?.[app.screen.draw.rank] ?? null;
   },
   key(app, key) {
     if (key === "a") {
