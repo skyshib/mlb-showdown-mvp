@@ -5251,12 +5251,23 @@ test("the rotation draw fronts full-format games; a rain check spends the day an
   assert.equal(app.screen.draw.rank, app.screen.battle.starterIndex, "the shown rank is the fielded rank");
   assert.equal(app.screen.draw.yours.length, 4, "all four ranks on the board");
   assert.equal(app.screen.draw.theirs.length, 4, "and the opponent's four beside them");
-  // Settled, the screen shows BOTH starters — yours and theirs, same graphic.
+  // The board shows all EIGHT arms, paired rank against rank, before and
+  // after the spin settles — you can see what the draw passed over.
+  const spinning = rotationDrawScreen.render(app);
+  for (const card of [...app.screen.draw.yours, ...app.screen.draw.theirs]) {
+    assert.ok(spinning.includes(card.id), `${card.name} is on the board`);
+  }
+  assert.equal((spinning.match(/gq-draw-seat/g) ?? []).length >= 8, true, "eight seats on the board");
+  // Settled, the picked pair is marked out for the embiggening.
   app.screen.settled = true;
   const drawHtml = rotationDrawScreen.render(app);
-  assert.ok(drawHtml.includes("YOUR BALL") && drawHtml.includes("THEIR BALL"), "both clubs' arms are shown");
-  assert.ok(drawHtml.includes(app.screen.draw.yours[app.screen.draw.rank].id), "your starter's card is on the screen");
-  assert.ok(drawHtml.includes(app.screen.draw.theirs[app.screen.draw.rank].id), "so is theirs");
+  for (const card of [...app.screen.draw.yours, ...app.screen.draw.theirs]) {
+    assert.ok(drawHtml.includes(card.id), `${card.name} is still on the board`);
+  }
+  assert.equal((drawHtml.match(/gq-draw-seat-picked/g) ?? []).length, 2, "one winner in each block");
+  assert.equal((drawHtml.match(/gq-draw-hero/g) ?? []).length, 2, "each block heroes its winner");
+  assert.equal((drawHtml.match(/gq-draw-rest/g) ?? []).length, 2, "with the passed-over arms stood down beneath");
+  assert.ok(drawHtml.includes("gq-draw-board-settled"), "and the board is in its settled layout");
   app.screen.settled = false;
   const firstSeed = app.screen.battle.seed;
   const day0 = ensureSeasonStats(save).games;

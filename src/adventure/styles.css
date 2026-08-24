@@ -323,19 +323,107 @@ h1.gq-logo {
    the pen's bare names: it takes the room out of the cards, which have it. */
 .gq-columns-swap { grid-template-columns: 1.75fr 1fr 1fr; }
 .gq-columns-swap .gq-menu { font-size: 2.7cqw; }
-/* The rotation draw stands the two clubs across from each other: your arm on
-   the left, the board of ranked matchups between them, theirs on the right —
-   both cards the same size, drawn the same way, landing together. */
-.gq-columns-draw { grid-template-columns: 1fr 1.4fr 1fr; }
-.gq-columns-draw .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
-.gq-columns-draw .gq-frame p { margin: 0.25cqw 0; }
-.gq-columns-pen .gq-card-side > p,
-.gq-columns-swap .gq-card-side > p { text-align: center; white-space: nowrap; margin: 0 0 0.6cqw; }
-.gq-columns-pen .gq-card-side > p:last-child { margin: 0.6cqw 0 0; }
-/* Two cards to a row means each column is already narrow; the card takes all
-   of it back — there is height to spare and the chart has to be readable. */
-.gq-columns-pen .gq-card-side .gq-card,
-.gq-columns-swap .gq-card-side .gq-card { width: 100%; }
+/* ---- The rotation draw ----
+   All eight arms on one board: your four in a block on the left, the
+   opponent's on the right, rank for rank. The spin lights the same rank in
+   both blocks; when it settles THAT card grows in each block and its three
+   siblings shrink — nothing ever leaves the screen, so you can see what the
+   draw passed over. The growth is grid track sizing (the card is sized by
+   HEIGHT against its printed aspect), so it is the layout moving rather than
+   a transform blowing up a blurry copy. */
+.gq-draw-board {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 1cqw;
+  height: 100%;
+  min-height: 0;
+}
+.gq-draw-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.gq-draw-panel > h3 { margin: 0 0 0.5cqw; text-align: center; }
+.gq-draw-panel-theirs > h3 { color: var(--gb-dark); }
+.gq-draw-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 0.6cqw;
+  transition: grid-template-columns 300ms ease, grid-template-rows 300ms ease;
+}
+.gq-draw-seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3cqw;
+  min-height: 0;
+  min-width: 0;
+  padding: 0.3cqw;
+  border: 0.3cqw solid transparent;
+  border-radius: 0.7cqw;
+  transition: opacity 240ms ease, border-color 160ms ease, background 160ms ease;
+}
+/* The card fills whatever height its cell has and takes its width from the
+   printed shape, so a cell that grows grows the CARD rather than the gap. */
+.gq-draw-card { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.gq-draw-card .gq-card {
+  height: 100%;
+  width: auto;
+  aspect-ratio: 242 / 386;
+  margin: 0;
+}
+.gq-draw-arm {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 2.1cqw;
+}
+.gq-draw-vs {
+  align-self: center;
+  color: var(--gb-dark);
+  font-size: 3.2cqw;
+  padding: 0 0.4cqw;
+}
+
+/* The spin's cursor: a lift off the tan in both blocks at once. */
+.gq-draw-seat-lit { background: var(--gb-lightest); border-color: var(--gb-dark); }
+
+/* Settled: the chosen arm takes the top of his block as a full card, and the
+   three the draw passed over line up beneath him — still on the screen, just
+   stood down. Both cells stay card-shaped, so height-sized cards never grow
+   wider than the cell holding them. */
+.gq-draw-hero {
+  flex: 3;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+}
+.gq-draw-rest {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 0.6cqw;
+  margin-top: 0.5cqw;
+}
+.gq-draw-rest .gq-draw-seat { flex: 1; min-width: 0; }
+.gq-draw-hero .gq-draw-seat { min-width: 0; }
+.gq-draw-seat-picked {
+  background: var(--gq-lead);
+  color: var(--gq-lead-ink);
+  border-color: var(--gq-lead);
+}
+.gq-draw-seat-picked .gq-draw-arm { font-size: 2.6cqw; }
+.gq-draw-seat-picked .gq-dim { color: var(--gb-light); }
+.gq-draw-seat-out { opacity: 0.5; }
+.gq-draw-seat-out .gq-draw-arm { font-size: 1.7cqw; }
 
 /* The spot reads first and the names line up behind it, so the list scans as a
    lineup card rather than as prose. The column is only as wide as a POSITION —

@@ -256,30 +256,46 @@ export const rotationDrawScreen = {
     const draw = app.screen.draw;
     const settled = Boolean(app.screen.settled);
     const highlight = settled ? draw.rank : (app.screen.spinStep ?? 0) % draw.yours.length;
-    const arm = (card) => card
-      ? `${escapeHtml(shortName(card.name))} <span class="gq-dim">CTRL${card.control}</span>`
-      : `<span class="gq-dim">&mdash;</span>`;
-    const rows = draw.yours.map((yourArm, index) => {
+    // All eight arms on the board at once: your four in a block on the left,
+    // theirs on the right, rank for rank. The spin lights the same rank in
+    // both blocks; when it settles, THAT card grows in each block — the two
+    // men you are about to watch pitch — and their six siblings step back
+    // without ever leaving the screen.
+    const seat = (card, index) => {
       const lit = index === highlight;
-      return `<p class="${lit ? "" : "gq-dim"}">${lit ? "&#9654;" : "&nbsp;"} #${index + 1} ${arm(yourArm)} <span class="gq-dim">v</span> ${arm(draw.theirs[index])}${lit && settled ? " &#9664;" : ""}</p>`;
-    }).join("");
+      const state = settled ? (lit ? " gq-draw-seat-picked" : " gq-draw-seat-out") : (lit ? " gq-draw-seat-lit" : "");
+      return `<div class="gq-draw-seat${state}"${card ? ` data-card-id="${escapeHtml(card.id)}"` : ""}>
+        <div class="gq-draw-card">${card ? cardPanelHtml(card) : ""}</div>
+        <span class="gq-draw-arm">#${index + 1} ${escapeHtml(shortName(card?.name ?? "—"))}${
+          card ? ` <span class="gq-dim">CTRL${card.control}</span>` : ""
+        }</span>
+      </div>`;
+    };
+    // Two shapes, one board. While the draw spins, a block's four arms sit in
+    // a 2x2 so all eight are on the screen at a readable size. The moment it
+    // settles, the block reshapes: the chosen arm takes the top as a full
+    // card, the three it passed over line up beneath him. Every cell stays
+    // roughly card-shaped either way, which is what keeps a card sized to its
+    // cell's HEIGHT from ever growing wider than the cell it sits in.
+    const panel = (title, arms, mine) => {
+      const seats = arms.map(seat);
+      const body = settled
+        ? `<div class="gq-draw-hero">${seats[draw.rank]}</div>
+           <div class="gq-draw-rest">${seats.filter((unused, index) => index !== draw.rank).join("")}</div>`
+        : `<div class="gq-draw-grid">${seats.join("")}</div>`;
+      return `<div class="gq-draw-panel${mine ? "" : " gq-draw-panel-theirs"}">
+        <h3>${title}</h3>
+        ${body}
+      </div>`;
+    };
     const starter = draw.yours[draw.rank];
     const opponent = draw.theirs[draw.rank];
-    // Both arms land at once, the same way, facing each other across the
-    // board — yours on the left, theirs on the right, the way the two clubs
-    // stand in every other screen in the game.
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>ROTATION DRAW</span><span>GAME ${draw.gameNumber}${draw.bestOf > 1 ? ` OF ${draw.bestOf}` : ""}</span></div>
-      <div class="gq-body"><div class="gq-columns gq-columns-draw">
-        <div class="gq-card-side">
-          <p class="gq-dim">${settled ? "YOUR BALL" : "&nbsp;"}</p>
-          ${settled && starter ? cardPanelHtml(starter) : ""}
-        </div>
-        <div class="gq-frame"><h3>THE DRAW &middot; VS ${escapeHtml(trainer.name)}</h3>${rows}</div>
-        <div class="gq-card-side gq-card-side-away">
-          <p class="gq-dim">${settled ? "THEIR BALL" : "&nbsp;"}</p>
-          ${settled && opponent ? cardPanelHtml(opponent) : ""}
-        </div>
+      <div class="gq-body"><div class="gq-draw-board${settled ? " gq-draw-board-settled" : ""}">
+        ${panel("YOU", draw.yours, true)}
+        <div class="gq-draw-vs">${settled ? `#${draw.rank + 1}` : "VS"}</div>
+        ${panel(escapeHtml(trainer.name), draw.theirs, false)}
       </div></div>
       <div class="gq-textbox">
         ${settled
@@ -303,10 +319,6 @@ export const rotationDrawScreen = {
       }
       app.rerender();
     }, 130);
-  },
-  hoverCard(app) {
-    if (!app.screen.settled) return null;
-    return app.screen.draw?.yours?.[app.screen.draw.rank] ?? null;
   },
   key(app, key) {
     if (key === "a") {
