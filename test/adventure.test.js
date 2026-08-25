@@ -5569,3 +5569,78 @@ test("the bench reads best bat first, and wears a hollow mark on the team", asyn
   const catalogApp = { save, screen: { name: "catalog", index: 0, filter: "ALL" }, go() {}, rerender() {} };
   assert.ok(catalogScreen.render(catalogApp).includes("&#96"), "the catalog renders its marks");
 });
+
+test("the in-game ROSTERS screen shows both benches", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const save = await fullTestSave("rosters-bench-seed");
+  const player = managerFor(save);
+  const trainer = trainerById("gym-garrick");
+  const npc = buildNpcTeam(trainer, save);
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "rosters-bench" });
+  const app = { save, screen: { name: "battle", trainerId: trainer.id, battle, mode: "rosters", rosterIndex: 0, lines: [] }, go() {}, rerender() {} };
+  const html = battleScreen.render(app);
+  assert.ok(html.includes("YOUR BENCH"), "your reserves are on the screen");
+  assert.ok(html.includes("THEIR BENCH"), "and so are theirs — you are deciding against them");
+  // Every man on both benches is actually named.
+  for (const card of battle.state[battle.playerSide].bench) {
+    assert.ok(html.includes(escapeName(card.name)), `${card.name} is listed`);
+  }
+  assert.ok(battle.state[battle.npcSide].bench.length > 0, "the opponent carries a bench too");
+});
+
+// The rosters screen shortens names the way its rows do.
+function escapeName(name) {
+  const parts = name.split(" ");
+  if (parts.length < 2) return name.toUpperCase();
+  return `${parts[0][0]}.${parts.slice(1).join(" ")}`.toUpperCase();
+}
+
+test("a defensive shuffle and a killed DH both replay from the recording", async () => {
+  const { actDefenseSwap, actDhTakesField, npcDugoutVisit } = await import("../src/rules/battle/controller.js");
+  const { positionTrades, dhMoveOptions } = await import("../src/rules/game.js");
+  const save = await fullTestSave("defense-replay-seed");
+  const player = managerFor(save);
+  const trainer = trainerById("gym-garrick");
+  const npc = buildNpcTeam(trainer, save);
+  // Host, so the player fields the top of the first and can rearrange at once.
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "defense-replay", playerIsAway: false });
+  const side = battle.playerSide;
+
+  // A shuffle, in the FIRST inning: repositioning obeys no seventh-inning gate.
+  assert.equal(battle.state.inning, 1);
+  let swapped = false;
+  for (const man of battle.state[side].lineup) {
+    const trades = positionTrades(battle.state, side, man.id);
+    if (trades.length) {
+      actDefenseSwap(battle, man.id, trades[0].player.id);
+      swapped = true;
+      break;
+    }
+  }
+  assert.ok(swapped, "somebody on this club can cover a second spot");
+  npcDugoutVisit(battle);
+
+  // And the DH going out to a glove, which ends the DH.
+  const moves = dhMoveOptions(battle.state, side);
+  let killedDh = false;
+  if (moves.length) {
+    actDhTakesField(battle, moves[0].out.id);
+    killedDh = true;
+    assert.equal(battle.state.pitcherBattingSpot[side] != null, true, "the arm is in the order");
+  }
+
+  const kinds = new Set(battle.actions.map((action) => action.type));
+  assert.ok(kinds.has("dx"), "the shuffle is in the recording");
+  if (killedDh) assert.ok(kinds.has("dh"), "so is the DH move");
+
+  const stashed = JSON.parse(JSON.stringify(serializeBattle(battle)));
+  const resumed = restoreBattle({ playerManager: player, npcManager: npc, trainer, ...stashed });
+  assert.ok(resumed, "the recording replays");
+  assert.deepEqual(
+    resumed.state[side].lineup.map((p) => `${p.assignedPosition ?? p.position}:${p.id}`),
+    battle.state[side].lineup.map((p) => `${p.assignedPosition ?? p.position}:${p.id}`),
+    "the same nine stand in the same spots"
+  );
+  assert.deepEqual(resumed.state.pitcherBattingSpot, battle.state.pitcherBattingSpot, "and the arm bats where he batted");
+  assert.deepEqual(resumed.state.removed, battle.state.removed);
+});

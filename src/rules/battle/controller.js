@@ -10,6 +10,10 @@ import {
   pinchSubKeepsDefense,
   defensiveSubFits,
   walkoffSpot,
+  swapDefensivePositions,
+  positionTrades,
+  dhTakesTheField,
+  dhMoveOptions,
   playStealAttempt,
   stealCandidates,
   attemptSteal,
@@ -98,6 +102,8 @@ const REPLAY = {
   ph: (battle, action) => actPinchHit(battle, action.id),
   pr: (battle, action) => actPinchRun(battle, action.id, action.base),
   ds: (battle, action) => actDefensiveSub(battle, action.id, action.target),
+  dx: (battle, action) => actDefenseSwap(battle, action.a, action.b),
+  dh: (battle, action) => actDhTakesField(battle, action.target),
   fastForward: (battle) => fastForward(battle)
 };
 
@@ -177,8 +183,14 @@ export function battlePhase(battle) {
     bullpen: availableRelievers(battle),
     bench: availableBench(state, battle.playerSide),
     subEligibility: substitutionEligibility(state, battle.playerSide),
-    // The nine on the field, for a defensive-replacement pick.
-    defenseTargets: state[battle.playerSide].lineup.map((player) => ({ player }))
+    // The nine on the field: who each man could be replaced by off the
+    // bench, and who he could trade spots with out there.
+    defenseTargets: state[battle.playerSide].lineup.map((player) => ({
+      player,
+      trades: positionTrades(state, battle.playerSide, player.id)
+    })),
+    // What it would take to send the DH out to a glove, and what it costs.
+    dhMoves: dhMoveOptions(state, battle.playerSide)
   };
 }
 
@@ -323,6 +335,22 @@ export function actPinchRun(battle, cardId, baseIndex) {
   record(battle, { type: "pr", id: cardId, base: baseIndex });
   const event = pinchRun(battle.state, battle.playerSide, cardId, baseIndex);
   return event ? [pushEvent(battle, event)] : [];
+}
+
+// Moving two men who are already out there. Not a substitution — nobody
+// enters, nobody leaves — so it is legal in any inning.
+// Sending the DH out to a glove — the one move on this screen that costs a
+// man and the designated hitter both (Official Baseball Rule 5.11).
+export function actDhTakesField(battle, targetId) {
+  record(battle, { type: "dh", target: targetId });
+  const event = dhTakesTheField(battle.state, battle.playerSide, targetId);
+  return event ? [pushEvent(battle, event), ...drainEngineEvents(battle)] : drainEngineEvents(battle);
+}
+
+export function actDefenseSwap(battle, idA, idB) {
+  record(battle, { type: "dx", a: idA, b: idB });
+  const event = swapDefensivePositions(battle.state, battle.playerSide, idA, idB);
+  return event ? [pushEvent(battle, event), ...drainEngineEvents(battle)] : drainEngineEvents(battle);
 }
 
 export function actDefensiveSub(battle, cardId, targetId) {

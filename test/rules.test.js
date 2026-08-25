@@ -28,9 +28,14 @@ import {
   pinchHit,
   pinchRun,
   defensiveSub,
-  autoSubstituteFor
+  autoSubstituteFor,
+  positionTrades,
+  swapDefensivePositions,
+  dhMoveOptions,
+  dhTakesTheField,
+  changePitcher
 } from "../src/rules/game.js";
-import { batterRunsPerPa, benchSlotFielding, pinchHitDecision, pinchRunDecision, defensiveSubDecision } from "../src/rules/substitutions.js";
+import { batterRunsPerPa, benchSlotFielding, pinchHitDecision, pinchRunDecision, defensiveSubDecision, alignmentLegal, coverageAssignment, defenseEligible } from "../src/rules/substitutions.js";
 import { createRng } from "../src/rules/rng.js";
 import { simulateRoundRobin } from "../src/rules/tournament.js";
 
@@ -2669,4 +2674,99 @@ test("the person index answers exactly what a roster scan answers", () => {
   assert.equal(conflictsWithIndex(personIndex([ruthArm]), ruthCareer), true, "his career printing is another era");
   assert.equal(conflictsWithIndex(personIndex([sosa00]), sosa01), true, "one Sosa to a club");
   assert.equal(conflictsWithIndex(personIndex([sosa00], "sd-1"), sosa01), false, "unless the first is the man leaving");
+});
+
+// ---- Moving the men already out there ---------------------------------------
+
+// A club whose cards each play two spots, so trades are actually available.
+function flexTeam(prefix) {
+  const two = (id, primary, second, fielding = 2) => makeHitter({
+    id: `${prefix}-${id}`, name: `${prefix} ${id}`, position: primary, assignedPosition: primary,
+    positions: [{ pos: primary, fielding }, { pos: second, fielding: fielding - 1 }]
+  });
+  return {
+    name: prefix.toUpperCase(),
+    lineup: [
+      two("c", "C", "1B"), two("first", "1B", "3B"), two("second", "2B", "SS"),
+      two("third", "3B", "2B"), two("short", "SS", "2B"), two("left", "LF/RF", "CF"),
+      two("center", "CF", "LF/RF"), two("right", "LF/RF", "CF"),
+      { ...makeHitter({ id: `${prefix}-dh`, name: `${prefix} dh`, position: "1B" }), assignedPosition: "DH" }
+    ].map((player, index) => ({ ...player, assignedPosition: ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"][index] })),
+    pitchers: [makePitcher({ id: `${prefix}-p`, name: `${prefix} arm` }), makePitcher({ id: `${prefix}-p2`, name: `${prefix} arm2`, role: "RP", ip: 1 })]
+  };
+}
+
+test("fielders already in the game can trade spots, in any inning", () => {
+  const state = createInitialState(flexTeam("away"), flexTeam("home"));
+  state.half = "top"; // home is in the field
+  const at = (label) => state.home.lineup.find((player) => (player.assignedPosition ?? player.position) === label);
+  const short = at("SS");
+  const second = at("2B");
+  // No seventh-inning gate: nobody enters or leaves, so nothing is spent.
+  assert.equal(state.inning, 1);
+  const trades = positionTrades(state, "home", short.id).map((trade) => trade.to);
+  assert.ok(trades.includes("2B"), `the shortstop can move to second (${trades.join(",")})`);
+  const event = swapDefensivePositions(state, "home", short.id, second.id);
+  assert.equal(event.type, "defense-swap");
+  assert.equal(event.a.from, "SS");
+  assert.equal(event.a.to, "2B");
+  assert.equal(at("2B").id, short.id, "he is standing at second now");
+  assert.equal(at("SS").id, second.id, "and the second baseman has short");
+  assert.equal(state.home.lineup.length, 9, "nobody entered or left");
+  assert.deepEqual(state.removed.home, [], "and nobody was spent");
+  // The glove follows the card: each man is rated where he now stands.
+  assert.equal(at("2B").fielding, 1, "his second-position rating");
+
+  // A man who cannot play the spot is never offered it.
+  const catcher = at("C");
+  assert.equal(positionTrades(state, "home", catcher.id).some((trade) => trade.to === "CF"), false);
+  assert.equal(swapDefensivePositions(state, "home", catcher.id, at("CF").id), null, "and cannot be forced there");
+  // The batting side does not rearrange its defense.
+  assert.equal(swapDefensivePositions(state, "away", state.away.lineup[0].id, state.away.lineup[1].id), null);
+});
+
+test("the DH taking a glove ends the DH and puts the pitcher in the order (rule 5.11)", () => {
+  const state = createInitialState(flexTeam("away"), flexTeam("home"));
+  state.half = "top";
+  const at = (label) => state.home.lineup.find((player) => (player.assignedPosition ?? player.position) === label);
+  const dh = at("DH");
+  const dhSpot = state.home.lineup.findIndex((player) => player.id === dh.id);
+  const firstBase = at("1B");
+  const firstSpot = state.home.lineup.findIndex((player) => player.id === firstBase.id);
+
+  // The DH is not part of ordinary position trades: his move is its own move.
+  assert.deepEqual(positionTrades(state, "home", dh.id), [], "no trade offers the DH a glove");
+  const moves = dhMoveOptions(state, "home");
+  assert.ok(moves.some((move) => move.to === "1B"), "but he may go out and play first");
+
+  const event = dhTakesTheField(state, "home", firstBase.id);
+  assert.equal(event.type, "dh-to-field");
+  // He keeps his own place in the order...
+  assert.equal(state.home.lineup[dhSpot].id, dh.id, "the DH bats where he always batted");
+  assert.equal(state.home.lineup[dhSpot].assignedPosition, "1B", "and now plays first");
+  // ...the man he replaced is gone...
+  assert.ok(state.removed.home.includes(firstBase.id), "the first baseman leaves the game");
+  assert.equal(state.home.lineup.some((player) => player.id === firstBase.id), false);
+  // ...and the pitcher bats in the departed man's spot.
+  const arm = state.home.pitchers[state.pitching.home.pitcherIndex];
+  assert.equal(state.home.lineup[firstSpot].id, arm.id, "the pitcher takes that spot in the order");
+  assert.equal(state.home.lineup[firstSpot].assignedPosition, "P");
+  assert.equal(state.home.lineup[firstSpot].battingAsPitcher, true);
+  assert.ok(state.home.lineup[firstSpot].onBase < 8, "and he is a pitcher at the plate, not a hitter");
+  assert.equal(state.pitcherBattingSpot.home, firstSpot);
+
+  // The role is finished for the day: it cannot happen twice.
+  assert.equal(dhMoveOptions(state, "home").length, 0);
+  assert.equal(dhTakesTheField(state, "home", at("2B").id), null, "the DH is gone for good");
+
+  // The defense is still legal — the pitcher is never matched into the eight.
+  assert.equal(alignmentLegal(state.home.lineup), true);
+  assert.ok(coverageAssignment(state.home.lineup), "eight men still cover the field");
+  assert.equal(defenseEligible(state.home.lineup[firstSpot], "1B"), false, "an arm cannot cover first");
+
+  // Every arm after him inherits that spot in the order.
+  const reliever = changePitcher(state, "home");
+  assert.equal(state.home.lineup[firstSpot].id, reliever.id, "the new arm bats there too");
+  assert.equal(state.home.lineup[firstSpot].battingAsPitcher, true);
+  assert.equal(state.home.lineup.length, 9, "still nine men in the order");
 });

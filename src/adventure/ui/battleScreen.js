@@ -18,7 +18,7 @@ import { longestHitStreak, updatePersonalRecords, setsOpenableGameRecord } from 
 import { uploadGame } from "../gameArchive.js?v=20260716-records";
 import { compactGame } from "../gameLog.js?v=20260716-records";
 import { cardById } from "../packs.js?v=20260716-records";
-import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver, pinchSubKeepsDefense, defensiveSubFits, walkoffSpot } from "../../rules/game.js?v=20260716-records";
+import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver, pinchSubKeepsDefense, defensiveSubFits, walkoffSpot, availableBench } from "../../rules/game.js?v=20260716-records";
 import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260716-records";
 import { rosterFormat, pickRandomStarter } from "../rosterFormats.js?v=20260716-records";
 import { createRng } from "../../rules/rng.js?v=20260716-records";
@@ -66,6 +66,8 @@ import {
   actPinchHit,
   actPinchRun,
   actDefensiveSub,
+  actDefenseSwap,
+  actDhTakesField,
   fastForward,
   runSimSeries,
   isDramaticMoment,
@@ -572,13 +574,19 @@ function benchMenuItem(app, phase, label) {
   const battle = app.screen.battle;
   const team = battle.state[battle.playerSide];
   const hadBench = (team.bench?.length ?? 0) > 0 || (battle.state.removed?.[battle.playerSide]?.length ?? 0) > 0;
-  if (!hadBench) return null;
   const eligibility = phase.subEligibility ?? { allowed: false, reason: "" };
+  // The DEFENSE door opens whenever you are in the field, bench or no bench:
+  // moving the men already out there costs nothing and obeys no gate. The
+  // BENCH door needs a bench to open at all.
+  const canShuffle = label === "DEFENSE" && (phase.defenseTargets ?? []).some((entry) => entry.trades?.length);
+  if (!hadBench && !canShuffle) return null;
   return {
     html: eligibility.allowed
       ? `${label} <span class="gq-dim">${phase.bench.length} AVAILABLE</span>`
-      : `${label} <span class="gq-dim">${escapeHtml(eligibility.reason.toUpperCase())}</span>`,
-    disabled: !eligibility.allowed,
+      : canShuffle
+        ? `${label} <span class="gq-dim">MOVE YOUR FIELDERS</span>`
+        : `${label} <span class="gq-dim">${escapeHtml(eligibility.reason.toUpperCase())}</span>`,
+    disabled: !eligibility.allowed && !canShuffle,
     run: (a) => {
       a.screen.mode = "bench";
       a.screen.benchStage = "target";
@@ -627,7 +635,33 @@ function benchTargetRows(battle, phase) {
 function benchManRows(battle, phase, target) {
   const state = battle.state;
   const side = battle.playerSide;
-  return (phase.bench ?? []).map((card) => {
+  const rows = [];
+  // A man on the field can be replaced from the bench OR simply moved: the
+  // second is not a substitution, so it is offered whatever the inning.
+  if (target?.kind === "ds") {
+    const isDh = (target.out.assignedPosition ?? target.out.position) === "DH";
+    if (isDh) {
+      // Rule 5.11: he can go out there, but it ends the DH for the day and
+      // puts your pitcher in the order. Every one of these is a warned move.
+      for (const move of phase.dhMoves ?? []) {
+        rows.push({
+          card: move.dh,
+          move: { kind: "dh", target: move.out, to: move.to },
+          risky: true,
+          html: `&#9888; TAKE THE FIELD AT ${escapeHtml(move.to)} <span class="gq-dim">${escapeHtml(shortName(move.out.name))} LEAVES &middot; PITCHER BATS</span>`
+        });
+      }
+    }
+    const entry = (phase.defenseTargets ?? []).find((item) => item.player.id === target.out.id);
+    for (const trade of entry?.trades ?? []) {
+      rows.push({
+        card: trade.player,
+        move: { kind: "dx", partner: trade.player },
+        html: `&#8646; TRADE SPOTS <span class="gq-dim">${escapeHtml(shortName(trade.player.name))} &middot; ${escapeHtml(trade.to)} &#8594; ${escapeHtml(trade.from)}</span>`
+      });
+    }
+  }
+  return rows.concat((phase.bench ?? []).map((card) => {
     const stat = `OB${card.onBase} SPD${card.speed} FLD${(Number(card.fielding) || 0) >= 0 ? "+" : ""}${Number(card.fielding) || 0}`;
     let risky = false;
     let disabled = false;
@@ -653,35 +687,45 @@ function benchManRows(battle, phase, target) {
       disabled,
       html: `${escapeHtml(shortName(card.name))} <span class="gq-dim">${stat}${note ? ` &middot; ${note}` : ""}</span>`
     };
-  });
+  }));
 }
 
 // The walk-off gamble spelled out before it is taken: win now, or forfeit
 // the moment this club must take the field again.
-function renderBenchConfirm(app, battle, trainer, target, card) {
+function renderBenchConfirm(app, battle, trainer, target, card, move = null) {
+  // Two moves on this screen cannot be walked back. Each gets the whole
+  // window and says plainly what it costs.
+  const dh = move?.kind === "dh";
+  const mound = pitcherStatus(battle.state, battle.playerSide).pitcher;
+  const body = dh
+    ? `<h3>&#9888; THIS ENDS YOUR DH</h3>
+       <p>Send ${escapeHtml(shortName(card.name))} out to ${escapeHtml(move.to)} and, by rule, the designated hitter is finished for this club for the rest of the game.</p>
+       <p class="gq-mt">${escapeHtml(shortName(move.target.name))} <b>LEAVES THE GAME.</b></p>
+       <p class="gq-mt">${escapeHtml(shortName(mound?.name ?? "Your pitcher"))} <b>BATS IN HIS SPOT</b> &mdash; and so does every arm you bring in after him.</p>`
+    : `<h3>&#9888; NO DEFENSE BEHIND THIS</h3>
+       <p>If ${escapeHtml(shortName(card.name))} goes in for ${escapeHtml(shortName(target.out.name))}, this club can NO LONGER field a legal defense &mdash; not even off the bench.</p>
+       <p class="gq-mt">WIN IT RIGHT HERE and you never take the field again.</p>
+       <p class="gq-mt">If the inning ends without the win, <b>YOU FORFEIT THE GAME.</b></p>`;
   return `<div class="gq-screen">
-    <div class="gq-topbar"><span>&#9888; FORFEIT RISK</span><span>${halfLabel(battle.state)}</span></div>
+    <div class="gq-topbar"><span>&#9888; ${dh ? "RULE 5.11" : "FORFEIT RISK"}</span><span>${halfLabel(battle.state)}</span></div>
     <div class="gq-body"><div class="gq-columns gq-columns-pen">
-      <div class="gq-frame">
-        <h3>&#9888; NO DEFENSE BEHIND THIS</h3>
-        <p>If ${escapeHtml(shortName(card.name))} goes in for ${escapeHtml(shortName(target.out.name))}, this club can NO LONGER field a legal defense &mdash; not even off the bench.</p>
-        <p class="gq-mt">WIN IT RIGHT HERE and you never take the field again.</p>
-        <p class="gq-mt">If the inning ends without the win, <b>YOU FORFEIT THE GAME.</b></p>
-      </div>
+      <div class="gq-frame">${body}</div>
       <div class="gq-card-side">
-        <p class="gq-dim">COMING IN</p>
+        <p class="gq-dim">${dh ? "TAKES THE FIELD" : "COMING IN"}</p>
         ${cardPanelHtml(card)}
       </div>
     </div></div>
-    <div class="gq-textbox"><p class="gq-blink">Z — SEND HIM UP ANYWAY &middot; X — THINK BETTER OF IT</p></div>
+    <div class="gq-textbox"><p class="gq-blink">Z — ${dh ? "DO IT ANYWAY" : "SEND HIM UP ANYWAY"} &middot; X — THINK BETTER OF IT</p></div>
   </div>`;
 }
 
-function runBenchSub(app, target, card) {
+function runBenchSub(app, target, card, move = null) {
   const battle = app.screen.battle;
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
-  if (target.kind === "ph") afterAction(app, actPinchHit(battle, card.id));
+  if (move?.kind === "dh") afterAction(app, actDhTakesField(battle, move.target.id));
+  else if (move?.kind === "dx") afterAction(app, actDefenseSwap(battle, target.out.id, move.partner.id));
+  else if (target.kind === "ph") afterAction(app, actPinchHit(battle, card.id));
   else if (target.kind === "pr") afterAction(app, actPinchRun(battle, card.id, target.base));
   else afterAction(app, actDefensiveSub(battle, card.id, target.target));
 }
@@ -692,7 +736,7 @@ function runBenchSub(app, target, card) {
 function renderBench(app, battle, trainer, phase) {
   const stage = app.screen.benchStage ?? "target";
   if (stage === "confirm" && app.screen.benchTarget && app.screen.benchChoice) {
-    return renderBenchConfirm(app, battle, trainer, app.screen.benchTarget, app.screen.benchChoice);
+    return renderBenchConfirm(app, battle, trainer, app.screen.benchTarget, app.screen.benchChoice, app.screen.benchMove);
   }
   const targets = benchTargetRows(battle, phase);
   const men = benchManRows(battle, phase, stage === "target" ? null : app.screen.benchTarget);
@@ -1382,12 +1426,35 @@ function rosterRows(battle) {
   for (const side of sides) {
     const team = battle.state[side.key];
     const onMound = battle.state.pitching[side.key].pitcherIndex;
+    const removed = battle.state.removed?.[side.key] ?? [];
     team.lineup.forEach((player, index) => rows.push({
+      side: side.key,
       section: `${side.tag} LINEUP`,
       html: `${index + 1}. ${escapeHtml(player.assignedPosition ?? player.position)} ${escapeHtml(shortName(player.name))} <span class="gq-dim">OB${player.onBase} SPD${player.speed}</span>`,
       card: player
     }));
+    // The bench belongs on this screen: it is half the club in the full-roster
+    // format, and a manager deciding whether to hit for somebody needs to see
+    // who he would be hitting with. Men already spent are listed too, struck
+    // through by a word, because who is GONE is as much use as who is left.
+    const bench = availableBench(battle.state, side.key);
+    bench.forEach((card) => rows.push({
+      side: side.key,
+      section: `${side.tag} BENCH`,
+      html: `${escapeHtml(card.position)} ${escapeHtml(shortName(card.name))} <span class="gq-dim">OB${card.onBase} SPD${card.speed}</span>`,
+      card
+    }));
+    for (const id of removed) {
+      const gone = (team.bench ?? []).find((card) => card.id === id) ?? team.lineup.find((player) => player.id === id);
+      rows.push({
+        side: side.key,
+        section: `${side.tag} BENCH`,
+        html: `<span class="gq-dim">&mdash; ${escapeHtml(shortName(gone?.name ?? "used"))} USED</span>`,
+        card: gone ?? null
+      });
+    }
     team.pitchers.forEach((pitcher, index) => rows.push({
+      side: side.key,
       section: `${side.tag} ARMS`,
       html: `${index === onMound ? "&#9679; " : ""}${escapeHtml(pitcher.role)} ${escapeHtml(shortName(pitcher.name))} <span class="gq-dim">CTRL${pitcher.control} IP${pitcher.ip}</span>`,
       card: pitcher
@@ -1407,7 +1474,7 @@ function renderRosters(app, battle, trainer) {
   const selected = rows[index];
   const sections = [];
   rows.forEach((row, rowIndex) => {
-    if (row.section !== rows[rowIndex - 1]?.section) sections.push({ header: row.section, start: rowIndex });
+    if (row.section !== rows[rowIndex - 1]?.section) sections.push({ header: row.section, start: rowIndex, side: row.side });
   });
   // One section drawn as a heading plus its slice of the flat row list, with
   // every row still carrying its global index so hover and clicks land right.
@@ -1424,8 +1491,12 @@ function renderRosters(app, battle, trainer) {
   return `<div class="gq-screen">
     <div class="gq-topbar"><span>ROSTERS &middot; VS ${escapeHtml(trainer.name)}</span><span>${halfLabel(battle.state)}</span></div>
     <div class="gq-body"><div class="gq-columns gq-columns-rosters">
-      <div class="gq-frame gq-roster-team">${sectionHtml(0)}${sectionHtml(1)}</div>
-      <div class="gq-frame gq-roster-team">${sectionHtml(2)}${sectionHtml(3)}</div>
+      <div class="gq-frame gq-roster-team gq-scroll">${sections
+        .map((section, at) => (section.side === battle.playerSide ? sectionHtml(at) : ""))
+        .join("")}</div>
+      <div class="gq-frame gq-roster-team gq-scroll">${sections
+        .map((section, at) => (section.side === battle.npcSide ? sectionHtml(at) : ""))
+        .join("")}</div>
       <div class="gq-card-side">${selected ? cardPanelHtml(selected.card) : ""}</div>
     </div></div>
     <div class="gq-textbox"><p class="gq-dim">Hover or move the cursor to read a card. X to go back.</p></div>
@@ -1560,10 +1631,11 @@ export const battleScreen = {
     if (app.screen.mode === "bench") {
       const stage = app.screen.benchStage ?? "target";
       if (stage === "confirm") {
-        if (key === "a") runBenchSub(app, app.screen.benchTarget, app.screen.benchChoice);
+        if (key === "a") runBenchSub(app, app.screen.benchTarget, app.screen.benchChoice, app.screen.benchMove);
         else if (key === "b") {
           app.screen.benchStage = "man";
           app.screen.benchChoice = null;
+          app.screen.benchMove = null;
         }
         app.rerender();
         return;
@@ -1591,9 +1663,13 @@ export const battleScreen = {
         } else if (rows[index].disabled) {
           // A man who leaves no legal defense doesn't go in from here.
         } else if (rows[index].risky) {
-          // The walk-off gamble gets its own screen and its own keypress.
+          // A move you do not walk back gets its own screen and its own
+          // keypress: the walk-off gamble, or killing your own DH.
           app.screen.benchChoice = rows[index].card;
+          app.screen.benchMove = rows[index].move ?? null;
           app.screen.benchStage = "confirm";
+        } else if (rows[index].move) {
+          runBenchSub(app, app.screen.benchTarget, rows[index].card, rows[index].move);
         } else {
           runBenchSub(app, app.screen.benchTarget, rows[index].card);
         }

@@ -104,6 +104,12 @@ export function gameLogLine(event, playerSide) {
   if (event.type === "pitching-change") {
     return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.team))} GO TO THE PEN: ${escapeHtml(shortName(event.pitcher))}</span>`;
   }
+  if (event.type === "dh-to-field") {
+    return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.dh?.name ?? ""))} TO ${escapeHtml(event.dh?.to ?? "THE FIELD")} &mdash; <b>DH ENDS</b>, PITCHER BATS</span>`;
+  }
+  if (event.type === "defense-swap") {
+    return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.a?.name ?? ""))} &#8646; ${escapeHtml(shortName(event.b?.name ?? ""))} SWITCH SPOTS</span>`;
+  }
   if (event.type === "forfeit") {
     return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.team))} CANNOT FIELD A DEFENSE &mdash; <b>FORFEIT</b></span>`;
   }

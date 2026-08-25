@@ -334,6 +334,18 @@ would strand the defense are refused — the CPU never makes one — except the
 home side batting in the 9th+ (`walkoffSpot`), where the battle UI allows the
 gamble behind an explicit confirm.
 
+Defensive management beyond substitutions: `positionTrades` /
+`swapDefensivePositions` (game.js) move two men who are already in the game
+between spots — no inning gate, since nobody enters or leaves — and both must
+be able to play where they are going. The DH is excluded from trades: sending
+him to a glove is `dhTakesTheField`, which implements Official Baseball Rule
+5.11 — the DH keeps his place in the batting order, the fielder he replaces
+LEAVES the game, the pitcher bats in that spot (`pitcherAtThePlate`, a weak
+synthetic batting line, since the card sets print no batting data for arms),
+and the DH is finished for that club for the game, so every arm after him
+inherits the spot (`state.pitcherBattingSpot`). The battle UI gates that move
+behind an explicit RULE 5.11 confirm screen. The CPU never makes it.
+
 Full-format games open on the `rotationDraw` screen: the spin over the four
 points-ranked matchups that lands on tonight's shared rank. X there is a
 rain check (`abandonSeriesGame`): the stash is torn up, the drawn rank is

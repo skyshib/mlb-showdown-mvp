@@ -83,6 +83,15 @@ export function describeEvent(event, playerSide = "away") {
       ? `${playName(event.team)} must cover the field: ${playName(event.in.name)} comes on at ${event.slot ?? "the field"} for ${playName(event.out.name)}.`
       : `${playName(event.team)} tightens the defense: ${playName(event.in.name)} takes over at ${event.slot ?? "the field"} for ${playName(event.out.name)}.`];
   }
+  if (event.type === "dh-to-field") {
+    return [
+      `${playName(event.team)} sends ${playName(event.dh.name)} out to ${event.dh.to} — ${playName(event.out.name)} leaves the game.`,
+      `That ends the designated hitter: ${playName(event.pitcher.name)} bats ${event.pitcher.spot}${event.pitcher.spot === 1 ? "st" : event.pitcher.spot === 2 ? "nd" : event.pitcher.spot === 3 ? "rd" : "th"} from here on.`
+    ];
+  }
+  if (event.type === "defense-swap") {
+    return [`${playName(event.team)} moves the defense: ${playName(event.a.name)} to ${event.a.to}, ${playName(event.b.name)} to ${event.b.to}.`];
+  }
   if (event.type === "forfeit") {
     return [`${playName(event.team)} cannot put a legal defense on the field. FORFEIT — the game is over.`];
   }

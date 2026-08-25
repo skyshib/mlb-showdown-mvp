@@ -179,6 +179,11 @@ export function defensiveSubDecision({ lineup, bench, lead = 0, inning = 1, bias
 const FIELD_LABELS = ["C", "1B", "2B", "3B", "SS", "LF", "RF", "CF"];
 
 export function defenseEligible(card, label) {
+  // A pitcher standing in the batting order (see game.pitcherAtThePlate, after
+  // a club has killed its own DH) covers exactly one thing: the mound. He must
+  // never be matched into the eight, not even at first base, where any GLOVE
+  // is allowed but no arm is.
+  if (card?.kind === "pitcher") return label === "P";
   if (label === "DH" || label === "1B") return true;
   return !benchSlotFielding(card, label).outOfPosition;
 }

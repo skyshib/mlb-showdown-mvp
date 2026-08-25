@@ -4,7 +4,7 @@ import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 import { advanceBreakeven } from "./breakeven.js?v=20260716-records";
-import { SUB_MIN_INNING, benchSlotFielding, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
+import { SUB_MIN_INNING, benchSlotFielding, defenseEligible, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
 
 export { SUB_MIN_INNING };
 
@@ -811,6 +811,10 @@ export function createInitialState(awayTeam, homeTeam, options = {}) {
     // Runner ids that already attempted a steal during the current at-bat —
     // one green light per runner per batter, safe or not.
     stealAttemptsThisPA: [],
+    // Where the PITCHER bats, once a club has killed its own designated
+    // hitter (see dhTakesTheField). Null while a DH is in use, which is the
+    // normal state of affairs; an index into the lineup once it is not.
+    pitcherBattingSpot: { away: null, home: null },
     // Substituted-out player ids, per side. Baseball's one-way door: a man
     // who leaves the game does not come back into it.
     removed: { away: [], home: [] },
@@ -869,7 +873,15 @@ export function changePitcher(state, side, targetIndex = null) {
   runtime.pitcherIndex += 1;
   runtime.outsRecorded = 0;
   runtime.battersFaced = 0;
-  return team.pitchers[runtime.pitcherIndex];
+  const arriving = team.pitchers[runtime.pitcherIndex];
+  // With the DH killed, the mound comes with a place in the batting order.
+  const spot = state.pitcherBattingSpot?.[side];
+  if (spot != null && arriving) {
+    const standIn = pitcherAtThePlate(arriving);
+    team.lineup = team.lineup.map((player, at) => (at === spot ? standIn : player));
+    ensureHitterLine(state, standIn, side);
+  }
+  return arriving;
 }
 
 // ---- Substitutions -----------------------------------------------------------
@@ -1020,11 +1032,15 @@ function realignDefense(state, side) {
     const matched = new Set([...pooled.values()].map((player) => player.id));
     const entering = bench.filter((card) => matched.has(card.id));
     const unmatched = team.lineup.filter((player) => !matched.has(player.id));
-    // One unmatched man stays on to DH — the best bat among them; the rest
-    // leave for the men who can actually cover the field.
-    const keep = [...unmatched].sort((a, b) =>
+    // One unmatched man stays on — the best bat among them — and the rest
+    // leave for men who can actually cover the field. A pitcher standing in
+    // the order (rule 5.11, see dhTakesTheField) is never one of the men who
+    // leave: he cannot cover a position by definition, and taking him out of
+    // the batting order would take him off the mound with it.
+    const arm = unmatched.find((player) => player.kind === "pitcher");
+    const keep = arm ?? [...unmatched].sort((a, b) =>
       roughBatValue(b) - roughBatValue(a) || String(a.id).localeCompare(String(b.id)))[0];
-    const leaving = unmatched.filter((player) => player !== keep);
+    const leaving = unmatched.filter((player) => player !== keep && player.kind !== "pitcher");
     entering.forEach((card, at) => {
       const out = leaving[at];
       const index = team.lineup.findIndex((player) => player.id === out.id);
@@ -1183,6 +1199,154 @@ export function autoSubstitute(state) {
   const battingSide = state.half === "top" ? "away" : "home";
   const fieldingSide = battingSide === "away" ? "home" : "away";
   return autoSubstituteFor(state, fieldingSide) ?? autoSubstituteFor(state, battingSide);
+}
+
+// Move men who are ALREADY in the game around the field: the shortstop to
+// second and the second baseman to short, the DH out to left and the left
+// fielder to the bench of the batting order — a trade of two spots, nobody
+// in, nobody out.
+//
+// This is not a substitution and does not obey the seventh-inning gate: no
+// one leaves the game, so there is nothing to spend. It cannot make an
+// illegal defense either — both men must be able to play where they are
+// going, and a trade of two legal spots is legal by construction.
+export function positionTrades(state, side, playerId) {
+  const team = state[side];
+  const man = team.lineup.find((player) => player.id === playerId);
+  if (!man || man.kind === "pitcher") return [];
+  const label = (player) => player.assignedPosition ?? player.defensivePosition ?? player.position;
+  const from = label(man);
+  // The DH is not part of any trade. Sending him out to a glove is not a
+  // swap of two spots, it is the end of the designated hitter for the day —
+  // its own move, with its own price (dhTakesTheField).
+  if (from === "DH") return [];
+  return team.lineup
+    .filter((other) => other.id !== man.id && other.kind !== "pitcher")
+    .filter((other) => label(other) !== "DH")
+    .filter((other) => defenseEligible(man, label(other)) && defenseEligible(other, from))
+    .map((other) => ({ player: other, from, to: label(other) }));
+}
+
+// ---- Killing the DH ----------------------------------------------------------
+//
+// Official Baseball Rule 5.11: the designated hitter may be used defensively,
+// continuing to bat in the same position in the batting order, "but the
+// pitcher must then bat in the place of the substituted defensive player."
+// Once the DH takes a glove, the role is finished for that club for the rest
+// of the game — so every arm who follows inherits that spot in the order too.
+//
+// Three things happen at once, and none of them is a trade:
+//   - the fielder the DH replaces LEAVES the game,
+//   - the DH keeps his own place in the batting order,
+//   - the pitcher takes the departed man's place in it.
+
+// What an arm is worth at the plate. Our pitcher cards carry no on-base and no
+// batting chart — the sets were printed for a DH game — so a pitcher who is
+// forced to hit gets this: a bat bad enough to be the deterrent the rule
+// intends, roughly the .130 a real pitcher hits.
+export function pitcherAtThePlate(pitcher) {
+  return {
+    ...pitcher,
+    onBase: 6,
+    speed: 10,
+    fielding: 0,
+    assignedPosition: "P",
+    defensivePosition: "P",
+    outOfPosition: false,
+    battingAsPitcher: true,
+    chart: [
+      { from: 1, to: 6, result: RESULTS.SO },
+      { from: 7, to: 11, result: RESULTS.GB },
+      { from: 12, to: 16, result: RESULTS.PU },
+      { from: 17, to: 18, result: RESULTS.BB },
+      { from: 19, to: 20, result: RESULTS.SINGLE }
+    ]
+  };
+}
+
+// The men the DH could go out and replace, with what it would cost.
+export function dhMoveOptions(state, side) {
+  const team = state[side];
+  const label = (player) => player.assignedPosition ?? player.defensivePosition ?? player.position;
+  const dh = team.lineup.find((player) => label(player) === "DH");
+  if (!dh || state.pitcherBattingSpot?.[side] != null) return [];
+  return team.lineup
+    .filter((player) => player.id !== dh.id && player.kind !== "pitcher" && label(player) !== "DH")
+    .filter((player) => defenseEligible(dh, label(player)))
+    .map((player) => ({ dh, out: player, to: label(player) }));
+}
+
+export function dhTakesTheField(state, side, targetPlayerId) {
+  const fieldingSide = state.half === "top" ? "home" : "away";
+  if (side !== fieldingSide) return null;
+  if (isGameOver(state) || state.pendingAdvance) return null;
+  const option = dhMoveOptions(state, side).find((move) => move.out.id === targetPlayerId);
+  if (!option) return null;
+  const team = state[side];
+  const dhIndex = team.lineup.findIndex((player) => player.id === option.dh.id);
+  const outIndex = team.lineup.findIndex((player) => player.id === option.out.id);
+  const glove = benchSlotFielding(option.dh, option.to);
+  const arm = team.pitchers[state.pitching[side].pitcherIndex];
+  const standIn = pitcherAtThePlate(arm);
+  team.lineup = team.lineup.map((player, at) => {
+    if (at === dhIndex) {
+      return { ...player, assignedPosition: option.to, defensivePosition: option.to, fielding: glove.value, outOfPosition: glove.outOfPosition };
+    }
+    // The departed man's spot in the order is the pitcher's now, and stays the
+    // pitcher's: every arm after him inherits it (see changePitcher).
+    if (at === outIndex) return standIn;
+    return player;
+  });
+  state.removed[side].push(option.out.id);
+  state.pitcherBattingSpot[side] = outIndex;
+  ensureHitterLine(state, standIn, side);
+  return {
+    type: "dh-to-field",
+    side,
+    team: team.name,
+    dh: { id: option.dh.id, name: option.dh.name, to: option.to },
+    out: { id: option.out.id, name: option.out.name },
+    pitcher: { id: standIn.id, name: standIn.name, spot: outIndex + 1 },
+    inning: state.inning,
+    half: state.half
+  };
+}
+
+export function swapDefensivePositions(state, side, idA, idB) {
+  const fieldingSide = state.half === "top" ? "home" : "away";
+  if (side !== fieldingSide) return null;
+  if (isGameOver(state) || state.pendingAdvance) return null;
+  const team = state[side];
+  const a = team.lineup.find((player) => player.id === idA);
+  const b = team.lineup.find((player) => player.id === idB);
+  if (!a || !b || a === b) return null;
+  const label = (player) => player.assignedPosition ?? player.defensivePosition ?? player.position;
+  const fromA = label(a);
+  const fromB = label(b);
+  if (!defenseEligible(a, fromB) || !defenseEligible(b, fromA)) return null;
+  const seat = (player, to) => {
+    const glove = benchSlotFielding(player, to);
+    player.defensivePosition = to;
+    player.assignedPosition = to;
+    player.fielding = glove.value;
+    player.outOfPosition = glove.outOfPosition;
+  };
+  // A NEW array, like every other change to the nine: the relief decision
+  // memoizes its read of a lineup on the array's identity.
+  team.lineup = team.lineup.map((player) => (player === a || player === b ? { ...player } : player));
+  const movedA = team.lineup.find((player) => player.id === idA);
+  const movedB = team.lineup.find((player) => player.id === idB);
+  seat(movedA, fromB);
+  seat(movedB, fromA);
+  return {
+    type: "defense-swap",
+    side,
+    team: team.name,
+    a: { id: movedA.id, name: movedA.name, from: fromA, to: fromB },
+    b: { id: movedB.id, name: movedB.name, from: fromB, to: fromA },
+    inning: state.inning,
+    half: state.half
+  };
 }
 
 // Snapshot of the current pitcher for an interactive layer: who is on the
