@@ -344,10 +344,15 @@ would strand the defense are refused — the CPU never makes one — except the
 home side batting in the 9th+ (`walkoffSpot`), where the battle UI allows the
 gamble behind an explicit confirm.
 
-Defensive management beyond substitutions: `positionTrades` /
-`swapDefensivePositions` (game.js) move two men who are already in the game
-between spots — no inning gate, since nobody enters or leaves — and both must
-be able to play where they are going. The DH is excluded from trades: sending
+Defensive management beyond substitutions: `positionMoves` /
+`movePlayerToPosition` (game.js) send a man already in the game to any
+position the other eight can still cover around him — no inning gate, since
+nobody enters or leaves. It is a re-match with one man pinned
+(`coverageAssignmentWith`), so a real CHAIN works: center to right, left to
+center behind him. The UI names the chain on the row before you take it. The
+current DH is held out of the pool, or a routine outfield shift would quietly
+hand him a glove and kill the DH without rule 5.11 being invoked.
+`positionTrades`/`swapDefensivePositions` remain as the strict pairwise form. The DH is excluded from trades: sending
 him to a glove is `dhTakesTheField`, which implements Official Baseball Rule
 5.11 — the DH keeps his place in the batting order, the fielder he replaces
 LEAVES the game, the pitcher bats in that spot (`pitcherAtThePlate`),

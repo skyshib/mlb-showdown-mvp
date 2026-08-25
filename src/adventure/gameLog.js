@@ -88,7 +88,10 @@ export function compactEvent(event) {
     b: event.b,
     // Rule 5.11: who went out, who left, and where the arm bats now.
     dh: event.dh,
-    pitcher: event.pitcher
+    pitcher: event.pitcher,
+    // A defensive shift names the man who moved and the chain behind him.
+    man: event.man,
+    shifts: event.shifts
   };
   // An undefined field still costs its key in JSON.stringify's eyes only if it is
   // present, so drop them: most events are not steals and have no runnerId.

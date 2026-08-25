@@ -12,6 +12,8 @@ import {
   walkoffSpot,
   swapDefensivePositions,
   positionTrades,
+  positionMoves,
+  movePlayerToPosition,
   dhTakesTheField,
   dhMoveOptions,
   pendingRealign,
@@ -111,6 +113,7 @@ const REPLAY = {
   pr: (battle, action) => actPinchRun(battle, action.id, action.base),
   ds: (battle, action) => actDefensiveSub(battle, action.id, action.target),
   dx: (battle, action) => actDefenseSwap(battle, action.a, action.b),
+  mv: (battle, action) => actMoveFielder(battle, action.id, action.to),
   dh: (battle, action) => actDhTakesField(battle, action.target),
   fastForward: (battle) => fastForward(battle)
 };
@@ -206,7 +209,9 @@ export function battlePhase(battle) {
     // bench, and who he could trade spots with out there.
     defenseTargets: state[battle.playerSide].lineup.map((player) => ({
       player,
-      trades: positionTrades(state, battle.playerSide, player.id)
+      trades: positionTrades(state, battle.playerSide, player.id),
+      // Everywhere he could go, with the chain each move sets off.
+      moves: positionMoves(state, battle.playerSide, player.id)
     })),
     // What it would take to send the DH out to a glove, and what it costs.
     dhMoves: dhMoveOptions(state, battle.playerSide)
@@ -377,6 +382,14 @@ export function actPinchRun(battle, cardId, baseIndex) {
 export function actDhTakesField(battle, targetId) {
   record(battle, { type: "dh", target: targetId });
   const event = dhTakesTheField(battle.state, battle.playerSide, targetId);
+  return event ? [pushEvent(battle, event), ...drainEngineEvents(battle)] : drainEngineEvents(battle);
+}
+
+// Move a man already on the field to another position; the other eight fall
+// in around him.
+export function actMoveFielder(battle, playerId, to) {
+  record(battle, { type: "mv", id: playerId, to });
+  const event = movePlayerToPosition(battle.state, battle.playerSide, playerId, to);
   return event ? [pushEvent(battle, event), ...drainEngineEvents(battle)] : drainEngineEvents(battle);
 }
 

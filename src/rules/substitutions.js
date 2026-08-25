@@ -196,18 +196,39 @@ const INELIGIBLE = 1e9;
 // coverage exists. Players left unmatched are the DH (and, in the pooled
 // call, the men who stay on the bench).
 export function coverageAssignment(players) {
+  return coverageAssignmentWith(players, {});
+}
+
+// The same matching with some men NAILED DOWN: pins maps a position label to
+// the id of the man who must play it. This is what lets a manager say "you,
+// right field" and have the other eight sort themselves out around him — a
+// real defensive shuffle is a CHAIN (short to second, second to left, left to
+// short), and a chain is exactly a re-match with one man fixed.
+export function coverageAssignmentWith(players, pins = {}) {
   const bodies = (players ?? []).filter(Boolean);
   if (bodies.length < FIELD_LABELS.length) return null;
-  const cost = FIELD_LABELS.map((label) => bodies.map((player) =>
-    defenseEligible(player, label)
-      ? 100 - benchSlotFielding(player, label).value
-      : INELIGIBLE));
-  const rowToCol = minCostAssignment(cost);
   const assignment = new Map();
-  for (let row = 0; row < FIELD_LABELS.length; row += 1) {
-    const player = bodies[rowToCol[row]];
-    if (!player || !defenseEligible(player, FIELD_LABELS[row])) return null;
-    assignment.set(FIELD_LABELS[row], player);
+  const pinnedIds = new Set();
+  for (const [label, id] of Object.entries(pins)) {
+    const player = bodies.find((body) => body.id === id);
+    if (!player || !FIELD_LABELS.includes(label) || !defenseEligible(player, label)) return null;
+    assignment.set(label, player);
+    pinnedIds.add(id);
+  }
+  const open = FIELD_LABELS.filter((label) => !assignment.has(label));
+  const rest = bodies.filter((body) => !pinnedIds.has(body.id));
+  if (rest.length < open.length) return null;
+  if (open.length) {
+    const cost = open.map((label) => rest.map((player) =>
+      defenseEligible(player, label)
+        ? 100 - benchSlotFielding(player, label).value
+        : INELIGIBLE));
+    const rowToCol = minCostAssignment(cost);
+    for (let row = 0; row < open.length; row += 1) {
+      const player = rest[rowToCol[row]];
+      if (!player || !defenseEligible(player, open[row])) return null;
+      assignment.set(open[row], player);
+    }
   }
   return assignment;
 }

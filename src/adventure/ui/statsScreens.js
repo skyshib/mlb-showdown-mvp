@@ -125,6 +125,11 @@ export function gameLogLine(event, playerSide) {
   if (event.type === "dh-to-field") {
     return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.dh?.name ?? ""))} TO ${escapeHtml(event.dh?.to ?? "THE FIELD")} &mdash; <b>DH ENDS</b>, PITCHER BATS</span>`;
   }
+  if (event.type === "defense-shift") {
+    return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.man?.name ?? ""))} ${escapeHtml(event.man?.from ?? "")} &#8594; ${escapeHtml(event.man?.to ?? "")}${
+      event.shifts?.length ? ` (+${event.shifts.length})` : ""
+    }</span>`;
+  }
   if (event.type === "defense-swap") {
     return `<span class="gq-dim">${inning} &middot; ${escapeHtml(shortName(event.a?.name ?? ""))} &#8646; ${escapeHtml(shortName(event.b?.name ?? ""))} SWITCH SPOTS</span>`;
   }

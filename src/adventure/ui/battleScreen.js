@@ -67,6 +67,7 @@ import {
   actPinchRun,
   actDefensiveSub,
   actDefenseSwap,
+  actMoveFielder,
   actDhTakesField,
   actAcceptRealign,
   actManualRealign,
@@ -583,7 +584,7 @@ function benchMenuItem(app, phase, label) {
   // The DEFENSE door opens whenever you are in the field, bench or no bench:
   // moving the men already out there costs nothing and obeys no gate. The
   // BENCH door needs a bench to open at all.
-  const canShuffle = label === "DEFENSE" && (phase.defenseTargets ?? []).some((entry) => entry.trades?.length);
+  const canShuffle = label === "DEFENSE" && (phase.defenseTargets ?? []).some((entry) => entry.moves?.length);
   if (!hadBench && !canShuffle) return null;
   return {
     html: eligibility.allowed
@@ -658,11 +659,16 @@ function benchManRows(battle, phase, target) {
       }
     }
     const entry = (phase.defenseTargets ?? []).find((item) => item.player.id === target.out.id);
-    for (const trade of entry?.trades ?? []) {
+    // Where this man can go. The eight behind him re-form to suit — a real
+    // shuffle is a chain, so the row says who else it moves.
+    for (const option of entry?.moves ?? []) {
+      const chain = option.shifts.length
+        ? option.shifts.map((shift) => `${escapeHtml(shortName(shift.player.name))}&#8594;${escapeHtml(shift.to)}`).join(", ")
+        : "NOBODY ELSE MOVES";
       rows.push({
-        card: trade.player,
-        move: { kind: "dx", partner: trade.player },
-        html: `&#8646; TRADE SPOTS <span class="gq-dim">${escapeHtml(shortName(trade.player.name))} &middot; ${escapeHtml(trade.to)} &#8594; ${escapeHtml(trade.from)}</span>`
+        card: target.out,
+        move: { kind: "mv", to: option.to },
+        html: `&#8594; MOVE TO ${escapeHtml(option.to)} <span class="gq-dim">${chain}</span>`
       });
     }
   }
@@ -729,6 +735,7 @@ function runBenchSub(app, target, card, move = null) {
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
   if (move?.kind === "dh") afterAction(app, actDhTakesField(battle, move.target.id));
+  else if (move?.kind === "mv") afterAction(app, actMoveFielder(battle, target.out.id, move.to));
   else if (move?.kind === "dx") afterAction(app, actDefenseSwap(battle, target.out.id, move.partner.id));
   else if (target.kind === "ph") afterAction(app, actPinchHit(battle, card.id));
   else if (target.kind === "pr") afterAction(app, actPinchRun(battle, card.id, target.base));

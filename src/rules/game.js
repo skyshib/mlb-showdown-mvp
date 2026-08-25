@@ -4,7 +4,7 @@ import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 import { advanceBreakeven, battingWp } from "./breakeven.js?v=20260716-records";
-import { SUB_MIN_INNING, benchSlotFielding, defenseEligible, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
+import { SUB_MIN_INNING, benchSlotFielding, defenseEligible, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, coverageAssignmentWith, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
 
 export { SUB_MIN_INNING };
 
@@ -1007,7 +1007,10 @@ function applyDefenseAssignment(lineup, assignment) {
   const labelById = new Map();
   for (const [label, player] of assignment) labelById.set(player.id, label);
   for (const player of lineup) {
-    const label = labelById.get(player.id) ?? "DH";
+    // Whoever the matching did not seat is the designated hitter — unless he
+    // is the pitcher standing in the order after a club killed its own DH
+    // (rule 5.11), in which case he is what he always was.
+    const label = labelById.get(player.id) ?? (player.kind === "pitcher" ? "P" : "DH");
     const glove = benchSlotFielding(player, label);
     player.defensivePosition = label;
     player.assignedPosition = label;
@@ -1405,6 +1408,71 @@ export function dhTakesTheField(state, side, targetPlayerId) {
     dh: { id: option.dh.id, name: option.dh.name, to: option.to },
     out: { id: option.out.id, name: option.out.name },
     pitcher: { id: standIn.id, name: standIn.name, spot: outIndex + 1 },
+    inning: state.inning,
+    half: state.half
+  };
+}
+
+// Where a man already on the field could go. Not "who will trade with him" —
+// anywhere the OTHER EIGHT can still cover the field around him, which is how
+// a real shuffle works: move the center fielder to right and the corners
+// rotate behind him. Pairwise trades could only ever reach the moves where
+// two men happened to be able to swap outright, which on a real roster is a
+// small fraction of the legal ones.
+//
+// The designated hitter is not a destination: taking his spot would send HIM
+// out to a glove, which is rule 5.11's move and has its own door.
+export function positionMoves(state, side, playerId) {
+  const team = state[side];
+  const man = team.lineup.find((player) => player.id === playerId);
+  if (!man || man.kind === "pitcher") return [];
+  const label = (player) => player.assignedPosition ?? player.defensivePosition ?? player.position;
+  const from = label(man);
+  if (from === "DH") return [];
+  // The man at DH is held OUT of the shuffle. He is eligible for everything —
+  // anybody can be seated anywhere the matcher likes — so leaving him in the
+  // pool let a routine outfield shift quietly hand him a glove, which is rule
+  // 5.11's move and would have killed the DH without anyone being asked.
+  const dh = team.lineup.find((player) => label(player) === "DH");
+  const pool = dh ? team.lineup.filter((player) => player.id !== dh.id) : team.lineup;
+  const moves = [];
+  for (const to of ["C", "1B", "2B", "3B", "SS", "LF", "RF", "CF"]) {
+    if (to === from || !defenseEligible(man, to)) continue;
+    const seating = coverageAssignmentWith(pool, { [to]: man.id });
+    if (!seating) continue;
+    // Who else has to move for it, so the manager sees the whole chain.
+    const shifts = [];
+    for (const [slot, player] of seating) {
+      if (player.id === man.id) continue;
+      if (label(player) !== slot) shifts.push({ player, from: label(player), to: slot });
+    }
+    moves.push({ to, from, shifts, seating });
+  }
+  return moves;
+}
+
+// Put him there, and let the other eight fall in around him.
+export function movePlayerToPosition(state, side, playerId, to) {
+  const fieldingSide = state.half === "top" ? "home" : "away";
+  if (side !== fieldingSide) return null;
+  if (isGameOver(state) || state.pendingAdvance) return null;
+  const move = positionMoves(state, side, playerId).find((option) => option.to === to);
+  if (!move) return null;
+  const team = state[side];
+  // A NEW array, as with every change to the nine: the relief decision
+  // memoizes its read of a lineup on the array's identity.
+  team.lineup = team.lineup.map((player) => ({ ...player }));
+  const label = (player) => player.assignedPosition ?? player.defensivePosition ?? player.position;
+  const dh = team.lineup.find((player) => label(player) === "DH");
+  const pool = dh ? team.lineup.filter((player) => player.id !== dh.id) : team.lineup;
+  applyDefenseAssignment(team.lineup, coverageAssignmentWith(pool, { [to]: playerId }));
+  const man = team.lineup.find((player) => player.id === playerId);
+  return {
+    type: "defense-shift",
+    side,
+    team: team.name,
+    man: { id: man.id, name: man.name, from: move.from, to },
+    shifts: move.shifts.map((shift) => ({ id: shift.player.id, name: shift.player.name, from: shift.from, to: shift.to })),
     inning: state.inning,
     half: state.half
   };

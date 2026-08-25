@@ -30,6 +30,8 @@ import {
   defensiveSub,
   autoSubstituteFor,
   positionTrades,
+  positionMoves,
+  movePlayerToPosition,
   swapDefensivePositions,
   dhMoveOptions,
   dhTakesTheField,
@@ -3010,4 +3012,68 @@ test("the skipper still fixes a defense nobody asked him about", () => {
   assert.equal(pendingRealign(state), null, "nobody is asked");
   assert.ok(state.home.lineup.some((player) => player.id === "home-catcher"), "the backup catcher is simply in");
   assert.equal(alignmentLegal(state.home.lineup), true);
+});
+
+test("a fielder can move anywhere the other eight can cover around him", () => {
+  // A chain the old pairwise swap could never reach: the center fielder wants
+  // right, the right fielder can only play left, and the left fielder can
+  // cover center. Nobody can trade outright; the three of them can rotate.
+  const glove = (id, primary, second = null) => ({
+    ...makeHitter({ id, name: id, position: primary }),
+    assignedPosition: primary,
+    defensivePosition: primary,
+    positions: second ? [{ pos: primary, fielding: 2 }, { pos: second, fielding: 1 }] : [{ pos: primary, fielding: 2 }]
+  });
+  const club = (prefix) => ({
+    name: prefix,
+    lineup: [
+      glove(`${prefix}-c`, "C"), glove(`${prefix}-1b`, "1B"), glove(`${prefix}-2b`, "2B"),
+      glove(`${prefix}-3b`, "3B"), glove(`${prefix}-ss`, "SS"),
+      glove(`${prefix}-lf`, "LF/RF", "CF"),   // left, can cover center
+      glove(`${prefix}-cf`, "CF", "LF/RF"),   // center, can cover a corner
+      glove(`${prefix}-rf`, "LF/RF"),         // right, corners only
+      { ...makeHitter({ id: `${prefix}-dh`, name: `${prefix} dh`, position: "1B" }), assignedPosition: "DH", defensivePosition: "DH", positions: [{ pos: "1B", fielding: 0 }] }
+    ].map((player, index) => ({ ...player, assignedPosition: ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"][index], defensivePosition: ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"][index] })),
+    pitchers: [makePitcher({ id: `${prefix}-arm`, name: `${prefix} arm` })],
+    bench: []
+  });
+  const state = createInitialState(club("away"), club("home"));
+  state.half = "top"; // home fields
+  const at = (label) => state.home.lineup.find((player) => (player.assignedPosition ?? player.position) === label);
+
+  // Pairwise: the center fielder cannot get to right, because the right
+  // fielder cannot play center.
+  assert.equal(positionTrades(state, "home", "home-cf").some((trade) => trade.to === "RF"), false,
+    "no straight swap reaches right field");
+  // As a MOVE it is legal, because left slides to center behind him.
+  const moves = positionMoves(state, "home", "home-cf");
+  const toRight = moves.find((move) => move.to === "RF");
+  assert.ok(toRight, "but the move is there");
+  assert.ok(toRight.shifts.length >= 1, "and it names who else moves");
+  assert.ok(toRight.shifts.some((shift) => shift.player.id === "home-lf" && shift.to === "CF"),
+    "left field covers center behind him");
+
+  const event = movePlayerToPosition(state, "home", "home-cf", "RF");
+  assert.equal(event.type, "defense-shift");
+  assert.equal(event.man.from, "CF");
+  assert.equal(event.man.to, "RF");
+  assert.equal(at("RF").id, "home-cf", "he is in right");
+  assert.equal(at("CF").id, "home-lf", "and the chain closed behind him");
+  assert.equal(alignmentLegal(state.home.lineup), true, "every man can play where he stands");
+  assert.equal(state.home.lineup.length, 9, "nobody entered or left");
+  assert.deepEqual(state.removed.home, [], "and nobody was spent");
+
+  // The DH is never quietly handed a glove by a shuffle — that is rule 5.11's
+  // move, and it has its own door and its own warning.
+  assert.equal(at("DH").id, "home-dh", "the designated hitter is where he was");
+  for (const move of positionMoves(state, "home", "home-1b")) {
+    assert.equal(move.shifts.some((shift) => shift.player.id === "home-dh"), false,
+      "no shuffle moves the DH into the field");
+  }
+  assert.deepEqual(positionMoves(state, "home", "home-dh"), [], "and he is not offered a position himself");
+
+  // A man with nowhere legal to go is offered nothing.
+  assert.deepEqual(positionMoves(state, "home", "home-c"), [], "the catcher stays behind the plate");
+  // The batting side does not rearrange its defense.
+  assert.equal(movePlayerToPosition(state, "away", "away-cf", "RF"), null);
 });

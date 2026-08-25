@@ -89,6 +89,12 @@ export function describeEvent(event, playerSide = "away") {
       `That ends the designated hitter: ${playName(event.pitcher.name)} bats ${event.pitcher.spot}${event.pitcher.spot === 1 ? "st" : event.pitcher.spot === 2 ? "nd" : event.pitcher.spot === 3 ? "rd" : "th"} from here on.`
     ];
   }
+  if (event.type === "defense-shift") {
+    const chain = (event.shifts ?? []).map((shift) => `${playName(shift.name)} to ${shift.to}`);
+    return [`${playName(event.team)} shifts the defense: ${playName(event.man.name)} from ${event.man.from} to ${event.man.to}${
+      chain.length ? `, ${chain.join(", ")}` : ""
+    }.`];
+  }
   if (event.type === "defense-swap") {
     return [`${playName(event.team)} moves the defense: ${playName(event.a.name)} to ${event.a.to}, ${playName(event.b.name)} to ${event.b.to}.`];
   }
