@@ -14,6 +14,9 @@ import {
   positionTrades,
   dhTakesTheField,
   dhMoveOptions,
+  pendingRealign,
+  acceptRealign,
+  manualRealign,
   playStealAttempt,
   stealCandidates,
   attemptSteal,
@@ -55,6 +58,9 @@ export function createBattle({ playerManager, npcManager, trainer, seed, starter
   // of being silently rotated out by a pitching plan.
   state.manualPitchingFor = "both";
   state.deferAdvancesFor = playerSide;
+  // A defense of the player's that needs bench help to cover the field is a
+  // question, not a housekeeping task: he is asked before anyone is spent.
+  state.deferRealignFor = playerSide;
   return {
     seed,
     trainer,
@@ -99,6 +105,8 @@ const REPLAY = {
   advance: (battle, action) => actAdvance(battle, action.send),
   iwalk: (battle) => actIntentionalWalk(battle),
   pen: (battle, action) => actChangePitcher(battle, action.index),
+  ra: (battle) => actAcceptRealign(battle),
+  rm: (battle, action) => actManualRealign(battle, action.id, action.target),
   ph: (battle, action) => actPinchHit(battle, action.id),
   pr: (battle, action) => actPinchRun(battle, action.id, action.base),
   ds: (battle, action) => actDefensiveSub(battle, action.id, action.target),
@@ -145,6 +153,17 @@ export function battlePhase(battle) {
         : state.score[battle.playerSide] > state.score[battle.npcSide],
       forfeitedBy: state.forfeitedBy ?? null,
       score: { ...state.score }
+    };
+  }
+  // A broken defense stops the game: nothing can be pitched until the nine
+  // can cover the field, so this is asked before anything else.
+  const realign = pendingRealign(state);
+  if (realign && realign.side === battle.playerSide) {
+    return {
+      type: "realign",
+      realign,
+      bench: availableBench(state, battle.playerSide),
+      lineup: state[battle.playerSide].lineup
     };
   }
   const pending = pendingAdvanceDecision(state);
@@ -321,6 +340,20 @@ export function actChangePitcher(battle, targetIndex = null) {
   const pitcher = changePitcher(battle.state, battle.playerSide, targetIndex);
   if (!pitcher) return [];
   return [pushEvent(battle, pitchingChangeEvent(battle, battle.playerSide, pitcher))];
+}
+
+// The two answers to a broken defense: let the skipper fix it, or fix it
+// yourself, one man at a time, until the nine can cover the field.
+export function actAcceptRealign(battle) {
+  record(battle, { type: "ra" });
+  acceptRealign(battle.state);
+  return drainEngineEvents(battle);
+}
+
+export function actManualRealign(battle, cardId, targetId) {
+  record(battle, { type: "rm", id: cardId, target: targetId });
+  manualRealign(battle.state, cardId, targetId);
+  return drainEngineEvents(battle);
 }
 
 // Player substitutions. Recorded by CARD ID — bench order shifts as men

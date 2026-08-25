@@ -329,7 +329,17 @@ cards play them (any glove may take 1B at the literal -1; the DH slot takes
 anyone). `coverageAssignment` (substitutions.js) answers it as a matching;
 `realignDefense` (game.js) reseats the nine at each inning turn, completes
 double-switches off the bench (forced `defensive-sub` events), and forfeits
-the game (`state.forfeitedBy`) when no coverage exists. Substitutions that
+the game (`state.forfeitedBy`) when no coverage exists. A reseat happens
+silently — no men are spent — but a double-switch SPENDS players, so the
+interactive layer is asked first: `createBattle` sets
+`state.deferRealignFor` to the player's side, the engine parks a
+`pendingRealign` (side + the skipper's proposal) instead of acting, and
+`battlePhase` returns a `realign` phase that outranks every other question.
+`acceptRealign` takes the recommendation; `manualRealign(benchId, targetId)`
+answers it by hand, one man at a time, and keeps the question open until the
+nine can cover — including the case where the manager spends his way into a
+forfeit. Auto play and the NPC dugout leave `deferRealignFor` null and fix
+themselves as before. Substitutions that
 would strand the defense are refused — the CPU never makes one — except the
 home side batting in the 9th+ (`walkoffSpot`), where the battle UI allows the
 gamble behind an explicit confirm.

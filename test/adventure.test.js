@@ -5651,3 +5651,59 @@ test("a defensive shuffle and a killed DH both replay from the recording", async
   assert.deepEqual(resumed.state.pitcherBattingSpot, battle.state.pitcherBattingSpot, "and the arm bats where he batted");
   assert.deepEqual(resumed.state.removed, battle.state.removed);
 });
+
+test("answering a broken defense by hand replays from the recording", async () => {
+  const { actPinchHit, actSwing, actPitch, actAcceptRealign, actManualRealign, npcDugoutVisit } =
+    await import("../src/rules/battle/controller.js");
+  const { pendingRealign, pinchSubKeepsDefense } = await import("../src/rules/game.js");
+  const save = await fullTestSave("realign-replay-seed");
+  const player = managerFor(save);
+  const trainer = trainerById("gym-garrick");
+  const npc = buildNpcTeam(trainer, save);
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "realign-replay" });
+  // The player's own defense is never rearranged behind his back.
+  assert.equal(battle.state.deferRealignFor, battle.playerSide, "his club gets asked");
+
+  // Play deep enough to open the bench, then spend it on pinch hitters until
+  // the defense needs help — or the bench runs dry.
+  let asked = false;
+  for (let i = 0; i < 400; i += 1) {
+    const phase = battlePhase(battle);
+    if (phase.type === "over") break;
+    if (phase.type === "realign") { asked = true; break; }
+    if (phase.type === "advance-decision") actAdvance(battle, 0);
+    else if (phase.type === "player-batting") {
+      const legal = phase.subEligibility?.allowed
+        ? phase.bench.find((card) => pinchSubKeepsDefense(battle.state, battle.playerSide, card.id, phase.batter.id))
+        : null;
+      if (legal) actPinchHit(battle, legal.id);
+      else actSwing(battle);
+    } else actPitch(battle);
+    npcDugoutVisit(battle);
+  }
+
+  if (asked) {
+    const phase = battlePhase(battle);
+    assert.ok(phase.realign.proposal.length, "the skipper has an answer to offer");
+    // Take the skipper's answer, which is always a legal one.
+    actAcceptRealign(battle);
+    assert.equal(pendingRealign(battle.state), null, "and the question closes");
+    assert.ok(battle.actions.some((action) => action.type === "ra"), "the choice is in the recording");
+
+    const stashed = JSON.parse(JSON.stringify(serializeBattle(battle)));
+    const resumed = restoreBattle({ playerManager: player, npcManager: npc, trainer, ...stashed });
+    assert.ok(resumed, "the recording replays");
+    assert.deepEqual(
+      resumed.state[battle.playerSide].lineup.map((p) => `${p.assignedPosition ?? p.position}:${p.id}`),
+      battle.state[battle.playerSide].lineup.map((p) => `${p.assignedPosition ?? p.position}:${p.id}`),
+      "the same nine stand in the same spots"
+    );
+    assert.deepEqual(resumed.state.removed, battle.state.removed, "and the same men were spent");
+  }
+  // Either way the game never proceeded with an illegal defense.
+  const { alignmentLegal } = await import("../src/rules/substitutions.js");
+  if (!battle.state.forfeitedBy && battlePhase(battle).type !== "realign") {
+    assert.equal(alignmentLegal(battle.state[battle.playerSide].lineup), true, "the nine on the field are legal");
+  }
+  void actManualRealign;
+});

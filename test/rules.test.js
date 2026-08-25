@@ -33,7 +33,11 @@ import {
   swapDefensivePositions,
   dhMoveOptions,
   dhTakesTheField,
-  changePitcher
+  changePitcher,
+  pendingRealign,
+  manualRealign,
+  acceptRealign,
+  realignProposal
 } from "../src/rules/game.js";
 import { batterRunsPerPa, benchSlotFielding, pinchHitDecision, pinchRunDecision, defensiveSubDecision, alignmentLegal, coverageAssignment, defenseEligible } from "../src/rules/substitutions.js";
 import { createRng } from "../src/rules/rng.js";
@@ -2821,4 +2825,131 @@ test("an arm at the plate never has the advantage: no pitch, and the mound's cha
   // The non-pitch is not counted as a die in the arm's rolling average.
   const line = [...state.stats.pitchers.values()].find((row) => row.id === `away-arm`);
   assert.ok(line.rolls <= 2, "only real pitches count toward the dice line");
+});
+
+test("a broken defense is a question, not a housekeeping task", () => {
+  // Two catchers on the roster, one on the bench: hit for the catcher and
+  // nobody left on the field can wear the gear.
+  const labels = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+  const seat = (prefix, label, extra = {}) => ({
+    ...makeHitter({ id: `${prefix}-${label}`, name: `${prefix} ${label}`, position: label === "DH" ? "1B" : label, ...extra }),
+    assignedPosition: label,
+    defensivePosition: label,
+    positions: [{ pos: label === "DH" ? "1B" : label, fielding: 2 }]
+  });
+  const club = (prefix) => ({
+    name: prefix,
+    lineup: labels.map((label) => seat(prefix, label)),
+    pitchers: [makePitcher({ id: `${prefix}-arm`, name: `${prefix} arm` })],
+    bench: [
+      { ...makeHitter({ id: `${prefix}-bat`, name: `${prefix} big bat`, position: "1B" }), positions: [{ pos: "1B", fielding: 0 }] },
+      { ...makeHitter({ id: `${prefix}-catcher`, name: `${prefix} backup C`, position: "C" }), positions: [{ pos: "C", fielding: 1 }] }
+    ]
+  });
+  const state = createInitialState(club("away"), club("home"));
+  state.deferRealignFor = "home"; // the interactive layer asks this club
+  state.inning = 7;
+  state.half = "bottom"; // home bats
+  state.lineupIndex.home = 0; // the catcher is due
+
+  // Hit for the catcher with a man who cannot catch. Legal: the backup
+  // catcher on the bench can still cover it later.
+  assert.ok(pinchHit(state, "home", "home-bat"), "the pinch hitter is allowed");
+  // Turn the inning: the club must now take the field.
+  state.outs = 2;
+  const rng = createRng("realign");
+  playPlateAppearance(state, rng);
+  playPlateAppearance(state, rng);
+
+  // Nobody was spent behind the manager's back — he is asked.
+  const asked = pendingRealign(state);
+  assert.ok(asked, "the game stops and asks");
+  assert.equal(asked.side, "home");
+  assert.equal(asked.proposal.length, 1, "one man has to come in");
+  assert.equal(asked.proposal[0].in.id, "home-catcher", "the skipper would use the backup catcher");
+  assert.equal(state.home.lineup.some((player) => player.id === "home-catcher"), false, "and has not done it yet");
+
+  // Answer it yourself, with the man YOU choose to spend. The pinch hitter
+  // standing in the catcher's spot is the man to take out — he is the reason
+  // nobody can catch.
+  const doomed = state.home.lineup.find((player) => player.id === "home-bat");
+  const event = manualRealign(state, "home-catcher", doomed.id);
+  assert.equal(event.type, "defensive-sub");
+  assert.equal(pendingRealign(state), null, "the question closes once the nine can cover");
+  assert.ok(state.removed.home.includes(doomed.id), "the man you picked is the man who left");
+  assert.equal(alignmentLegal(state.home.lineup), true, "and the defense is legal again");
+  assert.equal(state.home.lineup.length, 9);
+  assert.equal(state.forfeitedBy ?? null, null, "nobody forfeited");
+});
+
+test("choosing the men yourself means you can choose wrong", () => {
+  // The same broken defense, answered badly: the only catcher left is spent
+  // in RIGHT FIELD, where he cannot play and where nobody else can either.
+  // Taking the wheel means owning the crash — the club forfeits.
+  const labels = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+  const seat = (prefix, label) => ({
+    ...makeHitter({ id: `${prefix}-${label}`, name: `${prefix} ${label}`, position: label === "DH" ? "1B" : label }),
+    assignedPosition: label,
+    defensivePosition: label,
+    positions: [{ pos: label === "DH" ? "1B" : label, fielding: 2 }]
+  });
+  const club = (prefix) => ({
+    name: prefix,
+    lineup: labels.map((label) => seat(prefix, label)),
+    pitchers: [makePitcher({ id: `${prefix}-arm`, name: `${prefix} arm` })],
+    bench: [
+      { ...makeHitter({ id: `${prefix}-bat`, name: `${prefix} big bat`, position: "1B" }), positions: [{ pos: "1B", fielding: 0 }] },
+      { ...makeHitter({ id: `${prefix}-catcher`, name: `${prefix} backup C`, position: "C" }), positions: [{ pos: "C", fielding: 1 }] }
+    ]
+  });
+  const state = createInitialState(club("away"), club("home"));
+  state.deferRealignFor = "home";
+  state.inning = 7;
+  state.half = "bottom";
+  state.lineupIndex.home = 0;
+  assert.ok(pinchHit(state, "home", "home-bat"));
+  state.outs = 2;
+  const rng = createRng("bad-call");
+  playPlateAppearance(state, rng);
+  playPlateAppearance(state, rng);
+  assert.ok(pendingRealign(state), "the club is asked");
+
+  const rightField = state.home.lineup.find((player) => (player.assignedPosition ?? player.position) === "RF");
+  manualRealign(state, "home-catcher", rightField.id);
+  assert.equal(pendingRealign(state), null, "the question is closed");
+  assert.equal(state.forfeitedBy, "home", "because there is no defense left to field");
+  assert.equal(isGameOver(state), true);
+});
+
+test("the skipper still fixes a defense nobody asked him about", () => {
+  // Auto play (and the opponent's dugout) leaves deferRealignFor null, so the
+  // double-switch completes itself exactly as it always did.
+  const labels = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+  const seat = (prefix, label) => ({
+    ...makeHitter({ id: `${prefix}-${label}`, name: `${prefix} ${label}`, position: label === "DH" ? "1B" : label }),
+    assignedPosition: label,
+    defensivePosition: label,
+    positions: [{ pos: label === "DH" ? "1B" : label, fielding: 2 }]
+  });
+  const club = (prefix) => ({
+    name: prefix,
+    lineup: labels.map((label) => seat(prefix, label)),
+    pitchers: [makePitcher({ id: `${prefix}-arm`, name: `${prefix} arm` })],
+    bench: [
+      { ...makeHitter({ id: `${prefix}-bat`, name: `${prefix} big bat`, position: "1B" }), positions: [{ pos: "1B", fielding: 0 }] },
+      { ...makeHitter({ id: `${prefix}-catcher`, name: `${prefix} backup C`, position: "C" }), positions: [{ pos: "C", fielding: 1 }] }
+    ]
+  });
+  const state = createInitialState(club("away"), club("home"));
+  state.inning = 7;
+  state.half = "bottom";
+  state.lineupIndex.home = 0;
+  assert.ok(pinchHit(state, "home", "home-bat"));
+  state.outs = 2;
+  const rng = createRng("auto-realign");
+  playPlateAppearance(state, rng);
+  playPlateAppearance(state, rng);
+  assert.equal(pendingRealign(state), null, "nobody is asked");
+  assert.ok(state.home.lineup.some((player) => player.id === "home-catcher"), "the backup catcher is simply in");
+  assert.equal(alignmentLegal(state.home.lineup), true);
 });

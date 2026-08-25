@@ -829,6 +829,13 @@ export function createInitialState(awayTeam, homeTeam, options = {}) {
     // read them into the book (playGameEvent and the battle controller both
     // drain this).
     pendingSubEvents: [],
+    // A club whose defense needs men off the bench to cover the field is
+    // ASKED first rather than rearranged for them (createBattle sets this to
+    // the player's side; auto play leaves it null and fixes itself).
+    deferRealignFor: null,
+    // The question waiting on an answer: whose defense is broken, and what
+    // the skipper would do about it if you let him.
+    pendingRealign: null,
     // The side that could not field a legal defense. Set with gameOver: the
     // game ends and the other club wins, whatever the score reads.
     forfeitedBy: null
@@ -1016,51 +1023,142 @@ function applyDefenseAssignment(lineup, assignment) {
 // every glove lands where it legally can. A club that cannot cover the field
 // even off its bench FORFEITS: out-of-position is not a penalty, it is not a
 // team.
+// The double-switch a skipper WOULD make: who comes off the bench, for whom,
+// and where he plays. Pure — it decides nothing and moves nobody, so it can
+// be shown to a manager as a recommendation before anything happens.
+export function realignProposal(state, side) {
+  const team = state[side];
+  const bench = availableBench(state, side);
+  const pooled = coverageAssignment([...team.lineup, ...bench]);
+  if (!pooled) return null;
+  const matched = new Set([...pooled.values()].map((player) => player.id));
+  const entering = bench.filter((card) => matched.has(card.id));
+  const unmatched = team.lineup.filter((player) => !matched.has(player.id));
+  // One unmatched man stays on — the best bat among them — and the rest leave
+  // for men who can actually cover the field. A pitcher standing in the order
+  // (rule 5.11, see dhTakesTheField) is never one of the men who leave: he
+  // cannot cover a position by definition, and taking him out of the batting
+  // order would take him off the mound with it.
+  const arm = unmatched.find((player) => player.kind === "pitcher");
+  const keep = arm ?? [...unmatched].sort((a, b) =>
+    roughBatValue(b) - roughBatValue(a) || String(a.id).localeCompare(String(b.id)))[0];
+  const leaving = unmatched.filter((player) => player !== keep && player.kind !== "pitcher");
+  return entering.map((card, at) => ({
+    in: card,
+    out: leaving[at] ?? null,
+    slot: [...pooled].find(([, player]) => player.id === card.id)?.[0] ?? null
+  })).filter((move) => move.out);
+}
+
+function forfeitFor(state, side) {
+  state.gameOver = true;
+  state.forfeitedBy = side;
+  state.pendingSubEvents.push({
+    type: "forfeit",
+    side,
+    team: state[side].name,
+    inning: state.inning,
+    half: state.half
+  });
+}
+
+// Carry out one recommended move.
+function applyRealignMove(state, side, move) {
+  const index = state[side].lineup.findIndex((player) => player.id === move.out.id);
+  if (index < 0) return null;
+  const swapped = applyLineupSub(state, side, index, move.in);
+  ensureHitterLine(state, swapped.entering, side);
+  const event = substitutionEvent(state, side, "defensive-sub", swapped.entering, swapped.outgoing, {
+    slot: move.slot,
+    forced: true
+  });
+  state.pendingSubEvents.push(event);
+  return event;
+}
+
 function realignDefense(state, side) {
   const team = state[side];
   if (!team.lineup.length || alignmentLegal(team.lineup)) return;
-  let assignment = coverageAssignment(team.lineup);
-  if (!assignment) {
-    const bench = availableBench(state, side);
-    const pooled = coverageAssignment([...team.lineup, ...bench]);
-    if (!pooled) {
-      state.gameOver = true;
-      state.forfeitedBy = side;
-      state.pendingSubEvents.push({
-        type: "forfeit",
-        side,
-        team: team.name,
-        inning: state.inning,
-        half: state.half
-      });
-      return;
-    }
-    const matched = new Set([...pooled.values()].map((player) => player.id));
-    const entering = bench.filter((card) => matched.has(card.id));
-    const unmatched = team.lineup.filter((player) => !matched.has(player.id));
-    // One unmatched man stays on — the best bat among them — and the rest
-    // leave for men who can actually cover the field. A pitcher standing in
-    // the order (rule 5.11, see dhTakesTheField) is never one of the men who
-    // leave: he cannot cover a position by definition, and taking him out of
-    // the batting order would take him off the mound with it.
-    const arm = unmatched.find((player) => player.kind === "pitcher");
-    const keep = arm ?? [...unmatched].sort((a, b) =>
-      roughBatValue(b) - roughBatValue(a) || String(a.id).localeCompare(String(b.id)))[0];
-    const leaving = unmatched.filter((player) => player !== keep && player.kind !== "pitcher");
-    entering.forEach((card, at) => {
-      const out = leaving[at];
-      const index = team.lineup.findIndex((player) => player.id === out.id);
-      const swapped = applyLineupSub(state, side, index, card);
-      ensureHitterLine(state, swapped.entering, side);
-      state.pendingSubEvents.push(substitutionEvent(state, side, "defensive-sub", swapped.entering, swapped.outgoing, {
-        slot: [...pooled].find(([, player]) => player.id === card.id)?.[0] ?? null,
-        forced: true
-      }));
-    });
-    assignment = coverageAssignment(team.lineup);
-    if (!assignment) return; // cannot happen: the pooled matching promised it
+  const assignment = coverageAssignment(team.lineup);
+  if (assignment) {
+    // The nine can cover it themselves: this is a reseat, not a decision, so
+    // nobody is asked about it.
+    applyDefenseAssignment(team.lineup, assignment);
+    return;
   }
-  applyDefenseAssignment(team.lineup, assignment);
+  const proposal = realignProposal(state, side);
+  if (!proposal) {
+    forfeitFor(state, side);
+    return;
+  }
+  // A club that gets asked is asked: the men it would have to spend are its
+  // own, and which ones is a manager's call, not a skipper's.
+  if (state.deferRealignFor === side || state.deferRealignFor === "both") {
+    state.pendingRealign = { side, proposal };
+    return;
+  }
+  for (const move of proposal) applyRealignMove(state, side, move);
+  const seated = coverageAssignment(team.lineup);
+  if (seated) applyDefenseAssignment(team.lineup, seated);
+}
+
+// ---- Answering the realignment ------------------------------------------------
+
+export function pendingRealign(state) {
+  return state.pendingRealign ?? null;
+}
+
+// "Do it your way." Carries out the recommendation and seats the nine.
+export function acceptRealign(state) {
+  const pending = state.pendingRealign;
+  if (!pending) return [];
+  const events = [];
+  for (const move of pending.proposal) {
+    const event = applyRealignMove(state, pending.side, move);
+    if (event) events.push(event);
+  }
+  state.pendingRealign = null;
+  finishRealign(state, pending.side);
+  return events;
+}
+
+// "I'll do it myself." One chosen man for one chosen man, as many times as it
+// takes; the question stays open until the nine can cover the field.
+export function manualRealign(state, benchId, targetPlayerId) {
+  const pending = state.pendingRealign;
+  if (!pending) return null;
+  const side = pending.side;
+  const team = state[side];
+  const sub = availableBench(state, side).find((card) => card.id === benchId);
+  const index = team.lineup.findIndex((player) => player.id === targetPlayerId);
+  if (!sub || index < 0) return null;
+  // A pitcher in the batting order is never the man who leaves (rule 5.11).
+  if (team.lineup[index].kind === "pitcher") return null;
+  const swapped = applyLineupSub(state, side, index, sub);
+  ensureHitterLine(state, swapped.entering, side);
+  const event = substitutionEvent(state, side, "defensive-sub", swapped.entering, swapped.outgoing, {
+    slot: null,
+    forced: true
+  });
+  state.pendingSubEvents.push(event);
+  // Solved? Then the question closes and the nine take their places.
+  if (coverageAssignment(team.lineup)) {
+    state.pendingRealign = null;
+    finishRealign(state, side);
+  } else if (!realignProposal(state, side)) {
+    // He has spent his way out of a legal defense.
+    state.pendingRealign = null;
+    forfeitFor(state, side);
+  } else {
+    state.pendingRealign = { side, proposal: realignProposal(state, side) };
+  }
+  return event;
+}
+
+function finishRealign(state, side) {
+  const seated = coverageAssignment(state[side].lineup);
+  if (seated) applyDefenseAssignment(state[side].lineup, seated);
+  else forfeitFor(state, side);
 }
 
 // A bench bat hits for the man due up. Returns the event, or null when the

@@ -68,6 +68,8 @@ import {
   actDefensiveSub,
   actDefenseSwap,
   actDhTakesField,
+  actAcceptRealign,
+  actManualRealign,
   fastForward,
   runSimSeries,
   isDramaticMoment,
@@ -521,6 +523,9 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
 // ---- Interactive battle ----------------------------------------------------
 
 function battleMenuItems(app, phase) {
+  if (phase.type === "realign") {
+    return realignMenuItems(app, phase);
+  }
   if (phase.type === "advance-decision") {
     return advanceMenuItems(phase.pending);
   }
@@ -766,6 +771,77 @@ function renderBench(app, battle, trainer, phase) {
       stage === "target"
         ? "Pick the move. A man who leaves the game is gone for good. X backs out."
         : "Pick the man. A greyed man would leave no legal defense. X goes back a step."
+    }</p></div>
+  </div>`;
+}
+
+// Your pinch hitting has left nobody who can cover a position. The nine
+// cannot take the field like this, so the game stops here — but WHICH men you
+// spend to fix it is your call, not the skipper's. He offers his answer; you
+// can take it, or do it yourself, man by man.
+function realignMenuItems(app, phase) {
+  const proposal = phase.realign.proposal ?? [];
+  const items = [{
+    html: `LET THE SKIPPER DO IT <span class="gq-dim">${proposal
+      .map((move) => `${escapeHtml(shortName(move.in.name))} FOR ${escapeHtml(shortName(move.out.name))}`)
+      .join(", ")}</span>`,
+    run: (a) => afterAction(a, actAcceptRealign(a.screen.battle))
+  }];
+  items.push({
+    label: "I'LL PICK THE MEN MYSELF",
+    run: (a) => {
+      a.screen.mode = "realign";
+      a.screen.realignStage = "bench";
+      a.screen.realignIndex = 0;
+      a.screen.realignPick = null;
+    }
+  });
+  items.push(rostersItem(), gameLogItem());
+  return items;
+}
+
+// Picking it yourself: a bench man, then the man he replaces. The question
+// stays open until the nine can cover the field, so this can be walked more
+// than once.
+function realignBenchRows(phase) {
+  return (phase.bench ?? []).map((card) => ({
+    card,
+    html: `${escapeHtml(card.position)} ${escapeHtml(shortName(card.name))} <span class="gq-dim">OB${card.onBase} SPD${card.speed} FLD${(Number(card.fielding) || 0) >= 0 ? "+" : ""}${Number(card.fielding) || 0}</span>`
+  }));
+}
+
+function realignTargetRows(phase) {
+  // A pitcher standing in the order never leaves it (rule 5.11).
+  return (phase.lineup ?? [])
+    .filter((player) => player.kind !== "pitcher")
+    .map((player) => ({
+      card: player,
+      html: `${escapeHtml(player.assignedPosition ?? player.position)} ${escapeHtml(shortName(player.name))} <span class="gq-dim">OB${player.onBase}</span>`
+    }));
+}
+
+function renderRealign(app, battle, trainer, phase) {
+  const stage = app.screen.realignStage ?? "bench";
+  const rows = stage === "bench" ? realignBenchRows(phase) : realignTargetRows(phase);
+  const index = clampIndex(app.screen.realignIndex ?? 0, rows.length + 1);
+  const preview = rows[index]?.card ?? app.screen.realignPick ?? null;
+  const holes = (phase.realign.proposal ?? []).map((move) => move.slot).filter(Boolean);
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>&#9888; NOBODY CAN COVER ${escapeHtml(holes.join("/") || "THE FIELD")}</span><span>${halfLabel(battle.state)}</span></div>
+    <div class="gq-body"><div class="gq-columns gq-columns-pen">
+      <div class="gq-frame gq-scroll"><h3>${stage === "bench" ? "BRING IN&hellip;" : `${escapeHtml(shortName(app.screen.realignPick?.name ?? ""))} FOR&hellip;`}</h3>${menuHtml(
+        [...rows.map((row) => ({ html: row.html })), { label: stage === "bench" ? "NEVER MIND" : "BACK" }],
+        index
+      )}</div>
+      <div class="gq-card-side">
+        <p class="gq-dim">${preview ? (stage === "bench" ? "COMING IN" : "LEAVES THE GAME") : "&nbsp;"}</p>
+        ${preview ? cardPanelHtml(preview) : ""}
+      </div>
+    </div></div>
+    <div class="gq-textbox"><p class="gq-dim">${
+      stage === "bench"
+        ? "Your nine cannot cover the field. Pick the man you want out there. X goes back to the skipper's answer."
+        : "And the man he replaces — who leaves the game for good."
     }</p></div>
   </div>`;
 }
@@ -1545,6 +1621,7 @@ export const battleScreen = {
     const phase = battlePhase(battle);
     if (app.screen.mode === "pen" && phase.type !== "over") return renderPen(app, battle, trainer, phase);
     if (app.screen.mode === "bench" && phase.type !== "over") return renderBench(app, battle, trainer, phase);
+    if (app.screen.mode === "realign" && phase.type === "realign") return renderRealign(app, battle, trainer, phase);
     const series = app.save.activeSeries;
     // The board, then the game, then the clubs. What you are DOING — the menu you
     // are choosing from and the call of the play you just made — sits in the
@@ -1564,6 +1641,13 @@ export const battleScreen = {
   hoverCard(app, index) {
     if (app.screen.mode === "pen") {
       return battlePhase(app.screen.battle).bullpen?.[index]?.pitcher ?? null;
+    }
+    if (app.screen.mode === "realign") {
+      const phase = battlePhase(app.screen.battle);
+      if (phase.type !== "realign") return null;
+      return (app.screen.realignStage ?? "bench") === "bench"
+        ? realignBenchRows(phase)[index]?.card ?? null
+        : realignTargetRows(phase)[index]?.card ?? null;
     }
     if (app.screen.mode === "bench") {
       const phase = battlePhase(app.screen.battle);
@@ -1628,6 +1712,52 @@ export const battleScreen = {
       return;
     }
     if (phase.type === "over") return;
+    if (app.screen.mode === "realign") {
+      if (phase.type !== "realign") {
+        app.screen.mode = "menu";
+        app.rerender();
+        return;
+      }
+      const stage = app.screen.realignStage ?? "bench";
+      const rows = stage === "bench" ? realignBenchRows(phase) : realignTargetRows(phase);
+      const items = rows.length + 1;
+      if (key === "up" || key === "down") {
+        app.screen.realignIndex = clampIndex((app.screen.realignIndex ?? 0) + (key === "down" ? 1 : -1), items);
+      } else if (key === "a") {
+        const index = app.screen.realignIndex ?? 0;
+        if (index >= rows.length) {
+          if (stage === "target") {
+            app.screen.realignStage = "bench";
+            app.screen.realignIndex = 0;
+          } else {
+            app.screen.mode = "menu";
+            app.screen.menuIndex = 0;
+          }
+        } else if (stage === "bench") {
+          app.screen.realignPick = rows[index].card;
+          app.screen.realignStage = "target";
+          app.screen.realignIndex = 0;
+        } else {
+          const events = actManualRealign(app.screen.battle, app.screen.realignPick.id, rows[index].card.id);
+          // Still broken? Stay here and keep picking. Solved? Back to the game.
+          app.screen.realignStage = "bench";
+          app.screen.realignIndex = 0;
+          app.screen.realignPick = null;
+          if (battlePhase(app.screen.battle).type !== "realign") app.screen.mode = "menu";
+          afterAction(app, events);
+        }
+      } else if (key === "b") {
+        if (stage === "target") {
+          app.screen.realignStage = "bench";
+          app.screen.realignIndex = 0;
+        } else {
+          app.screen.mode = "menu";
+          app.screen.menuIndex = 0;
+        }
+      }
+      app.rerender();
+      return;
+    }
     if (app.screen.mode === "bench") {
       const stage = app.screen.benchStage ?? "target";
       if (stage === "confirm") {
