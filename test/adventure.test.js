@@ -5980,3 +5980,81 @@ test("a like-for-like swap is not worth asking about", async () => {
   assert.equal(app.screen.mode, "roster", "straight back to the roster");
   assert.ok(save.roster.cardIds.includes(spare.id), "and the swap is done");
 });
+
+test("a defense needing two men keeps asking until both are in", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { createBattle: makeBattle, battlePhase: phaseOf } = await import("../src/rules/battle/controller.js");
+  const g = await import("../src/rules/game.js");
+  // A club with two holes to plug: pinch hitters have taken the catcher's and
+  // the shortstop's spots, and only the bench can cover either.
+  const labels = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+  const seat = (prefix, label) => ({
+    id: `${prefix}-seat-${label}`, name: `${prefix} ${label}`, kind: "hitter",
+    position: label === "DH" ? "1B" : label, assignedPosition: label, defensivePosition: label,
+    fielding: 2, onBase: 9, speed: 12, points: 100,
+    positions: [{ pos: label === "DH" ? "1B" : label, fielding: 2 }],
+    chart: [{ from: 1, to: 20, result: "SO" }]
+  });
+  const spare = (id, pos, fielding = 0) => ({
+    id, name: id, kind: "hitter", position: pos, fielding, onBase: 12, speed: 12, points: 100,
+    positions: [{ pos, fielding }], chart: [{ from: 1, to: 20, result: "SO" }]
+  });
+  const club = (prefix) => ({
+    name: prefix,
+    lineup: labels.map((label) => seat(prefix, label)),
+    pitchers: [{ id: `${prefix}-arm`, name: `${prefix} arm`, kind: "pitcher", role: "SP", control: 4, ip: 6, chart: [{ from: 1, to: 20, result: "SO" }] }],
+    bench: [spare(`${prefix}-bat1`, "1B"), spare(`${prefix}-bat2`, "1B"), spare(`${prefix}-glovC`, "C", 1), spare(`${prefix}-glovSS`, "SS", 1)]
+  });
+
+  const battle = {
+    seed: "two-holes", trainer: trainerById("gym-garrick"), playerSide: "home", npcSide: "away",
+    starterIndex: 0, npcStarterIndex: null, playerIsAway: false,
+    profile: { stealBias: 0, pullBias: 0, subBias: 1 },
+    state: g.createInitialState(club("away"), club("home")),
+    rng: createRng("two-holes"), events: [], eventCount: 0, actions: []
+  };
+  const state = battle.state;
+  state.manualPitchingFor = "both";
+  state.deferRealignFor = "home";
+  state.inning = 7;
+  state.half = "bottom";
+  state.lineupIndex.home = 0;
+  assert.ok(g.pinchHit(state, "home", "home-bat1"), "hit for the catcher");
+  state.lineupIndex.home = 4;
+  assert.ok(g.pinchHit(state, "home", "home-bat2"), "hit for the shortstop");
+  state.outs = 2;
+  g.playPlateAppearance(state, battle.rng);
+  g.playPlateAppearance(state, battle.rng);
+  assert.equal(phaseOf(battle).type, "realign", "the club is asked");
+  assert.equal(g.pendingRealign(state).proposal.length, 2, "two men have to come in");
+
+  // Walk the picker by hand: bench man, then the man he replaces. Twice.
+  const app = { save: testSave(), screen: { name: "battle", trainerId: "gym-garrick", battle, mode: "realign", realignStage: "bench", realignIndex: 0, lines: [], playLog: [] }, go() {}, rerender() {} };
+  const pickPair = (benchId, outId) => {
+    const phase = phaseOf(battle);
+    const benchRows = phase.bench;
+    app.screen.realignStage = "bench";
+    app.screen.realignIndex = benchRows.findIndex((card) => card.id === benchId);
+    assert.ok(app.screen.realignIndex >= 0, `${benchId} is offered`);
+    battleScreen.key(app, "a");
+    assert.equal(app.screen.realignStage, "target", "then it asks who leaves");
+    const targets = phaseOf(battle).lineup.filter((player) => player.kind !== "pitcher");
+    app.screen.realignIndex = targets.findIndex((player) => player.id === outId);
+    assert.ok(app.screen.realignIndex >= 0, `${outId} is offered`);
+    battleScreen.key(app, "a");
+  };
+
+  pickPair("home-glovC", "home-bat1");
+  // The heart of it: one man was not enough, and the manager is NOT dumped
+  // back into the game with a broken defense — he is still being asked.
+  assert.equal(phaseOf(battle).type, "realign", "the question is still open");
+  assert.equal(app.screen.mode, "realign", "and he is still in the picker");
+  assert.equal(g.pendingRealign(state).proposal.length, 1, "one hole left");
+
+  pickPair("home-glovSS", "home-bat2");
+  assert.notEqual(phaseOf(battle).type, "realign", "now it is solved");
+  assert.equal(app.screen.mode, "menu", "and he is handed back to the game");
+  assert.equal(state.forfeitedBy ?? null, null, "with no forfeit");
+  const { alignmentLegal } = await import("../src/rules/substitutions.js");
+  assert.equal(alignmentLegal(state.home.lineup), true, "and a legal defense");
+});

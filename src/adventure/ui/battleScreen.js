@@ -1739,12 +1739,15 @@ export const battleScreen = {
           app.screen.realignIndex = 0;
         } else {
           const events = actManualRealign(app.screen.battle, app.screen.realignPick.id, rows[index].card.id);
-          // Still broken? Stay here and keep picking. Solved? Back to the game.
+          afterAction(app, events);
+          // One man is often not enough — two holes need two men. afterAction
+          // drops back to the battle menu, so if the nine STILL cannot cover
+          // the field, walk straight back into the picker rather than making
+          // him reopen it for every man he has to spend.
           app.screen.realignStage = "bench";
           app.screen.realignIndex = 0;
           app.screen.realignPick = null;
-          if (battlePhase(app.screen.battle).type !== "realign") app.screen.mode = "menu";
-          afterAction(app, events);
+          if (battlePhase(app.screen.battle).type === "realign") app.screen.mode = "realign";
         }
       } else if (key === "b") {
         if (stage === "target") {
