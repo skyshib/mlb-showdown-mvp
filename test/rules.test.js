@@ -585,6 +585,64 @@ test("runner tagging home scores when defense throws out another tag-up for the 
   assert.equal(state.lastPlayDetails.thrownAttempt.safe, false);
 });
 
+// A single with men on first and second sends two runners at once, and there is
+// one ball. Whoever the throw goes to is the only man who can be got; the other
+// takes his base while it is in the air. Picking the man easiest to throw out is a
+// fielder's answer to a manager's question — the out worth having depends on what
+// the run is worth, which depends on the score.
+test("the throw goes to the out worth having, not the man easiest to get", () => {
+  // SPD 14 coming home is a 95% runner — his +5 for the plate, in front of a
+  // butcher's outfield. SPD 18 into third is 90%. So the man at third is ALWAYS
+  // the easier out, and the old rule threw there every time.
+  const singleWithTwoGoing = (awayScore, homeScore) => {
+    const state = createInitialState(teamA, weakDefense);
+    state.inning = 7;
+    state.outs = 1;
+    state.score = { away: awayScore, home: homeScore };
+    state.bases = [{ name: "Trailer", speed: 18 }, { name: "Lead Man", speed: 14 }, null];
+    applySingle(state, hitter, "away", "home", { d20: () => 1 });
+    return state.lastPlayDetails;
+  };
+
+  const tied = singleWithTwoGoing(0, 0);
+  assert.equal(tied.extraBaseAttempts.length, 2, "both men went, so there is a choice to make");
+  assert.equal(tied.thrownAttempt.runner, "Lead Man");
+  assert.equal(tied.thrownAttempt.to, "home", "tied in the seventh, the run is what beats you");
+
+  // Four in front, the same two men on the same play: the run is cheap now and an
+  // out is not, so the throw takes the surer one.
+  const upFour = singleWithTwoGoing(0, 4);
+  assert.equal(upFour.thrownAttempt.runner, "Trailer");
+  assert.equal(upFour.thrownAttempt.to, "3B", "four in front, the run is cheap and the out is not");
+
+  // Twelve in front, a run is worth nothing at all and an out is still worth
+  // something, so the model arrives at the old answer on its own. It is not
+  // falling back — it agrees.
+  const routed = singleWithTwoGoing(0, 12);
+  assert.equal(routed.thrownAttempt.runner, "Trailer", "a run that cannot matter is not worth the throw");
+});
+
+// Two men neither of whom can be thrown out price exactly alike — every branch of
+// it ends with both of them safe — so there is nothing for the win column to
+// choose between, and the old rule breaks the tie.
+test("two runners who cannot be thrown out draw no throw and no die", () => {
+  const state = createInitialState(teamA, weakDefense);
+  state.outs = 1;
+  // SPD 15 coming home is target 20 in front of a butcher's outfield; SPD 20 into
+  // third is target 20. The throw would need a 21 either way.
+  state.bases = [{ name: "Trailer", speed: 20 }, { name: "Lead Man", speed: 15 }, null];
+  const rng = { d20: () => assert.fail("the defense threw a die it had no throw to make") };
+
+  const runs = applySingle(state, hitter, "away", "home", rng);
+
+  assert.equal(runs, 1, "the lead man scores");
+  assert.equal(state.outs, 1, "and nobody is out");
+  const details = state.lastPlayDetails;
+  assert.equal(details.extraBaseAttempts.length, 2);
+  assert.equal(details.thrownAttempt.runner, "Lead Man", "the tie goes to the lead man, as it always did");
+  assert.equal(details.thrownAttempt.roll, null, "and no die was thrown, because nothing threw it");
+});
+
 test("a base nobody can defend draws no throw, and no die", () => {
   const state = createInitialState(teamA, weakDefense);
   state.outs = 1;

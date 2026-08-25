@@ -95,6 +95,20 @@ function rawBreakeven(half, inning, outs, bases, diff, fromIndex, toIndex) {
   return Math.max(0, Math.min(1, (holdWp - outWp) / swing));
 }
 
+// The batting team's win probability with the diamond in a given state — the same
+// reckoning a break-even is built out of, exposed on its own because the DEFENSE
+// has a decision to price too. One throw, two runners: which of them to contest is
+// a question about what each out is worth, and it is asked in these numbers (see
+// chooseThrowTarget in game.js).
+//
+// Three outs is a state like any other here: the inning is over and the number is
+// what the other side's half is worth, which is the whole reason an out with two
+// down is worth so much more than an out with none.
+export function battingWp({ half, inning, outs, bases, diff }) {
+  const band = Math.min(inning, 10);
+  return outs >= 3 ? inningOverWp(half, band, diff) : stateWp(half, band, outs, bases, diff);
+}
+
 const CACHE = new Map();
 
 // The share of the time a runner must beat the throw for the attempt to be worth

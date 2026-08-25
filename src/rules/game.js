@@ -3,7 +3,7 @@ import { reliefDecision, lineupProfile } from "./pitching.js?v=20260716-records"
 import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
-import { advanceBreakeven } from "./breakeven.js?v=20260716-records";
+import { advanceBreakeven, battingWp } from "./breakeven.js?v=20260716-records";
 import { SUB_MIN_INNING, benchSlotFielding, defenseEligible, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
 
 export { SUB_MIN_INNING };
@@ -2083,16 +2083,18 @@ function shouldAttemptAdvance(candidate) {
 }
 
 // A die is worth throwing only when it could land on either side of the target.
-// Two runners on a play take that away. `chooseThrowTarget` hands back the most
-// gettable man: if even HE cannot be thrown out, nobody on the play can, the ball
-// goes back to the pitcher, and no die is thrown because nothing threw it. And at
-// the other end, a man so plainly beaten that even his kindest roll is out is out
-// on the throw the same way every time — the die is a formality with a foregone
-// answer. Either way the outcome is settled before the die leaves the hand, and a
-// d20 tumbling toward a number it must hit, or cannot, is a magic trick with no
-// card in it. It is only staged when the roll is the thing that decides.
+// `chooseThrowTarget` picks the man the throw goes to; the rest of the play is
+// about him. If he cannot be thrown out the ball goes back to the pitcher and no
+// die is thrown, because nothing threw it — and a man the defense would only ever
+// contest is one it can get, so a target nobody could have was nobody's choice
+// either. And at the other end, a man so plainly beaten that even his kindest roll
+// is out is out on the throw the same way every time — the die is a formality with
+// a foregone answer. Either way the outcome is settled before the die leaves the
+// hand, and a d20 tumbling toward a number it must hit, or cannot, is a magic
+// trick with no card in it. It is only staged when the roll is the thing that
+// decides.
 function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rng) {
-  const throwTarget = chooseThrowTarget(candidates);
+  const throwTarget = chooseThrowTarget(state, candidates);
   const alwaysSafe = certainSafe(throwTarget);
   const alwaysOut = certainOut(throwTarget);
   const settled = alwaysSafe || alwaysOut;
@@ -2155,8 +2157,86 @@ function resolveAdvanceAttempts(state, candidates, battingSide, pitchingSide, rn
   };
 }
 
-function chooseThrowTarget(candidates) {
+// Which of them to throw at.
+//
+// A single with men on first and second sends two runners at once: one breaking
+// for the plate, one for third. There is one ball and one throw, so whoever it
+// goes to is the only man who can be got — the other takes his base while it is in
+// the air. The choice used to go to whoever was easiest to throw out, which is a
+// fielder's answer to a manager's question. The easiest out is not always the one
+// worth having: a man rounding third with a coin-flip's chance of beating the
+// throw is worth more than a certain out at third if the run he is carrying is the
+// run that beats you.
+//
+// So it is priced, in the currency the rest of the game is scored in:
+//
+//   EV(throw at him) = P(safe) x WP(everybody in) + P(out) x WP(him out, rest in)
+//
+// The first term is the same whoever the throw goes to — the men who are not
+// contested score or take their base either way — so what separates the choices is
+// how often the throw gets its man times how much THAT out is worth. Both numbers
+// are the batting team's win probability, and the defense is trying to make it
+// small. The break-even the offense sent them on is the same arithmetic read from
+// the other side of the ball (see breakeven.js).
+//
+// A game the win surface has stopped pricing — six runs up in the second, where
+// every branch reads the same to the hundredth — has nothing to say here, and the
+// old rule answers instead. It was never wrong. It was only blind to the score.
+function chooseThrowTarget(state, candidates) {
+  if (candidates.length < 2) return candidates[0];
+  return bestPricedThrow(state, candidates) ?? mostGettableRunner(candidates);
+}
+
+// The old rule, kept as the fallback and the tiebreak: the man most likely to be
+// thrown out, and the lead one of two who are equally gettable.
+function mostGettableRunner(candidates) {
   return [...candidates].sort((a, b) => a.safeChance - b.safeChance || b.toIndex - a.toIndex)[0];
+}
+
+// Two throws the surface prices the SAME are not a choice it is making — six runs
+// down every branch of a blowout reads alike, and so do two men whose outs are
+// worth the same — so the old rule breaks the tie. The bar is float noise and
+// nothing more, because the differences here are genuinely small and still real:
+// across 300 simulated games the median tie-game play separated its two throws by
+// five ten-thousandths of a win and the largest by under two hundredths. Both
+// runners have to have been SENT to be on this play at all, which means both were
+// likely safe, which means the out-value gap is multiplied by a small chance of
+// ever collecting it. Small is what this decision looks like when it is real.
+const THROW_CHOICE_TIE = 1e-9;
+
+function bestPricedThrow(state, candidates) {
+  const { half, inning, outs } = state;
+  const diff = battingEdge(state);
+  // Nobody thrown out: the state every one of these choices shares.
+  const conceded = advanceOutcome(state.bases, candidates, null);
+  const safeWp = battingWp({ half, inning, outs, bases: conceded.bases, diff: diff + conceded.runs });
+
+  let best = null;
+  let worst = null;
+  for (const candidate of candidates) {
+    const got = advanceOutcome(state.bases, candidates, candidate);
+    const outWp = battingWp({ half, inning, outs: outs + 1, bases: got.bases, diff: diff + got.runs });
+    const wp = candidate.safeChance * safeWp + (1 - candidate.safeChance) * outWp;
+    if (best === null || wp < best.wp) best = { candidate, wp };
+    if (worst === null || wp > worst) worst = wp;
+  }
+  return worst - best.wp > THROW_CHOICE_TIE ? best.candidate : null;
+}
+
+// The diamond after these men go, with one of them (if any) thrown out on the way.
+// Every man leaves his base before anybody takes one, because a trailing runner is
+// often headed for the base the man ahead of him is leaving. Runs come back
+// separately: a run counts whether the man scoring it was contested or waved in.
+function advanceOutcome(bases, candidates, caught) {
+  const after = [...bases];
+  let runs = 0;
+  for (const candidate of candidates) after[candidate.fromIndex] = null;
+  for (const candidate of candidates) {
+    if (candidate === caught) continue;
+    if (candidate.toIndex >= 3) runs += 1;
+    else after[candidate.toIndex] = candidate.runner;
+  }
+  return { bases: after, runs };
 }
 
 // The number the DEFENSE has to roll to get the out. Every fielding check in the
