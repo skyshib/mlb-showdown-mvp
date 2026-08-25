@@ -7,7 +7,9 @@ prose from the site.
 import json, os, re, sys
 
 PAGES = os.path.join(os.path.dirname(__file__), "pages")
-ROW_RE = re.compile(r"<tr>\s*<td bgcolor='#CC0033'.*?</table>\s*</td>\s*</tr>", re.S)
+# The header row opens with the same red cell, so skip it explicitly — a match
+# starting there would swallow the page's first card row and lose the card.
+ROW_RE = re.compile(r"<tr>\s*<td bgcolor='#CC0033'(?! class='searchhead').*?</table>\s*</td>\s*</tr>", re.S)
 CELL_RE = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
 CHART_TABLE_RE = re.compile(r"<table border='1px'.*?</table>", re.S)
 TAG_RE = re.compile(r"<[^>]+>")

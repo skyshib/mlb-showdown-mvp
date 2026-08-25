@@ -3115,7 +3115,7 @@ test("the game log shows the dice and the running win probability", async () => 
 test("every league builds a working universe with a legal starter pack", async () => {
   const { UNIVERSES, DECADES, FRANCHISES, universeConfig } = await import("../src/adventure/packs.js");
   const { resolveChart } = await import("../src/rules/cards.js");
-  const expectedSizes = { classic: 3544 };
+  const expectedSizes = { classic: 3646 };
   try {
     assert.ok(DECADES.length >= 12 && DECADES.includes(1910) && DECADES.includes(2020), "decades run 1910s-2020s");
     assert.equal(FRANCHISES.length, 30, "all thirty active franchises");
