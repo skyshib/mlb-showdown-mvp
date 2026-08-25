@@ -5519,3 +5519,53 @@ test("every gauntlet round is a best-of-three, whatever the club prints", async 
     assert.equal(seriesLengthFor(campaign, trainer), trainer.battleFormat.bestOf ?? 1, `${trainer.id} keeps its own length in the campaign`);
   }
 });
+
+test("the bench reads best bat first, and wears a hollow mark on the team", async () => {
+  const { teamScreen, binderScreen, catalogScreen, rosterMark, onBench, lineupSlotOf } =
+    await import("../src/adventure/ui/collectionScreens.js");
+  const save = await fullTestSave("bench-order-seed");
+  const roster = rosterCards(save);
+  const bench = roster.filter((card) => card.kind === "hitter" && !lineupSlotOf(save, card));
+  assert.ok(bench.length >= 2, "the roster carries a bench to order");
+
+  // The team screen's bench is a depth chart: the man you would send up
+  // first sits at the top of it.
+  const app = { save, screen: { name: "team", page: "bats", index: 0 }, go() {}, rerender() {} };
+  const html = teamScreen.render(app);
+  const benchOrder = [...html.matchAll(/([A-Z]\.[^<]*?)\s*<span class="gq-dim">BENCH/g)].map((match) => match[1].trim());
+  const byPoints = [...bench].sort((a, b) => b.points - a.points).map((card) => shortNameOf(card.name));
+  assert.deepEqual(benchOrder, byPoints, "bench bats descend by points");
+  assert.ok(bench[0].points !== bench[bench.length - 1].points, "and the fixture actually has an order to get wrong");
+
+  // On the team, in the game, or on the team, out of it: same shape, filled
+  // or hollow, so one glance separates them.
+  const starter = roster.find((card) => lineupSlotOf(save, card));
+  const reserve = bench[0];
+  assert.equal(rosterMark(save, starter).trim(), "&#9670;", "a starter is filled");
+  assert.equal(rosterMark(save, reserve).trim(), "&#9671;", "a reserve is hollow");
+  assert.equal(onBench(save, starter), false);
+  assert.equal(onBench(save, reserve), true);
+  // An arm is never "benched" — the pen is his job.
+  const arm = roster.find((card) => card.kind === "pitcher");
+  assert.equal(onBench(save, arm), false, "a reliever is not a bench bat");
+  assert.equal(rosterMark(save, arm).trim(), "&#9670;");
+  // A card nobody rostered wears nothing at all.
+  const spare = adventurePool().find((card) => !save.roster.cardIds.includes(card.id));
+  assert.equal(rosterMark(save, spare), "");
+
+  // The binder shows both marks and says what they mean.
+  const binderApp = { save, screen: { name: "binder", index: 0, filter: "ALL" }, go() {}, rerender() {} };
+  const binderHtml = binderScreen.render(binderApp);
+  assert.ok(binderHtml.includes("&#9670;") && binderHtml.includes("&#9671;"), "both marks are on the page");
+  assert.ok(binderHtml.includes("&#9670; = starting") && binderHtml.includes("&#9671; = bench"), "and the legend explains them");
+
+  // The catalog keeps its own glyph family, filled and hollow the same way.
+  // (It pages by position, so the marks are checked on the helper the rows
+  // render through rather than on whichever page happens to be open.)
+  const circles = { filled: "&#9679;", hollow: "&#9675;" };
+  assert.equal(rosterMark(save, starter, circles).trim(), "&#9679;", "a starter is a filled circle");
+  assert.equal(rosterMark(save, reserve, circles).trim(), "&#9675;", "a reserve is a hollow one");
+  assert.equal(rosterMark(save, spare, circles), "", "and a card off the team is unmarked");
+  const catalogApp = { save, screen: { name: "catalog", index: 0, filter: "ALL" }, go() {}, rerender() {} };
+  assert.ok(catalogScreen.render(catalogApp).includes("&#96"), "the catalog renders its marks");
+});

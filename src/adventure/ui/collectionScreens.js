@@ -331,8 +331,9 @@ export const catalogScreen = {
         ? menuHtml(
             visible.map((card) => {
               const owned = ownedCount(app.save, card.id);
-              const rostered = app.save.roster.cardIds.includes(card.id);
-              return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">*x${owned}</span>` : ""}${rostered ? " &#9679;" : ""}${starMark(app.save, card)}${pinMark(app, card)}` };
+              return { html: `${cardLine(card)}${owned ? ` <span class="gq-dim">*x${owned}</span>` : ""}${
+                rosterMark(app.save, card, { filled: "&#9679;", hollow: "&#9675;" })
+              }${starMark(app.save, card)}${pinMark(app, card)}` };
             }),
             index - start,
             { offset: start }
@@ -724,9 +725,12 @@ function swapOrder(save, kind) {
   if (kind === "hitter") {
     // The lineup as it actually bats, then the reserves.
     for (const player of buildTeam(managerFor(save)).lineup) ids.push(player.id);
-    for (const card of rosterCards(save)) {
-      if (card.kind === "hitter" && !ids.includes(card.id)) ids.push(card.id);
-    }
+    // Then the bench, best bat first — the same depth chart the team screen
+    // reads, so the two never disagree about who the next man up is.
+    const bench = rosterCards(save)
+      .filter((card) => card.kind === "hitter" && !ids.includes(card.id))
+      .sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0) || a.name.localeCompare(b.name));
+    for (const card of bench) ids.push(card.id);
   } else {
     for (const arm of rotationCards(save)) ids.push(arm.id);
     for (const card of rosterCards(save)) {
@@ -822,7 +826,7 @@ export const binderScreen = {
         ? menuHtml(
             rows.map(({ card, count }) => ({
               html: `${cardLine(card)}${count > 1 ? ` <span class="gq-dim">x${count}</span>` : ""}${
-                app.save.roster.cardIds.includes(card.id) ? " &#9670;" : ""
+                rosterMark(app.save, card)
               }${starMark(app.save, card)}${pinMark(app, card)}`
             })),
             index
@@ -847,7 +851,7 @@ export const binderScreen = {
       <div class="gq-textbox">${app.screen.notice ? `<p><b>${app.screen.notice}</b></p>` : ""}${pinnedLine(app)}${searchLine(app.screen.query, app.screen.searching)}<p class="gq-dim">${
         app.screen.actionMenu ? "Z picks an action. X closes."
           : swapping ? "Z benches them for your card. X cancels."
-          : "Z/ENTER opens card actions &middot; F finds &middot; &#9664;/&#9654; page by position &middot; &#9670; = on team &middot; &#9733; = keeper. X to leave."
+          : "Z/ENTER opens card actions &middot; F finds &middot; &#9664;/&#9654; page &middot; &#9670; = starting &middot; &#9671; = bench &middot; &#9733; = keeper. X to leave."
       }</p></div>
     </div>`;
   },
@@ -983,6 +987,21 @@ function lineupSlots(save) {
   return assignLineupSlots(rosterCards(save), save.roster.lineupAssignments).slots;
 }
 
+// The mark a rostered card wears in a list. A man in the lineup or on the
+// staff wears the FILLED diamond he always has; a man on the bench wears a
+// HOLLOW one — he is on the team, he is just not in the game. Same shape, so
+// the two read as one idea at a glance, and nothing else on the row moves.
+export function rosterMark(save, card, { filled = "&#9670;", hollow = "&#9671;" } = {}) {
+  if (!save.roster.cardIds.includes(card.id)) return "";
+  return onBench(save, card) ? ` ${hollow}` : ` ${filled}`;
+}
+
+// A rostered bat the lineup does not seat. Arms are never "benched" this way:
+// a reliever who has not come in yet is still the pen, which is his job.
+export function onBench(save, card) {
+  return card?.kind === "hitter" && !lineupSlotOf(save, card);
+}
+
 // The slot a rostered hitter actually fills. Null for an arm, or for a bat
 // the lineup couldn't seat.
 export function lineupSlotOf(save, card) {
@@ -1078,7 +1097,10 @@ function teamRosterCards(save) {
   const rank = (card) => {
     if (card.kind === "hitter") {
       const seated = seat.get(card.id);
-      return seated === undefined ? [1, 0] : [0, seated];
+      // The bench reads best bat first — it is a depth chart, and the man you
+      // would send up first belongs at the top of it. (Negated points, so the
+      // ascending sort puts the dearest man first.)
+      return seated === undefined ? [1, -(Number(card.points) || 0)] : [0, seated];
     }
     if (card.role === "SP") return [2, rotation.get(card.id) ?? Number.MAX_SAFE_INTEGER];
     return [3, 0];
