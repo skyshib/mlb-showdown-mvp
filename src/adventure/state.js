@@ -375,6 +375,15 @@ function per162(wpa, games) {
   return games > 0 ? (wpa * 162) / games : 0;
 }
 
+// The same rate said per GAME, which is the unit a season page actually reads
+// in: a man who adds two points of win probability every time he plays is
+// "+2.0%/G", and you can hold that number against the ones on his card. Per
+// 162 answers the same question in wins, but nobody here has played 162 games
+// — it asks you to imagine a season that has not happened.
+function perGame(wpa, games) {
+  return games > 0 ? wpa / games : 0;
+}
+
 export function seasonHitters(save) {
   return Object.values(ensureSeasonStats(save).hitters)
     .map((line) => {
@@ -388,7 +397,9 @@ export function seasonHitters(save) {
         obp,
         slg,
         ops: obp + slg,
-        wpa162: per162(line.wpa, line.games)
+        wpa162: per162(line.wpa, line.games),
+      wpaPerGame: perGame(line.wpa, line.games),
+        wpaPerGame: perGame(line.wpa, line.games)
       };
     })
     .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
@@ -469,7 +480,8 @@ export function seasonPitchers(save) {
       ...line,
       runsPerNine: line.outs ? (line.r * 27) / line.outs : 0,
       strikeoutsPerNine: line.outs ? (line.so * 27) / line.outs : 0,
-      wpa162: per162(line.wpa, line.games)
+      wpa162: per162(line.wpa, line.games),
+      wpaPerGame: perGame(line.wpa, line.games)
     }))
     .sort((a, b) => (a.outs === 0) - (b.outs === 0) || a.runsPerNine - b.runsPerNine || b.outs - a.outs);
 }

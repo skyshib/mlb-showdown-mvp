@@ -55,6 +55,24 @@ export function wpa162Html(value) {
   return Math.abs(Number(value) || 0) >= 3 ? `<b>${text}</b>` : `<span class="gq-dim">${text}</span>`;
 }
 
+// WPA per GAME, which is the rate a season page is really asking for. A total
+// says how long a man has been here as much as how good he is; per 162 says
+// what he'd be worth over a season nobody in this campaign has played. Per
+// game is the honest middle: what he adds on a day he suits up, in the same
+// points of win probability every play in the book is measured in.
+//
+// Two points a game is a good regular, four is a star — the same bar the
+// per-162 line drew at three wins, said in the unit actually on the page.
+export function wpaGameText(value) {
+  const percent = (Number(value) || 0) * 100;
+  return `${percent >= 0 ? "+" : "\u2212"}${Math.abs(percent).toFixed(1)}%`;
+}
+
+export function wpaGameHtml(value) {
+  const text = `${wpaGameText(value)} <span class="gq-dim">/G</span>`;
+  return Math.abs(Number(value) || 0) >= 0.0185 ? `<b>${text}</b>` : `<span class="gq-dim">${text}</span>`;
+}
+
 // Big swings (|WPA| >= 10%) read bold; the rest stay quiet.
 export function wpaHtml(wpa) {
   const text = wpaText(wpa);
@@ -704,7 +722,7 @@ function teamStatRows(save) {
 // same number again flips the direction. RA9 defaults ascending (lower is
 // better); everything else descending.
 const HITTER_SORTS = [
-  { key: "wpa162", label: "WPA/162" },
+  { key: "wpaPerGame", label: "WPA/G" },
   { key: "avg", label: "AVG" },
   { key: "ops", label: "OPS" },
   { key: "hr", label: "HR" },
@@ -713,7 +731,7 @@ const HITTER_SORTS = [
   { key: "games", label: "G" }
 ];
 const PITCHER_SORTS = [
-  { key: "wpa162", label: "WPA/162" },
+  { key: "wpaPerGame", label: "WPA/G" },
   { key: "runsPerNine", label: "RA9" },
   { key: "so", label: "K" },
   { key: "outs", label: "IP" },
@@ -741,8 +759,8 @@ export function seasonLines(app) {
 // A box score and a series page are asking what a man DID, and summed WPA is the
 // honest answer to that. The season page is asking what he is WORTH, which is a
 // rate — so it asks for one.
-export function statLineHtml(line, view, { per162 = false } = {}) {
-  const swing = per162 ? wpa162Html(line.wpa162 ?? 0) : wpaHtml(line.wpa);
+export function statLineHtml(line, view, { rate = false } = {}) {
+  const swing = rate ? wpaGameHtml(line.wpaPerGame ?? 0) : wpaHtml(line.wpa);
   if (view === "pitchers") {
     return `${escapeHtml(shortName(line.name))} ${swing} <span class="gq-dim">${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G</span>`;
   }
@@ -794,13 +812,13 @@ export const seasonStatsScreen = {
         <p class="gq-dim">SORT: ${sortBar}</p>
         <div class="gq-frame gq-scroll">${
           lines.length
-            ? menuHtml(lines.map((line) => ({ html: statLineHtml(line, view, { per162: true }) })), index)
+            ? menuHtml(lines.map((line) => ({ html: statLineHtml(line, view, { rate: true }) })), index)
             : `<p class="gq-dim">${app.screen.query ? `NOBODY NAMED "${escapeHtml(app.screen.query)}" HERE.` : "NO GAMES ON RECORD YET. GO PLAY SOMEBODY."}</p>`
         }</div>
       </div>
       <div class="gq-textbox">${
         app.screen.query ? `<p>SEARCH: <b>${escapeHtml(app.screen.query)}</b>_ <span class="gq-dim">X CLEARS</span></p>` : ""
-      }<p class="gq-dim">W/162 IS WINS ADDED PER 162 GAMES &mdash; WHAT HE IS WORTH, NOT HOW LONG HE HAS BEEN HERE. &#8592;/&#8594; ROSTER &middot; EVERYONE. Z ${
+      }<p class="gq-dim">/G IS WIN PROBABILITY ADDED PER GAME PLAYED &mdash; WHAT HE IS WORTH, NOT HOW LONG HE HAS BEEN HERE. &#8592;/&#8594; ROSTER &middot; EVERYONE. Z ${
         view === "pitchers" ? "THE CLUB" : "ARMS"
       }. Type a name to search &middot; 1-${sorts.length} sorts (again flips). X to leave.</p></div>
     </div>`;

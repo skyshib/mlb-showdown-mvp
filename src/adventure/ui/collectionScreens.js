@@ -25,7 +25,7 @@ import {
 import { rosterFormat, benchPrice } from "../rosterFormats.js?v=20260716-records";
 import { validateRoster, buildTeam, assignLineupSlots, canPlayerFillLineupSlot } from "../../rules/draft.js?v=20260716-records";
 import { hitterPositions, personConflict, playsPosition, positionsLabel, positionsOverlap } from "../../rules/cards.js?v=20260716-records";
-import { rateText, ipText, wpaHtml } from "./statsScreens.js?v=20260716-records";
+import { rateText, ipText, wpaGameHtml } from "./statsScreens.js?v=20260716-records";
 import { seasonHitters, seasonPitchers } from "../state.js?v=20260716-records";
 import { playLegend } from "../../ui/sounds.js?v=20260716-records";
 
@@ -1235,7 +1235,9 @@ function seasonStatsHtml(save, card) {
   const body = isArm
     ? `${ipText(line.outs)} IP &middot; ${line.runsPerNine.toFixed(2)} RA9 &middot; ${line.so} K &middot; ${line.games}G`
     : `${rateText(line.avg)} &middot; ${rateText(line.ops)} OPS &middot; ${line.hr}HR ${line.rbi}RBI ${line.sb}SB &middot; ${line.games}G`;
-  return `<div class="gq-frame"><p class="gq-dim">THIS SEASON ${wpaHtml(line.wpa)}</p><p>${body}</p></div>`;
+  // The season line reads at his RATE, the same as the season page: a total
+  // here says as much about how long he has been on the roster as about him.
+  return `<div class="gq-frame"><p class="gq-dim">THIS SEASON ${wpaGameHtml(line.wpaPerGame ?? 0)}</p><p>${body}</p></div>`;
 }
 
 // The roster card's action menu: swap him out, jump to the batting order,
