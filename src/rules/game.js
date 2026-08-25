@@ -262,10 +262,16 @@ export function playPlateAppearance(state, rng) {
   const outsBefore = state.outs;
   const scoreBefore = { ...state.score };
   const wpBefore = winProbabilityHome(state);
-  const controlRoll = rollD20(state, rng);
+  // A pitcher at the plate never has the advantage — so there is no pitch.
+  // MLB Showdown does not print an on-base number on an arm's card, and the
+  // rulebook says the contest simply does not happen: the man on the mound
+  // has it automatically, and the swing is read off HIS chart. (This only
+  // ever comes up when a club has killed its own DH — see dhTakesTheField.)
+  const armAtThePlate = Boolean(batter.battingAsPitcher);
   const effectiveControl = pitcher.control - fatiguePenalty;
-  const controlTotal = controlRoll + effectiveControl;
-  const chartOwner = controlTotal > batter.onBase ? "pitcher" : "hitter";
+  const controlRoll = armAtThePlate ? null : rollD20(state, rng);
+  const controlTotal = armAtThePlate ? null : controlRoll + effectiveControl;
+  const chartOwner = armAtThePlate || controlTotal > batter.onBase ? "pitcher" : "hitter";
   const resultRoll = rollD20(state, rng);
   const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, resultRoll);
   state.lastPlayDetails = null;
@@ -1240,27 +1246,21 @@ export function positionTrades(state, side, playerId) {
 //   - the DH keeps his own place in the batting order,
 //   - the pitcher takes the departed man's place in it.
 
-// What an arm is worth at the plate. Our pitcher cards carry no on-base and no
-// batting chart — the sets were printed for a DH game — so a pitcher who is
-// forced to hit gets this: a bat bad enough to be the deterrent the rule
-// intends, roughly the .130 a real pitcher hits.
+// An arm sent to the plate is just himself. There is no batting card to
+// invent: a Showdown pitcher has no on-base number because he never gets the
+// advantage, and the swing is read off the chart of whoever is pitching to
+// him (see playPlateAppearance). All he needs is a place to stand in the
+// order, a runner's speed, and the flag that says which rule he is under.
 export function pitcherAtThePlate(pitcher) {
   return {
     ...pitcher,
-    onBase: 6,
+    onBase: 0,
     speed: 10,
     fielding: 0,
     assignedPosition: "P",
     defensivePosition: "P",
     outOfPosition: false,
-    battingAsPitcher: true,
-    chart: [
-      { from: 1, to: 6, result: RESULTS.SO },
-      { from: 7, to: 11, result: RESULTS.GB },
-      { from: 12, to: 16, result: RESULTS.PU },
-      { from: 17, to: 18, result: RESULTS.BB },
-      { from: 19, to: 20, result: RESULTS.SINGLE }
-    ]
+    battingAsPitcher: true
   };
 }
 

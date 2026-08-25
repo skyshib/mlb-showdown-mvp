@@ -144,6 +144,11 @@ export function describeEvent(event, playerSide = "away") {
   }
   const duel = duelLine(event);
   if (duel) lines.push(duel);
+  else if (event.chartOwner === "pitcher" && event.controlRoll == null && event.batter) {
+    // An arm at the plate never has the advantage, so no pitch is thrown for
+    // it — the swing is read straight off the man on the mound.
+    lines.push(`${playName(event.batter)} is a pitcher at the plate. No pitch — the advantage is automatic.`);
+  }
   if (event.result === "HR" && event.runs === 4) {
     lines.push(`${playName(event.batter)} unloads the bases... GRAND SLAM!`);
   } else {

@@ -2752,7 +2752,10 @@ test("the DH taking a glove ends the DH and puts the pitcher in the order (rule 
   assert.equal(state.home.lineup[firstSpot].id, arm.id, "the pitcher takes that spot in the order");
   assert.equal(state.home.lineup[firstSpot].assignedPosition, "P");
   assert.equal(state.home.lineup[firstSpot].battingAsPitcher, true);
-  assert.ok(state.home.lineup[firstSpot].onBase < 8, "and he is a pitcher at the plate, not a hitter");
+  // He is not given an invented bat: a Showdown arm has no on-base number
+  // because he never gets the advantage.
+  assert.equal(state.home.lineup[firstSpot].onBase, 0, "no on-base is invented for him");
+  assert.equal(state.home.lineup[firstSpot].chart, arm.chart, "and no batting chart either — it is his own card");
   assert.equal(state.pitcherBattingSpot.home, firstSpot);
 
   // The role is finished for the day: it cannot happen twice.
@@ -2769,4 +2772,53 @@ test("the DH taking a glove ends the DH and puts the pitcher in the order (rule 
   assert.equal(state.home.lineup[firstSpot].id, reliever.id, "the new arm bats there too");
   assert.equal(state.home.lineup[firstSpot].battingAsPitcher, true);
   assert.equal(state.home.lineup.length, 9, "still nine men in the order");
+});
+
+test("an arm at the plate never has the advantage: no pitch, and the mound's chart", () => {
+  // Every hitter on this club homers off his own chart; the arm on the mound
+  // only ever gets outs off his. So whose chart was read is unmistakable.
+  const homers = [{ from: 1, to: 20, result: RESULTS.HR }];
+  const outs = [{ from: 1, to: 20, result: RESULTS.SO }];
+  const labels = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+  const club = (prefix) => ({
+    name: prefix,
+    lineup: labels.map((label) => ({
+      // On-base 25 is unreachable (a d20 plus control 4 tops out at 24), so a
+      // real hitter here ALWAYS wins the advantage and always homers. That
+      // makes the arm's plate appearance the only thing under test.
+      ...makeHitter({ id: `${prefix}-${label}`, name: `${prefix} ${label}`, position: label === "DH" ? "1B" : label, chart: homers, onBase: 25 }),
+      assignedPosition: label,
+      defensivePosition: label,
+      positions: [{ pos: label === "DH" ? "1B" : label, fielding: 2 }]
+    })),
+    pitchers: [makePitcher({ id: `${prefix}-arm`, name: `${prefix} arm`, chart: outs })],
+    bench: []
+  });
+  const state = createInitialState(club("away"), club("home"));
+  state.half = "top";
+  state.inning = 7;
+  const firstBase = state.home.lineup.find((player) => player.assignedPosition === "1B");
+  assert.ok(dhTakesTheField(state, "home", firstBase.id), "the home DH goes out to play first");
+  const spot = state.pitcherBattingSpot.home;
+
+  // The arm comes to the plate.
+  state.half = "bottom";
+  state.lineupIndex.home = spot;
+  const rng = createRng("arm-at-the-plate");
+  const event = playPlateAppearance(state, rng);
+  assert.equal(event.batter, state.home.pitchers[0].name, "the arm is batting");
+  assert.equal(event.controlRoll, null, "no pitch is thrown for him");
+  assert.equal(event.controlTotal, null);
+  assert.equal(event.chartOwner, "pitcher", "the advantage is automatic");
+  assert.equal(event.result, RESULTS.SO, "and the swing is read off the MOUND's chart, not his club's");
+
+  // A real hitter still gets the contest, and his own chart when he wins it.
+  state.lineupIndex.home = (spot + 1) % 9;
+  const real = playPlateAppearance(state, rng);
+  assert.equal(typeof real.controlRoll, "number", "a pitch is thrown to a hitter");
+  assert.equal(real.result, RESULTS.HR, "who homers off his own card");
+
+  // The non-pitch is not counted as a die in the arm's rolling average.
+  const line = [...state.stats.pitchers.values()].find((row) => row.id === `away-arm`);
+  assert.ok(line.rolls <= 2, "only real pitches count toward the dice line");
 });

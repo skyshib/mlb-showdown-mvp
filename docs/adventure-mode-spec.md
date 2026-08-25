@@ -340,11 +340,13 @@ between spots — no inning gate, since nobody enters or leaves — and both mus
 be able to play where they are going. The DH is excluded from trades: sending
 him to a glove is `dhTakesTheField`, which implements Official Baseball Rule
 5.11 — the DH keeps his place in the batting order, the fielder he replaces
-LEAVES the game, the pitcher bats in that spot (`pitcherAtThePlate`, a weak
-synthetic batting line, since the card sets print no batting data for arms),
+LEAVES the game, the pitcher bats in that spot (`pitcherAtThePlate`),
 and the DH is finished for that club for the game, so every arm after him
-inherits the spot (`state.pitcherBattingSpot`). The battle UI gates that move
-behind an explicit RULE 5.11 confirm screen. The CPU never makes it.
+inherits the spot (`state.pitcherBattingSpot`). An arm at the plate is played the way MLB Showdown plays it: a
+pitcher has no on-base number because he never gets the advantage, so no
+pitch is thrown for him at all — the man on the mound has it automatically
+and the swing is read off HIS chart. The battle UI gates the move behind an
+explicit RULE 5.11 confirm screen. The CPU never makes it.
 
 Full-format games open on the `rotationDraw` screen: the spin over the four
 points-ranked matchups that lands on tonight's shared rank. X there is a
