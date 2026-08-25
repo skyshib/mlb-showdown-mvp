@@ -62,15 +62,29 @@ function collectionTag(entry) {
   return `${entry.cardsOwned}/${entry.cardsTotal} CARDS`;
 }
 
+// When the trophy landed. Two plaques that took the same number of days read
+// exactly alike without it, and one of them has been standing there since April.
+// A plaque the board sent up with no stamp on it simply does not get one, the
+// same as the record book: inventing a date is inventing a fact.
+function finishedOn(entry) {
+  if (!Number.isFinite(entry?.finishedAt)) return "";
+  return new Date(entry.finishedAt)
+    .toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    .toUpperCase();
+}
+
 function leaderboardRows() {
   const rows = [];
   const entries = mergeEntries(loadHallOfFame(), cachedGlobalEntries());
   for (const { mode, entries: modeEntries } of hallOfFameByMode(entries)) {
-    modeEntries.forEach((entry, place) => rows.push({
-      section: MODE_LABELS[mode] ?? mode.toUpperCase(),
-      entry,
-      html: `${place + 1}. ${escapeHtml(entry.name)}${entry.catalogComplete ? " &#9733;" : ""} — <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> <span class="gq-dim">${entry.wins}-${entry.losses} &middot; ${collectionTag(entry)} &middot; ${escapeHtml(leagueName(entry))}</span>`
-    }));
+    modeEntries.forEach((entry, place) => {
+      const finished = finishedOn(entry);
+      rows.push({
+        section: MODE_LABELS[mode] ?? mode.toUpperCase(),
+        entry,
+        html: `${place + 1}. ${escapeHtml(entry.name)}${entry.catalogComplete ? " &#9733;" : ""} — <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> <span class="gq-dim">${entry.wins}-${entry.losses} &middot; ${collectionTag(entry)} &middot; ${escapeHtml(leagueName(entry))}${finished ? ` &middot; ${escapeHtml(finished)}` : ""}</span>`
+      });
+    });
   }
   return rows;
 }
@@ -196,7 +210,7 @@ export const hofTeamScreen = {
     const page = pages[pageIndex];
     const rows = pageRows(app, page);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
-    const finished = new Date(entry.finishedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    const finished = finishedOn(entry);
     const foe = page.foe;
     return `<div class="gq-screen">
       <div class="gq-topbar"><span>${escapeHtml(entry.name)} &middot; ${MODE_LABELS[entry.mode] ?? escapeHtml(entry.mode.toUpperCase())}</span><span>${escapeHtml(page.title)}${pages.length > 1 ? ` &middot; ${pageIndex + 1}/${pages.length}` : ""}</span></div>
@@ -205,7 +219,7 @@ export const hofTeamScreen = {
           ${page.key === "club"
             ? `<b>&#9733; WORLD SERIES CHAMPION &#9733;</b>
               <p class="gq-mt">THE TROPHY IN <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> &middot; WENT <b>${entry.wins}-${entry.losses}</b> ON THE FIELD.</p>
-              <p class="gq-dim">BATTLES ${entry.battlesWon}-${entry.battlesLost} &middot; ${entry.badges.length} BADGES &middot; ${entry.rosterPoints} PT ROSTER &middot; ${escapeHtml(leagueName(entry))} &middot; ${escapeHtml(finished.toUpperCase())}</p>
+              <p class="gq-dim">BATTLES ${entry.battlesWon}-${entry.battlesLost} &middot; ${entry.badges.length} BADGES &middot; ${entry.rosterPoints} PT ROSTER &middot; ${escapeHtml(leagueName(entry))}${finished ? ` &middot; ${escapeHtml(finished)}` : ""}</p>
               ${entry.catalogComplete
                 ? `<p><b>&#9733; THE COMPLETE CATALOG &#9733;</b><br><span class="gq-dim">EVERY CARD IN THE LEAGUE${entry.catalogCompletedOn ? ` &middot; DAY ${entry.catalogCompletedOn}` : ""}</span></p>`
                 : entry.cardsTotal

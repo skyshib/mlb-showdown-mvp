@@ -4240,12 +4240,27 @@ test("the hall of fame screens list champions and open the team page", async () 
   assert.ok(listHtml.includes("ICHIRO"), "the champion is listed");
   assert.ok(listHtml.includes("21 DAYS"), "days to the trophy lead the line");
   assert.ok(listHtml.includes("18-3"), "the final record shows");
+  // Two plaques that took the same number of days read alike without the day the
+  // trophy landed, and one of them has been standing there since April.
   const entry = loadHallOfFame().find((item) => item.saveSeed === "hof-screen-seed");
+  const finished = new Date(entry.finishedAt)
+    .toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+    .toUpperCase();
+  assert.ok(listHtml.includes(finished), "and the line says when he won it");
   app.screen = { name: "hofTeam", entry, index: 0 };
   const teamHtml = hofTeamScreen.render(app);
   assert.ok(teamHtml.includes("WORLD SERIES CHAMPION"));
   assert.ok(teamHtml.includes("THE BATS") && teamHtml.includes("THE ARMS"), "the roster renders in sections");
   assert.ok(teamHtml.includes("18-3"), "the record repeats on the team page");
+  assert.ok(teamHtml.includes(finished), "and so does the day");
+
+  // A plaque the board sent up with no stamp on it is left alone rather than
+  // given a made-up one — a hall of fame does not invent dates.
+  app.screen = { name: "hofTeam", entry: { ...entry, finishedAt: null }, index: 0 };
+  const undated = hofTeamScreen.render(app);
+  assert.ok(undated.includes("WORLD SERIES CHAMPION"), "an undated plaque still reads");
+  assert.ok(!undated.includes("INVALID DATE") && !undated.includes("NAN"), "and says nothing about a day it does not know");
+  app.screen = { name: "hofTeam", entry, index: 0 };
   assert.ok(hofTeamScreen.hoverCard(app, 0), "rows hover to the snapshotted card");
   hofTeamScreen.key(app, "b");
   assert.equal(app.screen.name, "hallOfFame", "X returns to the leaderboard");
