@@ -358,6 +358,16 @@ pitch is thrown for him at all — the man on the mound has it automatically
 and the swing is read off HIS chart. The battle UI gates the move behind an
 explicit RULE 5.11 confirm screen. The CPU never makes it.
 
+Roster edits work the same way as the in-game realignment: a swap is
+PREVIEWED before it is written. `rosterSwapPreview(save, outId, inId)`
+(collectionScreens.js) seats the club before and after and reports every man
+the change moves; when it moves anyone beyond the two principals
+(`needsApproval`), the screen shows the whole list and waits — Z makes every
+move, X writes nothing. All three doors a swap can come through (team screen,
+binder ADD TO TEAM, pack-open) share the preview, the approval screen, and
+`applyRosterSwap`. A like-for-like swap moves nobody else and is applied
+without asking.
+
 Full-format games open on the `rotationDraw` screen: the spin over the four
 points-ranked matchups that lands on tonight's shared rank. X there is a
 rain check (`abandonSeriesGame`): the stash is torn up, the drawn rank is

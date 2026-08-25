@@ -5909,3 +5909,74 @@ test("answering a broken defense by hand replays from the recording", async () =
   }
   void actManualRealign;
 });
+
+test("a roster swap that moves other men has to be approved first", async () => {
+  const { teamScreen, rosterSwapPreview, lineupSlotOf } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = await fullTestSave("swap-approve-seed");
+  const roster = rosterCards(save);
+  const seatOf = (card) => lineupSlotOf(save, card) ?? "BENCH";
+
+  // Swapping a center fielder for a catcher-only spare cannot be absorbed by
+  // the two men involved: the outfield has to slide across to cover it.
+  const centerFielder = roster.find((card) => seatOf(card) === "CF");
+  const spare = adventurePool().find((card) =>
+    card.kind === "hitter" && card.position === "C" && !save.roster.cardIds.includes(card.id));
+  addCardToCollection(save, spare.id);
+  const preview = rosterSwapPreview(save, centerFielder.id, spare.id);
+  assert.equal(preview.needsApproval, true, "this one moves men who were not part of it");
+  assert.ok(preview.knockOn.length >= 1, `${preview.knockOn.length} other men move`);
+
+  // The team screen stops and asks rather than writing it.
+  const before = [...save.roster.cardIds];
+  const app = { save, screen: { name: "team", page: "bats", index: 0, mode: "approve", approve: { outId: centerFielder.id, inId: spare.id }, approveIndex: 0 }, go() {}, rerender() {} };
+  const html = teamScreen.render(app);
+  assert.ok(html.includes("THIS SWAP ALSO MOVES"), "it names what else moves");
+  assert.ok(html.includes("MAKE THE MOVES"), "and offers the choice");
+  for (const move of preview.knockOn) {
+    assert.ok(html.includes(escapeShort(move.card.name)), `${move.card.name} is named`);
+  }
+
+  // X leaves the team exactly as it was.
+  teamScreen.key(app, "b");
+  assert.deepEqual(save.roster.cardIds, before, "denying writes nothing");
+  assert.equal(app.screen.mode, "pick", "and goes back to the picker");
+
+  // Z makes every move at once.
+  app.screen.mode = "approve";
+  app.screen.approve = { outId: centerFielder.id, inId: spare.id };
+  teamScreen.key(app, "a");
+  assert.ok(save.roster.cardIds.includes(spare.id), "approving brings the new man in");
+  assert.ok(!save.roster.cardIds.includes(centerFielder.id), "and sends the old one out");
+  assert.equal(save.roster.cardIds.length, before.length, "the roster is the same size");
+  for (const move of preview.knockOn) {
+    const now = lineupSlotOf(save, cardById(move.card.id)) ?? "BENCH";
+    assert.equal(now, move.to, `${move.card.name} ended up where the preview said (${move.to})`);
+  }
+});
+
+function escapeShort(name) {
+  const parts = name.split(" ");
+  if (parts.length < 2) return name.toUpperCase();
+  return `${parts[0][0]}.${parts.slice(1).join(" ")}`.toUpperCase();
+}
+
+test("a like-for-like swap is not worth asking about", async () => {
+  const { teamScreen, rosterSwapPreview, lineupSlotOf, pickRowsFor } = await import("../src/adventure/ui/collectionScreens.js");
+  const save = await fullTestSave("swap-quiet-seed");
+  const catcher = rosterCards(save).find((card) => lineupSlotOf(save, card) === "C");
+  const spare = adventurePool().find((card) =>
+    card.kind === "hitter" && card.position === "C" && !save.roster.cardIds.includes(card.id));
+  addCardToCollection(save, spare.id);
+  const preview = rosterSwapPreview(save, catcher.id, spare.id);
+  assert.equal(preview.needsApproval, false, "a catcher for a catcher moves nobody else");
+  assert.equal(preview.incomingTo, "C", "the new man simply takes the spot");
+
+  // So the picker just does it — no screen in the way.
+  const rows = pickRowsFor(save, catcher, "position");
+  const at = rows.findIndex((row) => row.id === spare.id);
+  assert.ok(at >= 0, "the spare is offered");
+  const app = { save, screen: { name: "team", page: "bats", index: 0, mode: "pick", pickFilter: "position", pickIndex: at }, go() {}, rerender() {} };
+  teamScreen.key(app, "a");
+  assert.equal(app.screen.mode, "roster", "straight back to the roster");
+  assert.ok(save.roster.cardIds.includes(spare.id), "and the swap is done");
+});

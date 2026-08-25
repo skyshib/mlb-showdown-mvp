@@ -236,6 +236,7 @@ function clickCursorField(screen) {
   if (screen.mode === "team-swap") return "pickIndex";
   // The record book's top-five board is its own cursor while you are standing in it.
   if (screen.mode === "board") return "boardIndex";
+  if (screen.mode === "approve") return "approveIndex";
   if (screen.mode === "pen") return "penIndex";
   if (screen.mode === "pick" || screen.mode === "switchPos") return "pickIndex";
   if (screen.mode === "rosters") return "rosterIndex";

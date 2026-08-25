@@ -792,6 +792,9 @@ function teamPointsLabel(save) {
 
 export const binderScreen = {
   render(app) {
+    if (app.screen.mode === "approve" && app.screen.approve) {
+      return swapApprovalHtml(app, rosterSwapPreview(app.save, app.screen.approve.outId, app.screen.approve.inId), { title: "APPROVE THE MOVES?" });
+    }
     const filter = app.screen.filter ?? "ALL";
     const rows = binderVisibleRows(app);
     const index = clampIndex(app.screen.index ?? 0, rows.length);
@@ -871,6 +874,24 @@ export const binderScreen = {
       app.rerender();
       return;
     }
+    if (app.screen.mode === "approve") {
+      const pending = app.screen.approve;
+      if (key === "up" || key === "down") {
+        const rows = swapApprovalRows(rosterSwapPreview(app.save, pending.outId, pending.inId));
+        app.screen.approveIndex = clampIndex((app.screen.approveIndex ?? 0) + (key === "down" ? 1 : -1), rows.length);
+      } else if (key === "a") {
+        applyRosterSwap(app.save, pending.outId, pending.inId);
+        addLog(app.save, `${cardById(pending.inId)?.name} takes ${cardById(pending.outId)?.name}'s roster spot.`);
+        persistSave(app.save);
+        app.screen.mode = null;
+        app.screen.approve = null;
+      } else if (key === "b") {
+        app.screen.mode = "team-swap";
+        app.screen.approve = null;
+      }
+      app.rerender();
+      return;
+    }
     if (app.screen.mode === "team-swap") {
       const targets = selected ? swapTargets(app.save, selected.card) : [];
       if (key === "up" || key === "down") {
@@ -878,7 +899,15 @@ export const binderScreen = {
       } else if (key === "a") {
         const target = targets[clampIndex(app.screen.pickIndex ?? 0, targets.length + 1)];
         if (target && selected) {
-          setRoster(app.save, app.save.roster.cardIds.map((id) => (id === target.id ? selected.card.id : id)));
+          const preview = rosterSwapPreview(app.save, target.id, selected.card.id);
+          if (preview.needsApproval) {
+            app.screen.mode = "approve";
+            app.screen.approve = { outId: target.id, inId: selected.card.id };
+            app.screen.approveIndex = 0;
+            app.rerender();
+            return;
+          }
+          applyRosterSwap(app.save, target.id, selected.card.id);
           addLog(app.save, `${selected.card.name} takes ${target.name}'s roster spot.`);
           persistSave(app.save);
         }
@@ -985,6 +1014,110 @@ export function switchSlotTo(save, card, label) {
 
 function lineupSlots(save) {
   return assignLineupSlots(rosterCards(save), save.roster.lineupAssignments).slots;
+}
+
+// ---- What a swap actually does -----------------------------------------------
+//
+// Swapping one card for another is never just that one card. The lineup
+// re-seats itself around the change, and a single move can slide three men
+// across the diamond and sit a starter down — silently, which is no way to
+// hand a manager a team. So a swap is PREVIEWED first: every place that
+// changes, named, before anything is written.
+
+function seatMap(cards, assignments) {
+  const seats = new Map();
+  for (const slot of assignLineupSlots(cards, assignments).slots) {
+    if (slot.player) seats.set(slot.player.id, slot.label);
+  }
+  return seats;
+}
+
+// setRoster keeps the assignments that still point at rostered cards; the
+// preview has to keep the same ones or it would be reading a different team.
+function survivingAssignments(assignments, cardIds) {
+  return Object.fromEntries(
+    Object.entries(assignments ?? {})
+      .map(([slot, value]) => (Array.isArray(value)
+        ? [slot, value.filter((id) => cardIds.includes(id))]
+        : [slot, value]))
+      .filter(([, value]) => (Array.isArray(value) ? value.length : cardIds.includes(value)))
+  );
+}
+
+// Every change a swap would make: the two principals, and — the point of the
+// exercise — everyone else the re-seating moves. Exported for tests.
+export function rosterSwapPreview(save, outgoingId, incomingId) {
+  const before = seatMap(rosterCards(save), save.roster.lineupAssignments);
+  const nextIds = save.roster.cardIds.map((id) => (id === outgoingId ? incomingId : id));
+  const nextCards = nextIds.map((id) => cardById(id)).filter(Boolean);
+  const after = seatMap(nextCards, survivingAssignments(save.roster.lineupAssignments, nextIds));
+  const where = (map, id) => map.get(id) ?? "BENCH";
+  const outgoing = cardById(outgoingId);
+  const incoming = cardById(incomingId);
+  const knockOn = [];
+  for (const card of nextCards) {
+    if (card.id === incomingId || card.kind !== "hitter") continue;
+    const from = where(before, card.id);
+    const to = where(after, card.id);
+    if (from !== to) knockOn.push({ card, from, to });
+  }
+  return {
+    outgoing,
+    incoming,
+    outgoingFrom: outgoing ? where(before, outgoingId) : null,
+    incomingTo: incoming ? where(after, incomingId) : null,
+    knockOn,
+    // A swap that only moves the two men involved needs no approving.
+    needsApproval: knockOn.length > 0
+  };
+}
+
+export function applyRosterSwap(save, outgoingId, incomingId) {
+  setRoster(save, save.roster.cardIds.map((id) => (id === outgoingId ? incomingId : id)));
+  persistSave(save);
+  return save;
+}
+
+// The approval screen's list: what the club looks like after, move by move.
+export function swapApprovalRows(preview) {
+  const rows = [];
+  if (preview.incoming) {
+    rows.push({
+      card: preview.incoming,
+      html: `&#9656; ${escapeHtml(shortName(preview.incoming.name))} <span class="gq-dim">JOINS &#8594; ${escapeHtml(preview.incomingTo ?? "BENCH")}</span>`
+    });
+  }
+  if (preview.outgoing) {
+    rows.push({
+      card: preview.outgoing,
+      html: `&#9666; ${escapeHtml(shortName(preview.outgoing.name))} <span class="gq-dim">${escapeHtml(preview.outgoingFrom ?? "BENCH")} &#8594; OFF THE TEAM</span>`
+    });
+  }
+  for (const move of preview.knockOn) {
+    rows.push({
+      card: move.card,
+      html: `${escapeHtml(shortName(move.card.name))} <span class="gq-dim">${escapeHtml(move.from)} &#8594; ${escapeHtml(move.to)}</span>`
+    });
+  }
+  return rows;
+}
+
+// The screen itself, shared by every door a swap can come through.
+export function swapApprovalHtml(app, preview, { title }) {
+  const rows = swapApprovalRows(preview);
+  const index = clampIndex(app.screen.approveIndex ?? 0, rows.length);
+  const moved = preview.knockOn.length;
+  return `<div class="gq-screen">
+    <div class="gq-topbar"><span>${escapeHtml(title)}</span><span>${moved} MAN${moved === 1 ? "" : "MEN"} MOVED</span></div>
+    <div class="gq-body"><div class="gq-columns gq-columns-swap">
+      <div class="gq-frame gq-scroll"><h3>THIS SWAP ALSO MOVES&hellip;</h3>${menuHtml(rows.map((row) => ({ html: row.html })), index)}</div>
+      <div class="gq-card-side">${rows[index] ? cardPanelHtml(rows[index].card) : ""}</div>
+    </div></div>
+    <div class="gq-textbox">
+      <p>Taking this card re-seats the club. ${moved === 1 ? "One man moves" : `${moved} men move`} to make it fit.</p>
+      <p class="gq-blink">Z — MAKE THE MOVES &middot; X — LEAVE THE TEAM ALONE</p>
+    </div>
+  </div>`;
 }
 
 // The mark a rostered card wears in a list. A man in the lineup or on the
@@ -1314,6 +1447,9 @@ function teamCardActions(app, card) {
 export const teamScreen = {
   render(app) {
     const save = app.save;
+    if (app.screen.mode === "approve" && app.screen.approve) {
+      return swapApprovalHtml(app, rosterSwapPreview(save, app.screen.approve.outId, app.screen.approve.inId), { title: "APPROVE THE MOVES?" });
+    }
     const page = TEAM_PAGES.includes(app.screen.page) ? app.screen.page : "bats";
     const roster = teamPageCards(save, page);
     const actions = teamActions(save);
@@ -1438,6 +1574,25 @@ export const teamScreen = {
       app.rerender();
       return;
     }
+    if (app.screen.mode === "approve") {
+      const pending = app.screen.approve;
+      if (key === "up" || key === "down") {
+        const rows = swapApprovalRows(rosterSwapPreview(save, pending.outId, pending.inId));
+        app.screen.approveIndex = clampIndex((app.screen.approveIndex ?? 0) + (key === "down" ? 1 : -1), rows.length);
+      } else if (key === "a") {
+        applyRosterSwap(save, pending.outId, pending.inId);
+        addLog(save, `${cardById(pending.inId)?.name} takes ${cardById(pending.outId)?.name}'s roster spot.`);
+        persistSave(save);
+        app.screen.mode = "roster";
+        app.screen.approve = null;
+      } else if (key === "b") {
+        // Nothing is written: the club is exactly as it was.
+        app.screen.mode = "pick";
+        app.screen.approve = null;
+      }
+      app.rerender();
+      return;
+    }
     if (app.screen.mode === "pick") {
       const anchor = roster[clampIndex(app.screen.index ?? 0, roster.length)];
       const rows = pickRowsFor(save, anchor, app.screen.pickFilter ?? "position");
@@ -1452,6 +1607,16 @@ export const teamScreen = {
         const pick = rows[app.screen.pickIndex ?? 0];
         // Picking the incumbent (or CANCEL) keeps him; anyone else swaps in.
         if (pick && pick.id !== anchor.id) {
+          const preview = save.roster.cardIds.includes(pick.id) ? null : rosterSwapPreview(save, anchor.id, pick.id);
+          if (preview?.needsApproval) {
+            // The swap moves men who were not part of it. Say so, and let the
+            // manager approve the whole move or none of it.
+            app.screen.mode = "approve";
+            app.screen.approve = { outId: anchor.id, inId: pick.id };
+            app.screen.approveIndex = 0;
+            app.rerender();
+            return;
+          }
           if (save.roster.cardIds.includes(pick.id)) {
             // A roster-internal trade of SPOTS: the bench man is pinned at
             // the seated man's slot, and the seated man takes the bench (or
@@ -1768,6 +1933,9 @@ function packFooter(app, card, cards) {
 export const packOpenScreen = {
   render(app) {
     const save = app.save;
+    if (app.screen.mode === "approve" && app.screen.approve) {
+      return swapApprovalHtml(app, rosterSwapPreview(save, app.screen.approve.outId, app.screen.approve.inId), { title: "APPROVE THE MOVES?" });
+    }
     const pending = save.pendingPacks[0];
     if (!pending) return `<div class="gq-screen"><div class="gq-body gq-center"><p>NO PACKS TO OPEN.</p></div></div>`;
     const cards = openPack(pending.packId, pending.seed);
@@ -1855,6 +2023,24 @@ export const packOpenScreen = {
   },
   key(app, key) {
     const save = app.save;
+    if (app.screen.mode === "approve" && app.screen.approve) {
+      const move = app.screen.approve;
+      if (key === "up" || key === "down") {
+        const rows = swapApprovalRows(rosterSwapPreview(save, move.outId, move.inId));
+        app.screen.approveIndex = clampIndex((app.screen.approveIndex ?? 0) + (key === "down" ? 1 : -1), rows.length);
+      } else if (key === "a") {
+        applyRosterSwap(save, move.outId, move.inId);
+        addLog(save, `${cardById(move.inId)?.name} takes ${cardById(move.outId)?.name}'s roster spot.`);
+        persistSave(save);
+        app.screen.mode = null;
+        app.screen.approve = null;
+      } else if (key === "b") {
+        app.screen.mode = "team-swap";
+        app.screen.approve = null;
+      }
+      app.rerender();
+      return;
+    }
     const pending = save.pendingPacks[0];
     if (!pending) {
       if (key === "a" || key === "b") app.go(app.screen.returnTo ?? "map");
@@ -1883,7 +2069,15 @@ export const packOpenScreen = {
       } else if (key === "a") {
         const target = targets[clampIndex(app.screen.pickIndex ?? 0, targets.length + 1)];
         if (target) {
-          setRoster(save, save.roster.cardIds.map((id) => (id === target.id ? current.id : id)));
+          const preview = rosterSwapPreview(save, target.id, current.id);
+          if (preview.needsApproval) {
+            app.screen.mode = "approve";
+            app.screen.approve = { outId: target.id, inId: current.id };
+            app.screen.approveIndex = 0;
+            app.rerender();
+            return;
+          }
+          applyRosterSwap(save, target.id, current.id);
           addLog(save, `${current.name} takes ${target.name}'s roster spot.`);
           persistSave(save);
         }
