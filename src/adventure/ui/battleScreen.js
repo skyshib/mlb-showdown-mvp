@@ -516,7 +516,7 @@ export function recordFinishedGame(save, { trainer, boxScore, playerSide, events
   // world-records board can open it — title or no title. A finished run uploads all
   // its games anyway (see uploadRun); the server files one page per day, so a game
   // sent now and again at the trophy is not doubled.
-  if (setsOpenableGameRecord(moved, day)) uploadGame(save, entry);
+  if (setsOpenableGameRecord(moved, day, save.saveSeed)) uploadGame(save, entry);
   return feats;
 }
 

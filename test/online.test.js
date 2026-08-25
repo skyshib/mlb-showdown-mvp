@@ -1010,6 +1010,38 @@ test("the host can pause a snake room, and nobody picks until it resumes", async
   assert.equal(resumed.managers[0].roster.length, 1);
 });
 
+// A club sum comes back nought when nobody did the thing, and MOST STEALS IN A
+// GAME is read straight off it — so a manager who had never stolen a base was
+// filed as a holder of the steals record. An old client with the page cached will
+// go on sending those, so the gate is on this end too.
+test("the record book turns away a nought where a nought is not a record", async (t) => {
+  const base = await startServer(t);
+  const board = async (key) => (await api(base, "GET", "/api/records")).data.records[key];
+
+  const empty = await api(base, "POST", "/api/records", {
+    name: "NIL", saveSeed: "sq-nil", mode: "budget",
+    records: { "steals-game": { value: 0, day: 1, opponent: "JOJO" } }
+  });
+  assert.equal(empty.status, 400, "a club that never stole a base filed nothing");
+  assert.equal(await board("steals-game"), undefined, "and the board stays empty behind it");
+
+  // The LOW records are the other way round: nought hits allowed in a win is the
+  // best afternoon a staff can have, and it is the mark.
+  const clean = await api(base, "POST", "/api/records", {
+    name: "ANA", saveSeed: "sq-ana", mode: "budget",
+    records: { "hits-allowed-win": { value: 0, day: 4, opponent: "PETRA" } }
+  });
+  assert.equal(clean.status, 201);
+  assert.equal((await board("hits-allowed-win"))[0].value, 0, "a no-hit win is a record, and its number is nought");
+
+  // One steal is.
+  await api(base, "POST", "/api/records", {
+    name: "BO", saveSeed: "sq-bo", mode: "budget",
+    records: { "steals-game": { value: 1, day: 2, opponent: "MABEL" } }
+  });
+  assert.equal((await board("steals-game"))[0].value, 1);
+});
+
 // A record is a number, a name, and a DAY, and the day has to survive being
 // looked at. The book goes up again on every visit to the records screen, so a
 // mark you already hold arrives over and over — restamping it made every standing

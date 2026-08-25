@@ -634,12 +634,29 @@ const RECORD_DIRECTIONS = {
   "player-wpa162": "max"
 };
 
+// The boards a nought does not belong on. MOST STEALS IN A GAME is a record about
+// having stolen one, and a club that never stole a base is not the league leader in
+// not stealing bases — but the club sums it is read from are perfectly happy to
+// come back nought, and five of those had made the wall. Mirrors `atLeastOne` in
+// src/adventure/records.js. The LOW records are not here: nought hits allowed in a
+// win is the best afternoon a staff can have, and nought is the mark.
+const RECORDS_NEED_ONE = new Set([
+  "runs-game",
+  "homers-game",
+  "steals-game",
+  "advances-game",
+  "strikeouts-game",
+  "caught-stealing-game",
+  "caught-advancing-game",
+  "hit-streak"
+]);
+
 function loadRecordsFile(dataDir) {
   mkdirSync(dataDir, { recursive: true });
   try {
     const book = JSON.parse(readFileSync(join(dataDir, RECORDS_FILE), "utf8"));
     if (!book || typeof book !== "object" || Array.isArray(book)) return {};
-    return splitFastestTitle(book);
+    return dropEmptyMarks(splitFastestTitle(book));
   } catch {
     return {};
   }
@@ -657,6 +674,16 @@ function splitFastestTitle(book) {
   const store = { records: book };
   for (const row of filed) {
     fileRecord(store, row.mode === "uncapped" ? "fastest-title-uncapped" : "fastest-title-budget", row);
+  }
+  return book;
+}
+
+// The noughts already on the wall, filed before the gate existed, swept on the way
+// in — otherwise a manager who never stole a base holds the steals record for as
+// long as the file lives, because nothing ever resubmits a mark to replace it.
+function dropEmptyMarks(book) {
+  for (const key of RECORDS_NEED_ONE) {
+    if (Array.isArray(book[key])) book[key] = book[key].filter((row) => row.value > 0);
   }
   return book;
 }
@@ -731,6 +758,8 @@ async function postRecords(store, request, response) {
     if (!RECORD_DIRECTIONS[key] || !entry || typeof entry !== "object") continue;
     const value = hofNumber(entry.value, 1e6);
     if (!Number.isFinite(value) || value < 0) continue;
+    // An old client with the page cached will go on sending its noughts up.
+    if (RECORDS_NEED_ONE.has(key) && value <= 0) continue;
     fileRecord(store, key, {
       value,
       name,

@@ -41,21 +41,24 @@ let syncStatus = "idle"; // idle | syncing | online | offline
 async function syncGlobal(app) {
   syncStatus = "syncing";
   try {
-    // Yours go up, the league's come down. Both, every visit — a save that beat
-    // its own mark since last time is exactly the case worth pushing. Fold the run
-    // in your hands into the all-time book first, then send the book: your best of
-    // every record, each under the run that set it, whether or not that run is over.
+    // The league's come down first, so we can tell what it is missing. Fold the run
+    // in your hands into the book before reading it: a save that beat its own mark
+    // since last time is exactly the case worth pushing.
     updatePersonalRecords(app.save);
-    await submitPersonalRecords();
+    const globals = await fetchGlobalRecords();
+    // Then yours go up — every run of yours that ever set a mark, each under the run
+    // that set it, and only the ones the board has not already got at that number.
+    await submitPersonalRecords(globals);
     // The player single-game records go up per man, so a tie (two of your men each
     // with three homers in a game) reaches the league board, not just your screen.
     await submitCoHolders(app.save);
-    const globals = await fetchGlobalRecords();
     // The finished runs, too: any whose title marks the book has not got yet go up
     // under their own managers — a run that finished before this board existed, or
-    // on a day the record screen was never opened, catches up here. Re-read so the
-    // ones that just went up show.
-    if (await submitMissingRunRecords(globals)) await fetchGlobalRecords();
+    // on a day the record screen was never opened, catches up here.
+    await submitMissingRunRecords(globals);
+    // And read the board again, so everything that just went up is on the screen
+    // that is about to be drawn.
+    await fetchGlobalRecords();
     syncStatus = "online";
   } catch {
     // No server, no problem: your own bests still stand, alone.

@@ -78,6 +78,7 @@ export const RECORDS = [
     group: "AT THE PLATE",
     title: "MOST RUNS IN A GAME",
     better: "max",
+    atLeastOne: true,
     unit: "runs",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => game.score?.[game.playerSide])
@@ -104,6 +105,7 @@ export const RECORDS = [
     // and two records called the same thing are two records nobody trusts.
     title: "MOST HOMERS IN A GAME (CLUB)",
     better: "max",
+    atLeastOne: true,
     unit: "HR",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(mine(game)?.hitters, "hr"))
@@ -114,6 +116,7 @@ export const RECORDS = [
     group: "AT THE PLATE",
     title: "MOST STEALS IN A GAME (CLUB)",
     better: "max",
+    atLeastOne: true,
     unit: "SB",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(mine(game)?.hitters, "sb"))
@@ -126,6 +129,7 @@ export const RECORDS = [
     // home — beyond the base the hit itself was worth.
     title: "MOST EXTRA BASES TAKEN IN A GAME (CLUB)",
     better: "max",
+    atLeastOne: true,
     unit: "XBT",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(mine(game)?.hitters, "adv"))
@@ -157,6 +161,7 @@ export const RECORDS = [
     // The whole staff. One arm's own board is on the player page.
     title: "MOST STRIKEOUTS IN A GAME (STAFF)",
     better: "max",
+    atLeastOne: true,
     unit: "K",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(mine(game)?.pitchers, "so"))
@@ -169,6 +174,7 @@ export const RECORDS = [
     // read off the other dugout's line — the runners they lost on the bases to you.
     title: "MOST RUNNERS CAUGHT STEALING IN A GAME (CLUB)",
     better: "max",
+    atLeastOne: true,
     unit: "CS",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(game.boxScore?.[theirSide(game)]?.hitters, "cs"))
@@ -181,6 +187,7 @@ export const RECORDS = [
     // are the extra bases the OTHER dugout's runners tried for and lost.
     title: "MOST RUNNERS THROWN OUT ADVANCING IN A GAME (CLUB)",
     better: "max",
+    atLeastOne: true,
     unit: "outs",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => sum(game.boxScore?.[theirSide(game)]?.hitters, "advOut"))
@@ -214,6 +221,7 @@ export const RECORDS = [
     group: "STREAKS",
     title: "MOST CONSECUTIVE HITS",
     better: "max",
+    atLeastOne: true,
     unit: "hits",
     opens: true,
     read: (save) => bestGame(save, "max", (game) => game.hitStreak ?? null)
@@ -553,6 +561,18 @@ const RUN_RECORD_KEYS = RECORDS.filter((record) => record.fromRun).map((record) 
 
 const RECORD_BY_KEY = new Map(RECORDS.map((record) => [record.key, record]));
 
+// A count of nought is not a record; it is an afternoon on which nobody did the
+// thing. MOST STEALS IN A GAME belongs to whoever stole one, and a club that has
+// never stolen a base sitting on that board at nought is the board saying it did.
+// Those records are marked `atLeastOne` and the gate is here, where every mark the
+// save produces passes through. The LOW records are the other way round and are
+// not gated: nought hits allowed in a win is the best afternoon a staff can have.
+function readRecord(record, save) {
+  const best = record.read(save);
+  if (!best) return null;
+  return record.atLeastOne && !(best.value > 0) ? null : best;
+}
+
 // The records whose board line opens onto a single afternoon (see `opens` and
 // openBoardGame). A game that sets one of these is worth uploading, so the box
 // score is there to open on the shared board; a season or career total is not.
@@ -803,7 +823,7 @@ export function personalBests(save) {
     // Player single-game records can be co-held, so a single best would hide a tie:
     // they go up per man through submitCoHolders, not one-per-save through the book.
     if (record.measure) continue;
-    const best = record.read(save);
+    const best = readRecord(record, save);
     if (best) bests[record.key] = best;
   }
   return bests;
@@ -822,8 +842,21 @@ export function personalBests(save) {
 // game you play can set a world record, whether or not its run ends in a trophy,
 // and it goes on standing after you have moved on. Each mark remembers the run that
 // set it, so the shared board credits that run and files it under no other.
+//
+// One shelf per record, and one line per RUN on the shelf. It used to be one line
+// per record — your best, from whichever campaign managed it — and that is the
+// right thing to show YOU and the wrong thing to send the league. A campaign whose
+// twelve-steal afternoon was second in the world never went up at all, because a
+// campaign of your own had once managed thirteen, and only the better of the two
+// was ever in the book to send. The league board files a line per campaign and has
+// room for twenty-five of them; the book that feeds it now keeps them the same way.
 
 const PERSONAL_KEY = "showdown-quest-records-local";
+
+// How many runs' marks one shelf holds. The league's own board keeps twenty-five a
+// record (see RECORDS_MAX_PER_KEY in online-server.js), so the twenty-sixth cannot
+// reach it however long it is carried.
+const PERSONAL_MAX_PER_KEY = 25;
 
 // Same care as the hall of fame: ask for the method, not the name (see there).
 function personalStorage() {
@@ -834,54 +867,94 @@ function personalStorage() {
 export function loadPersonalRecords(storage = personalStorage()) {
   const raw = storage?.getItem(PERSONAL_KEY);
   if (!raw) return {};
+  let stored;
   try {
-    const book = JSON.parse(raw);
-    return book && typeof book === "object" && !Array.isArray(book) ? book : {};
+    stored = JSON.parse(raw);
   } catch {
     return {};
   }
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+  const book = {};
+  for (const [key, value] of Object.entries(stored)) {
+    // A book written before the shelf held more than one run is a single mark per
+    // record. It becomes a shelf of one and goes on standing.
+    const marks = (Array.isArray(value) ? value : [value]).filter(shelvable(key));
+    if (marks.length) book[key] = marks;
+  }
+  return book;
 }
 
-// Fold this save's current bests into the all-time book, keeping whichever is
-// better for each record. The kept mark is stamped with who set it — this save —
-// so from now on it is shown and filed under his name, in this run or any later
-// one. Persisted only when something actually moved; returns the keys that moved,
-// so the caller can tell whether this game just set a record (see recordFinishedGame).
+// What belongs on a shelf: a mark with a number and the run that set it. Marks of
+// nought filed before the gate existed are dropped on the way in, so an old book
+// cannot go on putting a club that never stole a base on the steals board (see
+// readRecord).
+function shelvable(key) {
+  const record = RECORD_BY_KEY.get(key);
+  return (mark) => Boolean(mark)
+    && typeof mark === "object"
+    && Number.isFinite(mark.value)
+    && Boolean(mark.saveSeed)
+    && !(record?.atLeastOne && !(mark.value > 0));
+}
+
+// Fold this save's current bests into the book, keeping whichever is better for
+// each record THIS RUN has done. The kept mark is stamped with who set it — this
+// save — so from now on it is shown and filed under his name, on a shelf beside
+// whatever his other campaigns managed. Persisted only when something actually
+// moved; returns the keys that moved, so the caller can tell whether this game just
+// set a record (see recordFinishedGame).
 export function updatePersonalRecords(save, storage = personalStorage()) {
   if (!save) return [];
   const book = loadPersonalRecords(storage);
   const changed = [];
   for (const [key, mark] of Object.entries(personalBests(save))) {
     const record = RECORD_BY_KEY.get(key);
-    const previous = book[key];
+    const marks = book[key] ?? [];
+    // Measured against THIS run's own line, not against the best you have ever
+    // done. Every campaign keeps its own record and the league ranks them against
+    // each other; a run is not kept off the board by an older run of yours.
+    const previous = marks.find((line) => line.saveSeed === save.saveSeed);
     const better = !previous || (record.better === "max" ? mark.value > previous.value : mark.value < previous.value);
     if (!better) continue;
     // Stamped with the day it was set, not the day it is next read: this line only
     // moves when the mark is actually beaten, so the date on it is the date of the
     // afternoon that put it there, and it goes up to the league with it.
-    book[key] = { ...mark, name: save.player.name, saveSeed: save.saveSeed, mode: save.mode ?? "budget", at: Date.now() };
+    const line = { ...mark, name: save.player.name, saveSeed: save.saveSeed, mode: save.mode ?? "budget", at: Date.now() };
+    book[key] = shelve(record, marks.filter((other) => other.saveSeed !== save.saveSeed), line);
     changed.push(key);
   }
   if (changed.length) storage?.setItem(PERSONAL_KEY, JSON.stringify(book));
   return changed;
 }
 
+// One shelf, best first, no deeper than the league will hold. The line just set is
+// never the one trimmed off the end: it has not been sent up yet, and a mark
+// dropped before it is sent is a mark nobody ever hears about.
+function shelve(record, others, line) {
+  const marks = [...others, line].sort(
+    (a, b) => (record.better === "max" ? b.value - a.value : a.value - b.value)
+  );
+  if (marks.length <= PERSONAL_MAX_PER_KEY) return marks;
+  const kept = marks.slice(0, PERSONAL_MAX_PER_KEY);
+  return kept.includes(line) ? kept : [...kept.slice(0, -1), line];
+}
+
 // Of the records this game just moved, did any open onto a single afternoon whose
 // box score the shared board would open — and is that afternoon THIS one, filed on
 // `day`? That is exactly when the game is worth uploading (see recordFinishedGame):
 // so a mark set in a run that never wins a title can still be opened by the league.
-export function setsOpenableGameRecord(changedKeys, day) {
+export function setsOpenableGameRecord(changedKeys, day, saveSeed) {
   const book = loadPersonalRecords();
-  return changedKeys.some((key) => OPENABLE_RECORD_KEYS.has(key) && book[key]?.day === day);
+  return changedKeys.some((key) => OPENABLE_RECORD_KEYS.has(key)
+    && (book[key] ?? []).some((mark) => mark.saveSeed === saveSeed && mark.day === day));
 }
 
-// Your all-time best for one record, as a board row under the run that set it, or
-// nothing if you have never set it. This is the twin of localRunMarks for the
-// save-derived records: it is the best you have ever done from ANY run, not the
-// run in your hands, that folds onto the board.
+// Your own marks for one record, one row per run that set one, each under the run
+// that set it. This is the twin of localRunMarks for the save-derived records: it
+// is every campaign you have played folded onto the board, not only the run in
+// your hands and not only your best.
 function personalRecordMarks(record) {
-  const mark = loadPersonalRecords()[record.key];
-  return mark ? [{ ...mark, you: true }] : [];
+  return (loadPersonalRecords()[record.key] ?? []).map((mark) => ({ ...mark, you: true }));
 }
 
 // ---- The shared board -------------------------------------------------------
@@ -921,20 +994,38 @@ function postRecordBook(name, saveSeed, mode, records) {
   }).then((response) => response.ok, () => false);
 }
 
-// Your record book goes up whenever the world-records screen is opened — your
-// all-time best for each record, each filed under the run that actually set it, so
+// Your record book goes up whenever the world-records screen is opened — every run
+// of yours that ever set a mark, each filed under the run that actually set it, so
 // the board keeps them apart the way it keeps everyone apart, by saveSeed. A record
 // you set two runs ago goes up under that run, never under whoever you are playing
-// now, so it is neither double-counted nor lost when you start over. The title-run
-// records are not here — they belong to finished runs (see submitRunRecords).
-export function submitPersonalRecords() {
+// now, so it is neither double-counted nor lost when you start over. It is one
+// request per campaign, which is the price of the campaigns being told apart at
+// all — so only the campaigns with something to say send one (see alreadyFiled).
+// The title-run records are not here — they belong to finished runs (see
+// submitRunRecords).
+// A mark the board already holds, at a number this one cannot improve on, does not
+// need sending again: the server would only file it back exactly as it stands. With
+// no board to compare against — a first visit, or one made offline — everything
+// goes, the way it always did.
+function alreadyFiled(record, board, mark) {
+  const filed = (board ?? []).find((row) =>
+    row.saveSeed === mark.saveSeed && (row.player ?? "") === (mark.player ?? ""));
+  if (!filed) return false;
+  return record.better === "max" ? filed.value >= mark.value : filed.value <= mark.value;
+}
+
+export function submitPersonalRecords(globals) {
   if (!inBrowser()) return Promise.resolve(false);
   const bySeed = new Map();
-  for (const [key, mark] of Object.entries(loadPersonalRecords())) {
-    if (!mark?.saveSeed || !mark?.name) continue;
-    const group = bySeed.get(mark.saveSeed) ?? { name: mark.name, mode: mark.mode ?? "budget", records: {} };
-    group.records[key] = { value: mark.value, player: mark.player, day: mark.day, opponent: mark.opponent, at: mark.at };
-    bySeed.set(mark.saveSeed, group);
+  for (const [key, marks] of Object.entries(loadPersonalRecords())) {
+    const record = RECORD_BY_KEY.get(key);
+    if (!record) continue;
+    for (const mark of marks) {
+      if (!mark.name || alreadyFiled(record, globals?.[key], mark)) continue;
+      const group = bySeed.get(mark.saveSeed) ?? { name: mark.name, mode: mark.mode ?? "budget", records: {} };
+      group.records[key] = { value: mark.value, player: mark.player, day: mark.day, opponent: mark.opponent, at: mark.at };
+      bySeed.set(mark.saveSeed, group);
+    }
   }
   const posts = [...bySeed.entries()].map(([saveSeed, group]) =>
     postRecordBook(group.name, saveSeed, group.mode, group.records));
@@ -998,7 +1089,7 @@ function runNeedsFiling(run, globals) {
 // Your mark for a save record, as a board row — the campaign in your hands, or
 // nothing if it has not set this record.
 function saveMark(record, save) {
-  const best = save ? record.read(save) : null;
+  const best = save ? readRecord(record, save) : null;
   return best ? [{ ...best, name: save.player.name, saveSeed: save.saveSeed, you: true }] : [];
 }
 
@@ -1037,14 +1128,11 @@ export function leaderboard(record, globals, save, limit = 5) {
   const rows = [...(globals?.[record.key] ?? [])].map((row) => ({ ...row }));
   // Your own marks, folded onto the board the server sent, each credited to the run
   // that earned it rather than to whoever is playing now. A title-run record has one
-  // per finished run (localRunMarks). A save record folds in your all-time best from
-  // any run (personalRecordMarks) and, so the run in your hands shows the instant it
-  // does something before the book is next written, its live mark too — same
-  // saveSeed simply dedupes below.
-  // A title-run record has one row per finished run (localRunMarks). A player
-  // single-game record folds in ALL of the current save's co-holders, so a tie
-  // names both men (coHolderMarks). Everything else folds in your all-time best from
-  // any run, plus the run in your hands live before the book is next written.
+  // row per finished run (localRunMarks). A player single-game record folds in ALL
+  // of the current save's co-holders, so a tie names both men (coHolderMarks).
+  // Everything else folds in one row per run you have played (personalRecordMarks),
+  // plus the run in your hands live before the book is next written — same saveSeed
+  // simply dedupes below.
   const mine = record.fromRun
     ? localRunMarks(record)
     : record.measure

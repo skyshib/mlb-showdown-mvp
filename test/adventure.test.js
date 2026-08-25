@@ -4474,10 +4474,13 @@ test("a record from any run stands, and survives starting the next one", async (
   updatePersonalRecords(runB);
 
   // The book still remembers ANA's eight — a better mark, from a run that never won
-  // a thing and is long gone — credited to the run that set it.
+  // a thing and is long gone — credited to the run that set it. And it keeps BO's
+  // five ALONGSIDE it rather than instead of it: the shelf is one line per run.
   const book = loadPersonalRecords();
-  assert.equal(book["runs-game"].value, 8, "the best of every run I have played, not just the one I hold");
-  assert.equal(book["runs-game"].saveSeed, "sq-a", "credited to the run that set it");
+  assert.deepEqual(
+    book["runs-game"].map((mark) => [mark.value, mark.saveSeed]), [[8, "sq-a"], [5, "sq-b"]],
+    "every run I have played keeps its own line, best first, each credited to the run that set it"
+  );
 
   // And the board, read while playing run B, folds ANA's eight in above BO's five.
   const board = leaderboard(runsGame, {}, runB);
@@ -4486,11 +4489,194 @@ test("a record from any run stands, and survives starting the next one", async (
     "a game from a past run makes the record book, not just a run that wins the title"
   );
 
-  // Beat it in run B and the book moves to B; the old mark is replaced, not stacked.
+  // Beat it in run B and B's own line moves. ANA's still stands: a run is measured
+  // against itself, not against the best you have ever done.
   runB.almanac = [gameWith(12)];
   updatePersonalRecords(runB);
-  assert.equal(loadPersonalRecords()["runs-game"].value, 12, "a new best overwrites the old");
-  assert.equal(loadPersonalRecords()["runs-game"].saveSeed, "sq-b");
+  assert.deepEqual(
+    loadPersonalRecords()["runs-game"].map((mark) => [mark.value, mark.saveSeed]), [[12, "sq-b"], [8, "sq-a"]],
+    "a run beating its own mark replaces its own line and nobody else's"
+  );
+
+  localStorage.removeItem("showdown-quest-records-local");
+});
+
+// The whole point of the shelf. A campaign whose best afternoon is second in the
+// world used to go unsent — and so unseen by anyone but the man playing it —
+// because an older campaign of his own had once done better, and only the better of
+// the two was ever in the book to send.
+test("a run that never beats your own best still goes up to the league", async () => {
+  const { updatePersonalRecords, loadPersonalRecords, personalBests } = await import("../src/adventure/records.js");
+  localStorage.removeItem("showdown-quest-records-local");
+  const gameWith = (runs) => ({
+    day: 1, opponent: "JOJO", won: true, innings: 9, playerSide: "away",
+    score: { away: runs, home: 0 },
+    boxScore: { away: { team: "?", hitters: [], pitchers: [] }, home: { team: "JOJO", hitters: [], pitchers: [] } }
+  });
+
+  const old = testSave();
+  old.saveSeed = "sq-old"; old.player.name = "ANA"; old.almanac = [gameWith(13)];
+  updatePersonalRecords(old);
+
+  const now = testSave();
+  now.saveSeed = "sq-now"; now.player.name = "ANA"; now.almanac = [gameWith(12)];
+  const moved = updatePersonalRecords(now);
+  assert.ok(moved.includes("runs-game"), "twelve is this run's record even though thirteen is mine");
+
+  // Both are in the book, so both are in what goes up (see submitPersonalRecords,
+  // which sends one request per campaign in it).
+  const seeds = loadPersonalRecords()["runs-game"].map((mark) => mark.saveSeed);
+  assert.deepEqual(seeds, ["sq-old", "sq-now"], "the run in my hands is on the shelf beside the old one");
+  assert.equal(personalBests(now)["runs-game"].value, 12);
+
+  localStorage.removeItem("showdown-quest-records-local");
+});
+
+// The book on a machine that has been playing for months is a flat one — a single
+// mark per record, from before the shelf held more than one run. It has to come
+// forward without losing a line, and its noughts have to go.
+test("a book written before the shelf reads as a shelf of one", async () => {
+  const { loadPersonalRecords, updatePersonalRecords } = await import("../src/adventure/records.js");
+  // The shape a real book is in: no `at` on the older marks, which were filed
+  // before the book kept days.
+  localStorage.setItem("showdown-quest-records-local", JSON.stringify({
+    "steals-game": { value: 13, day: 61, opponent: "OKABE", name: "ANA", saveSeed: "sq-old", mode: "budget" },
+    "advances-game": { value: 0, day: 3, opponent: "JOJO", name: "ANA", saveSeed: "sq-old", mode: "budget" },
+    "runs-game": "not a mark at all"
+  }));
+
+  const book = loadPersonalRecords();
+  assert.deepEqual(book["steals-game"], [
+    { value: 13, day: 61, opponent: "OKABE", name: "ANA", saveSeed: "sq-old", mode: "budget" }
+  ], "the old single mark stands, on a shelf of one");
+  assert.equal(book["advances-game"], undefined, "an old nought is swept on the way in");
+  assert.equal(book["runs-game"], undefined, "and so is anything that was never a mark");
+
+  // And the run in your hands takes its place beside the old one rather than
+  // being turned away by it.
+  const save = testSave();
+  save.saveSeed = "sq-now"; save.player.name = "ANA";
+  save.almanac = [{
+    day: 4, opponent: "JOJO", won: true, innings: 9, playerSide: "away",
+    score: { away: 2, home: 1 },
+    boxScore: {
+      away: { team: "ANA", hitters: [{ sb: 12 }], pitchers: [] },
+      home: { team: "JOJO", hitters: [], pitchers: [] }
+    }
+  }];
+  updatePersonalRecords(save);
+  assert.deepEqual(
+    loadPersonalRecords()["steals-game"].map((mark) => [mark.value, mark.saveSeed]), [[13, "sq-old"], [12, "sq-now"]],
+    "twelve is this run's record, and goes on the shelf under a thirteen it cannot beat"
+  );
+
+  localStorage.removeItem("showdown-quest-records-local");
+});
+
+// The book goes up a campaign at a time, and a machine that has been played for
+// months has a lot of campaigns on it. Sending all of them on every visit is a
+// request each for marks the board has had for weeks.
+test("the book only sends the league the campaigns it has something new about", async () => {
+  const { updatePersonalRecords, submitPersonalRecords } = await import("../src/adventure/records.js");
+  localStorage.removeItem("showdown-quest-records-local");
+  const gameWith = (runs) => ({
+    day: 1, opponent: "JOJO", won: true, innings: 9, playerSide: "away",
+    score: { away: runs, home: 0 },
+    boxScore: { away: { team: "?", hitters: [], pitchers: [] }, home: { team: "JOJO", hitters: [], pitchers: [] } }
+  });
+  const play = (seed, runs) => {
+    const save = testSave();
+    save.saveSeed = seed; save.player.name = "ANA"; save.almanac = [gameWith(runs)];
+    updatePersonalRecords(save);
+  };
+  play("sq-old", 13);
+  play("sq-now", 12);
+
+  // submitPersonalRecords only posts from a browser, so stand one up: a document,
+  // and a fetch that keeps what it was asked to send instead of sending it. The
+  // kept requests are then read back as a board, the way the server would file them.
+  const realDocument = globalThis.document;
+  const realFetch = globalThis.fetch;
+  const sent = [];
+  globalThis.document = {};
+  globalThis.fetch = async (url, options) => {
+    sent.push(JSON.parse(options.body));
+    return { ok: true };
+  };
+  const boardOf = (bodies) => {
+    const board = {};
+    for (const body of bodies) {
+      for (const [key, mark] of Object.entries(body.records)) {
+        (board[key] ??= []).push({ ...mark, name: body.name, saveSeed: body.saveSeed });
+      }
+    }
+    return board;
+  };
+  try {
+    // Offline, or on a first visit, there is no board to compare against and the
+    // whole book goes up — both campaigns, each under its own seed.
+    await submitPersonalRecords(null);
+    assert.deepEqual([...new Set(sent.map((body) => body.saveSeed))].sort(), ["sq-now", "sq-old"], "no board, so everything goes");
+    const board = boardOf(sent);
+    assert.deepEqual(
+      board["runs-game"].map((row) => [row.value, row.saveSeed]).sort(), [[12, "sq-now"], [13, "sq-old"]],
+      "and the twelve goes up beside the thirteen, which is the whole point of the shelf"
+    );
+
+    // Open the screen again with that board in hand: it has everything, so nothing
+    // is written to it.
+    sent.length = 0;
+    await submitPersonalRecords(board);
+    assert.deepEqual(sent, [], "a board that already has it all is not written to again");
+
+    // Play another afternoon in the run in your hands, and only that run reports.
+    play("sq-now", 20);
+    sent.length = 0;
+    await submitPersonalRecords(board);
+    assert.deepEqual(sent.map((body) => body.saveSeed), ["sq-now"], "one request, from the run with something to say");
+    // Twenty-nil moved two: the runs and the margin. Nothing else, and nothing from
+    // the campaign that did not play.
+    assert.deepEqual(Object.keys(sent[0].records).sort(), ["margin-game", "runs-game"], "and it says only what moved");
+    assert.equal(sent[0].records["runs-game"].value, 20);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
+  }
+
+  localStorage.removeItem("showdown-quest-records-local");
+});
+
+// A club sum is happy to come back nought, and MOST STEALS IN A GAME read straight
+// off it: a manager who had never stolen a base held a share of the steals record.
+test("a nought is not a record, except where going low is the point", async () => {
+  const { RECORDS, personalBests, leaderboard } = await import("../src/adventure/records.js");
+  localStorage.removeItem("showdown-quest-records-local");
+
+  // A win in which the club stole nothing, took no extra base, and threw nobody
+  // out — and allowed no hits, which is the best afternoon a staff ever has.
+  const save = testSave();
+  save.saveSeed = "sq-nought"; save.player.name = "NIL";
+  save.almanac = [{
+    day: 1, opponent: "JOJO", won: true, innings: 9, playerSide: "away",
+    score: { away: 1, home: 0 }, hitStreak: 0,
+    boxScore: {
+      away: { team: "NIL", hitters: [{ sb: 0, adv: 0, hr: 0 }], pitchers: [{ h: 0, so: 0 }] },
+      home: { team: "JOJO", hitters: [{ cs: 0, advOut: 0 }], pitchers: [] }
+    }
+  }];
+
+  const bests = personalBests(save);
+  for (const key of ["steals-game", "advances-game", "homers-game", "strikeouts-game",
+    "caught-stealing-game", "caught-advancing-game", "hit-streak"]) {
+    assert.equal(bests[key], undefined, `${key} is unset, not nought`);
+  }
+  assert.equal(bests["runs-game"].value, 1, "the one run it did score is a record");
+  assert.equal(bests["hits-allowed-win"].value, 0, "and nought hits allowed IS the mark, going the other way");
+
+  // So the board reads UNSET behind him rather than seating him at the top of it.
+  const steals = RECORDS.find((record) => record.key === "steals-game");
+  assert.equal(leaderboard(steals, {}, save).top.length, 0, "nobody holds a record nobody has set");
+  assert.equal(leaderboard(RECORDS.find((r) => r.key === "hits-allowed-win"), {}, save).top[0].value, 0);
 
   localStorage.removeItem("showdown-quest-records-local");
 });
@@ -4509,9 +4695,10 @@ test("a game that sets an openable record is the one worth uploading", async () 
   }];
   const moved = updatePersonalRecords(save);
   assert.ok(moved.includes("runs-game"), "the eight-run game moved an openable record");
-  assert.equal(setsOpenableGameRecord(moved, 1), true, "so its afternoon is worth uploading");
-  assert.equal(setsOpenableGameRecord(moved, 2), false, "but only the day it actually happened");
-  assert.equal(setsOpenableGameRecord(updatePersonalRecords(save), 1), false, "and nothing to send when nothing moved");
+  assert.equal(setsOpenableGameRecord(moved, 1, "sq-up"), true, "so its afternoon is worth uploading");
+  assert.equal(setsOpenableGameRecord(moved, 2, "sq-up"), false, "but only the day it actually happened");
+  assert.equal(setsOpenableGameRecord(moved, 1, "sq-other"), false, "and only for the run that set it");
+  assert.equal(setsOpenableGameRecord(updatePersonalRecords(save), 1, "sq-up"), false, "and nothing to send when nothing moved");
 
   localStorage.removeItem("showdown-quest-records-local");
 });
@@ -4652,7 +4839,7 @@ test("every line of the board says when the mark was set", async () => {
   const save = sluggerSave();
   const before = Date.now();
   updatePersonalRecords(save);
-  const mark = loadPersonalRecords()["player-homers"];
+  const [mark] = loadPersonalRecords()["player-homers"];
   assert.ok(mark.at >= before && mark.at <= Date.now(), "your book stamps a best with the day you set it");
 
   // The league's line keeps the league's day, and yours keeps your own.
