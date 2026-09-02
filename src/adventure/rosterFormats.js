@@ -46,11 +46,13 @@ export function benchPrice(points) {
 // The full-format cap calibration: the cap buys this multiple of the pool's
 // mean legal 20-man roster (bench discounted). Chosen so the CLASSIC SHOWDOWN
 // universe — real cards, authentic printed points — lands on the real game's
-// 5000-point cap: 5000 / 4223, the measured mean full-roster cost of that
+// 5000-point cap: 5000 / 4246, the measured mean full-roster cost of that
 // pool at true prices. Every other universe scales off its own mean, so the
 // figure stays proportional pool to pool. Re-derive by printing
-// poolMean("full") for the classic universe (see test coverage).
-export const FULL_CAP_CALIBRATION = 5000 / 4223;
+// poolMean("full") for the classic universe (see test coverage) — the mean
+// moves whenever the classic card set does, as it did when the by-number
+// re-crawl recovered 247 cards the offset crawl had dropped (4223 -> 4246).
+export const FULL_CAP_CALIBRATION = 5000 / 4246;
 
 export const ROSTER_FORMATS = {
   classic: {

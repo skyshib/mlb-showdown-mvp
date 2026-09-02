@@ -3115,7 +3115,7 @@ test("the game log shows the dice and the running win probability", async () => 
 test("every league builds a working universe with a legal starter pack", async () => {
   const { UNIVERSES, DECADES, FRANCHISES, universeConfig } = await import("../src/adventure/packs.js");
   const { resolveChart } = await import("../src/rules/cards.js");
-  const expectedSizes = { classic: 3646 };
+  const expectedSizes = { classic: 3893 };
   try {
     assert.ok(DECADES.length >= 12 && DECADES.includes(1910) && DECADES.includes(2020), "decades run 1910s-2020s");
     assert.equal(FRANCHISES.length, 30, "all thirty active franchises");
@@ -4351,6 +4351,9 @@ test("adding from the pack asks who sits, and the man he replaces comes off", as
   assert.ok(packOpenScreen.render(app).includes("WHO SITS"), "and says so");
 
   packOpenScreen.key(app, "a");                         // bench him
+  // Benching a man whose position the newcomer cannot cover reshuffles the
+  // rest of the defense, and that preview waits on the manager's nod.
+  if (app.screen.mode === "approve") packOpenScreen.key(app, "a");
   const roster = rosterCards(save).map((card) => card.id);
   assert.ok(roster.includes(pulled.id), "the new man is on the team");
   assert.ok(!roster.includes(benched.id), "and the man he replaced is off it");
@@ -5271,7 +5274,7 @@ test("the full-roster cap prices the classic universe at the real game's 5000", 
   try {
     setUniverseSeed("full-cap-probe", "classic");
     assert.equal(budgetCap("full"), 5000, "authentic cards, authentic cap");
-    assert.equal(budgetCap(), 3200, "and the classic 13-man cap is untouched");
+    assert.equal(budgetCap(), 3250, "and the classic 13-man cap tracks its own pool mean");
     setUniverseSeed("full-cap-probe", "fictional");
     const fictional = budgetCap("full");
     assert.ok(fictional > budgetCap() && fictional < 5000,

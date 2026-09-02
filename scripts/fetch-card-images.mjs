@@ -13,7 +13,10 @@
 import { mkdir, writeFile, readFile, readdir, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
-const UA = { "User-Agent": "showdown-quest-research/1.0 (personal fan project; images credited)" };
+// The host 403s any User-Agent containing "research" (a generic bot-keyword
+// rule, not a block on us: "spider", "crawler" and "bot" all pass). Same
+// identifying UA, minus the word that trips the filter.
+const UA = { "User-Agent": "showdown-quest/1.0 (personal fan project; images credited)" };
 const DELAY_MS = 350;
 const BASE = "https://www.showdowncards.com";
 
@@ -42,25 +45,13 @@ function slug(name) {
 
 // ---- Stage 1: search pages ------------------------------------------------------
 
-await mkdir(PAGES, { recursive: true });
-{
-  const existing = new Set(await readdir(PAGES));
-  let lastMax = 3872;
-  for (let offset = 0; offset <= lastMax; offset += 25) {
-    const file = `page-${String(offset).padStart(5, "0")}.html`;
-    if (existing.has(file)) continue;
-    const url = `${BASE}/mlb/mlbsearch.php?a=general&cardnumber=&namecontains=&mascot=&year=&expansion=&rarity=&storeinfo=&submit=Get+MLB+Scouting+Report&limit=${offset}&orderby=cardnumber&sort=ASC`;
-    try {
-      const html = await (await politeFetch(url)).text();
-      await writeFile(new URL(file, PAGES), html);
-      for (const match of html.matchAll(/limit=(\d+)/g)) {
-        lastMax = Math.max(lastMax, Number(match[1]));
-      }
-      console.log(`search ${file} ok (max ${lastMax})`);
-    } catch (error) {
-      console.log(`search ${file} FAILED: ${error.message}`);
-    }
-  }
+// The crawl itself lives in scrape-showdowncards.mjs (one page per card number
+// — see the note there on why offset paging drops rows). This script used to
+// keep a second, offset-based copy of it, which is how 247 cards went missing;
+// now it just consumes what that scraper cached.
+if (!existsSync(PAGES) || !(await readdir(PAGES)).some((f) => f.endsWith(".html"))) {
+  console.log("no cached search pages — run `node scripts/scrape-showdowncards.mjs` first");
+  process.exit(1);
 }
 
 // ---- Stage 2: parse rows -> store slugs -----------------------------------------

@@ -2034,6 +2034,9 @@ export const packOpenScreen = {
         persistSave(save);
         app.screen.mode = null;
         app.screen.approve = null;
+        // Same finished job as the straight swap below: the cursor goes home to
+        // NEXT CARD instead of resting on a spent ADD TO TEAM.
+        app.screen.menuIndex = 0;
       } else if (key === "b") {
         app.screen.mode = "team-swap";
         app.screen.approve = null;
