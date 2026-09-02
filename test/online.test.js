@@ -1042,6 +1042,97 @@ test("the record book turns away a nought where a nought is not a record", async
   assert.equal((await board("steals-game"))[0].value, 1);
 });
 
+test("a resubmitted plaque amends the board without improving its ranking figure", async (t) => {
+  const base = await startServer(t);
+  const seed = "amend-1";
+  const entry = {
+    saveSeed: seed, name: "SKY", mode: "budget", universe: "classic",
+    finishedAt: 1720000000000, days: 54, wins: 29, losses: 25,
+    battlesWon: 12, battlesLost: 10, badges: [], rosterPoints: 5000,
+    roster: [], hitters: [], pitchers: []
+  };
+  assert.equal((await api(base, "POST", "/api/hall-of-fame", entry)).status, 201);
+  const board = async () => (await api(base, "GET", "/api/hall-of-fame")).data.entries.find((e) => e.saveSeed === seed);
+
+  // The same campaign coming back as what it actually was: a gauntlet sweep the
+  // old server filed as a budget run because it had never heard of the mode.
+  const again = await api(base, "POST", "/api/hall-of-fame", {
+    ...entry, mode: "gauntlet", gauntletTier: "immortal",
+    gauntletCleared: 6, gauntletTotal: 6, gauntletAttempts: 11
+  });
+  assert.equal(again.status, 200);
+  assert.equal(again.data.amended, true, "the amendment landed");
+  assert.equal((await board()).mode, "gauntlet", "and the plaque is filed where it belongs");
+  assert.equal((await board()).gauntletCleared, 6);
+  assert.equal((await board()).gauntletSwept, true);
+  assert.equal((await board()).days, 54, "the campaign's clock is still its own");
+
+  // A resubmission cannot claim a better clock...
+  await api(base, "POST", "/api/hall-of-fame", { ...entry, mode: "gauntlet", gauntletTier: "immortal", gauntletCleared: 6, days: 1 });
+  assert.equal((await board()).days, 54, "one day is not a thing you get to claim later");
+
+  // ...nor walk a run's depth backwards.
+  await api(base, "POST", "/api/hall-of-fame", { ...entry, mode: "gauntlet", gauntletTier: "immortal", gauntletCleared: 2 });
+  assert.equal((await board()).gauntletCleared, 6, "a stale device cannot erase how far you got");
+
+  // One plaque throughout.
+  const all = (await api(base, "GET", "/api/hall-of-fame")).data.entries.filter((e) => e.saveSeed === seed);
+  assert.equal(all.length, 1);
+});
+
+test("the boards take a gauntlet run on its own terms: its mode, its depth, its tier", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+
+  const run = (saveSeed, name, cleared, days) => ({
+    saveSeed, name, mode: "gauntlet", universe: "classic", finishedAt: 1720000000000,
+    days, wins: cleared * 2, losses: 2, battlesWon: cleared, battlesLost: 1, badges: [],
+    rosterPoints: 5000, gauntletTier: "immortal", gauntletCleared: cleared,
+    gauntletTotal: 6, gauntletAttempts: 3, roster: [], hitters: [], pitchers: []
+  });
+
+  const filed = await api(base, "POST", "/api/hall-of-fame", run("g-1", "WALL", 4, 40));
+  assert.equal(filed.status, 201);
+  const [stored] = (await api(base, "GET", "/api/hall-of-fame")).data.entries;
+  assert.equal(stored.mode, "gauntlet", "a gauntlet run is not filed as a budget one");
+  assert.equal(stored.gauntletCleared, 4, "and its depth survives the trip");
+  assert.equal(stored.gauntletTier, "immortal");
+  assert.equal(stored.gauntletSwept, false);
+
+  // A made-up tier lands on the default; a depth past the total is clamped.
+  await api(base, "POST", "/api/hall-of-fame", {
+    ...run("g-liar", "LIAR", 99, 1), gauntletTier: "godlike"
+  });
+  const liar = (await api(base, "GET", "/api/hall-of-fame")).data.entries.find((e) => e.saveSeed === "g-liar");
+  assert.equal(liar.gauntletTier, "elite", "an invented tier is not a tier");
+  assert.equal(liar.gauntletCleared, 6, "and you cannot clear more clubs than there are");
+
+  // The gauntlet board ranks on depth. A manager who lost round one in two days
+  // is not ahead of one who got to the fifth club.
+  await api(base, "POST", "/api/hall-of-fame", run("g-quick", "QUICK", 1, 2));
+  const ranked = (await api(base, "GET", "/api/hall-of-fame")).data.entries
+    .filter((entry) => entry.mode === "gauntlet")
+    .map((entry) => entry.name);
+  assert.equal(ranked[ranked.length - 1], "QUICK", "the shallowest run is last, whatever its clock");
+
+  // And the record book knows the three tier boards.
+  const posted = await api(base, "POST", "/api/records", {
+    name: "WALL", saveSeed: "g-1", mode: "gauntlet",
+    records: { "deepest-gauntlet-immortal": { value: 4, at: 1720000000000 } }
+  });
+  assert.equal(posted.status, 201, "a gauntlet depth is a record the server has heard of");
+  const board = (await api(base, "GET", "/api/records")).data.records["deepest-gauntlet-immortal"];
+  assert.equal(board[0].value, 4);
+  assert.equal(board[0].name, "WALL");
+
+  // Nobody cleared is nobody beaten.
+  const nought = await api(base, "POST", "/api/records", {
+    name: "NIL", saveSeed: "g-nil", mode: "gauntlet",
+    records: { "deepest-gauntlet-immortal": { value: 0, at: 1720000000000 } }
+  });
+  assert.equal(nought.status, 400, "turning up is not a mark");
+});
+
 // A record is a number, a name, and a DAY, and the day has to survive being
 // looked at. The book goes up again on every visit to the records screen, so a
 // mark you already hold arrives over and over — restamping it made every standing

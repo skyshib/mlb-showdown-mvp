@@ -344,6 +344,10 @@ function persistRoom(store, room) {
 const HOF_FILE = "hall-of-fame.json";
 const HOF_MAX_PER_MODE = 100;
 const HOF_RARITIES = new Set(["common", "uncommon", "rare", "legend"]);
+// The rule sets a plaque can be filed under. Anything else lands in the budget
+// league, which is where a client that made a mode up belongs.
+const HOF_MODES = new Set(["budget", "uncapped", "gauntlet"]);
+const GAUNTLET_TIERS = new Set(["contender", "elite", "immortal"]);
 // Every stat key the client's season lines render, hitters and pitchers both.
 const HOF_STAT_KEYS = [
   "games", "pa", "ab", "h", "d", "t", "hr", "bb", "so", "r", "rbi", "sb", "cs", "gidp", "wpa",
@@ -443,7 +447,7 @@ function sanitizeHofEntry(body) {
   return {
     saveSeed,
     name,
-    mode: body.mode === "uncapped" ? "uncapped" : "budget",
+    mode: HOF_MODES.has(body.mode) ? body.mode : "budget",
     universe: hofString(body.universe, 40) || "fictional",
     finishedAt: hofNumber(body.finishedAt, 4102444800000) || Date.now(),
     days,
@@ -455,7 +459,24 @@ function sanitizeHofEntry(body) {
     rosterPoints: hofNumber(body.rosterPoints, 1e6),
     roster: Array.isArray(body.roster) ? body.roster.slice(0, 30).map(sanitizeCard).filter(Boolean) : [],
     hitters: Array.isArray(body.hitters) ? body.hitters.slice(0, 30).map(sanitizeStatLine).filter(Boolean) : [],
-    pitchers: Array.isArray(body.pitchers) ? body.pitchers.slice(0, 30).map(sanitizeStatLine).filter(Boolean) : []
+    pitchers: Array.isArray(body.pitchers) ? body.pitchers.slice(0, 30).map(sanitizeStatLine).filter(Boolean) : [],
+    ...sanitizeGauntlet(body)
+  };
+}
+
+// A gauntlet plaque's score is how deep the run got, at which tier. Kept as its
+// own few fields rather than trusted wholesale, same as everything else here.
+function sanitizeGauntlet(body) {
+  if (body.mode !== "gauntlet") return {};
+  const tier = GAUNTLET_TIERS.has(body.gauntletTier) ? body.gauntletTier : "elite";
+  const total = Math.min(hofNumber(body.gauntletTotal, 100) || 6, 100);
+  const cleared = Math.max(0, Math.min(hofNumber(body.gauntletCleared, 100), total));
+  return {
+    gauntletTier: tier,
+    gauntletCleared: cleared,
+    gauntletTotal: total,
+    gauntletAttempts: Math.max(1, hofNumber(body.gauntletAttempts, 1e6)),
+    gauntletSwept: cleared >= total
   };
 }
 
@@ -469,8 +490,13 @@ function trimHallOfFame(entries) {
     byMode.set(entry.mode, list);
   }
   const kept = [];
-  for (const list of byMode.values()) {
-    list.sort((a, b) => a.days - b.days || a.losses - b.losses || a.finishedAt - b.finishedAt);
+  for (const [mode, list] of byMode) {
+    // Fastest to the trophy, except in the gauntlet, where there is no trophy to
+    // be fast to: trimming that board on days would keep the hundred managers who
+    // lost round one quickest and throw away the ones who got furthest.
+    list.sort((a, b) => (mode === "gauntlet"
+      ? (b.gauntletCleared ?? 0) - (a.gauntletCleared ?? 0) || a.days - b.days
+      : a.days - b.days || a.losses - b.losses) || a.finishedAt - b.finishedAt);
     kept.push(...list.slice(0, HOF_MAX_PER_MODE));
   }
   return kept;
@@ -613,6 +639,9 @@ const RECORD_DIRECTIONS = {
   "fewest-losses-title": "min",
   "fastest-title-budget": "min",
   "fastest-title-uncapped": "min",
+  "deepest-gauntlet-contender": "max",
+  "deepest-gauntlet-elite": "max",
+  "deepest-gauntlet-immortal": "max",
   "player-hr-game": "max",
   "player-rbi-game": "max",
   "player-hits-game": "max",
@@ -641,6 +670,9 @@ const RECORD_DIRECTIONS = {
 // src/adventure/records.js. The LOW records are not here: nought hits allowed in a
 // win is the best afternoon a staff can have, and nought is the mark.
 const RECORDS_NEED_ONE = new Set([
+  "deepest-gauntlet-contender",
+  "deepest-gauntlet-elite",
+  "deepest-gauntlet-immortal",
   "runs-game",
   "homers-game",
   "steals-game",
@@ -783,9 +815,27 @@ async function postHallOfFameEntry(store, request, response) {
   const body = await readJsonBody(request);
   const entry = sanitizeHofEntry(body);
   if (!entry) return sendJson(response, 400, { error: "Malformed hall of fame entry" });
-  // One plaque per campaign: a resubmitted run (retry, second device) is a no-op.
-  if (store.hallOfFame.some((existing) => existing.saveSeed === entry.saveSeed)) {
-    return sendJson(response, 200, { ok: true, duplicate: true });
+  // One plaque per campaign — but a campaign's plaque keeps moving. The catalog
+  // goes on filling after the trophy lands (syncRunProgress), and a run filed by
+  // an older client can come back corrected: a gauntlet sweep sent up before this
+  // board knew what a gauntlet run was is stored here as a budget campaign with
+  // no score on it. So a resubmission AMENDS the plaque rather than being dropped.
+  //
+  // What it may never do is improve the figure the board ranks on. `days` is the
+  // campaign's, settled the day it finished, and a second submit claiming one day
+  // does not get to rewrite it; a gauntlet run's depth may rise (a later, deeper
+  // run) but never fall, so a stale second device cannot erase how far somebody got.
+  const at = store.hallOfFame.findIndex((existing) => existing.saveSeed === entry.saveSeed);
+  if (at >= 0) {
+    const held = store.hallOfFame[at];
+    const amended = { ...entry, days: held.days };
+    if (amended.gauntletTier) {
+      amended.gauntletCleared = Math.max(amended.gauntletCleared ?? 0, held.gauntletCleared ?? 0);
+      amended.gauntletSwept = amended.gauntletCleared >= (amended.gauntletTotal ?? 6);
+    }
+    store.hallOfFame = trimHallOfFame(store.hallOfFame.map((row, index) => (index === at ? amended : row)));
+    persistHallOfFame(store);
+    return sendJson(response, 200, { ok: true, duplicate: true, amended: true });
   }
   store.hallOfFame = trimHallOfFame([...store.hallOfFame, entry]);
   persistHallOfFame(store);

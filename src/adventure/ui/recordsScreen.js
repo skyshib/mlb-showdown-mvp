@@ -1,4 +1,5 @@
 import { escapeHtml, clampIndex } from "./helpers.js?v=20260716-records";
+import { fileFinishedGauntletRun } from "../hallOfFame.js?v=20260716-records";
 import { sectionedMenu, gameStars } from "./statsScreens.js?v=20260716-records";
 import { ensureAlmanac } from "../state.js?v=20260716-records";
 import { expandGame } from "../gameLog.js?v=20260716-records";
@@ -237,6 +238,9 @@ export const recordsScreen = {
     // rerenders and is thrown away by the next go().
     if (app.screen.synced) return;
     app.screen.synced = true;
+    // The book reads finished runs out of the hall of fame, so a run that never
+    // got filed has no marks to send. File it first, then sync.
+    fileFinishedGauntletRun(app.save);
     syncGlobal(app);
   },
   key(app, key) {

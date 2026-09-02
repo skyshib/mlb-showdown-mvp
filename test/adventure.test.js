@@ -5754,6 +5754,171 @@ test("IMMORTAL gives you the wall again; the other tiers are one life", async ()
   }
 });
 
+test("a gauntlet run reaches the hall of fame and the record book, deepest run standing", async () => {
+  const { recordCompletedRun, loadHallOfFame, hallOfFameByMode, MODE_LABELS } = await import("../src/adventure/hallOfFame.js");
+  const { hallOfFameScreen } = await import("../src/adventure/ui/hallOfFameScreen.js");
+  const { RECORDS, leaderboard } = await import("../src/adventure/records.js");
+  const {
+    lockGauntletRoster, recordGauntletRound, restartGauntletRun
+  } = await import("../src/adventure/state.js");
+  const { gauntletTrainers } = await import("../src/adventure/region.js");
+  try {
+    setUniverseSeed("gauntlet-hof", "classic");
+    const clubs = gauntletTrainers();
+    const save = createSave({
+      name: "WALL", saveSeed: "gauntlet-hof", universe: "classic",
+      mode: "gauntlet", rosterFormat: "full", gauntletTier: "immortal"
+    });
+    hydrateUniverse(save);
+    setRoster(save, starterPack(save.saveSeed, "full").map((card) => card.id));
+    const plaque = () => loadHallOfFame().find((entry) => entry.saveSeed === "gauntlet-hof");
+    const record = (key) => RECORDS.find((item) => item.key === key);
+
+    // A run that ENDS is still a run. Two clubs put away, then the wall.
+    recordGauntletRound(save, clubs[0].id, true);
+    recordGauntletRound(save, clubs[1].id, true);
+    lockGauntletRoster(save);
+    recordGauntletRound(save, clubs[2].id, false);
+    recordCompletedRun(save);
+    assert.equal(plaque()?.gauntletCleared, 2, "a lost run gets its plaque");
+    assert.equal(plaque()?.gauntletTier, "immortal", "under the tier it was run at");
+    assert.equal(plaque()?.mode, "gauntlet");
+    assert.equal(MODE_LABELS.gauntlet, "THE GAUNTLET", "and the board has a name for it");
+
+    // A shallower go does not undo it, and does not add a second plaque.
+    restartGauntletRun(save);
+    recordGauntletRound(save, clubs[0].id, true);
+    recordGauntletRound(save, clubs[1].id, false);
+    recordCompletedRun(save);
+    assert.equal(loadHallOfFame().filter((e) => e.saveSeed === "gauntlet-hof").length, 1, "one plaque per save");
+    assert.equal(plaque()?.gauntletCleared, 2, "the deepest run stands");
+    assert.equal(plaque()?.gauntletAttempts, 2, "but the board counts the tries");
+
+    // A deeper one replaces it.
+    restartGauntletRun(save);
+    for (const trainer of clubs.slice(0, 4)) recordGauntletRound(save, trainer.id, true);
+    recordGauntletRound(save, clubs[4].id, false);
+    recordCompletedRun(save);
+    assert.equal(plaque()?.gauntletCleared, 4, "four beats two");
+
+    // The record book: one board per tier, and the title boards stay clean.
+    assert.deepEqual(record("deepest-gauntlet-immortal").read(save), { value: 4, opponent: "WALL" });
+    assert.equal(record("deepest-gauntlet-elite").read(save), null, "a tier you never ran is empty");
+    assert.equal(record("fewest-losses-title").read(save), null, "a gauntlet run is not a title run");
+    assert.equal(record("fastest-title-budget").read(save), null);
+    const board = leaderboard(record("deepest-gauntlet-immortal"), {}, save, 5);
+    assert.equal(board.top[0]?.value, 4, "and it stands on the shared board");
+    assert.equal(board.top[0]?.name, "WALL");
+
+    // The plaque reads as a depth, not a clock, and ranks that way.
+    const html = hallOfFameScreen.render({ save, screen: { name: "hallOfFame", index: 0 }, go() {}, rerender() {} });
+    assert.ok(html.includes("THE GAUNTLET"), "its own section");
+    assert.ok(html.includes("4/6 CLEARED"), "and its own headline");
+    assert.ok(!html.includes("4/6 CLEARED</b> <span class=\"gq-dim\">0 DAYS"), "not a day count");
+
+    // Running the table says so in words.
+    restartGauntletRun(save);
+    for (const trainer of clubs) recordGauntletRound(save, trainer.id, true);
+    recordCompletedRun(save);
+    assert.equal(plaque()?.gauntletSwept, true);
+    const swept = hallOfFameScreen.render({ save, screen: { name: "hallOfFame", index: 0 }, go() {}, rerender() {} });
+    assert.ok(swept.includes("RAN THE TABLE"), "six of six is not a score, it is a sentence");
+
+    // Deepest first, not fastest first.
+    const ranked = hallOfFameByMode([
+      { saveSeed: "a", mode: "gauntlet", gauntletCleared: 1, days: 3, losses: 0, finishedAt: 1 },
+      { saveSeed: "b", mode: "gauntlet", gauntletCleared: 5, days: 90, losses: 9, finishedAt: 2 }
+    ]).find((group) => group.mode === "gauntlet");
+    assert.deepEqual(ranked.entries.map((e) => e.saveSeed), ["b", "a"], "depth outranks the clock");
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("a run that ended without being filed is picked up when the board is opened", async () => {
+  const { fileFinishedGauntletRun, loadHallOfFame } = await import("../src/adventure/hallOfFame.js");
+  const { hallOfFameScreen } = await import("../src/adventure/ui/hallOfFameScreen.js");
+  const { lockGauntletRoster, recordGauntletRound, restartGauntletRun } = await import("../src/adventure/state.js");
+  const { gauntletTrainers } = await import("../src/adventure/region.js");
+  try {
+    setUniverseSeed("gauntlet-catchup", "classic");
+    const clubs = gauntletTrainers();
+    const save = createSave({
+      name: "LOST", saveSeed: "gauntlet-catchup", universe: "classic",
+      mode: "gauntlet", rosterFormat: "full", gauntletTier: "immortal"
+    });
+    hydrateUniverse(save);
+    setRoster(save, starterPack(save.saveSeed, "full").map((card) => card.id));
+    const plaques = () => loadHallOfFame().filter((entry) => entry.saveSeed === "gauntlet-catchup");
+
+    // A run that ended with nobody filing it — a tab on an older build, a browser
+    // closed on the result screen.
+    for (const trainer of clubs.slice(0, 3)) recordGauntletRound(save, trainer.id, true);
+    lockGauntletRoster(save);
+    recordGauntletRound(save, clubs[3].id, false);
+    assert.equal(plaques().length, 0, "nothing filed it at the time");
+
+    const app = { save, screen: { name: "hallOfFame", index: 0 }, go() {}, rerender() {} };
+    hallOfFameScreen.mounted(app);
+    assert.equal(plaques()[0]?.gauntletCleared, 3, "opening the board files it");
+    assert.ok(hallOfFameScreen.render(app).includes("3/6 CLEARED"), "and it reads as a depth");
+
+    // Asking again writes nothing new.
+    app.screen = { name: "hallOfFame", index: 0 };
+    hallOfFameScreen.mounted(app);
+    assert.equal(plaques().length, 1, "filing is idempotent");
+
+    // An earlier run's depth still files while a later one is live.
+    restartGauntletRun(save);
+    recordGauntletRound(save, clubs[0].id, true);
+    assert.ok(fileFinishedGauntletRun(save) !== undefined, "a save with a past run still has a score");
+    assert.equal(plaques()[0]?.gauntletCleared, 3, "and it is the deepest one");
+
+    // A first run still in progress has not scored yet.
+    const live = createSave({
+      name: "LIVE", saveSeed: "gauntlet-live", universe: "classic",
+      mode: "gauntlet", rosterFormat: "full", gauntletTier: "elite"
+    });
+    hydrateUniverse(live);
+    setRoster(live, starterPack(live.saveSeed, "full").map((card) => card.id));
+    recordGauntletRound(live, clubs[0].id, true);
+    assert.equal(fileFinishedGauntletRun(live), null, "a live first run is not a finished run");
+    assert.ok(!loadHallOfFame().some((entry) => entry.saveSeed === "gauntlet-live"));
+
+    // And a budget campaign is none of this function's business.
+    const budget = createSave({ name: "B", saveSeed: "gauntlet-budget", universe: "classic" });
+    assert.equal(fileFinishedGauntletRun(budget), null);
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
+test("your own plaque beats the league's older copy of it", async () => {
+  const { mergeEntries, hallOfFameByMode } = await import("../src/adventure/hallOfFame.js");
+  // A gauntlet sweep that went up before the server understood gauntlet plaques
+  // came back down as a budget campaign with the score stripped off. Taking the
+  // league's word for it filed the run under BUDGET LEAGUE and hid it from the
+  // manager who set it.
+  const mine = {
+    saveSeed: "sq-swept", name: "SKYLAR", mode: "gauntlet", days: 54,
+    gauntletTier: "immortal", gauntletCleared: 6, gauntletTotal: 6, gauntletSwept: true
+  };
+  const theirs = { saveSeed: "sq-swept", name: "SKYLAR", mode: "budget", days: 54 };
+  const other = { saveSeed: "sq-someone-else", name: "PAT", mode: "budget", days: 40 };
+
+  const merged = mergeEntries([mine], [theirs, other]);
+  assert.equal(merged.length, 2, "one row per campaign");
+  assert.equal(merged.find((e) => e.saveSeed === "sq-swept").mode, "gauntlet", "your copy is the true one");
+  assert.equal(merged.find((e) => e.saveSeed === "sq-swept").gauntletCleared, 6, "score and all");
+  assert.ok(merged.some((e) => e.saveSeed === "sq-someone-else"), "and the rest of the league still shows");
+
+  const sections = hallOfFameByMode(merged).map((group) => group.mode);
+  assert.ok(sections.includes("gauntlet"), "so the board grows a GAUNTLET section");
+
+  // A campaign only the server knows about still comes through.
+  assert.equal(mergeEntries([], [theirs]).length, 1);
+});
+
 test("the gauntlet board offers one club at a time and no shopping", async () => {
   const { mapScreen } = await import("../src/adventure/ui/mapScreen.js");
   const { lockGauntletRoster, recordGauntletRound } = await import("../src/adventure/state.js");

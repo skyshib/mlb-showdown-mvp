@@ -10,6 +10,7 @@ import {
   fetchGlobalEntries,
   submitRun,
   syncRunProgress,
+  fileFinishedGauntletRun,
   mergeEntries
 } from "../hallOfFame.js?v=20260716-records";
 
@@ -73,6 +74,19 @@ function finishedOn(entry) {
     .toUpperCase();
 }
 
+// What the plaque is FOR. A championship run is measured in days to the trophy;
+// a gauntlet run is measured in clubs put away, at the tier it put them away at,
+// and a sweep says so in words because six of six is the thing nobody does.
+function headline(entry) {
+  if ((entry.mode ?? "budget") !== "gauntlet") {
+    return `${entry.days} DAY${entry.days === 1 ? "" : "S"}`;
+  }
+  const cleared = entry.gauntletCleared ?? 0;
+  const total = entry.gauntletTotal ?? 6;
+  const tier = (entry.gauntletTier ?? "elite").toUpperCase();
+  return cleared >= total ? `RAN THE TABLE &middot; ${tier}` : `${cleared}/${total} CLEARED &middot; ${tier}`;
+}
+
 function leaderboardRows() {
   const rows = [];
   const entries = mergeEntries(loadHallOfFame(), cachedGlobalEntries());
@@ -82,7 +96,7 @@ function leaderboardRows() {
       rows.push({
         section: MODE_LABELS[mode] ?? mode.toUpperCase(),
         entry,
-        html: `${place + 1}. ${escapeHtml(entry.name)}${entry.catalogComplete ? " &#9733;" : ""} — <b>${entry.days} DAY${entry.days === 1 ? "" : "S"}</b> <span class="gq-dim">${entry.wins}-${entry.losses} &middot; ${collectionTag(entry)} &middot; ${escapeHtml(leagueName(entry))}${finished ? ` &middot; ${escapeHtml(finished)}` : ""}</span>`
+        html: `${place + 1}. ${escapeHtml(entry.name)}${entry.catalogComplete ? " &#9733;" : ""} — <b>${headline(entry)}</b> <span class="gq-dim">${entry.wins}-${entry.losses} &middot; ${collectionTag(entry)} &middot; ${escapeHtml(leagueName(entry))}${finished ? ` &middot; ${escapeHtml(finished)}` : ""}</span>`
       });
     });
   }
@@ -111,6 +125,9 @@ export const hallOfFameScreen = {
     // A champion who is still collecting has a plaque that is out of date. Bring
     // it up to what he actually owns before the board is read — and push the
     // amendment up, so the global board sees it too.
+    // A gauntlet run that ended without reaching the board — an older build, a
+    // closed tab — is filed now, before the board is read.
+    fileFinishedGauntletRun(app.save);
     syncRunProgress(app.save);
     syncGlobal(app);
   },

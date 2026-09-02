@@ -1474,7 +1474,11 @@ function resolveGameEnd(app, phase) {
       addLog(save, run.over
         ? `The run ends against ${trainer.name} — ${run.cleared.length} of 6 cleared.`
         : `${trainer.name} put away. ${run.cleared.length} of 6.`);
-      if (!run.over && run.cleared.length >= 6) recordCompletedRun(save);
+      // Every finished run goes on the board, not just a sweep. A gauntlet run
+      // that ends in round three is not a failed campaign with nothing to show —
+      // how far it got is the whole score, and on IMMORTAL a sweep is a
+      // once-in-25000 afternoon that nobody would ever file.
+      if (run.over || run.cleared.length >= 6) recordCompletedRun(save);
     }
     persistSave(save);
     next = { name: "battleResult", data: { trainerId: trainer.id, outcome, score: phase.score, playerSide: battle.playerSide, page: 0 } };

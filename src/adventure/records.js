@@ -309,6 +309,40 @@ export const RECORDS = [
     fromRun: true,
     read: () => fastestTitle("uncapped")
   },
+  // Three boards, for the same reason the championship has two: six clubs built
+  // a shade over your budget and six built at the World Series budget are not the
+  // same six clubs, and ranking a CONTENDER run against an IMMORTAL one only ever
+  // says which wall was shorter. A gauntlet run's score is how far it got.
+  {
+    key: "deepest-gauntlet-contender",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: "DEEPEST GAUNTLET RUN (CONTENDER)",
+    better: "max",
+    unit: "cleared",
+    fromRun: true,
+    read: () => deepestGauntlet("contender")
+  },
+  {
+    key: "deepest-gauntlet-elite",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: "DEEPEST GAUNTLET RUN (ELITE)",
+    better: "max",
+    unit: "cleared",
+    fromRun: true,
+    read: () => deepestGauntlet("elite")
+  },
+  {
+    key: "deepest-gauntlet-immortal",
+    page: "manager",
+    group: "THE LONG HAUL",
+    title: "DEEPEST GAUNTLET RUN (IMMORTAL)",
+    better: "max",
+    unit: "cleared",
+    fromRun: true,
+    read: () => deepestGauntlet("immortal")
+  },
   {
     key: "twenties-game",
     page: "manager",
@@ -676,6 +710,7 @@ function catalogDays(save) {
 function fewestTitleLosses() {
   let best = null;
   for (const run of loadHallOfFame()) {
+    if ((run.mode ?? "budget") === "gauntlet") continue;
     const losses = Number(run.losses);
     if (!Number.isFinite(losses) || losses < 0) continue;
     if (!best || losses < best.value) best = { value: losses, opponent: run.name };
@@ -786,6 +821,20 @@ function longestWinStreak(save) {
 // was won in — so each board only ever counts the runs that were actually playing
 // its game. A run predating the field is a budget run, which is what the league
 // was before the cheques were uncapped.
+// The deepest run one tier has seen, out of the plaques this machine holds.
+// A run that cleared nobody is not a mark — it is a run that turned up — so the
+// board starts at one club put away.
+function deepestGauntlet(tier) {
+  let best = null;
+  for (const run of loadHallOfFame()) {
+    if (run.gauntletTier !== tier) continue;
+    const cleared = Number(run.gauntletCleared);
+    if (!Number.isFinite(cleared) || cleared <= 0) continue;
+    if (!best || cleared > best.value) best = { value: cleared, opponent: run.name };
+  }
+  return best;
+}
+
 function fastestTitle(mode) {
   let best = null;
   for (const run of loadHallOfFame()) {
@@ -801,6 +850,16 @@ function fastestTitle(mode) {
 // A fastest-championship board only counts runs won under its own rule set; the
 // fewest-losses board counts them all, whichever league they were won in.
 function runRecordValue(key, run) {
+  const gauntlet = /^deepest-gauntlet-(.+)$/.exec(key);
+  if (gauntlet) {
+    if (run.gauntletTier !== gauntlet[1]) return null;
+    const cleared = Number(run.gauntletCleared);
+    return Number.isFinite(cleared) && cleared > 0 ? cleared : null;
+  }
+  // The title boards are for title runs. A gauntlet run is six best-of-threes
+  // and would walk onto FEWEST LOSSES with three of them, which is not the same
+  // achievement as losing three games across a whole campaign.
+  if ((run.mode ?? "budget") === "gauntlet") return null;
   if (key === "fewest-losses-title") {
     const losses = Number(run.losses);
     return Number.isFinite(losses) && losses >= 0 ? losses : null;
