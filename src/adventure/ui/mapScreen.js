@@ -22,7 +22,7 @@ export function pointsLabel(save) {
 import { dayWhimsy } from "../feats.js?v=20260716-records";
 import { validateRoster } from "../../rules/draft.js?v=20260716-records";
 import { buildNpcTeam } from "../npcTeams.js?v=20260716-records";
-import { startTrainerBattle } from "./battleScreen.js?v=20260716-records";
+import { startTrainerBattle, seriesLengthFor } from "./battleScreen.js?v=20260716-records";
 import { playChallenge, playFootfall } from "../../ui/sounds.js?v=20260716-records";
 
 export function rosterProblems(save) {
@@ -61,7 +61,7 @@ function mapItems(app) {
     // will play you for now, so the map itself says where the coins are.
     const marker = beaten
       ? `&#10003; &#8635; $${rewardCoins(save, trainer)}`
-      : formatTag(trainer);
+      : formatTag(save, trainer);
     items.push({
       section: trainer.title.toUpperCase(),
       html: `${escapeHtml(trainer.name)} <span class="gq-dim">${unlocked ? marker : "LOCKED"}</span>`,
@@ -152,10 +152,15 @@ function rosterLockLabel(save) {
   return run?.locked ? "TEAM <span class=\"gq-dim\">LOCKED FOR THE RUN</span>" : "TEAM <span class=\"gq-dim\">BUILD IT NOW</span>";
 }
 
-function formatTag(trainer) {
+// What you are about to play, not what the club prints. The gauntlet levels
+// every round to the same best-of-three, so October Gatekeeper Ivy's printed BO5
+// and Mr. November's BO7 are not what happens there — and a walk-on screen that
+// says BO7 over a three-game series is the game lying to you about the terms.
+function formatTag(save, trainer) {
   const format = trainer.battleFormat;
-  if (format.type === "simSeries") return `SIM BO${format.bestOf}`;
-  if (format.type === "series") return `BO${format.bestOf}`;
+  const bestOf = seriesLengthFor(save, trainer);
+  if (format.type === "simSeries") return `SIM BO${bestOf}`;
+  if (format.type === "series" || bestOf > 1) return `BO${bestOf}`;
   return "1 GAME";
 }
 
@@ -397,7 +402,7 @@ export const trainerIntroScreen = {
     // first thing he says both wait until the two of you have stopped moving.
     const late = app.screen.introPlayed ? "" : " gq-intro-late";
     return `<div class="gq-screen">
-      <div class="gq-topbar"><span>${escapeHtml(trainer.title)}</span><span>${formatTag(trainer)}</span></div>
+      <div class="gq-topbar"><span>${escapeHtml(trainer.title)}</span><span>${formatTag(app.save, trainer)}</span></div>
       <div class="gq-body gq-center">
         <div class="gq-frame gq-title-frame${late}">
           <b>${escapeHtml(trainer.name)}</b><br>

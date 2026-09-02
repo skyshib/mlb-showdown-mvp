@@ -87,6 +87,17 @@ function headline(entry) {
   return cleared >= total ? `RAN THE TABLE &middot; ${tier}` : `${cleared}/${total} CLEARED &middot; ${tier}`;
 }
 
+// How many goes it took. A gauntlet plaque holds the DEEPEST run a save has
+// made, and on a tier you can walk back up to that number is half the story —
+// six of six on the eleventh attempt is a different afternoon from six of six
+// on the first. Silent on a save that has only had the one go, where there is
+// nothing to say.
+function triesTag(entry) {
+  if ((entry.mode ?? "budget") !== "gauntlet") return "";
+  const attempts = entry.gauntletAttempts ?? 1;
+  return attempts > 1 ? ` &middot; ${attempts} ATTEMPTS` : "";
+}
+
 function leaderboardRows() {
   const rows = [];
   const entries = mergeEntries(loadHallOfFame(), cachedGlobalEntries());
@@ -96,7 +107,7 @@ function leaderboardRows() {
       rows.push({
         section: MODE_LABELS[mode] ?? mode.toUpperCase(),
         entry,
-        html: `${place + 1}. ${escapeHtml(entry.name)}${entry.catalogComplete ? " &#9733;" : ""} — <b>${headline(entry)}</b> <span class="gq-dim">${entry.wins}-${entry.losses} &middot; ${collectionTag(entry)} &middot; ${escapeHtml(leagueName(entry))}${finished ? ` &middot; ${escapeHtml(finished)}` : ""}</span>`
+        html: `${place + 1}. ${escapeHtml(entry.name)}${entry.catalogComplete ? " &#9733;" : ""} — <b>${headline(entry)}</b> <span class="gq-dim">${entry.wins}-${entry.losses}${triesTag(entry)} &middot; ${collectionTag(entry)} &middot; ${escapeHtml(leagueName(entry))}${finished ? ` &middot; ${escapeHtml(finished)}` : ""}</span>`
       });
     });
   }

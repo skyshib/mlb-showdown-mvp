@@ -5781,6 +5781,8 @@ test("a gauntlet run reaches the hall of fame and the record book, deepest run s
     recordGauntletRound(save, clubs[2].id, false);
     recordCompletedRun(save);
     assert.equal(plaque()?.gauntletCleared, 2, "a lost run gets its plaque");
+    assert.ok(!hallOfFameScreen.render({ save, screen: { name: "hallOfFame", index: 0 }, go() {}, rerender() {} }).includes("ATTEMPTS"),
+      "but a save that has had one go says nothing about tries");
     assert.equal(plaque()?.gauntletTier, "immortal", "under the tier it was run at");
     assert.equal(plaque()?.mode, "gauntlet");
     assert.equal(MODE_LABELS.gauntlet, "THE GAUNTLET", "and the board has a name for it");
@@ -5823,6 +5825,10 @@ test("a gauntlet run reaches the hall of fame and the record book, deepest run s
     assert.equal(plaque()?.gauntletSwept, true);
     const swept = hallOfFameScreen.render({ save, screen: { name: "hallOfFame", index: 0 }, go() {}, rerender() {} });
     assert.ok(swept.includes("RAN THE TABLE"), "six of six is not a score, it is a sentence");
+    // Six of six on the fourth go is a different afternoon from six of six on the
+    // first, so the plaque says which.
+    assert.equal(plaque()?.gauntletAttempts, 4);
+    assert.ok(swept.includes("4 ATTEMPTS"), "and how many goes it took");
 
     // Deepest first, not fastest first.
     const ranked = hallOfFameByMode([
@@ -5917,6 +5923,68 @@ test("your own plaque beats the league's older copy of it", async () => {
 
   // A campaign only the server knows about still comes through.
   assert.equal(mergeEntries([], [theirs]).length, 1);
+});
+
+test("the gauntlet says the terms it actually plays, and no rival jumps into it", async () => {
+  const { trainerIntroScreen, mapScreen } = await import("../src/adventure/ui/mapScreen.js");
+  const { seriesLengthFor } = await import("../src/adventure/ui/battleScreen.js");
+  const { gauntletTrainers, pendingAmbush, TRAINERS } = await import("../src/adventure/region.js");
+  const { recordGauntletRound, recordTrainerWin } = await import("../src/adventure/state.js");
+  try {
+    setUniverseSeed("gauntlet-terms", "classic");
+    const clubs = gauntletTrainers();
+    const save = createSave({
+      name: "G", saveSeed: "gauntlet-terms", universe: "classic",
+      mode: "gauntlet", rosterFormat: "full", gauntletTier: "immortal"
+    });
+    hydrateUniverse(save);
+    setRoster(save, starterPack(save.saveSeed, "full").map((card) => card.id));
+
+    // The last three clubs print BO5/BO7/BO7, but the gauntlet levels every round
+    // to a best-of-three. The walk-on screen used to announce the printed number
+    // over a three-game series.
+    assert.ok(clubs.some((club) => (club.battleFormat.bestOf ?? 1) !== 3), "the clubs do print longer series");
+    for (const club of clubs) {
+      assert.equal(seriesLengthFor(save, club), 3, `${club.id} is played as a BO3`);
+      const html = trainerIntroScreen.render({
+        save, screen: { name: "trainerIntro", trainerId: club.id, page: 99, menuIndex: 0 }, go() {}, rerender() {}
+      });
+      assert.ok(html.includes("<span>BO3</span>"), `${club.id}'s walk-on says BO3, not BO${club.battleFormat.bestOf}`);
+      assert.ok(!/<span>BO[^3]<\/span>/.test(html), `${club.id} announces no other length`);
+    }
+    // And the board agrees with the walk-on.
+    assert.ok(mapScreen.render({ save, screen: { name: "map" }, go() {}, rerender() {} }).includes("BO3"));
+
+    // A campaign save still gets the printed terms.
+    const campaign = createSave({ name: "C", saveSeed: "campaign-terms", universe: "classic" });
+    hydrateUniverse(campaign);
+    setRoster(campaign, starterPack(campaign.saveSeed).map((card) => card.id));
+    const long = clubs.find((club) => club.battleFormat.bestOf === 7);
+    assert.equal(seriesLengthFor(campaign, long), 7, "outside the gauntlet a BO7 is a BO7");
+    assert.ok(trainerIntroScreen.render({
+      save: campaign, screen: { name: "trainerIntro", trainerId: long.id, page: 99, menuIndex: 0 }, go() {}, rerender() {}
+    }).includes("<span>BO7</span>"));
+
+    // No rival ambushes in the gauntlet. Six clubs, one life — a seventh bout
+    // that the run could be lost to does not belong in it.
+    assert.ok(TRAINERS.some((trainer) => trainer.ambush), "the league does have rivals");
+    assert.equal(pendingAmbush(save), null, "but none of them jumps a gauntlet run");
+    // This is the trap the gauntlet fell into: rivals unlock off the campaign
+    // ladder, and three of the four hang off clubs that ARE gauntlet rounds
+    // (rival-2 off gym-garrick, rival-3 off gym-quince, rival-4 off
+    // post-championship). Clearing rounds used to spring them mid-run.
+    for (const club of clubs.slice(0, 3)) {
+      recordGauntletRound(save, club.id, true);
+      recordTrainerWin(save, club.id);
+      assert.equal(pendingAmbush(save), null, `no rival after clearing ${club.id}`);
+    }
+
+    // The campaign is untouched: beat what a rival waits on and he still jumps.
+    recordTrainerWin(campaign, "gym-garrick");
+    assert.equal(pendingAmbush(campaign)?.id, "rival-2", "a campaign save still gets ambushed");
+  } finally {
+    setUniverseSeed("test-seed");
+  }
 });
 
 test("the gauntlet board offers one club at a time and no shopping", async () => {

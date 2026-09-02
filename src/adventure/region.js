@@ -550,6 +550,10 @@ export function isRematch(save, trainer) {
 // Ambush trainers stay off the map until they jump the player: the first map
 // visit after their requirements clear. Once sprung they show like anyone else.
 export function pendingAmbush(save) {
+  // Not in the gauntlet. That mode is six clubs in order and one life; a rival
+  // jumping out between rounds is a seventh, unscheduled bout that is not part
+  // of the run and that the run can be lost to. Rivals belong to the campaign.
+  if (save?.mode === "gauntlet") return null;
   return TRAINERS.find((trainer) =>
     trainer.ambush &&
     !ambushSprung(save, trainer.id) &&

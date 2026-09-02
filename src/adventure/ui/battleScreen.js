@@ -19,7 +19,7 @@ import { uploadGame } from "../gameArchive.js?v=20260716-records";
 import { compactGame } from "../gameLog.js?v=20260716-records";
 import { cardById } from "../packs.js?v=20260716-records";
 import { buildBoxScore, inningsPlayed, pitcherStatus, fieldingCheckNeeds, winProbabilityHome, stateLeverage, isGameOver, pinchSubKeepsDefense, defensiveSubFits, walkoffSpot, availableBench } from "../../rules/game.js?v=20260716-records";
-import { trainerById, rewardCoins, markAmbushDone } from "../region.js?v=20260716-records";
+import { trainerById, rewardCoins, markAmbushDone, GAUNTLET_TRAINER_IDS } from "../region.js?v=20260716-records";
 import { rosterFormat, pickRandomStarter } from "../rosterFormats.js?v=20260716-records";
 import { createRng } from "../../rules/rng.js?v=20260716-records";
 import { gameFeats } from "../feats.js?v=20260716-records";
@@ -1468,7 +1468,12 @@ function resolveGameEnd(app, phase) {
     clearSeries(save);
     // In the gauntlet a decided series is a round: won moves you along, lost
     // ends the run where it stands.
-    const run = recordGauntletRound(save, trainer.id, status === "won");
+    // Only one of the six can advance or end a run. Anything else played during
+    // a gauntlet — a rival ambush from an older save, a rematch — used to go
+    // through here unchecked: winning it pushed a stranger onto the cleared list
+    // and skipped a club, losing it ended the run on a bout that was never in it.
+    const round = GAUNTLET_TRAINER_IDS.includes(trainer.id);
+    const run = round ? recordGauntletRound(save, trainer.id, status === "won") : null;
     if (run) {
       outcome.gauntlet = { round: run.cleared.length, total: 6, over: run.over };
       addLog(save, run.over
