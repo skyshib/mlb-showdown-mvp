@@ -331,34 +331,147 @@ function ordinal(value) {
 function bestPitchingGem(game) {
   const candidates = [];
   for (const side of ["away", "home"]) {
-    const opponent = side === "away" ? "home" : "away";
-    const pitchers = game.boxScore?.[side]?.pitchers ?? [];
-    const outs = pitchers.reduce((sum, line) => sum + (line.outs ?? 0), 0);
-    const hits = pitchers.reduce((sum, line) => sum + (line.h ?? 0), 0);
-    const walks = pitchers.reduce((sum, line) => sum + (line.bb ?? 0), 0);
-    const strikeouts = pitchers.reduce((sum, line) => sum + (line.so ?? 0), 0);
-    const runsAllowed = Number(game[opponent]?.runs ?? game.boxScore?.[opponent]?.runs ?? 0);
-    if (outs < 27 || runsAllowed !== 0) continue;
-
-    const activePitchers = pitchers.filter((line) => (line.outs ?? 0) > 0);
-    const onePitcher = activePitchers.length === 1;
-    const tier = hits === 0 && walks === 0 ? 3 : hits === 0 ? 2 : 1;
-    const kind = tier === 3
-      ? (onePitcher ? "Perfect game" : "Combined perfect game")
-      : tier === 2
-        ? (onePitcher ? "No-hitter" : "Combined no-hitter")
-        : "Best shutout";
+    const gem = sideShutout(game, side);
+    if (!gem) continue;
     candidates.push({
-      kind,
-      tier,
-      rank: tier * 1_000_000 + (100 - hits) * 1_000 + strikeouts,
-      outs,
-      hits,
-      walks,
-      strikeouts,
-      team: game[side]?.name ?? game.boxScore?.[side]?.team ?? side,
-      pitchers: activePitchers.map((line) => line.name).join(", ") || "Pitching staff"
+      ...gem,
+      rank: gem.tier * 1_000_000 + (100 - gem.hits) * 1_000 + gem.strikeouts,
+      pitchers: gem.activePitchers.map((line) => line.name).join(", ") || "Pitching staff"
     });
   }
   return candidates.sort((a, b) => b.rank - a.rank || b.outs - a.outs)[0] ?? null;
+}
+
+// One side's complete shutout, if it threw one: a full nine innings' worth of
+// outs with nothing across. The tier is what kind — 3 perfect, 2 hitless, 1 a
+// plain shutout — and the tiers are exclusive, so a perfect game is counted as
+// perfect and nowhere else.
+function sideShutout(game, side) {
+  const opponent = side === "away" ? "home" : "away";
+  const pitchers = game.boxScore?.[side]?.pitchers ?? [];
+  const outs = pitchers.reduce((sum, line) => sum + (line.outs ?? 0), 0);
+  const hits = pitchers.reduce((sum, line) => sum + (line.h ?? 0), 0);
+  const walks = pitchers.reduce((sum, line) => sum + (line.bb ?? 0), 0);
+  const strikeouts = pitchers.reduce((sum, line) => sum + (line.so ?? 0), 0);
+  const runsAllowed = Number(game[opponent]?.runs ?? game.boxScore?.[opponent]?.runs ?? 0);
+  if (outs < 27 || runsAllowed !== 0) return null;
+
+  const activePitchers = pitchers.filter((line) => (line.outs ?? 0) > 0);
+  const onePitcher = activePitchers.length === 1;
+  const tier = hits === 0 && walks === 0 ? 3 : hits === 0 ? 2 : 1;
+  const kind = tier === 3
+    ? (onePitcher ? "Perfect game" : "Combined perfect game")
+    : tier === 2
+      ? (onePitcher ? "No-hitter" : "Combined no-hitter")
+      : "Best shutout";
+  return {
+    kind,
+    tier,
+    onePitcher,
+    outs,
+    hits,
+    walks,
+    strikeouts,
+    activePitchers,
+    team: game[side]?.name ?? game.boxScore?.[side]?.team ?? side
+  };
+}
+
+// ---- the notable-games tally ----
+//
+// The shelves above keep the three best of each kind. This keeps the count:
+// how many perfect games a team threw across ten thousand simulated games, how
+// many times it hit for the cycle, how often it walked one off. A shelf tells
+// you what the best one was; a counter tells you how rare it is — which is the
+// only way to read a feat that happens twice in a season and eleven times in a
+// career.
+//
+// Feats are exclusive by construction (a perfect game is not also counted as a
+// no-hitter) so the per-team total is a real total, and each is credited to the
+// team that did it, not to the game it happened in.
+const NOTABLE_FEATS = [
+  { key: "perfectGame", label: "Perfect games" },
+  { key: "noHitter", label: "No-hitters" },
+  { key: "shutout", label: "Shutouts" },
+  { key: "bigStrikeoutGame", label: "15-K games" },
+  { key: "cycle", label: "Cycles" },
+  { key: "threeHomerGame", label: "3-HR games" },
+  { key: "walkOff", label: "Walk-offs" }
+];
+
+// How many example games each (team, feat) keeps a pointer to, so the count can
+// be clicked through to an actual replay rather than being a dead number.
+const NOTABLE_EXAMPLES = 3;
+
+export function notableFeats() {
+  return NOTABLE_FEATS.map((feat) => ({ ...feat }));
+}
+
+// Seeded with the room's teams so a club that never threw a no-hitter still has
+// a row saying so — a missing row reads as missing data, a zero reads as a zero.
+export function createNotableGameTally(teamNames = []) {
+  const tally = new Map();
+  for (const team of teamNames) tally.set(team, new Map());
+  return tally;
+}
+
+export function foldNotableGame(tally, game, index) {
+  if (!(tally instanceof Map) || !game) return tally;
+  for (const side of ["away", "home"]) {
+    const team = game[side]?.name ?? game.boxScore?.[side]?.team ?? side;
+
+    const shutout = sideShutout(game, side);
+    if (shutout) {
+      creditFeat(tally, team, shutout.tier === 3 ? "perfectGame" : shutout.tier === 2 ? "noHitter" : "shutout", index);
+    }
+
+    for (const line of game.boxScore?.[side]?.pitchers ?? []) {
+      if ((line.so ?? 0) >= 15) creditFeat(tally, team, "bigStrikeoutGame", index);
+    }
+
+    for (const line of game.boxScore?.[side]?.hitters ?? []) {
+      const homers = line.hr ?? 0;
+      const singles = (line.h ?? 0) - (line.d ?? 0) - (line.t ?? 0) - homers;
+      if (singles >= 1 && (line.d ?? 0) >= 1 && (line.t ?? 0) >= 1 && homers >= 1) {
+        creditFeat(tally, team, "cycle", index);
+      }
+      if (homers >= 3) creditFeat(tally, team, "threeHomerGame", index);
+    }
+  }
+
+  // A walk-off belongs to the home team, which is the only side that can hit one.
+  if (walkOffFinish(game)) {
+    creditFeat(tally, game.home?.name ?? game.boxScore?.home?.team ?? "home", "walkOff", index);
+  }
+  return tally;
+}
+
+export function summarizeNotableGames(tally) {
+  if (!(tally instanceof Map)) return null;
+  const teams = [...tally.entries()]
+    .map(([team, feats]) => {
+      const counts = {};
+      const examples = {};
+      let total = 0;
+      for (const { key } of NOTABLE_FEATS) {
+        const entry = feats.get(key);
+        counts[key] = entry?.count ?? 0;
+        examples[key] = [...(entry?.indexes ?? [])];
+        total += counts[key];
+      }
+      return { team, counts, examples, total };
+    })
+    .sort((a, b) => b.total - a.total || a.team.localeCompare(b.team));
+  return { feats: notableFeats(), teams };
+}
+
+function creditFeat(tally, team, key, index) {
+  if (!tally.has(team)) tally.set(team, new Map());
+  const feats = tally.get(team);
+  const entry = feats.get(key) ?? { count: 0, indexes: [] };
+  entry.count += 1;
+  if (Number.isInteger(index) && entry.indexes.length < NOTABLE_EXAMPLES && !entry.indexes.includes(index)) {
+    entry.indexes.push(index);
+  }
+  feats.set(key, entry);
 }

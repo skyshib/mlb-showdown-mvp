@@ -392,6 +392,31 @@ test("a tied top bid forces a sealed rebid among the tied managers", () => {
   assert.equal(sale.price, 111);
 });
 
+test("a rebid pays the tied managers another increment, and pays nobody else", () => {
+  const draft = createDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), 13, "tie-clock", {
+    draftType: "auction",
+    timer: { reviewSeconds: 0, bankSeconds: 60, incrementSeconds: 30 }
+  });
+  const [alpha, beta, gamma] = draft.managers;
+  completeAuctionReview(draft, 0);
+  nominatePlayer(draft, draft.pool[0].id, 1000);
+  // Nomination hands everyone their increment: 60s bank + 30s.
+  assert.equal(draft.auction.clockBanks[alpha.id], 90000);
+
+  // Alpha and Beta each burn five seconds and tie; Gamma bids under and is out.
+  placeSealedBid(draft, alpha.id, 100, 6000);
+  placeSealedBid(draft, beta.id, 100, 6000);
+  const tie = placeSealedBid(draft, gamma.id, 80, 6000);
+  assert.equal(tie.sold, false);
+  assert.equal(draft.auction.lot.round, 2);
+
+  // The rebid is another turn on the clock for the two who have to make it.
+  assert.equal(draft.auction.clockBanks[alpha.id], 85000 + 30000);
+  assert.equal(draft.auction.clockBanks[beta.id], 85000 + 30000);
+  // Gamma is not in the rebid and is paid nothing for it.
+  assert.equal(draft.auction.clockBanks[gamma.id], 85000);
+});
+
 test("a second tie resolves with a seeded random winner at the tied price", () => {
   const run = () => {
     const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16));

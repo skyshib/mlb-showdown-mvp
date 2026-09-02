@@ -177,6 +177,8 @@ import {
   insertTierBreak,
   loadOnlineDraftNotes,
   loadOnlineDraftRankings,
+  loadOnlineRankingMode,
+  saveOnlineRankingMode,
   moveRankedAboveBreak,
   moveRankedWithTiers,
   normalizeDraftNotes,
@@ -674,10 +676,21 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
   // A lot that came back tied goes to a sealed rebid. It keeps the same lot key,
   // so it never trips the nomination sting — it gets its own, sounded once when
   // the round turns over rather than on every repaint while the rebid sits open.
-  if (lot && lot.round === 2 && lotKey && lotKey !== heardTieLotKey) {
-    if (heardTieLotKey !== null || !first) playTie();
+  //
+  // The tie is read off the LIVE lot, not the replayed one: online, sealed bids
+  // are withheld from the action log until the lot settles, so the local draft
+  // still shows round one and would never hear the tie at all.
+  const liveLotState = liveLot(draft);
+  if (liveLotState && liveLotState.round === 2 && lotKey && lotKey !== heardTieLotKey) {
+    if (heardTieLotKey !== null || !first) {
+      playTie();
+      // A rebid is a decision the room did not expect to have to make, at a
+      // price nobody has thought about, and it opens with a fresh clock. It is
+      // announced rather than left to a line of small type in the rail.
+      showTieToast(draft, liveLotState);
+    }
     heardTieLotKey = lotKey;
-  } else if (!lot || lot.round !== 2) {
+  } else if (!liveLotState || liveLotState.round !== 2) {
     heardTieLotKey = null;
   }
 
@@ -992,6 +1005,10 @@ function defaultState() {
       pitchers: "all"
     },
     batchChartManager: null,
+    // Which position group the draft-value chart is plotting. "all" is every
+    // drafted card; anything else is one slot's market, which is the only way
+    // to read what catchers went for against what catchers were worth.
+    batchChartPosition: "all",
     // Draft-value chart axes. x defaults to what a card cost (price in an auction,
     // pick number in a snake); y to the WPA it went on to earn. Both are
     // re-pointable — see renderBatch's axis pickers.
@@ -1030,12 +1047,36 @@ function defaultState() {
       search: "",
       starredOnly: false,
       flaggedOnly: false,
-      hideTaken: false
+      hideTaken: false,
+      // Ranking mode is the board's default layer: a position board opens in
+      // your own hand ranking. Turned off, the ranking column goes away and the
+      // column headers get the board back — which is the only way to sort a
+      // position by chart, speed, or points.
+      rankingMode: true
     }
   };
 }
 
+// Room events arrive in bursts: one bid can push a lot update, then a seat
+// update, then the action that settled the card. Each one used to repaint the
+// whole screen on the spot, so the board visibly rebuilt itself two or three
+// times in a row for a single thing happening. Fold a burst into one paint on
+// the next frame; anything you did yourself still renders straight away.
+let queuedScreenFrame = null;
+
+function scheduleScreenRender() {
+  if (queuedScreenFrame !== null) return;
+  queuedScreenFrame = requestAnimationFrame(() => {
+    queuedScreenFrame = null;
+    renderCurrentScreen();
+  });
+}
+
 function renderCurrentScreen() {
+  if (queuedScreenFrame !== null) {
+    cancelAnimationFrame(queuedScreenFrame);
+    queuedScreenFrame = null;
+  }
   // The sheet is ruled in the club's ink once a franchise room is open. The
   // setup screen is not in a league yet, so it keeps the house colors — and
   // walking back out to it puts them back.
@@ -1141,6 +1182,8 @@ function openRoom(roomId, room) {
   // manager so a refresh restores it without showing it to another seat.
   state.draftRankings = loadOnlineDraftRankings(localStorage, roomId, seat?.managerId);
   state.draftNotes = loadOnlineDraftNotes(localStorage, roomId, seat?.managerId);
+  const savedRankingMode = loadOnlineRankingMode(localStorage, roomId, seat?.managerId);
+  if (savedRankingMode !== null) state.filters.rankingMode = savedRankingMode;
   rebuildOnlineDraft(room);
   subscribeOnline();
   renderCurrentScreen();
@@ -1262,19 +1305,19 @@ function subscribeOnline() {
       }
       selectedLineupMove = null;
       draggedLineupMove = null;
-      renderCurrentScreen();
+      scheduleScreenRender();
       driveOnlineCpuTurn();
     },
     onSeats: (payload) => {
       if (!state.online) return;
       state.online.claimedSeats = payload.seats;
       state.online.liveSeats = payload.live ?? payload.seats;
-      renderCurrentScreen();
+      scheduleScreenRender();
     },
     onLot: (payload) => {
       if (!state.online) return;
       state.online.lot = payload.lot;
-      renderCurrentScreen();
+      scheduleScreenRender();
     },
     onError: () => {
       if (!state.online || state.online.status) return;
@@ -2254,7 +2297,7 @@ function restoreSealedBids() {
   if (!focused) return;
   const input = app.querySelector(`[data-sealed-bid][data-manager-id="${CSS.escape(focused.managerId)}"]`);
   if (!input || input.dataset.lotKey !== focused.lotKey) return;
-  input.focus();
+  input.focus({ preventScroll: true });
   if (focused.caret !== null) {
     try {
       input.setSelectionRange(focused.caret, focused.caret);
@@ -2277,7 +2320,7 @@ function focusSealedBidEntry() {
   if (active && active !== document.body) return;
   const bid = app.querySelector("[data-sealed-bid]");
   if (!bid) return;
-  bid.focus();
+  bid.focus({ preventScroll: true });
   bid.select?.();
 }
 
@@ -2363,7 +2406,10 @@ function renderDraft() {
   reactToDraftChange(draft);
   captureSealedBids();
   if (!state.online && syncAuctionTimer(draft, draftNow())) saveState();
-  syncAuctionPositionFilter(draft);
+  // A new lot swings the board onto that card's position, so the list under the
+  // scroll bar is a different list. Putting the old offset back would drop you
+  // into the middle of a stranger's shelf; the new board starts at the top.
+  const boardSwitched = syncAuctionPositionFilter(draft);
   const auction = isAuctionDraft(draft);
   const reviewOpen = auction && !auctionReviewComplete(draft, draftNow());
   const queued = isRandomNomination(draft);
@@ -2495,46 +2541,53 @@ function renderDraft() {
 
   restoreSealedBids();
   restoreTypingFocus(typing);
-  if (window.scrollY !== scrollTop) window.scrollTo(0, scrollTop);
-  if (listScrollTop) {
-    const list = app.querySelector(".table-scroll-tall");
-    if (list) list.scrollTop = listScrollTop;
-  }
   // A freshly opened note editor takes the caret; re-renders while already
   // typing are handled by captureTypingFocus above.
   if (editingNoteId && document.activeElement?.dataset?.noteInputId !== editingNoteId) {
     const noteField = app.querySelector(`[data-note-input-id="${CSS.escape(editingNoteId)}"]`);
     if (noteField) {
-      noteField.focus();
+      noteField.focus({ preventScroll: true });
       noteField.setSelectionRange(noteField.value.length, noteField.value.length);
     }
   }
   focusSealedBidEntry();
+  // Every focus() above has to land BEFORE the scroll goes back, and every one
+  // of them has to be preventScroll: focusing an off-screen field scrolls the
+  // page to it, and a repaint that lands on someone else's bid was doing that
+  // on its own — you would be reading down the board and get yanked to the bid
+  // box every time the room moved. Put the view back last and it stays put.
+  if (window.scrollY !== scrollTop) window.scrollTo(0, scrollTop);
+  const list = app.querySelector(".table-scroll-tall");
+  if (list) list.scrollTop = boardSwitched ? 0 : listScrollTop;
   bindDraftActions();
   syncAuctionUrgency(draft, draftNow());
   pickClockTick();
 }
 
+// Returns true when it actually moved the board — the caller uses that to know
+// the card list under the scroll bar changed out from under it.
 function syncAuctionPositionFilter(draft) {
   if (!isAuctionDraft(draft)) {
     filteredAuctionLotKey = null;
-    return;
+    return false;
   }
 
   const player = auctionLotPlayer(draft);
   if (!player) {
     filteredAuctionLotKey = null;
-    return;
+    return false;
   }
 
   const lotKey = `${state.online?.roomId ?? "local"}:${draft.seed}:${draft.auction.history.length}:${draft.auction.queueIndex ?? draft.pickNumber}:${player.id}`;
-  if (lotKey === filteredAuctionLotKey) return;
+  if (lotKey === filteredAuctionLotKey) return false;
 
   const filter = nominatedPlayerFilter(player);
+  const moved = state.filters.type !== filter.type || state.filters.position !== filter.position;
   state.filters.type = filter.type;
   state.filters.position = filter.position;
   filteredAuctionLotKey = lotKey;
   saveState();
+  return moved;
 }
 
 // The field the caret was in when the page was rebuilt under it, and where in
@@ -2559,7 +2612,7 @@ function restoreTypingFocus(typing) {
   if (!typing) return;
   const field = document.querySelector(typing.selector);
   if (!field) return;
-  field.focus();
+  field.focus({ preventScroll: true });
   if (typing.caret && typeof field.setSelectionRange === "function") {
     field.setSelectionRange(typing.caret.start, typing.caret.end);
   }
@@ -3032,6 +3085,14 @@ function bindDraftActions() {
     const rankingMove = event.target.closest("button[data-action='ranking-up'], button[data-action='ranking-down']");
     if (rankingMove) {
       nudgePositionRanking(rankingMove.dataset.playerId, rankingMove.dataset.action === "ranking-up" ? -1 : 1);
+      saveState();
+      renderDraft();
+      return;
+    }
+
+    const rankingToggle = event.target.closest("button[data-action='toggle-ranking-mode']");
+    if (rankingToggle) {
+      state.filters.rankingMode = !rankingModeOn();
       saveState();
       renderDraft();
       return;
@@ -4116,8 +4177,8 @@ function renderBatch() {
         <td class="num">${formatShare(row.winPct)}</td>
         <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.wins), teamScheduleGames(row)))}</td>
         <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.losses), teamScheduleGames(row)))}</td>
-        <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.runsFor), teamScheduleGames(row)))}</td>
-        <td class="num">${formatSeasonCount(per162(formatDistributionTotal(row.runsAgainst), teamScheduleGames(row)))}</td>
+        <td class="num">${formatDecimal(perGame(formatDistributionTotal(row.runsFor), teamScheduleGames(row)), 2)}</td>
+        <td class="num">${formatDecimal(perGame(formatDistributionTotal(row.runsAgainst), teamScheduleGames(row)), 2)}</td>
       </tr>`
     )
     .join("");
@@ -4190,8 +4251,8 @@ function renderBatch() {
         ${renderBatchSortHeader("teams", "winPct", "Win%", "num")}
         ${renderBatchSortHeader("teams", "w162", "W/162", "num")}
         ${renderBatchSortHeader("teams", "l162", "L/162", "num")}
-        ${renderBatchSortHeader("teams", "rf162", "RF/162", "num")}
-        ${renderBatchSortHeader("teams", "ra162", "RA/162", "num")}
+        ${renderBatchSortHeader("teams", "rfPerGame", "R/G", "num")}
+        ${renderBatchSortHeader("teams", "raPerGame", "RA/G", "num")}
       </tr></thead>
       <tbody>${teamRows}</tbody>
     </table>
@@ -4263,6 +4324,15 @@ function renderBatch() {
   }
 
   const chartManager = chartTeamOrder.includes(state.batchChartManager) ? state.batchChartManager : null;
+  // Position groups the chart can narrow to, in roster order, built from what
+  // this room actually drafted rather than from a fixed list — a deck with no
+  // printed DH must not offer an empty shelf.
+  const chartPositions = [...new Set(cardRecords.map((rec) => rec.slot).filter(Boolean))]
+    .sort((a, b) => chartPositionOrder(a) - chartPositionOrder(b) || a.localeCompare(b));
+  const chartPosition = chartPositions.includes(state.batchChartPosition) ? state.batchChartPosition : "all";
+  const chartRecords = chartPosition === "all"
+    ? cardRecords
+    : cardRecords.filter((rec) => rec.slot === chartPosition);
   const xMode = auctionDraft
     ? (state.batchChartXAxis ?? "price")
     : (state.batchChartXAxis === "points" ? "points" : "pick");
@@ -4282,7 +4352,7 @@ function renderBatch() {
     // height: the whole room's read on every card, side by side.
     xAxisLabel = "Every bid ($)";
     const colorByName = new Map(chartLegend.map((item) => [item.name, item.color]));
-    for (const rec of cardRecords) {
+    for (const rec of chartRecords) {
       const yv = yValue(rec);
       const bids = bidsByCard[rec.cardId];
       if (!Number.isFinite(yv) || !bids) continue;
@@ -4311,7 +4381,7 @@ function renderBatch() {
     // One manager's whole bid book — every card they chased, at what they bid,
     // won or lost. With nobody picked yet, fall back to each card's top bid.
     xAxisLabel = chartManager ? `${chartManager}'s bid ($)` : "Top bid ($)";
-    for (const rec of cardRecords) {
+    for (const rec of chartRecords) {
       const yv = yValue(rec);
       if (!Number.isFinite(yv)) continue;
       const bid = chartManager ? bidsByCard[rec.cardId]?.[chartManager] : maxBidByCard[rec.cardId];
@@ -4348,7 +4418,7 @@ function renderBatch() {
       if (auctionDraft) return `Price: ${money(value)}`;
       return `Pick #${value}`;
     };
-    const shown = chartManager ? cardRecords.filter((rec) => rec.team === chartManager) : cardRecords;
+    const shown = chartManager ? chartRecords.filter((rec) => rec.team === chartManager) : chartRecords;
     for (const rec of shown) {
       const xv = xValueFor(rec);
       const yv = yValue(rec);
@@ -4377,24 +4447,30 @@ function renderBatch() {
   const yOptions = [["wpa", "WPA/162"], ["points", "Points"]];
   const axisOption = (axis, value, label, active) =>
     `<button type="button" class="chart-axis-option${active ? " active" : ""}" data-batch-chart-${axis}="${escapeHtml(value)}" aria-pressed="${active}">${escapeHtml(label)}</button>`;
+  const positionOptions = [["all", "All"], ...chartPositions.map((value) => [value, value])];
+  const positionRow = chartPositions.length > 1
+    ? `<div class="chart-axis-row"><span class="chart-axis-label">Pos</span>${positionOptions.map(([value, label]) => axisOption("position", value, label, chartPosition === value)).join("")}</div>`
+    : "";
   const axisPicker = `<div class="chart-axis-pickers">
     <div class="chart-axis-row"><span class="chart-axis-label">X</span>${xOptions.map(([value, label]) => axisOption("xaxis", value, label, xMode === value)).join("")}</div>
     <div class="chart-axis-row"><span class="chart-axis-label">Y</span>${yOptions.map(([value, label]) => axisOption("yaxis", value, label, yMode === value)).join("")}</div>
+    ${positionRow}
   </div>`;
   const chartNote = xMode === "allbids"
     ? "Each card is a thin line at its WPA (or points); a dot on it is one manager's sealed bid. Hover a dot for who bid what."
     : xMode === "manager"
       ? (chartManager ? `Every card ${chartManager} bid on, at what they bid — dots in another manager's colour are ones they lost.` : "Pick a manager in the legend to see only their bids; showing each card's top bid until then.")
       : "Each dot is a drafted player who logged a stat, colored by manager. Hover for the line, click for the card, or filter by manager in the legend.";
+  const positionNote = chartPosition === "all" ? "" : ` Showing ${escapeHtml(chartPosition)} only.`;
   const draftValueSection = cardRecords.length ? `<section class="panel wide draft-chart-panel">
     <div class="section-title-row">
       <div>
         <p class="eyebrow">Draft value</p>
-        <h2>${escapeHtml(X_TITLES[xMode] ?? "Draft value")} against ${escapeHtml(yTitle)}</h2>
+        <h2>${escapeHtml(X_TITLES[xMode] ?? "Draft value")} against ${escapeHtml(yTitle)}${chartPosition === "all" ? "" : ` &middot; ${escapeHtml(chartPosition)}`}</h2>
       </div>
       ${axisPicker}
     </div>
-    <p class="batch-note">${chartNote}</p>
+    <p class="batch-note">${chartNote}${positionNote}</p>
     ${renderDraftScatter({ points: scatterPoints, connectors, xLabel: xAxisLabel, yLabel: yAxisLabel, legend: chartLegend, activeManager: chartManager })}
   </section>` : "";
 
@@ -4882,6 +4958,7 @@ function renderBatchGamesSection() {
       </div>
       <span>Games ${start + 1}–${start + count} of ${runs}</span>
     </div>
+    ${renderNotableGameCounts(state.batch.summary?.notableGames)}
     ${interestingGames}
     <div class="table-scroll">
       <table>
@@ -4893,6 +4970,64 @@ function renderBatchGamesSection() {
       <button class="small" data-game-page="${page - 1}" ${page === 0 ? "disabled" : ""}>Previous</button>
       <span>Page ${page + 1} of ${pageCount}</span>
       <button class="small" data-game-page="${page + 1}" ${page >= pageCount - 1 ? "disabled" : ""}>Next</button>
+    </div>
+  </section>`;
+}
+
+// How often each club did something that would make the papers, over the whole
+// sim. The shelf below shows the best one of each kind; this says how many
+// there were, which is the only way to tell a fluke from a staff.
+function renderNotableGameCounts(notable) {
+  if (!notable?.teams?.length) return "";
+  const feats = notable.feats ?? [];
+  const totals = feats.map((feat) => notable.teams.reduce((sum, row) => sum + (row.counts[feat.key] ?? 0), 0));
+  // A column nobody ever filled is noise on a scoreboard: a room where nobody
+  // threw a no-hitter should not be reading a column of zeros about it.
+  const shown = feats.filter((feat, index) => totals[index] > 0);
+  if (!shown.length) {
+    return `<section class="notable-games">
+      <div class="interesting-games-heading">
+        <div>
+          <p class="eyebrow">The record book</p>
+          <h3>Notable games</h3>
+        </div>
+      </div>
+      <p class="batch-note">Nothing worth writing down happened in this sim — no shutouts, no cycles, no walk-offs. Run more games and they will come.</p>
+    </section>`;
+  }
+  const countCell = (row, feat) => {
+    const count = row.counts[feat.key] ?? 0;
+    if (!count) return `<td class="num notable-zero">—</td>`;
+    const example = row.examples?.[feat.key]?.[0];
+    const label = `${row.team}: ${count} ${feat.label.toLowerCase()}`;
+    return Number.isInteger(example)
+      ? `<td class="num"><button type="button" class="notable-count" data-game-open="${example}" title="${escapeHtml(label)} — open game ${example + 1}">${count}</button></td>`
+      : `<td class="num"><strong>${count}</strong></td>`;
+  };
+  const rows = notable.teams
+    .map((row) => `<tr>
+      <td><strong>${escapeHtml(row.team)}</strong></td>
+      ${shown.map((feat) => countCell(row, feat)).join("")}
+      <td class="num"><strong>${row.total}</strong></td>
+    </tr>`)
+    .join("");
+  return `<section class="notable-games">
+    <div class="interesting-games-heading">
+      <div>
+        <p class="eyebrow">The record book</p>
+        <h3>Notable games</h3>
+      </div>
+    </div>
+    <p class="batch-note">One line per club, counting the whole sim. The kinds do not overlap — a perfect game is counted as perfect and not again as a no-hitter or a shutout. Click a number to open one of them.</p>
+    <div class="table-scroll">
+      <table class="notable-games-table">
+        <thead><tr>
+          <th>Team</th>
+          ${shown.map((feat) => `<th class="num" title="${escapeHtml(feat.label)}">${escapeHtml(feat.label)}</th>`).join("")}
+          <th class="num">Total</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>
   </section>`;
 }
@@ -5106,8 +5241,8 @@ function batchTeamSortValue(row, sort) {
   if (sort === "winPct") return row.winPct ?? row.titleShare ?? 0;
   if (sort === "w162") return per162(formatDistributionTotal(row.wins), teamScheduleGames(row));
   if (sort === "l162") return per162(formatDistributionTotal(row.losses), teamScheduleGames(row));
-  if (sort === "rf162") return per162(formatDistributionTotal(row.runsFor), teamScheduleGames(row));
-  if (sort === "ra162") return per162(formatDistributionTotal(row.runsAgainst), teamScheduleGames(row));
+  if (sort === "rfPerGame") return perGame(formatDistributionTotal(row.runsFor), teamScheduleGames(row));
+  if (sort === "raPerGame") return perGame(formatDistributionTotal(row.runsAgainst), teamScheduleGames(row));
   return row.winPct ?? row.titleShare ?? 0;
 }
 
@@ -5212,6 +5347,10 @@ function normalizeBatchSorts(value) {
   if (sorts.teams?.sort === "titleShare" || sorts.teams?.sort === "finalsShare") {
     sorts.teams = { sort: "winPct", direction: "desc" };
   }
+  // The runs columns moved off the 162-game pace onto a plain per-game rate;
+  // a save still pointed at the old keys would sort by a value nobody computes.
+  if (sorts.teams?.sort === "rf162") sorts.teams = { sort: "rfPerGame", direction: "desc" };
+  if (sorts.teams?.sort === "ra162") sorts.teams = { sort: "raPerGame", direction: "asc" };
   return sorts;
 }
 
@@ -5281,6 +5420,14 @@ function bindBatchActions() {
     const chartManagerButton = event.target.closest("button[data-batch-chart-manager]");
     if (chartManagerButton) {
       state.batchChartManager = chartManagerButton.dataset.batchChartManager || null;
+      saveState();
+      renderBatch();
+      return;
+    }
+
+    const chartPositionButton = event.target.closest("button[data-batch-chart-position]");
+    if (chartPositionButton) {
+      state.batchChartPosition = chartPositionButton.dataset.batchChartPosition || "all";
       saveState();
       renderBatch();
       return;
@@ -5464,6 +5611,21 @@ function per162(total, games) {
   return games ? (Number(total) * 162) / games : 0;
 }
 
+// Roster order for the draft-value chart's position pills, so the row reads
+// down the diamond and out to the mound rather than alphabetically.
+const CHART_POSITION_ORDER = ["C", "1B", "2B", "3B", "SS", "LF", "LF/RF", "RF", "CF", "OF", "DH", "SP", "RP"];
+
+function chartPositionOrder(position) {
+  const index = CHART_POSITION_ORDER.indexOf(position);
+  return index < 0 ? CHART_POSITION_ORDER.length : index;
+}
+
+// Runs are read per game, not per season: 4.61 is a number anybody who has
+// looked at a box score can price, where 747 is arithmetic you have to undo.
+function perGame(total, games) {
+  return games ? Number(total) / games : 0;
+}
+
 function formatSeasonCount(value) {
   return String(Math.round(Number(value) || 0));
 }
@@ -5624,13 +5786,37 @@ function showSaleToast(sale) {
   const price = money(sale.price);
   const name = sale.player?.name ?? "";
   const winner = sale.manager?.name ?? "";
-  saleToast.innerHTML = `<span class="sale-toast-mark">SOLD</span>
+  showBannerToast(`<span class="sale-toast-mark">SOLD</span>
     <strong class="sale-toast-name">${escapeHtml(name)}</strong>
-    <span class="sale-toast-line">to <strong>${escapeHtml(winner)}</strong> for <strong>${escapeHtml(price)}</strong></span>`;
+    <span class="sale-toast-line">to <strong>${escapeHtml(winner)}</strong> for <strong>${escapeHtml(price)}</strong></span>`, 2600);
+}
+
+// The other announcement the block makes: nobody won, because two managers wrote
+// the same number. It names them and the number, says the clock has been topped
+// up, and holds longer than a sale — a sale is news, a tie is an instruction.
+function showTieToast(draft, lot) {
+  const player = draft.pool.find((item) => item.id === lot.playerId);
+  const names = (lot.tie?.managerIds ?? [])
+    .map((managerId) => draft.managers.find((manager) => manager.id === managerId)?.name)
+    .filter(Boolean);
+  const tied = names.length > 1
+    ? `${names.slice(0, -1).map(escapeHtml).join(", ")} and ${escapeHtml(names.at(-1))}`
+    : escapeHtml(names[0] ?? "The room");
+  showBannerToast(`<span class="sale-toast-mark tie-toast-mark">TIED</span>
+    <strong class="sale-toast-name">${escapeHtml(player?.name ?? "This lot")}</strong>
+    <span class="sale-toast-line">${tied} ${names.length > 2 ? "all" : "both"} bid <strong>${escapeHtml(money(lot.tie?.amount ?? 0))}</strong></span>
+    <span class="sale-toast-line sale-toast-sub">Sealed rebid at ${escapeHtml(money(lot.tie?.amount ?? 0))} or more &middot; fresh time on the clock</span>`, 5200, "tie-toast");
+}
+
+// One banner, reused: a card dropped in over the board and cleared on its own
+// after a beat. It never blocks — the draft rolls straight on underneath it.
+function showBannerToast(html, holdMs, variant = "") {
+  saleToast.className = variant ? `sale-toast ${variant}` : "sale-toast";
+  saleToast.innerHTML = html;
   saleToast.hidden = false;
   saleToast.setAttribute("aria-hidden", "false");
-  // Restart the entrance every time so a quick run of sales each get their own
-  // full moment rather than one frozen card riding through all of them.
+  // Restart the entrance every time so a quick run of announcements each get
+  // their own full moment rather than one frozen card riding through all of them.
   saleToast.classList.remove("show");
   void saleToast.offsetWidth;
   saleToast.classList.add("show");
@@ -5640,7 +5826,7 @@ function showSaleToast(sale) {
     saleToast.hidden = true;
     saleToast.setAttribute("aria-hidden", "true");
     saleToastTimer = null;
-  }, 2600);
+  }, holdMs);
 }
 
 function renderGameDetail(game) {
@@ -7703,6 +7889,18 @@ function renderFilters() {
       </button>`
     : "";
   const rankingKey = currentPositionRankingKey();
+  const rankingOn = rankingModeOn();
+  // The switch, and then — only while it is on — the reset. Ranking mode owns
+  // the board's order, so with it on the column headers cannot sort; the switch
+  // is how you hand them the board back, and it has to stay reachable from the
+  // off position, which is why it is a control of its own rather than a state
+  // of the reset button.
+  const rankingToggle = owner && rankingKey
+    ? `<button type="button" class="ranking-mode-button ranking-mode-switch${rankingOn ? " active" : ""}" data-action="toggle-ranking-mode" aria-pressed="${rankingOn}" title="${rankingOn ? "Turn ranking mode off and sort this position by any column" : "Turn ranking mode back on and put your hand ranking back on the board"}">
+        <span class="ranking-mode-mark">${rankingOn ? "&#9776;" : "&#9636;"}</span>
+        <span>Ranking ${rankingOn ? "on" : "off"}</span>
+      </button>`
+    : "";
   const rankingButton = owner && rankingKey && ranking
     ? `<button type="button" class="ranking-mode-button active" data-action="reset-position-ranking" title="Restore the ${escapeHtml(state.filters.position)} ranking to its starting OB/Control order and clear its tier lines"><strong>${ranking.ids.length}</strong> ranked <span>${ranking.customized ? "Reset OB/CTRL" : "OB/CTRL start"}</span></button>`
     : "";
@@ -7714,6 +7912,7 @@ function renderFilters() {
     ${starFilter}
     ${flagFilter}
     ${takenFilter}
+    ${rankingToggle}
     ${rankingButton}
     <label class="filter-position">
       Position
@@ -7722,7 +7921,7 @@ function renderFilters() {
       </select>
     </label>
     <label class="filter-sort">
-      Sort unranked
+      ${ranking ? "Sort unranked" : "Sort"}
       <select data-filter="sort">
         ${displayedSortOptions.map(([value, label]) => `<option value="${value}" ${state.filters.sort === value ? "selected" : ""}>${label}</option>`).join("")}
       </select>
@@ -7855,7 +8054,14 @@ function currentPositionRankingKey() {
 }
 
 function activePositionRanking() {
+  // Ranking mode off means the board is a plain table again: no rank column,
+  // no drag handles, and — the point of the switch — the column headers sort.
+  if (!rankingModeOn()) return null;
   return positionRankingFor(state.filters.type, state.filters.position);
+}
+
+function rankingModeOn() {
+  return state.filters.rankingMode !== false;
 }
 
 function positionRankingFor(type, position) {
@@ -8839,6 +9045,7 @@ function saveState() {
       state.online.managerId,
       state.draftNotes
     );
+    saveOnlineRankingMode(localStorage, state.online.roomId, state.online.managerId, rankingModeOn());
     return;
   }
   localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState(state)));

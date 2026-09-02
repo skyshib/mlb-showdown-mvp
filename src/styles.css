@@ -1884,6 +1884,27 @@ button.roster-slot[draggable="true"]:active {
   text-underline-offset: 2px;
 }
 
+/* The on/off switch reads as a switch, not as the reset button beside it: its
+   label is plain rather than underlined, and off it goes flat and quiet. */
+.ranking-mode-switch span {
+  margin-left: 6px;
+  text-decoration: none;
+}
+
+.ranking-mode-switch .ranking-mode-mark {
+  margin-left: 0;
+  margin-right: 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.ranking-mode-switch:not(.active) {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  opacity: 0.85;
+}
+
 .manual-rank-header {
   min-width: 122px;
 }
@@ -4446,6 +4467,49 @@ tr:focus-within .row-tools {
   background: color-mix(in srgb, var(--card) 88%, var(--accent) 12%);
 }
 
+/* The record book sits in the same frame as the shelf below it, so the two read
+   as one section: how many, then which ones. */
+.notable-games {
+  margin: 18px 0 22px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card) 92%, var(--navy) 8%);
+}
+
+.notable-games-table {
+  font-variant-numeric: tabular-nums;
+}
+
+.notable-games-table th.num,
+.notable-games-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.notable-zero {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.notable-count {
+  padding: 1px 6px 2px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.notable-count:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
 .interesting-games-heading {
   display: flex;
   align-items: end;
@@ -5190,10 +5254,53 @@ button.interesting-game-card:focus-visible {
   color: var(--ink);
 }
 
+/* A tie stops the room, so it gets the loud version of the banner: middle of
+   the screen rather than down by the toolbar, bigger, and in the alarm colour. */
+.sale-toast.tie-toast {
+  bottom: auto;
+  top: 50%;
+  min-width: 420px;
+  max-width: min(94vw, 620px);
+  padding: 28px 44px 30px;
+  border-color: var(--accent);
+  border-width: 4px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%);
+  box-shadow: 0 20px 64px rgba(20, 28, 24, 0.42);
+  transform: translate(-50%, calc(-50% + 18px)) scale(0.96);
+}
+
+.sale-toast.tie-toast.show {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.tie-toast .sale-toast-mark {
+  font-size: 22px;
+  letter-spacing: 0.28em;
+  color: var(--accent-dark);
+}
+
+.tie-toast .sale-toast-name {
+  font-size: 36px;
+}
+
+.tie-toast .sale-toast-line {
+  font-size: 17px;
+}
+
+.tie-toast .sale-toast-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sale-toast {
     transition: opacity 120ms ease;
     transform: translate(-50%, 0);
+  }
+  .sale-toast.tie-toast,
+  .sale-toast.tie-toast.show {
+    transform: translate(-50%, -50%);
   }
   .sale-toast.show {
     transform: translate(-50%, 0);

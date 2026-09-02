@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   considerInterestingGame,
   createInterestingGameState,
-  summarizeInterestingGames
+  createNotableGameTally,
+  foldNotableGame,
+  summarizeInterestingGames,
+  summarizeNotableGames
 } from "../src/rules/interestingGames.js";
 
 function hitter(name, sb = 0, hr = 0, overrides = {}) {
@@ -109,4 +112,56 @@ test("a two-way player's hitting and pitching WPA combine into one hero performa
   const hero = summarizeInterestingGames(state).find((entry) => entry.categoryKey === "heroPerformance");
   assert.ok(Math.abs(hero.value - 0.7) < 1e-9);
   assert.match(hero.note, /1 HR.*2 RBI.*9\.0 IP.*10 K/);
+});
+
+test("the notable-games tally counts feats per team, and the kinds never overlap", () => {
+  const tally = createNotableGameTally(["Away", "Home"]);
+
+  // A perfect game by the visitors: 27 outs, nothing across, nothing on.
+  foldNotableGame(tally, game({
+    awayRuns: 1,
+    homeRuns: 0,
+    events: [{ inning: 9, half: "bottom", batter: "Last out", result: "SO", wpa: 0.1, scoreAfter: { away: 1, home: 0 } }],
+    awayPitchers: [pitcher("Perfect Pat", { h: 0, bb: 0, so: 15 })]
+  }), 0);
+
+  // A no-hitter with a walk, plus a cycle and a three-homer game for the home bats.
+  foldNotableGame(tally, game({
+    awayRuns: 0,
+    homeRuns: 4,
+    events: [{ inning: 9, half: "top", batter: "Last out", result: "GB", wpa: -0.05, scoreAfter: { away: 0, home: 4 } }],
+    homePitchers: [pitcher("Nearly Ned", { h: 0, bb: 2, so: 9 })],
+    homeHitters: [
+      hitter("Cycle Cy", 0, 1, { h: 4, d: 1, t: 1 }),
+      hitter("Three Trey", 0, 3, { h: 3 })
+    ]
+  }), 1);
+
+  // A walk-off for the home team, in a game nobody shut anybody out of.
+  foldNotableGame(tally, game({
+    awayRuns: 3,
+    homeRuns: 4,
+    events: [{ inning: 9, half: "bottom", batter: "Hero", result: "HR", wpa: 0.5, scoreAfter: { away: 3, home: 4 } }]
+  }), 2);
+
+  const summary = summarizeNotableGames(tally);
+  const row = (team) => summary.teams.find((entry) => entry.team === team);
+
+  assert.equal(row("Away").counts.perfectGame, 1);
+  assert.equal(row("Away").counts.noHitter, 0, "a perfect game is not counted twice");
+  assert.equal(row("Away").counts.shutout, 0);
+  assert.equal(row("Away").counts.bigStrikeoutGame, 1);
+  assert.deepEqual(row("Away").examples.perfectGame, [0]);
+
+  assert.equal(row("Home").counts.noHitter, 1);
+  assert.equal(row("Home").counts.perfectGame, 0);
+  assert.equal(row("Home").counts.cycle, 1);
+  assert.equal(row("Home").counts.threeHomerGame, 1);
+  assert.equal(row("Home").counts.walkOff, 1);
+  assert.equal(row("Home").total, 4);
+
+  // A team that did nothing notable still gets a row, reading zero.
+  const empty = summarizeNotableGames(createNotableGameTally(["Nobody"]));
+  assert.equal(empty.teams.length, 1);
+  assert.equal(empty.teams[0].total, 0);
 });

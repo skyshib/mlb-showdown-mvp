@@ -17,6 +17,8 @@ import {
   removeRankedId,
   removeRankedWithTiers,
   removeTierBreak,
+  loadOnlineRankingMode,
+  saveOnlineRankingMode,
   saveOnlineDraftNotes,
   saveOnlineDraftRankings,
   tierOfRank
@@ -251,6 +253,30 @@ test("online notes persist privately by room and seat, like the rankings", () =>
   assert.deepEqual(loadOnlineDraftNotes(storage, "blue-sky", "managerB"), {});
   assert.equal(saveOnlineDraftNotes(storage, "blue-sky", "managerA", {}), true);
   assert.deepEqual(loadOnlineDraftNotes(storage, "blue-sky", "managerA"), {});
+});
+
+test("the ranking-mode switch is kept per room and seat, and defaults to unset", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key)
+  };
+
+  // Nothing stored means "no opinion" — the caller keeps its own default.
+  assert.equal(loadOnlineRankingMode(storage, "blue-sky", "managerA"), null);
+
+  assert.equal(saveOnlineRankingMode(storage, "blue-sky", "managerA", false), true);
+  assert.equal(loadOnlineRankingMode(storage, "blue-sky", "managerA"), false);
+  assert.equal(loadOnlineRankingMode(storage, "blue-sky", "managerB"), null, "another seat is unaffected");
+  assert.equal(loadOnlineRankingMode(storage, "other-room", "managerA"), null, "another room is unaffected");
+
+  assert.equal(saveOnlineRankingMode(storage, "blue-sky", "managerA", true), true);
+  assert.equal(loadOnlineRankingMode(storage, "blue-sky", "managerA"), true);
+
+  // A spectator has no seat to key on, so there is nothing to keep.
+  assert.equal(saveOnlineRankingMode(storage, "blue-sky", null, false), false);
+  assert.equal(loadOnlineRankingMode(storage, "blue-sky", null), null);
 });
 
 test("online ranking storage ignores malformed and unavailable browser data", () => {

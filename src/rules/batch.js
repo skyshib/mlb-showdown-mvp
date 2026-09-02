@@ -5,8 +5,11 @@ import { createRng } from "./rng.js?v=20260716-records";
 import {
   considerInterestingGame,
   createInterestingGameState,
-  summarizeInterestingGames
-} from "./interestingGames.js?v=20260725-hero-games";
+  createNotableGameTally,
+  foldNotableGame,
+  summarizeInterestingGames,
+  summarizeNotableGames
+} from "./interestingGames.js?v=20260831-notable-counts";
 
 export const DEFAULT_BATCH_RUNS = 10000;
 export const BATCH_SCHEDULE_VERSION = 2;
@@ -37,6 +40,7 @@ export function createBatchState(teams, options = {}) {
     hitters: new Map(),
     pitchers: new Map(),
     interestingGames: createInterestingGameState(),
+    notableGames: createNotableGameTally(teams.map((team) => team.name)),
     topSwing: null,
     scheduleVersion: options.scheduleVersion ?? BATCH_SCHEDULE_VERSION
   };
@@ -189,6 +193,7 @@ export function summarizeBatch(state) {
     hitters,
     pitchers,
     interestingGames: summarizeInterestingGames(state.interestingGames),
+    notableGames: summarizeNotableGames(state.notableGames),
     topSwing: state.topSwing,
     scheduleVersion: state.scheduleVersion
   };
@@ -197,6 +202,7 @@ export function summarizeBatch(state) {
 function foldGame(state, game) {
   state.runs += 1;
   considerInterestingGame(state.interestingGames, game, state.runs - 1);
+  foldNotableGame(state.notableGames, game, state.runs - 1);
 
   foldTeamResult(state, game.away.name, game.away.runs, game.home.runs);
   foldTeamResult(state, game.home.name, game.home.runs, game.away.runs);

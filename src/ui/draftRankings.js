@@ -8,6 +8,11 @@ const LEGACY_ONLINE_RANKINGS_PREFIX = "mlb-showdown-online-rankings-v2:";
 // Notes ride the same private channel as the rankings: per room, per seat,
 // never sent to the server. One short line per card.
 const ONLINE_NOTES_STORAGE_PREFIX = "mlb-showdown-online-notes-v1:";
+// So does the ranking-mode switch. A room keeps none of the board's display
+// settings in the saved state — there is no saved state online — so the one
+// switch that decides whether the column headers sort has to be kept here, or a
+// refresh mid-draft silently hands the board back to the ranking.
+const ONLINE_RANKING_MODE_STORAGE_PREFIX = "mlb-showdown-online-ranking-mode-v1:";
 export const MAX_NOTE_LENGTH = 80;
 
 export function normalizeDraftRankings(value) {
@@ -98,6 +103,24 @@ export function saveOnlineDraftNotes(storage, roomId, managerId, notes) {
     } else if (typeof storage.removeItem === "function") {
       storage.removeItem(key);
     }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// null when nothing has been stored for this seat — the caller keeps its default.
+export function loadOnlineRankingMode(storage, roomId, managerId) {
+  const raw = readOnlineValue(storage, ONLINE_RANKING_MODE_STORAGE_PREFIX, roomId, managerId);
+  if (raw !== "on" && raw !== "off") return null;
+  return raw === "on";
+}
+
+export function saveOnlineRankingMode(storage, roomId, managerId, on) {
+  const key = onlineStorageKey(ONLINE_RANKING_MODE_STORAGE_PREFIX, roomId, managerId);
+  if (!key || typeof storage?.setItem !== "function") return false;
+  try {
+    storage.setItem(key, on ? "on" : "off");
     return true;
   } catch {
     return false;

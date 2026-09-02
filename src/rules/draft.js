@@ -964,7 +964,7 @@ export function nominatePlayer(draft, playerId, now = Date.now()) {
     tie: null,
     clock: null
   };
-  draft.auction.lot.clock = createLotClock(draft, now, true);
+  draft.auction.lot.clock = createLotClock(draft, now, draft.managers.map((manager) => manager.id));
   return draft.auction.lot;
 }
 
@@ -991,7 +991,7 @@ export function nominateNextQueued(draft, expectedPlayerId = null, now = Date.no
     tie: null,
     clock: null
   };
-  draft.auction.lot.clock = createLotClock(draft, now, true);
+  draft.auction.lot.clock = createLotClock(draft, now, draft.managers.map((manager) => manager.id));
   // Nobody can bid — everyone is broke or blocked. The card passes untouched.
   if (!draft.auction.lot.pending.length) return passLot(draft);
   return draft.auction.lot;
@@ -1105,7 +1105,7 @@ function resolveSealedLot(draft, now = Date.now()) {
     lot.round = 2;
     lot.tie = { amount: top, managerIds: leaders };
     lot.pending = [...leaders];
-    lot.clock = createLotClock(draft, now, false);
+    lot.clock = createLotClock(draft, now, leaders);
     return { sold: false, lot, tie: lot.tie };
   }
 
@@ -1125,13 +1125,18 @@ function resolveSealedLot(draft, now = Date.now()) {
   return sellLotTo(draft, winnerId, price);
 }
 
-function createLotClock(draft, now, addIncrement) {
+// Everyone the clock is about to run for is credited an increment first, the
+// way a chess clock pays you when your turn comes round. A rebid is another
+// turn — the tied managers are being asked for a fresh decision, at a price
+// they have never had to think about — so they are paid again rather than
+// being made to settle it out of what the first round left them.
+function createLotClock(draft, now, creditManagerIds = []) {
   if (!auctionTimerEnabled(draft)) return null;
-  if (addIncrement) {
-    for (const manager of draft.managers) {
-      if (!hasUnlimitedRoster(draft) && manager.roster.length >= draft.rosterSize) continue;
-      draft.auction.clockBanks[manager.id] = auctionClockBankMs(draft, manager) + draft.auction.timer.incrementMs;
-    }
+  for (const managerId of creditManagerIds) {
+    const manager = draft.managers.find((item) => item.id === managerId);
+    if (!manager) continue;
+    if (!hasUnlimitedRoster(draft) && manager.roster.length >= draft.rosterSize) continue;
+    draft.auction.clockBanks[manager.id] = auctionClockBankMs(draft, manager) + draft.auction.timer.incrementMs;
   }
   return { startedAt: normalizeTimestamp(now), timedOut: [] };
 }

@@ -53,6 +53,17 @@ test("simulateBatch accounts for every simulated game", () => {
   assert.ok(Array.isArray(summary.interestingGames));
   assert.ok(summary.interestingGames.length >= 4);
   assert.ok(summary.interestingGames.every((game) => game.index >= 0 && game.index < summary.runs));
+  // Every team gets a notable-games row, feats included even when the count is nil.
+  assert.deepEqual(
+    summary.notableGames.teams.map((row) => row.team).sort(),
+    summary.teams.map((row) => row.team).sort()
+  );
+  assert.ok(summary.notableGames.feats.some((feat) => feat.key === "perfectGame"));
+  for (const row of summary.notableGames.teams) {
+    const counted = summary.notableGames.feats.reduce((sum, feat) => sum + row.counts[feat.key], 0);
+    assert.equal(counted, row.total);
+    assert.ok(summary.notableGames.feats.every((feat) => row.examples[feat.key].length <= row.counts[feat.key]));
+  }
 
   for (const row of summary.teams) {
     assert.ok(Number.isFinite(row.winPct));
