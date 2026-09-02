@@ -5687,6 +5687,73 @@ test("a gauntlet run locks the roster, advances on a win, and ends on a loss", a
   }
 });
 
+test("IMMORTAL gives you the wall again; the other tiers are one life", async () => {
+  const { mapScreen } = await import("../src/adventure/ui/mapScreen.js");
+  const {
+    gauntletRun, lockGauntletRoster, recordGauntletRound, rosterLocked,
+    canRestartGauntlet, restartGauntletRun
+  } = await import("../src/adventure/state.js");
+  const { gauntletTrainers } = await import("../src/adventure/region.js");
+  try {
+    setUniverseSeed("gauntlet-again", "classic");
+    const clubs = gauntletTrainers();
+    const lose = (tier) => {
+      const save = createSave({
+        name: "G", saveSeed: `again-${tier}`, universe: "classic",
+        mode: "gauntlet", rosterFormat: "full", gauntletTier: tier
+      });
+      hydrateUniverse(save);
+      setRoster(save, starterPack(save.saveSeed, "full").map((card) => card.id));
+      recordGauntletRound(save, clubs[0].id, true);
+      recordGauntletRound(save, clubs[1].id, true);
+      lockGauntletRoster(save);
+      recordGauntletRound(save, clubs[2].id, false);
+      return save;
+    };
+
+    // One life means one life: a finished ELITE run offers nothing but NEW GAME.
+    const elite = lose("elite");
+    assert.equal(canRestartGauntlet(elite), false, "elite is one life");
+    assert.equal(restartGauntletRun(elite), null, "and refuses to restart");
+    assert.equal(gauntletRun(elite).over, true, "the run stays over");
+    const eliteBoard = mapScreen.render({ save: elite, screen: { name: "map" }, go() {}, rerender() {} });
+    assert.ok(!eliteBoard.includes("RUN IT AGAIN"), "no retry on the board");
+    assert.ok(eliteBoard.includes("NEW GAME starts another"), "just the old way out");
+
+    const save = lose("immortal");
+    assert.equal(canRestartGauntlet(save), true, "immortal gets another swing");
+    const app = { save, screen: { name: "map" }, go() {}, rerender() {} };
+    assert.ok(mapScreen.render(app).includes("RUN IT AGAIN"), "and the board offers it");
+
+    // Six clubs sit above it, all disabled once the run is over, so the cursor
+    // lands on the retry — press A there and the wall is standing again.
+    app.screen.menuIndex = 0;
+    for (let step = 0; step < 12 && app.screen.menuIndex !== 6; step += 1) mapScreen.key(app, "down");
+    assert.equal(app.screen.menuIndex, 6, "the retry is the first live row");
+    mapScreen.key(app, "a");
+
+    const run = gauntletRun(save);
+    assert.equal(run.over, false, "the run is live again");
+    assert.equal(run.cleared.length, 0, "the board is cleared");
+    assert.equal(rosterLocked(save), false, "and the club is yours to rebuild");
+    assert.equal(run.best, 2, "the depth you reached is the score, and it keeps");
+    assert.equal(run.attempt, 2, "this is the second go");
+    const board = mapScreen.render(app);
+    assert.ok(board.includes("BEST 2"), "the best stands in the header");
+    assert.ok(board.includes("BUILD IT NOW"), "and the team screen is open again");
+
+    // A run still going has nothing to restart, and a deeper run raises the best.
+    assert.equal(canRestartGauntlet(save), false, "no restarting a live run");
+    for (const trainer of clubs.slice(0, 4)) recordGauntletRound(save, trainer.id, true);
+    recordGauntletRound(save, clubs[4].id, false);
+    restartGauntletRun(save);
+    assert.equal(gauntletRun(save).best, 4, "four beats two");
+    assert.equal(gauntletRun(save).attempt, 3);
+  } finally {
+    setUniverseSeed("test-seed");
+  }
+});
+
 test("the gauntlet board offers one club at a time and no shopping", async () => {
   const { mapScreen } = await import("../src/adventure/ui/mapScreen.js");
   const { lockGauntletRoster, recordGauntletRound } = await import("../src/adventure/state.js");

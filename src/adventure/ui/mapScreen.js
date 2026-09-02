@@ -1,6 +1,6 @@
 import { escapeHtml, menuHtml, clampIndex, cardLine, cardPanelHtml } from "./helpers.js?v=20260716-records";
 import { TRAINERS, BADGES, trainerById, isTrainerUnlocked, isTrainerAvailable, rewardCoins, npcBudget, pendingAmbush, ambushSprung, springAmbush, ambushDone , gauntletTrainers, gauntletBudget, gauntletTier } from "../region.js?v=20260716-records";
-import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, seasonTeam, persistSave, gauntletRun } from "../state.js?v=20260716-records";
+import { timesBeaten, managerFor, rosterPoints, pointCap, ensureSeasonStats, seasonTeam, persistSave, gauntletRun, canRestartGauntlet, restartGauntletRun } from "../state.js?v=20260716-records";
 
 // What the club has actually done, which is the one thing the bar never said. The
 // day counts afternoons; the purse and the roster count money and points; none of
@@ -91,7 +91,10 @@ function gauntletItems(save, items) {
   const budget = gauntletBudget(save);
   const clubs = gauntletTrainers();
   const done = run?.over;
-  const heading = `THE GAUNTLET &middot; ${gauntletTier(save).name} &middot; ${run.cleared.length}/6`;
+  // The deepest run this save has made rides in the header once there is one to
+  // beat: on a tier you can retry, the best is the score, not the current board.
+  const best = run.best > run.cleared.length ? ` &middot; BEST ${run.best}` : "";
+  const heading = `THE GAUNTLET &middot; ${gauntletTier(save).name} &middot; ${run.cleared.length}/6${best}`;
   clubs.forEach((trainer, index) => {
     const cleared = run.cleared.includes(trainer.id);
     const current = !done && index === run.cleared.length;
@@ -105,6 +108,19 @@ function gauntletItems(save, items) {
       run: (a) => a.go("trainerIntro", { trainerId: trainer.id, page: 0 })
     });
   });
+  if (canRestartGauntlet(save)) {
+    items.push({
+      section: heading,
+      html: `RUN IT AGAIN <span class="gq-dim">ATTEMPT ${run.attempt + 1}</span>`,
+      run: (a) => {
+        restartGauntletRun(a.save);
+        persistSave(a.save);
+        // The board it was sitting on is gone; put the cursor back on the club
+        // that is live again rather than wherever the old one left it.
+        a.screen.menuIndex = undefined;
+      }
+    });
+  }
   items.push({ section: "YOUR CLUB", html: rosterLockLabel(save), run: (a) => a.go("team", { index: 0, mode: "roster" }) });
   items.push({ section: "YOUR CLUB", label: "BATTING ORDER", run: (a) => a.go("lineup", { index: 0 }) });
   items.push({ section: "YOUR CLUB", label: "BINDER", run: (a) => a.go("binder", { index: 0 }) });
@@ -118,7 +134,13 @@ function gauntletItems(save, items) {
 // scoreboard for a run that only goes one way.
 function gauntletWord(save) {
   const run = gauntletRun(save);
-  if (run.over) return `The run is over — ${run.cleared.length} of 6 cleared. NEW GAME starts another.`;
+  if (run.over) {
+    const depth = `The run is over — ${run.cleared.length} of 6 cleared.`;
+    if (!canRestartGauntlet(save)) return `${depth} NEW GAME starts another.`;
+    return run.best > run.cleared.length
+      ? `${depth} Your best is ${run.best}. RUN IT AGAIN and go past it.`
+      : `${depth} RUN IT AGAIN — the wall is still there.`;
+  }
   if (run.cleared.length >= 6) return "SIX FOR SIX. Nobody left to beat.";
   if (!run.locked) return "The whole league is yours. Build the club that survives all six, then start — it locks on the first pitch.";
   return `${run.cleared.length} down, ${6 - run.cleared.length} to go. Lose a series and that is the run.`;

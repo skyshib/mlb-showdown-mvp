@@ -44,7 +44,7 @@ export function createSave({ name, saveSeed, universe = "fictional", mode = "bud
     // collection is not a list of cards owned — it is every card there is.
     ownsEverything: mode === "gauntlet",
     gauntletTier: mode === "gauntlet" ? gauntletTier : null,
-    gauntlet: mode === "gauntlet" ? { round: 0, cleared: [], over: false, locked: false } : null,
+    gauntlet: mode === "gauntlet" ? { round: 0, cleared: [], over: false, locked: false, best: 0, attempt: 1 } : null,
     player: {
       name,
       coins: 0,
@@ -657,7 +657,41 @@ export function clearSeries(save) {
 
 export function gauntletRun(save) {
   if (save?.mode !== "gauntlet") return null;
-  if (!save.gauntlet) save.gauntlet = { round: 0, cleared: [], over: false, locked: false };
+  if (!save.gauntlet) save.gauntlet = freshGauntletRun();
+  // Saves written before runs could be taken twice carry neither counter.
+  if (save.gauntlet.best === undefined) save.gauntlet.best = 0;
+  if (save.gauntlet.attempt === undefined) save.gauntlet.attempt = 1;
+  return save.gauntlet;
+}
+
+function freshGauntletRun() {
+  return { round: 0, cleared: [], over: false, locked: false, best: 0, attempt: 1 };
+}
+
+// IMMORTAL is the one tier you may take another swing at. The other two are one
+// life on purpose — a run you can retry is not a run you can lose — but nobody
+// is expected to finish IMMORTAL, and "how far you got is the score" only means
+// something if you are allowed to go again. (region.GAUNTLET_TIERS says what
+// each tier is; this says which of them gives you another go.)
+const RETRYABLE_TIER = "immortal";
+
+export function canRestartGauntlet(save) {
+  const run = gauntletRun(save);
+  return Boolean(run?.over) && save?.gauntletTier === RETRYABLE_TIER;
+}
+
+// Back to the first pitch: board cleared, roster unlocked, six clubs waiting
+// again. What carries over is the depth — the deepest run this save has made,
+// and which attempt this is — because that is the only score IMMORTAL keeps,
+// and a retry that wiped it would be a retry that wiped the mode.
+export function restartGauntletRun(save) {
+  if (!canRestartGauntlet(save)) return null;
+  const previous = save.gauntlet;
+  save.gauntlet = {
+    ...freshGauntletRun(),
+    best: Math.max(previous.best ?? 0, previous.cleared.length),
+    attempt: (previous.attempt ?? 1) + 1
+  };
   return save.gauntlet;
 }
 
