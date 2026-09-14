@@ -7785,7 +7785,7 @@ function renderDockBenchSlot(manager, bench, activeAt, heatScale, prices) {
   const dead = prices ? bench.reduce((sum, player) => sum + (prices.get(player.id) ?? 0), 0) : null;
   return `<span class="dock-slot dock-bench-slot dock-carousel-slot heat" style="${card.heat}" tabindex="0" data-carousel-key="${escapeHtml(carouselKey)}" data-carousel-index="${index}" data-carousel-default-index="${index}" data-carousel-cards="${escapeHtml(JSON.stringify(cards))}" data-preview-id="dock-${escapeHtml(carouselKey)}-${escapeHtml(card.id)}" data-preview-card="${escapeHtml(card.card)}"${dead !== null ? ` title="${money(dead)} of dead money on the bench"` : ""}>
     <small class="dock-slot-head"><span>Bench</span><b>${cards.length}</b></small>
-    <span>${bench.length} ${bench.length === 1 ? "player" : "players"}${dead !== null ? ` &middot; ${money(dead)}` : ""}</span>
+    <span>${dead !== null ? `${money(dead)} dead` : `${bench.length} ${bench.length === 1 ? "player" : "players"}`}</span>
   </span>`;
 }
 
@@ -9281,8 +9281,10 @@ function renderDraftDone(draft) {
     ${ledgers
       .map(
         (ledger) => `<td class="comp-cell">
-          <span class="comp-points-value${ledger.spent === leanest ? " cheapest" : ""}">${money(ledger.spent)}</span>
-          <span class="comp-value">${ledger.count ? `${ledger.count} card${ledger.count === 1 ? "" : "s"}${pointsHidden() ? "" : `, ${ledger.points} pts`}` : "none"}</span>
+          <span class="comp-dead">
+            <span class="comp-points-value${ledger.spent === leanest ? " cheapest" : ""}">${money(ledger.spent)}</span>
+            <span class="comp-dead-detail">${ledger.count ? `${ledger.count} card${ledger.count === 1 ? "" : "s"}${pointsHidden() ? "" : `, ${ledger.points} pts`}` : "none"}</span>
+          </span>
         </td>`
       )
       .join("")}
