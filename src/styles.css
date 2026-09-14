@@ -7153,6 +7153,17 @@ html.club .war-panel {
 }
 
 .wpar-card-pos {
+/* ---- dead money ---- */
+
+/* The bench, priced, under the budget on the roster panel: the figure sits on
+   the budget line's baseline and the detail wraps beneath it. */
+.auction-focus-budget.dead-money {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.auction-focus-budget.dead-money strong { color: var(--warn); }
+.auction-focus-budget.dead-money small {
+  flex-basis: 100%;
   color: var(--muted);
   font-size: 12px;
 }
@@ -7164,3 +7175,17 @@ html.club .war-panel {
 .war-panel > h3 {
   margin-top: 22px;
 }
+/* The recap row: the dollars big, the card count under them. */
+.comp-dead-money .comp-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.comp-dead-money .comp-value {
+  grid-column: auto;
+  margin-left: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+html.club .auction-focus-budget.dead-money strong { color: #ff7a6b; }

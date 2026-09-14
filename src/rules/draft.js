@@ -2317,6 +2317,28 @@ export function benchPlayers(manager) {
   return manager.roster.filter((player) => !active.has(player.id));
 }
 
+// DEAD MONEY. What a manager paid for the players he is NOT fielding: his
+// bench, priced at what each card went for. Nothing is stored — the bench is
+// whatever the lineup and the staff leave out right now, so the number moves
+// the moment a manager moves a card, and it settles the argument about who
+// bought depth and who bought a mistake. `total` is everything he spent, so a
+// screen can say "$1,240 of $4,890". A snake draft spends no money, so both
+// are null there; the points are the whole story, and with an active slot for
+// every card a snake roster owns they are usually nothing.
+export function benchLedger(draft, manager) {
+  const players = benchPlayers(manager);
+  const points = players.reduce((sum, player) => sum + (Number(player.points) || 0), 0);
+  if (!isAuctionDraft(draft)) return { players, count: players.length, points, spent: null, total: null };
+  const paid = new Map();
+  for (const entry of draft.auction?.history ?? []) {
+    if (entry.managerId === manager.id) paid.set(entry.playerId, Number(entry.price) || 0);
+  }
+  let total = 0;
+  for (const price of paid.values()) total += price;
+  const spent = players.reduce((sum, player) => sum + (paid.get(player.id) ?? 0), 0);
+  return { players, count: players.length, points, spent, total };
+}
+
 // The card's own points — the universal strength the board already ranks by —
 // so a manager fields the BEST nine and the best arms, not merely the first
 // drafted. Blind drafts still carry points on the card; only the display hides

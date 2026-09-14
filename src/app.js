@@ -66,6 +66,7 @@ import {
   auctionTimerEnabled,
   autopick,
   availablePlayers,
+  benchLedger,
   benchPlayers,
   buildTeam,
   canCancelLot,
@@ -7125,7 +7126,7 @@ function renderRoster(manager, draft) {
   };
   const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
   const budgetLine = auction
-    ? ` &middot; ${money(auctionBudget(draft, manager))} left &middot; max bid ${money(draft.complete ? 0 : auctionMaxBid(draft, manager))}`
+    ? ` &middot; ${money(auctionBudget(draft, manager))} left &middot; max bid ${money(draft.complete ? 0 : auctionMaxBid(draft, manager))}${deadMoneyNote(draft, manager)}`
     : "";
   // Nothing to count up to when the roster has no ceiling: a manager owns as
   // many cards as they bought, one active roster of which takes the field.
@@ -7306,7 +7307,10 @@ function renderWarRoom() {
       const budgetLead = auction && !draft.complete
         ? `${money(auctionBudget(draft, manager))} left &middot; max ${money(auctionMaxBid(draft, manager))}`
         : "";
-      const headerMeta = [budgetLead, pointsHidden() ? "" : `${points} pts`].filter(Boolean).join(" &middot; ");
+      // The bench, priced: what this club paid for the cards it is not fielding.
+      const ledger = auction ? benchLedger(draft, manager) : null;
+      const deadLead = ledger?.count ? `${money(ledger.spent)} dead` : "";
+      const headerMeta = [budgetLead, deadLead, pointsHidden() ? "" : `${points} pts`].filter(Boolean).join(" &middot; ");
       return `<section class="war-team">
         <header>
           <h3>${escapeHtml(manager.name)}</h3>
@@ -7777,9 +7781,11 @@ function renderDockBenchSlot(manager, bench, activeAt, heatScale, prices) {
   const cards = dockCarouselCards(bench, activeAt, heatScale, prices).map((card) => ({ ...card, status: "Bench" }));
   const index = 0;
   const card = cards[index];
-  return `<span class="dock-slot dock-bench-slot dock-carousel-slot heat" style="${card.heat}" tabindex="0" data-carousel-key="${escapeHtml(carouselKey)}" data-carousel-index="${index}" data-carousel-default-index="${index}" data-carousel-cards="${escapeHtml(JSON.stringify(cards))}" data-preview-id="dock-${escapeHtml(carouselKey)}-${escapeHtml(card.id)}" data-preview-card="${escapeHtml(card.card)}">
+  // In an auction the bench has a price tag: the dead money the chips add up to.
+  const dead = prices ? bench.reduce((sum, player) => sum + (prices.get(player.id) ?? 0), 0) : null;
+  return `<span class="dock-slot dock-bench-slot dock-carousel-slot heat" style="${card.heat}" tabindex="0" data-carousel-key="${escapeHtml(carouselKey)}" data-carousel-index="${index}" data-carousel-default-index="${index}" data-carousel-cards="${escapeHtml(JSON.stringify(cards))}" data-preview-id="dock-${escapeHtml(carouselKey)}-${escapeHtml(card.id)}" data-preview-card="${escapeHtml(card.card)}"${dead !== null ? ` title="${money(dead)} of dead money on the bench"` : ""}>
     <small class="dock-slot-head"><span>Bench</span><b>${cards.length}</b></small>
-    <span>${bench.length} ${bench.length === 1 ? "player" : "players"}</span>
+    <span>${bench.length} ${bench.length === 1 ? "player" : "players"}${dead !== null ? ` &middot; ${money(dead)}` : ""}</span>
   </span>`;
 }
 
@@ -7887,6 +7893,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
           <span>Budget left</span>
           <strong>${money(auctionBudget(draft, manager))}</strong>
         </div>
+        ${renderDeadMoney(draft, manager)}
         ${pointsHidden() ? "" : `<p class="auction-focus-points">${totalPoints} team points</p>`}
         <p class="auction-focus-fielding-label">Defense</p>
         <dl class="auction-focus-fielding" aria-label="Active lineup fielding">
@@ -7920,6 +7927,33 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
       ${state.rosterTab === "order" ? renderBattingOrder(manager) : renderRosterSlots(manager, draft)}
     </div>
   </section>`;
+}
+
+// ---- dead money ----
+//
+// An auction buys more cards than a lineup holds, and the ones left over cost
+// real money. Every screen that prices a roster says so: what the manager paid
+// for the cards not in the lineup or on the staff, read fresh off the bench
+// each time it draws, so a lineup change after the draft moves the number —
+// which is the argument it exists to settle.
+function renderDeadMoney(draft, manager) {
+  if (!isAuctionDraft(draft)) return "";
+  const ledger = benchLedger(draft, manager);
+  const detail = ledger.count
+    ? `${ledger.count} benched card${ledger.count === 1 ? "" : "s"}${pointsHidden() ? "" : ` &middot; ${ledger.points} pts`} &middot; of ${money(ledger.total)} spent`
+    : "every card bought is on the field";
+  return `<div class="auction-focus-budget dead-money" title="What this manager paid for the cards not in the lineup or on the staff. It follows every lineup change.">
+    <span>Dead money</span>
+    <strong>${money(ledger.spent)}</strong>
+    <small>${detail}</small>
+  </div>`;
+}
+
+function deadMoneyNote(draft, manager) {
+  if (!isAuctionDraft(draft)) return "";
+  const ledger = benchLedger(draft, manager);
+  if (!ledger.count) return "";
+  return ` &middot; ${money(ledger.spent)} dead money on ${ledger.count} benched card${ledger.count === 1 ? "" : "s"}`;
 }
 
 // A pill per manager so you can flip through everyone's roster from your own
@@ -9173,6 +9207,15 @@ function recapText(draft) {
     lines.push(`The room paid ${money(rate)} a point.`);
     lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} for ${money(recap.steal.price)} — ${recap.steal.player.points} pts, ${money(Math.round(recap.steal.swing))} under the rate`);
     lines.push(`Biggest overpay: ${recap.reach.player.name} to ${recap.reach.manager.name} for ${money(recap.reach.price)} — ${recap.reach.player.points} pts, ${money(Math.round(-recap.reach.swing))} over the rate`);
+    const benches = draft.managers
+      .map((manager) => ({ manager, ledger: benchLedger(draft, manager) }))
+      .filter(({ ledger }) => ledger.count);
+    if (benches.length) {
+      lines.push("", "Dead money — paid for cards not in the lineup or on the staff:");
+      for (const { manager, ledger } of benches) {
+        lines.push(`  ${manager.name.padEnd(12)} ${money(ledger.spent).padStart(7)}  ${ledger.count} card${ledger.count === 1 ? "" : "s"}, ${ledger.points} pts`);
+      }
+    }
     lines.push("", "Every lot:");
     for (const pick of recap.picks) {
       lines.push(`  ${pick.manager.name.padEnd(12)} ${money(pick.price).padStart(7)}  ${pick.player.name} (${pick.player.points} pts)`);
@@ -9227,6 +9270,25 @@ function renderDraftDone(draft) {
       .join("")}
   </tr>`;
 
+  // The other half of the money, for an auction: what each manager paid for
+  // the cards that are NOT on the field. It reads off the bench as it stands,
+  // so a lineup change after the draft moves it — that is the point.
+  const ledgers = draft.managers.map((manager) => benchLedger(draft, manager));
+  const leanest = Math.min(...ledgers.map((ledger) => ledger.spent ?? 0));
+  const deadMoneyRow = isAuctionDraft(draft)
+    ? `<tr class="comp-points comp-dead-money">
+    <th class="comp-label"><span class="comp-name">Dead money</span></th>
+    ${ledgers
+      .map(
+        (ledger) => `<td class="comp-cell">
+          <span class="comp-points-value${ledger.spent === leanest ? " cheapest" : ""}">${money(ledger.spent)}</span>
+          <span class="comp-value">${ledger.count ? `${ledger.count} card${ledger.count === 1 ? "" : "s"}${pointsHidden() ? "" : `, ${ledger.points} pts`}` : "none"}</span>
+        </td>`
+      )
+      .join("")}
+  </tr>`
+    : "";
+
   const card = (label, pick, tone) => {
     const line = recap.auction
       ? `<p class="recap-line">
@@ -9268,11 +9330,11 @@ function renderDraftDone(draft) {
         <button class="small" data-action="export-save">Save the room</button>
       </div>
     </div>
-    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card on the board &mdash; the bench isn't graded. Active points adds up those same starters.</p>
+    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card on the board &mdash; the bench isn't graded. Active points adds up those same starters.${isAuctionDraft(draft) ? " Dead money is what each manager paid for the cards on the bench, and it moves when the lineup does." : ""}</p>
     <div class="table-scroll">
       <table class="comp-table">
         <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
-        <tbody>${body}${pointsRow}</tbody>
+        <tbody>${body}${pointsRow}${deadMoneyRow}</tbody>
       </table>
     </div>
     <div class="recap-cards">
