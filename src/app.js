@@ -2077,6 +2077,8 @@ function renderSetup(setupError = "") {
       return;
     }
     if (event.target.name !== "managers") return;
+    const cpuList = setupForm.querySelector("[data-cpu-list]");
+    const listed = new Set([...cpuList.querySelectorAll('input[name="cpu"]')].map((input) => input.value));
     const checked = form.getAll("cpu").map(String);
     const names = dedupeManagerNames(
       String(form.get("managers"))
@@ -2084,7 +2086,10 @@ function renderSetup(setupError = "") {
         .map((name) => name.trim())
         .filter(Boolean)
     );
-    setupForm.querySelector("[data-cpu-list]").innerHTML = renderCpuChoices(names, checked);
+    // A newly typed name with "CPU" in it starts out computer-managed; names
+    // already listed keep whatever their box says.
+    const typedCpu = names.filter((name) => !listed.has(name) && /cpu/i.test(name));
+    cpuList.innerHTML = renderCpuChoices(names, [...checked, ...typedCpu]);
     const blurb = setupForm.querySelector("[data-random-nomination-blurb]");
     if (blurb) blurb.textContent = randomNominationBlurb(names.length, normalizeStartingPitchers(form.get("startingPitchers")));
   });
