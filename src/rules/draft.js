@@ -2797,17 +2797,20 @@ function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPos
   const slot = replacementSlot(neededKind, neededRole, neededPosition);
   const priorAtSlot = manager.roster.filter((player) => player.replacement && player.slot === slot).length;
   const id = `replacement-${manager.id}-${slot.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${priorAtSlot + 1}`;
-  // A second copy at the same slot — the corners are where it happens — reads
-  // as the same name twice on the roster, so it takes a number. Nobody can tell
-  // two identical cards apart otherwise.
-  const numbered = (base) => (priorAtSlot === 0 ? base : `${base} #${priorAtSlot + 1}`);
   const standing = standingReplacement(draft, slot);
   if (standing) {
-    const copy = { ...standing, id, sourceId: standing.id, name: numbered(standing.name) };
+    // His NAME is untouched, including on a second copy at the same slot — the
+    // corners are where that happens. A roster listing the same real man twice
+    // is reading correctly: it is the same card twice. Numbering him would put
+    // a "#2" where his surname goes, which is what the scoreboard and the photo
+    // lookup both read off the name.
+    const copy = { ...standing, id, sourceId: standing.id };
     draft.pool.push(copy);
     return copy;
   }
-  const name = numbered(`Replacement ${slot}`);
+  // The fabricated fallback has no man behind it, so a number is all there is
+  // to tell two of them apart: "Replacement LF/RF", then "Replacement LF/RF #2".
+  const name = priorAtSlot === 0 ? `Replacement ${slot}` : `Replacement ${slot} #${priorAtSlot + 1}`;
   const source = replacementSource(draft, neededKind, neededRole, neededPosition);
   const replacement = source
     ? copyAsReplacement(source, { id, name, slot, kind: neededKind })
@@ -2857,6 +2860,9 @@ function copyAsReplacement(source, { id, name, slot, kind }) {
     slot,
     points: replacementPoints(source),
     replacement: true,
+    // A plain name over a stranger's numbers: there is no man here to look a
+    // photo up for. The standing cards are real men and carry no such mark.
+    anonymous: true,
     sourceId: source.id,
     team: "FA",
     setTag: "Replacement",
@@ -2871,7 +2877,7 @@ function copyAsReplacement(source, { id, name, slot, kind }) {
 // Only when the board holds nothing at all that plays the slot — a pool too
 // thin to have dealt one, which the setup screen is supposed to refuse.
 function fabricateReplacement({ id, name, slot, kind }) {
-  const shared = { id, name, slot, replacement: true, team: "FA", setTag: "Replacement", points: 10 };
+  const shared = { id, name, slot, replacement: true, anonymous: true, team: "FA", setTag: "Replacement", points: 10 };
   if (kind === "pitcher") {
     return {
       ...shared,

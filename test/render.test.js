@@ -232,6 +232,22 @@ test("draft ranking inputs are blank for unranked players and numbered for ranke
   assert.match(html, /class="draft-player-row first-unranked-row manual-ranking-row"/);
 });
 
+test("a standing replacement handed to a manager still shows its printed scan", () => {
+  // The copy carries a minted id so two rosters can hold the same man, but the
+  // scans are filed under the printing's id — so it has to ask under sourceId
+  // or the card comes back as a drawn face when a photograph of it exists.
+  const printing = { ...hitter, id: "sd-03-ul-99-einar-diaz", name: "Einar Diaz '03", real: true, setTag: "'03 UL" };
+  const copy = { ...printing, id: "replacement-team-1-c-1", sourceId: printing.id, replacement: true, slot: "C" };
+  const html = cardPanelHtml(copy);
+  assert.match(html, /assets\/cards\/[^"]+\.jpg/, "the copy shows the printed card");
+  assert.equal(html.includes("data-photo-anon"), false, "a real man gets his own face");
+
+  // The fabricated fallback is the exception: a plain name over a stranger's
+  // numbers at a different price, so the stranger's scan is not a picture of it.
+  const fabricated = { ...copy, id: "replacement-team-1-c-2", name: "Replacement C", points: 10, anonymous: true };
+  assert.equal(cardPanelHtml(fabricated).includes("assets/cards/"), false);
+});
+
 test("replacement-level players are called out in the draft table, naming their groups", () => {
   const html = renderPlayerTable([hitter], {
     mode: "hitter",

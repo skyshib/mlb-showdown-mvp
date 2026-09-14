@@ -1495,11 +1495,13 @@ test("one roster can hold the same standing replacement twice", () => {
 
   sweepRosters(draft);
 
-  // Two corner outfield slots, one standing corner: the same card, twice, and
-  // the second one numbered so the roster can be read.
+  // Two corner outfield slots, one standing corner: the same real man, twice,
+  // under his own name both times. A number in the name would land where the
+  // scoreboard and the photo lookup read his surname.
   const copies = draft.managers[0].roster.filter((card) => card.sourceId === corner.id);
   assert.equal(copies.length, 2);
-  assert.deepEqual(copies.map((card) => card.name), [corner.name, `${corner.name} #2`]);
+  assert.deepEqual(copies.map((card) => card.name), [corner.name, corner.name]);
+  assert.equal(copies.every((card) => card.anonymous === undefined), true, "he is a real man, not a fabrication");
   assert.equal(new Set(copies.map((card) => card.id)).size, 2, "two cards, not one card twice");
   assert.deepEqual(validateRoster(draft.managers[0]), []);
 });

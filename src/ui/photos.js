@@ -134,11 +134,12 @@ export function hydratePhotos(root) {
   // action shot, the wide action hero, the MLB headshot, Wikipedia, and
   // finally the drawn pixel portrait.
   for (const slot of root.querySelectorAll("[data-photo-name]")) {
-    // A replacement card is nobody: it carries a real card's numbers under a
-    // plain name, and it gets the drawn portrait without a lookup. Searching
+    // A card marked anonymous is nobody: it carries a real card's numbers under
+    // a plain name, and it gets the drawn portrait without a lookup. Searching
     // for him would be worse than useless — "Replacement C" hunts a surname of
     // "c", which is a substring of half of Wikipedia, and the card would come
-    // back wearing some real catcher's face.
+    // back wearing some real catcher's face. A standing replacement is NOT
+    // this: he is a real man off the board and gets his own face like anyone.
     if (slot.dataset.photoAnon !== undefined) {
       drawPortrait(slot);
       continue;

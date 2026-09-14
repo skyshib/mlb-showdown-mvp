@@ -403,7 +403,16 @@ function fictionalCardHtml(card, count, hidePoints = false) {
 // the face sits on a black backdrop, so an unloaded scan is not a blank card,
 // it is a black one.
 export function cardScanUrl(card) {
-  const scan = CARD_IMAGE_FILES[card.id];
+  // A standing replacement handed to a manager is a COPY: same man, same
+  // printing, a minted id so two rosters can hold him at once. The scans are
+  // filed under the printing's own id, so the copy has to ask under the id it
+  // was copied from or it falls back to a drawn face — a generated picture of a
+  // card that exists, and was photographed, and is sitting right there.
+  //
+  // The fabricated fallback is the one case where that would lie: it wears a
+  // plain name over a stranger's numbers at a different price, so the stranger's
+  // printed scan is not a picture of it. Those are marked anonymous.
+  const scan = CARD_IMAGE_FILES[card.id] ?? (card.anonymous ? null : CARD_IMAGE_FILES[card.sourceId]);
   return scan ? `assets/cards/${scan}` : null;
 }
 
@@ -455,7 +464,7 @@ export function cardPanelHtml(card, { count = null, hidePoints = false } = {}) {
   const photoClass = card.real ? "gq-photo" : `gq-photo gq-fictional-backdrop ${fictionalBackdropClass(card)}`;
   return `<div class="${cardShell(card, partner ? " gq-card-two-way" : "")}"><div class="gq-face">
     <div class="${photoClass}">${card.real
-      ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.replacement ? " data-photo-anon" : ""}${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
+      ? `<div class="gq-card-headshot" data-photo-name="${escapeHtml(photoName(card.name))}" data-era="${eraYear(card)}"${card.anonymous ? " data-photo-anon" : ""}${card.mlbam ? ` data-mlbam="${escapeHtml(String(card.mlbam))}"` : ""}></div>`
       : `<span class="gq-card-initials">${escapeHtml(initials)}</span>
       <img class="gq-fictional-face" src="https://api.dicebear.com/9.x/open-peeps/svg?seed=${encodeURIComponent(`${card.name}-${card.kind}`)}&backgroundColor=transparent" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`}
       ${overlay}
