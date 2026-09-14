@@ -298,7 +298,17 @@ function reviveRoom(saved) {
 // Atomic write (tmp + rename) chained per room so saves never interleave.
 function persistRoom(store, room) {
   if (!store.dataDir) return;
-  const payload = JSON.stringify({
+  const payload = JSON.stringify(roomRecord(room));
+  const target = join(store.dataDir, `${room.id}.json`);
+  const tmp = `${target}.tmp`;
+  room.saveChain = (room.saveChain ?? Promise.resolve())
+    .then(() => writeFile(tmp, payload))
+    .then(() => rename(tmp, target))
+    .catch((error) => console.error(`Failed to save room ${room.id}: ${error.message}`));
+}
+
+function roomRecord(room) {
+  return {
     id: room.id,
     seed: room.seed,
     rosterSize: room.rosterSize,
@@ -323,13 +333,7 @@ function persistRoom(store, room) {
     actions: room.actions,
     pendingBids: room.pendingBids ?? [],
     createdAt: room.createdAt
-  });
-  const target = join(store.dataDir, `${room.id}.json`);
-  const tmp = `${target}.tmp`;
-  room.saveChain = (room.saveChain ?? Promise.resolve())
-    .then(() => writeFile(tmp, payload))
-    .then(() => rename(tmp, target))
-    .catch((error) => console.error(`Failed to save room ${room.id}: ${error.message}`));
+  };
 }
 
 // ---- Hall of fame -----------------------------------------------------------
@@ -1043,6 +1047,24 @@ async function postAction(store, room, request, response) {
   const denial = denyAction(room.draft, seat, isHost, action);
   if (denial) return sendJson(response, 409, { error: denial });
 
+  // The bid is dropped from the withheld list and the draft rebuilt without it,
+  // so the bidder is back on the lot with the clock they would have had.
+  if (action.type === "withdraw-bid") {
+    const withheld = (room.pendingBids ?? []).filter((bid) => bid.managerId === action.managerId);
+    if (!withheld.length) return sendJson(response, 409, { error: "That bid is not withheld on the server" });
+    const kept = room.pendingBids.filter((bid) => bid.managerId !== action.managerId);
+    try {
+      room.draft = reviveRoom({ ...roomRecord(room), pendingBids: kept }).draft;
+    } catch (error) {
+      return sendJson(response, 409, { error: `Could not rebuild the room: ${error.message}` });
+    }
+    room.pendingBids = kept;
+    persistRoom(store, room);
+    broadcastLot(room);
+    scheduleRoomTimer(store, room);
+    return sendJson(response, 200, { seq: room.actions.length, lot: lotView(room) });
+  }
+
   // A targeted autopick names the seat it means to pick for. The host drives
   // computer turns and covers stalled seats off its OWN view of the clock, which
   // can lag the room's — a resync landing out of order rolls it back to a turn
@@ -1303,10 +1325,19 @@ function denyAction(draft, seat, isHost, action) {
   if (type === "grant-time") {
     if (!isHost) return "Only the host can grant time";
     if (draft.complete) return "The draft is already complete";
-    if (isAuctionDraft(draft)) return "Auction rooms have no snake clock to grant";
-    if (!snakeClockEnabled(draft)) return "This room has no snake clock";
+    if (isAuctionDraft(draft) ? !auctionTimerEnabled(draft) : !snakeClockEnabled(draft)) {
+      return "This room has no clock";
+    }
     if (!draft.managers.some((manager) => manager.id === action?.managerId)) return "No such manager";
     if (!Number.isFinite(Number(action?.ms)) || Number(action?.ms) === 0) return "Grant a number of milliseconds";
+    return null;
+  }
+  // Taking back a sealed bid is a repair too, and it touches only the server's
+  // withheld bids — the room never saw the bid, so nothing is logged.
+  if (type === "withdraw-bid") {
+    if (!isHost) return "Only the host can withdraw a bid";
+    if (!isAuctionDraft(draft) || !draft.auction.lot) return "No card is on the block";
+    if (!(action?.managerId in draft.auction.lot.bids)) return "That manager has no bid on this card";
     return null;
   }
   // A paused room is a room holding still: the clocks are stopped, so no move

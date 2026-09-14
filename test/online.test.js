@@ -731,6 +731,42 @@ test("the host can grant a manager time, and only the host can", async (t) => {
   assert.equal(floored.data.snakeClock.banks["team-2"], 0);
 });
 
+test("the host can grant time in an auction room", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "auction-clock-grant",
+    managers: ["Ana", "Bo"],
+    draftType: "auction",
+    auctionTimer: { bankSeconds: 60, incrementSeconds: 0 }
+  });
+  const roomId = created.data.roomId;
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, {
+    managerId: "team-1",
+    hostToken: created.data.hostToken
+  });
+  await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "pause" } });
+  const before = await api(base, "GET", `/api/rooms/${roomId}`);
+  const grant = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "grant-time", managerId: "team-2", ms: 20000 }
+  });
+  assert.equal(grant.status, 200);
+  const draft = createDraft(
+    before.data.managers.map((manager) => ({ name: manager.name, cpu: manager.cpu })),
+    deckFromIds(before.data.universe, before.data.seed, before.data.deck, before.data.temperature),
+    before.data.rosterSize,
+    before.data.seed,
+    { draftType: "auction", nomination: before.data.nomination, startingPitchers: before.data.startingPitchers, budget: before.data.auctionBudget, timer: before.data.auctionTimer }
+  );
+  const beforeBank = structuredClone(draft);
+  const after = await api(base, "GET", `/api/rooms/${roomId}`);
+  for (const entry of before.data.actions) applyDraftAction(beforeBank, entry.action);
+  for (const entry of after.data.actions) applyDraftAction(draft, entry.action);
+  assert.equal(draft.auction.clockBanks["team-2"], beforeBank.auction.clockBanks["team-2"] + 20000);
+  assert.equal(draft.auction.clockBanks["team-1"], beforeBank.auction.clockBanks["team-1"]);
+});
+
 test("shared sim actions are logged after the draft completes and survive restarts", async (t) => {
   const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
   const base = await startServer(t, dataDir);

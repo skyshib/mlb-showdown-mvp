@@ -2660,7 +2660,32 @@ function renderPausedPanel(draft) {
       </div>
     </div>
     ${host ? `<div class="lot-actions"><button data-action="resume-draft">&#9654; Resume draft</button></div>` : ""}
+    ${host ? renderGrantTimeControl(draft) : ""}
   </section>`;
+}
+
+// The host's repair for a clock the room owes somebody: a dropped connection, a
+// bid the server ate. It lives on the paused panel because that is where a
+// repair gets made — stop the room, fix the clock, start it again.
+function renderGrantTimeControl(draft) {
+  const auction = isAuctionDraft(draft);
+  if (draft.complete || !(auction ? auctionTimerEnabled(draft) : snakeClockEnabled(draft))) return "";
+  const now = draftNow();
+  const live = liveDraft(draft);
+  // The room re-renders whenever anyone moves, even paused; the markup is built
+  // before the old panel is replaced, so what the host had chosen carries over.
+  const chosenId = document.querySelector("[data-grant-manager]")?.value;
+  const seconds = document.querySelector("[data-grant-seconds]")?.value ?? "20";
+  const options = draft.managers.map((manager) => {
+    const left = auction ? auctionBidTimeRemainingMs(live, manager, now) : snakeTimeRemainingMs(draft, manager, now);
+    return `<option value="${manager.id}" ${manager.id === chosenId ? "selected" : ""}>${escapeHtml(manager.name)} (${formatPickClock(left)} left)</option>`;
+  }).join("");
+  return `<div class="grant-time-control" data-grant-time>
+    <label>Add time to <select data-grant-manager>${options}</select></label>
+    <label><input type="number" data-grant-seconds value="${escapeHtml(seconds)}" step="5" aria-label="Seconds"> seconds</label>
+    <button data-action="grant-time">Add time</button>
+    <span class="muted">A negative number takes time back.</span>
+  </div>`;
 }
 
 // A live online lot is only half-visible here: the amounts stay on the server
@@ -3378,6 +3403,21 @@ function bindDraftActions() {
       selectedLineupMove = null;
       invalidateBatch();
       afterLocalDraftAction();
+    }
+    if (action === "grant-time") {
+      const control = button.closest("[data-grant-time]");
+      const managerId = control?.querySelector("[data-grant-manager]")?.value;
+      const ms = Math.round(Number(control?.querySelector("[data-grant-seconds]")?.value) * 1000);
+      if (!managerId || !Number.isFinite(ms) || ms === 0) return;
+      const grant = { type: "grant-time", managerId, ms };
+      if (state.online) {
+        sendOnlineAction(grant);
+        return;
+      }
+      applyDraftAction(state.draft, grant);
+      saveState();
+      renderDraft();
+      return;
     }
     if (action === "cancel-lot") {
       if (button.disabled) return;

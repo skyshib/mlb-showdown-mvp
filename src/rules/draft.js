@@ -723,13 +723,19 @@ export function pauseAuction(draft, now = Date.now()) {
     if (lot?.clock) {
       // Charge the running clocks now, so the banks are already settled and the
       // pause itself costs nobody anything.
+      // Sealed bids reach the log only when the lot sells, so on replay a bid
+      // placed before this pause is applied after it, while its bidder still
+      // looks pending. Each charge is written down so that bid can refund it.
+      const settlement = { from: lot.clock.startedAt, to: timestamp, charged: {} };
       for (const managerId of lot.pending) {
         const manager = draft.managers.find((item) => item.id === managerId);
         if (!manager) continue;
         const elapsed = Math.max(0, timestamp - lot.clock.startedAt);
         const bank = auctionClockBankMs(draft, manager);
+        settlement.charged[manager.id] = Math.min(bank, elapsed);
         draft.auction.clockBanks[manager.id] = Math.max(0, bank - Math.min(bank, elapsed));
       }
+      lot.clock.settlements = [...(lot.clock.settlements ?? []), settlement];
       lot.clock.startedAt = timestamp;
     }
   }
@@ -865,6 +871,18 @@ function chargeSnakeClock(draft, now) {
 
 export function auctionClockBankMs(draft, manager) {
   return Math.max(0, Number(draft.auction?.clockBanks?.[manager?.id] ?? 0));
+}
+
+// The auction's version of grantSnakeTime: the grant lands on the bank, so a
+// manager with a live lot is still charged for the time already spent on it.
+export function grantAuctionTime(draft, managerId, ms) {
+  if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) return false;
+  const manager = draft.managers.find((entry) => entry.id === managerId);
+  if (!manager) return false;
+  const amount = Number(ms);
+  if (!Number.isFinite(amount) || amount === 0) return false;
+  draft.auction.clockBanks[manager.id] = Math.max(0, auctionClockBankMs(draft, manager) + amount);
+  return true;
 }
 
 export function auctionBidTimeRemainingMs(draft, manager, now = Date.now()) {
@@ -1032,15 +1050,33 @@ export function pendingCpuBidder(draft) {
   return draft.managers.find((manager) => manager.cpu && pending.includes(manager.id)) ?? null;
 }
 
+// Clock a pause charged a bidder after the moment they had already bid. Only a
+// replayed bid, applied behind the pause that followed it, can be owed any.
+function auctionPauseRefundMs(draft, manager, now) {
+  const timestamp = normalizeTimestamp(now);
+  let refund = 0;
+  for (const settlement of draft.auction?.lot?.clock?.settlements ?? []) {
+    if (settlement.to <= timestamp) continue;
+    const charged = Number(settlement.charged?.[manager?.id]) || 0;
+    refund += Math.max(0, charged - Math.max(0, timestamp - settlement.from));
+  }
+  return refund;
+}
+
 export function canPlaceSealedBid(draft, manager, amount, now = Date.now()) {
   const lot = draft.auction?.lot;
   if (!lot) return { ok: false, reason: "no card is on the block" };
-  if (isAuctionPaused(draft)) return { ok: false, reason: "the draft is paused" };
+  // A bid stamped before the pause was placed before it; it is only being
+  // replayed now.
+  if (isAuctionPaused(draft) && !(normalizeTimestamp(now) < draft.auction.pausedAt)) {
+    return { ok: false, reason: "the draft is paused" };
+  }
   if (!isPendingBidder(draft, manager?.id)) {
     const alreadyIn = manager?.id in lot.bids;
     return { ok: false, reason: alreadyIn ? "your bid is already in" : "you are not bidding on this card" };
   }
-  if (lot.clock && auctionBidTimeRemainingMs(draft, manager, now) <= 0) {
+  const refund = lot.clock ? auctionPauseRefundMs(draft, manager, now) : 0;
+  if (lot.clock && auctionBidTimeRemainingMs(draft, manager, now) + refund <= 0) {
     return { ok: false, reason: "bid clock expired" };
   }
   const bid = Math.round(Number(amount));
@@ -1156,6 +1192,8 @@ function submitAuctionClock(draft, manager, now, timedOut) {
   const lot = draft.auction?.lot;
   if (!lot?.clock) return;
   const timestamp = normalizeTimestamp(now);
+  const refund = timedOut ? 0 : auctionPauseRefundMs(draft, manager, timestamp);
+  if (refund) draft.auction.clockBanks[manager.id] = auctionClockBankMs(draft, manager) + refund;
   const elapsed = Math.max(0, timestamp - lot.clock.startedAt);
   const spent = Math.min(auctionClockBankMs(draft, manager), elapsed);
   draft.auction.clockBanks[manager.id] = timedOut ? 0 : Math.max(0, auctionClockBankMs(draft, manager) - spent);
@@ -1414,7 +1452,8 @@ export function applyDraftAction(draft, action) {
       else resumeSnake(draft, action.at);
       return;
     case "grant-time":
-      grantSnakeTime(draft, action.managerId, action.ms);
+      if (isAuctionDraft(draft)) grantAuctionTime(draft, action.managerId, action.ms);
+      else grantSnakeTime(draft, action.managerId, action.ms);
       return;
     case "seat":
       setManagerCpu(draft, action.managerId, action.cpu);

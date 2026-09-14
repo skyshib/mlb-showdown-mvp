@@ -6188,6 +6188,17 @@ button.interesting-game-card:focus-visible {
   color: #8a6a04;
 }
 
+.grant-time-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.grant-time-control input {
+  width: 5em;
+}
+
 .pause-button {
   border-color: #a97f05;
   background: #d9a406;
