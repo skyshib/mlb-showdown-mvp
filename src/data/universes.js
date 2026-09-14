@@ -219,7 +219,10 @@ export function universePool() {
 
 // Classic cards are the real thing: rarity ranks true strength via the raw
 // formula-free signal we have (the printed points ARE the truth), so both
-// truePoints and points stay authentic.
+// truePoints and points stay authentic. Each one is stamped `classic` as it
+// goes out: a dealt deck is just a list of cards by the time the draft rules
+// see it, with no way back to the universe key, and the draft needs to know
+// this set prints a hard 10-point floor.
 function assignAuthenticRarity(pool) {
   const groups = [
     pool.filter((card) => card.kind === "hitter"),
@@ -234,7 +237,7 @@ function assignAuthenticRarity(pool) {
       tiers.set(card.id, RARITY_SHARES.find(([, share]) => fromTop <= share)[0]);
     });
   }
-  return pool.map((card) => ({ ...card, rarity: tiers.get(card.id), truePoints: card.points }));
+  return pool.map((card) => ({ ...card, rarity: tiers.get(card.id), truePoints: card.points, classic: true }));
 }
 
 export function cardById(id) {

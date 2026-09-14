@@ -479,8 +479,14 @@ function managerForPickNumber(draft, pickNumber) {
   return draft.managers[managerIndex];
 }
 
+// What the room can still take: the unpicked board, minus the replacements.
+// A replacement is printed straight into a roster and marked taken in the same
+// breath, so this filter is belt-and-braces — but it is the invariant the
+// auction leans on. He is never nominated, never bid on, never swept to a
+// second manager, and he sits in the pool only so the card can be looked up by
+// id later.
 export function availablePlayers(draft) {
-  return draft.pool.filter((player) => !draft.pickedIds.has(player.id));
+  return draft.pool.filter((player) => !player.replacement && !draft.pickedIds.has(player.id));
 }
 
 // Nothing here asks whether the manager already owns another era of this man.
@@ -490,6 +496,11 @@ export function availablePlayers(draft) {
 export function canPickPlayer(draft, manager, player) {
   if (!player || draft.pickedIds.has(player.id)) {
     return { ok: false, reason: "already picked" };
+  }
+  // A replacement is handed out, never bought: he cannot be nominated, bid on,
+  // or autopicked. Each manager who needs one gets his own copy printed.
+  if (player.replacement) {
+    return { ok: false, reason: "replacements are not auctioned" };
   }
   // With unlimited inactive slots the only thing standing between a manager
   // and a card is the money: no roster cap, no position cap, and no duty to
@@ -1504,9 +1515,7 @@ export function pickReplacement(draft, now = Date.now()) {
   const manager = currentManager(draft);
   const gap = neediestGap(manager.roster, draft);
   if (!gap) throw new Error("Roster has no hole to fill");
-  const replacement = makeReplacementPlayer(
-    draft, manager, gap.kind, gap.role, gap.position, lastPickedEligible(draft, gap)
-  );
+  const replacement = makeReplacementPlayer(draft, manager, gap.kind, gap.role, gap.position);
   chargeSnakeClock(draft, now);
   manager.roster.push(replacement);
   draft.pickedIds.add(replacement.id);
@@ -1526,27 +1535,6 @@ function neediestGap(roster, options = {}) {
   if (gaps.starter > 0) return { kind: "pitcher", role: "SP", position: null };
   if (gaps.bullpen > 0) return { kind: "pitcher", role: "RP", position: null };
   return null;
-}
-
-// The last real card drafted anywhere in the room that could fill this hole,
-// walking the snake order oldest-to-newest and keeping the latest match. That
-// is the card whose drafting usually drained the pool, and the one the
-// replacement copies.
-function lastPickedEligible(draft, gap) {
-  const counters = new Map();
-  let found = null;
-  for (let pick = 0; pick < draft.pickNumber; pick += 1) {
-    const manager = managerForPickNumber(draft, pick);
-    const index = counters.get(manager.id) ?? 0;
-    counters.set(manager.id, index + 1);
-    const player = manager.roster[index];
-    if (!player || player.replacement) continue;
-    if (player.kind !== gap.kind) continue;
-    if (gap.role && pitcherRole(player) !== gap.role) continue;
-    if (gap.position && !positionMatchesSlot(player, gap.position)) continue;
-    found = player;
-  }
-  return found;
 }
 
 function bestAutopickTarget(draft, manager) {
@@ -2707,13 +2695,22 @@ function leagueSupply(players) {
 // REPLACEMENT LEVEL. The board is out of cards that can fill a hole, so the
 // manager is handed the worst card on the board that plays the slot — printed
 // under a plain name, stripped to that one position, and copied rather than
-// moved. Copies repeat on purpose: two managers short a center fielder get the
-// same replacement center fielder, and a hole costs every manager the same.
+// moved. Three rules govern the printings, and they are the same in both draft
+// modes:
 //
-// The card it copies is the CHEAPEST that plays the slot, owned or not, which
-// is the honest floor. The old fabricated card was a 180-point invention on a
-// board whose worst center fielder went for 20 — being swept was a reward.
-function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition, preferredSource = null) {
+// - He never comes up for auction. A replacement is minted at the moment he is
+//   handed out and marked taken in the same breath, so he is never on the block
+//   and never in the hidden queue. He is relief, not a lot.
+// - Copies repeat across teams on purpose. Two managers short a center fielder
+//   get the SAME replacement center fielder — same card, same numbers, same
+//   price — because a hole has to cost every manager the same thing.
+// - His price is the floor of the set (see replacementPoints).
+//
+// The card he copies is the CHEAPEST that plays the slot, owned or not, read
+// over the whole deck so every manager's copy is identical and the price is
+// honest. The old fabricated card was a 180-point invention on a board whose
+// worst center fielder went for 20 — being swept was a reward.
+function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition) {
   const slot = replacementSlot(neededKind, neededRole, neededPosition);
   const priorAtSlot = manager.roster.filter((player) => player.replacement && player.slot === slot).length;
   // "Replacement LF/RF", then "Replacement LF/RF #2" — the corner slots are the
@@ -2722,12 +2719,7 @@ function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPos
   // them apart is a roster nobody can read.
   const name = priorAtSlot === 0 ? `Replacement ${slot}` : `Replacement ${slot} #${priorAtSlot + 1}`;
   const id = `replacement-${manager.id}-${slot.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${priorAtSlot + 1}`;
-  // The caller may hand in the card to copy — the snake stall copies the last
-  // real card drafted at the slot. Otherwise fall back to the cheapest on the
-  // board, which is the auction sweep's honest floor.
-  const source = preferredSource && !preferredSource.replacement
-    ? preferredSource
-    : replacementSource(draft, neededKind, neededRole, neededPosition);
+  const source = replacementSource(draft, neededKind, neededRole, neededPosition);
   const replacement = source
     ? copyAsReplacement(source, { id, name, slot, kind: neededKind })
     : fabricateReplacement({ id, name, slot, kind: neededKind });
@@ -2753,15 +2745,28 @@ function replacementSource(draft, kind, role, position) {
     .sort((a, b) => a.points - b.points || a.id.localeCompare(b.id))[0] ?? null;
 }
 
-// His numbers, not his name: the chart, the on-base, the arm and the price
-// come across; the face, the team and the season don't. He fields the one slot
-// he was called up for and nothing else.
+// What a replacement is printed at: the floor of the set he comes from. Classic
+// Showdown's floor is a hard 10 — the least any real card was ever worth — and
+// he reads 10 even when the deck dealt no 10-point card at his slot, because a
+// card handed out for free should never total up like a card somebody paid for.
+// Every other pool prices on its own seeded curve, where the floor at a slot is
+// the cheapest card there: the very card he is copying.
+const CLASSIC_REPLACEMENT_POINTS = 10;
+
+function replacementPoints(source) {
+  return source.classic ? CLASSIC_REPLACEMENT_POINTS : source.points;
+}
+
+// His numbers, not his name: the chart, the on-base and the arm come across;
+// the face, the team, the season and the price don't. He fields the one slot he
+// was called up for and nothing else.
 function copyAsReplacement(source, { id, name, slot, kind }) {
   const card = {
     ...source,
     id,
     name,
     slot,
+    points: replacementPoints(source),
     replacement: true,
     sourceId: source.id,
     team: "FA",

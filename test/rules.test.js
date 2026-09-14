@@ -1423,6 +1423,89 @@ test("the sweep hands managers short at a position a copy of the worst card who 
   assert.deepEqual(validateRoster(draft.managers[1]), []);
 });
 
+test("a classic replacement is printed at the set's ten-point floor", () => {
+  // Classic Showdown never printed a card under 10 points, so that is what a
+  // replacement costs there — even when the deck it was dealt from happens to
+  // hold nothing cheap at the slot. The card's NUMBERS still come across; only
+  // the price is the set's, not the copied man's.
+  const dear = makeHitter({
+    id: "sd-03-ul-cf-dear",
+    name: "Dear Glove '03",
+    position: "CF",
+    points: 90,
+    onBase: 9,
+    classic: true,
+    positions: [{ pos: "CF", fielding: 2 }]
+  });
+  const short = rosterMissingOutfield("classic-short", ["CF"]);
+  const hoarder = rosterMissingOutfield("classic-hog", ["CF"]);
+  const pool = [dear, ...short, ...hoarder].map((card) => ({ ...card, classic: true }));
+  const draft = createDraft(["Short", "Hoarder"], pool, 13, "replacement-classic", AUCTION_ROOM);
+  draft.managers[0].roster = pool.filter((card) => card.id.startsWith("classic-short"));
+  draft.managers[1].roster = [...pool.filter((card) => card.id.startsWith("classic-hog")), pool[0]];
+  draft.pickedIds = new Set(pool.map((player) => player.id));
+
+  sweepRosters(draft);
+
+  const printed = draft.managers[0].roster.find((player) => player.replacement);
+  assert.ok(printed, "the sweep fills the hole");
+  assert.equal(printed.points, 10, "the floor of the set, not the 90 the copied man cost");
+  assert.equal(printed.onBase, 9, "his numbers still come across");
+  assert.equal(printed.sourceId, "sd-03-ul-cf-dear");
+});
+
+test("outside the classic set a replacement costs what the pool's floor costs", () => {
+  // Every other pool prices on its own seeded curve, so there is no 10 to print:
+  // the floor at a slot is the cheapest card there, and that is the card he is.
+  const cheap = makeHitter({
+    id: "curve-cf-cheap",
+    name: "Cheap Glove",
+    position: "CF",
+    points: 64,
+    positions: [{ pos: "CF", fielding: 1 }]
+  });
+  const short = rosterMissingOutfield("curve-short", ["CF"]);
+  const hoarder = rosterMissingOutfield("curve-hog", ["CF"]);
+  const pool = [cheap, ...short, ...hoarder];
+  const draft = createDraft(["Short", "Hoarder"], pool, 13, "replacement-curve", AUCTION_ROOM);
+  draft.managers[0].roster = [...short];
+  draft.managers[1].roster = [...hoarder, cheap];
+  draft.pickedIds = new Set(pool.map((player) => player.id));
+
+  sweepRosters(draft);
+
+  const printed = draft.managers[0].roster.find((player) => player.replacement);
+  assert.equal(printed.points, 64, "the cheapest center fielder in this pool, priced as he is");
+});
+
+test("a replacement never comes up for auction", () => {
+  const cheap = makeHitter({
+    id: "block-cf",
+    name: "Only Glove",
+    position: "CF",
+    points: 20,
+    positions: [{ pos: "CF", fielding: 1 }]
+  });
+  const short = rosterMissingOutfield("block-short", ["CF"]);
+  const hoarder = rosterMissingOutfield("block-hog", ["CF"]);
+  const pool = [cheap, ...short, ...hoarder];
+  const draft = createDraft(["Short", "Hoarder"], pool, 13, "replacement-unbiddable", AUCTION_ROOM);
+  draft.managers[0].roster = [...short];
+  draft.managers[1].roster = [...hoarder, cheap];
+  draft.pickedIds = new Set(pool.map((player) => player.id));
+
+  sweepRosters(draft);
+
+  const printed = draft.managers[0].roster.find((player) => player.replacement);
+  assert.ok(printed, "the sweep printed one");
+  // He is in the pool so the card can be looked up by id, and nowhere else: not
+  // on the board, not biddable, and not in the hidden nomination queue.
+  assert.ok(draft.pool.some((player) => player.id === printed.id), "the card is findable by id");
+  assert.equal(availablePlayers(draft).some((player) => player.id === printed.id), false);
+  assert.equal(canPickPlayer(draft, draft.managers[1], printed).ok, false, "nobody can buy him");
+  assert.equal(draft.auction.queue.includes(printed.id), false, "and the queue never deals him");
+});
+
 test("two holes at the same slot print numbered replacements", () => {
   const corner = makeHitter({
     id: "corner-only",
@@ -1499,7 +1582,7 @@ test("draft blocks picks that would consume another manager's only required posi
   assert.equal(safePick.ok, true);
 });
 
-test("snake hands a stalled manager a replacement copy of the last card drafted at the slot", () => {
+test("snake hands a stalled manager a copy of the cheapest card at the slot", () => {
   const makeBat = (id, position, extra = {}) =>
     makeHitter({ id, position, positions: [{ pos: position, fielding: 2 }], ...extra });
   const teamOne = [
@@ -1557,7 +1640,7 @@ test("snake hands a stalled manager a replacement copy of the last card drafted 
   const printed = draft.managers[0].roster.find((player) => player.replacement);
   assert.ok(printed, "the stall is filled rather than throwing");
   assert.equal(printed.name, "Replacement C");
-  assert.equal(printed.sourceId, "stall-two-c", "copies the last real catcher drafted");
+  assert.equal(printed.sourceId, "stall-two-c", "copies the cheapest catcher on the board");
   assert.equal(printed.onBase, 11, "his numbers come across");
   assert.equal(printed.points, 175);
   assert.deepEqual(printed.positions, [{ pos: "C", fielding: 4 }]);
