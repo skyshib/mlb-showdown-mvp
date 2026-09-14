@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, conflictsWithIndex, personConflict, personIndex, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, maxSeriesStarts, normalizeCardPosition, pauseSnake, pickPlayer, pickRandomStarter, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, staffSlotLabels, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, maxSeriesStarts, nominationQueueRemaining, normalizeCardPosition, pauseSnake, pickPlayer, pickRandomStarter, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, staffSlotLabels, standingReplacement, standingReplacements, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { buildDraftPool } from "../src/data/universes.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
   applyDouble,
@@ -1421,6 +1422,80 @@ test("the sweep hands managers short at a position a copy of the worst card who 
   assert.notEqual(copies[0].id, copies[1].id, "two copies, two cards");
   assert.deepEqual(validateRoster(draft.managers[0]), []);
   assert.deepEqual(validateRoster(draft.managers[1]), []);
+});
+
+test("a classic auction sweeps holes with the standing card, not the leftovers", () => {
+  // A real classic room: the board holds unsold cards at every slot, some of
+  // them a good deal better than 10 points. None of that matters — a manager
+  // who finishes short gets the card that wore the badge all night.
+  const pool = buildDraftPool("classic", "standing-sweep", { nomination: "random", managerCount: 3 });
+  const draft = createDraft(["One", "Two", "Three"], pool, 13, "standing-sweep", AUCTION_ROOM);
+  const standingCf = standingReplacement(draft, "CF");
+  assert.ok(standingCf, "the room dealt a standing center fielder");
+  assert.equal(standingCf.points, 10);
+
+  // Nobody drafts anything, so every roster is nothing but holes.
+  sweepRosters(draft);
+
+  for (const manager of draft.managers) {
+    assert.deepEqual(validateRoster(manager), [], `${manager.name} finished illegal`);
+    for (const card of manager.roster) {
+      assert.equal(card.replacement, true, `${card.name} came off the board, not the floor`);
+      assert.equal(card.points, 10);
+    }
+  }
+
+  // Every manager's center fielder is the SAME man — same card, same numbers,
+  // same price — because a hole costs the room one thing.
+  const centers = draft.managers.map((manager) =>
+    manager.roster.find((card) => card.sourceId === standingCf.id));
+  for (const card of centers) {
+    assert.ok(card, "each roster got the standing center fielder");
+    assert.equal(card.name, standingCf.name);
+    assert.equal(card.onBase, standingCf.onBase);
+  }
+  assert.equal(new Set(centers.map((card) => card.id)).size, 3, "three copies, three cards");
+
+  // And the board he stands over is untouched: the leftovers stay unsold.
+  const cheapestUnsold = availablePlayers(draft)
+    .filter((card) => card.kind === "hitter")
+    .sort((a, b) => a.points - b.points)[0];
+  assert.ok(cheapestUnsold.points > 10 || !cheapestUnsold.replacement);
+  assert.equal(draft.managers.some((manager) =>
+    manager.roster.some((card) => !card.replacement)), false, "nobody was handed a real card");
+});
+
+test("the standing replacement is never biddable and never queued", () => {
+  const pool = buildDraftPool("classic", "standing-unbiddable", { nomination: "random", managerCount: 3 });
+  const draft = createDraft(["One", "Two", "Three"], pool, 13, "standing-unbiddable", AUCTION_ROOM);
+  const standing = standingReplacements(draft);
+  assert.equal(standing.length, 9);
+
+  for (const card of standing) {
+    assert.equal(availablePlayers(draft).some((player) => player.id === card.id), false);
+    assert.equal(canPickPlayer(draft, draft.managers[0], card).ok, false);
+    assert.equal(draft.auction.queue.includes(card.id), false);
+  }
+  // The queue still deals a full board: taking the standing cards out of it did
+  // not cost the room a lot.
+  assert.equal(draft.auction.queue.length, nominationQueueRemaining(draft));
+  assert.ok(draft.auction.queue.length > 0);
+});
+
+test("one roster can hold the same standing replacement twice", () => {
+  const pool = buildDraftPool("classic", "standing-twice", { nomination: "random", managerCount: 3 });
+  const draft = createDraft(["One", "Two", "Three"], pool, 13, "standing-twice", AUCTION_ROOM);
+  const corner = standingReplacement(draft, "LF/RF");
+
+  sweepRosters(draft);
+
+  // Two corner outfield slots, one standing corner: the same card, twice, and
+  // the second one numbered so the roster can be read.
+  const copies = draft.managers[0].roster.filter((card) => card.sourceId === corner.id);
+  assert.equal(copies.length, 2);
+  assert.deepEqual(copies.map((card) => card.name), [corner.name, `${corner.name} #2`]);
+  assert.equal(new Set(copies.map((card) => card.id)).size, 2, "two cards, not one card twice");
+  assert.deepEqual(validateRoster(draft.managers[0]), []);
 });
 
 test("a classic replacement is printed at the set's ten-point floor", () => {

@@ -85,7 +85,12 @@ export function renderPlayerTable(players, options = {}) {
       // up next, so a dead "Blocked" button on every row of the deck says
       // nothing. Where hideBlocked is set, the cell simply stays empty and the
       // sold tags have the column to themselves.
-      const action = owner
+      // A standing replacement is nobody's to take: he is handed out, free, to
+      // whoever finishes short. A dead "Blocked" button would read as a card
+      // somebody might get to — the badge already says what he is.
+      const action = player.replacement
+        ? `<span class="free-tag" title="Free at the close of the draft to anyone short at ${escapeHtml(player.slot ?? "this slot")} — never up for bid">Free</span>`
+        : owner
         ? `<span class="sold-tag" title="${escapeHtml(owner.title ?? "")}"><span class="sold-owner">${escapeHtml(owner.label)}</span>${owner.round ? `<span class="sold-round">R${owner.round}</span>` : ""}${owner.detail ? `<span class="sold-detail">${escapeHtml(owner.detail)}</span>` : ""}</span>`
         : options.action && (legality.ok || !options.hideBlocked)
           ? `<button class="small" data-action="${options.action}" data-player-id="${player.id}" ${legality.ok ? "" : "disabled"} title="${escapeHtml(legality.reason)}">${legality.ok ? (options.label ?? "Pick") : "Blocked"}</button>`

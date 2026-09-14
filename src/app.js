@@ -118,6 +118,8 @@ import {
   snakeTimeRemainingMs,
   staffStatus,
   staffSlotLabels,
+  standingReplacement,
+  standingReplacements,
   startAuctionReview,
   startSnakeClock,
   syncAuctionTimer,
@@ -6961,11 +6963,17 @@ function renderPoolFloor(draft) {
       const eligible = available.filter((player) =>
         poolGroupEligible(player, group) && !(onBlock && player.id === lotPlayer.id));
       const blockNote = onBlock ? `<em class="floor-onblock">+1 up now</em>` : "";
+      // The standing replacement IS the floor where a room deals one: what is
+      // left on the board is what you can still BUY, and he is what you get if
+      // you buy none of it. A group with nothing left still has him.
+      const standing = standingReplacement(draft, group === "1B" ? "DH" : group);
       if (!eligible.length) {
-        return `<span class="floor-chip floor-empty"><small>${group} ${blockNote}</small><strong>none left${onBlock ? " after this" : ""}</strong></span>`;
+        return standing
+          ? `<span class="floor-chip floor-empty"><small>${group} &middot; none left ${blockNote}</small>${previewChip("floor", standing)}</span>`
+          : `<span class="floor-chip floor-empty"><small>${group} ${blockNote}</small><strong>none left${onBlock ? " after this" : ""}</strong></span>`;
       }
       const best = eligible.reduce((high, player) => (player.points > high.points ? player : high));
-      const floor = eligible.reduce((low, player) => (player.points < low.points ? player : low));
+      const floor = standing ?? eligible.reduce((low, player) => (player.points < low.points ? player : low));
       const lines = best === floor
         ? previewChip("last:", best)
         : `${previewChip("best", best)}${previewChip("floor", floor)}`;
@@ -7000,6 +7008,19 @@ function poolGroupEligible(player, group) {
 function replacementLevelGroups(draft) {
   const levels = new Map();
   if (!draft) return levels;
+  // A room that dealt standing replacements has a FIXED floor: the badge sits on
+  // the same nine unbiddable cards from the first lot to the last, so what a
+  // hole costs is knowable all night instead of drifting as the board sells.
+  // First base has no standing card of its own — a hole at first is a hole for a
+  // bat, any glove covers the bag — so the DH card stands floor there too.
+  const standing = standingReplacements(draft);
+  if (standing.length) {
+    for (const group of BOARD_POSITION_GROUPS) {
+      const floor = standing.find((player) => player.slot === (group === "1B" ? "DH" : group));
+      if (floor) levels.set(floor.id, [...(levels.get(floor.id) ?? []), group]);
+    }
+    return levels;
+  }
   const available = availablePlayers(draft);
   for (const group of BOARD_POSITION_GROUPS) {
     const floor = available

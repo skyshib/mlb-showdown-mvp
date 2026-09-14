@@ -4,7 +4,7 @@ import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260716-records";
-import { poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
+import { ANY_HITTER, CORNER_OUTFIELD_POSITION, poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
 import { authenticPoints } from "../rules/pricing.js?v=20260716-records";
 import { PRICE_MODEL } from "./priceModel.js";
 
@@ -514,7 +514,77 @@ export function buildDraftPool(mode, seed, options = {}) {
   const deck = options.nomination === "random"
     ? dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers)
     : dealDraftDeck(seed, options.managerCount, options.startingPitchers);
-  return universeKey() === "fictional" ? ensureGoldenTicket(deck, seed) : deck;
+  const dealt = universeKey() === "fictional" ? ensureGoldenTicket(deck, seed) : deck;
+  return [...dealt, ...dealReplacementCards(dealt, seed)];
+}
+
+// THE STANDING REPLACEMENTS. Every room deals nine cards nobody can buy: one
+// scrub at every slot, sitting on the board from the first lot wearing the
+// replacement-level badge. That card is what a hole costs — finish the night
+// without a center fielder and this is the man who plays center for you, for
+// free. He is never nominated, and he is copied rather than taken, so he can
+// turn up on every roster in the room and twice on one of them.
+//
+// He is drawn at RANDOM from the bottom of the market, not taken as the worst
+// or the best of it. Cards down there are not all equal — the classic set
+// printed Barry Larkin at 10 points — so picking by quality would either hand
+// the room a bargain or invent a floor crueler than anything the set sold. The
+// roll is seeded, so the room replays identically and everyone reads the same
+// nine faces.
+//
+// A person deals once across the whole board, so the roll skips anyone already
+// dealt into the biddable deck: no manager should be bidding on a man his
+// rivals are being handed. Only if a slot's whole floor is on the board does
+// that rule give way — a standing card at every slot is the promise, and a
+// duplicated face is a smaller price than a slot with no floor.
+const CLASSIC_REPLACEMENT_POINTS = 10;
+const REPLACEMENT_PERCENTILE = 0.05;
+
+// One per slot the sweep can be asked for. No 1B: a hole at first is a hole for
+// a BAT (any glove covers the bag), so the DH card stands floor there too.
+const REPLACEMENT_SLOTS = ["C", "2B", "3B", "SS", CORNER_OUTFIELD_POSITION, "CF", "DH", "SP", "RP"];
+
+// Where the bottom of the market IS, which is a different question in each set.
+// Classic has a real rung to stand on: it never printed a card under 10 points
+// and it printed 127 of them, so the floor is that rung, and a 10-point card is
+// a thing a manager recognizes. Every other pool prices on a seeded rank curve
+// with no rung at all — the cheapest card is whatever the curve bottomed out at
+// this time — so the floor is defined by SHAPE instead: the cheapest 5% at the
+// slot. Same idea either way, measured where the market actually is.
+//
+// The percentile is read per SLOT, not across the pool. A set's cheapest 5%
+// overall is whichever group the curve prices lowest — the relievers, usually —
+// and a floor read that way would have no catchers in it at all.
+function replacementCandidates(pool, group) {
+  const atSlot = pool.filter((card) => poolGroupMatches(card, group));
+  if (universeKey() === "classic") {
+    const rung = atSlot.filter((card) => card.points === CLASSIC_REPLACEMENT_POINTS);
+    if (rung.length) return rung;
+  }
+  const ranked = [...atSlot].sort((a, b) => a.points - b.points || a.id.localeCompare(b.id));
+  return ranked.slice(0, Math.max(1, Math.ceil(ranked.length * REPLACEMENT_PERCENTILE)));
+}
+
+export function dealReplacementCards(deck, seed) {
+  const rng = createRng(`replacements:${universeKey()}:${seed}`);
+  const pool = universePool();
+  const dealtPeople = new Set(deck.map((card) => cardPerson(card)));
+  const taken = new Set();
+  const cards = [];
+  for (const slot of REPLACEMENT_SLOTS) {
+    // "DH" is not a printed position — it is the bat-shaped hole — so that seat
+    // draws on every hitter in the set, exactly as the deal's own DH group
+    // draws on whatever hitters the position groups left behind.
+    const group = slot === "DH" ? ANY_HITTER : slot;
+    const eligible = replacementCandidates(pool, group).filter((card) => !taken.has(cardPerson(card)));
+    const fresh = eligible.filter((card) => !dealtPeople.has(cardPerson(card)));
+    const candidates = fresh.length ? fresh : eligible;
+    if (!candidates.length) continue;
+    const card = candidates[rng.int(0, candidates.length - 1)];
+    taken.add(cardPerson(card));
+    cards.push({ ...card, slot, replacement: true });
+  }
+  return cards;
 }
 
 // Every fictional deck carries exactly one golden ticket. The deal slices a
@@ -553,6 +623,10 @@ function ensureGoldenTicket(deck, seed) {
 // that came back untagged would deal its DH bats out of the center-field
 // reserve, which is the whole thing the tag exists to prevent.
 export function deckEntry(card) {
+  // A standing replacement rides along in the deck like any other dealt card,
+  // and the flag has to ride with it: rebuilt without it he would come back a
+  // biddable 10-point card and the room would have no floor.
+  if (card.replacement) return { id: card.id, slot: card.slot, replacement: true };
   return card.slot ? { id: card.id, slot: card.slot } : card.id;
 }
 
@@ -565,6 +639,7 @@ export function deckFromIds(mode, seed, entries, temperature = 0) {
     const card = cardById(id);
     if (!card) throw new Error(`Deck card ${id} is not in the ${mode} set`);
     const slot = typeof entry === "string" ? null : entry?.slot ?? null;
+    if (entry?.replacement) return { ...card, slot, replacement: true };
     return slot ? { ...card, slot } : card;
   });
 }

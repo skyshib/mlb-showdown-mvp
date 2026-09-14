@@ -19,6 +19,7 @@ import {
   randomNominationCounts,
   randomNominationQuotas,
   randomNominationShortfalls,
+  standingReplacements,
   undoLastPick,
   validateRoster
 } from "../src/rules/draft.js";
@@ -40,12 +41,19 @@ function roomOf(managerCount, seed = "rn-seed") {
   return { draft, pool };
 }
 
+// The quotas describe the BIDDABLE board. A classic room also deals a standing
+// replacement at every slot — one more card in each group that nobody can buy —
+// so the counts that check the deal have to leave them out.
+function biddable(cards) {
+  return cards.filter((card) => !card.replacement);
+}
+
 function countGroup(cards, group) {
-  return cards.filter((card) => poolGroup(card) === group).length;
+  return biddable(cards).filter((card) => poolGroup(card) === group).length;
 }
 
 function countHitters(cards) {
-  return cards.filter((card) => card.kind === "hitter").length;
+  return biddable(cards).filter((card) => card.kind === "hitter").length;
 }
 
 test("the roster slot table is the 13-man roster, spelled out", () => {
@@ -228,9 +236,14 @@ test("every manager finishes with a legal roster, however the bidding went", () 
       assert.ok(manager.roster.length >= 13, `${manager.name} has only ${manager.roster.length} cards`);
     }
 
-    // Nobody was handed a printed replacement: the board covered the sweep.
-    const printed = draft.pool.filter((card) => card.replacement);
-    assert.deepEqual(printed, [], `${managerCount} managers: the sweep had to print ${printed.length} players`);
+    // Every hole was filled from the standing replacements — copies of the nine
+    // unbiddable 10-point cards the room dealt — and never from thin air.
+    const standing = new Set(standingReplacements(draft).map((card) => card.id));
+    const printed = draft.pool.filter((card) => card.replacement && card.sourceId);
+    for (const card of printed) {
+      assert.ok(standing.has(card.sourceId), `${card.name} is not a copy of a standing replacement`);
+      assert.equal(card.points, 10, `${card.name} was handed out above the floor`);
+    }
   }
 });
 
@@ -262,12 +275,16 @@ test("a manager who wins every single lot cannot exhaust the board", () => {
       const issues = validateRoster(manager, { unlimitedRoster: true });
       assert.deepEqual(issues, [], `${managerCount} managers: ${manager.name} finished illegal — ${issues.join(", ")}`);
     }
-    const printed = draft.pool.filter((card) => card.replacement);
-    assert.deepEqual(
-      printed.map((card) => card.name),
-      [],
-      `${managerCount} managers: the sweep ran out of real cards`
-    );
+    // The hoarder's rivals drafted nothing at all, so every slot they own is a
+    // standing-replacement copy — which is exactly the promise: a hole always
+    // costs the badged 10-point card, never more and never nothing.
+    const standing = new Set(standingReplacements(draft).map((card) => card.id));
+    for (const manager of draft.managers.slice(1)) {
+      for (const card of manager.roster) {
+        assert.ok(standing.has(card.sourceId), `${manager.name} holds ${card.name}, which the sweep did not print`);
+        assert.equal(card.points, 10);
+      }
+    }
   }
 });
 

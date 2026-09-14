@@ -165,8 +165,12 @@ export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_
 export function randomNominationShortfalls(pool, managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS) {
   const shortfalls = [];
   const taken = new Set();
+  // The standing replacements are not supply: they are dealt on top of the
+  // board, one per slot, and counting them would tell a room its thin catcher
+  // pile is one catcher deeper than it is.
+  const biddable = pool.filter((player) => !player.replacement);
   for (const [group, quota] of randomNominationQuotas(managerCount, startingPitchers).visible) {
-    const available = pool.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
+    const available = biddable.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
     for (const player of available.slice(0, quota)) taken.add(player.id);
     if (available.length < quota) shortfalls.push({ group, quota, dealt: available.length });
   }
@@ -180,8 +184,11 @@ export function randomNominationShortfalls(pool, managerCount, startingPitchers 
 // way seats eight however the secondary listings fall.
 export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHERS) {
   const starterTarget = normalizeStartingPitchers(startingPitchers);
-  const hitters = pool.filter((player) => player.kind === "hitter");
-  const pitchers = pool.filter((player) => player.kind === "pitcher");
+  // Same reason the shortfall check skips them: a card nobody can draft seats
+  // nobody, however many rosters it ends up on.
+  const biddable = pool.filter((player) => !player.replacement);
+  const hitters = biddable.filter((player) => player.kind === "hitter");
+  const pitchers = biddable.filter((player) => player.kind === "pitcher");
   const countPosition = (position) => hitters.filter((player) => player.position === position).length;
   return Math.min(
     ...EXACT_REQUIRED_POSITIONS.map(countPosition),
@@ -189,7 +196,7 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
     Math.floor(hitters.length / HITTER_TARGET),
     Math.floor(pitchers.filter((player) => player.role === "SP").length / starterTarget),
     Math.floor(pitchers.filter((player) => player.role !== "SP").length / BULLPEN_TARGET),
-    Math.floor(pool.length / rosterSizeForStartingPitchers(starterTarget))
+    Math.floor(biddable.length / rosterSizeForStartingPitchers(starterTarget))
   );
 }
 
@@ -401,7 +408,8 @@ function buildNominationQueue(draft) {
   const queue = [];
   const queued = new Set();
   for (const [group, count] of hidden) {
-    const cards = draft.pool.filter((player) => !queued.has(player.id) && dealtInSlot(player, group));
+    const cards = draft.pool.filter((player) =>
+      !player.replacement && !queued.has(player.id) && dealtInSlot(player, group));
     for (const player of shuffleSeeded(cards, rng).slice(0, count)) {
       queued.add(player.id);
       queue.push(player);
@@ -485,6 +493,18 @@ function managerForPickNumber(draft, pickNumber) {
 // auction leans on. He is never nominated, never bid on, never swept to a
 // second manager, and he sits in the pool only so the card can be looked up by
 // id later.
+// THE STANDING REPLACEMENTS: the unbiddable 10-point cards a classic room deals
+// alongside its board, one per slot. They are dealt cards, so they carry their
+// own real ids; a copy handed to a manager carries `sourceId` and a minted id,
+// which is how the two are told apart without another flag to persist.
+export function standingReplacements(draft) {
+  return (draft?.pool ?? []).filter((player) => player.replacement && !player.sourceId);
+}
+
+export function standingReplacement(draft, slot) {
+  return standingReplacements(draft).find((player) => player.slot === slot) ?? null;
+}
+
 export function availablePlayers(draft) {
   return draft.pool.filter((player) => !player.replacement && !draft.pickedIds.has(player.id));
 }
@@ -2424,13 +2444,18 @@ export function sweepRosters(draft) {
         return index === -1 ? reserve.length : index;
       };
 
-      const replacement = availablePlayers(draft)
-        .filter((player) => !player.replacement)
-        .filter((player) => player.kind === neededKind)
-        .filter((player) => !neededRole || pitcherRole(player) === neededRole)
-        .filter((player) => !neededPosition || positionMatchesSlot(player, neededPosition))
-        .sort((a, b) => fromReserve(a) - fromReserve(b) || a.points - b.points || a.id.localeCompare(b.id))[0]
-        ?? makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition);
+      // A room with a standing card at the slot never goes to the board at all:
+      // the badge has said all night what a hole costs, and it costs that. The
+      // unsold leftovers stay unsold, which is the point — nobody finds out at
+      // the buzzer that his hole was quietly worth a 50-point center fielder.
+      const replacement = standingReplacement(draft, replacementSlot(neededKind, neededRole, neededPosition))
+        ? makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition)
+        : availablePlayers(draft)
+          .filter((player) => player.kind === neededKind)
+          .filter((player) => !neededRole || pitcherRole(player) === neededRole)
+          .filter((player) => !neededPosition || positionMatchesSlot(player, neededPosition))
+          .sort((a, b) => fromReserve(a) - fromReserve(b) || a.points - b.points || a.id.localeCompare(b.id))[0]
+          ?? makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition);
 
       manager.roster.push(replacement);
       draft.pickedIds.add(replacement.id);
@@ -2661,7 +2686,9 @@ function repairManagerRoster(draft, manager) {
 function canLeagueFinishAfterPick(draft, pickingManager, nextRoster, pickedPlayer) {
   const pickedIds = new Set(draft.pickedIds);
   pickedIds.add(pickedPlayer.id);
-  const remaining = draft.pool.filter((player) => !pickedIds.has(player.id));
+  // Replacements are not supply: they finish any roster, so counting them would
+  // answer "can the league finish" with yes forever and retire the guard.
+  const remaining = draft.pool.filter((player) => !player.replacement && !pickedIds.has(player.id));
   const demand = emptyLeagueDemand();
 
   for (const manager of draft.managers) {
@@ -2745,19 +2772,28 @@ function leagueSupply(players) {
 //   price — because a hole has to cost every manager the same thing.
 // - His price is the floor of the set (see replacementPoints).
 //
-// The card he copies is the CHEAPEST that plays the slot, owned or not, read
-// over the whole deck so every manager's copy is identical and the price is
-// honest. The old fabricated card was a 180-point invention on a board whose
-// worst center fielder went for 20 — being swept was a reward.
+// A classic room has a STANDING card at the slot — the man on the board wearing
+// the badge — and he is simply copied, whole: his name, his face, his printed
+// positions and his 10 points. Every other room has no such card, so it falls
+// back to copying the CHEAPEST card that plays the slot, owned or not, read over
+// the whole deck so every manager's copy is identical and the price is honest.
+// The old fabricated card was a 180-point invention on a board whose worst
+// center fielder went for 20 — being swept was a reward.
 function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition) {
   const slot = replacementSlot(neededKind, neededRole, neededPosition);
   const priorAtSlot = manager.roster.filter((player) => player.replacement && player.slot === slot).length;
-  // "Replacement LF/RF", then "Replacement LF/RF #2" — the corner slots are the
-  // only place one roster takes two of the same, but the numbering costs
-  // nothing and a roster that lists the same name twice with no way to tell
-  // them apart is a roster nobody can read.
-  const name = priorAtSlot === 0 ? `Replacement ${slot}` : `Replacement ${slot} #${priorAtSlot + 1}`;
   const id = `replacement-${manager.id}-${slot.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${priorAtSlot + 1}`;
+  // A second copy at the same slot — the corners are where it happens — reads
+  // as the same name twice on the roster, so it takes a number. Nobody can tell
+  // two identical cards apart otherwise.
+  const numbered = (base) => (priorAtSlot === 0 ? base : `${base} #${priorAtSlot + 1}`);
+  const standing = standingReplacement(draft, slot);
+  if (standing) {
+    const copy = { ...standing, id, sourceId: standing.id, name: numbered(standing.name) };
+    draft.pool.push(copy);
+    return copy;
+  }
+  const name = numbered(`Replacement ${slot}`);
   const source = replacementSource(draft, neededKind, neededRole, neededPosition);
   const replacement = source
     ? copyAsReplacement(source, { id, name, slot, kind: neededKind })

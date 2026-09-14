@@ -13,7 +13,7 @@ import {
   universeKey,
   universePool
 } from "../src/data/universes.js";
-import { autopick, createDraft, maxPoolManagers, validateRoster } from "../src/rules/draft.js";
+import { autopick, createDraft, maxPoolManagers, randomNominationShortfalls, validateRoster } from "../src/rules/draft.js";
 import { battlePhase, createBattle, fastForward } from "../src/rules/battle/controller.js";
 import { personConflict } from "../src/rules/cards.js";
 
@@ -239,4 +239,85 @@ test("every fictional deck seats exactly one golden ticket, and it survives an i
   // Real-player decks stay untouched: the golden printing is a fictional thing.
   const classic = buildDraftPool("classic", "night-a");
   assert.equal(classic.filter((card) => card.egg === "golden").length, 0);
+});
+
+test("every deck carries a standing replacement at every slot", () => {
+  const SLOTS = ["C", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
+  for (const nomination of ["manual", "random"]) {
+    const deck = buildDraftPool("classic", "standing-a", { nomination, managerCount: 4 });
+    const standing = deck.filter((card) => card.replacement);
+    assert.deepEqual(standing.map((card) => card.slot), SLOTS, `${nomination}: one per slot, in slot order`);
+    assert.deepEqual(standing.map((card) => card.points), Array(SLOTS.length).fill(10));
+    // He is a REAL card of the set, not an invention: he has the set's id.
+    for (const card of standing) assert.ok(cardById(card.id), `${card.name} is not a card of the set`);
+    // A person deals once across the whole board — nobody bids on a man the
+    // room is handing out for free.
+    for (const card of standing) {
+      assert.equal(
+        deck.filter((other) => !other.replacement && personConflict([other], card)).length,
+        0,
+        `${card.name} is also on the biddable board`
+      );
+    }
+  }
+
+  // The other sets have no 10-point rung to stand on, so their floor is read as
+  // a shape instead: the cheapest 5% at the slot, one of them at random.
+  for (const mode of ["fictional", "mlb-history", "decade-1990", "franchise-SEA"]) {
+    const deck = buildDraftPool(mode, "standing-a", { nomination: "random", managerCount: 4 });
+    const standing = deck.filter((card) => card.replacement);
+    assert.deepEqual(standing.map((card) => card.slot), SLOTS, `${mode}: one per slot`);
+    const pool = universePool();
+    for (const card of standing) {
+      const atSlot = pool
+        .filter((other) => (card.kind === "pitcher"
+          ? other.role === card.role
+          : other.kind === "hitter" && (card.slot === "DH" || other.position === card.slot)))
+        .map((other) => other.points)
+        .sort((a, b) => a - b);
+      const cut = atSlot[Math.max(0, Math.ceil(atSlot.length * 0.05) - 1)];
+      assert.ok(
+        card.points <= cut,
+        `${mode}: the standing ${card.slot} costs ${card.points}, above the slot's 5th percentile of ${cut}`
+      );
+    }
+  }
+});
+
+test("the standing replacements are seeded, and survive the trip through a room's deck record", async () => {
+  const { deckEntry, deckFromIds } = await import("../src/data/universes.js");
+  const names = (seed) => buildDraftPool("classic", seed, { nomination: "random", managerCount: 4 })
+    .filter((card) => card.replacement)
+    .map((card) => card.name);
+
+  // Same seed, same nine faces; a different seed deals different ones, which is
+  // the point of rolling them at random rather than taking the worst.
+  assert.deepEqual(names("standing-a"), names("standing-a"));
+  assert.notDeepEqual(names("standing-a"), names("standing-b"));
+
+  const deck = buildDraftPool("classic", "standing-a", { nomination: "random", managerCount: 4 });
+  const rebuilt = deckFromIds("classic", "standing-a", deck.map(deckEntry));
+  assert.deepEqual(
+    rebuilt.filter((card) => card.replacement).map((card) => [card.id, card.slot]),
+    deck.filter((card) => card.replacement).map((card) => [card.id, card.slot]),
+    "a rebuilt room would have no floor if the flag did not ride along"
+  );
+});
+
+test("the standing replacements are not board supply", () => {
+  // They are dealt on top of the board, so the checks that ask whether a set is
+  // deep enough to seat a room have to look past them — otherwise a pool one
+  // catcher short of seating eight managers would claim it can seat them.
+  for (const mode of ["classic", "fictional", "mlb-history", "franchise-SEA"]) {
+    for (const managerCount of [3, 6]) {
+      const deck = buildDraftPool(mode, "supply-check", { nomination: "random", managerCount });
+      const biddable = deck.filter((card) => !card.replacement);
+      assert.equal(maxPoolManagers(deck), maxPoolManagers(biddable), `${mode}/${managerCount}: seats`);
+      assert.deepEqual(
+        randomNominationShortfalls(deck, managerCount),
+        randomNominationShortfalls(biddable, managerCount),
+        `${mode}/${managerCount}: shortfalls`
+      );
+    }
+  }
 });
