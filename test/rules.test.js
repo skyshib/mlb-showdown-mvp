@@ -1029,7 +1029,7 @@ test("undoLastPick reopens a completed draft and clears undone lineup assignment
   assert.deepEqual(manager.lineupAssignments, {});
 });
 
-test("a completed draft hands every CPU manager an optimized lineup, staff, and order", () => {
+test("a completed draft hands every manager an optimized lineup, staff, and order", () => {
   const draft = createDraft(
     [{ name: "Robo", cpu: true }, { name: "Human", cpu: false }],
     makeDraftPool("cpu-sync"),
@@ -1040,21 +1040,27 @@ test("a completed draft hands every CPU manager an optimized lineup, staff, and 
   const robo = draft.managers[0];
   const human = draft.managers[1];
 
-  // The CPU's materialized choices reproduce exactly the team the optimizer
-  // would build from a blank slate — nothing better is left on his bench.
-  const played = buildTeam(robo);
-  const optimal = buildTeam(
-    { ...robo, lineupAssignments: {}, staffAssignments: {}, battingOrder: [] },
-    { optimize: true }
-  );
-  assert.deepEqual(played.lineup.map((player) => player.id), optimal.lineup.map((player) => player.id));
-  assert.deepEqual(played.starters.map((player) => player.id), optimal.starters.map((player) => player.id));
-  assert.deepEqual(played.bullpen.map((player) => player.id), optimal.bullpen.map((player) => player.id));
+  // Each seat's materialized choices reproduce exactly the team the optimizer
+  // would build from a blank slate — nothing better is left on a bench, and the
+  // order bats by points, highest first.
+  for (const manager of [robo, human]) {
+    const played = buildTeam(manager);
+    const optimal = buildTeam(
+      { ...manager, lineupAssignments: {}, staffAssignments: {}, battingOrder: [] },
+      { optimize: true }
+    );
+    assert.deepEqual(played.lineup.map((player) => player.id), optimal.lineup.map((player) => player.id));
+    assert.deepEqual(played.starters.map((player) => player.id), optimal.starters.map((player) => player.id));
+    assert.deepEqual(played.bullpen.map((player) => player.id), optimal.bullpen.map((player) => player.id));
+    const points = played.lineup.map((player) => Number(player.points) || 0);
+    assert.deepEqual(points, [...points].sort((a, b) => b - a));
+  }
 
-  // The human's seat is his own business: completion writes him nothing.
-  assert.ok(!human.lineupAssignments || Object.keys(human.lineupAssignments).length === 0);
-  assert.ok(!human.staffAssignments || Object.keys(human.staffAssignments).length === 0);
-  assert.ok(!human.battingOrder || human.battingOrder.length === 0);
+  // The human's edits after the draft are his own: a later sync keeps them.
+  const edited = [...human.battingOrder].reverse();
+  applyDraftAction(draft, { type: "batting-order", managerId: human.id, order: edited });
+  repairDraftRosters(draft);
+  assert.deepEqual(human.battingOrder, edited);
 });
 
 test("corner outfielders can fill left or right field", () => {

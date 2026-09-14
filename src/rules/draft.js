@@ -1359,6 +1359,7 @@ export function undoLastPick(draft) {
   }
   draft.pickNumber -= 1;
   draft.complete = false;
+  draft.teamChoicesSeeded = false;
   forgetRosterPlayer(manager, player.id);
   return { manager, player };
 }
@@ -1384,6 +1385,7 @@ function undoAuctionAction(draft) {
     draft.auction.nominatorIndex = entry.nominatorIndex;
     draft.auction.queueIndex -= 1;
     draft.complete = false;
+    draft.teamChoicesSeeded = false;
     return { passed: true, player: draft.pool.find((item) => item.id === entry.playerId) ?? null };
   }
 
@@ -1398,6 +1400,7 @@ function undoAuctionAction(draft) {
   draft.pickedIds.delete(player.id);
   draft.pickNumber -= 1;
   draft.complete = false;
+  draft.teamChoicesSeeded = false;
   if (isRandomNomination(draft)) draft.auction.queueIndex -= 1;
   forgetRosterPlayer(manager, player.id);
   return { manager, player };
@@ -1424,6 +1427,7 @@ function revertSweep(draft) {
     draft.pickNumber -= 1;
   }
   draft.complete = false;
+  draft.teamChoicesSeeded = false;
 }
 
 // Sim actions live in the shared room log so every player sees the same
@@ -2194,20 +2198,30 @@ function bestStaffAssignment(roster, options = {}) {
 // nine seated, the best staff slotted, the order batting by value. Real
 // assignments rather than a render-time flag, so games, sims, the report
 // card, and the dock all see the same team. Deterministic, so online clients
-// replaying the same actions agree. Humans are never touched.
+// replaying the same actions agree.
+//
+// Humans get the same starting point, but once per completion: they open the
+// lineup screen to a team already set by points and adjust from there, and a
+// later sync (a repair, a replayed log) never throws their edits away. An undo
+// reopens the draft and clears the mark, so the next completion seeds again.
 export function syncCpuTeamChoices(draft) {
   if (!draft.complete) return draft;
+  const seedHumans = !draft.teamChoicesSeeded;
   for (const manager of draft.managers) {
-    if (!manager.cpu) continue;
-    manager.lineupAssignments = bestLineupAssignment(manager.roster);
-    manager.staffAssignments = bestStaffAssignment(manager.roster, { startingPitchers: manager.startingPitchers });
-    manager.battingOrder = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
-      .filter((slot) => slot.player)
-      .map((slot) => lineupPlayer(slot))
-      .sort((a, b) => lineupRankValue(b) - lineupRankValue(a))
-      .map((player) => player.id);
+    if (manager.cpu || seedHumans) setBestTeamChoices(manager);
   }
+  draft.teamChoicesSeeded = true;
   return draft;
+}
+
+function setBestTeamChoices(manager) {
+  manager.lineupAssignments = bestLineupAssignment(manager.roster);
+  manager.staffAssignments = bestStaffAssignment(manager.roster, { startingPitchers: manager.startingPitchers });
+  manager.battingOrder = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
+    .filter((slot) => slot.player)
+    .map((slot) => lineupPlayer(slot))
+    .sort((a, b) => lineupRankValue(b) - lineupRankValue(a))
+    .map((player) => player.id);
 }
 
 export function buildTeam(manager, options = {}) {

@@ -1375,6 +1375,20 @@ async function sendOnlineAction(action) {
     // a screen that would not move until they reloaded the page.
     if (state.online !== online) return;
     if (result?.lot !== undefined) online.lot = result.lot;
+    if (SIM_ACTION_TYPES.has(action.type)) {
+      // The reply usually beats our own stream event. Resyncing here replays the
+      // sim with {instant:true}, so the one who clicked saw only the final table
+      // while everyone else watched the race. Run it live, as the stream would.
+      if (Number(result?.seq) === online.appliedSeq + 1) {
+        online.appliedSeq = Number(result.seq);
+        online.status = "";
+        applySharedSim(action);
+        return;
+      }
+      // The stream got here first and the race is already running; a render now
+      // would strip its skip and fast-forward handlers.
+      if (Number(result?.seq) === online.appliedSeq) return;
+    }
     if (Number(result?.seq) > online.appliedSeq) {
       // The log moved and we have not seen it — the stream is behind or gone.
       await resyncOnlineRoom();
@@ -2531,7 +2545,7 @@ function renderDraft() {
     <button data-action="autopick" ${canAdvance ? "" : "disabled"}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot && !queued ? "Undo nomination" : "Undo last pick"}</button>
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
-    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS} games</button>
+    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS.toLocaleString("en-US")} games</button>
     ${renderPlayGameControl(draft)}
     <button data-action="export-save" title="Save this room to a file you can keep, move, or send">&#128190; Save room</button>
     <button class="sound-toggle${isMuted() ? " muted" : ""}" data-action="toggle-sound" aria-pressed="${!isMuted()}" title="${isMuted() ? "Turn sound on" : "Turn sound off"}">${isMuted() ? "&#128264;" : "&#128266;"}</button>
@@ -4059,7 +4073,9 @@ function startBatchRun(runs, options = {}) {
   const runSkip = () => {
     const start = completed;
     const remaining = count - start;
-    const pumps = Math.min(remaining, 14);
+    // A dozen-odd pumps, but never more than ~2,000 games in one: at 100k a
+    // fixed 14 made each block several times longer than the old full sim.
+    const pumps = Math.min(remaining, Math.max(14, Math.ceil(remaining / 2000)));
     const perPump = Math.ceil(remaining / pumps);
     const SAMPLE = 200;
     const pump = () => {

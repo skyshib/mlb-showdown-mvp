@@ -11,7 +11,7 @@ import {
   summarizeNotableGames
 } from "./interestingGames.js?v=20260831-notable-counts";
 
-export const DEFAULT_BATCH_RUNS = 10000;
+export const DEFAULT_BATCH_RUNS = 100000;
 export const BATCH_SCHEDULE_VERSION = 2;
 
 export function normalizeBatchRuns(value) {
