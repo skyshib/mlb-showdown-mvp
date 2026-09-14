@@ -169,6 +169,7 @@ import {
   renderPlayerCard,
   renderPlayerTable,
   renderRaceChart,
+  renderFieldingCurves,
   renderWinProbabilityChart,
   topSwingRanks,
   HIGH_LEVERAGE
@@ -3985,7 +3986,13 @@ function newBatchSalt() {
 function startBatchRun(runs, options = {}) {
   if (!state.draft || !canSimulate(state.draft)) return;
   const count = normalizeBatchRuns(runs);
-  const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
+  // Each club carries the room's standing replacement cards, which is what turns
+  // on wins above replacement in the sim (rooms dealt before them have none).
+  const replacements = standingReplacements(state.draft);
+  const teams = state.draft.managers.map((manager) => ({
+    ...buildTeam(manager, { optimize: true }),
+    ...(replacements.length ? { replacements } : {})
+  }));
   const teamNames = teams.map((team) => team.name);
   const batchState = createBatchState(teams);
   const seed = options.salt ? `${state.seed}-batch-${options.salt}` : `${state.seed}-batch`;
@@ -4700,6 +4707,7 @@ function renderBatch() {
     hitters: hittersSection,
     pitchers: pitchersSection,
     skills: teamSkillsSection,
+    war: activeBatchTab === "war" ? renderBatchWarSection(summary, playersById, runs) : "",
     // Replaying games is cheap but not free; only do it when the tab is open.
     games: activeBatchTab === "games" ? renderBatchGamesSection() : "",
     draft: draftRecapSection
@@ -4741,6 +4749,7 @@ function batchStatsTabs() {
     { id: "hitters", label: "Hitters" },
     { id: "pitchers", label: "Pitchers" },
     { id: "skills", label: "Team skills" },
+    { id: "war", label: "WAR" },
     { id: "games", label: "Game log" },
     { id: "draft", label: "Draft recap" }
   ];
@@ -5265,6 +5274,70 @@ function weightLeanChip({ label, weight, base }) {
   const direction = delta > 0 ? "lean-up" : delta < 0 ? "lean-down" : "";
   const sign = delta > 0 ? "+" : "";
   return `<span class="weight-lean ${direction}">${escapeHtml(label)} <strong>${sign}${delta}%</strong></span>`;
+}
+
+// Wins above replacement, in the four buckets the sim measured them in. Every
+// figure is a 162-game pace for the player's club.
+function renderBatchWarSection(summary, playersById, runs) {
+  const header = `<div class="section-title-row">
+      <div>
+        <p class="eyebrow">Wins above replacement</p>
+        <h2>What each card won over the room's replacement card, 162-game pace</h2>
+      </div>
+      <span>${runs} games</span>
+    </div>`;
+  if (!summary.attribution) {
+    return `<section class="panel tournament-stats-panel">${header}
+      <p class="batch-note">This room has no standing replacement cards to measure against${standingReplacements(state.draft).length ? ", or this sim ran before WAR existed. Hit Run again." : "; they are dealt only in rooms opened since they were added."}</p>
+    </section>`;
+  }
+  const war = (value) => `${value >= 0 ? "+" : ""}${(Number(value) || 0).toFixed(1)}`;
+  const hitters = [...summary.hitters].sort((a, b) => b.warPer162.total - a.warPer162.total);
+  const pitchers = [...summary.pitchers].sort((a, b) => b.warPer162.total - a.warPer162.total);
+  const teamTotals = summary.teams.map((team) => {
+    const sum = (rows, key) => rows.filter((row) => row.team === team.team).reduce((total, row) => total + row.warPer162[key], 0);
+    const totals = {
+      hitting: sum(summary.hitters, "hitting"),
+      baserunning: sum(summary.hitters, "baserunning"),
+      defense: sum(summary.hitters, "defense"),
+      pitching: sum(summary.pitchers, "pitching")
+    };
+    return { team: team.team, ...totals, total: totals.hitting + totals.baserunning + totals.defense + totals.pitching };
+  }).sort((a, b) => b.total - a.total);
+
+  return `<section class="panel tournament-stats-panel war-panel">${header}
+    <p class="batch-note">Each card number counts in one bucket only. <strong>Hitting</strong> is on-base and chart: every plate appearance replayed with the same dice and the replacement's numbers. <strong>Baserunning</strong> is speed and <strong>defense</strong> is fielding, both exact expected values at every steal, extra-base, tag-up and double-play chance. <strong>Pitching</strong> is control and chart, replayed like hitting. Pitching is per-batter value: it assumes the replacement faces every batter the real arm faced. A manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers.</p>
+    <h3>By team</h3>
+    <div class="table-scroll">
+      <table class="tournament-stat-table">
+        <thead><tr><th>Team</th><th class="num">Hitting</th><th class="num">Baserunning</th><th class="num">Defense</th><th class="num">Pitching</th><th class="num">WAR</th></tr></thead>
+        <tbody>${teamTotals.map((row) => `<tr><td>${escapeHtml(row.team)}</td><td class="num">${war(row.hitting)}</td><td class="num">${war(row.baserunning)}</td><td class="num">${war(row.defense)}</td><td class="num">${war(row.pitching)}</td><td class="num"><strong>${war(row.total)}</strong></td></tr>`).join("")}</tbody>
+      </table>
+    </div>
+    <h3>What fielding is worth</h3>
+    <p class="batch-note">Wins per 162 games if a unit's fielding total had been higher or lower, across every chance the sim threw. Runners re-decide whether to go at each level. The infield and outfield totals are sums of their gloves.</p>
+    ${renderFieldingCurves(summary.teams, summary.fieldingSweep)}
+    <div class="team-skill-grid">
+      <div class="stat-table-block">
+        <h3>Hitters</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table">
+            <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Pos</th><th class="num">Hitting</th><th class="num">Baserunning</th><th class="num">Defense</th><th class="num">WAR</th></tr></thead>
+            <tbody>${hitters.map((line, index) => `<tr><td>${index + 1}</td><td>${renderBatchPlayerName(line, playersById)}</td><td>${escapeHtml(line.team)}</td><td>${escapeHtml(line.position ?? "")}</td><td class="num">${war(line.warPer162.hitting)}</td><td class="num">${war(line.warPer162.baserunning)}</td><td class="num">${war(line.warPer162.defense)}</td><td class="num"><strong>${war(line.warPer162.total)}</strong></td></tr>`).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="stat-table-block">
+        <h3>Pitchers</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table">
+            <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Role</th><th class="num" title="Per batter faced: assumes the replacement faces every batter this arm faced">WAR (per batter)</th></tr></thead>
+            <tbody>${pitchers.map((line, index) => `<tr><td>${index + 1}</td><td>${renderBatchPlayerName(line, playersById)}</td><td>${escapeHtml(line.team)}</td><td>${escapeHtml(line.role)}</td><td class="num"><strong>${war(line.warPer162.pitching)}</strong></td></tr>`).join("")}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>`;
 }
 
 function renderBatchPlayerName(line, playersById, tagName = "strong", className = "batch-player-name") {

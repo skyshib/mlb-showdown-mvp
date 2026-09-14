@@ -580,6 +580,83 @@ function pointTipAttrs({ title, color, lines }) {
 // pure plotter — {x, y, color, cardId, tipTitle, tipColor, tipLines}. cardId
 // lets app.js pop the player's card when the dot is clicked; activeManager
 // highlights the manager whose dots are currently filtered in.
+// What each club's fielding is worth at the margin: one small chart per team,
+// every chart on the same wins scale so the clubs compare at a glance. The x-axis
+// is a change to the unit's fielding total (the infield and outfield are sums of
+// several gloves); each line is the wins per 162 games that change would have
+// bought or cost across every chance the sim actually threw.
+const FIELDING_CURVE_UNITS = [
+  { key: "C", label: "Catcher", short: "C" },
+  { key: "IF", label: "Infield", short: "IF" },
+  { key: "OF", label: "Outfield", short: "OF" }
+];
+
+export function renderFieldingCurves(teams = [], sweep = 10) {
+  const curves = teams.filter((team) => team.fieldingCurvePer162);
+  if (!curves.length) return "";
+  const values = curves.flatMap((team) => FIELDING_CURVE_UNITS.flatMap((unit) => team.fieldingCurvePer162[unit.key] ?? []));
+  // Round the scale OUT to whole steps, so the deepest line stays inside the plot.
+  const low = Math.min(0, ...values);
+  const high = Math.max(0, ...values);
+  const probe = niceTicks(low, high, 4);
+  const tickStep = probe.length > 1 ? probe[1] - probe[0] : 1;
+  const yLo = Math.floor(low / tickStep) * tickStep;
+  const yHi = Math.ceil(high / tickStep) * tickStep;
+  const ticks = [];
+  for (let value = yLo; value <= yHi + tickStep * 1e-6; value += tickStep) ticks.push(Math.abs(value) < tickStep * 1e-6 ? 0 : value);
+
+  const width = 360;
+  const height = 230;
+  const margin = { top: 14, right: 34, bottom: 44, left: 44 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const xFor = (shift) => margin.left + ((shift + sweep) / (sweep * 2)) * plotWidth;
+  const yFor = (value) => margin.top + (1 - (value - yLo) / ((yHi - yLo) || 1)) * plotHeight;
+  const signed = (value) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
+
+  const chart = (team) => {
+    const series = FIELDING_CURVE_UNITS.map((unit) => ({ ...unit, values: team.fieldingCurvePer162[unit.key] ?? [] }));
+    const grid = ticks.map((value) => `<line x1="${margin.left}" y1="${yFor(value).toFixed(1)}" x2="${margin.left + plotWidth}" y2="${yFor(value).toFixed(1)}" class="${value === 0 ? "war-zero" : "race-grid"}" />
+      <text x="${margin.left - 8}" y="${(yFor(value) + 4).toFixed(1)}" text-anchor="end" class="race-axis-text">${Number.isInteger(value) ? `${value > 0 ? "+" : ""}${value}` : signed(value)}</text>`).join("");
+    const xTicks = [-sweep, -sweep / 2, 0, sweep / 2, sweep].map((shift) => `<text x="${xFor(shift).toFixed(1)}" y="${margin.top + plotHeight + 18}" text-anchor="middle" class="race-axis-text">${shift > 0 ? "+" : ""}${shift}</text>`).join("");
+    const lines = series.map((unit) => `<polyline class="war-curve war-curve-${unit.key}" fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${unit.values.map((value, index) => `${xFor(index - sweep).toFixed(1)},${yFor(value).toFixed(1)}`).join(" ")}" />`).join("");
+
+    // Direct labels at the right end, nudged apart when the lines finish close.
+    const labels = series
+      .map((unit) => ({ unit, y: yFor(unit.values[unit.values.length - 1] ?? 0) }))
+      .sort((a, b) => a.y - b.y);
+    for (let index = 1; index < labels.length; index += 1) labels[index].y = Math.max(labels[index].y, labels[index - 1].y + 12);
+    const labelText = labels.map((label) => `<text x="${margin.left + plotWidth + 5}" y="${(label.y + 4).toFixed(1)}" class="war-curve-label war-label-${label.unit.key}">${label.unit.short}</text>`).join("");
+
+    // One hover column per step of glove: the tooltip reads all three units there.
+    const step = plotWidth / (sweep * 2);
+    const columns = Array.from({ length: sweep * 2 + 1 }, (_, index) => {
+      const shift = index - sweep;
+      const tip = pointTipAttrs({
+        title: `${team.team}: fielding ${shift > 0 ? "+" : ""}${shift}`,
+        lines: series.map((unit) => `${unit.label}: ${signed(unit.values[index] ?? 0)} wins / 162`)
+      });
+      return `<rect class="war-column" x="${(xFor(shift) - step / 2).toFixed(1)}" y="${margin.top}" width="${step.toFixed(1)}" height="${plotHeight}" ${tip} />`;
+    }).join("");
+
+    return `<figure class="war-curve-card">
+      <figcaption>${escapeHtml(team.team)}</figcaption>
+      <svg viewBox="0 0 ${width} ${height}" class="race-chart" role="img" aria-label="${escapeHtml(team.team)}: wins per 162 games by change in catcher, infield and outfield fielding">
+        ${grid}
+        <line x1="${xFor(0).toFixed(1)}" y1="${margin.top}" x2="${xFor(0).toFixed(1)}" y2="${margin.top + plotHeight}" class="race-parity" />
+        ${xTicks}
+        <text x="${(margin.left + plotWidth / 2).toFixed(1)}" y="${height - 2}" text-anchor="middle" class="race-axis-text">Change in fielding</text>
+        ${lines}
+        ${labelText}
+        ${columns}
+      </svg>
+    </figure>`;
+  };
+
+  return `<div class="war-curve-legend" aria-hidden="true">${FIELDING_CURVE_UNITS.map((unit) => `<span><i class="war-swatch-${unit.key}"></i>${unit.label}</span>`).join("")}</div>
+    <div class="war-curve-grid">${curves.map(chart).join("")}</div>`;
+}
+
 export function renderDraftScatter({ points = [], connectors = [], xLabel = "", yLabel = "", legend = [], activeManager = null } = {}) {
   if (points.length < 1) {
     return `<div class="draft-chart">

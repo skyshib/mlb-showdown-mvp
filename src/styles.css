@@ -6964,3 +6964,80 @@ html.club .dock-chip em,
 html.club .auction-paused .eyebrow { color: var(--accent-bright); }
 html.club .sold-tag { color: var(--muted); }
 html.club button:disabled { color: var(--muted); opacity: 0.75; }
+
+/* ---- Wins above replacement: fielding curves ----
+ * Three series in fixed order, validated for color-vision separation on the
+ * cream panel and on a club's black one. The light steps sit under 3:1 on
+ * cream, which is why every line also carries a direct label. */
+.war-panel {
+  --war-c: #2a78d6;
+  --war-if: #eb6834;
+  --war-of: #1baf7a;
+}
+
+html.club .war-panel {
+  --war-c: #3987e5;
+  --war-if: #d95926;
+  --war-of: #199e70;
+}
+
+.war-curve-C, .war-label-C { stroke: var(--war-c); }
+.war-curve-IF, .war-label-IF { stroke: var(--war-if); }
+.war-curve-OF, .war-label-OF { stroke: var(--war-of); }
+.war-swatch-C { background: var(--war-c); }
+.war-swatch-IF { background: var(--war-if); }
+.war-swatch-OF { background: var(--war-of); }
+
+.war-curve-label {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  stroke: none;
+}
+
+.war-zero {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.war-column {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.war-column:hover {
+  fill: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.war-curve-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 4px 0 8px;
+  font-size: 13px;
+}
+
+.war-curve-legend i {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.war-curve-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.war-curve-card {
+  margin: 0;
+}
+
+.war-curve-card figcaption {
+  font-weight: 700;
+  font-size: 14px;
+}

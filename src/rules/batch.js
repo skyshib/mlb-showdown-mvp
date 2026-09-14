@@ -2,6 +2,7 @@ import { distribution, rate } from "./stats.js?v=20260716-records";
 import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.js?v=20260716-records";
 import { simulateGame } from "./game.js?v=20260717-draft-wpa";
 import { createRng } from "./rng.js?v=20260716-records";
+import { FIELDING_SWEEP, FIELDING_UNITS } from "./attribution.js?v=20260914-war";
 import {
   considerInterestingGame,
   createInterestingGameState,
@@ -52,7 +53,8 @@ export function createBatchState(teams, options = {}) {
       wins: [],
       losses: [],
       runsFor: [],
-      runsAgainst: []
+      runsAgainst: [],
+      fieldingCurve: emptyFieldingCurve()
     });
     for (const player of team.lineup ?? []) {
       registerHitter(state, team.name, player);
@@ -76,17 +78,23 @@ export function runBatchChunk(state, teams, seed, startIndex, count, options = {
   );
   if (!schedule.length) return state;
   for (let index = startIndex; index < startIndex + count; index += 1) {
-    foldGame(state, playScheduledGame(schedule[index % schedule.length], seed, index));
+    foldGame(state, playScheduledGame(schedule[index % schedule.length], seed, index, { attribution: true }));
   }
   return state;
 }
 
-function playScheduledGame(matchup, seed, index) {
+// Wins above replacement are measured only when both clubs carry the room's
+// standing replacement cards (rooms dealt before those existed have none), and
+// only for the season itself: attribution never changes a game's dice, so a
+// replayed game from the review log is the same game without it.
+function playScheduledGame(matchup, seed, index, { attribution = false } = {}) {
   const gameSeed = `${seed}-game-${index + 1}-${matchup.away.name}-${matchup.home.name}`;
+  const measure = attribution && matchup.away.replacements?.length && matchup.home.replacements?.length;
   return simulateGame(
     teamForGame(matchup.away, gameSeed, "away"),
     teamForGame(matchup.home, gameSeed, "home"),
-    gameSeed
+    gameSeed,
+    measure ? { attribution: { replacements: { away: matchup.away.replacements, home: matchup.home.replacements } } } : {}
   );
 }
 
@@ -139,7 +147,8 @@ export function summarizeBatch(state) {
       runsFor: distribution(row.runsFor),
       runsAgainst: distribution(row.runsAgainst),
       winPct: rate(formatDistributionTotal(row.wins), row.games),
-      ...teamSkillTotals(row)
+      ...teamSkillTotals(row),
+      fieldingCurvePer162: summarizeFieldingCurve(row.fieldingCurve, row.games)
     }))
     .sort((a, b) => b.winPct - a.winPct || b.wins.sum - a.wins.sum);
 
@@ -168,7 +177,8 @@ export function summarizeBatch(state) {
         runsPerSeason: rate(line.r, state.runs),
         sbPerSeason: rate(line.sb, state.runs),
         gidpPerSeason: rate(line.gidp, state.runs),
-        wpaPerSeason: rate(line.wpa, state.runs)
+        wpaPerSeason: rate(line.wpa, state.runs),
+        warPer162: summarizeWar(line.war, line.teamGames)
       };
     })
     .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
@@ -195,7 +205,9 @@ export function summarizeBatch(state) {
     interestingGames: summarizeInterestingGames(state.interestingGames),
     notableGames: summarizeNotableGames(state.notableGames),
     topSwing: state.topSwing,
-    scheduleVersion: state.scheduleVersion
+    scheduleVersion: state.scheduleVersion,
+    attribution: Boolean(state.attributionGames),
+    fieldingSweep: FIELDING_SWEEP
   };
 }
 
@@ -217,6 +229,7 @@ function foldGame(state, game) {
   for (const event of game.events ?? []) {
     aggregateEventSkillStats(state.teams, event);
   }
+  if (game.attribution) foldAttribution(state, game);
   if (game.topSwing && (!state.topSwing || game.topSwing.wpa > state.topSwing.wpa)) {
     state.topSwing = {
       ...game.topSwing,
@@ -224,6 +237,45 @@ function foldGame(state, game) {
       matchup: `${game.away.name} at ${game.home.name}`
     };
   }
+}
+
+function foldAttribution(state, game) {
+  state.attributionGames = (state.attributionGames ?? 0) + 1;
+  for (const line of game.attribution.lines) {
+    const hitter = state.hitters.get(line.id);
+    if (hitter) {
+      hitter.war.hitting += line.hitting;
+      hitter.war.baserunning += line.baserunning;
+      hitter.war.defense += line.defense;
+    }
+    const pitcher = state.pitchers.get(line.id);
+    if (pitcher) pitcher.war.pitching += line.pitching;
+  }
+  for (const side of ["away", "home"]) {
+    const row = state.teams.get(game[side].name);
+    if (!row) continue;
+    for (const unit of FIELDING_UNITS) {
+      const sums = row.fieldingCurve[unit];
+      game.attribution.curves[side][unit].forEach((value, index) => { sums[index] += value; });
+    }
+  }
+}
+
+function emptyWar() {
+  return { hitting: 0, baserunning: 0, defense: 0, pitching: 0 };
+}
+
+function emptyFieldingCurve() {
+  return Object.fromEntries(FIELDING_UNITS.map((unit) => [unit, new Array(FIELDING_SWEEP * 2 + 1).fill(0)]));
+}
+
+function summarizeWar(war, teamGames) {
+  const scaled = Object.fromEntries(Object.entries(war ?? emptyWar()).map(([key, value]) => [key, per162(value, teamGames)]));
+  return { ...scaled, total: scaled.hitting + scaled.baserunning + scaled.defense + scaled.pitching };
+}
+
+function summarizeFieldingCurve(curve, games) {
+  return Object.fromEntries(FIELDING_UNITS.map((unit) => [unit, (curve?.[unit] ?? []).map((value) => per162(value, games))]));
 }
 
 function foldHeadToHead(state, team, opponent, runsFor, runsAgainst) {
@@ -380,7 +432,8 @@ function registerHitter(state, teamName, player) {
     cs: 0,
     rbi: 0,
     gidp: 0,
-    wpa: 0
+    wpa: 0,
+    war: emptyWar()
   });
 }
 
@@ -400,6 +453,7 @@ function registerPitcher(state, teamName, player) {
     hr: 0,
     r: 0,
     wpa: 0,
+    war: emptyWar(),
     fresh: emptyPitcherTotals()
   });
 }
@@ -420,6 +474,7 @@ function emptyPitcherTotals() {
 function summarizePitcherLine(line, runs) {
   return {
     ...summarizePitcherTotals(line, line.teamGames, runs),
+    warPer162: summarizeWar(line.war, line.teamGames),
     fresh: summarizePitcherTotals(line.fresh ?? emptyPitcherTotals(), line.teamGames, runs)
   };
 }

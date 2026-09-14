@@ -4,6 +4,7 @@ import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 import { advanceBreakeven, battingWp } from "./breakeven.js?v=20260716-records";
+import { UNIT_POSITIONS, attributeOpportunity, attributionLine, createAttribution, replacementSlotFor, summarizeGameAttribution } from "./attribution.js?v=20260914-war";
 import { SUB_MIN_INNING, benchSlotFielding, defenseEligible, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, coverageAssignmentWith, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
 
 export { SUB_MIN_INNING };
@@ -198,6 +199,7 @@ function trackTopSwing(state, player, wpa, result) {
 export function simulateGame(awayTeam, homeTeam, seed = "showdown", options = {}) {
   const rng = createRng(seed);
   const state = createInitialState(awayTeam, homeTeam, options);
+  if (options.attribution) state.attribution = createGameAttribution(state, options.attribution, seed);
   const events = [];
 
   while (shouldContinue(state)) {
@@ -220,7 +222,8 @@ export function simulateGame(awayTeam, homeTeam, seed = "showdown", options = {}
     topSwing: state.topSwing,
     twenties: state.twenties,
     // The board this game was played on, so a simulated game hangs one too.
-    lineScore: state.lineScore
+    lineScore: state.lineScore,
+    ...(state.attribution ? { attribution: summarizeGameAttribution(state.attribution) } : {})
   };
 }
 
@@ -259,9 +262,15 @@ export function playPlateAppearance(state, rng) {
   const responsiblePitcher = { id: pitcher.id, freshAtReach: pitcherWasFresh };
 
   const before = snapshotBases(state);
+  const basesBefore = [...state.bases];
   const outsBefore = state.outs;
   const scoreBefore = { ...state.score };
   const wpBefore = winProbabilityHome(state);
+  // Wins above replacement replays this plate appearance with the same dice, so
+  // every die it throws is written down on the way past. The main game's rolls
+  // are untouched either way.
+  const rolls = state.attribution ? [] : null;
+  const dice = rolls ? { d20: () => { const roll = rng.d20(); rolls.push(roll); return roll; } } : rng;
   // A pitcher at the plate never has the advantage — so there is no pitch.
   // MLB Showdown does not print an on-base number on an arm's card, and the
   // rulebook says the contest simply does not happen: the man on the mound
@@ -269,13 +278,13 @@ export function playPlateAppearance(state, rng) {
   // ever comes up when a club has killed its own DH — see dhTakesTheField.)
   const armAtThePlate = Boolean(batter.battingAsPitcher);
   const effectiveControl = pitcher.control - fatiguePenalty;
-  const controlRoll = armAtThePlate ? null : rollD20(state, rng);
+  const controlRoll = armAtThePlate ? null : rollD20(state, dice);
   const controlTotal = armAtThePlate ? null : controlRoll + effectiveControl;
   const chartOwner = armAtThePlate || controlTotal > batter.onBase ? "pitcher" : "hitter";
-  const resultRoll = rollD20(state, rng);
+  const resultRoll = rollD20(state, dice);
   const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, resultRoll);
   state.lastPlayDetails = null;
-  const runs = applyResult(state, result, batter, battingSide, pitchingSide, rng, responsiblePitcher);
+  const runs = applyResult(state, result, batter, battingSide, pitchingSide, dice, responsiblePitcher);
   if (state.pendingAdvance) state.pendingAdvance.batter = { id: batter.id, name: batter.name };
 
   const outsOnPlay = Math.max(0, state.outs - outsBefore);
@@ -296,6 +305,12 @@ export function playPlateAppearance(state, rng) {
 
   const wpAfter = winProbabilityHome(state);
   const battingWpa = battingSide === "home" ? wpAfter - wpBefore : wpBefore - wpAfter;
+  if (state.attribution && !state.pendingAdvance) {
+    attributePlateAppearance(state, {
+      half: state.half, inning: state.inning, basesBefore, outsBefore, scoreBefore, wpBefore,
+      battingSide, pitchingSide, batter, pitcher, fatiguePenalty, responsiblePitcher, rolls, battingWpa
+    });
+  }
   ensureHitterLine(state, batter).wpa += battingWpa;
   const pitcherLine = ensurePitcherLine(state, pitcher);
   pitcherLine.wpa -= battingWpa;
@@ -348,6 +363,10 @@ export function playPlateAppearance(state, rng) {
 
 export function playStealAttempt(state, rng) {
   const pitchingSide = state.half === "top" ? "home" : "away";
+  if (state.attribution) {
+    const options = stealOptions(state, pitchingSide);
+    if (options.length) attributeOpportunity(state.attribution, opportunityContext(state, "C"), advanceOpportunity(state, options));
+  }
   const stealAttempt = chooseStealAttempt(state, pitchingSide);
   if (!stealAttempt) return null;
   return performStealAttempt(state, stealAttempt, rng);
@@ -1714,6 +1733,10 @@ export function applyFlyout(state, batter, battingSide, pitchingSide, rng) {
     // chance clears the bar — and a certainty clears every bar.
   }
 
+  if (state.attribution && state.outs < 3) {
+    const candidates = tagUpCandidates(state, pitchingSide, state.outs);
+    if (candidates.length) attributeOpportunity(state.attribution, opportunityContext(state, "OF"), advanceOpportunity(state, candidates));
+  }
   const tagUpAttempts = chooseTagUpAttempts(state, pitchingSide, state.outs);
 
   if (tagUpAttempts.length && state.outs < 3) {
@@ -1752,6 +1775,9 @@ export function applyGroundout(state, batter, battingSide, pitchingSide, rng) {
   if (first) {
     state.outs += 1;
     if (state.outs < 3) {
+      if (state.attribution) {
+        attributeOpportunity(state.attribution, opportunityContext(state, "IF"), doublePlayOpportunity(state, batter, second, third));
+      }
       const fielding = totalInfieldFielding(state[pitchingSide]);
       const target = speedTarget(batter);
       // The throw is worth rolling only when the die could land on either side of
@@ -2000,7 +2026,14 @@ function leadPrefixAttempts(candidates) {
 }
 
 function chooseStealAttempt(state, pitchingSide) {
-  if (state.outs >= 3) return null;
+  return stealOptions(state, pitchingSide)
+    .filter((candidate) => shouldAttemptAdvance(candidate))
+    .sort((a, b) => b.safeChance - a.safeChance || b.toIndex - a.toIndex)[0] ?? null;
+}
+
+// The steals auto play would consider right now, priced but not yet chosen.
+function stealOptions(state, pitchingSide) {
+  if (state.outs >= 3) return [];
   const [first, runnerOnSecond, runnerOnThird] = state.bases;
   // Auto play honors the same rule: one attempt per runner per at-bat.
   const runnerOnFirst = canStealThisPA(state, first) ? first : null;
@@ -2028,9 +2061,7 @@ function chooseStealAttempt(state, pitchingSide) {
     }));
   }
 
-  return annotateAdvanceOptions(state, candidates)
-    .filter((candidate) => shouldAttemptAdvance(candidate))
-    .sort((a, b) => b.safeChance - a.safeChance || b.toIndex - a.toIndex)[0] ?? null;
+  return annotateAdvanceOptions(state, candidates);
 }
 
 function resolveStealAttempt(state, candidate, rng) {
@@ -2096,6 +2127,9 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
     return 0;
   }
 
+  if (state.attribution && allCandidates.length) {
+    attributeOpportunity(state.attribution, opportunityContext(state, "OF"), advanceOpportunity(state, allCandidates));
+  }
   const attempts = leadPrefixAttempts(allCandidates);
 
   if (!attempts.length) {
@@ -2672,5 +2706,171 @@ function buildTeamBoxScore(state, side) {
     team: state[side].name,
     hitters: [...state.stats.hitters.values()].filter((line) => line.side === side),
     pitchers: [...state.stats.pitchers.values()].filter((line) => line.side === side)
+  };
+}
+
+// ---- Wins above replacement --------------------------------------------------
+//
+// Batch sims only (simulateGame's `attribution` option). The measuring lives in
+// attribution.js; what is here needs the engine's own rules to replay a play.
+
+function createGameAttribution(state, config, seed) {
+  const cardsBySlot = {
+    away: new Map((config.replacements?.away ?? []).map((card) => [card.slot, card])),
+    home: new Map((config.replacements?.home ?? []).map((card) => [card.slot, card]))
+  };
+  const gloves = { away: new Map(), home: new Map() };
+  // hitter / pitcher: the replacement card. runner: its speed. fielder: its glove
+  // at the position. Null when the room has no card for the slot.
+  const resolveReplacement = config.resolveReplacement ?? ((side, kind, player, position) => {
+    const cards = cardsBySlot[side];
+    if (kind === "pitcher") return cards.get(state[side].pitchers[0]?.id === player.id ? "SP" : "RP") ?? null;
+    if (kind === "fielder") {
+      if (!gloves[side].has(position)) {
+        const card = cards.get(replacementSlotFor(position));
+        gloves[side].set(position, card ? benchSlotFielding(card, position).value : null);
+      }
+      return gloves[side].get(position);
+    }
+    const seated = kind === "runner" ? state[side].lineup.find((item) => item.id === player.id) : player;
+    const card = seated ? cards.get(replacementSlotFor(playerDefensivePosition(seated))) : null;
+    if (!card) return null;
+    return kind === "runner" ? speedTarget(card) : card;
+  });
+  return {
+    ...createAttribution({ resolveReplacement, rng: createRng(`${seed}:attribution`) }),
+    swapped: { hit: new Map(), pitch: new Map() }
+  };
+}
+
+// The same card with the replacement's numbers in the named fields — cached, since
+// a batter comes up four times a game.
+function swappedCard(attribution, key, player, replacement, fields) {
+  const cache = attribution.swapped[key];
+  let entry = cache.get(player);
+  if (!entry || entry.replacement !== replacement) {
+    const card = { ...player };
+    for (const field of fields) card[field] = replacement[field];
+    entry = { replacement, card };
+    cache.set(player, entry);
+  }
+  return entry.card;
+}
+
+function attributePlateAppearance(state, play) {
+  const attribution = state.attribution;
+  const { batter, pitcher, battingSide, pitchingSide, battingWpa } = play;
+  if (!batter.battingAsPitcher) {
+    const card = attribution.resolveReplacement(battingSide, "hitter", batter);
+    if (card) {
+      const replayed = replayPlateAppearance(state, play, swappedCard(attribution, "hit", batter, card, ["onBase", "chart"]), pitcher);
+      attributionLine(attribution, battingSide, batter, state[battingSide].name).hitting += battingWpa - replayed;
+    }
+  }
+  const card = attribution.resolveReplacement(pitchingSide, "pitcher", pitcher);
+  if (card) {
+    const replayed = replayPlateAppearance(state, play, batter, swappedCard(attribution, "pitch", pitcher, card, ["control", "chart"]));
+    attributionLine(attribution, pitchingSide, pitcher, state[pitchingSide].name).pitching += replayed - battingWpa;
+  }
+}
+
+// The plate appearance again, from the state it started in, in a sandbox that
+// shares nothing the game keeps: its own bases, score and box score. The recorded
+// dice are used in order; a replay that needs more than the real play threw gets
+// fresh ones from the attribution's own stream. Returns the batting side's WPA.
+function replayPlateAppearance(state, play, batter, pitcher) {
+  const attribution = state.attribution;
+  const sandbox = {
+    away: state.away,
+    home: state.home,
+    half: play.half,
+    inning: play.inning,
+    outs: play.outsBefore,
+    bases: [...play.basesBefore],
+    score: { ...play.scoreBefore },
+    stats: attribution.sink,
+    lineScore: { away: [], home: [] },
+    pitching: state.pitching,
+    lastPlayDetails: null,
+    walkoff: false,
+    twenties: 0,
+    deferAdvancesFor: null,
+    pendingAdvance: null,
+    stealAttemptsThisPA: [],
+    attribution: null
+  };
+  let next = 0;
+  const dice = { d20: () => (next < play.rolls.length ? play.rolls[next++] : attribution.rng.d20()) };
+  const armAtThePlate = Boolean(batter.battingAsPitcher);
+  const controlTotal = armAtThePlate ? null : rollD20(sandbox, dice) + pitcher.control - play.fatiguePenalty;
+  const chartOwner = armAtThePlate || controlTotal > batter.onBase ? "pitcher" : "hitter";
+  const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, rollD20(sandbox, dice));
+  applyResult(sandbox, result, batter, play.battingSide, play.pitchingSide, dice, play.responsiblePitcher);
+  const wpAfter = winProbabilityHome(sandbox);
+  return play.battingSide === "home" ? wpAfter - play.wpBefore : play.wpBefore - wpAfter;
+}
+
+function opportunityContext(state, unit) {
+  const battingSide = state.half === "top" ? "away" : "home";
+  const fieldingSide = battingSide === "away" ? "home" : "away";
+  const team = state[fieldingSide];
+  const fielders = unit === "C"
+    ? [catcherOf(team)].filter(Boolean).map((player) => ({ player, position: "C", value: fieldingValue(player) }))
+    : UNIT_POSITIONS[unit]
+      .map((position) => ({ player: team.lineup.find((item) => playerDefensivePosition(item) === position), position }))
+      .filter((entry) => entry.player)
+      .map((entry) => ({ ...entry, value: fieldingValue(entry.player) }));
+  return { battingSide, fieldingSide, unit, fielders, teams: { away: state.away.name, home: state.home.name } };
+}
+
+// A send (extra base, tag-up) or a steal, as numbers attribution.js can re-decide
+// under any glove or any legs: each candidate's break-even (which depends on
+// neither), and the win probability of every way the play can end.
+function advanceOpportunity(state, candidates) {
+  const { half, inning, outs } = state;
+  const diff = battingEdge(state);
+  const safeWp = [];
+  const outWp = [];
+  for (let length = 1; length <= candidates.length; length += 1) {
+    const going = candidates.slice(0, length);
+    const conceded = advanceOutcome(state.bases, going, null);
+    safeWp[length] = battingWp({ half, inning, outs, bases: conceded.bases, diff: diff + conceded.runs });
+    outWp[length] = going.map((caught) => {
+      const got = advanceOutcome(state.bases, going, caught);
+      return battingWp({ half, inning, outs: outs + 1, bases: got.bases, diff: diff + got.runs });
+    });
+  }
+  return {
+    forced: false,
+    holdWp: battingWp({ half, inning, outs, bases: state.bases, diff }),
+    safeWp,
+    outWp,
+    candidates: candidates.map((candidate) => ({
+      runner: candidate.runner,
+      speed: candidate.runnerSpeed,
+      bonus: candidate.targetBonus,
+      min: candidate.decisionMinimum,
+      toIndex: candidate.toIndex
+    }))
+  };
+}
+
+// The relay to first on a ground ball with a man on: no decision, the batter's
+// legs against the infield. Called with the force at second already recorded and
+// the bases already cleared, exactly as applyGroundout rolls it.
+function doublePlayOpportunity(state, batter, second, third) {
+  const { half, inning, outs } = state;
+  const diff = battingEdge(state);
+  const scored = third ? 1 : 0;
+  const safeWp = battingWp({ half, inning, outs, bases: [batter, null, second], diff: diff + scored });
+  const outWp = outs + 1 >= 3
+    ? battingWp({ half, inning, outs: 3, bases: [null, null, null], diff })
+    : battingWp({ half, inning, outs: outs + 1, bases: [null, null, second], diff: diff + scored });
+  return {
+    forced: true,
+    holdWp: null,
+    safeWp: [null, safeWp],
+    outWp: [null, [outWp]],
+    candidates: [{ runner: batter, speed: speedTarget(batter), bonus: 0, min: 0, toIndex: 0 }]
   };
 }
