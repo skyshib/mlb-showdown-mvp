@@ -54,7 +54,8 @@ export function createBatchState(teams, options = {}) {
       losses: [],
       runsFor: [],
       runsAgainst: [],
-      fieldingCurve: emptyFieldingCurve()
+      fieldingCurve: emptyFieldingCurve(),
+      fielded: emptyFielded()
     });
     for (const player of team.lineup ?? []) {
       registerHitter(state, team.name, player);
@@ -148,7 +149,8 @@ export function summarizeBatch(state) {
       runsAgainst: distribution(row.runsAgainst),
       winPct: rate(formatDistributionTotal(row.wins), row.games),
       ...teamSkillTotals(row),
-      fieldingCurvePer162: summarizeFieldingCurve(row.fieldingCurve, row.games)
+      fieldingCurvePer162: summarizeFieldingCurve(row.fieldingCurve, row.games),
+      fieldedAtChances: summarizeFielded(row.fielded)
     }))
     .sort((a, b) => b.winPct - a.winPct || b.wins.sum - a.wins.sum);
 
@@ -178,7 +180,8 @@ export function summarizeBatch(state) {
         sbPerSeason: rate(line.sb, state.runs),
         gidpPerSeason: rate(line.gidp, state.runs),
         wpaPerSeason: rate(line.wpa, state.runs),
-        warPer162: summarizeWar(line.war, line.teamGames)
+        warPer162: summarizeWar(line.war, line.teamGames),
+        warInputs: summarizeWarInputs(line.warInputs, line.teamGames)
       };
     })
     .sort((a, b) => b.ops - a.ops || b.pa - a.pa);
@@ -247,6 +250,7 @@ function foldAttribution(state, game) {
       hitter.war.hitting += line.hitting;
       hitter.war.baserunning += line.baserunning;
       hitter.war.defense += line.defense;
+      for (const key of Object.keys(hitter.warInputs)) hitter.warInputs[key] += line.inputs[key];
     }
     const pitcher = state.pitchers.get(line.id);
     if (pitcher) pitcher.war.pitching += line.pitching;
@@ -257,12 +261,45 @@ function foldAttribution(state, game) {
     for (const unit of FIELDING_UNITS) {
       const sums = row.fieldingCurve[unit];
       game.attribution.curves[side][unit].forEach((value, index) => { sums[index] += value; });
+      row.fielded[unit].total += game.attribution.fielded[side][unit].total;
+      row.fielded[unit].chances += game.attribution.fielded[side][unit].chances;
     }
   }
 }
 
 function emptyWar() {
   return { hitting: 0, baserunning: 0, defense: 0, pitching: 0 };
+}
+
+function emptyWarInputs() {
+  return { fieldChances: 0, glove: 0, replacementGlove: 0, runChances: 0, speed: 0, replacementSpeed: 0 };
+}
+
+// Per-chance sums become the average glove and legs each player carried into his
+// chances, against the replacement's, plus how many chances he saw per 162.
+function summarizeWarInputs(inputs, teamGames) {
+  const { fieldChances, glove, replacementGlove, runChances, speed, replacementSpeed } = inputs ?? emptyWarInputs();
+  return {
+    fieldChancesPer162: per162(fieldChances, teamGames),
+    glove: fieldChances ? glove / fieldChances : null,
+    replacementGlove: fieldChances ? replacementGlove / fieldChances : null,
+    runChancesPer162: per162(runChances, teamGames),
+    speed: runChances ? speed / runChances : null,
+    replacementSpeed: runChances ? replacementSpeed / runChances : null
+  };
+}
+
+function emptyFielded() {
+  return Object.fromEntries(FIELDING_UNITS.map((unit) => [unit, { total: 0, chances: 0 }]));
+}
+
+// The unit's fielding total, averaged over the chances it fielded: the zero on
+// its fielding curve.
+function summarizeFielded(fielded) {
+  return Object.fromEntries(FIELDING_UNITS.map((unit) => {
+    const { total = 0, chances = 0 } = fielded?.[unit] ?? {};
+    return [unit, chances ? total / chances : null];
+  }));
 }
 
 function emptyFieldingCurve() {
@@ -418,6 +455,9 @@ function registerHitter(state, teamName, player) {
     name: player.name,
     team: teamName,
     position: player.cardPosition ?? player.position,
+    // Where the lineup put him, which is not always the position printed on his
+    // card (a DH card can be stationed at first).
+    fieldPosition: player.defensivePosition ?? player.assignedPosition ?? player.cardPosition ?? player.position,
     teamGames: 0,
     pa: 0,
     ab: 0,
@@ -433,7 +473,8 @@ function registerHitter(state, teamName, player) {
     rbi: 0,
     gidp: 0,
     wpa: 0,
-    war: emptyWar()
+    war: emptyWar(),
+    warInputs: emptyWarInputs()
   });
 }
 

@@ -584,7 +584,9 @@ function pointTipAttrs({ title, color, lines }) {
 // every chart on the same wins scale so the clubs compare at a glance. The x-axis
 // is a change to the unit's fielding total (the infield and outfield are sums of
 // several gloves); each line is the wins per 162 games that change would have
-// bought or cost across every chance the sim actually threw.
+// bought or cost across every chance the sim actually threw. The caption lists
+// the totals the club actually fielded (team.fieldedAtChances), the zero of the
+// x-axis, so a shift reads against a real number.
 const FIELDING_CURVE_UNITS = [
   { key: "C", label: "Catcher", short: "C" },
   { key: "IF", label: "Infield", short: "IF" },
@@ -613,9 +615,15 @@ export function renderFieldingCurves(teams = [], sweep = 10) {
   const xFor = (shift) => margin.left + ((shift + sweep) / (sweep * 2)) * plotWidth;
   const yFor = (value) => margin.top + (1 - (value - yLo) / ((yHi - yLo) || 1)) * plotHeight;
   const signed = (value) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
+  const rating = (value) => `${value >= 0 ? "+" : ""}${Number.isInteger(value) ? value : value.toFixed(1)}`;
 
   const chart = (team) => {
-    const series = FIELDING_CURVE_UNITS.map((unit) => ({ ...unit, values: team.fieldingCurvePer162[unit.key] ?? [] }));
+    const series = FIELDING_CURVE_UNITS.map((unit) => {
+      const fielded = team.fieldedAtChances?.[unit.key];
+      return { ...unit, values: team.fieldingCurvePer162[unit.key] ?? [], fielded: Number.isFinite(fielded) ? fielded : null };
+    });
+    const fieldedCaption = series.filter((unit) => unit.fielded !== null)
+      .map((unit) => `${unit.short} ${rating(unit.fielded)}`).join(" · ");
     const grid = ticks.map((value) => `<line x1="${margin.left}" y1="${yFor(value).toFixed(1)}" x2="${margin.left + plotWidth}" y2="${yFor(value).toFixed(1)}" class="${value === 0 ? "war-zero" : "race-grid"}" />
       <text x="${margin.left - 8}" y="${(yFor(value) + 4).toFixed(1)}" text-anchor="end" class="race-axis-text">${Number.isInteger(value) ? `${value > 0 ? "+" : ""}${value}` : signed(value)}</text>`).join("");
     const xTicks = [-sweep, -sweep / 2, 0, sweep / 2, sweep].map((shift) => `<text x="${xFor(shift).toFixed(1)}" y="${margin.top + plotHeight + 18}" text-anchor="middle" class="race-axis-text">${shift > 0 ? "+" : ""}${shift}</text>`).join("");
@@ -634,14 +642,14 @@ export function renderFieldingCurves(teams = [], sweep = 10) {
       const shift = index - sweep;
       const tip = pointTipAttrs({
         title: `${team.team}: fielding ${shift > 0 ? "+" : ""}${shift}`,
-        lines: series.map((unit) => `${unit.label}: ${signed(unit.values[index] ?? 0)} wins / 162`)
+        lines: series.map((unit) => `${unit.label}${unit.fielded === null ? "" : ` ${rating(unit.fielded)} → ${rating(unit.fielded + shift)}`}: ${signed(unit.values[index] ?? 0)} WPA / 162`)
       });
       return `<rect class="war-column" x="${(xFor(shift) - step / 2).toFixed(1)}" y="${margin.top}" width="${step.toFixed(1)}" height="${plotHeight}" ${tip} />`;
     }).join("");
 
     return `<figure class="war-curve-card">
-      <figcaption>${escapeHtml(team.team)}</figcaption>
-      <svg viewBox="0 0 ${width} ${height}" class="race-chart" role="img" aria-label="${escapeHtml(team.team)}: wins per 162 games by change in catcher, infield and outfield fielding">
+      <figcaption>${escapeHtml(team.team)}${fieldedCaption ? ` <span class="wpar-fielded">fielded ${escapeHtml(fieldedCaption)}</span>` : ""}</figcaption>
+      <svg viewBox="0 0 ${width} ${height}" class="race-chart" role="img" aria-label="${escapeHtml(team.team)}: WPA per 162 games by change in catcher, infield and outfield fielding">
         ${grid}
         <line x1="${xFor(0).toFixed(1)}" y1="${margin.top}" x2="${xFor(0).toFixed(1)}" y2="${margin.top + plotHeight}" class="race-parity" />
         ${xTicks}

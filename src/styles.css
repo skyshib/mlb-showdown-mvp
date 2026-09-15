@@ -7052,3 +7052,24 @@ html.club .war-panel {
   font-weight: 700;
   font-size: 14px;
 }
+
+.wpar-fielded {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  margin-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wpar-card-pos {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wpar-pos {
+  white-space: nowrap;
+}
+
+.war-panel > h3 {
+  margin-top: 22px;
+}

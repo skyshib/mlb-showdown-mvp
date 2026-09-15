@@ -32,7 +32,8 @@
 // The team fielding curve reuses the defense machinery: at every chance, the
 // unit's fielding total (catcher, infield sum, outfield sum) is shifted from
 // -FIELDING_SWEEP to +FIELDING_SWEEP and the change in the fielding team's win
-// probability is summed.
+// probability is summed. Alongside it, each unit's real fielding total is summed
+// over the same chances, so the curve can be read against what the club fielded.
 
 export const FIELDING_SWEEP = 10;
 export const FIELDING_UNITS = ["C", "IF", "OF"];
@@ -53,11 +54,13 @@ export function replacementSlotFor(position) {
 
 export function createAttribution({ resolveReplacement, rng }) {
   const curve = () => Object.fromEntries(FIELDING_UNITS.map((unit) => [unit, new Array(FIELDING_SWEEP * 2 + 1).fill(0)]));
+  const fielded = () => Object.fromEntries(FIELDING_UNITS.map((unit) => [unit, { total: 0, chances: 0 }]));
   return {
     resolveReplacement,
     rng,
     lines: { away: new Map(), home: new Map() },
     curves: { away: curve(), home: curve() },
+    fielded: { away: fielded(), home: fielded() },
     // A throwaway box score for plate-appearance replays to write into. Never
     // read, so it is never cleared either.
     sink: { hitters: new Map(), pitchers: new Map() }
@@ -68,7 +71,12 @@ export function attributionLine(attribution, side, player, team) {
   const lines = attribution.lines[side];
   let line = lines.get(player.id);
   if (!line) {
-    line = { id: player.id, name: player.name, side, team, hitting: 0, baserunning: 0, defense: 0, pitching: 0 };
+    line = {
+      id: player.id, name: player.name, side, team, hitting: 0, baserunning: 0, defense: 0, pitching: 0,
+      // What defense and baserunning were measured against, summed per chance:
+      // the player's glove and legs and the replacement's.
+      inputs: { fieldChances: 0, glove: 0, replacementGlove: 0, runChances: 0, speed: 0, replacementSpeed: 0 }
+    };
     lines.set(player.id, line);
   }
   return line;
@@ -125,6 +133,9 @@ export function attributeOpportunity(attribution, { battingSide, fieldingSide, u
   const speeds = op.candidates.map((candidate) => candidate.speed);
   const actual = opportunityWp(op, fielding, speeds);
 
+  const fielded = attribution.fielded[fieldingSide][unit];
+  fielded.total += fielding;
+  fielded.chances += 1;
   const curve = attribution.curves[fieldingSide][unit];
   for (let shift = -FIELDING_SWEEP; shift <= FIELDING_SWEEP; shift += 1) {
     if (shift === 0) continue;
@@ -137,7 +148,11 @@ export function attributeOpportunity(attribution, { battingSide, fieldingSide, u
     const replacementValue = attribution.resolveReplacement(fieldingSide, "fielder", fielder.player, fielder.position);
     if (replacementValue === null) continue;
     const withReplacement = opportunityWp(op, fielding - fielder.value + replacementValue, speeds);
-    attributionLine(attribution, fieldingSide, fielder.player, teams[fieldingSide]).defense += withReplacement - actual;
+    const line = attributionLine(attribution, fieldingSide, fielder.player, teams[fieldingSide]);
+    line.defense += withReplacement - actual;
+    line.inputs.fieldChances += 1;
+    line.inputs.glove += fielder.value;
+    line.inputs.replacementGlove += replacementValue;
   }
 
   op.candidates.forEach((candidate, index) => {
@@ -146,8 +161,11 @@ export function attributeOpportunity(attribution, { battingSide, fieldingSide, u
     if (replacementSpeed === null) return;
     const swapped = [...speeds];
     swapped[index] = replacementSpeed;
-    attributionLine(attribution, battingSide, candidate.runner, teams[battingSide]).baserunning
-      += actual - opportunityWp(op, fielding, swapped);
+    const line = attributionLine(attribution, battingSide, candidate.runner, teams[battingSide]);
+    line.baserunning += actual - opportunityWp(op, fielding, swapped);
+    line.inputs.runChances += 1;
+    line.inputs.speed += candidate.speed;
+    line.inputs.replacementSpeed += replacementSpeed;
   });
 }
 
@@ -155,6 +173,7 @@ export function summarizeGameAttribution(attribution) {
   if (!attribution) return null;
   return {
     lines: [...attribution.lines.away.values(), ...attribution.lines.home.values()],
-    curves: attribution.curves
+    curves: attribution.curves,
+    fielded: attribution.fielded
   };
 }
