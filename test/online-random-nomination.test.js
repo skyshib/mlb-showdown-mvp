@@ -93,10 +93,14 @@ test("a random-nomination room opens with a card already on the block", async (t
   const { base } = await startServer(t);
   const created = await openRoom(base);
   assert.equal(created.status, 201);
+  assert.equal(created.data.lot, null, "no card is turned over before the table is full");
+  for (const manager of created.data.managers) {
+    await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: manager.id });
+  }
 
-  const room = created.data;
+  const room = (await api(base, "GET", `/api/rooms/${created.data.roomId}`)).data;
   assert.equal(room.nomination, "random");
-  // Nobody nominated it — the queue dealt it before anyone even joined.
+  // Nobody nominated it — the queue dealt it the moment the last manager sat down.
   assert.ok(room.lot, "no card on the block");
   assert.equal(room.lot.nominatorId, null);
 
@@ -106,11 +110,15 @@ test("a random-nomination room opens with a card already on the block", async (t
 
 test("no manager may nominate, and the card on the block cannot be cancelled", async (t) => {
   const { base } = await startServer(t);
-  const room = (await openRoom(base)).data;
-  const ana = await api(base, "POST", `/api/rooms/${room.roomId}/join`, {
-    managerId: room.managers[0].id,
+  const created = (await openRoom(base)).data;
+  const ana = await api(base, "POST", `/api/rooms/${created.roomId}/join`, {
+    managerId: created.managers[0].id,
     name: "Ana"
   });
+  for (const manager of created.managers.slice(1)) {
+    await api(base, "POST", `/api/rooms/${created.roomId}/join`, { managerId: manager.id });
+  }
+  const room = (await api(base, "GET", `/api/rooms/${created.roomId}`)).data;
   const token = ana.data.token;
   const pool = buildDraftPool(room.universe, room.seed, {
     nomination: room.nomination,

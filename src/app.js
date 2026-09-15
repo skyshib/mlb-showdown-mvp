@@ -1090,6 +1090,8 @@ function renderCurrentScreen() {
   }
   if (state.online && !state.online.managerId && !state.online.spectator) {
     renderSeatSelect();
+  } else if (state.online?.waiting) {
+    renderWaitingRoom();
   } else if (liveGame) {
     renderLiveGame();
   } else if (state.view === "batch" && state.batch && state.draft) {
@@ -1145,8 +1147,6 @@ async function bootOnlineRoom(roomId) {
 function openRoom(roomId, room) {
   const seat = loadOnlineSeat(roomId);
   state = defaultState();
-  state.seed = room.seed;
-  rememberLastSeed(state.seed);
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
   state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
@@ -1170,6 +1170,10 @@ function openRoom(roomId, room) {
     // Claimed is not occupied. A seat whose holder lost their token is still
     // claimed, and is the one somebody needs to be able to sit back down in.
     liveSeats: room.managers.filter((manager) => manager.live).map((manager) => manager.id),
+    // The room holds its board back until every human seat is filled; until
+    // then there is no draft to build, only the list of who is here.
+    waiting: false,
+    managers: room.managers,
     appliedSeq: 0,
     serverOffsetMs: Number(room.serverNow) - Date.now() || 0,
     status: "",
@@ -1187,12 +1191,44 @@ function openRoom(roomId, room) {
   state.draftNotes = loadOnlineDraftNotes(localStorage, roomId, seat?.managerId);
   const savedRankingMode = loadOnlineRankingMode(localStorage, roomId, seat?.managerId);
   if (savedRankingMode !== null) state.filters.rankingMode = savedRankingMode;
-  rebuildOnlineDraft(room);
+  applyRoomSnapshot(room);
   subscribeOnline();
   renderCurrentScreen();
 }
 
+// The host handed this browser's seat to the computer. The server has already
+// forgotten the token, so stop acting as that manager and go choose again.
+function releaseSeatHandedToCpu() {
+  const online = state.online;
+  if (!online?.managerId) return false;
+  const managers = state.draft?.managers ?? online.managers ?? [];
+  if (!managers.find((manager) => manager.id === online.managerId)?.cpu) return false;
+  online.managerId = null;
+  online.token = null;
+  online.host = false;
+  storeOnlineSeat(online.roomId, { managerId: null, token: null, host: false });
+  online.status = "The host handed your seat to the computer.";
+  return true;
+}
+
+function applyRoomSnapshot(room) {
+  const online = state.online;
+  online.waiting = Boolean(room.waiting);
+  online.managers = room.managers;
+  online.claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
+  online.liveSeats = room.managers.filter((manager) => manager.live).map((manager) => manager.id);
+  if (!online.waiting) {
+    rebuildOnlineDraft(room);
+  } else {
+    state.draft = null;
+    online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
+  }
+  releaseSeatHandedToCpu();
+}
+
 function rebuildOnlineDraft(room) {
+  state.seed = room.seed;
+  if (state.seed) rememberLastSeed(state.seed);
   // The board is the one the ROOM dealt, not one this browser deals for itself.
   // Re-dealing from the seed asks every client to reproduce a deal that only
   // holds while nobody touches the dealing code — and the room outlives that.
@@ -1274,7 +1310,8 @@ function subscribeOnline() {
     onAction: (entry) => {
       const online = state.online;
       if (!online || entry.seq <= online.appliedSeq) return;
-      if (entry.seq > online.appliedSeq + 1) {
+      // The room opened while we sat in the waiting room: fetch the board.
+      if (online.waiting || entry.seq > online.appliedSeq + 1) {
         resyncOnlineRoom();
         return;
       }
@@ -1302,6 +1339,7 @@ function subscribeOnline() {
       // An undo means someone is rewinding on purpose; hold computer picks
       // until the next forward action so they don't instantly redo the turn.
       online.pausedForUndo = entry.action.type === "undo";
+      if (entry.action.type === "seat") releaseSeatHandedToCpu();
       if (entry.action.type !== "lineup") {
         state.tournament = null;
         invalidateBatch();
@@ -1315,6 +1353,10 @@ function subscribeOnline() {
       if (!state.online) return;
       state.online.claimedSeats = payload.seats;
       state.online.liveSeats = payload.live ?? payload.seats;
+      if (state.online.waiting && payload.waiting === false) {
+        resyncOnlineRoom();
+        return;
+      }
       scheduleScreenRender();
     },
     onLot: (payload) => {
@@ -1349,9 +1391,8 @@ async function resyncOnlineRoom(snapshot = null) {
     const room = snapshot ?? await fetchRoom(online.roomId);
     if (state.online !== online) return;
     online.serverOffsetMs = Number(room.serverNow) - Date.now() || online.serverOffsetMs || 0;
-    online.claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
-    rebuildOnlineDraft(room);
     online.status = "";
+    applyRoomSnapshot(room);
     subscribeOnline();
   } catch (error) {
     online.status = error.message;
@@ -1432,7 +1473,7 @@ function renderSeatSelect() {
   // whoever comes back to it may sit down. The host can take back any seat at
   // all, occupied or not.
   const liveSeats = online.liveSeats ?? online.claimedSeats;
-  const seats = state.draft.managers
+  const seats = (state.draft?.managers ?? online.managers)
     .map((manager) => {
       const claimed = online.claimedSeats.includes(manager.id);
       const occupied = liveSeats.includes(manager.id);
@@ -1488,6 +1529,56 @@ function renderSeatSelect() {
       state.online.status = error.message;
       renderSeatSelect();
     }
+  };
+}
+
+// The room before the draft: who is here, who is still coming, and the link to
+// send them. The board is not on this screen because the server has not sent it.
+function renderWaitingRoom() {
+  resetAppHandlers();
+  const online = state.online;
+  const liveSeats = online.liveSeats ?? online.claimedSeats;
+  const mySeat = online.managers.find((manager) => manager.id === online.managerId);
+  const shareUrl = `${inviteOrigin(online)}${location.pathname}?room=${encodeURIComponent(online.roomId)}`;
+  const missing = online.managers.filter((manager) => !manager.cpu && !liveSeats.includes(manager.id));
+  const seats = online.managers
+    .map((manager) => {
+      const here = liveSeats.includes(manager.id);
+      const label = manager.cpu ? "Computer"
+        : here ? (manager.id === online.managerId ? "You &middot; in the room" : "In the room")
+        : online.claimedSeats.includes(manager.id) ? "Stepped away"
+        : "Not here yet";
+      // The host's way out of a room somebody never shows up to.
+      const seatButton = online.host && manager.id !== online.managerId
+        ? `<button type="button" class="small seat-button" data-action="seat" data-manager-id="${escapeHtml(manager.id)}" data-cpu="${manager.cpu ? "0" : "1"}">${manager.cpu ? "Hand back" : "Hand to CPU"}</button>`
+        : "";
+      return `<div class="seat-option ${manager.cpu || here ? "" : "reseat-option"}">
+        <strong>${escapeHtml(manager.name)}</strong>
+        <span>${label}</span>
+        ${seatButton}
+      </div>`;
+    })
+    .join("");
+  const waitingOn = missing.map((manager) => manager.name).join(", ");
+  app.innerHTML = `<section class="panel setup">
+    <div>
+      <p class="eyebrow">Online room ${escapeHtml(online.roomId)}</p>
+      <h1>Waiting for managers</h1>
+      <p class="lede">${mySeat ? `You are ${escapeHtml(mySeat.name)}. ` : ""}The player pool opens for everyone at once, as soon as every manager is in the room.${waitingOn ? ` Still waiting on ${escapeHtml(waitingOn)}.` : ""}${online.host && waitingOn ? " As host, you can hand a seat that isn't coming to the computer." : ""}</p>
+      <div class="seat-grid">${seats}</div>
+      <p>Invite link: <code>${escapeHtml(shareUrl)}</code></p>
+      <p><button type="button" data-action="reset">Leave room</button></p>
+      ${online.status ? `<p class="warn">${escapeHtml(online.status)}</p>` : ""}
+    </div>
+  </section>`;
+
+  app.onclick = (event) => {
+    if (event.target.closest("[data-action='reset']")) {
+      leaveOnlineRoom();
+      return;
+    }
+    const seat = event.target.closest("[data-action='seat']");
+    if (seat) sendOnlineAction({ type: "seat", managerId: seat.dataset.managerId, cpu: seat.dataset.cpu === "1" });
   };
 }
 
@@ -6752,7 +6843,7 @@ function renderRoster(manager, draft) {
   // The whistle: a seat nobody is sitting in can be handed to the computer so
   // the room keeps moving, and handed back the moment its manager returns.
   const online = state.online;
-  const canSeat = !draft.complete && (!online || online.host);
+  const canSeat = !draft.complete && (!online || (online.host && manager.id !== online.managerId));
   const seatButton = canSeat
     ? `<button class="small seat-button" data-action="seat" data-manager-id="${escapeHtml(manager.id)}" data-cpu="${manager.cpu ? "0" : "1"}">${manager.cpu ? "Hand back" : "Hand to CPU"}</button>`
     : "";

@@ -203,9 +203,9 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
 export const AUCTION_MIN_BID = 5;
 export const AUCTION_MIN_RAISE = 5;
 export const AUCTION_DEFAULT_BUDGET = 1000;
-export const AUCTION_DEFAULT_REVIEW_SECONDS = 10 * 60;
+export const AUCTION_DEFAULT_REVIEW_SECONDS = 5 * 60;
 export const AUCTION_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
-export const AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS = 30;
+export const AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS = 20;
 
 const MS_PER_SECOND = 1000;
 
@@ -236,7 +236,7 @@ function normalizeTimerMs(ms, seconds, fallbackSeconds) {
 }
 
 export const SNAKE_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
-export const SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS = 30;
+export const SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS = 20;
 
 // The snake's chess clock: one bank for the WHOLE draft, plus an increment
 // handed back on every pick. It is the auction's model, and it asks the same

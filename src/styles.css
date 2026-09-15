@@ -6140,6 +6140,17 @@ button.interesting-game-card:focus-visible {
   opacity: 0.55;
 }
 
+/* The waiting room lists seats as status, not as buttons. */
+div.seat-option:not(:disabled):hover {
+  border-color: var(--line);
+  background: var(--card);
+  color: inherit;
+}
+
+div.seat-option:not(:disabled):hover span {
+  color: var(--muted);
+}
+
 .link-button {
   border: 0;
   background: transparent;

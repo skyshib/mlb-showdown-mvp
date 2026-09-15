@@ -123,6 +123,98 @@ test("online room lifecycle: create, join, turn enforcement, replay parity", asy
   );
 });
 
+test("nobody sees the board until every human manager is in the room", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "waiting-room",
+    managers: ["Ana", "Bo", "Robo"],
+    cpu: ["Robo"]
+  });
+  assert.equal(created.status, 201);
+  const roomId = created.data.roomId;
+  assert.equal(created.data.waiting, true);
+  assert.equal(created.data.deck, null, "the creator gets no board either");
+  assert.equal(created.data.seed, null, "nor the seed to re-deal it from");
+
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken });
+  const early = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(early.data.waiting, true, "one of two humans is not a full table");
+  assert.equal(early.data.deck, null);
+  assert.doesNotMatch(JSON.stringify(early.data), /waiting-room"/, "the seed is nowhere in the payload");
+
+  // Not even the host can move the draft before the table is full.
+  const hostPick = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "autopick" } });
+  assert.equal(hostPick.status, 409);
+  assert.match(hostPick.data.error, /every manager/);
+
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+  const opened = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(opened.data.waiting, false, "the computer seat is not waited on");
+  assert.ok(opened.data.deck?.length);
+  assert.equal(opened.data.seed, "waiting-room");
+  const pick = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "autopick" } });
+  assert.equal(pick.status, 200);
+
+  // Once open it stays open, across a restart, whoever has since wandered off.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const restarted = await startServer(t, dataDir);
+  const revived = await api(restarted, "GET", `/api/rooms/${roomId}`);
+  assert.equal(revived.data.waiting, false);
+  assert.ok(revived.data.deck?.length);
+});
+
+test("the host can hand a no-show's seat to the computer, which opens the room", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "no-show",
+    managers: ["Ana", "Bo", "Cy"],
+    // A clock, so a stray timeout pick on the unstarted clock would show up:
+    // an unstarted clock reads as started at 0, long past any bank.
+    snakeTimer: { bankMs: 60000, incrementMs: 0 }
+  });
+  const roomId = created.data.roomId;
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken });
+  const bo = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+
+  const guest = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: bo.data.token, action: { type: "seat", managerId: "team-3", cpu: true } });
+  assert.equal(guest.status, 409);
+  assert.match(guest.data.error, /Only the host/);
+  const self = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "seat", managerId: "team-1", cpu: true } });
+  assert.equal(self.status, 409, "the host keeps their own seat");
+
+  // Handing Bo away takes his seat with it: his token is dead.
+  const handBo = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "seat", managerId: "team-2", cpu: true } });
+  assert.equal(handBo.status, 200);
+  const boActs = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: bo.data.token, action: { type: "autopick" } });
+  assert.equal(boActs.status, 403);
+  let room = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(room.data.waiting, true, "Cy is still owed a seat");
+  assert.equal(room.data.managers[1].cpu, true);
+  assert.equal(room.data.actions.some((entry) => entry.action.type === "autopick"), false, "no clock ran while waiting");
+
+  // And back: Bo is a person again, and his seat is open to claim.
+  assert.equal((await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "seat", managerId: "team-2", cpu: false } })).status, 200);
+  const boAgain = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+  assert.equal(boAgain.status, 200);
+
+  // Cy never comes. Handing Cy over fills the table, and the board opens.
+  assert.equal((await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "seat", managerId: "team-3", cpu: true } })).status, 200);
+  room = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(room.data.waiting, false);
+  assert.ok(room.data.deck?.length);
+  const types = room.data.actions.map((entry) => entry.action.type);
+  assert.deepEqual(types, ["seat", "seat", "seat", "start-clock"]);
+
+  // The log replays to the same seats on a restarted server.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const restarted = await startServer(t, dataDir);
+  const revived = await api(restarted, "GET", `/api/rooms/${roomId}`);
+  assert.deepEqual(revived.data.managers.map((manager) => manager.cpu), [false, false, true]);
+  assert.equal(revived.data.waiting, false);
+});
+
 test("online rooms carry the configured rotation size into roster construction", async (t) => {
   const base = await startServer(t);
   const created = await api(base, "POST", "/api/rooms", {
@@ -139,6 +231,7 @@ test("online rooms carry the configured rotation size into roster construction",
     managerId: "team-1",
     hostToken: created.data.hostToken
   });
+  await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-2" });
   const finish = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
     token: joined.data.token,
     action: { type: "finish" }
@@ -218,6 +311,7 @@ test("online room streams actions over SSE", async (t) => {
   const created = await api(base, "POST", "/api/rooms", { seed: "online-sse", managers: ["Eve", "Fay"] });
   const roomId = created.data.roomId;
   const eve = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1" });
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
 
   const controller = new AbortController();
   t.after(() => controller.abort());
@@ -306,6 +400,7 @@ test("online rooms draft any card set, and the client rebuilds the same deck", a
   assert.equal(created.data.universe, "franchise-SEA");
 
   const seat = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-1" });
+  await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-2" });
   const pick = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
     token: seat.data.token,
     action: { type: "autopick" }
@@ -340,6 +435,8 @@ test("a room deals the deck it recorded, not the deck its seed would deal today"
   });
   assert.equal(created.status, 201);
   const roomId = created.data.roomId;
+  await api(first, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1" });
+  await api(first, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
   // persistRoom writes async; give the chained write a beat to land.
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
 
@@ -393,6 +490,7 @@ test("rooms survive a server restart with seats and turn state intact", async (t
     managerId: "team-1",
     hostToken: created.data.hostToken
   });
+  await api(first, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
   await api(first, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "autopick" } });
   // persistRoom writes async; give the chained write a beat to land.
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
@@ -405,7 +503,7 @@ test("rooms survive a server restart with seats and turn state intact", async (t
   assert.equal(room.data.actions.length, 1);
   assert.deepEqual(
     room.data.managers.map((manager) => [manager.name, manager.claimed]),
-    [["Ana", true], ["Bo", false]]
+    [["Ana", true], ["Bo", true]]
   );
 
   // Ana's old seat token still works, and it is still Bo's turn (snake pick 2),
@@ -543,14 +641,17 @@ test("online snake chess clocks use server timestamps and authoritative snapshot
     snakeTimer: { bankSeconds: 60, incrementSeconds: 10 }
   });
   assert.equal(created.status, 201);
-  assert.equal(created.data.actions[0].action.type, "start-clock");
-  assert.ok(Number.isFinite(created.data.actions[0].action.at));
-  assert.deepEqual(created.data.snakeClock.banks, { "team-1": 60000, "team-2": 60000 });
+  assert.deepEqual(created.data.actions, [], "the clock waits for the table to fill");
 
   const ana = await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, {
     managerId: "team-1",
     hostToken: created.data.hostToken
   });
+  await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-2" });
+  const opened = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  assert.equal(opened.data.actions[0].action.type, "start-clock");
+  assert.ok(Number.isFinite(opened.data.actions[0].action.at));
+  assert.deepEqual(opened.data.snakeClock.banks, { "team-1": 60000, "team-2": 60000 });
   const picked = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
     token: ana.data.token,
     // A browser's wall clock is untrusted. The room must replace this value.
@@ -602,9 +703,12 @@ test("the room server expires snake chess clocks without a browser driving them"
     snakeTimer: { bankMs: 50, incrementMs: 100 }
   });
   assert.equal(created.status, 201);
-  const startedAt = created.data.actions[0].action.at;
+  await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-1" });
+  await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-2" });
+  const opened = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  const startedAt = opened.data.actions[0].action.at;
 
-  // Nobody joins. The room itself owns the deadline and makes the expired
+  // Nobody acts. The room itself owns the deadline and makes the expired
   // picks, just as a timed auction continues without a host tab backstopping it.
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 175));
   const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
@@ -628,6 +732,7 @@ test("pausing an online snake room freezes its authoritative chess clock", async
     managerId: "team-1",
     hostToken: created.data.hostToken
   });
+  await api(base, "POST", `/api/rooms/${created.data.roomId}/join`, { managerId: "team-2" });
 
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
   const pause = await api(base, "POST", `/api/rooms/${created.data.roomId}/actions`, {
@@ -745,6 +850,7 @@ test("the host can grant time in an auction room", async (t) => {
     managerId: "team-1",
     hostToken: created.data.hostToken
   });
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
   await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: ana.data.token, action: { type: "pause" } });
   const before = await api(base, "GET", `/api/rooms/${roomId}`);
   const grant = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
@@ -776,6 +882,7 @@ test("shared sim actions are logged after the draft completes and survive restar
     managerId: "team-1",
     hostToken: created.data.hostToken
   });
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
 
   // Sims are rejected until the draft is complete.
   const early = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
@@ -913,6 +1020,7 @@ test("the host can hand back a seat somebody has lost", async (t) => {
 
   const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken });
   assert.equal(ana.status, 200);
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
 
   // Ana's browser loses its storage — cleared, or she comes back on a
   // different address, which is a different localStorage. The seat is still

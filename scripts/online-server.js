@@ -288,6 +288,8 @@ function reviveRoom(saved) {
     draft,
     actions,
     pendingBids,
+    // Rooms saved before the waiting room existed were already underway.
+    waitingForPlayers: Boolean(saved.waitingForPlayers),
     seats: new Map(Object.entries(saved.seats ?? {})),
     hostToken: saved.hostToken,
     streams: new Set(),
@@ -332,6 +334,7 @@ function roomRecord(room) {
     seats: Object.fromEntries(room.seats),
     actions: room.actions,
     pendingBids: room.pendingBids ?? [],
+    waitingForPlayers: Boolean(room.waitingForPlayers),
     createdAt: room.createdAt
   };
 }
@@ -893,7 +896,7 @@ async function handleApi(store, request, response, url) {
   if (!subroute && request.method === "GET") return sendJson(response, 200, roomSnapshot(room, request.socket.localPort));
   if (subroute === "join" && request.method === "POST") return joinRoom(store, room, request, response);
   if (subroute === "actions" && request.method === "POST") return postAction(store, room, request, response);
-  if (subroute === "stream" && request.method === "GET") return openStream(room, request, response, url);
+  if (subroute === "stream" && request.method === "GET") return openStream(store, room, request, response, url);
   return sendJson(response, 404, { error: "Unknown API route" });
 }
 
@@ -958,19 +961,6 @@ async function createRoom(store, request, response) {
     { draftType, nomination, startingPitchers, budget: auctionBudget, timer: auctionTimer, snakeTimer }
   );
   const createdAt = Date.now();
-  const actions = [];
-  if (isAuctionDraft(draft)) {
-    const action = { type: "start-review", at: createdAt };
-    applyDraftAction(draft, action);
-    actions.push({ seq: 1, action });
-  } else if (snakeClockEnabled(draft)) {
-    // The gun, recorded like any other action: every client that replays this
-    // room starts its clocks at the instant the room opened, not at the instant
-    // it happened to load.
-    const action = { type: "start-clock", at: createdAt };
-    applyDraftAction(draft, action);
-    actions.push({ seq: 1, action });
-  }
   const room = {
     id: newRoomId(store.rooms),
     seed,
@@ -991,18 +981,20 @@ async function createRoom(store, request, response) {
     cpuNames,
     managerNames: managers,
     draft,
-    actions,
+    actions: [],
     pendingBids: [],
+    // Nobody sees the board until every human manager is in the room, so the
+    // first one through the door gets no head start studying it.
+    waitingForPlayers: true,
     seats: new Map(),
     hostToken: newToken(),
     streams: new Set(),
     createdAt
   };
   store.rooms.set(room.id, room);
-  // A computer first nominator opens the block before anyone arrives.
-  runCpuAuction(store, room);
+  // A room with no human seats has nobody to wait for.
+  startRoomIfFull(store, room);
   persistRoom(store, room);
-  scheduleRoomTimer(store, room);
   sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room, request.socket.localPort) });
 }
 
@@ -1030,8 +1022,9 @@ async function joinRoom(store, room, request, response) {
   // person through the door can take it out from under you.
   const seat = { managerId: manager.id, token: newToken(), isHost, lastSeenAt: Date.now() };
   room.seats.set(manager.id, seat);
+  startRoomIfFull(store, room);
   persistRoom(store, room);
-  broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room) });
+  broadcastSeats(room);
   sendJson(response, 200, { token: seat.token, managerId: manager.id, host: isHost, reseated: Boolean(existing) });
 }
 
@@ -1041,6 +1034,11 @@ async function postAction(store, room, request, response) {
   const seat = [...room.seats.values()].find((item) => item.token === body.token);
   const isHost = Boolean(seat?.isHost) || (Boolean(body.token) && body.token === room.hostToken);
   if (!seat && !isHost) return sendJson(response, 403, { error: "Join a seat before acting" });
+  // The one move a waiting room takes: the host handing a seat that is not
+  // coming to the computer, so the table can fill without them.
+  if (room.waitingForPlayers && action?.type !== "seat") {
+    return sendJson(response, 409, { error: "The draft starts once every manager is in the room" });
+  }
 
   syncRoomTimer(store, room, action?.at);
   runCpuAuction(store, room);
@@ -1097,6 +1095,14 @@ async function postAction(store, room, request, response) {
     // never saw them, so no replica ever has to unwind them.
     if (action.type === "cancel-lot" || action.type === "undo") room.pendingBids = [];
     appendAction(store, room, action);
+  }
+  if (action.type === "seat") {
+    // A seat handed to the computer is nobody's any more: the token that held
+    // it stops working, and a person can sit back down once it is handed back.
+    if (action.cpu) room.seats.delete(action.managerId);
+    startRoomIfFull(store, room);
+    persistRoom(store, room);
+    broadcastSeats(room);
   }
   runCpuAuction(store, room);
   broadcastLot(room);
@@ -1202,6 +1208,8 @@ function syncRoomSnakeTimer(store, room, now = Date.now()) {
 }
 
 function syncRoomTimer(store, room, now = Date.now()) {
+  // No clock has started, and an unstarted snake clock reads as long expired.
+  if (room.waitingForPlayers) return false;
   return isAuctionDraft(room.draft)
     ? syncRoomAuctionTimer(store, room, now)
     : syncRoomSnakeTimer(store, room, now);
@@ -1210,6 +1218,7 @@ function syncRoomTimer(store, room, now = Date.now()) {
 function scheduleRoomTimer(store, room) {
   if (room.timer) clearTimeout(room.timer);
   room.timer = null;
+  if (room.waitingForPlayers) return;
   const deadline = nextRoomTimerDeadline(room.draft);
   if (deadline === null) return;
   room.timer = setTimeout(() => {
@@ -1246,6 +1255,7 @@ function nextRoomTimerDeadline(draft) {
 // do in a snake room: only the server can see the sealed lot, so only the server
 // can bid into it. A room of computers also finishes with nobody watching.
 function runCpuAuction(store, room) {
+  if (room.waitingForPlayers) return;
   const draft = room.draft;
   if (!isAuctionDraft(draft)) return;
   // A pause stops the computer managers too, or the room would come back from
@@ -1343,7 +1353,7 @@ function denyAction(draft, seat, isHost, action) {
   // A paused room is a room holding still: the clocks are stopped, so no move
   // that would spend one may land. Setting a lineup is not a move on the draft,
   // and stays open — a break is exactly when people tinker with their team.
-  if (isDraftPaused(draft) && type !== "lineup" && type !== "staff" && !SIM_ACTION_TYPES.has(type)) {
+  if (isDraftPaused(draft) && type !== "lineup" && type !== "staff" && type !== "seat" && !SIM_ACTION_TYPES.has(type)) {
     return "The draft is paused";
   }
   if (type === "pick" || type === "autopick") {
@@ -1438,10 +1448,20 @@ function denyAction(draft, seat, isHost, action) {
     if (!draft.complete) return "The draft must be complete before simulating";
     return null;
   }
+  if (type === "seat") {
+    if (!isHost) return "Only the host can hand a seat to the computer";
+    if (draft.complete) return "The draft is already complete";
+    const manager = draft.managers.find((item) => item.id === action?.managerId);
+    if (!manager) return "No such manager";
+    if (typeof action.cpu !== "boolean") return "Say whether the seat goes to the computer";
+    if (manager.cpu === action.cpu) return action.cpu ? `${manager.name} is already a computer` : `${manager.name} is not a computer`;
+    if (action.cpu && manager.id === seat?.managerId) return "The host cannot hand their own seat to the computer";
+    return null;
+  }
   return `Unknown draft action: ${type}`;
 }
 
-function openStream(room, request, response, url) {
+function openStream(store, room, request, response, url) {
   const since = Math.max(0, Number(url.searchParams.get("since")) || 0);
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -1470,9 +1490,45 @@ function openStream(room, request, response, url) {
   request.on("close", () => {
     if (seat) seat.lastSeenAt = Date.now();
     room.streams.delete(response);
-    broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room) });
+    broadcastSeats(room);
   });
-  broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room) });
+  // Coming back into the room counts as arriving, so a manager who claimed a
+  // seat, wandered off, and returned can be the one who completes the table.
+  if (seat && startRoomIfFull(store, room)) persistRoom(store, room);
+  broadcastSeats(room);
+}
+
+function broadcastSeats(room) {
+  broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room), waiting: Boolean(room.waitingForPlayers) });
+}
+
+// The room opens its board the moment every human seat is occupied at once,
+// and never closes it again: a dropped connection mid-draft is not a reason to
+// hide the pool from the people still there. The clocks start here, not when
+// the room was created, so nobody's bank burns down while the table fills.
+function startRoomIfFull(store, room) {
+  if (!room.waitingForPlayers) return false;
+  const humans = room.draft.managers.filter((manager) => !manager.cpu);
+  if (!humans.every((manager) => seatIsLive(room, manager.id))) return false;
+  room.waitingForPlayers = false;
+  const at = Date.now();
+  if (isAuctionDraft(room.draft)) {
+    const action = { type: "start-review", at };
+    applyDraftAction(room.draft, action);
+    appendAction(store, room, action);
+  } else if (snakeClockEnabled(room.draft)) {
+    // The gun, recorded like any other action: every client that replays this
+    // room starts its clocks at the instant the draft opened, not at the
+    // instant it happened to load.
+    const action = { type: "start-clock", at };
+    applyDraftAction(room.draft, action);
+    appendAction(store, room, action);
+  }
+  // A computer first nominator opens the block as soon as the board is shown.
+  runCpuAuction(store, room);
+  broadcastLot(room);
+  scheduleRoomTimer(store, room);
+  return true;
 }
 
 function seatForToken(room, token) {
@@ -1520,10 +1576,14 @@ function lanOrigin(port) {
 }
 
 function roomSnapshot(room, port = null) {
+  // Until the table is full the board stays on the server: no deck, and no seed
+  // to re-deal it from either.
+  const waiting = Boolean(room.waitingForPlayers);
   return {
     lanOrigin: port ? lanOrigin(port) : null,
     roomId: room.id,
-    seed: room.seed,
+    waiting,
+    seed: waiting ? null : room.seed,
     rosterSize: room.rosterSize,
     startingPitchers: room.startingPitchers,
     temperature: room.temperature ?? 0,
@@ -1531,7 +1591,7 @@ function roomSnapshot(room, port = null) {
     // The room deals its board to every client. Left to re-deal from the seed a
     // client runs whatever deal ITS copy of the code knows, which is not always
     // the deal the room was opened with.
-    deck: room.deck ?? null,
+    deck: waiting ? null : room.deck ?? null,
     poolMode: room.poolMode,
     realPool: room.realPool ?? "stars",
     pickTimer: room.pickTimer ?? 0,

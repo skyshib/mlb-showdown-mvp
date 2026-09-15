@@ -62,8 +62,10 @@ function replay(room) {
   return draft;
 }
 
+// The room withholds its seed until every manager is in, so deal off the one
+// the test opened it with.
 function firstNominatable(room) {
-  return buildDraftPool(room.universe, room.seed).find((player) => player.kind === "hitter").id;
+  return buildDraftPool(room.universe, SEED).find((player) => player.kind === "hitter").id;
 }
 
 
@@ -167,7 +169,7 @@ test("timed online auctions share review and chess-clock state", async (t) => {
     bankMs: 30000,
     incrementMs: 5000
   });
-  assert.equal(room.actions[0].action.type, "start-review");
+  assert.deepEqual(room.actions, [], "review waits for the table to fill");
   assert.ok(Number.isFinite(room.serverNow));
 
   const ana = await api(base, "POST", `/api/rooms/${room.roomId}/join`, {
@@ -175,6 +177,8 @@ test("timed online auctions share review and chess-clock state", async (t) => {
     hostToken: room.hostToken
   });
   const bo = await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-2" });
+  const opened = await api(base, "GET", `/api/rooms/${room.roomId}`);
+  assert.equal(opened.data.actions[0].action.type, "start-review");
   assert.equal((await act(base, room.roomId, bo.data.token, { type: "complete-review" })).status, 409);
   assert.equal((await act(base, room.roomId, ana.data.token, { type: "complete-review", at: 1 })).status, 200);
 
@@ -210,6 +214,7 @@ test("online bid-clock expiry records sealed zero bids", async (t) => {
     managerId: "team-1",
     hostToken: room.hostToken
   });
+  await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-2" });
   assert.equal((await act(base, room.roomId, ana.data.token, {
     type: "nominate", playerId: firstNominatable(room)
   })).status, 200);
@@ -359,6 +364,7 @@ test("a nomination can be canceled until a rival bids on it", async (t) => {
     hostToken: room.hostToken
   });
   const bo = await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-2" });
+  await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-3" });
   const playerId = firstNominatable(room);
 
   // The nominator's own opening bid does not commit the card.
@@ -391,6 +397,7 @@ test("a stalled auction is finished by the host, and the withheld bids come out 
     managerId: "team-1",
     hostToken: room.hostToken
   });
+  await api(base, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-2" });
   const playerId = firstNominatable(room);
   await act(base, room.roomId, ana.data.token, { type: "nominate", playerId });
   await act(base, room.roomId, ana.data.token, { type: "seal-bid", managerId: "team-1", amount: 150 });
