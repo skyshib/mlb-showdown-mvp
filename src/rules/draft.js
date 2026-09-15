@@ -133,13 +133,16 @@ export function boardBullpenSlots(pen = {}) {
 
 // The pen slots this roster shows. An unlimited pen seats every reliever not
 // sent to the bench, plus one open seat while anyone is benched, so a benched
-// arm always has somewhere to come back to without bumping another.
+// arm always has somewhere to come back to without bumping another. A room
+// with a set floor never shows fewer seats than it, so a roster still being
+// drafted shows the relievers it owes as open seats.
 function bullpenSlotTarget(options = {}, roster = [], benched = new Set()) {
   const slots = normalizeBullpenSlots(options?.bullpenSlots);
   if (slots !== UNLIMITED_BULLPEN) return slots;
   const relievers = staffStatus(roster).bullpen;
   const active = relievers.filter((player) => !benched.has(player.id)).length;
-  return active + (active < relievers.length ? 1 : 0);
+  const floor = options?.bullpenMin != null && options.bullpenMin !== "" ? bullpenRequirement(options) : 0;
+  return Math.max(floor, active + (active < relievers.length ? 1 : 0));
 }
 
 // The designated hitter is a slot, not a position: ANY bat fills it, and

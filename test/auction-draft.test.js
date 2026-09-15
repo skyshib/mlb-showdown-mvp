@@ -721,6 +721,13 @@ test("a random-nomination room sets how many relievers pitch, unlimited by defau
   alpha.staffAssignments = { RP2: null };
   assert.equal(buildTeam(alpha).bullpen.length, 5);
 
+  // Before any reliever is bought, the pen still shows the seats its floor owes.
+  const floored = makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: UNLIMITED_BULLPEN, bullpenMin: 3 });
+  assert.deepEqual(
+    assignStaffSlots([], {}, floored).filter((slot) => slot.role === "RP").map((slot) => slot.label),
+    ["RP1", "RP2", "RP3"]
+  );
+
   const three = makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: 3 });
   const beta = rosterFor(three.managers[0]);
   assert.equal(buildTeam(beta).bullpen.length, 3, "a set pen seats that many");

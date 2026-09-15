@@ -2703,11 +2703,6 @@ tr:focus-within .row-tools {
   font-weight: 750;
 }
 
-/* Holds a column open on a team with a smaller pen; not a seat to fill. */
-.dock-slot.dock-slot-filler {
-  visibility: hidden;
-}
-
 .dock-bench-slot {
   flex: 0 1 94px;
   min-width: 72px;

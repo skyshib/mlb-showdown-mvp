@@ -7599,14 +7599,10 @@ function renderRosterDock(draft, viewerId) {
   // The "you" tag hangs off the same answer the rest of the screen uses, so it
   // cannot end up pinned to a manager the app no longer thinks is you.
   const ownTag = viewerManager(draft) ? "you" : "";
-  // An uncapped pen gives each team a seat per reliever it owns, so the rows
-  // would run to different lengths. Every row is padded to the room's biggest
-  // staff so a slot sits in the same column on every team.
-  const staffColumns = Math.max(0, ...ordered.map((manager) => assignStaffSlots(manager.roster, manager.staffAssignments, draft).length));
   const bars = collapsed
     ? ""
     : ordered
-        .map((manager) => renderDockBar(draft, manager, auction, prices, heatScale, { own: manager.id === viewerId, ownTag, staffColumns }))
+        .map((manager) => renderDockBar(draft, manager, auction, prices, heatScale, { own: manager.id === viewerId, ownTag }))
         .join("");
   return `<div class="roster-dock-spacer${collapsed ? " collapsed" : ""}"></div>
   <aside class="roster-dock${collapsed ? " collapsed" : ""}" aria-label="Team rosters">
@@ -7618,7 +7614,14 @@ function renderRosterDock(draft, viewerId) {
   </aside>`;
 }
 
-function renderDockBar(draft, manager, auction, prices, heatScale, { own = false, ownTag = "", staffColumns = 0 } = {}) {
+// The dock's pen is a fixed width: the room's count, or its floor when the pen
+// is uncapped. An uncapped pen seats a reliever per arm owned, which would run
+// the rows to different lengths; the extras still ride every RP carousel.
+function dockBullpenColumns(draft) {
+  return draft.bullpenSlots === UNLIMITED_BULLPEN ? bullpenRequirement(draft) : Infinity;
+}
+
+function renderDockBar(draft, manager, auction, prices, heatScale, { own = false, ownTag = "" } = {}) {
   // Every position is a tiny depth chart. A multi-position card deliberately
   // appears in more than one list; its hover badge says where it is actually
   // starting so that availability is not mistaken for another owned card.
@@ -7638,7 +7641,9 @@ function renderDockBar(draft, manager, auction, prices, heatScale, { own = false
     heatScale,
     prices
   })).join("");
-  const pitcherSlots = staffSlots.map((slot) => renderDockPositionSlot({
+  const penColumns = dockBullpenColumns(draft);
+  const shownStaff = staffSlots.filter((slot) => slot.role === "SP" || Number(slot.label.slice(2)) <= penColumns);
+  const pitcherSlots = shownStaff.map((slot) => renderDockPositionSlot({
     manager,
     slotKey: slot.label,
     label: slot.label,
@@ -7648,10 +7653,9 @@ function renderDockBar(draft, manager, auction, prices, heatScale, { own = false
     heatScale,
     prices
   })).join("");
-  const staffFiller = `<span class="dock-slot dock-slot-filler" aria-hidden="true"></span>`.repeat(Math.max(0, staffColumns - staffSlots.length));
   return `<div class="dock-bar${own ? " own-bar" : ""}">
     <span class="dock-team">${escapeHtml(manager.name)}${own && ownTag ? ` <em class="own-tag">${escapeHtml(ownTag)}</em>` : ""}</span>
-    <div class="dock-slots">${hitterSlots}${pitcherSlots}${staffFiller}${renderDockBenchSlot(manager, bench, activeAt, heatScale, prices)}</div>
+    <div class="dock-slots">${hitterSlots}${pitcherSlots}${renderDockBenchSlot(manager, bench, activeAt, heatScale, prices)}</div>
   </div>`;
 }
 
