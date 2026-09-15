@@ -72,7 +72,7 @@ const SP_SLOT_ANCHOR = 3;
 const SP_SLOT_DISCOUNT_ANCHOR = 4;
 const SP_SLOT_FACTOR_CAP = 2;
 
-function spSlotFactor(startingPitchers) {
+export function spSlotFactor(startingPitchers) {
   const slots = Number(startingPitchers) || SP_SLOT_ANCHOR;
   const discount = Math.min(1, SP_SLOT_DISCOUNT_ANCHOR / slots);
   return Math.min(SP_SLOT_FACTOR_CAP, Math.max(discount, SP_SLOT_ANCHOR / slots));

@@ -538,3 +538,45 @@ test("a bench bat does not hide an open position from the budget", () => {
   assert.ok(withoutBench > 0, "the second baseman fills a hole");
   assert.ok(withBench <= withoutBench * 1.1, `a bench bat lifted the bid from ${withoutBench} to ${withBench}`);
 });
+
+// A pen is priced by the arm it adds. The engine rides the best reliever out
+// there, so a card that would become a team's best reliever is worth a premium,
+// and in an uncapped pen the third through fifth relievers still take innings
+// off the rotation — they are a need, not bench.
+test("relievers are bid on as the pen they join", () => {
+  const seed = "pen-depth";
+  const pen = { bullpenSlots: "all", bullpenMin: 2 };
+  const pool = buildDraftPool(UNIVERSE, seed, { nomination: "random", managerCount: 4, startingPitchers: 4, ...pen });
+  const cards = pool.filter((card) => !card.replacement);
+  const bats = (position) => cards.filter((card) => card.kind === "hitter" && card.position === position);
+  const lineup = ["C", "1B", "2B", "3B", "SS", "CF", "LF/RF"].map((position) => bats(position)[0]);
+  lineup.push(bats("LF/RF")[1]);
+  lineup.push(cards.find((card) => card.kind === "hitter" && !lineup.includes(card)));
+  const rotation = cards.filter((card) => card.kind === "pitcher" && card.role === "SP").slice(0, 4);
+  const relievers = cards.filter((card) => card.kind === "pitcher" && card.role !== "SP")
+    .sort((a, b) => b.points - a.points);
+  const [ace, second] = relievers;
+  const weakPen = relievers.slice(-2);
+
+  const bid = (penSettings, owned, lot) => {
+    const draft = createDraft(
+      Array.from({ length: 4 }, (_, index) => ({ name: `M${index + 1}`, cpu: true, persona: "balanced" })),
+      pool, 15, seed,
+      { draftType: "auction", nomination: "random", startingPitchers: 4, budget: 1500, timer: false, ...penSettings }
+    );
+    const cpu = draft.managers[0];
+    cpu.roster = [...lineup, ...rotation, ...owned].map((card) => draft.pool.find((item) => item.id === card.id));
+    for (const card of cpu.roster) draft.pickedIds.add(card.id);
+    draft.auction.budgets[cpu.id] = 600;
+    draft.auction.lot = { playerId: lot.id, nominatorId: null, round: 1, bids: {}, pending: [], tie: null, clock: null };
+    return cpuSealedBid(draft, cpu);
+  };
+
+  const uncapped = bid(pen, weakPen, ace);
+  const capped = bid({ bullpenSlots: 2, bullpenMin: 2 }, weakPen, ace);
+  assert.ok(uncapped > capped, `a third reliever bid ${uncapped} uncapped vs ${capped} in a two-man pen`);
+
+  const wouldLead = bid(pen, weakPen, second);
+  const behindAce = bid(pen, [ace, weakPen[0]], second);
+  assert.ok(wouldLead > behindAce, `the same reliever bid ${wouldLead} to lead a pen vs ${behindAce} behind a better arm`);
+});

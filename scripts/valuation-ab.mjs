@@ -73,7 +73,7 @@ function driveLeague(seed, newSeats) {
   return draft.managers.map((m, i) => ({ isNew: newSeats.has(i), win: winByName.get(m.name) ?? 0 }));
 }
 
-const newWins = [], oldWins = [];
+const newWins = [], oldWins = [], leagueEdges = [];
 for (let L = 0; L < LEAGUES; L++) {
   // swap which seats are NEW every other league
   const newSeats = new Set(
@@ -81,7 +81,10 @@ for (let L = 0; L < LEAGUES; L++) {
       ? Array.from({ length: TEAMS }, (_, i) => i).filter((i) => i % 2 === 0)
       : Array.from({ length: TEAMS }, (_, i) => i).filter((i) => i % 2 === 1)
   );
-  for (const r of driveLeague(`${TAG}-${L}`, newSeats)) (r.isNew ? newWins : oldWins).push(r.win);
+  const results = driveLeague(`${TAG}-${L}`, newSeats);
+  for (const r of results) (r.isNew ? newWins : oldWins).push(r.win);
+  const side = (isNew) => results.filter((r) => r.isNew === isNew).reduce((sum, r, _, all) => sum + r.win / all.length, 0);
+  leagueEdges.push(side(true) - side(false));
 }
 const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
 const std = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((x) => (x - m) ** 2))); };
@@ -92,3 +95,8 @@ console.log(`Head-to-head: ${LEAGUES} leagues, ${TEAMS} teams, $${BUDGET}, roste
 console.log(`  NEW seats win%: ${(nW * 100).toFixed(2)}%  (n=${newWins.length})`);
 console.log(`  OLD seats win%: ${(oW * 100).toFixed(2)}%  (n=${oldWins.length})`);
 console.log(`  NEW − OLD:      ${((nW - oW) * 100 >= 0 ? "+" : "")}${((nW - oW) * 100).toFixed(2)} pts   (±${(1.96 * se * 100).toFixed(2)} 95% CI)`);
+// The seats within a league are near zero-sum, so the pooled CI above runs too
+// narrow. This one treats each league as one observation.
+const edge = mean(leagueEdges);
+const edgeSe = std(leagueEdges) / Math.sqrt(leagueEdges.length);
+console.log(`  per-league:     ${(edge * 100 >= 0 ? "+" : "")}${(edge * 100).toFixed(2)} pts   (±${(1.96 * edgeSe * 100).toFixed(2)} 95% CI, league-paired)`);

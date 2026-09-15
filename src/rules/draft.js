@@ -1,5 +1,5 @@
 import { createRng } from "./rng.js?v=20260716-records";
-import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality } from "./valuation.js?v=20260716-records";
+import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality, spSlotFactor } from "./valuation.js?v=20260716-records";
 import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260716-records";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
@@ -1872,6 +1872,33 @@ function auctionWorth(market, player) {
   return Math.max(0, value - replacement);
 }
 
+// A reliever's worth depends on the pen he joins. The engine always calls on
+// the best arm out there and rides him, so a team's top reliever throws about
+// two innings a game and the next one well under one. Measured by swapping
+// arms for the worst card at the role across 60 leagues a format, a point of
+// value is worth ~2.5x a starter's in a team's best reliever and ~0.7x in the
+// rest. So the part of him that beats the manager's current best reliever is
+// priced at RELIEVER_TOP_RATE and the part below it at RELIEVER_DEPTH_RATE.
+//
+// A starter's value is per start and the model lifts it by rotation size
+// (spSlotFactor); a reliever pitches every game whatever the rotation. The
+// ratios above were measured at four starters, so both rates scale by
+// K · spSlotFactor(K) / 4: 0.75 at two or three starters, 1 at four or five.
+const RELIEVER_TOP_RATE = 2.5;
+const RELIEVER_DEPTH_RATE = 0.7;
+
+function relieverWorth(market, player, bestReliever, startingPitchers) {
+  const value = market.model.value(player);
+  const floor = market.replacement.get(poolGroup(player)) ?? 0;
+  const best = Math.max(floor, bestReliever);
+  const slots = normalizeStartingPitchers(startingPitchers);
+  const scale = slots * spSlotFactor(slots) / 4;
+  return scale * (
+    RELIEVER_TOP_RATE * Math.max(0, value - best)
+    + RELIEVER_DEPTH_RATE * Math.max(0, Math.min(value, best) - floor)
+  );
+}
+
 // How badly this manager needs to buy SOMETHING at this spot before its chances
 // run out. Worth says how good the card is; urgency says whether it can afford
 // to be choosy. It weighs the holes it still has at the card's bucket against
@@ -2018,15 +2045,28 @@ function hitterTakesOpenSlot(roster, card) {
 // cardFillsNeed reads them, by the open slots in the seated lineup, not by
 // head count: nine hitters with nobody who can play second still leave second
 // open, and a card bought for that hole has to be a hole the budget knows about.
+//
+// Relievers are counted up to the pen a manager should carry, not the room's
+// minimum. The engine goes to the pen as soon as it holds a better arm and the
+// innings to finish, so a deep pen takes innings off the rotation: the reliever
+// after the second is not bench. Head to head in uncapped rooms, a target of
+// five beat four and six (+6 win points over the room minimum on classic and
+// fictional). A capped pen stops at its cap, since arms past it never pitch.
+const AUCTION_PEN_DEPTH = 5;
+
 function auctionNeeds(draft, manager) {
   const needs = getRosterNeeds(manager.roster, draft);
+  const slots = normalizeBullpenSlots(draft.bullpenSlots);
+  const penTarget = slots === UNLIMITED_BULLPEN ? AUCTION_PEN_DEPTH : Math.min(AUCTION_PEN_DEPTH, slots);
+  needs.bullpen = Math.max(needs.bullpen, penTarget - staffStatus(manager.roster).bullpen.length);
+  needs.pitcher = needs.starter + needs.bullpen;
   const openLineup = assignLineupSlots(manager.roster).slots.filter((slot) => !slot.player).length;
   return { ...needs, hitter: Math.max(needs.hitter, openLineup) };
 }
 
 function cardFillsNeed(manager, draft, card) {
   if (card?.kind === "pitcher") {
-    const needs = getRosterNeeds(manager.roster, draft);
+    const needs = auctionNeeds(draft, manager);
     return pitcherRole(card) === "SP" ? needs.starter > 0 : needs.bullpen > 0;
   }
   return hitterTakesOpenSlot(manager.roster, card);
@@ -2069,6 +2109,10 @@ function auctionWillingness(draft, manager, player) {
   // the draft's tail, a full-bucket card is worth the larger of its damped depth
   // and how far it clears the manager's OWN weakest fielded card at that bucket,
   // scaled by how near the end we are. Upgrade-gated, so it never chases scrubs.
+  const bestReliever = Math.max(
+    market.replacement.get("RP") ?? 0,
+    ...manager.roster.filter((card) => playerBucket(card) === "bullpen").map((card) => market.model.value(card))
+  );
   const endgame = auctionEndgamePressure(draft);
   const fieldedFloor = endgame > 0 ? fieldedBucketFloor(manager, market.model) : null;
   const effectiveWorth = (card) => {
@@ -2081,7 +2125,10 @@ function auctionWillingness(draft, manager, player) {
     // so duplicate positions read as needs until the ninth bat was aboard.)
     const fills = cardFillsNeed(manager, draft, card);
     const urgency = fills ? auctionUrgency(needs, card, forthcoming) : 0;
-    const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * urgency);
+    const surplus = playerBucket(card) === "bullpen"
+      ? relieverWorth(market, card, bestReliever, draft.startingPitchers)
+      : auctionWorth(market, card);
+    const base = surplus * (1 + URGENCY_WEIGHT * urgency);
     if (fills) return base;
     const damped = base * DEPTH_DAMP;
     if (!endgame) return damped;
