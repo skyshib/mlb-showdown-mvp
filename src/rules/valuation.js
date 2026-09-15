@@ -59,16 +59,23 @@ const PERTURBATION = 0.25;
 // anchored at a full rotation (SP_SLOT_ANCHOR): at that many slots or more a
 // starter is priced as-is, and a shorter rotation lifts him toward the anchor.
 // Relievers work out of the pen on availability, not the rotation, so they never
-// take this factor. The shape (anchor 3, floor 1, cap 2) was chosen by an A/B
-// sweep of the CPU bidder: boosting SP ~1.5x at 2 slots beat the slot-blind
-// bidder by ~+4 win pts, while EVER cutting SP below its base value (long
-// rotations) consistently hurt — so the floor never lets it drop below 1.
+// take this factor. Short rotations lift toward SP_SLOT_ANCHOR (cap 2): ~1.5x
+// at 2 slots beats the slot-blind bidder by ~+6 win pts. Rotations longer than
+// SP_SLOT_DISCOUNT_ANCHOR discount by the same 1/slots logic, so a five-man
+// starter is 0.8x. Without it the computers sank 36% of a 5-SP budget into the
+// rotation (29% at 4 slots, 25% at 2-3). Measured on the league-paired
+// valuation-ab against its null, 1000 leagues a cell, 0.8x at 5 slots won
+// +0.5 to +1.9 win pts on every deck, table size and persona tried. Deeper cuts
+// hurt (0.75x at 4 slots −2.2, 0.4x at 5 slots −2.1), and so did lifting a
+// 3-man starter past 1 on mlb-history (−1.3), so 3-4 slots stay at 1.
 const SP_SLOT_ANCHOR = 3;
+const SP_SLOT_DISCOUNT_ANCHOR = 4;
 const SP_SLOT_FACTOR_CAP = 2;
 
 function spSlotFactor(startingPitchers) {
   const slots = Number(startingPitchers) || SP_SLOT_ANCHOR;
-  return Math.min(SP_SLOT_FACTOR_CAP, Math.max(1, SP_SLOT_ANCHOR / slots));
+  const discount = Math.min(1, SP_SLOT_DISCOUNT_ANCHOR / slots);
+  return Math.min(SP_SLOT_FACTOR_CAP, Math.max(discount, SP_SLOT_ANCHOR / slots));
 }
 
 // ---- what a computer manager believes ----
