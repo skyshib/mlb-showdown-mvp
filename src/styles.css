@@ -4742,6 +4742,10 @@ button.interesting-game-card:focus-visible {
   text-align: center;
 }
 
+.player-table .outs-boundary {
+  border-right: 1px dashed var(--hairline);
+}
+
 .draft-player-row:hover td {
   background: var(--sheet);
 }

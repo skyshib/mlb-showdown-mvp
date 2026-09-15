@@ -322,7 +322,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         ${hidePoints ? "" : sortHeader("points", "Pts")}
         ${showWpar ? sortHeader("wpar", "WPAR/162", "Win probability added over the room's replacement card per 162 games in the simulation") : ""}
         ${showWpa ? sortHeader("wpa", "WPA/162", "Win probability added per 162 games in the simulation") : ""}
-        ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
+        ${HISTORY_OUTCOMES.map((outcome) => `<th class="num${outcomeBoundaryClass(outcome)}">${outcome}</th>`).join("")}
       </tr>
     </thead>
     <tbody>${rows}</tbody>
@@ -330,7 +330,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
 }
 
 function renderHeaderCell(header, mode, index, options) {
-  const className = tableHeaderClass(mode, index);
+  const className = `${tableHeaderClass(mode, index)}${outcomeBoundaryClass(header.label)}`.trim();
   if (!header.sort) return `<th class="${className}">${escapeHtml(header.label)}</th>`;
   const active = options.sort === header.sort;
   const direction = active ? options.sortDirection ?? "desc" : null;
@@ -349,10 +349,16 @@ function tableHeaderClass(mode, index) {
   return isNumeric ? "num" : "";
 }
 
+// FB is the last out on the chart; a divider after it marks where outs end
+// and the batter reaches.
+function outcomeBoundaryClass(outcome) {
+  return outcome === "FB" ? " outs-boundary" : "";
+}
+
 function renderOutcomeCells(player, outcomes) {
   const ranges = chartRanges(player.chart);
   return outcomes
-    .map((outcome) => `<td class="num chart-range-cell">${ranges.get(outcome) ?? ""}</td>`)
+    .map((outcome) => `<td class="num chart-range-cell${outcomeBoundaryClass(outcome)}">${ranges.get(outcome) ?? ""}</td>`)
     .join("");
 }
 
