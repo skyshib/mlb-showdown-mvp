@@ -55,19 +55,25 @@ async function fetchJson(url) {
   return response.json();
 }
 
+// The place, and the network the address belongs to. The network is often the
+// better answer to "who is this": a university, an employer, a carrier, or a
+// cloud provider running somebody's crawler.
 export async function lookupPlace(ip) {
-  if (isPrivateIp(ip)) return "";
+  if (isPrivateIp(ip)) return { place: "", org: "" };
   const token = process.env.IPINFO_TOKEN;
   if (token) {
     const data = await fetchJson(`https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(token)}`);
-    return placeName(data.city, data.region, data.country);
+    return { place: placeName(data.city, data.region, data.country), org: String(data.org ?? "").replace(/^AS\d+\s+/, "") };
   }
   const data = await fetchJson(`https://ipwho.is/${encodeURIComponent(ip)}`);
   // ipwho.is answers 200 even when it has nothing, and says so only in `success`.
   // Left unchecked, a failed lookup reads as a successful one and "undefined"
   // becomes the most popular city on the dashboard.
   if (!data.success) throw new Error(String(data.message ?? "lookup failed"));
-  return placeName(data.city, data.region, data.country_code);
+  return {
+    place: placeName(data.city, data.region, data.country_code),
+    org: String(data.connection?.isp || data.connection?.org || "")
+  };
 }
 
 // One at a time, spaced out, and dropped on the floor if the queue backs up —

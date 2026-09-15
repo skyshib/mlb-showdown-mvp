@@ -20,6 +20,7 @@ scripts/*
 !scripts/online-server.js
 !scripts/traffic.js
 !scripts/geo.js
+!scripts/visits.js
 
 # Never opened by the running server.
 test

@@ -13,7 +13,8 @@
 // questions actually being asked (how many, which pages, from where, sent by
 // whom). The only per-visitor thing retained is a salted hash of the IP, held
 // per day so a day can report people rather than pageviews, and dropped with the
-// day it belongs to. The raw IP is never written down.
+// day it belongs to. The raw IP is never written down. (The per-visit log lives
+// beside this, in visits.js, behind its own token.)
 import { mkdirSync, readFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -64,7 +65,10 @@ export function loadTrafficFile(dataDir) {
     regions: plainCounts(saved?.regions, countOf),
     referrers: plainCounts(saved?.referrers, countOf),
     places: plainCounts(saved?.places, countOf),
-    geoCache: plainCounts(saved?.geoCache, (value) => (typeof value === "string" ? value : ""))
+    geoCache: plainCounts(saved?.geoCache, (value) => (typeof value === "string" ? value : "")),
+    // The network behind a visitor ("Comcast Cable", "UC Berkeley", "Google LLC"),
+    // kept beside the place and pruned with it.
+    orgs: plainCounts(saved?.orgs, (value) => (typeof value === "string" ? value : ""))
   };
 }
 
@@ -126,7 +130,7 @@ export function recordView(store, request, pathname, now = new Date()) {
   // day makes the stats page the most popular thing on the site.
   if (pathname === "/stats.html") return;
   const agent = String(request.headers["user-agent"] ?? "");
-  if (!agent || BOT_PATTERN.test(agent)) return;
+  if (!agent || isBotAgent(agent)) return;
 
   const day = now.toISOString().slice(0, 10);
   const bucket = traffic.days[day] ?? (traffic.days[day] = { views: 0, visitors: [] });
@@ -158,6 +162,7 @@ function attributePlace(store, visitor, ip) {
   const known = traffic.geoCache[visitor];
   if (known !== undefined) {
     if (known) bump(traffic.places, known);
+    if (known && traffic.orgs[visitor] === undefined) backfillOrg(store, visitor, ip);
     return;
   }
   if (process.env.GEO_LOOKUP === "off") return;
@@ -174,20 +179,41 @@ function attributePlace(store, visitor, ip) {
   waiting.set(visitor, 1);
 
   const queue = (store.geoQueue ??= createGeoQueue(store.geoLookup, store.geoIntervalMs));
-  queue.submit(ip).then((place) => {
+  queue.submit(ip).then((found) => {
     const views = waiting.get(visitor) ?? 1;
     waiting.delete(visitor);
+    const place = typeof found === "string" ? found : found?.place ?? "";
     if (!place) return;
     traffic.geoCache[visitor] = place;
+    traffic.orgs[visitor] = typeof found === "object" ? found?.org ?? "" : "";
     for (let i = 0; i < views; i++) bump(traffic.places, place);
     pruneGeoCache(traffic);
     persistTraffic(store);
   });
 }
 
+// Visitors placed before networks were recorded get one more lookup, for the
+// network alone. Marked "" up front so a busy returning visitor asks once.
+function backfillOrg(store, visitor, ip) {
+  if (process.env.GEO_LOOKUP === "off" || isPrivateIp(ip)) return;
+  const traffic = store.traffic;
+  traffic.orgs[visitor] = "";
+  const queue = (store.geoQueue ??= createGeoQueue(store.geoLookup, store.geoIntervalMs));
+  queue.submit(ip).then((found) => {
+    // A failed lookup stays "" — the network is a nice-to-have, not worth a
+    // lookup on every visit from somebody the provider cannot place.
+    if (typeof found !== "object" || !found?.org) return;
+    traffic.orgs[visitor] = found.org;
+    persistTraffic(store);
+  });
+}
+
 function pruneGeoCache(traffic) {
   const keys = Object.keys(traffic.geoCache);
-  for (let i = 0; i < keys.length - MAX_GEO_CACHE; i++) delete traffic.geoCache[keys[i]];
+  for (let i = 0; i < keys.length - MAX_GEO_CACHE; i++) {
+    delete traffic.geoCache[keys[i]];
+    delete traffic.orgs[keys[i]];
+  }
 }
 
 function bump(counts, key) {
@@ -196,7 +222,11 @@ function bump(counts, key) {
   counts[key] = (counts[key] ?? 0) + 1;
 }
 
-function clientIp(request) {
+export function isBotAgent(agent) {
+  return BOT_PATTERN.test(agent);
+}
+
+export function clientIp(request) {
   const direct = request.headers["fly-client-ip"];
   if (typeof direct === "string" && direct) return direct;
   // Only consulted when Fly's own header is absent, i.e. running locally. The
@@ -206,7 +236,7 @@ function clientIp(request) {
   return request.socket?.remoteAddress ?? "";
 }
 
-function visitorId(salt, ip) {
+export function visitorId(salt, ip) {
   if (!ip) return "";
   // Truncated because the whole digest is not needed to tell two people apart at
   // this scale, and a shorter one is a weaker handle on somebody if the file ever

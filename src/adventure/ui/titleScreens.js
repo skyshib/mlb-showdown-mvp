@@ -1,4 +1,5 @@
 import { escapeHtml, menuHtml, clampIndex, cardPanelHtml, rarityTag } from "./helpers.js?v=20260716-records";
+import { track } from "../../ui/telemetry.js?v=20260915-visits";
 import { resumeBattle } from "./battleScreen.js?v=20260716-records";
 import { starterPack, UNIVERSES, DECADES, EARLIEST_DECADE, decadeLabel, FRANCHISES, universeConfig, canFieldFullRoster, setUniverseSeed } from "../packs.js?v=20260716-records";
 import { GAUNTLET_TIERS } from "../region.js?v=20260716-records";
@@ -503,6 +504,7 @@ export const tierSelectScreen = {
 function finishNewGame(app, playerName, universe, mode = "budget", rosterFormat = "classic", gauntletTier = "elite") {
   const saveSeed = `sq-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`;
   const save = createSave({ name: playerName, saveSeed, universe, mode, rosterFormat, gauntletTier });
+  track("adventure-start", { name: playerName, saveSeed, universe, mode, rosterFormat, gauntletTier });
   // Build this league's pool and freeze it into the save at birth, so its cards
   // never re-derive as the generators change.
   hydrateUniverse(save);

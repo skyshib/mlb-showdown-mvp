@@ -11,6 +11,7 @@ import { buildRealDraftPool } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
 import { buildDraftPool, deckEntry, deckFromIds, universeConfig } from "../src/data/universes.js";
 import { flushTraffic, loadTrafficFile, recordView, trafficSummary } from "./traffic.js";
+import { deviceFor, flushVisits, loadVisitLog, logClientEvent, logPageView, logServerEvent, readVisits } from "./visits.js";
 import {
   applyDraftAction,
   auctionReviewComplete,
@@ -117,7 +118,8 @@ export function createOnlineServer(options = {}) {
     rooms: loadRooms(dataDir),
     hallOfFame: loadHallOfFameFile(dataDir),
     records: loadRecordsFile(dataDir),
-    traffic: loadTrafficFile(dataDir)
+    traffic: loadTrafficFile(dataDir),
+    visits: loadVisitLog(dataDir)
   };
   for (const room of store.rooms.values()) {
     scheduleRoomTimer(store, room);
@@ -169,7 +171,8 @@ export async function flushSaves(store) {
     store.hofSaveChain ?? Promise.resolve(),
     // Pageviews are batched rather than written one at a time, so on the way down
     // there is almost always a few seconds of them still only in memory.
-    flushTraffic(store)
+    flushTraffic(store),
+    flushVisits(store)
   ]);
 }
 
@@ -626,6 +629,7 @@ async function postGame(store, request, response) {
   kept.push(game);
   kept.sort((a, b) => a.day - b.day);
   persistGames(store, saveSeed, kept.slice(0, GAMES_MAX_PER_SAVE));
+  logServerEvent(store, request, "adventure-game", { saveSeed, day: game.day });
   sendJson(response, 201, { ok: true, games: kept.length });
 }
 
@@ -833,6 +837,10 @@ async function postHallOfFameEntry(store, request, response) {
   const body = await readJsonBody(request);
   const entry = sanitizeHofEntry(body);
   if (!entry) return sendJson(response, 400, { error: "Malformed hall of fame entry" });
+  logServerEvent(store, request, "hall-of-fame", {
+    saveSeed: entry.saveSeed, name: entry.name, mode: entry.mode, universe: entry.universe,
+    days: entry.days, wins: entry.wins, losses: entry.losses
+  });
   // One plaque per campaign — but a campaign's plaque keeps moving. The catalog
   // goes on filling after the trophy lands (syncRunProgress), and a run filed by
   // an older client can come back corrected: a gauntlet sweep sent up before this
@@ -893,6 +901,34 @@ async function handleApi(store, request, response, url) {
       return sendJson(response, 401, { error: "Stats are private. Add ?token=… to see them." });
     }
     return sendJson(response, 200, trafficSummary(store.traffic));
+  }
+  // /api/events — a page reporting what it did (a local draft dealt, a sim run).
+  // Always a 204: a beacon has nobody waiting on the answer.
+  if (segments[1] === "events" && !segments[2] && request.method === "POST") {
+    const body = await readJsonBody(request).catch(() => null);
+    if (body) logClientEvent(store, request, body);
+    response.writeHead(204);
+    response.end();
+    return;
+  }
+  // /api/visits — the per-visit log. Unlike /api/stats it has no public mode:
+  // with VISITS_TOKEN unset, nobody reads it.
+  if (segments[1] === "visits" && !segments[2]) {
+    if (request.method !== "GET") return sendJson(response, 404, { error: "Unknown API route" });
+    const required = process.env.VISITS_TOKEN;
+    if (!required || url.searchParams.get("token") !== required) {
+      return sendJson(response, 401, { error: "The visit log is private." });
+    }
+    const params = url.searchParams;
+    return sendJson(response, 200, {
+      visits: readVisits(store, {
+        days: params.get("days") ?? 3,
+        kind: params.get("kind") ?? "",
+        visitor: params.get("visitor") ?? "",
+        device: params.get("device") ?? "",
+        humansOnly: params.get("humans") === "1"
+      })
+    });
   }
   // /api/rooms | /api/rooms/:id | /api/rooms/:id/(join|actions|stream)
   if (segments[1] !== "rooms") return sendJson(response, 404, { error: "Unknown API route" });
@@ -1009,6 +1045,9 @@ async function createRoom(store, request, response) {
   // A room with no human seats has nobody to wait for.
   startRoomIfFull(store, room);
   persistRoom(store, room);
+  logServerEvent(store, request, "room-create", {
+    roomId: room.id, managers, cpu: cpuNames, draftType, nomination, universe, startingPitchers, seed
+  });
   sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room, request.socket.localPort) });
 }
 
@@ -1039,6 +1078,7 @@ async function joinRoom(store, room, request, response) {
   startRoomIfFull(store, room);
   persistRoom(store, room);
   broadcastSeats(room);
+  logServerEvent(store, request, "room-join", { roomId: room.id, manager: manager.name, host: isHost, reseated: Boolean(existing) });
   sendJson(response, 200, { token: seat.token, managerId: manager.id, host: isHost, reseated: Boolean(existing) });
 }
 
@@ -1717,14 +1757,19 @@ async function serveStatic(store, request, response, url) {
     // asks — and is told 304 — every single time somebody opens it. So a repeat
     // visit is a 304, and counting only the 200s would show every returning
     // player as having never come back.
+    const cookieHeaders = {};
     if (request.method === "GET" && extname(target).toLowerCase() === ".html") {
-      recordView(store, request, info.isDirectory() ? `${pathname.replace(/\/$/, "")}/` : pathname);
+      const page = info.isDirectory() ? `${pathname.replace(/\/$/, "")}/` : pathname;
+      recordView(store, request, page);
+      const { device, setCookie } = deviceFor(request);
+      if (setCookie) cookieHeaders["Set-Cookie"] = setCookie;
+      logPageView(store, request, { path: page, query: url.search, device, setCookie });
     }
     // Size and mtime, which a rebuilt image restamps — so shipping a new module
     // invalidates it on its own, without anyone having to remember to bump a query.
     const etag = `W/"${targetInfo.size.toString(16)}-${Math.floor(targetInfo.mtimeMs).toString(16)}"`;
     if (request.headers["if-none-match"] === etag) {
-      response.writeHead(304, { ETag: etag, "Cache-Control": cacheControl });
+      response.writeHead(304, { ETag: etag, "Cache-Control": cacheControl, ...cookieHeaders });
       response.end();
       return;
     }
@@ -1732,7 +1777,8 @@ async function serveStatic(store, request, response, url) {
     response.writeHead(200, {
       "Content-Type": MIME_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream",
       "Cache-Control": cacheControl,
-      ETag: etag
+      ETag: etag,
+      ...cookieHeaders
     });
     response.end(body);
   } catch {

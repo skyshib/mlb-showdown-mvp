@@ -199,6 +199,9 @@ import {
   saveOnlineDraftRankings,
   tierOfRank
 } from "./ui/draftRankings.js?v=20260725-prep-tiers";
+import { track, trackSession } from "./ui/telemetry.js?v=20260915-visits";
+
+trackSession();
 
 const STORAGE_KEY = "mlb-showdown-mvp-state-v3";
 const BOARD_POSITION_GROUPS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
@@ -2405,6 +2408,17 @@ function renderSetup(setupError = "") {
     state.selectedTeamName = state.managers[0];
     state.rosterManagerId = null;
     cpuPaused = false;
+    track("local-draft-start", {
+      managers: state.managers,
+      cpu: state.cpuManagers,
+      draftType: state.draftType,
+      nomination: state.nomination,
+      universe: state.universe,
+      startingPitchers: state.startingPitchers,
+      rosterSize: state.rosterSize,
+      hidePoints: state.hidePoints,
+      seed: state.seed
+    });
     advanceCpuTurns();
     saveState();
     renderDraft();
@@ -4231,6 +4245,14 @@ function startBatchRun(runs, options = {}) {
     state.batchGameIndex = null;
     saveState();
     renderBatch();
+    if (!options.instant) {
+      track("sim", {
+        roomId: state.online?.roomId ?? null,
+        runs: count,
+        humans: state.draft.managers.filter((manager) => !manager.cpu).map((manager) => manager.name),
+        standings: state.batch.summary.teams.map((row) => ({ team: row.team, winPct: Math.round(row.winPct * 1000) / 1000 }))
+      });
+    }
   };
 
   // Skip the animation, not the race. Running the whole remainder as one

@@ -14,6 +14,7 @@ import { gameStatsScreen, seasonStatsScreen, championshipScreen, almanacScreen, 
 import { hallOfFameScreen, hofTeamScreen } from "./ui/hallOfFameScreen.js?v=20260716-records";
 import { recordsScreen } from "./ui/recordsScreen.js?v=20260716-records";
 import { unlockSounds, soundsUnlocked, isMuted } from "../ui/sounds.js?v=20260716-records";
+import { track, trackSession } from "../ui/telemetry.js?v=20260915-visits";
 
 // A browser will not let a page make a noise until the person has touched it, so
 // the adventure buys the right on the first button pressed — the one that opens
@@ -376,5 +377,18 @@ document.addEventListener("click", (event) => {
   tooltip.style.left = `${Math.max(pad, Math.min(anchor.left, window.innerWidth - rect.width - pad))}px`;
   tooltip.style.top = `${Math.max(pad, Math.min(anchor.bottom + pad, window.innerHeight - rect.height - pad))}px`;
 });
+
+trackSession();
+// Whose save this browser holds, so a returning campaign has a name on it.
+if (app.save) {
+  track("adventure-open", {
+    name: app.save.player?.name ?? "",
+    saveSeed: app.save.saveSeed ?? "",
+    universe: app.save.universe ?? "",
+    mode: app.save.mode ?? "",
+    battlesWon: app.save.progress?.counters?.battlesWon ?? 0,
+    battlesLost: app.save.progress?.counters?.battlesLost ?? 0
+  });
+}
 
 app.rerender();
