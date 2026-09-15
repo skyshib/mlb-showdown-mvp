@@ -1209,6 +1209,30 @@ test("combined LF/RF cards cover both corners at the same fielding score", () =>
   assert.equal(swapped.lineup.find((player) => player.defensivePosition === "RF").fielding, 2);
 });
 
+test("the optimized lineup seats the first baseman at first and the DH card at DH", () => {
+  // Points pick the nine; every seating of those nine ties on points, so the
+  // glove has to decide who stands where. A DH card at first fields -1.
+  const roster = [
+    makeHitter({ id: "opt-c", position: "C", fielding: 5, points: 300 }),
+    makeHitter({ id: "opt-dh", name: "DH Card", position: "DH", fielding: 0, points: 500 }),
+    makeHitter({ id: "opt-1b", name: "First Baseman", position: "1B", fielding: 1, points: 400 }),
+    makeHitter({ id: "opt-2b", position: "2B", fielding: 2, points: 300 }),
+    makeHitter({ id: "opt-3b", position: "3B", fielding: 2, points: 300 }),
+    makeHitter({ id: "opt-ss", position: "SS", fielding: 3, points: 300 }),
+    makeHitter({ id: "opt-lf", position: "LF", fielding: 1, points: 300 }),
+    makeHitter({ id: "opt-cf", position: "CF", fielding: 2, points: 300 }),
+    makeHitter({ id: "opt-rf", position: "RF", fielding: 1, points: 300 })
+  ];
+  // Either order on the roster, since the solver's tie-break follows it.
+  for (const ordered of [roster, [...roster].reverse()]) {
+    const team = buildTeam({ name: "Optimized", roster: ordered }, { optimize: true });
+    const at = (label) => team.lineup.find((player) => player.defensivePosition === label);
+    assert.equal(at("1B").id, "opt-1b");
+    assert.equal(at("1B").fielding, 1);
+    assert.equal(at("DH").id, "opt-dh");
+  }
+});
+
 test("any hitter can cover first base with literal minus-one fielding", () => {
   const manager = {
     name: "First Base Fallback",

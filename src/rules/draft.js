@@ -2154,12 +2154,19 @@ function bestLineupAssignment(roster) {
   const hitters = roster.filter((player) => player.kind === "hitter");
   if (!hitters.length) return {};
   const BIG = 1e9;
+  // Points pick the nine; the glove each brings to the slot only arranges them.
+  // Without it every seating of the same nine costs the same, and the solver's
+  // tie-break was free to send a DH card to first at -1 and the first baseman to
+  // DH. Points are whole numbers and a lineup's gloves span far less than
+  // GLOVE_SCALE, so no glove ever outbids a point.
+  const GLOVE_SCALE = 1000;
   const cols = Math.max(LINEUP_SLOT_LABELS.length, hitters.length);
   const cost = LINEUP_SLOT_LABELS.map((label) =>
     Array.from({ length: cols }, (unused, col) => {
       const hitter = hitters[col];
       if (!hitter) return 0; // dummy column — leaves the slot to a real bat
-      return canPlayerFillLineupSlot(hitter, label) ? -lineupRankValue(hitter) : BIG;
+      if (!canPlayerFillLineupSlot(hitter, label)) return BIG;
+      return -(lineupRankValue(hitter) * GLOVE_SCALE + gloveAtLineupSlot(hitter, label));
     })
   );
   const rowToCol = minCostAssignment(cost);
@@ -3056,6 +3063,14 @@ function slotFielding(player, label) {
     if (corner) return Number(corner.fielding) || 0;
   }
   return fieldingAt(player, label) ?? (Number(player.fielding) || 0);
+}
+
+// The glove a card would field at a lineup slot, as assignLineupSlots seats it:
+// nothing at DH, a flat -1 at first for a card that does not list it.
+function gloveAtLineupSlot(player, label) {
+  if (label === "DH") return 0;
+  if (slotOptions(player, label).firstBaseOutOfPosition) return -1;
+  return slotFielding(player, label);
 }
 
 function slotOptions(player, label) {
