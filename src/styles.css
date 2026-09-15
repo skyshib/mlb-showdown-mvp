@@ -6184,7 +6184,13 @@ div.seat-option:not(:disabled):hover span {
   border-top: 1px dashed var(--line);
 }
 
-.auction-budget-field input {
+/* The relievers setting belongs to random nomination alone. */
+.auction-budget-field[hidden] {
+  display: none;
+}
+
+.auction-budget-field input,
+.auction-budget-field select {
   max-width: 180px;
 }
 

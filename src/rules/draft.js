@@ -62,8 +62,9 @@ export function normalizeStartingPitchers(value) {
   return Math.min(MAX_STARTING_PITCHERS, Math.max(MIN_STARTING_PITCHERS, count));
 }
 
-export function rosterSizeForStartingPitchers(value = DEFAULT_STARTING_PITCHERS) {
-  return BASE_ROSTER_SIZE + normalizeStartingPitchers(value);
+// Nine hitters, the rotation, and the pen the roster must own.
+export function rosterSizeForStartingPitchers(value = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
+  return HITTER_TARGET + normalizeStartingPitchers(value) + bullpenRequirement({ bullpenSlots });
 }
 
 function startingPitcherTarget(options = {}) {
@@ -71,16 +72,54 @@ function startingPitcherTarget(options = {}) {
   return normalizeStartingPitchers(options?.startingPitchers);
 }
 
-// The pen's slot count. Fixed at two for every draft room; the adventure's
-// full-roster format hands whole rosters over, where the pen is however many
-// relievers the twenty cards hold — zero to seven of them.
+// The pen's slot count, set per draft room like the rotation: two unless the
+// commissioner says otherwise. A random-nomination room can also leave it
+// unlimited, so every reliever a manager owns pitches; a capped room cannot,
+// since its roster size is counted slot by slot. The adventure's full-roster
+// format hands whole rosters over, where the pen is however many relievers
+// the twenty cards hold — zero to seven.
 export const MAX_BULLPEN_SLOTS = 7;
+export const UNLIMITED_BULLPEN = "all";
 
-function bullpenSlotTarget(options = {}) {
-  const value = options?.bullpenSlots;
-  if (value == null) return BULLPEN_TARGET;
-  const count = Math.round(Number(value) || 0);
+// A missing setting is two: every room saved before the pen was configurable
+// played with two relievers, and replays the way it played.
+export function normalizeBullpenSlots(value) {
+  if (value === UNLIMITED_BULLPEN) return UNLIMITED_BULLPEN;
+  if (value == null || value === "") return BULLPEN_TARGET;
+  const count = Math.round(Number(value));
+  if (!Number.isFinite(count)) return BULLPEN_TARGET;
   return Math.min(MAX_BULLPEN_SLOTS, Math.max(0, count));
+}
+
+// A draft room's pen. Unlimited is a random-nomination setting; a capped room
+// asked for it (or a setup form left on it) gets the usual two.
+export function roomBullpenSlots(value, randomNomination) {
+  const slots = normalizeBullpenSlots(value);
+  return slots === UNLIMITED_BULLPEN && !randomNomination ? BULLPEN_TARGET : slots;
+}
+
+// How many relievers a roster must own: the set count, or two for an unlimited
+// pen, which asks for the classic two and pitches whatever else is bought.
+export function bullpenRequirement(options = {}) {
+  const slots = normalizeBullpenSlots(options?.bullpenSlots);
+  return slots === UNLIMITED_BULLPEN ? BULLPEN_TARGET : slots;
+}
+
+// Relievers a board deals per team. It grows with a deeper pen but never
+// shrinks below two: a smaller pen does not need a thinner board.
+export function boardBullpenSlots(bullpenSlots) {
+  return Math.max(BULLPEN_TARGET, bullpenRequirement({ bullpenSlots }));
+}
+
+// The pen slots this roster shows. An unlimited pen seats every reliever not
+// sent to the bench, plus one open seat while anyone is benched, so a benched
+// arm always has somewhere to come back to without bumping another.
+function bullpenSlotTarget(options = {}, roster = [], benched = new Set()) {
+  const slots = normalizeBullpenSlots(options?.bullpenSlots);
+  if (slots !== UNLIMITED_BULLPEN) return slots;
+  const relievers = staffStatus(roster).bullpen;
+  const active = relievers.filter((player) => !benched.has(player.id)).length;
+  return active + (active < relievers.length ? 1 : 0);
 }
 
 // The designated hitter is a slot, not a position: ANY bat fills it, and
@@ -146,11 +185,12 @@ export function randomNominationCounts(managerCount) {
 
 // Per-position card counts for a random-nomination room: the slot quota times
 // the manager multiplier. Returns [[group, count], ...] in ROSTER_SLOTS order.
-export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS) {
+export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
   const { hiddenPerSlot, visiblePerSlot } = randomNominationCounts(managerCount);
+  const slots = rosterSlots(startingPitchers, boardBullpenSlots(bullpenSlots));
   return {
-    visible: rosterSlots(startingPitchers).map(([group, slots]) => [group, visiblePerSlot * slots]),
-    hidden: rosterSlots(startingPitchers).map(([group, slots]) => [group, hiddenPerSlot * slots])
+    visible: slots.map(([group, count]) => [group, visiblePerSlot * count]),
+    hidden: slots.map(([group, count]) => [group, hiddenPerSlot * count])
   };
 }
 
@@ -162,14 +202,14 @@ export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_
 // checked against what is LEFT after the position groups take theirs, because
 // one card cannot be two managers' cards: nine hitters per roster means nine
 // hitters' worth of board, however they are labelled.
-export function randomNominationShortfalls(pool, managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS) {
+export function randomNominationShortfalls(pool, managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
   const shortfalls = [];
   const taken = new Set();
   // The standing replacements are not supply: they are dealt on top of the
   // board, one per slot, and counting them would tell a room its thin catcher
   // pile is one catcher deeper than it is.
   const biddable = pool.filter((player) => !player.replacement);
-  for (const [group, quota] of randomNominationQuotas(managerCount, startingPitchers).visible) {
+  for (const [group, quota] of randomNominationQuotas(managerCount, startingPitchers, bullpenSlots).visible) {
     const available = biddable.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
     for (const player of available.slice(0, quota)) taken.add(player.id);
     if (available.length < quota) shortfalls.push({ group, quota, dealt: available.length });
@@ -178,12 +218,13 @@ export function randomNominationShortfalls(pool, managerCount, startingPitchers 
 }
 
 // How many managers a pool can seat: every team needs a catcher, a middle
-// infield, a center fielder, two corners, its configured starters, and two relievers —
+// infield, a center fielder, two corners, its configured starters and relievers —
 // whichever of those runs out first caps the room. Counts read a card's
 // PRIMARY position, so the answer is a floor: a pool that seats eight this
 // way seats eight however the secondary listings fall.
-export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHERS) {
+export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
   const starterTarget = normalizeStartingPitchers(startingPitchers);
+  const bullpenTarget = bullpenRequirement({ bullpenSlots });
   // Same reason the shortfall check skips them: a card nobody can draft seats
   // nobody, however many rosters it ends up on.
   const biddable = pool.filter((player) => !player.replacement);
@@ -195,8 +236,9 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
     Math.floor(countPosition(CORNER_OUTFIELD_POSITION) / 2),
     Math.floor(hitters.length / HITTER_TARGET),
     Math.floor(pitchers.filter((player) => player.role === "SP").length / starterTarget),
-    Math.floor(pitchers.filter((player) => player.role !== "SP").length / BULLPEN_TARGET),
-    Math.floor(biddable.length / rosterSizeForStartingPitchers(starterTarget))
+    // A league with no pen seats as many as its other slots allow.
+    bullpenTarget ? Math.floor(pitchers.filter((player) => player.role !== "SP").length / bullpenTarget) : Infinity,
+    Math.floor(biddable.length / rosterSizeForStartingPitchers(starterTarget, bullpenSlots))
   );
 }
 
@@ -284,6 +326,9 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
   const startingPitchers = normalizeStartingPitchers(
     options.startingPitchers ?? Number(rosterSize) - BASE_ROSTER_SIZE
   );
+  // Only a random-nomination room can leave the pen unlimited: a capped roster
+  // is sized slot by slot, so it needs a count, and falls back to two.
+  const bullpenSlots = roomBullpenSlots(options.bullpenSlots, options.draftType === "auction" && options.nomination === "random");
   // A computer manager gets an opinion, dealt from the seed so the same room
   // always faces the same table. A human's seat carries none: he has his own.
   const personaRng = createRng(`${seed}:personas`);
@@ -296,6 +341,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
       name: name.trim() || `Manager ${index + 1}`,
       cpu,
       startingPitchers,
+      bullpenSlots,
       persona: cpu
         ? (CPU_PERSONALITIES[chosen] ? chosen : CPU_PERSONALITY_KEYS[Math.floor(personaRng.next() * CPU_PERSONALITY_KEYS.length)])
         : null,
@@ -307,8 +353,9 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
     managers: cleanManagers,
     pool: pool.map((player) => normalizeCardPosition({ ...player })),
     pickedIds: new Set(),
-    rosterSize: rosterSizeForStartingPitchers(startingPitchers),
+    rosterSize: rosterSizeForStartingPitchers(startingPitchers, bullpenSlots),
     startingPitchers,
+    bullpenSlots,
     seed,
     pickNumber: 0,
     complete: false,
@@ -404,7 +451,7 @@ function dealtInSlot(player, group) {
 // third man short of one. Read the tag; leave the reserve alone.
 function buildNominationQueue(draft) {
   const rng = createRng(`${draft.seed}:nomination-queue`);
-  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers);
+  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft.bullpenSlots);
   const queue = [];
   const queued = new Set();
   for (const [group, count] of hidden) {
@@ -442,7 +489,7 @@ export function nominationQueueRemaining(draft) {
 // only when it settles, so it counts alongside sold and passed history.
 export function guaranteedNominationMinimums(draft) {
   if (!isRandomNomination(draft)) return [];
-  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers);
+  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft.bullpenSlots);
   const minimums = new Map(hidden.filter(([group]) => group !== ANY_HITTER));
   const calledIds = (draft.auction.history ?? []).map((entry) => entry.playerId);
   if (draft.auction.lot?.playerId) calledIds.push(draft.auction.lot.playerId);
@@ -2042,12 +2089,16 @@ const staffSlotRole = (label) => (label.startsWith("SP") ? "SP" : "RP");
 export function assignStaffSlots(roster, assignments = {}, options = {}) {
   const benched = explicitBenchIds(assignments);
   const pitchers = roster.filter((player) => player.kind === "pitcher" && !benched.has(player.id));
-  const slots = staffSlotLabels(startingPitcherTarget(options), bullpenSlotTarget(options))
+  // An unlimited pen has no holes to hold open: its seat count already follows
+  // the bench, so a stale null must not strand a reliever off both.
+  const unlimitedPen = normalizeBullpenSlots(options?.bullpenSlots) === UNLIMITED_BULLPEN;
+  const slots = staffSlotLabels(startingPitcherTarget(options), bullpenSlotTarget(options, roster, benched))
     .map((label) => ({
       label,
       role: staffSlotRole(label),
       player: null,
       lockedEmpty: hasOwn(assignments, label) && assignments[label] === null
+        && !(unlimitedPen && staffSlotRole(label) === "RP")
     }));
   const used = new Set();
 
@@ -2180,8 +2231,8 @@ function bestLineupAssignment(roster) {
   return assignment;
 }
 
-// The configured number of best starters and the two best relievers by value —
-// the arms a manager would choose, not the ones he happened to buy first.
+// The configured number of best starters and relievers by value — the arms a
+// manager would choose, not the ones he happened to buy first.
 function bestStaffAssignment(roster, options = {}) {
   const { starters, bullpen } = staffStatus(roster);
   const byValue = (list) => [...list].sort((a, b) => lineupRankValue(b) - lineupRankValue(a));
@@ -2190,7 +2241,7 @@ function bestStaffAssignment(roster, options = {}) {
     SP: byValue(starters),
     RP: byValue(bullpen)
   };
-  for (const label of staffSlotLabels(startingPitcherTarget(options), bullpenSlotTarget(options))) {
+  for (const label of staffSlotLabels(startingPitcherTarget(options), bullpenSlotTarget(options, roster))) {
     const role = staffSlotRole(label);
     const player = ranked[role].shift();
     if (player) assignment[label] = player.id;
@@ -2223,7 +2274,7 @@ export function syncCpuTeamChoices(draft) {
 
 function setBestTeamChoices(manager) {
   manager.lineupAssignments = bestLineupAssignment(manager.roster);
-  manager.staffAssignments = bestStaffAssignment(manager.roster, { startingPitchers: manager.startingPitchers });
+  manager.staffAssignments = bestStaffAssignment(manager.roster, manager);
   manager.battingOrder = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
     .filter((slot) => slot.player)
     .map((slot) => lineupPlayer(slot))
@@ -2380,8 +2431,11 @@ export function validateRoster(manager, options = {}) {
     if (manager.roster.length !== targetSize) issues.push(`roster must be ${targetSize} cards (has ${manager.roster.length})`);
     if (staff.starters.length > starterTarget) issues.push(`too many starters (${staff.starters.length} of ${starterTarget})`);
     if (lineup.hitters.length > flexHitterCap) issues.push(`too many bench hitters`);
-  } else if (staff.bullpen.length < BULLPEN_TARGET) {
-    issues.push(`needs ${BULLPEN_TARGET - staff.bullpen.length} more bullpen pitcher${BULLPEN_TARGET - staff.bullpen.length === 1 ? "" : "s"}`);
+  } else {
+    const bullpenTarget = bullpenRequirement({ bullpenSlots: options.bullpenSlots ?? manager.bullpenSlots });
+    if (staff.bullpen.length < bullpenTarget) {
+      issues.push(`needs ${bullpenTarget - staff.bullpen.length} more bullpen pitcher${bullpenTarget - staff.bullpen.length === 1 ? "" : "s"}`);
+    }
   }
   return issues;
 }
@@ -2515,7 +2569,7 @@ export function getRosterNeeds(roster, options = {}) {
   const hitters = roster.filter((player) => player.kind === "hitter").length;
   const staff = staffStatus(roster);
   const starter = Math.max(0, startingPitcherTarget(options) - staff.starters.length);
-  const bullpen = Math.max(0, BULLPEN_TARGET - staff.bullpen.length);
+  const bullpen = Math.max(0, bullpenRequirement(options) - staff.bullpen.length);
   return {
     hitter: Math.max(0, HITTER_TARGET - hitters),
     pitcher: starter + bullpen,
@@ -3000,7 +3054,7 @@ function canAddPitcherToStaff(roster, player, options = {}) {
   if (pitcherRole(player) === "SP" && staff.starters.length >= startingPitcherTarget(options)) {
     return { ok: false, reason: "starter slots are already filled" };
   }
-  if (pitcherRole(player) === "RP" && staff.bullpen.length >= BULLPEN_TARGET) {
+  if (pitcherRole(player) === "RP" && staff.bullpen.length >= bullpenRequirement(options)) {
     return { ok: false, reason: "bullpen slots are already filled" };
   }
   return { ok: true, reason: "" };

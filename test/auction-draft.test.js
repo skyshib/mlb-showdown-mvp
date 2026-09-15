@@ -34,6 +34,7 @@ import {
   nominatePlayer,
   normalizeAuctionBudget,
   normalizeAuctionTimerConfig,
+  normalizeBullpenSlots,
   pauseAuction,
   pickPlayer,
   placeSealedBid,
@@ -42,11 +43,14 @@ import {
   startAuctionReview,
   submitCpuSealedBids,
   syncAuctionTimer,
+  syncCpuTeamChoices,
+  UNLIMITED_BULLPEN,
   undoLastPick,
   upcomingNominators,
   validateRoster,
   managerValuation
 } from "../src/rules/draft.js";
+import { buildDraftPool } from "../src/data/universes.js";
 
 const hitter = {
   id: "h-test",
@@ -685,6 +689,86 @@ test("a manager picks which of their cards take the field", () => {
   // A closer cannot be handed the ball to start.
   const chosen = assignStaffSlots(alpha.roster, { SP1: rp3.id });
   assert.notEqual(chosen[0].player.id, rp3.id, "a reliever does not fill a starter's slot");
+});
+
+test("a random-nomination room sets how many relievers pitch, unlimited by default", () => {
+  const pool = makeDraftPool("pen", 40, 24);
+  const relievers = pool.filter((card) => card.role === "RP").slice(0, 5);
+  const rosterFor = (manager) => {
+    manager.roster = [
+      ...pool.filter((card) => card.kind === "hitter").slice(0, 9),
+      ...pool.filter((card) => card.role === "SP").slice(0, 2),
+      ...relievers
+    ];
+    return manager;
+  };
+
+  const open = makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: UNLIMITED_BULLPEN });
+  const alpha = rosterFor(open.managers[0]);
+  assert.equal(alpha.bullpenSlots, UNLIMITED_BULLPEN);
+  assert.equal(buildTeam(alpha).bullpen.length, 5, "every reliever he bought pitches");
+  assert.equal(benchPlayers(alpha).length, 0);
+
+  // Benching one leaves an open seat to bring him back to; the rest still pitch.
+  applyDraftAction(open, { type: "staff", managerId: alpha.id, assignments: { RP2: null, [ROSTER_BENCH_KEY]: [relievers[1].id] } });
+  const staff = assignStaffSlots(alpha.roster, alpha.staffAssignments, open).filter((slot) => slot.role === "RP");
+  assert.equal(staff.length, 5, "four seated plus the open seat");
+  assert.equal(staff.filter((slot) => slot.player).length, 4);
+  assert.deepEqual(benchPlayers(alpha).map((card) => card.id), [relievers[1].id]);
+  // A stale null with nobody benched cannot strand an arm off both the pen and the bench.
+  alpha.staffAssignments = { RP2: null };
+  assert.equal(buildTeam(alpha).bullpen.length, 5);
+
+  const three = makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: 3 });
+  const beta = rosterFor(three.managers[0]);
+  assert.equal(buildTeam(beta).bullpen.length, 3, "a set pen seats that many");
+  assert.equal(benchPlayers(beta).length, 2);
+  three.complete = true;
+  syncCpuTeamChoices(three);
+  assert.equal(Object.keys(beta.staffAssignments).filter((label) => label.startsWith("RP")).length, 3);
+
+  // The roster has to own the set count; an unlimited pen asks for two.
+  beta.roster = beta.roster.filter((card) => card.role !== "RP" || card.id === relievers[0].id);
+  assert.ok(validateRoster(beta, three).some((issue) => issue.includes("2 more bullpen pitchers")));
+  assert.ok(validateRoster({ ...alpha, roster: beta.roster }, open).some((issue) => issue.includes("1 more bullpen pitcher")));
+  const one = makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: 1 });
+  assert.deepEqual(validateRoster({ ...one.managers[0], roster: beta.roster }, one), []);
+
+  // Rooms saved before the setting keep the two-man pen.
+  assert.equal(makeAuctionDraft(["Alpha"], pool, { nomination: "random" }).bullpenSlots, 2);
+  assert.equal(normalizeBullpenSlots(12), 7);
+});
+
+test("a capped draft drafts exactly the set number of relievers", () => {
+  const pool = makeDraftPool("capped-pen", 40, 24);
+  // Unlimited has no meaning on a roster counted slot by slot.
+  assert.equal(createDraft(["One"], pool, 13, "capped-pen", { bullpenSlots: UNLIMITED_BULLPEN }).bullpenSlots, 2);
+  assert.equal(makeAuctionDraft(["One"], pool, { bullpenSlots: UNLIMITED_BULLPEN }).bullpenSlots, 2);
+
+  for (const [options, label] of [[{}, "snake"], [{ draftType: "auction", timer: false }, "manual auction"]]) {
+    const draft = createDraft(["One", "Two"], pool, 13, "capped-pen", { ...options, bullpenSlots: 3 });
+    assert.equal(draft.rosterSize, 14, `${label}: nine hitters, two starters, three relievers`);
+    const zero = createDraft(["One", "Two"], pool, 13, "capped-pen", { ...options, bullpenSlots: 0 });
+    assert.equal(zero.rosterSize, 11, `${label}: a league with no pen`);
+  }
+
+  const draft = createDraft(["One", "Two"], pool, 13, "capped-pen", { bullpenSlots: 3 });
+  while (!draft.complete) autopick(draft);
+  for (const manager of draft.managers) {
+    assert.equal(manager.roster.filter((card) => card.role === "RP").length, 3);
+    assert.deepEqual(validateRoster(manager), []);
+    assert.equal(buildTeam(manager).bullpen.length, 3, "all three pitch");
+  }
+});
+
+test("the dealt board carries enough relievers for a deeper pen", () => {
+  const relieversDealt = (options) => buildDraftPool("classic", "pen-deal", { managerCount: 4, ...options })
+    .filter((card) => !card.replacement && card.slot === "RP").length;
+  const standard = relieversDealt({});
+  assert.equal(relieversDealt({ bullpenSlots: 0 }), standard, "a smaller pen keeps the usual supply");
+  assert.equal(relieversDealt({ bullpenSlots: UNLIMITED_BULLPEN, nomination: "random" }), relieversDealt({ nomination: "random" }));
+  assert.equal(relieversDealt({ bullpenSlots: 4 }), standard * 2);
+  assert.equal(relieversDealt({ bullpenSlots: 4, nomination: "random" }), relieversDealt({ nomination: "random" }) * 2);
 });
 
 test("a manager can bench an active hitter or pitcher and hold the vacated slot open", () => {

@@ -47,6 +47,7 @@ import {
   AUCTION_MIN_RAISE,
   CORNER_OUTFIELD_POSITION,
   DEFAULT_STARTING_PITCHERS,
+  MAX_BULLPEN_SLOTS,
   MAX_STARTING_PITCHERS,
   MIN_STARTING_PITCHERS,
   ROSTER_BENCH_KEY,
@@ -97,7 +98,11 @@ import {
   normalizeAuctionTimerConfig,
   normalizeCardPosition,
   normalizePickTimerSeconds,
+  normalizeBullpenSlots,
+  roomBullpenSlots,
   normalizeStartingPitchers,
+  bullpenRequirement,
+  UNLIMITED_BULLPEN,
   normalizeSnakeTimerConfig,
   pauseAuction,
   pauseSnake,
@@ -117,7 +122,6 @@ import {
   snakeClockFlagged,
   snakeTimeRemainingMs,
   staffStatus,
-  staffSlotLabels,
   standingReplacement,
   standingReplacements,
   startAuctionReview,
@@ -436,6 +440,10 @@ function clearAuctionUrgency() {
 function formatAuctionClock(ms) {
   const seconds = Math.max(0, Math.ceil((Number(ms) || 0) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function setupRandomNomination(value) {
+  return value.draftType === "auction" && value.nomination === "random";
 }
 
 // A snake draft has one clock or none: the per-pick countdown, or the chess
@@ -981,6 +989,9 @@ function defaultState() {
     myManagerId: null,
     maskBids: false,
     startingPitchers: DEFAULT_STARTING_PITCHERS,
+    // How many relievers pitch in a random-nomination room: all of them unless
+    // the commissioner says otherwise.
+    bullpenSlots: UNLIMITED_BULLPEN,
     rosterSize: rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS),
     // Wildness of the generated (fictional) pool; 0 = normal. Ignored by real sets.
     temperature: 0,
@@ -1149,7 +1160,8 @@ function openRoom(roomId, room) {
   state = defaultState();
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
-  state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
+  state.bullpenSlots = roomBullpenSlots(room.bullpenSlots, room.draftType === "auction" && room.nomination === "random");
+  state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers, state.bullpenSlots);
   state.temperature = normalizeTemperature(room.temperature);
   state.universe = universeConfig(room.universe)?.key ?? DEFAULT_UNIVERSE;
   state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
@@ -1238,6 +1250,7 @@ function rebuildOnlineDraft(room) {
       nomination: state.nomination,
       managerCount: room.managers.length,
       startingPitchers: state.startingPitchers,
+      bullpenSlots: state.bullpenSlots,
       temperature: state.temperature
     });
   state.draft = createDraft(
@@ -1249,6 +1262,7 @@ function rebuildOnlineDraft(room) {
       draftType: state.draftType,
       startingPitchers: state.startingPitchers,
       nomination: state.nomination,
+      bullpenSlots: state.bullpenSlots,
       hidePoints: state.hidePoints,
       budget: state.auctionBudget,
       // A room that names no clock has no clock — the same default reviveRoom
@@ -1720,7 +1734,8 @@ function draftModeFromForm(form) {
   const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && form.get("nomination") === "random" ? "random" : "manual";
   const hidePoints = Boolean(form.get("hidePoints"));
-  return { draftType, nomination, hidePoints };
+  const bullpenSlots = roomBullpenSlots(form.get("bullpenSlots"), nomination === "random");
+  return { draftType, nomination, hidePoints, bullpenSlots };
 }
 
 // Whether the chosen card set can actually seat the room, phrased for the setup
@@ -1735,15 +1750,15 @@ function draftModeFromForm(form) {
 // the advice sent people looking for a bigger set that would not have helped.
 // The advice is real now — a single club's set runs dry where the whole of
 // Showdown does not.
-function draftPoolError(pool, universe, managerCount, nomination, startingPitchers = DEFAULT_STARTING_PITCHERS) {
+function draftPoolError(pool, universe, managerCount, nomination, startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots) {
   const setName = universeConfig(universe).name;
   if (nomination === "random") {
-    const shortfalls = randomNominationShortfalls(pool, managerCount, startingPitchers);
+    const shortfalls = randomNominationShortfalls(pool, managerCount, startingPitchers, bullpenSlots);
     if (!shortfalls.length) return "";
     const spots = shortfalls.map((short) => `${short.group} (${short.dealt} of ${short.quota})`).join(", ");
     return `The ${setName} set is too thin to deal a ${managerCount}-manager random-nomination board: ${spots}. Trim the manager list or pick a deeper card set.`;
   }
-  const managerLimit = maxPoolManagers(pool, startingPitchers);
+  const managerLimit = maxPoolManagers(pool, startingPitchers, bullpenSlots);
   if (managerCount <= managerLimit) return "";
   return `The ${setName} set runs out of position depth at ${managerLimit} managers — it cannot deal a board deep enough for ${managerCount}. Trim the manager list or pick a deeper card set.`;
 }
@@ -1983,7 +1998,16 @@ function renderSetup(setupError = "") {
           <label>
             Starting pitchers per team
             <input name="startingPitchers" type="number" min="${MIN_STARTING_PITCHERS}" max="${MAX_STARTING_PITCHERS}" step="1" value="${state.startingPitchers}" />
-            <small>Each team also drafts nine hitters and two relievers.</small>
+            <small>Each team also drafts nine hitters and its relievers.</small>
+          </label>
+          <label>
+            Relievers per team
+            <select name="bullpenSlots">
+              ${[[UNLIMITED_BULLPEN, "Unlimited"], ...Array.from({ length: MAX_BULLPEN_SLOTS + 1 }, (_, count) => [count, String(count)])]
+                .map(([value, label]) => `<option value="${value}" ${String(roomBullpenSlots(state.bullpenSlots, setupRandomNomination(state))) === String(value) ? "selected" : ""} ${value === UNLIMITED_BULLPEN && !setupRandomNomination(state) ? "disabled" : ""}>${label}</option>`)
+                .join("")}
+            </select>
+            <small>How many relievers each team drafts and takes into a game. Unlimited is for random nomination: every reliever a manager buys pitches, and two are required.</small>
           </label>
         </div>
       </div>
@@ -2108,10 +2132,21 @@ function renderSetup(setupError = "") {
   // snake's clock — belong to their type, so they only show when it is
   // chosen; and reaching for one of them says you want that type, so it
   // selects it.
+  // Unlimited is a random-nomination pen. Leaving that mode puts an unlimited
+  // pen back to two; entering it goes unlimited unless the pen was set by hand.
+  const syncBullpenOptions = () => {
+    const form = new FormData(setupForm);
+    const random = form.get("draftType") === "auction" && form.get("nomination") === "random";
+    const select = setupForm.querySelector('select[name="bullpenSlots"]');
+    select.querySelector(`option[value="${UNLIMITED_BULLPEN}"]`).disabled = !random;
+    if (!random && select.value === UNLIMITED_BULLPEN) select.value = "2";
+    else if (random && !select.dataset.userEdited) select.value = UNLIMITED_BULLPEN;
+  };
   const syncAuctionOptions = () => {
     const auction = new FormData(setupForm).get("draftType") === "auction";
     setupForm.querySelector(".auction-suboptions").hidden = !auction;
     setupForm.querySelector(".snake-suboptions").hidden = auction;
+    syncBullpenOptions();
   };
   // The snake has one clock or none, so each clock shows only its own settings —
   // and reaching for a setting says you want the clock it belongs to.
@@ -2167,9 +2202,10 @@ function renderSetup(setupError = "") {
       event.target.dataset.userEdited = "1";
       return;
     }
-    if (event.target.name === "startingPitchers") {
+    if (event.target.name === "bullpenSlots") event.target.dataset.userEdited = "1";
+    if (event.target.name === "startingPitchers" || event.target.name === "bullpenSlots") {
       const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
-      const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
+      const rosterSize = rosterSizeForStartingPitchers(startingPitchers, draftModeFromForm(form).bullpenSlots);
       // The default budget is $100 a slot, so it moves with the roster until a
       // manager overrides it.
       const budgetInput = setupForm.querySelector('input[name="auctionBudget"]');
@@ -2259,7 +2295,6 @@ function renderSetup(setupError = "") {
     const cpuChecked = new Set(form.getAll("cpu").map(String));
     state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));
     state.startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
-    state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers);
     state.temperature = normalizeTemperature(form.get("temperature"));
     const universe = universeFromForm(form);
     if (!universe) {
@@ -2270,6 +2305,8 @@ function renderSetup(setupError = "") {
     const mode = draftModeFromForm(form);
     state.draftType = mode.draftType;
     state.nomination = mode.nomination;
+    state.bullpenSlots = mode.bullpenSlots;
+    state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers, state.bullpenSlots);
     state.hidePoints = mode.hidePoints;
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
     state.auctionTimer = normalizeAuctionTimerInput(form);
@@ -2280,9 +2317,10 @@ function renderSetup(setupError = "") {
       nomination: state.nomination,
       managerCount: state.managers.length,
       startingPitchers: state.startingPitchers,
+      bullpenSlots: state.bullpenSlots,
       temperature: state.temperature
     });
-    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers);
+    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers, state.bullpenSlots);
     if (poolError) {
       renderSetup(poolError);
       return;
@@ -2291,6 +2329,7 @@ function renderSetup(setupError = "") {
       draftType: state.draftType,
       startingPitchers: state.startingPitchers,
       nomination: state.nomination,
+      bullpenSlots: state.bullpenSlots,
       hidePoints: state.hidePoints,
       budget: state.auctionBudget,
       timer: state.auctionTimer,
@@ -2336,11 +2375,11 @@ function renderSetup(setupError = "") {
     );
     const seed = String(form.get("seed")).trim() || "showdown";
     const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
-    const rosterSize = rosterSizeForStartingPitchers(startingPitchers);
     const universe = universeFromForm(form);
     const snakeClock = snakeClockFromForm(form);
     const pickTimer = snakeClock.pickTimerSeconds;
-    const { draftType, nomination, hidePoints } = draftModeFromForm(form);
+    const { draftType, nomination, hidePoints, bullpenSlots } = draftModeFromForm(form);
+    const rosterSize = rosterSizeForStartingPitchers(startingPitchers, bullpenSlots);
     const budget = normalizeAuctionBudget(form.get("auctionBudget"), rosterSize);
     const auctionTimer = normalizeAuctionTimerInput(form);
     const cpuChecked = form.getAll("cpu").map(String);
@@ -2354,6 +2393,7 @@ function renderSetup(setupError = "") {
       const room = await createRoom({
         seed,
         startingPitchers,
+        bullpenSlots,
         temperature: normalizeTemperature(form.get("temperature")),
         managers: managers.length >= 2 ? managers : ["Home", "Away"],
         universe,
@@ -6917,7 +6957,7 @@ function renderRoster(manager, draft) {
     <div class="target-row">
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
       <span class="${counts.starters >= draft.startingPitchers ? "ok" : "warn"}">${counts.starters}/${draft.startingPitchers} starters</span>
-      <span class="${counts.bullpen >= 2 ? "ok" : "warn"}">${counts.bullpen}/2 bullpen</span>
+      <span class="${counts.bullpen >= bullpenRequirement(draft) ? "ok" : "warn"}">${counts.bullpen}/${bullpenRequirement(draft)} bullpen</span>
     </div>
     ${renderRosterDepthChart(manager, slotContext)}
   </article>`;
@@ -7988,7 +8028,8 @@ function canManageRoster(managerId) {
   return true;
 }
 
-const isStaffSlot = (label) => staffSlotLabels(state.draft?.startingPitchers).includes(label);
+// Any rotation or pen seat: an unlimited pen numbers as many as the roster needs.
+const isStaffSlot = (label) => /^(SP|RP)\d+$/.test(String(label));
 
 // Can this card go in that slot? Works for a card already on the field and for
 // one sitting on the bench — the bench is where an unlimited roster keeps the
@@ -9229,7 +9270,7 @@ function matchesPositionFilter(player, filterPosition) {
 }
 
 function canSimulate(draft) {
-  const options = { unlimitedRoster: hasUnlimitedRoster(draft), startingPitchers: draft.startingPitchers };
+  const options = { unlimitedRoster: hasUnlimitedRoster(draft), startingPitchers: draft.startingPitchers, bullpenSlots: draft.bullpenSlots };
   return draft.complete && draft.managers.every((manager) => validateRoster(manager, options).length === 0);
 }
 
@@ -9502,6 +9543,9 @@ function reviveState(value) {
     draft.draftType = draft.draftType === "auction" ? "auction" : "snake";
     draft.nomination = draft.draftType === "auction" && draft.nomination === "random" ? "random" : "manual";
     draft.unlimitedRoster = draft.nomination === "random";
+    // A draft saved before the pen was configurable played with two relievers.
+    draft.bullpenSlots = roomBullpenSlots(draft.bullpenSlots, draft.unlimitedRoster);
+    draft.rosterSize = rosterSizeForStartingPitchers(draft.startingPitchers, draft.bullpenSlots);
     draft.hidePoints = Boolean(draft.hidePoints);
     // A random-nomination draft ends when the queue runs out, not when the
     // rosters fill — they never do, there is no cap to fill to.
@@ -9512,6 +9556,7 @@ function reviveState(value) {
     draft.pool = draft.pool.map(normalizeCardPosition);
     for (const manager of draft.managers) {
       manager.startingPitchers = draft.startingPitchers;
+      manager.bullpenSlots = draft.bullpenSlots;
       manager.roster = manager.roster.map(normalizeCardPosition);
     }
     if (draft.draftType === "auction") {
@@ -9522,12 +9567,13 @@ function reviveState(value) {
     ...defaultState(),
     ...value,
     startingPitchers: draft?.startingPitchers ?? normalizeStartingPitchers(value.startingPitchers),
-    rosterSize: draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers),
+    bullpenSlots: value.bullpenSlots === undefined ? UNLIMITED_BULLPEN : normalizeBullpenSlots(value.bullpenSlots),
+    rosterSize: draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers, value.bullpenSlots),
     universe: universeConfig(value.universe)?.key ?? DEFAULT_UNIVERSE,
     draftType: value.draftType === "auction" ? "auction" : "snake",
     auctionBudget: normalizeAuctionBudget(
       value.auctionBudget ?? AUCTION_DEFAULT_BUDGET,
-      draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers)
+      draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers, value.bullpenSlots)
     ),
     auctionTimer: normalizeAuctionTimerState(value.auctionTimer),
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),

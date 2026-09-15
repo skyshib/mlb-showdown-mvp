@@ -4,7 +4,7 @@ import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260716-records";
-import { ANY_HITTER, CORNER_OUTFIELD_POSITION, poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
+import { ANY_HITTER, CORNER_OUTFIELD_POSITION, boardBullpenSlots, poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
 import { authenticPoints } from "../rules/pricing.js?v=20260716-records";
 import { PRICE_MODEL } from "./priceModel.js";
 
@@ -395,12 +395,15 @@ const DECK_QUOTAS = [
 // on it, and a three-manager night should not be punished for being small: it
 // keeps the same deep board it has always had. Rooms of eight or fewer deal
 // exactly the cards they dealt before, down to the card.
-function deckQuotas(managerCount, startingPitchers = 2) {
+function deckQuotas(managerCount, startingPitchers = 2, bullpenSlots = 2) {
   const managers = Math.max(1, Math.round(Number(managerCount) || DECK_BASELINE_MANAGERS));
   const starterScale = Math.max(1, Math.round(Number(startingPitchers) || 2)) / 2;
-  const starterAdjusted = starterScale === 1
+  // A deeper pen deals more relievers; a smaller one keeps the usual supply.
+  const relieverScale = boardBullpenSlots(bullpenSlots) / 2;
+  const scale = { SP: starterScale, RP: relieverScale };
+  const starterAdjusted = starterScale === 1 && relieverScale === 1
     ? DECK_QUOTAS
-    : DECK_QUOTAS.map(([group, quota]) => [group, group === "SP" ? Math.ceil(quota * starterScale) : quota]);
+    : DECK_QUOTAS.map(([group, quota]) => [group, scale[group] ? Math.ceil(quota * scale[group]) : quota]);
   if (managers <= DECK_BASELINE_MANAGERS) return starterAdjusted;
   return starterAdjusted.map(([group, quota]) => [
     group,
@@ -486,12 +489,12 @@ function dealDeckToQuotas(quotas, rngKey) {
 // The room's size is salted into the deal ONLY when it changes the quotas. A
 // room of eight or fewer deals the very same cards it dealt before this took a
 // manager count at all — same seed, same salt, same board.
-export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, startingPitchers = 2) {
-  const quotas = deckQuotas(managerCount, startingPitchers);
+export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, startingPitchers = 2, bullpenSlots = 2) {
+  const quotas = deckQuotas(managerCount, startingPitchers, bullpenSlots);
   const defaultRotation = Math.round(Number(startingPitchers) || 2) === 2;
   const salt = quotas === DECK_QUOTAS
     ? ""
-    : `${managerCount > DECK_BASELINE_MANAGERS ? `:m${Math.round(managerCount)}` : ""}${defaultRotation ? "" : `:sp${Math.round(startingPitchers)}`}`;
+    : `${managerCount > DECK_BASELINE_MANAGERS ? `:m${Math.round(managerCount)}` : ""}${defaultRotation ? "" : `:sp${Math.round(startingPitchers)}`}${penSalt(bullpenSlots)}`;
   return dealDeckToQuotas(quotas, `deck-deal:${universeKey()}:${seed}${salt}`);
 }
 
@@ -500,10 +503,17 @@ export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, start
 // enough that the closing sweep can always finish everybody (see
 // randomNominationCounts). Three managers see twelve starters; eight of them
 // will come up for bid, and the other four sit there all night as insurance.
-export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 2) {
-  const { visible } = randomNominationQuotas(managerCount, startingPitchers);
+export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 2, bullpenSlots = 2) {
+  const { visible } = randomNominationQuotas(managerCount, startingPitchers, bullpenSlots);
   const rotationSalt = Math.round(Number(startingPitchers) || 2) === 2 ? "" : `:sp${Math.round(startingPitchers)}`;
-  return dealDeckToQuotas(visible, `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}${rotationSalt}`);
+  return dealDeckToQuotas(visible, `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}${rotationSalt}${penSalt(bullpenSlots)}`);
+}
+
+// Salted into the deal only when the pen changes the quotas, so a two-reliever
+// room deals the same cards it always did.
+function penSalt(bullpenSlots) {
+  const pen = boardBullpenSlots(bullpenSlots);
+  return pen === 2 ? "" : `:rp${pen}`;
 }
 
 // Build a room's deck in one call: point the universe at the room's league
@@ -512,8 +522,8 @@ export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 
 export function buildDraftPool(mode, seed, options = {}) {
   setUniverse(seed, mode, { priceNoise: false, temperature: options.temperature });
   const deck = options.nomination === "random"
-    ? dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers)
-    : dealDraftDeck(seed, options.managerCount, options.startingPitchers);
+    ? dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers, options.bullpenSlots)
+    : dealDraftDeck(seed, options.managerCount, options.startingPitchers, options.bullpenSlots);
   const dealt = universeKey() === "fictional" ? ensureGoldenTicket(deck, seed) : deck;
   return [...dealt, ...dealReplacementCards(dealt, seed)];
 }
