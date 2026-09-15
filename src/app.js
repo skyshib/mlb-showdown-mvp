@@ -1050,8 +1050,8 @@ function defaultState() {
     batchSorts: {
       teams: { sort: "winPct", direction: "desc" },
       starters: { sort: "team", direction: "asc" },
-      hitters: { sort: "ops", direction: "desc" },
-      pitchers: { sort: "era", direction: "asc" }
+      hitters: { sort: "war", direction: "desc" },
+      pitchers: { sort: "war", direction: "desc" }
     },
     batchStatsTab: "overview",
     batchPitcherSplit: "overall",
@@ -4414,6 +4414,14 @@ function renderBatch() {
   const sortedTeams = sortBatchRows(summary.teams, "teams", (row, sort) => batchTeamSortValue(row, sort));
   const starterResults = summary.starterResults ?? [];
   const sortedStarterResults = sortBatchRows(starterResults, "starters", (row, sort) => batchStarterSortValue(row, sort));
+  // The player tables open on WPAR; a sim that predates it has no such column,
+  // so they fall back to WPA.
+  if (!hasWar) {
+    for (const table of ["hitters", "pitchers"]) {
+      const config = batchSortConfig(table);
+      if (config.sort === "war") state.batchSorts = { ...state.batchSorts, [table]: { ...config, sort: "wpa162" } };
+    }
+  }
   const sortedHitters = sortBatchRows(hitterLines, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
   const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
   const winProbabilityNote = "Win probability comes from a simulated table calibrated to a modern MLB run environment (about 4.4 runs a game) with no home-field edge, so a swing is measured against what that state is worth in an average ballgame, not in this room's.";
@@ -5750,8 +5758,8 @@ function defaultBatchSorts() {
   return {
     teams: { sort: "winPct", direction: "desc" },
     starters: { sort: "team", direction: "asc" },
-    hitters: { sort: "ops", direction: "desc" },
-    pitchers: { sort: "era", direction: "asc" },
+    hitters: { sort: "war", direction: "desc" },
+    pitchers: { sort: "war", direction: "desc" },
     skillPlayers: { sort: "total", direction: "desc" },
     baserunning: { sort: "war", direction: "desc" },
     defense: { sort: "war", direction: "desc" }
@@ -5767,6 +5775,10 @@ function normalizeBatchSorts(value) {
   // a save still pointed at the old keys would sort by a value nobody computes.
   if (sorts.teams?.sort === "rf162") sorts.teams = { sort: "rfPerGame", direction: "desc" };
   if (sorts.teams?.sort === "ra162") sorts.teams = { sort: "raPerGame", direction: "asc" };
+  // The player tables used to open on OPS and ERA; a save still holding those
+  // old defaults opens on WPAR like a fresh one.
+  if (sorts.hitters?.sort === "ops" && sorts.hitters.direction === "desc") sorts.hitters = { sort: "war", direction: "desc" };
+  if (sorts.pitchers?.sort === "era" && sorts.pitchers.direction === "asc") sorts.pitchers = { sort: "war", direction: "desc" };
   return sorts;
 }
 
