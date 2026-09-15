@@ -253,7 +253,10 @@ function foldAttribution(state, game) {
       for (const key of Object.keys(hitter.warInputs)) hitter.warInputs[key] += line.inputs[key];
     }
     const pitcher = state.pitchers.get(line.id);
-    if (pitcher) pitcher.war.pitching += line.pitching;
+    if (pitcher) {
+      pitcher.war.pitching += line.pitching;
+      pitcher.freshWar.pitching += line.pitchingFresh;
+    }
   }
   for (const side of ["away", "home"]) {
     const row = state.teams.get(game[side].name);
@@ -495,6 +498,7 @@ function registerPitcher(state, teamName, player) {
     r: 0,
     wpa: 0,
     war: emptyWar(),
+    freshWar: emptyWar(),
     fresh: emptyPitcherTotals()
   });
 }
@@ -516,7 +520,10 @@ function summarizePitcherLine(line, runs) {
   return {
     ...summarizePitcherTotals(line, line.teamGames, runs),
     warPer162: summarizeWar(line.war, line.teamGames),
-    fresh: summarizePitcherTotals(line.fresh ?? emptyPitcherTotals(), line.teamGames, runs)
+    fresh: {
+      ...summarizePitcherTotals(line.fresh ?? emptyPitcherTotals(), line.teamGames, runs),
+      warPer162: summarizeWar(line.freshWar, line.teamGames)
+    }
   };
 }
 

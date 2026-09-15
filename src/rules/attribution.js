@@ -73,6 +73,8 @@ export function attributionLine(attribution, side, player, team) {
   if (!line) {
     line = {
       id: player.id, name: player.name, side, team, hitting: 0, baserunning: 0, defense: 0, pitching: 0,
+      // The part of `pitching` from plate appearances that began before he tired.
+      pitchingFresh: 0,
       // What defense and baserunning were measured against, summed per chance:
       // the player's glove and legs and the replacement's.
       inputs: { fieldChances: 0, glove: 0, replacementGlove: 0, runChances: 0, speed: 0, replacementSpeed: 0 }

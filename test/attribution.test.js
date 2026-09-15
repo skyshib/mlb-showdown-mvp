@@ -41,7 +41,7 @@ test("a player measured against himself is worth exactly nothing", () => {
     const [away, home] = [TEAMS[index % 4], TEAMS[(index + 2) % 4]];
     const game = simulateGame(away, home, `self-${index}`, { attribution: { resolveReplacement: self } });
     for (const line of game.attribution.lines) {
-      for (const bucket of ["hitting", "baserunning", "defense", "pitching"]) {
+      for (const bucket of ["hitting", "baserunning", "defense", "pitching", "pitchingFresh"]) {
         assert.equal(line[bucket], 0, `${line.name} ${bucket} in game ${index}`);
       }
     }
@@ -74,6 +74,14 @@ test("each bucket lands only on the players it measures", () => {
   assert.ok(summary.hitters.some((hitter) => hitter.warPer162.baserunning !== 0));
   assert.ok(summary.hitters.some((hitter) => hitter.warPer162.defense !== 0));
   assert.ok(summary.pitchers.some((pitcher) => pitcher.warPer162.pitching !== 0));
+  // Not tired pitching WPAR is its own split: measured, and short of all work
+  // for an arm who pitched tired.
+  assert.ok(summary.pitchers.some((pitcher) => pitcher.fresh.warPer162.pitching !== 0));
+  assert.ok(summary.pitchers.some((pitcher) => pitcher.fresh.bf < pitcher.bf
+    && pitcher.fresh.warPer162.pitching !== pitcher.warPer162.pitching));
+  for (const pitcher of summary.pitchers.filter((line) => line.fresh.bf === line.bf)) {
+    assert.ok(Math.abs(pitcher.fresh.warPer162.pitching - pitcher.warPer162.pitching) < 1e-9, pitcher.name);
+  }
 });
 
 test("a room without standing replacements simulates without measuring", () => {

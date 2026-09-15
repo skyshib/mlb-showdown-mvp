@@ -2775,7 +2775,9 @@ function attributePlateAppearance(state, play) {
   const card = attribution.resolveReplacement(pitchingSide, "pitcher", pitcher);
   if (card) {
     const replayed = replayPlateAppearance(state, play, batter, swappedCard(attribution, "pitch", pitcher, card, ["control", "chart"]));
-    attributionLine(attribution, pitchingSide, pitcher, state[pitchingSide].name).pitching += replayed - battingWpa;
+    const line = attributionLine(attribution, pitchingSide, pitcher, state[pitchingSide].name);
+    line.pitching += replayed - battingWpa;
+    if (play.fatiguePenalty === 0) line.pitchingFresh += replayed - battingWpa;
   }
 }
 

@@ -4398,7 +4398,9 @@ function renderBatch() {
   const hasPitcherSplits = summary.pitchers.some((line) => line.fresh);
   const pitcherSplit = hasPitcherSplits ? normalizeBatchPitcherSplit(state.batchPitcherSplit) : "overall";
   const allPitcherLines = pitcherSplit === "fresh"
-    ? summary.pitchers.map((line) => ({ ...line, ...(line.fresh ?? {}) }))
+    // A run from before the split WPAR has no Not tired WPAR, so it goes blank
+    // rather than showing all work.
+    ? summary.pitchers.map((line) => ({ ...line, ...(line.fresh ?? {}), warPer162: line.fresh?.warPer162 ?? null }))
     : summary.pitchers;
   const teamNames = summary.teams.map((row) => row.team);
   const hitterTeamFilter = normalizeBatchTeamFilter(state.batchTeamFilters?.hitters, teamNames);
@@ -4484,7 +4486,7 @@ function renderBatch() {
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
         <td class="num">${formatFip(line, fipConstant)}</td>
         ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
-        ${hasWar ? `<td class="num">${pitcherSplit === "fresh" ? "—" : formatWar(line.warPer162?.pitching)}</td>` : ""}
+        ${hasWar ? `<td class="num">${line.warPer162 ? formatWar(line.warPer162.pitching) : "—"}</td>` : ""}
       </tr>`
     )
     .join("");
@@ -4827,7 +4829,7 @@ function renderBatch() {
           ? "This simulation predates fatigue splits. Run it again to compare fresh and tired work."
           : pitcherSplit === "fresh"
           ? "Only plate appearances that began before the pitcher was tired."
-          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? ` <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers. It covers all work, so it is blank under Not tired.` : ""}</p>
+          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? ` <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers.` : ""}</p>
       </div>
       <div class="batch-stat-controls">
         ${renderBatchTeamFilter("pitchers", pitcherTeamFilter, teamNames)}
