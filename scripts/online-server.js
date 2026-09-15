@@ -31,7 +31,7 @@ import {
   isPendingBidder,
   isRandomNomination,
   maxPoolManagers,
-  roomBullpenSlots,
+  roomBullpen,
   nominateBestTarget,
   randomNominationShortfalls,
   normalizeAuctionBudget,
@@ -217,6 +217,7 @@ function roomPool(room) {
     managerCount: room.managerCount,
     startingPitchers: room.startingPitchers,
     bullpenSlots: room.bullpenSlots,
+    bullpenMin: room.bullpenMin,
     temperature: room.temperature
   });
 }
@@ -232,8 +233,8 @@ function reviveRoom(saved) {
     saved.startingPitchers ?? Number(saved.rosterSize) - 11
   );
   // A room saved before the pen was configurable played with two relievers.
-  const bullpenSlots = roomBullpenSlots(saved.bullpenSlots, nomination === "random");
-  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, bullpenSlots);
+  const { bullpenSlots, bullpenMin } = roomBullpen(saved, nomination === "random");
+  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin });
   const temperature = normalizeTemperature(saved.temperature);
   const savedDeck = Array.isArray(saved.deck) && saved.deck.length ? saved.deck : null;
   const pool = roomPool({
@@ -244,6 +245,7 @@ function reviveRoom(saved) {
     nomination,
     startingPitchers,
     bullpenSlots,
+    bullpenMin,
     temperature,
     managerCount: managerNames.length,
     deck: savedDeck
@@ -256,7 +258,7 @@ function reviveRoom(saved) {
     pool,
     rosterSize,
     saved.seed,
-    { draftType, nomination, startingPitchers, bullpenSlots, budget: auctionBudget, timer: saved.auctionTimer ?? false, snakeTimer: saved.snakeTimer ?? false }
+    { draftType, nomination, startingPitchers, bullpenSlots, bullpenMin, budget: auctionBudget, timer: saved.auctionTimer ?? false, snakeTimer: saved.snakeTimer ?? false }
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
@@ -273,6 +275,7 @@ function reviveRoom(saved) {
     rosterSize,
     startingPitchers,
     bullpenSlots: draft.bullpenSlots,
+    bullpenMin: draft.bullpenMin,
     temperature,
     universe,
     // A room saved before decks were written down pins the one it just revived
@@ -322,6 +325,7 @@ function roomRecord(room) {
     rosterSize: room.rosterSize,
     startingPitchers: room.startingPitchers,
     bullpenSlots: room.bullpenSlots,
+    bullpenMin: room.bullpenMin,
     temperature: room.temperature ?? 0,
     universe: room.universe,
     deck: room.deck ?? null,
@@ -927,8 +931,8 @@ async function createRoom(store, request, response) {
   const pickTimer = normalizePickTimerSeconds(body.pickTimer);
   const draftType = body.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && body.nomination === "random" ? "random" : "manual";
-  const bullpenSlots = roomBullpenSlots(body.bullpenSlots, nomination === "random");
-  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, bullpenSlots);
+  const pen = roomBullpen(body, nomination === "random");
+  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, pen);
   // Display-only house rule: hide every card's printed points. It never touches
   // the deal or the replay, so it just rides along as a room setting.
   const hidePoints = Boolean(body.hidePoints);
@@ -944,9 +948,9 @@ async function createRoom(store, request, response) {
   // random-nomination board is dealt to the size of the ROOM, so how many
   // managers it seats is not a question — whether the set is deep enough to
   // deal it is.
-  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, bullpenSlots, temperature });
+  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, ...pen, temperature });
   if (nomination === "random") {
-    const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers, bullpenSlots);
+    const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers, pen);
     if (shortfalls.length) {
       const spots = shortfalls.map((short) => `${short.group} (${short.dealt} of ${short.quota})`).join(", ");
       return sendJson(response, 400, {
@@ -954,7 +958,7 @@ async function createRoom(store, request, response) {
       });
     }
   } else {
-    const managerLimit = maxPoolManagers(pool, startingPitchers, bullpenSlots);
+    const managerLimit = maxPoolManagers(pool, startingPitchers, pen);
     if (managers.length > managerLimit) {
       return sendJson(response, 400, {
         error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers`
@@ -966,7 +970,7 @@ async function createRoom(store, request, response) {
     pool,
     rosterSize,
     seed,
-    { draftType, nomination, startingPitchers, bullpenSlots, budget: auctionBudget, timer: auctionTimer, snakeTimer }
+    { draftType, nomination, startingPitchers, ...pen, budget: auctionBudget, timer: auctionTimer, snakeTimer }
   );
   const createdAt = Date.now();
   const room = {
@@ -975,6 +979,7 @@ async function createRoom(store, request, response) {
     rosterSize,
     startingPitchers,
     bullpenSlots: draft.bullpenSlots,
+    bullpenMin: draft.bullpenMin,
     temperature,
     universe,
     // The board this room dealt, written down on the night it dealt it —
@@ -1609,6 +1614,7 @@ function roomSnapshot(room, port = null) {
     draftType: room.draftType ?? "snake",
     nomination: room.nomination ?? "manual",
     bullpenSlots: room.bullpenSlots ?? null,
+    bullpenMin: room.bullpenMin ?? null,
     hidePoints: Boolean(room.hidePoints),
     auctionBudget: room.auctionBudget ?? null,
     auctionTimer: room.auctionTimer ?? null,

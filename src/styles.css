@@ -446,6 +446,42 @@ td span {
   align-items: start;
 }
 
+/* Relievers per team: a min and a max side by side, across the row. */
+.bullpen-range-field {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+
+.bullpen-range-title {
+  font-family: var(--display);
+  color: var(--navy);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.bullpen-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 130px));
+  gap: 18px;
+}
+
+.bullpen-range label {
+  font-size: 12px;
+}
+
+.bullpen-range label[hidden] {
+  display: none;
+}
+
+.bullpen-range-field small {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 /* The seed's two refills — last room's seed, or a fresh roll — ride the
    header line so the box below keeps its full width for reading the seed. */
 .seed-label-row {

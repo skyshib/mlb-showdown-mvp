@@ -34,6 +34,7 @@ import {
   nominatePlayer,
   normalizeAuctionBudget,
   normalizeAuctionTimerConfig,
+  normalizeBullpenMin,
   normalizeBullpenSlots,
   pauseAuction,
   pickPlayer,
@@ -43,6 +44,7 @@ import {
   startAuctionReview,
   submitCpuSealedBids,
   syncAuctionTimer,
+  sweepRosters,
   syncCpuTeamChoices,
   UNLIMITED_BULLPEN,
   undoLastPick,
@@ -737,6 +739,53 @@ test("a random-nomination room sets how many relievers pitch, unlimited by defau
   // Rooms saved before the setting keep the two-man pen.
   assert.equal(makeAuctionDraft(["Alpha"], pool, { nomination: "random" }).bullpenSlots, 2);
   assert.equal(normalizeBullpenSlots(12), 7);
+});
+
+test("the pen is a range: a floor every roster is filled to, and a ceiling on who pitches", () => {
+  const pool = makeDraftPool("pen-range", 40, 24);
+  const relievers = pool.filter((card) => card.role === "RP").slice(0, 5);
+  const roster = [
+    ...pool.filter((card) => card.kind === "hitter").slice(0, 9),
+    ...pool.filter((card) => card.role === "SP").slice(0, 2)
+  ];
+
+  const open = makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenMin: 2, bullpenSlots: UNLIMITED_BULLPEN });
+  const alpha = open.managers[0];
+  assert.equal(alpha.bullpenMin, 2);
+  alpha.roster = [...roster, relievers[0]];
+  assert.ok(validateRoster(alpha, open).some((issue) => issue.includes("1 more bullpen pitcher")), "one short of the floor");
+  alpha.roster = [...roster, ...relievers];
+  assert.deepEqual(validateRoster(alpha, open), []);
+  assert.equal(buildTeam(alpha).bullpen.length, 5, "no ceiling: all five pitch");
+
+  const ranged = makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenMin: 1, bullpenSlots: 3 });
+  const beta = ranged.managers[0];
+  beta.roster = [...roster, relievers[0]];
+  assert.deepEqual(validateRoster(beta, ranged), [], "one meets a floor of one");
+  beta.roster = [...roster, ...relievers];
+  assert.equal(buildTeam(beta).bullpen.length, 3, "three of five pitch");
+
+  // The floor never sits above the ceiling, and a capped room drafts the floor.
+  assert.equal(normalizeBullpenMin(5, 3), 3);
+  const capped = createDraft(["One"], pool, 13, "pen-range", { bullpenMin: 3, bullpenSlots: UNLIMITED_BULLPEN });
+  assert.deepEqual([capped.bullpenMin, capped.bullpenSlots, capped.rosterSize], [3, 3, 14]);
+  // Rooms saved with one count before the range keep requiring all of it.
+  assert.equal(makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: 4 }).bullpenMin, 4);
+});
+
+test("a roster short of the pen floor is swept up to it with the replacement reliever", () => {
+  for (const bullpenMin of [2, 3]) {
+    const options = { nomination: "random", managerCount: 2, bullpenMin, bullpenSlots: UNLIMITED_BULLPEN };
+    const deck = buildDraftPool("classic", "pen-sweep", options);
+    const draft = createDraft(["One", "Two"], deck, 13, "pen-sweep", { draftType: "auction", timer: false, ...options });
+    sweepRosters(draft);
+    for (const manager of draft.managers) {
+      const pen = manager.roster.filter((card) => card.role === "RP");
+      assert.equal(pen.length, bullpenMin, `floor of ${bullpenMin}`);
+      assert.ok(pen.every((card) => card.replacement), "filled with the replacement reliever");
+      assert.deepEqual(validateRoster(manager, draft), []);
+    }
+  }
 });
 
 test("a capped draft drafts exactly the set number of relievers", () => {

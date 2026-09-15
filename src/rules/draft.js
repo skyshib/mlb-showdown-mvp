@@ -62,9 +62,10 @@ export function normalizeStartingPitchers(value) {
   return Math.min(MAX_STARTING_PITCHERS, Math.max(MIN_STARTING_PITCHERS, count));
 }
 
-// Nine hitters, the rotation, and the pen the roster must own.
-export function rosterSizeForStartingPitchers(value = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
-  return HITTER_TARGET + normalizeStartingPitchers(value) + bullpenRequirement({ bullpenSlots });
+// Nine hitters, the rotation, and the relievers the roster must own. `pen` is
+// anything carrying the pen settings: a draft, a manager, a room, the form.
+export function rosterSizeForStartingPitchers(value = DEFAULT_STARTING_PITCHERS, pen = {}) {
+  return HITTER_TARGET + normalizeStartingPitchers(value) + bullpenRequirement(pen);
 }
 
 function startingPitcherTarget(options = {}) {
@@ -72,12 +73,13 @@ function startingPitcherTarget(options = {}) {
   return normalizeStartingPitchers(options?.startingPitchers);
 }
 
-// The pen's slot count, set per draft room like the rotation: two unless the
-// commissioner says otherwise. A random-nomination room can also leave it
-// unlimited, so every reliever a manager owns pitches; a capped room cannot,
-// since its roster size is counted slot by slot. The adventure's full-roster
-// format hands whole rosters over, where the pen is however many relievers
-// the twenty cards hold — zero to seven.
+// A draft room's pen is a range. bullpenMin is how many relievers a roster must
+// own; a manager short at the end of the draft is filled out to it. bullpenSlots
+// is the most that pitch in a game, a count or unlimited. A random-nomination
+// room sets both. A capped room's roster is counted slot by slot, so it drafts
+// one count, and every reliever it drafts pitches. The adventure's full-roster
+// format hands whole rosters over, where the pen is however many relievers the
+// twenty cards hold — zero to seven.
 export const MAX_BULLPEN_SLOTS = 7;
 export const UNLIMITED_BULLPEN = "all";
 
@@ -91,24 +93,35 @@ export function normalizeBullpenSlots(value) {
   return Math.min(MAX_BULLPEN_SLOTS, Math.max(0, count));
 }
 
-// A draft room's pen. Unlimited is a random-nomination setting; a capped room
-// asked for it (or a setup form left on it) gets the usual two.
-export function roomBullpenSlots(value, randomNomination) {
-  const slots = normalizeBullpenSlots(value);
-  return slots === UNLIMITED_BULLPEN && !randomNomination ? BULLPEN_TARGET : slots;
+// The pen's floor, never above its ceiling. A pen saved before the range
+// existed required its whole count, or two when it was unlimited.
+export function normalizeBullpenMin(value, bullpenSlots) {
+  const slots = normalizeBullpenSlots(bullpenSlots);
+  const ceiling = slots === UNLIMITED_BULLPEN ? MAX_BULLPEN_SLOTS : slots;
+  if (value == null || value === "") return slots === UNLIMITED_BULLPEN ? BULLPEN_TARGET : slots;
+  const count = Math.round(Number(value));
+  if (!Number.isFinite(count)) return Math.min(BULLPEN_TARGET, ceiling);
+  return Math.min(ceiling, Math.max(0, count));
 }
 
-// How many relievers a roster must own: the set count, or two for an unlimited
-// pen, which asks for the classic two and pitches whatever else is bought.
-export function bullpenRequirement(options = {}) {
-  const slots = normalizeBullpenSlots(options?.bullpenSlots);
-  return slots === UNLIMITED_BULLPEN ? BULLPEN_TARGET : slots;
+// A draft room's pen, settled for its mode. A capped room drafts one count: its
+// floor, since that is the number it has to fill, and all of those pitch.
+export function roomBullpen(pen = {}, randomNomination = false) {
+  const bullpenMin = normalizeBullpenMin(pen?.bullpenMin, pen?.bullpenSlots);
+  if (!randomNomination) return { bullpenSlots: bullpenMin, bullpenMin };
+  return { bullpenSlots: normalizeBullpenSlots(pen?.bullpenSlots), bullpenMin };
 }
 
-// Relievers a board deals per team. It grows with a deeper pen but never
-// shrinks below two: a smaller pen does not need a thinner board.
-export function boardBullpenSlots(bullpenSlots) {
-  return Math.max(BULLPEN_TARGET, bullpenRequirement({ bullpenSlots }));
+// How many relievers a roster must own.
+export function bullpenRequirement(pen = {}) {
+  return normalizeBullpenMin(pen?.bullpenMin, pen?.bullpenSlots);
+}
+
+// Relievers a board deals per team: enough for the floor every roster is
+// filled to. It grows past two but never shrinks below it: a smaller pen does
+// not need a thinner board.
+export function boardBullpenSlots(pen = {}) {
+  return Math.max(BULLPEN_TARGET, bullpenRequirement(pen));
 }
 
 // The pen slots this roster shows. An unlimited pen seats every reliever not
@@ -185,9 +198,9 @@ export function randomNominationCounts(managerCount) {
 
 // Per-position card counts for a random-nomination room: the slot quota times
 // the manager multiplier. Returns [[group, count], ...] in ROSTER_SLOTS order.
-export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
+export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS, pen = {}) {
   const { hiddenPerSlot, visiblePerSlot } = randomNominationCounts(managerCount);
-  const slots = rosterSlots(startingPitchers, boardBullpenSlots(bullpenSlots));
+  const slots = rosterSlots(startingPitchers, boardBullpenSlots(pen));
   return {
     visible: slots.map(([group, count]) => [group, visiblePerSlot * count]),
     hidden: slots.map(([group, count]) => [group, hiddenPerSlot * count])
@@ -202,14 +215,14 @@ export function randomNominationQuotas(managerCount, startingPitchers = DEFAULT_
 // checked against what is LEFT after the position groups take theirs, because
 // one card cannot be two managers' cards: nine hitters per roster means nine
 // hitters' worth of board, however they are labelled.
-export function randomNominationShortfalls(pool, managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
+export function randomNominationShortfalls(pool, managerCount, startingPitchers = DEFAULT_STARTING_PITCHERS, pen = {}) {
   const shortfalls = [];
   const taken = new Set();
   // The standing replacements are not supply: they are dealt on top of the
   // board, one per slot, and counting them would tell a room its thin catcher
   // pile is one catcher deeper than it is.
   const biddable = pool.filter((player) => !player.replacement);
-  for (const [group, quota] of randomNominationQuotas(managerCount, startingPitchers, bullpenSlots).visible) {
+  for (const [group, quota] of randomNominationQuotas(managerCount, startingPitchers, pen).visible) {
     const available = biddable.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
     for (const player of available.slice(0, quota)) taken.add(player.id);
     if (available.length < quota) shortfalls.push({ group, quota, dealt: available.length });
@@ -222,9 +235,9 @@ export function randomNominationShortfalls(pool, managerCount, startingPitchers 
 // whichever of those runs out first caps the room. Counts read a card's
 // PRIMARY position, so the answer is a floor: a pool that seats eight this
 // way seats eight however the secondary listings fall.
-export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHERS, bullpenSlots = BULLPEN_TARGET) {
+export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHERS, pen = {}) {
   const starterTarget = normalizeStartingPitchers(startingPitchers);
-  const bullpenTarget = bullpenRequirement({ bullpenSlots });
+  const bullpenTarget = bullpenRequirement(pen);
   // Same reason the shortfall check skips them: a card nobody can draft seats
   // nobody, however many rosters it ends up on.
   const biddable = pool.filter((player) => !player.replacement);
@@ -238,7 +251,7 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
     Math.floor(pitchers.filter((player) => player.role === "SP").length / starterTarget),
     // A league with no pen seats as many as its other slots allow.
     bullpenTarget ? Math.floor(pitchers.filter((player) => player.role !== "SP").length / bullpenTarget) : Infinity,
-    Math.floor(biddable.length / rosterSizeForStartingPitchers(starterTarget, bullpenSlots))
+    Math.floor(biddable.length / rosterSizeForStartingPitchers(starterTarget, pen))
   );
 }
 
@@ -328,7 +341,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
   );
   // Only a random-nomination room can leave the pen unlimited: a capped roster
   // is sized slot by slot, so it needs a count, and falls back to two.
-  const bullpenSlots = roomBullpenSlots(options.bullpenSlots, options.draftType === "auction" && options.nomination === "random");
+  const { bullpenSlots, bullpenMin } = roomBullpen(options, options.draftType === "auction" && options.nomination === "random");
   // A computer manager gets an opinion, dealt from the seed so the same room
   // always faces the same table. A human's seat carries none: he has his own.
   const personaRng = createRng(`${seed}:personas`);
@@ -342,6 +355,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
       cpu,
       startingPitchers,
       bullpenSlots,
+      bullpenMin,
       persona: cpu
         ? (CPU_PERSONALITIES[chosen] ? chosen : CPU_PERSONALITY_KEYS[Math.floor(personaRng.next() * CPU_PERSONALITY_KEYS.length)])
         : null,
@@ -353,9 +367,10 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
     managers: cleanManagers,
     pool: pool.map((player) => normalizeCardPosition({ ...player })),
     pickedIds: new Set(),
-    rosterSize: rosterSizeForStartingPitchers(startingPitchers, bullpenSlots),
+    rosterSize: rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin }),
     startingPitchers,
     bullpenSlots,
+    bullpenMin,
     seed,
     pickNumber: 0,
     complete: false,
@@ -451,7 +466,7 @@ function dealtInSlot(player, group) {
 // third man short of one. Read the tag; leave the reserve alone.
 function buildNominationQueue(draft) {
   const rng = createRng(`${draft.seed}:nomination-queue`);
-  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft.bullpenSlots);
+  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft);
   const queue = [];
   const queued = new Set();
   for (const [group, count] of hidden) {
@@ -489,7 +504,7 @@ export function nominationQueueRemaining(draft) {
 // only when it settles, so it counts alongside sold and passed history.
 export function guaranteedNominationMinimums(draft) {
   if (!isRandomNomination(draft)) return [];
-  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft.bullpenSlots);
+  const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft);
   const minimums = new Map(hidden.filter(([group]) => group !== ANY_HITTER));
   const calledIds = (draft.auction.history ?? []).map((entry) => entry.playerId);
   if (draft.auction.lot?.playerId) calledIds.push(draft.auction.lot.playerId);
@@ -2432,7 +2447,7 @@ export function validateRoster(manager, options = {}) {
     if (staff.starters.length > starterTarget) issues.push(`too many starters (${staff.starters.length} of ${starterTarget})`);
     if (lineup.hitters.length > flexHitterCap) issues.push(`too many bench hitters`);
   } else {
-    const bullpenTarget = bullpenRequirement({ bullpenSlots: options.bullpenSlots ?? manager.bullpenSlots });
+    const bullpenTarget = bullpenRequirement(options.bullpenSlots !== undefined ? options : manager);
     if (staff.bullpen.length < bullpenTarget) {
       issues.push(`needs ${bullpenTarget - staff.bullpen.length} more bullpen pitcher${bullpenTarget - staff.bullpen.length === 1 ? "" : "s"}`);
     }
