@@ -4664,7 +4664,7 @@ function renderBatch() {
         tipColor: rec.color,
         tipLines: [
           rec.name + (rec.slot ? ` · ${rec.slot}` : ""),
-          chartManager ? `${chartManager} bid ${money(bid)}${won ? " · won it" : " · lost to " + rec.team}` : `Top bid: ${money(bid)}`,
+          chartManager ? `${chartManager} bid ${money(bid)}${won ? " · won it" : ` · lost to ${rec.team}${Number.isFinite(rec.price) ? ` (${money(rec.price)})` : ""}`}` : `Top bid: ${money(bid)}`,
           yTip(rec)
         ].filter(Boolean)
       });
