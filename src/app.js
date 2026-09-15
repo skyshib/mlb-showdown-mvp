@@ -173,6 +173,7 @@ import {
   renderPlayerTable,
   renderRaceChart,
   renderFieldingCurves,
+  renderTipTarget,
   renderWinProbabilityChart,
   topSwingRanks,
   HIGH_LEVERAGE
@@ -4376,6 +4377,14 @@ function renderBatch() {
   const backLabel = "Back to draft";
   const playersById = draftedPlayersById();
   const auctionDraft = isAuctionDraft(state.draft);
+  // Managers keep the color they wear on the standings race chart, keyed by
+  // their seat order so a team is the same hue everywhere on the screen.
+  const chartTeamOrder = state.batch.race?.teamNames ?? summary.teams.map((row) => row.team);
+  const colorForTeam = (team) => {
+    const index = chartTeamOrder.indexOf(team);
+    return raceColor(index >= 0 ? index : 0);
+  };
+  const bidTips = buildBidTipMap(state.draft, colorForTeam);
   // Auction lots don't follow the snake order buildPickNumberMap assumes, so the
   // real acquisition order comes from the auction history instead.
   const acquisitionPickMap = auctionDraft
@@ -4387,7 +4396,7 @@ function renderBatch() {
     if (!player) return "";
     if (auctionDraft) {
       const price = pricePaidMap[player.id];
-      return Number.isFinite(price) ? money(price) : "";
+      return Number.isFinite(price) ? renderTipTarget(money(price), bidTips[player.id]) : "";
     }
     return pickNumberMap[player.id] ?? "";
   };
@@ -4518,13 +4527,6 @@ function renderBatch() {
       <tbody>${teamRows}</tbody>
     </table>
   </div>`;
-  // Managers keep the color they wear on the standings race chart, keyed by
-  // their seat order so a team is the same hue everywhere on the screen.
-  const chartTeamOrder = state.batch.race?.teamNames ?? summary.teams.map((row) => row.team);
-  const colorForTeam = (team) => {
-    const index = chartTeamOrder.indexOf(team);
-    return raceColor(index >= 0 ? index : 0);
-  };
   const chartLegend = chartTeamOrder.map((name, index) => ({ name, color: raceColor(index) }));
 
   // One record per drafted card that logged a stat. Every axis the chart can plot
@@ -4870,12 +4872,13 @@ function renderBatch() {
     ${renderDraftHistoryTable(draftHistory(state.draft), {
       wpaByPlayerId: batchWpaByPlayerId(summary),
       wparByPlayerId: hasWar ? batchWparByPlayerId(summary) : null,
+      bidTipsByPlayerId: bidTips,
       ...normalizeDraftHistorySort(state.draftHistorySort)
     })}
   </section>`;
   const batchSections = {
     overview: overviewSection,
-    allStars: activeBatchTab === "allStars" ? renderBatchAllStars(summary, playersById) : "",
+    allStars: activeBatchTab === "allStars" ? renderBatchAllStars(summary, playersById, bidTips) : "",
     headToHead: headToHeadSection,
     starters: `${starterResultsSection}${starterMatchupSection}`,
     hitters: hittersSection,
@@ -4935,7 +4938,7 @@ function normalizeBatchPitcherSplit(value) {
   return value === "fresh" ? "fresh" : "overall";
 }
 
-function renderBatchAllStars(summary, playersById) {
+function renderBatchAllStars(summary, playersById, bidTips = {}) {
   const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
   const slots = buildAllStarDepthChart(teams, summary);
   const pricePaidMap = buildPricePaidMap(state.draft);
@@ -4958,11 +4961,11 @@ function renderBatchAllStars(summary, playersById) {
       </div>
       <span>${filled.length} roster spots</span>
     </div>
-    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap, byWpar)).join("")}</div>
+    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap, byWpar, bidTips)).join("")}</div>
   </section>`;
 }
 
-function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false) {
+function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidTips = {}) {
   if (!slot.leader) {
     return `<article class="all-star-slot all-star-slot-empty">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
@@ -4972,13 +4975,13 @@ function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false) {
   const leader = slot.leader;
   const pricePaid = pricePaidMap[leader.id];
   const closestCompetition = allStarComparisonCandidates(slot.depth);
-  const comparisonRows = closestCompetition.map((candidate) => renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar)).join("");
+  const comparisonRows = closestCompetition.map((candidate) => renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar, bidTips)).join("");
   const showFullDepth = shouldShowFullAllStarDepth(slot.depth);
   const depthRows = slot.depth.map((candidate) => `<li class="${candidate.rank === 1 ? "all-star-depth-leader" : ""}">
     <span class="all-star-depth-rank">#${candidate.rank}</span>
     <span class="all-star-depth-player">
       ${renderBatchPlayerName(candidate, playersById)}
-      <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap)}</small>
+      <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap, bidTips)}</small>
     </span>
     ${renderAllStarValue(candidate, byWpar)}
   </li>`).join("");
@@ -4990,7 +4993,7 @@ function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false) {
     <div class="all-star-card-face">${renderPlayerCard(leader.player)}</div>
     <div class="all-star-identity">
       <strong>${escapeHtml(leader.name)}</strong>
-      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; Paid ${money(pricePaid)}` : ""}${byWpar ? ` &middot; ${formatWpaStat(leader.wpaPer162)} WPA` : ""}</span>
+      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; ${renderTipTarget(`Paid ${money(pricePaid)}`, bidTips[leader.id])}` : ""}${byWpar ? ` &middot; ${formatWpaStat(leader.wpaPer162)} WPA` : ""}</span>
     </div>
     ${comparisonRows ? `<section class="all-star-comparison" aria-label="Closest competition at ${escapeHtml(allStarPositionLabel(slot.position))}">
       <div class="all-star-comparison-heading">
@@ -5006,12 +5009,12 @@ function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false) {
   </article>`;
 }
 
-function renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar = false) {
+function renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar = false, bidTips = {}) {
   return `<li>
     <span class="all-star-depth-rank">#${candidate.rank}</span>
     <span class="all-star-depth-player">
       ${renderBatchPlayerName(candidate, playersById)}
-      <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap)}</small>
+      <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap, bidTips)}</small>
     </span>
     ${renderAllStarValue(candidate, byWpar)}
   </li>`;
@@ -5023,9 +5026,9 @@ function renderAllStarValue(candidate, byWpar) {
   return `<strong class="all-star-value">${formatWar(candidate.wparPer162)}<small>${formatWpaStat(candidate.wpaPer162)} WPA</small></strong>`;
 }
 
-function renderAllStarPrice(candidate, pricePaidMap) {
+function renderAllStarPrice(candidate, pricePaidMap, bidTips = {}) {
   const pricePaid = pricePaidMap[candidate.id];
-  return Number.isFinite(pricePaid) ? ` &middot; Paid ${money(pricePaid)}` : "";
+  return Number.isFinite(pricePaid) ? ` &middot; ${renderTipTarget(`Paid ${money(pricePaid)}`, bidTips[candidate.id])}` : "";
 }
 
 function allStarPositionLabel(position) {
@@ -5800,6 +5803,44 @@ function buildPricePaidMap(draft) {
     if (Number.isFinite(pick.price)) prices[pick.player.id] = pick.price;
   }
   return prices;
+}
+
+// The floating tip behind a price on the post-draft tabs: who won the lot and
+// for what, then every manager's sealed bid beside the budget they held going
+// into it. Budgets aren't logged per lot, so each is rebuilt backward from the
+// final purse — a purse only ever moves when its manager buys a card.
+function buildBidTipMap(draft, colorForManager) {
+  if (!isAuctionDraft(draft)) return {};
+  const history = draft.auction?.history ?? [];
+  const budgets = { ...(draft.auction?.budgets ?? {}) };
+  const tips = {};
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry.managerId && Number.isFinite(entry.price)) {
+      budgets[entry.managerId] = (budgets[entry.managerId] ?? 0) + entry.price;
+    }
+    if (entry.passed || !entry.managerId) continue;
+    const winner = draft.managers.find((manager) => manager.id === entry.managerId);
+    const player = draft.pool.find((item) => item.id === entry.playerId);
+    if (!winner || !player) continue;
+    const bidOf = (manager) => {
+      const amount = Number(entry.bids?.[manager.id]);
+      return Number.isFinite(amount) && amount > 0 ? amount : null;
+    };
+    const managers = [...draft.managers].sort((a, b) => (bidOf(b) ?? -1) - (bidOf(a) ?? -1));
+    tips[player.id] = {
+      title: player.name,
+      color: colorForManager(winner.name),
+      lines: [
+        `Sold to ${winner.name} for ${money(entry.price)}`,
+        ...managers.map((manager) => {
+          const bid = bidOf(manager);
+          return `${manager.name} ${bid === null ? "no bid" : `bid ${money(bid)}`} (budget ${money(budgets[manager.id] ?? 0)})`;
+        })
+      ]
+    };
+  }
+  return tips;
 }
 
 function buildPickNumberMap(draft) {

@@ -240,6 +240,9 @@ export function renderDraftHistoryTable(picks, options = {}) {
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
+  // The post-draft recap also hands over each lot's bids, keyed by player id,
+  // to float over the price.
+  const bidTipsByPlayerId = options.bidTipsByPlayerId ?? null;
   const requestedSort = ["pick", "paid", "points", "wpar", "wpa"].includes(options.sort)
     ? options.sort
     : options.paidSortDirection
@@ -300,7 +303,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         <td>${escapeHtml(manager.name)}</td>
         <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong></td>
         <td>${escapeHtml(playerPosition(player))}</td>
-        ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? `$${price.toLocaleString()}` : "&mdash;"}</td>` : ""}
+        ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? renderTipTarget(`$${price.toLocaleString()}`, bidTipsByPlayerId?.[player.id]) : "&mdash;"}</td>` : ""}
         <td class="num">${playerPrimary(player)}</td>
         ${hidePoints ? "" : `<td class="num">${player.points}</td>`}
         ${showWpar ? `<td class="num">${Number.isFinite(wparByPlayerId.get(player.id)) ? formatWpar(wparByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
@@ -588,6 +591,14 @@ function niceTicks(lo, hi, count = 5) {
 // text is escaped once here for the attribute and escaped again at display.
 function pointTipAttrs({ title, color, lines }) {
   return `data-point data-tip-title="${escapeHtml(title ?? "")}" data-tip-color="${escapeHtml(color ?? "")}" data-tip-lines="${escapeHtml((lines ?? []).filter(Boolean).join("\n"))}"`;
+}
+
+// The same tip hung on a bit of table text rather than a chart dot — a price
+// that opens onto the lot's bids. `html` arrives already escaped; with no tip
+// it passes through untouched.
+export function renderTipTarget(html, tip) {
+  if (!tip) return html;
+  return `<span class="tip-target" tabindex="0" ${pointTipAttrs(tip)}>${html}</span>`;
 }
 
 // Scatter of drafted players: cost (price or pick number) against WPA/162, each

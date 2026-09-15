@@ -5279,6 +5279,14 @@ button.interesting-game-card:focus-visible {
   flex: none;
 }
 
+/* A price that opens onto the lot's bids: flagged the way the explained column
+   headers are. */
+.tip-target {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
 /* The won-lot announcement: a card dropped in over the top of the board, gone on
    its own after a beat. It never takes a click and never blocks the draft. */
 .sale-toast {
