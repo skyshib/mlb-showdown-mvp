@@ -47,6 +47,22 @@ test("generated hitter speed has no artificial upper cap", () => {
   assert.ok(Math.max(...speeds) > 20);
 });
 
+test("generated fast hitters print 1B+ off the top of their singles, slow ones never", () => {
+  const hitters = generatePlayerPool("single-plus-check", 40, 13).filter((player) => player.kind === "hitter");
+  const plusSlots = (player) => player.chart
+    .filter((entry) => entry.result === "1B+")
+    .reduce((sum, entry) => sum + entry.to - entry.from + 1, 0);
+
+  for (const player of hitters) {
+    assertChartCoversD20(player.chart);
+    if (player.speed < 13) assert.equal(plusSlots(player), 0, `${player.name} (Speed ${player.speed}) has no 1B+`);
+    const plusIndex = player.chart.findIndex((entry) => entry.result === "1B+");
+    if (plusIndex >= 0) assert.equal(player.chart[plusIndex - 1].result, "1B", "a 1B+ follows a plain single");
+  }
+  const fast = hitters.filter((player) => player.speed >= 18);
+  assert.ok(fast.length > 0 && fast.every((player) => plusSlots(player) >= 1));
+});
+
 test("generated player pools do not repeat full names", () => {
   const pool = generatePlayerPool("name-variety-check", 12, 13);
   const names = pool.map((player) => player.name);

@@ -3022,6 +3022,7 @@ export function generatePlayerPool(seed, teamCount = 4, rosterSize = 13, tempera
   // A separate stream makes versatility deterministic without perturbing the
   // established names, charts, and ratings produced by the main seed.
   addGeneratedPositions(players, createRng(`${seed}:positions`), heat);
+  addSinglePlus(players, createRng(`${seed}:single-plus`));
   assignEggCards(players, createRng(`${seed}:eggs`));
 
   return players.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
@@ -3186,6 +3187,31 @@ function addGeneratedPositions(players, rng, heat = 0) {
     }
 
     player.positions = positions;
+  }
+}
+
+// The real cards print 1B+ on fast bats: none at Speed 11 or under, about 1.7
+// slots at Speed 20, 3 by Speed 24 (classic set, ~2400 hitters). The slots come
+// off the top of the singles, so on-base and points are untouched — chartPower
+// prices a 1B+ like a 1B, as the valuation does. Its own stream, like positions,
+// so the main seed's charts and ratings stay put.
+const SINGLE_PLUS_MIN_SPEED = 12;
+const SINGLE_PLUS_SLOTS_PER_SPEED = 0.22;
+const SINGLE_PLUS_MAX_SLOTS = 4;
+
+function addSinglePlus(players, rng) {
+  for (const player of players) {
+    if (player.kind !== "hitter") continue;
+    const expected = clamp((player.speed - SINGLE_PLUS_MIN_SPEED) * SINGLE_PLUS_SLOTS_PER_SPEED, 0, SINGLE_PLUS_MAX_SLOTS);
+    const roll = rng.next();
+    const single = player.chart.find((entry) => entry.result === RESULTS.SINGLE);
+    if (!single) continue;
+    // Always leave one plain single on the card.
+    const slots = Math.min(Math.floor(expected) + (roll < expected % 1 ? 1 : 0), single.to - single.from);
+    if (slots <= 0) continue;
+    const index = player.chart.indexOf(single);
+    player.chart.splice(index + 1, 0, { from: single.to - slots + 1, to: single.to, result: RESULTS.SINGLE_PLUS });
+    single.to -= slots;
   }
 }
 
@@ -3410,6 +3436,7 @@ export function chartPower(chart) {
     [RESULTS.FB]: -2,
     [RESULTS.BB]: 4,
     [RESULTS.SINGLE]: 5,
+    [RESULTS.SINGLE_PLUS]: 5,
     [RESULTS.DOUBLE]: 9,
     [RESULTS.TRIPLE]: 11,
     [RESULTS.HR]: 14
