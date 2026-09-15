@@ -2462,8 +2462,14 @@ export function sweepRosters(draft) {
       // the badge has said all night what a hole costs, and it costs that. The
       // unsold leftovers stay unsold, which is the point — nobody finds out at
       // the buzzer that his hole was quietly worth a 50-point center fielder.
-      const replacement = standingReplacement(draft, replacementSlot(neededKind, neededRole, neededPosition))
-        ? makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition)
+      // A bat hole on a roster where nobody lists first base takes the standing
+      // first baseman; once first is covered, further bat holes take the DH card.
+      const standingPosition = neededKind === "hitter" && !neededPosition && standingReplacement(draft, "1B")
+        && lineupStatus(manager.roster).missingPositions.includes("1B")
+        ? "1B"
+        : neededPosition;
+      const replacement = standingReplacement(draft, replacementSlot(neededKind, neededRole, standingPosition))
+        ? makeReplacementPlayer(draft, manager, neededKind, neededRole, standingPosition)
         : availablePlayers(draft)
           .filter((player) => player.kind === neededKind)
           .filter((player) => !neededRole || pitcherRole(player) === neededRole)

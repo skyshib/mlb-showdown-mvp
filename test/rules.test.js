@@ -1475,7 +1475,7 @@ test("the standing replacement is never biddable and never queued", () => {
   const pool = buildDraftPool("classic", "standing-unbiddable", { nomination: "random", managerCount: 3 });
   const draft = createDraft(["One", "Two", "Three"], pool, 13, "standing-unbiddable", AUCTION_ROOM);
   const standing = standingReplacements(draft);
-  assert.equal(standing.length, 9);
+  assert.equal(standing.length, 10);
 
   for (const card of standing) {
     assert.equal(availablePlayers(draft).some((player) => player.id === card.id), false);
@@ -1503,6 +1503,38 @@ test("one roster can hold the same standing replacement twice", () => {
   assert.deepEqual(copies.map((card) => card.name), [corner.name, corner.name]);
   assert.equal(copies.every((card) => card.anonymous === undefined), true, "he is a real man, not a fabrication");
   assert.equal(new Set(copies.map((card) => card.id)).size, 2, "two cards, not one card twice");
+  assert.deepEqual(validateRoster(draft.managers[0]), []);
+});
+
+test("an empty roster is swept one standing first baseman and one standing DH", () => {
+  const pool = buildDraftPool("classic", "standing-first", { nomination: "random", managerCount: 3 });
+  const draft = createDraft(["One", "Two", "Three"], pool, 13, "standing-first", AUCTION_ROOM);
+  const first = standingReplacement(draft, "1B");
+  const dh = standingReplacement(draft, "DH");
+  assert.ok(first, "the room dealt a standing first baseman");
+  assert.equal(first.position, "1B");
+  assert.notEqual(first.id, dh.id);
+
+  sweepRosters(draft);
+
+  for (const manager of draft.managers) {
+    assert.equal(manager.roster.filter((card) => card.sourceId === first.id).length, 1, `${manager.name}: one first baseman`);
+    assert.equal(manager.roster.filter((card) => card.sourceId === dh.id).length, 1, `${manager.name}: one DH`);
+    assert.deepEqual(validateRoster(manager), []);
+  }
+});
+
+test("a roster that already lists a first baseman is swept the DH card for a bat hole", () => {
+  const pool = buildDraftPool("classic", "standing-first-covered", { nomination: "random", managerCount: 3 });
+  const draft = createDraft(["One", "Two", "Three"], pool, 13, "standing-first-covered", AUCTION_ROOM);
+  const first = standingReplacement(draft, "1B");
+  const owned = availablePlayers(draft).find((card) => card.kind === "hitter" && card.position === "1B");
+  draft.managers[0].roster.push(owned);
+  draft.pickedIds.add(owned.id);
+
+  sweepRosters(draft);
+
+  assert.equal(draft.managers[0].roster.some((card) => card.sourceId === first.id), false);
   assert.deepEqual(validateRoster(draft.managers[0]), []);
 });
 

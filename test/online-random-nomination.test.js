@@ -146,11 +146,11 @@ test("a room of computers drafts itself out and everybody ends up legal", async 
     const issues = validateRoster(manager, { unlimitedRoster: true });
     assert.deepEqual(issues, [], `${manager.name} finished illegal — ${issues.join(", ")}`);
   }
-  // Nine standing replacements came through the room's record intact, and every
+  // Ten standing replacements came through the room's record intact, and every
   // hole the computers left was filled with a copy of one of them.
   const standing = standingReplacements(draft);
-  assert.equal(standing.length, 9, "the room deals a standing replacement at every slot");
-  assert.deepEqual(standing.map((card) => card.points), Array(9).fill(10));
+  assert.equal(standing.length, 10, "the room deals a standing replacement at every slot");
+  assert.deepEqual(standing.map((card) => card.points), Array(10).fill(10));
   const standingIds = new Set(standing.map((card) => card.id));
   for (const card of draft.pool.filter((player) => player.replacement && player.sourceId)) {
     assert.ok(standingIds.has(card.sourceId), `${card.name} is not a copy of a standing replacement`);

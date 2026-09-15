@@ -42,12 +42,12 @@ export const UNIT_POSITIONS = {
   OF: ["LF", "CF", "RF"]
 };
 
-// Where a lineup spot finds its replacement card. There is no standing first
-// baseman: a hole at first is a hole for a bat, so the DH card stands there.
+// Where a lineup spot finds its replacement card. Rooms dealt before first base
+// had a standing card of its own fall back to the DH card there (see game.js).
 export function replacementSlotFor(position) {
   if (position === "CA") return "C";
   if (position === "LF" || position === "RF" || position === "LF/RF") return "LF/RF";
-  if (position === "1B" || !position) return "DH";
+  if (!position) return "DH";
   return position;
 }
 

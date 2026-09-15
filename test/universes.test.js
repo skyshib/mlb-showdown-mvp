@@ -242,7 +242,7 @@ test("every fictional deck seats exactly one golden ticket, and it survives an i
 });
 
 test("every deck carries a standing replacement at every slot", () => {
-  const SLOTS = ["C", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
+  const SLOTS = ["C", "1B", "2B", "3B", "SS", "LF/RF", "CF", "DH", "SP", "RP"];
   for (const nomination of ["manual", "random"]) {
     const deck = buildDraftPool("classic", "standing-a", { nomination, managerCount: 4 });
     const standing = deck.filter((card) => card.replacement);
@@ -290,7 +290,7 @@ test("the standing replacements are seeded, and survive the trip through a room'
     .filter((card) => card.replacement)
     .map((card) => card.name);
 
-  // Same seed, same nine faces; a different seed deals different ones, which is
+  // Same seed, same ten faces; a different seed deals different ones, which is
   // the point of rolling them at random rather than taking the worst.
   assert.deepEqual(names("standing-a"), names("standing-a"));
   assert.notDeepEqual(names("standing-a"), names("standing-b"));

@@ -518,7 +518,7 @@ export function buildDraftPool(mode, seed, options = {}) {
   return [...dealt, ...dealReplacementCards(dealt, seed)];
 }
 
-// THE STANDING REPLACEMENTS. Every room deals nine cards nobody can buy: one
+// THE STANDING REPLACEMENTS. Every room deals ten cards nobody can buy: one
 // scrub at every slot, sitting on the board from the first lot wearing the
 // replacement-level badge. That card is what a hole costs — finish the night
 // without a center fielder and this is the man who plays center for you, for
@@ -530,7 +530,7 @@ export function buildDraftPool(mode, seed, options = {}) {
 // printed Barry Larkin at 10 points — so picking by quality would either hand
 // the room a bargain or invent a floor crueler than anything the set sold. The
 // roll is seeded, so the room replays identically and everyone reads the same
-// nine faces.
+// ten faces.
 //
 // A person deals once across the whole board, so the roll skips anyone already
 // dealt into the biddable deck: no manager should be bidding on a man his
@@ -540,9 +540,11 @@ export function buildDraftPool(mode, seed, options = {}) {
 const CLASSIC_REPLACEMENT_POINTS = 10;
 const REPLACEMENT_PERCENTILE = 0.05;
 
-// One per slot the sweep can be asked for. No 1B: a hole at first is a hole for
-// a BAT (any glove covers the bag), so the DH card stands floor there too.
-const REPLACEMENT_SLOTS = ["C", "2B", "3B", "SS", CORNER_OUTFIELD_POSITION, "CF", "DH", "SP", "RP"];
+// One per board position group, first base included. Any glove still covers the
+// bag in a lineup; the 1B card is what the sweep hands a roster short a bat with
+// nobody who lists first. Rooms dealt before it existed hold nine cards and fall
+// back to the DH card at first.
+const REPLACEMENT_SLOTS = ["C", "1B", "2B", "3B", "SS", CORNER_OUTFIELD_POSITION, "CF", "DH", "SP", "RP"];
 
 // Where the bottom of the market IS, which is a different question in each set.
 // Classic has a real rung to stand on: it never printed a card under 10 points

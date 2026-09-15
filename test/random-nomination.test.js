@@ -236,7 +236,7 @@ test("every manager finishes with a legal roster, however the bidding went", () 
       assert.ok(manager.roster.length >= 13, `${manager.name} has only ${manager.roster.length} cards`);
     }
 
-    // Every hole was filled from the standing replacements — copies of the nine
+    // Every hole was filled from the standing replacements — copies of the ten
     // unbiddable 10-point cards the room dealt — and never from thin air.
     const standing = new Set(standingReplacements(draft).map((card) => card.id));
     const printed = draft.pool.filter((card) => card.replacement && card.sourceId);

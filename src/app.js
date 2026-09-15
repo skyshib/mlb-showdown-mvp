@@ -7060,7 +7060,7 @@ function renderPoolFloor(draft) {
       // The standing replacement IS the floor where a room deals one: what is
       // left on the board is what you can still BUY, and he is what you get if
       // you buy none of it. A group with nothing left still has him.
-      const standing = standingReplacement(draft, group === "1B" ? "DH" : group);
+      const standing = standingReplacement(draft, group) ?? (group === "1B" ? standingReplacement(draft, "DH") : null);
       if (!eligible.length) {
         return standing
           ? `<span class="floor-chip floor-empty"><small>${group} &middot; none left ${blockNote}</small>${previewChip("floor", standing)}</span>`
@@ -7103,14 +7103,14 @@ function replacementLevelGroups(draft) {
   const levels = new Map();
   if (!draft) return levels;
   // A room that dealt standing replacements has a FIXED floor: the badge sits on
-  // the same nine unbiddable cards from the first lot to the last, so what a
-  // hole costs is knowable all night instead of drifting as the board sells.
-  // First base has no standing card of its own — a hole at first is a hole for a
-  // bat, any glove covers the bag — so the DH card stands floor there too.
+  // the same unbiddable cards from the first lot to the last, so what a hole
+  // costs is knowable all night instead of drifting as the board sells. Rooms
+  // dealt before first base had its own card let the DH card stand floor there.
   const standing = standingReplacements(draft);
   if (standing.length) {
+    const hasFirst = standing.some((player) => player.slot === "1B");
     for (const group of BOARD_POSITION_GROUPS) {
-      const floor = standing.find((player) => player.slot === (group === "1B" ? "DH" : group));
+      const floor = standing.find((player) => player.slot === (group === "1B" && !hasFirst ? "DH" : group));
       if (floor) levels.set(floor.id, [...(levels.get(floor.id) ?? []), group]);
     }
     return levels;

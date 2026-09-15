@@ -2715,9 +2715,14 @@ function buildTeamBoxScore(state, side) {
 // attribution.js; what is here needs the engine's own rules to replay a play.
 
 function createGameAttribution(state, config, seed) {
+  const bySlot = (cards) => {
+    const map = new Map(cards.map((card) => [card.slot, card]));
+    if (!map.has("1B") && map.has("DH")) map.set("1B", map.get("DH"));
+    return map;
+  };
   const cardsBySlot = {
-    away: new Map((config.replacements?.away ?? []).map((card) => [card.slot, card])),
-    home: new Map((config.replacements?.home ?? []).map((card) => [card.slot, card]))
+    away: bySlot(config.replacements?.away ?? []),
+    home: bySlot(config.replacements?.home ?? [])
   };
   const gloves = { away: new Map(), home: new Map() };
   // hitter / pitcher: the replacement card. runner: its speed. fielder: its glove
