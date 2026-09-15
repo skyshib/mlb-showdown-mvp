@@ -20,6 +20,7 @@ import {
   randomNominationQuotas,
   randomNominationShortfalls,
   standingReplacements,
+  submitCpuSealedBids,
   undoLastPick,
   validateRoster
 } from "../src/rules/draft.js";
@@ -473,4 +474,67 @@ test("the last man at a needed bucket is bid to the max", () => {
 
   assert.equal(auctionLotPlayer(draft).id, survivor.id);
   assert.equal(cpuSealedBid(draft, cpu), auctionMaxBid(draft, cpu));
+});
+
+// The queue's order is the room's secret. A computer reads what a human at the
+// table reads — the card on the block, the lots left, each position's
+// guaranteed minimum, the unpicked board — so reshuffling the cards still to
+// come, or swapping them for others off the board, cannot move a single bid.
+test("a computer's bid does not read the hidden queue", () => {
+  const { draft } = roomOf(4, "no-peeking");
+  for (let lot = 0; lot < 12; lot += 1) {
+    applyDraftAction(draft, { type: "auto-nominate", at: 0 });
+    submitCpuSealedBids(draft);
+  }
+  applyDraftAction(draft, { type: "auto-nominate", at: 0 });
+  const bids = () => draft.managers.map((manager) => cpuSealedBid(draft, manager));
+  const before = bids();
+  assert.ok(before.some((bid) => bid > 0), "somebody bids on the lot");
+
+  const { queue, queueIndex } = draft.auction;
+  const ahead = new Set(queue.slice(queueIndex));
+  const offQueue = draft.pool
+    .filter((card) => !card.replacement && !draft.pickedIds.has(card.id) && !ahead.has(card.id))
+    .map((card) => card.id);
+  const tail = queue.slice(queueIndex + 1).reverse();
+  tail.splice(0, Math.min(offQueue.length, 5), ...offQueue.slice(0, 5));
+  draft.auction.queue = [...queue.slice(0, queueIndex + 1), ...tail];
+
+  assert.deepEqual(bids(), before);
+});
+
+// Budgeting counts the holes the way the bid reads them. Nine bats with nobody
+// who plays second leave second open; counting heads called the lineup full,
+// budgeted the whole bankroll against the one rotation seat left, and bid
+// double on a mediocre second baseman for owning a bench bat.
+test("a bench bat does not hide an open position from the budget", () => {
+  const seed = "open-second";
+  const pool = buildDraftPool(UNIVERSE, seed, { nomination: "random", managerCount: 4 });
+  const cards = pool.filter((card) => !card.replacement);
+  const bats = (position) => cards.filter((card) => card.kind === "hitter" && card.position === position);
+  const seconds = bats("2B").sort((a, b) => a.points - b.points);
+  const target = seconds[Math.floor(seconds.length / 3)];
+  const lineup = ["C", "1B", "3B", "SS", "CF", "LF/RF"].map((position) => bats(position)[0]);
+  lineup.push(bats("LF/RF")[1]);
+  const [dh, bench] = cards.filter((card) => card.kind === "hitter" && card.position !== "2B" && !lineup.includes(card));
+  const starter = cards.find((card) => card.kind === "pitcher" && card.role === "SP");
+  const relievers = cards.filter((card) => card.kind === "pitcher" && card.role !== "SP").slice(0, 2);
+
+  const bidWith = (hitters) => {
+    const draft = createDraft(
+      Array.from({ length: 4 }, (_, index) => ({ name: `M${index + 1}`, cpu: true, persona: "balanced" })),
+      pool, 13, seed, { draftType: "auction", nomination: "random", budget: 1000, timer: false }
+    );
+    const cpu = draft.managers[0];
+    cpu.roster = [...hitters, starter, ...relievers].map((card) => draft.pool.find((item) => item.id === card.id));
+    for (const card of cpu.roster) draft.pickedIds.add(card.id);
+    draft.auction.budgets[cpu.id] = 600;
+    draft.auction.lot = { playerId: target.id, nominatorId: null, round: 1, bids: {}, pending: [], tie: null, clock: null };
+    return cpuSealedBid(draft, cpu);
+  };
+
+  const withoutBench = bidWith([...lineup, dh]);
+  const withBench = bidWith([...lineup, dh, bench]);
+  assert.ok(withoutBench > 0, "the second baseman fills a hole");
+  assert.ok(withBench <= withoutBench * 1.1, `a bench bat lifted the bid from ${withoutBench} to ${withBench}`);
 });

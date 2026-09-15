@@ -33,6 +33,7 @@
 //
 // Usage: node scripts/bidder-duel.mjs [--leagues N] [--runs N] [--teams N]
 //        [--budget N] [--roster N] [--temperature N] [--universe U] [--persona P] [--tag T]
+//        [--sp N] [--pen N|all] [--penmin N]
 //
 // Baselines (regenerate before testing a change, delete before commit):
 //   cp src/rules/valuation.js src/rules/valuation.baseline.mjs
@@ -57,16 +58,18 @@ const UNIVERSE = args.universe ?? "fictional";
 const PERSONA = args.persona ?? "balanced";
 const TAG = args.tag ?? "duel";
 const SP = Number(args.sp ?? ROSTER - 11);
+// The pen: --pen N or --pen all (the most that pitch), --penmin N (the floor).
+const PEN = args.pen == null ? {} : { bullpenSlots: args.pen === "all" ? "all" : Number(args.pen), bullpenMin: args.penmin == null ? undefined : Number(args.penmin) };
 
 // Drive one whole auction with every seat bidding out of ONE module.
 function driveLeague(seed, bidder) {
   const pool = buildDraftPool(UNIVERSE, seed, {
-    nomination: "random", managerCount: TEAMS, startingPitchers: SP, temperature: TEMPERATURE
+    nomination: "random", managerCount: TEAMS, startingPitchers: SP, temperature: TEMPERATURE, ...PEN
   });
   const managers = Array.from({ length: TEAMS }, (_, i) => ({ name: `T${i}`, cpu: true }));
   const draft = NEW.createDraft(managers, pool, ROSTER, seed, {
     draftType: "auction", nomination: "random", startingPitchers: SP,
-    budget: BUDGET, timer: false, snakeTimer: false
+    budget: BUDGET, timer: false, snakeTimer: false, ...PEN
   });
   for (const m of draft.managers) m.persona = PERSONA;
   if (NEW.completeAuctionReview) NEW.completeAuctionReview(draft, 0);
@@ -103,6 +106,6 @@ const mean = (a) => a.reduce((s, x) => s + x, 0) / a.length;
 const std = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((x) => (x - m) ** 2))); };
 const m = mean(wins);
 const se = std(wins) / Math.sqrt(wins.length);
-console.log(`Paired duel: ${LEAGUES} leagues x ${TEAMS} seats, $${BUDGET}, roster ${ROSTER} (${SP} SP), ${UNIVERSE}, temp=${TEMPERATURE}, persona=${PERSONA}, tag=${TAG}, ${RUNS} games/duel`);
+console.log(`Paired duel: ${LEAGUES} leagues x ${TEAMS} seats, $${BUDGET}, roster ${ROSTER} (${SP} SP), ${UNIVERSE}, temp=${TEMPERATURE}, pen=${PEN.bullpenSlots ?? 2}/${PEN.bullpenMin ?? "-"}, persona=${PERSONA}, tag=${TAG}, ${RUNS} games/duel`);
 console.log(`  NEW beats its own OLD counterpart: ${(m * 100).toFixed(2)}%  (n=${wins.length})`);
 console.log(`  edge over even:                    ${((m - 0.5) * 100 >= 0 ? "+" : "")}${((m - 0.5) * 100).toFixed(2)} pts   (±${(1.96 * se * 100).toFixed(2)} 95% CI)`);

@@ -10,6 +10,7 @@
 // persona so the bidder VERSION is the sole difference.
 //
 // Usage: node scripts/valuation-ab.mjs [--leagues N] [--runs N] [--teams N] [--budget N] [--roster N] [--universe U] [--persona P]
+//        [--sp N] [--pen N|all] [--penmin N] [--tag T]
 //
 // To re-baseline before testing a NEW change (freeze the current bidder as OLD):
 //   cp src/rules/valuation.js src/rules/valuation.baseline.mjs
@@ -37,15 +38,17 @@ const TEMPERATURE = Number(args.temperature ?? 0);
 // a result that only holds under `vab` is a result about `vab`.
 const TAG = args.tag ?? "vab";
 const SP = Number(args.sp ?? ROSTER - 11);
+// The pen: --pen N or --pen all (the most that pitch), --penmin N (the floor).
+const PEN = args.pen == null ? {} : { bullpenSlots: args.pen === "all" ? "all" : Number(args.pen), bullpenMin: args.penmin == null ? undefined : Number(args.penmin) };
 
 function driveLeague(seed, newSeats) {
   const pool = buildDraftPool(UNIVERSE, seed, {
-    nomination: "random", managerCount: TEAMS, startingPitchers: SP, temperature: TEMPERATURE
+    nomination: "random", managerCount: TEAMS, startingPitchers: SP, temperature: TEMPERATURE, ...PEN
   });
   const managers = Array.from({ length: TEAMS }, (_, i) => ({ name: `T${i}`, cpu: true }));
   const draft = NEW.createDraft(managers, pool, ROSTER, seed, {
     draftType: "auction", nomination: "random", startingPitchers: SP,
-    budget: BUDGET, timer: false, snakeTimer: false
+    budget: BUDGET, timer: false, snakeTimer: false, ...PEN
   });
   for (const m of draft.managers) m.persona = PERSONA;
   if (NEW.completeAuctionReview) NEW.completeAuctionReview(draft, 0);
@@ -85,7 +88,7 @@ const std = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((x) => (x - 
 const nW = mean(newWins), oW = mean(oldWins);
 const se = Math.sqrt(std(newWins) ** 2 / newWins.length + std(oldWins) ** 2 / oldWins.length);
 
-console.log(`Head-to-head: ${LEAGUES} leagues, ${TEAMS} teams, $${BUDGET}, roster ${ROSTER} (${SP} SP), ${UNIVERSE}, temp=${TEMPERATURE}, persona=${PERSONA}, ${RUNS} sim games/league`);
+console.log(`Head-to-head: ${LEAGUES} leagues, ${TEAMS} teams, $${BUDGET}, roster ${ROSTER} (${SP} SP), ${UNIVERSE}, temp=${TEMPERATURE}, pen=${PEN.bullpenSlots ?? 2}/${PEN.bullpenMin ?? "-"}, persona=${PERSONA}, ${RUNS} sim games/league`);
 console.log(`  NEW seats win%: ${(nW * 100).toFixed(2)}%  (n=${newWins.length})`);
 console.log(`  OLD seats win%: ${(oW * 100).toFixed(2)}%  (n=${oldWins.length})`);
 console.log(`  NEW − OLD:      ${((nW - oW) * 100 >= 0 ? "+" : "")}${((nW - oW) * 100).toFixed(2)} pts   (±${(1.96 * se * 100).toFixed(2)} 95% CI)`);

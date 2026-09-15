@@ -1765,23 +1765,52 @@ function autoRunAuctionLot(draft, now = Date.now()) {
 // him — which is right, and which is what makes the rest of the money mean
 // something.
 
-// The cards this manager will actually get another crack at. Under random
-// nomination that is NOT the whole board — the board is dealt from a hidden
-// queue and stops when the queue runs dry, leaving a heap of cards that are
-// never auctioned at all (they are swept out for free at the end, by design).
-// Pricing a man against replacements that will never come up for bid is how a
-// computer talked itself out of every fight: it always believed another
-// catcher was on the way. So the market it reads is the cards STILL IN THE
-// QUEUE, current lot included — the men it can genuinely still buy. Under
-// manual nomination any unpicked card can be put up, so there the board is the
-// market.
+// The cards this manager can still expect to bid on, each with its CHANCE of
+// coming up. Under random nomination the order is a hidden queue, and a
+// computer may not read it: it knows only what a human at the table knows —
+// the card on the block, how many lots are left, the least each position is
+// still guaranteed to deal (guaranteedNominationMinimums), and the unpicked
+// board. Every position gets its guaranteed share first; the lots left over are
+// spread evenly across the whole unseen board. (The queue stops well short of
+// the board, so pricing a man against every unpicked card at his spot would
+// have a computer forever believing another catcher is on the way.) Under
+// manual nomination any unpicked card can be put up, so the board is the
+// market, every card at even odds.
 function forthcomingPlayers(draft) {
-  if (isRandomNomination(draft)) {
-    const { queue, queueIndex } = draft.auction;
-    const byId = new Map(draft.pool.map((player) => [player.id, player]));
-    return queue.slice(queueIndex).map((id) => byId.get(id)).filter(Boolean);
+  if (!isRandomNomination(draft)) return availablePlayers(draft).map((player) => ({ player, chance: 1 }));
+  const lot = auctionLotPlayer(draft);
+  const called = new Set((draft.auction.history ?? []).map((entry) => entry.playerId));
+  if (lot) called.add(lot.id);
+  const unseen = availablePlayers(draft).filter((player) => !called.has(player.id));
+  const lotsLeft = Math.max(0, nominationQueueRemaining(draft) - (lot ? 1 : 0));
+  const entries = lot ? [{ player: lot, chance: 1 }] : [];
+  if (!unseen.length || !lotsLeft) return entries;
+
+  const byGroup = new Map();
+  for (const player of unseen) {
+    const group = poolGroup(player);
+    byGroup.set(group, (byGroup.get(group) ?? 0) + 1);
   }
-  return availablePlayers(draft);
+  const floor = new Map();
+  for (const { position, minimum } of guaranteedNominationMinimums(draft)) {
+    const count = byGroup.get(position);
+    if (count) floor.set(position, Math.min(1, minimum / count));
+  }
+  // The even rate every card gets on top of its position's floor, solved so
+  // the chances add up to the lots actually left.
+  const expected = (rate) => [...byGroup].reduce((sum, [group, count]) =>
+    sum + count * Math.min(1, Math.max(floor.get(group) ?? 0, rate)), 0);
+  let lo = 0;
+  let hi = 1;
+  for (let step = 0; step < 30; step += 1) {
+    const mid = (lo + hi) / 2;
+    if (expected(mid) < lotsLeft) lo = mid;
+    else hi = mid;
+  }
+  for (const player of unseen) {
+    entries.push({ player, chance: Math.min(1, Math.max(floor.get(poolGroup(player)) ?? 0, hi)) });
+  }
+  return entries;
 }
 
 // Which of the three roster buckets a card fills. Urgency and the depth discount
@@ -1855,11 +1884,11 @@ const URGENCY_PATIENT = 0.5; // holes-per-remaining below this: no hurry
 const URGENCY_DESPERATE = 1; // holes at or above the men left to fill them: all in
 const URGENCY_WEIGHT = 1; // how far full desperation lifts a card's worth (×2 at the limit)
 
-function auctionUrgency(draft, manager, player, forthcoming) {
+function auctionUrgency(needs, player, forthcoming) {
   const bucket = playerBucket(player);
-  const need = bucketNeed(getRosterNeeds(manager.roster, draft), bucket);
+  const need = bucketNeed(needs, bucket);
   if (need <= 0) return 0;
-  const supply = forthcoming.reduce((count, other) => count + (playerBucket(other) === bucket ? 1 : 0), 0);
+  const supply = forthcoming.reduce((count, entry) => count + (playerBucket(entry.player) === bucket ? entry.chance : 0), 0);
   if (supply <= 0) return 1;
   const pressure = need / supply;
   return Math.max(0, Math.min(1, (pressure - URGENCY_PATIENT) / (URGENCY_DESPERATE - URGENCY_PATIENT)));
@@ -1876,9 +1905,11 @@ function auctionAggression(draft, manager, player) {
 // Money left over at the last out is money you never had. A manager that is
 // running ahead of its budget — plenty left, few slots to fill — has nothing
 // else to do with the difference, so it goes into the bid; one that has
-// overspent pulls its horns in and shops the bargain rack. This is the budget
-// management the old bidder had none of: it simply divided what was left by the
-// slots left, every time, and so never knew whether it was rich or poor.
+// overspent pulls its horns in and shops the bargain rack. Only manual
+// nomination reads it: a queued room paces by auctionRoundsFactor, and the two
+// stacked counted one fat bankroll twice: a $785 manager with two holes read
+// pace 1.8 × rounds 1.27 and bid $181 on a 210-point second baseman, where
+// the spend-down alone bids $101.
 function auctionPace(draft, manager, openSlots) {
   const starting = draft.auction?.budget ?? 0;
   if (!starting || openSlots <= 0) return 1;
@@ -1892,8 +1923,7 @@ function auctionPace(draft, manager, openSlots) {
 // never captured. A manager still flush with few lots left to bid on leans in;
 // one that has already committed pulls back. Keyed to the REAL lots left in the
 // nomination queue and made budget-relative so it holds at any bankroll. (Manual
-// nomination has no queue, so it keeps the neutral factor — pacing lives in
-// auctionPace there instead.)
+// nomination has no queue, so pacing lives in auctionPace there instead.)
 function auctionRoundsFactor(draft, manager, openSlots) {
   const starting = draft.auction?.budget ?? 0;
   const roundsLeft = nominationQueueRemaining(draft);
@@ -1981,6 +2011,16 @@ function hitterTakesOpenSlot(roster, card) {
   return !fieldOpen && dhOpen;
 }
 
+// The holes an auction bidder budgets against. Bats are counted the way
+// cardFillsNeed reads them, by the open slots in the seated lineup, not by
+// head count: nine hitters with nobody who can play second still leave second
+// open, and a card bought for that hole has to be a hole the budget knows about.
+function auctionNeeds(draft, manager) {
+  const needs = getRosterNeeds(manager.roster, draft);
+  const openLineup = assignLineupSlots(manager.roster).slots.filter((slot) => !slot.player).length;
+  return { ...needs, hitter: Math.max(needs.hitter, openLineup) };
+}
+
 function cardFillsNeed(manager, draft, card) {
   if (card?.kind === "pitcher") {
     const needs = getRosterNeeds(manager.roster, draft);
@@ -1992,7 +2032,7 @@ function cardFillsNeed(manager, draft, card) {
 function auctionWillingness(draft, manager, player) {
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
-  const needs = getRosterNeeds(manager.roster, draft);
+  const needs = auctionNeeds(draft, manager);
   // A computer under random nomination budgets against the holes it still has,
   // not against a roster cap it no longer has.
   const needSlots = hasUnlimitedRoster(draft)
@@ -2037,7 +2077,7 @@ function auctionWillingness(draft, manager, player) {
     // hole that is still open. (The old gate counted bats nine-deep as one pool,
     // so duplicate positions read as needs until the ninth bat was aboard.)
     const fills = cardFillsNeed(manager, draft, card);
-    const urgency = fills ? auctionUrgency(draft, manager, card, forthcoming) : 0;
+    const urgency = fills ? auctionUrgency(needs, card, forthcoming) : 0;
     const base = auctionWorth(market, card) * (1 + URGENCY_WEIGHT * urgency);
     if (fills) return base;
     const damped = base * DEPTH_DAMP;
@@ -2053,20 +2093,30 @@ function auctionWillingness(draft, manager, player) {
   // proportion to their worth — raised to SHARE_EXPONENT, a near-linear tilt so
   // the standouts take a larger bite than a flat split would give without the
   // ruinous over-concentration a squared share produced in a crowded room. Then
-  // the rounds spend-down and pool-elite premium (below) shape the actual bid.
+  // the spend-down and pool-elite premium (below) shape the actual bid. The plan
+  // is the best men still expected, down to the manager's open slots: a card
+  // that may not come up counts for its chance of coming up.
   const plan = forthcoming
-    .map(effectiveWorth)
-    .sort((a, b) => b - a)
-    .slice(0, Math.max(1, openSlots))
-    .map((entry) => entry ** SHARE_EXPONENT);
-  const planned = plan.reduce((sum, entry) => sum + entry, 0) || worth ** SHARE_EXPONENT;
+    .map((entry) => ({ worth: effectiveWorth(entry.player), chance: entry.chance }))
+    .sort((a, b) => b.worth - a.worth);
+  let slotsLeft = Math.max(1, openSlots);
+  let planned = 0;
+  for (const entry of plan) {
+    if (slotsLeft <= 0) break;
+    const take = Math.min(entry.chance, slotsLeft);
+    planned += take * entry.worth ** SHARE_EXPONENT;
+    slotsLeft -= take;
+  }
+  planned = planned || worth ** SHARE_EXPONENT;
 
   const share = worth ** SHARE_EXPONENT / planned;
+  const spendDown = isRandomNomination(draft)
+    ? auctionRoundsFactor(draft, manager, openSlots)
+    : auctionPace(draft, manager, openSlots);
   const raw = maxBid
     * share
     * auctionAggression(draft, manager, player)
-    * auctionPace(draft, manager, openSlots)
-    * auctionRoundsFactor(draft, manager, openSlots)
+    * spendDown
     * auctionPoolPremium(market, player)
     * (depthMode ? DEPTH_DAMP : 1);
   // Sealed bids are whole points, not raise steps — odd amounts make ties rare.
