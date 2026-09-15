@@ -87,9 +87,11 @@ export function renderPlayerTable(players, options = {}) {
       // sold tags have the column to themselves.
       // A standing replacement is nobody's to take: he is handed out, free, to
       // whoever finishes short. A dead "Blocked" button would read as a card
-      // somebody might get to — the badge already says what he is.
+      // somebody might get to — the badge already says what he is. It names his
+      // slot, because a position view also lists the replacements dealt for
+      // OTHER slots whose printed position matches (a catcher as the DH card).
       const action = player.replacement
-        ? `<span class="free-tag" title="Free at the close of the draft to anyone short at ${escapeHtml(player.slot ?? "this slot")} — never up for bid">Free</span>`
+        ? `<span class="free-tag" title="Free at the close of the draft to anyone short at ${escapeHtml(player.slot ?? "this slot")} — never up for bid">Free${player.slot ? ` &middot; ${escapeHtml(player.slot)}` : ""}</span>`
         : owner
         ? `<span class="sold-tag" title="${escapeHtml(owner.title ?? "")}"><span class="sold-owner">${escapeHtml(owner.label)}</span>${owner.round ? `<span class="sold-round">R${owner.round}</span>` : ""}${owner.detail ? `<span class="sold-detail">${escapeHtml(owner.detail)}</span>` : ""}</span>`
         : options.action && (legality.ok || !options.hideBlocked)

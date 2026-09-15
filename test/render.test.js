@@ -260,6 +260,13 @@ test("replacement-level players are called out in the draft table, naming their 
   assert.match(html, /current free fallback if a roster finishes with a hole/);
 });
 
+test("a standing replacement's Free badge names the slot he was dealt for", () => {
+  // A position view lists every replacement whose printed position matches, so
+  // a catcher dealt as the DH card sits beside the C card — the badge tells them apart.
+  const html = renderPlayerTable([{ ...hitter, replacement: true, slot: "DH" }], { mode: "hitter" });
+  assert.match(html, /class="free-tag"[^>]*>Free &middot; DH<\/span>/);
+});
+
 test("fictional card backdrops vary by id but remain deterministic", () => {
   const backdrop = (card) => /gq-backdrop-([a-z]+)/.exec(cardPanelHtml(card))?.[1];
   const first = backdrop(hitter);
