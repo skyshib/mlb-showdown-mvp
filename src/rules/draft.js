@@ -107,8 +107,15 @@ export function normalizeBullpenMin(value, bullpenSlots) {
 // A draft room's pen, settled for its mode. A capped room drafts one count: its
 // floor, since that is the number it has to fill, and all of those pitch.
 export function roomBullpen(pen = {}, randomNomination = false) {
+  if (!randomNomination) {
+    // No max is a capped room's ceiling: a set min is the count whatever max
+    // rides along (the setup form sends none), and only a room saved before
+    // the range reads its count off the max.
+    const hasMin = pen?.bullpenMin != null && pen.bullpenMin !== "";
+    const count = normalizeBullpenMin(pen?.bullpenMin, hasMin ? UNLIMITED_BULLPEN : pen?.bullpenSlots);
+    return { bullpenSlots: count, bullpenMin: count };
+  }
   const bullpenMin = normalizeBullpenMin(pen?.bullpenMin, pen?.bullpenSlots);
-  if (!randomNomination) return { bullpenSlots: bullpenMin, bullpenMin };
   return { bullpenSlots: normalizeBullpenSlots(pen?.bullpenSlots), bullpenMin };
 }
 

@@ -769,6 +769,12 @@ test("the pen is a range: a floor every roster is filled to, and a ceiling on wh
   assert.equal(normalizeBullpenMin(5, 3), 3);
   const capped = createDraft(["One"], pool, 13, "pen-range", { bullpenMin: 3, bullpenSlots: UNLIMITED_BULLPEN });
   assert.deepEqual([capped.bullpenMin, capped.bullpenSlots, capped.rosterSize], [3, 3, 14]);
+  // The setup form sends a capped room no max at all, and a max below the min is no ceiling.
+  for (const bullpenSlots of [undefined, null, 2]) {
+    const draft = createDraft(["One"], pool, 13, "pen-range", { bullpenMin: 4, bullpenSlots });
+    assert.deepEqual([draft.bullpenMin, draft.bullpenSlots], [4, 4], `max ${bullpenSlots}`);
+  }
+  assert.equal(createDraft(["One"], pool, 13, "pen-range", { bullpenSlots: 3 }).bullpenMin, 3, "a saved count still reads off the max");
   // Rooms saved with one count before the range keep requiring all of it.
   assert.equal(makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: 4 }).bullpenMin, 4);
 });

@@ -445,37 +445,45 @@ function setupRandomNomination(value) {
   return value.draftType === "auction" && value.nomination === "random";
 }
 
-// The pen range on the setup screen. Min is how many relievers every team
-// must own; max, a random-nomination setting, is how many of them pitch.
-function renderBullpenRangeField(value) {
+// The pitching staff on the setup screen: the rotation, and the pen as a range.
+// Min is how many relievers every team must own. Max, how many of them pitch,
+// is a random-nomination setting; a capped draft drafts exactly the min, so
+// there its max sits disabled at the min and remembers the random-nomination
+// choice for when that mode comes back.
+function renderStaffFieldset(value) {
   const random = setupRandomNomination(value);
   const { bullpenSlots, bullpenMin } = roomBullpen(value, true);
   const counts = Array.from({ length: MAX_BULLPEN_SLOTS + 1 }, (_, count) => count);
+  const shownMax = random ? bullpenSlots : bullpenMin;
   const option = (optionValue, label, selected, disabled = false) =>
     `<option value="${optionValue}" ${selected ? "selected" : ""} ${disabled ? "disabled" : ""}>${label}</option>`;
-  return `<div class="bullpen-range-field">
-    <span class="bullpen-range-title">Relievers per team</span>
-    <div class="bullpen-range">
+  return `<fieldset class="pool-mode staff-mode">
+    <legend>Pitching staff</legend>
+    <div class="staff-fields">
       <label>
-        Min
+        Starters
+        <input name="startingPitchers" type="number" min="${MIN_STARTING_PITCHERS}" max="${MAX_STARTING_PITCHERS}" step="1" value="${value.startingPitchers}" />
+      </label>
+      <label>
+        Relievers min
         <select name="bullpenMin">${counts.map((count) => option(count, count, count === bullpenMin)).join("")}</select>
       </label>
-      <label data-bullpen-max ${random ? "" : "hidden"}>
-        Max
-        <select name="bullpenSlots">${[
-          option(UNLIMITED_BULLPEN, "Unlimited", bullpenSlots === UNLIMITED_BULLPEN),
-          ...counts.map((count) => option(count, count, count === bullpenSlots, count < bullpenMin))
+      <label class="${random ? "" : "is-disabled"}">
+        Relievers max
+        <select name="bullpenSlots" data-random-value="${bullpenSlots}" ${random ? "" : "disabled"}>${[
+          option(UNLIMITED_BULLPEN, "Unlimited", shownMax === UNLIMITED_BULLPEN),
+          ...counts.map((count) => option(count, count, count === shownMax, count < bullpenMin))
         ].join("")}</select>
       </label>
     </div>
-    <small data-bullpen-note>${escapeHtml(bullpenRangeNote(random))}</small>
-  </div>`;
+    <small class="staff-note" data-bullpen-note>${escapeHtml(bullpenRangeNote(random))}</small>
+  </fieldset>`;
 }
 
 function bullpenRangeNote(random) {
   return random
-    ? "Min is how many relievers every team must own: a team short at the end of the draft gets the replacement reliever. Max is how many pitch in a game; any past it sit on the bench."
-    : "Snake drafts and manager-nominated auctions draft exactly the min, and every one of them pitches. Max is a random-nomination setting.";
+    ? "Every team drafts nine hitters, its starters, and at least the minimum relievers; a team short at the end gets the replacement reliever. Up to the max pitch in a game, and the rest sit on the bench."
+    : "Every team drafts nine hitters, its starters, and exactly the minimum relievers, and all of them pitch. A separate max is a random-nomination auction setting.";
 }
 
 // A snake draft has one clock or none: the per-pick countdown, or the chess
@@ -2022,8 +2030,7 @@ function renderSetup(setupError = "") {
           <div class="cpu-list" data-cpu-list>${renderCpuChoices(state.managers, state.cpuManagers)}</div>
           <small class="cpu-note">Checked managers play themselves — instant picks and sealed bids.</small>
         </fieldset>
-        <div class="setup-row">
-          <label>
+        <label>
             <span class="seed-label-row">
               <span>Seed</span>
               <span class="seed-buttons">
@@ -2032,14 +2039,8 @@ function renderSetup(setupError = "") {
               </span>
             </span>
             <input name="seed" value="${escapeHtml(state.seed)}" />
-          </label>
-          <label>
-            Starting pitchers per team
-            <input name="startingPitchers" type="number" min="${MIN_STARTING_PITCHERS}" max="${MAX_STARTING_PITCHERS}" step="1" value="${state.startingPitchers}" />
-            <small>Each team also drafts nine hitters and its relievers.</small>
-          </label>
-          ${renderBullpenRangeField(state)}
-        </div>
+        </label>
+        ${renderStaffFieldset(state)}
       </div>
       <div class="setup-col">
         <h2 class="setup-h2">The draft</h2>
@@ -2170,12 +2171,18 @@ function renderSetup(setupError = "") {
     const random = form.get("draftType") === "auction" && form.get("nomination") === "random";
     const min = setupForm.querySelector('select[name="bullpenMin"]');
     const max = setupForm.querySelector('select[name="bullpenSlots"]');
-    setupForm.querySelector("[data-bullpen-max]").hidden = !random;
-    setupForm.querySelector("[data-bullpen-note]").textContent = bullpenRangeNote(random);
+    // The random-nomination max is kept aside while a capped mode shows the min.
+    if (!max.disabled) max.dataset.randomValue = max.value;
+    let shown = random ? max.dataset.randomValue : min.value;
+    if (shown !== UNLIMITED_BULLPEN && Number(shown) < Number(min.value)) shown = min.value;
     for (const option of max.options) {
       option.disabled = option.value !== UNLIMITED_BULLPEN && Number(option.value) < Number(min.value);
     }
-    if (max.value !== UNLIMITED_BULLPEN && Number(max.value) < Number(min.value)) max.value = min.value;
+    max.value = shown;
+    if (random) max.dataset.randomValue = shown;
+    max.disabled = !random;
+    max.closest("label").classList.toggle("is-disabled", !random);
+    setupForm.querySelector("[data-bullpen-note]").textContent = bullpenRangeNote(random);
   };
   const syncAuctionOptions = () => {
     const auction = new FormData(setupForm).get("draftType") === "auction";
@@ -2340,8 +2347,8 @@ function renderSetup(setupError = "") {
     const mode = draftModeFromForm(form);
     state.draftType = mode.draftType;
     state.nomination = mode.nomination;
-    // The form remembers the max as set, even when a capped draft ignores it.
-    state.bullpenSlots = roomBullpen({ bullpenSlots: form.get("bullpenSlots"), bullpenMin: form.get("bullpenMin") }, true).bullpenSlots;
+    // The form remembers the random-nomination max, even when a capped draft ignores it.
+    state.bullpenSlots = roomBullpen({ bullpenSlots: setupForm.querySelector('select[name="bullpenSlots"]').dataset.randomValue, bullpenMin: form.get("bullpenMin") }, true).bullpenSlots;
     state.bullpenMin = mode.bullpenMin;
     state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers, mode);
     state.hidePoints = mode.hidePoints;
