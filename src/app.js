@@ -4416,7 +4416,7 @@ function renderBatch() {
   const sortedStarterResults = sortBatchRows(starterResults, "starters", (row, sort) => batchStarterSortValue(row, sort));
   const sortedHitters = sortBatchRows(hitterLines, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
   const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
-  const winProbabilityNote = "Win probability comes from MLB history (Retrosheet, 1903-2025), so a swing is measured against what a real ballgame in that state was worth.";
+  const winProbabilityNote = "Win probability comes from a simulated table calibrated to a modern MLB run environment (about 4.4 runs a game) with no home-field edge, so a swing is measured against what that state is worth in an average ballgame, not in this room's.";
 
   const teamRows = sortedTeams
     .map(
