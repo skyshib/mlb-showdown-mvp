@@ -231,10 +231,14 @@ export function renderDraftHistoryTable(picks, options = {}) {
   const wpaByPlayerId = options.wpaByPlayerId ?? null;
   const showWpa = Boolean(wpaByPlayerId);
   const formatWpa = (value) => (value >= 0 ? "+" : "") + value.toFixed(2);
+  // WPA over replacement comes along only from sims that measured it.
+  const wparByPlayerId = options.wparByPlayerId ?? null;
+  const showWpar = Boolean(wparByPlayerId);
+  const formatWpar = (value) => (value >= 0 ? "+" : "") + value.toFixed(1);
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
-  const requestedSort = ["pick", "paid", "points", "wpa"].includes(options.sort)
+  const requestedSort = ["pick", "paid", "points", "wpar", "wpa"].includes(options.sort)
     ? options.sort
     : options.paidSortDirection
       ? "paid"
@@ -243,6 +247,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
     "pick",
     ...(auction ? ["paid"] : []),
     ...(!hidePoints ? ["points"] : []),
+    ...(showWpar ? ["wpar"] : []),
     ...(showWpa ? ["wpa"] : [])
   ]);
   const requestedSortAllowed = allowedSorts.has(requestedSort);
@@ -261,8 +266,8 @@ export function renderDraftHistoryTable(picks, options = {}) {
   const sortValue = (pick) => {
     if (sort === "paid") return Number.isFinite(pick.price) ? pick.price : null;
     if (sort === "points") return Number.isFinite(pick.player.points) ? pick.player.points : null;
-    if (sort === "wpa") {
-      const value = wpaByPlayerId?.get(pick.player.id);
+    if (sort === "wpa" || sort === "wpar") {
+      const value = (sort === "wpa" ? wpaByPlayerId : wparByPlayerId)?.get(pick.player.id);
       return Number.isFinite(value) ? value : null;
     }
     return pick.pickNumber;
@@ -296,6 +301,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? `$${price.toLocaleString()}` : "&mdash;"}</td>` : ""}
         <td class="num">${playerPrimary(player)}</td>
         ${hidePoints ? "" : `<td class="num">${player.points}</td>`}
+        ${showWpar ? `<td class="num">${Number.isFinite(wparByPlayerId.get(player.id)) ? formatWpar(wparByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
         ${showWpa ? `<td class="num">${Number.isFinite(wpaByPlayerId.get(player.id)) ? formatWpa(wpaByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
       </tr>`)
@@ -312,6 +318,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         ${auction ? sortHeader("paid", "Paid ($)") : ""}
         <th class="num">OB/CT</th>
         ${hidePoints ? "" : sortHeader("points", "Pts")}
+        ${showWpar ? sortHeader("wpar", "WPAR/162", "Win probability added over the room's replacement card per 162 games in the simulation") : ""}
         ${showWpa ? sortHeader("wpa", "WPA/162", "Win probability added per 162 games in the simulation") : ""}
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num">${outcome}</th>`).join("")}
       </tr>

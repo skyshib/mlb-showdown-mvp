@@ -61,7 +61,9 @@ test("computeAwards crowns the right winners", () => {
   const awards = computeAwards(SUMMARY, PICKS);
   const byKey = Object.fromEntries(awards.map((item) => [item.key, item]));
 
-  assert.equal(byKey.mvp.name, "Ace Steady", "MVP is the highest WPA producer");
+  assert.equal(byKey["mvp-hitter"].name, "Homer Launch", "hitter MVP is the highest WPA hitter");
+  assert.equal(byKey["mvp-pitcher"].name, "Ace Steady", "pitcher MVP is the highest WPA pitcher");
+  assert.equal(byKey.mvp, undefined, "there is no combined MVP");
   assert.equal(byKey["cy-young"].name, "Ace Steady");
   assert.equal(byKey.fireman.name, "Door Slammer");
   assert.equal(byKey.obp.name, "Obi Onbase");
@@ -72,32 +74,58 @@ test("computeAwards crowns the right winners", () => {
   assert.equal(byKey.swing.name, "Homer Launch");
   assert.match(byKey.swing.note, /Bottom 9th/);
 
-  assert.ok(byKey.steal, "value pick award exists");
-  assert.ok(byKey.bust, "bust award exists");
-  assert.equal(byKey.bust.name, "Dee Pee", "top-3-round pick with the worst WPA rank");
+  // Picks rank within each field: Mid Rotation was the third pitcher taken and
+  // the second-best pitcher; Gas Can the second pitcher taken and the worst.
+  assert.equal(byKey["steal-pitcher"].name, "Mid Rotation");
+  assert.equal(byKey["steal-pitcher"].stat, "Pick #6, #2 of pitchers in WPA");
+  assert.equal(byKey["bust-hitter"].name, "Dee Pee", "top-3-round hitter with the worst WPA rank among hitters");
+  assert.equal(byKey["bust-hitter"].label, "Bust of the draft (hitter)");
+  assert.equal(byKey["bust-pitcher"].name, "Gas Can");
 });
 
 test("an auction is judged on what a card cost, not on when it came up", () => {
-  // Dee Pee is the room's most expensive card and its worst producer; Ronnie
-  // Rounds went for nothing and produced. The pick numbers say the opposite —
-  // Dee Pee was pick 1 and Ronnie pick 20 — so the prices must be what count.
+  // Ace Steady was the first pitcher picked, so by pick he beat nobody's cost and
+  // Mid Rotation is the steal. In the auction Gas Can went for more, so the best
+  // pitcher was only the second-dearest — the prices must be what count.
   const prices = { h1: 300, h2: 250, h3: 120, h4: 5, h5: 900, p1: 400, p2: 200, p3: 60, p4: 500 };
   const awards = computeAwards(SUMMARY, PICKS, prices);
   const byKey = Object.fromEntries(awards.map((item) => [item.key, item]));
 
-  assert.equal(byKey.bust.name, "Dee Pee");
-  assert.equal(byKey.bust.label, "Bust of the auction");
-  assert.match(byKey.bust.stat, /^Paid 900,/);
+  assert.equal(byKey["bust-hitter"].name, "Dee Pee");
+  assert.equal(byKey["bust-hitter"].label, "Bust of the auction (hitter)");
+  assert.match(byKey["bust-hitter"].stat, /^Paid 900,/);
 
-  assert.equal(byKey.steal.name, "Ronnie Rounds");
-  assert.equal(byKey.steal.label, "Bargain of the auction");
-  assert.match(byKey.steal.stat, /^Paid 5,/);
+  assert.equal(byKey["steal-pitcher"].name, "Ace Steady");
+  assert.equal(byKey["steal-pitcher"].label, "Bargain of the auction (pitcher)");
+  assert.equal(byKey["steal-pitcher"].stat, "Paid 400, #1 of pitchers in WPA");
+});
+
+test("a sim that measured WPAR ranks MVP and value awards on it, not WPA", () => {
+  // Ace Steady leads in WPA; Ronnie Rounds leads in WPAR and went for $5.
+  const wpar = { h1: 1.1, h2: 2.0, h3: 0.4, h4: 6.2, h5: -1.5, p1: 3.0, p2: 0.8, p3: 0.5, p4: -0.9 };
+  const summary = {
+    ...SUMMARY,
+    attribution: true,
+    hitters: SUMMARY.hitters.map((line) => ({ ...line, wpaPer162: line.wpaPerSeason * 162, warPer162: { total: wpar[line.id] } })),
+    pitchers: SUMMARY.pitchers.map((line) => ({ ...line, wpaPer162: line.wpaPerSeason * 162, warPer162: { total: wpar[line.id] } }))
+  };
+  const prices = { h1: 300, h2: 250, h3: 120, h4: 5, h5: 900, p1: 400, p2: 200, p3: 60, p4: 500 };
+  const byKey = Object.fromEntries(computeAwards(summary, PICKS, prices).map((item) => [item.key, item]));
+
+  assert.equal(byKey["mvp-hitter"].name, "Ronnie Rounds");
+  assert.equal(byKey["mvp-hitter"].stat, "+6.2 WPAR per 162 games");
+  assert.match(byKey["mvp-hitter"].note, /\+3\.24 WPA\.$/, "the MVP card still carries WPA");
+  assert.equal(byKey["mvp-pitcher"].name, "Ace Steady");
+  assert.equal(byKey["steal-hitter"].name, "Ronnie Rounds");
+  assert.equal(byKey["steal-hitter"].stat, "Paid 5, #1 of hitters in WPAR");
+  assert.equal(byKey["bust-hitter"].name, "Dee Pee");
+  assert.match(byKey["bust-hitter"].stat, /of hitters in WPAR$/);
 });
 
 test("computeAwards degrades gracefully without pick numbers or WPA stats", () => {
   const noPicks = computeAwards(SUMMARY, null);
   assert.ok(noPicks.length > 0);
-  assert.ok(!noPicks.some((item) => item.key === "steal" || item.key === "bust"));
+  assert.ok(!noPicks.some((item) => /^(steal|bust)-/.test(item.key)));
 
   const legacy = {
     ...SUMMARY,
@@ -135,7 +163,7 @@ test("a real batch summary feeds the full awards show", () => {
 
   const awards = computeAwards(summary, picks);
   const keys = new Set(awards.map((item) => item.key));
-  for (const expected of ["mvp", "cy-young", "fireman", "obp", "hr", "runs", "swing"]) {
+  for (const expected of ["mvp-hitter", "mvp-pitcher", "cy-young", "fireman", "obp", "hr", "runs", "swing"]) {
     assert.ok(keys.has(expected), `award ${expected} present`);
   }
   for (const item of awards) {

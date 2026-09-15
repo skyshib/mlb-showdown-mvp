@@ -4212,6 +4212,19 @@ tr:focus-within .row-tools {
   align-items: center;
 }
 
+/* The hitter and pitcher tables run 20+ columns; tighter side padding keeps the
+   hitter table on one screen, and centered cells line headers up with values. */
+.batch-stat-table th,
+.batch-stat-table td {
+  padding-inline: 4px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.batch-stat-table td {
+  white-space: nowrap;
+}
+
 .batch-stat-controls {
   display: flex;
   flex-wrap: wrap;
@@ -4366,6 +4379,18 @@ tr:focus-within .row-tools {
 .all-star-comparison li > strong {
   font-size: 11px;
   white-space: nowrap;
+}
+
+/* WPAR over the WPA it is compared against. */
+.all-star-value {
+  display: grid;
+  justify-items: end;
+}
+
+.all-star-value small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 .all-star-depth {

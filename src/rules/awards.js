@@ -2,6 +2,16 @@
 // engine is charged to a pitcher and there are no errors, so runs allowed
 // per nine is displayed as ERA. "WP" is win probability from the model in
 // game.js; per-162 WPA normalizes a player's game-level swings to a familiar pace.
+// When the sim measured WPA over replacement (WPAR), value awards rank on that
+// instead, and fall back to WPA for sims that predate it. The value awards (MVP,
+// steal, bust) are given once to hitters and once to pitchers: pitching WPAR
+// assumes the replacement faces every batter the real arm did, so it reads well
+// above hitting WPAR and a single field would always go to a pitcher.
+
+const VALUE_GROUPS = [
+  { key: "hitter", label: "hitter", plural: "hitters", lines: (summary) => summary.hitters },
+  { key: "pitcher", label: "pitcher", plural: "pitchers", lines: (summary) => summary.pitchers }
+];
 
 export function computeAwards(summary, pickNumbers = null, prices = null) {
   if (!summary?.hitters?.length || !summary?.pitchers?.length) return [];
@@ -9,15 +19,22 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
 
   const teamCount = summary.teams?.length ?? 0;
   const awards = [];
+  const byWpar = Boolean(summary.attribution);
+  const value = byWpar ? (line) => line.warPer162?.total : (line) => line.wpaPerSeason;
+  const valueLabel = byWpar ? "WPAR" : "WPA";
 
-  const everyone = [...summary.hitters, ...summary.pitchers];
-  const mvp = maxBy(everyone, (line) => line.wpaPerSeason);
-  if (mvp) {
-    const mvpStat = Number.isFinite(mvp.wpaPer162)
-      ? `${formatWpa(mvp.wpaPer162)} WPA per 162 games`
-      : `${formatWpa(mvp.wpaPerSeason)} WP added/season`;
-    awards.push(award("mvp", "Sim MVP", mvp, mvpStat,
-      "Win probability added: every swing weighted by how much it moved the game."));
+  for (const group of VALUE_GROUPS) {
+    const mvp = maxBy(group.lines(summary), value);
+    if (!mvp) continue;
+    const mvpStat = byWpar
+      ? `${formatWar(mvp.warPer162.total)} WPAR per 162 games`
+      : Number.isFinite(mvp.wpaPer162)
+        ? `${formatWpa(mvp.wpaPer162)} WPA per 162 games`
+        : `${formatWpa(mvp.wpaPerSeason)} WP added/season`;
+    const mvpNote = byWpar
+      ? `Win probability added over the room's replacement card, per 162 games. ${formatWpa(mvp.wpaPer162)} WPA.`
+      : "Win probability added: every swing weighted by how much it moved the game.";
+    awards.push(award(`mvp-${group.key}`, `Sim MVP (${group.label})`, mvp, mvpStat, mvpNote));
   }
 
   const starters = summary.pitchers.filter((line) => line.role === "SP" && line.outs >= teamGameMinimum(line, 9));
@@ -81,29 +98,35 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
   // money, and money is the only thing a manager actually chose — the order the
   // cards happened to come up in was the queue's doing, not theirs. So an
   // auction is judged on the price paid, and a snake draft on the pick spent.
-  const marketRanks = prices && Object.keys(prices).length
-    ? rankByCost(everyone, prices, (price) => `Paid ${price}`)
-    : pickNumbers && Object.keys(pickNumbers).length
-      ? rankByCost(everyone, pickNumbers, (pick) => `Pick #${pick}`, { ascending: true })
-      : null;
+  const byMoney = Boolean(prices && Object.keys(prices).length);
+  const costs = byMoney ? prices : pickNumbers && Object.keys(pickNumbers).length ? pickNumbers : null;
+  const label = byMoney ? (price) => `Paid ${price}` : (pick) => `Pick #${pick}`;
 
-  if (marketRanks) {
-    const { ranked, label, byMoney } = marketRanks;
-    const steal = maxBy(ranked, (entry) => entry.costRank - entry.productionRank);
-    if (steal && steal.costRank - steal.productionRank > 0) {
-      awards.push(award("steal", byMoney ? "Bargain of the auction" : "Steal of the draft", steal.line,
-        `${label(steal.cost)}, finished #${steal.productionRank} in WPA`,
-        byMoney ? "Nobody else wanted them. Nobody else got them." : "Late-round pick, front-of-the-draft production."));
-    }
-
+  if (costs) {
     // The cards the room paid up for: the priciest few in an auction, the first
-    // three rounds in a snake draft. Both come to the same handful of players.
-    const premium = ranked.filter((entry) => entry.costRank <= teamCount * 3);
-    const bust = maxBy(premium, (entry) => entry.productionRank - entry.costRank);
-    if (bust && bust.productionRank - bust.costRank > 0) {
-      awards.push(award("bust", byMoney ? "Bust of the auction" : "Bust of the draft", bust.line,
-        `${label(bust.cost)}, finished #${bust.productionRank} in WPA`,
-        byMoney ? "The room bid them up. The room was wrong." : "First three rounds. This is a safe space."));
+    // three rounds in a snake draft. Both come to the same handful of players,
+    // counted over the whole room before it is split into hitters and pitchers.
+    const premiumCount = teamCount * 3;
+    const roomCostRanks = costRanks([...summary.hitters, ...summary.pitchers], costs, byMoney);
+
+    for (const group of VALUE_GROUPS) {
+      const ranked = rankByCost(group.lines(summary), value, costs, byMoney);
+      const finished = (entry) => `${label(entry.cost)}, #${entry.productionRank} of ${group.plural} in ${valueLabel}`;
+
+      const steal = maxBy(ranked, (entry) => entry.costRank - entry.productionRank);
+      if (steal && steal.costRank - steal.productionRank > 0) {
+        awards.push(award(`steal-${group.key}`, `${byMoney ? "Bargain of the auction" : "Steal of the draft"} (${group.label})`, steal.line,
+          finished(steal),
+          byMoney ? "Nobody else wanted them. Nobody else got them." : "Late-round pick, front-of-the-draft production."));
+      }
+
+      const premium = ranked.filter((entry) => roomCostRanks.get(entry.line.id) <= premiumCount);
+      const bust = maxBy(premium, (entry) => entry.productionRank - entry.costRank);
+      if (bust && bust.productionRank - bust.costRank > 0) {
+        awards.push(award(`bust-${group.key}`, `${byMoney ? "Bust of the auction" : "Bust of the draft"} (${group.label})`, bust.line,
+          finished(bust),
+          byMoney ? "The room bid them up. The room was wrong." : "First three rounds. This is a safe space."));
+      }
     }
   }
 
@@ -128,25 +151,26 @@ function award(key, label, line, stat, note) {
   return { key, label, id: line.id, name: line.name, team: line.team, stat, note };
 }
 
-// Lines up what each player produced against what he cost, so the two can be
-// compared as ranks. A pick number is already a rank — pick 7 is the seventh
-// costliest thing anyone spent — but a price is only a number, so the field has
-// to be sorted by it: the dearest card is cost rank 1.
-function rankByCost(everyone, costs, label, options = {}) {
-  const ranked = [...everyone]
-    .sort((a, b) => b.wpaPerSeason - a.wpaPerSeason)
-    .map((line, index) => ({ line, productionRank: index + 1, cost: Number(costs[line.id]) }))
+// Lines up what each player in one field produced against what he cost, so the
+// two can be compared as ranks within that field: the dearest hitter (or the
+// first hitter picked) is cost rank 1 among hitters.
+function rankByCost(lines, value, costs, byMoney) {
+  const ranks = costRanks(lines, costs, byMoney);
+  return [...lines]
+    .sort((a, b) => (value(b) ?? 0) - (value(a) ?? 0))
+    .map((line, index) => ({ line, productionRank: index + 1, cost: Number(costs[line.id]), costRank: ranks.get(line.id) }))
     .filter((entry) => Number.isFinite(entry.cost));
-  if (options.ascending) {
-    for (const entry of ranked) entry.costRank = entry.cost;
-    return { ranked, label, byMoney: false };
-  }
-  [...ranked]
-    .sort((a, b) => b.cost - a.cost)
-    .forEach((entry, index) => {
-      entry.costRank = index + 1;
-    });
-  return { ranked, label, byMoney: true };
+}
+
+// Player id -> cost rank: highest price first in an auction, earliest pick
+// first in a snake draft.
+function costRanks(lines, costs, byMoney) {
+  const ranks = new Map();
+  lines
+    .filter((line) => Number.isFinite(Number(costs[line.id])))
+    .sort((a, b) => (byMoney ? Number(costs[b.id]) - Number(costs[a.id]) : Number(costs[a.id]) - Number(costs[b.id])))
+    .forEach((line, index) => ranks.set(line.id, index + 1));
+  return ranks;
 }
 
 function maxBy(list, valueOf) {
@@ -194,6 +218,11 @@ function teamOf(summary, playerId) {
 function formatWpa(value) {
   const number = Number(value) || 0;
   return `${number >= 0 ? "+" : ""}${number.toFixed(2)}`;
+}
+
+function formatWar(value) {
+  const number = Number(value) || 0;
+  return `${number >= 0 ? "+" : ""}${number.toFixed(1)}`;
 }
 
 function formatBattingStat(value) {

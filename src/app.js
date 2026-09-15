@@ -1068,7 +1068,7 @@ function defaultState() {
     // pick number in a snake); y to the WPA it went on to earn. Both are
     // re-pointable — see renderBatch's axis pickers.
     batchChartXAxis: null,
-    batchChartYAxis: "wpa",
+    batchChartY: "wpar",
     batchGamePage: 0,
     batchGameIndex: null,
     view: null,
@@ -4525,6 +4525,7 @@ function renderBatch() {
     const player = playerForBoxLine(playersById, line, line.team);
     const id = player?.id ?? line.id;
     const wpa162 = batchPace(line, "wpaPer162", "wpa", teamGamesByName);
+    const wpar162 = hasWar && Number.isFinite(line.warPer162?.total) ? line.warPer162.total : null;
     let statLine;
     if (kind === "hitter") {
       const hr = Math.round(batchPace(line, "hrPer162", "hr", teamGamesByName));
@@ -4544,6 +4545,7 @@ function renderBatch() {
       slot: kind === "hitter" ? line.position : line.role,
       points: Number.isFinite(player?.points) ? player.points : null,
       wpa162,
+      wpar162,
       pick: acquisitionPickMap[id],
       price: pricePaidMap[id],
       pickNumber: pickNumberMap[id],
@@ -4587,12 +4589,19 @@ function renderBatch() {
   const xMode = auctionDraft
     ? (state.batchChartXAxis ?? "price")
     : (state.batchChartXAxis === "points" ? "points" : "pick");
-  const yMode = state.batchChartYAxis === "points" ? "points" : "wpa";
-  const yValue = (rec) => (yMode === "points" ? rec.points : rec.wpa162);
-  const yAxisLabel = yMode === "points" ? "Card points" : "WPA / 162 games";
-  const yTip = (rec) => (yMode === "points" ? `Points: ${rec.points ?? "—"}` : `WPA/162: ${formatWpaStat(rec.wpa162)}`);
+  // WPAR leads when the sim measured it; a sim that predates it opens on WPA.
+  const yOptions = [...(hasWar ? [["wpar", "WPAR/162"]] : []), ["wpa", "WPA/162"], ["points", "Points"]];
+  const yMode = yOptions.some(([value]) => value === state.batchChartY) ? state.batchChartY : yOptions[0][0];
+  const yValue = (rec) => (yMode === "points" ? rec.points : yMode === "wpar" ? rec.wpar162 : rec.wpa162);
+  const yAxisLabel = { wpar: "WPAR / 162 games", wpa: "WPA / 162 games", points: "Card points" }[yMode];
+  // Hover shows WPAR and WPA side by side whichever one is plotted.
+  const yTip = (rec) => [
+    yMode === "points" ? `Points: ${rec.points ?? "—"}` : "",
+    Number.isFinite(rec.wpar162) ? `WPAR/162: ${formatWar(rec.wpar162)}` : "",
+    `WPA/162: ${formatWpaStat(rec.wpa162)}`
+  ].filter(Boolean).join(" · ");
   const X_TITLES = { price: "Dollars spent", max: "Top bid", manager: "Manager's bid", allbids: "Every bid", points: "Points", pick: "Draft slot" };
-  const yTitle = yMode === "points" ? "Points" : "WPA per 162";
+  const yTitle = { wpar: "WPAR per 162", wpa: "WPA per 162", points: "Points" }[yMode];
 
   const scatterPoints = [];
   const connectors = [];
@@ -4695,7 +4704,6 @@ function renderBatch() {
   const xOptions = auctionDraft
     ? [["price", "Price paid"], ["max", "Top bid"], ["manager", "Manager bid"], ["allbids", "All bids"], ["points", "Points"]]
     : [["pick", "Pick"], ["points", "Points"]];
-  const yOptions = [["wpa", "WPA/162"], ["points", "Points"]];
   const axisOption = (axis, value, label, active) =>
     `<button type="button" class="chart-axis-option${active ? " active" : ""}" data-batch-chart-${axis}="${escapeHtml(value)}" aria-pressed="${active}">${escapeHtml(label)}</button>`;
   const positionOptions = [["all", "All"], ...chartPositions.map((value) => [value, value])];
@@ -4708,7 +4716,7 @@ function renderBatch() {
     ${positionRow}
   </div>`;
   const chartNote = xMode === "allbids"
-    ? "Each card is a thin line at its WPA (or points); a dot on it is one manager's sealed bid. Hover a dot for who bid what."
+    ? `Each card is a thin line at its ${yTitle}; a dot on it is one manager's sealed bid. Hover a dot for who bid what.`
     : xMode === "manager"
       ? (chartManager ? `Every card ${chartManager} bid on, at what they bid — dots in another manager's colour are ones they lost.` : "Pick a manager in the legend to see only their bids; showing each card's top bid until then.")
       : "Each dot is a drafted player who logged a stat, colored by manager. Hover for the line, click for the card, or filter by manager in the legend.";
@@ -4773,7 +4781,7 @@ function renderBatch() {
     </div>
     ${hasWar ? `<p class="batch-note"><strong>WPAR</strong> is WPA over replacement: win probability added over the room's replacement card at the hitter's position, per 162 games. It is <strong>Hit WPAR</strong> (on-base and chart, every plate appearance replayed with the same dice and the replacement's numbers) plus <strong>Def WPAR</strong> and <strong>BsR WPAR</strong> (glove and speed against the replacement's), whose inputs are on the Baserunning &amp; defense tab.</p>` : ""}
     <div class="table-scroll">
-      <table>
+      <table class="batch-stat-table">
         <thead><tr>
           <th>#</th>
           <th class="num">${draftCostHeader}</th>
@@ -4822,7 +4830,7 @@ function renderBatch() {
       </div>
     </div>
     <div class="table-scroll">
-      <table>
+      <table class="batch-stat-table">
         <thead><tr>
           <th>#</th>
           <th class="num">${draftCostHeader}</th>
@@ -4851,6 +4859,7 @@ function renderBatch() {
     </div>
     ${renderDraftHistoryTable(draftHistory(state.draft), {
       wpaByPlayerId: batchWpaByPlayerId(summary),
+      wparByPlayerId: hasWar ? batchWparByPlayerId(summary) : null,
       ...normalizeDraftHistorySort(state.draftHistorySort)
     })}
   </section>`;
@@ -4920,6 +4929,7 @@ function renderBatchAllStars(summary, playersById) {
   const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
   const slots = buildAllStarDepthChart(teams, summary);
   const pricePaidMap = buildPricePaidMap(state.draft);
+  const byWpar = Boolean(summary.attribution);
   const filled = slots.filter((slot) => slot.leader);
   if (!filled.length) {
     return `<section class="panel wide">
@@ -4932,15 +4942,17 @@ function renderBatchAllStars(summary, playersById) {
       <div>
         <p class="eyebrow">Best at every position</p>
         <h2>Simulation All-Stars</h2>
-        <p class="batch-note">Each card shows the WPA/162 leader and closest competition with their draft prices. Larger fields also include a full depth chart.</p>
+        <p class="batch-note">${byWpar
+          ? "Each card shows the leader in WPAR (WPA over replacement) per 162 games and the closest competition, with WPA and draft prices alongside. Larger fields also include a full depth chart."
+          : "Each card shows the WPA/162 leader and closest competition with their draft prices. Larger fields also include a full depth chart."}</p>
       </div>
       <span>${filled.length} roster spots</span>
     </div>
-    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap)).join("")}</div>
+    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap, byWpar)).join("")}</div>
   </section>`;
 }
 
-function renderAllStarSlot(slot, playersById, pricePaidMap) {
+function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false) {
   if (!slot.leader) {
     return `<article class="all-star-slot all-star-slot-empty">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
@@ -4950,7 +4962,7 @@ function renderAllStarSlot(slot, playersById, pricePaidMap) {
   const leader = slot.leader;
   const pricePaid = pricePaidMap[leader.id];
   const closestCompetition = allStarComparisonCandidates(slot.depth);
-  const comparisonRows = closestCompetition.map((candidate) => renderAllStarComparisonRow(candidate, playersById, pricePaidMap)).join("");
+  const comparisonRows = closestCompetition.map((candidate) => renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar)).join("");
   const showFullDepth = shouldShowFullAllStarDepth(slot.depth);
   const depthRows = slot.depth.map((candidate) => `<li class="${candidate.rank === 1 ? "all-star-depth-leader" : ""}">
     <span class="all-star-depth-rank">#${candidate.rank}</span>
@@ -4958,22 +4970,22 @@ function renderAllStarSlot(slot, playersById, pricePaidMap) {
       ${renderBatchPlayerName(candidate, playersById)}
       <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap)}</small>
     </span>
-    <strong>${formatWpaStat(candidate.wpaPer162)}</strong>
+    ${renderAllStarValue(candidate, byWpar)}
   </li>`).join("");
   return `<article class="all-star-slot">
     <header class="all-star-slot-header">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
-      <strong>${formatWpaStat(leader.wpaPer162)} <small>WPA/162</small></strong>
+      <strong>${byWpar ? `${formatWar(leader.wparPer162)} <small>WPAR/162</small>` : `${formatWpaStat(leader.wpaPer162)} <small>WPA/162</small>`}</strong>
     </header>
     <div class="all-star-card-face">${renderPlayerCard(leader.player)}</div>
     <div class="all-star-identity">
       <strong>${escapeHtml(leader.name)}</strong>
-      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; Paid ${money(pricePaid)}` : ""}</span>
+      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; Paid ${money(pricePaid)}` : ""}${byWpar ? ` &middot; ${formatWpaStat(leader.wpaPer162)} WPA` : ""}</span>
     </div>
     ${comparisonRows ? `<section class="all-star-comparison" aria-label="Closest competition at ${escapeHtml(allStarPositionLabel(slot.position))}">
       <div class="all-star-comparison-heading">
         <strong>Next in line</strong>
-        <small>WPA/162</small>
+        <small>${byWpar ? "WPAR/162" : "WPA/162"}</small>
       </div>
       <ol>${comparisonRows}</ol>
     </section>` : ""}
@@ -4984,15 +4996,21 @@ function renderAllStarSlot(slot, playersById, pricePaidMap) {
   </article>`;
 }
 
-function renderAllStarComparisonRow(candidate, playersById, pricePaidMap) {
+function renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar = false) {
   return `<li>
     <span class="all-star-depth-rank">#${candidate.rank}</span>
     <span class="all-star-depth-player">
       ${renderBatchPlayerName(candidate, playersById)}
       <small>${escapeHtml(candidate.team)}${renderAllStarPrice(candidate, pricePaidMap)}</small>
     </span>
-    <strong>${formatWpaStat(candidate.wpaPer162)}</strong>
+    ${renderAllStarValue(candidate, byWpar)}
   </li>`;
+}
+
+// WPAR ranks the field, so it leads; WPA sits under it for comparison.
+function renderAllStarValue(candidate, byWpar) {
+  if (!byWpar) return `<strong>${formatWpaStat(candidate.wpaPer162)}</strong>`;
+  return `<strong class="all-star-value">${formatWar(candidate.wparPer162)}<small>${formatWpaStat(candidate.wpaPer162)} WPA</small></strong>`;
 }
 
 function renderAllStarPrice(candidate, pricePaidMap) {
@@ -5115,6 +5133,15 @@ function batchWpaByPlayerId(summary) {
   const map = new Map();
   for (const line of [...(summary.hitters ?? []), ...(summary.pitchers ?? [])]) {
     if (line?.id != null && Number.isFinite(line.wpaPer162)) map.set(line.id, line.wpaPer162);
+  }
+  return map;
+}
+
+// Player id -> WPA over replacement per 162 games, for the same ledger.
+function batchWparByPlayerId(summary) {
+  const map = new Map();
+  for (const line of [...(summary.hitters ?? []), ...(summary.pitchers ?? [])]) {
+    if (line?.id != null && Number.isFinite(line.warPer162?.total)) map.set(line.id, line.warPer162.total);
   }
   return map;
 }
@@ -5699,7 +5726,7 @@ function updateBatchSort(table, sort) {
 }
 
 function updateDraftHistorySort(sort) {
-  if (!["pick", "paid", "points", "wpa"].includes(sort)) return;
+  if (!["pick", "paid", "points", "wpar", "wpa"].includes(sort)) return;
   const current = normalizeDraftHistorySort(state.draftHistorySort);
   state.draftHistorySort = current.sort === sort
     ? { sort, direction: current.direction === "asc" ? "desc" : "asc" }
@@ -5707,7 +5734,7 @@ function updateDraftHistorySort(sort) {
 }
 
 function normalizeDraftHistorySort(value, legacyPaidSort = null) {
-  if (value && ["pick", "paid", "points", "wpa"].includes(value.sort)) {
+  if (value && ["pick", "paid", "points", "wpar", "wpa"].includes(value.sort)) {
     return {
       sort: value.sort,
       direction: value.direction === "asc" ? "asc" : "desc"
@@ -5833,7 +5860,7 @@ function bindBatchActions() {
 
     const chartYAxisButton = event.target.closest("button[data-batch-chart-yaxis]");
     if (chartYAxisButton) {
-      state.batchChartYAxis = chartYAxisButton.dataset.batchChartYaxis || "wpa";
+      state.batchChartY = chartYAxisButton.dataset.batchChartYaxis || "wpar";
       saveState();
       renderBatch();
       return;
@@ -9660,6 +9687,9 @@ function reviveState(value) {
   return {
     ...defaultState(),
     ...value,
+    // The chart's y-axis setting moved keys when WPAR became the default. The old
+    // key's "wpa" was just the old default, so only a Points choice carries over.
+    ...(value.batchChartY === undefined && value.batchChartYAxis === "points" ? { batchChartY: "points" } : {}),
     startingPitchers: draft?.startingPitchers ?? normalizeStartingPitchers(value.startingPitchers),
     ...(value.bullpenSlots === undefined
       ? { bullpenSlots: UNLIMITED_BULLPEN, bullpenMin: 2 }

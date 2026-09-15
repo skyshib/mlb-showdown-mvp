@@ -1,7 +1,11 @@
 export const ALL_STAR_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "SP", "RP"];
 const INLINE_ALL_STAR_DEPTH_LIMIT = 5;
 
+// Ranks each position on WPA over replacement (WPAR) when the sim measured it,
+// and on WPA for sims that predate it. Every candidate carries both.
 export function buildAllStarDepthChart(teams, summary) {
+  const byWpar = Boolean(summary?.attribution);
+  const value = byWpar ? (candidate) => candidate.wparPer162 : (candidate) => candidate.wpaPer162;
   const hitterLines = statLineIndex(summary?.hitters ?? []);
   const pitcherLines = statLineIndex(summary?.pitchers ?? []);
   const candidates = new Map(ALL_STAR_POSITIONS.map((position) => [position, []]));
@@ -22,7 +26,7 @@ export function buildAllStarDepthChart(teams, summary) {
 
   return ALL_STAR_POSITIONS.map((position) => {
     const depth = candidates.get(position)
-      .sort((a, b) => b.wpaPer162 - a.wpaPer162 || a.name.localeCompare(b.name) || a.team.localeCompare(b.team));
+      .sort((a, b) => value(b) - value(a) || a.name.localeCompare(b.name) || a.team.localeCompare(b.team));
     const leader = depth[0] ?? null;
     return {
       position,
@@ -64,6 +68,7 @@ function addCandidate(bucket, player, team, lines) {
     name: player.name,
     team,
     player,
-    wpaPer162: Number.isFinite(line.wpaPer162) ? line.wpaPer162 : 0
+    wpaPer162: Number.isFinite(line.wpaPer162) ? line.wpaPer162 : 0,
+    wparPer162: Number.isFinite(line.warPer162?.total) ? line.warPer162.total : 0
   });
 }

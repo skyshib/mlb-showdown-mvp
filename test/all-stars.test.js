@@ -55,6 +55,27 @@ test("the simulation All-Star roster picks each positional WPA leader and ranks 
   assert.equal(chart.find((slot) => slot.position === "1B").leader, null);
 });
 
+test("All-Stars rank on WPAR when the sim measured it and keep WPA alongside", () => {
+  const alphaCatcher = hitter("a-c", "Alpha Catcher", "C");
+  const betaCatcher = hitter("b-c", "Beta Catcher", "C");
+  const teams = [
+    { name: "Alpha", lineup: [alphaCatcher] },
+    { name: "Beta", lineup: [betaCatcher] }
+  ];
+  const lines = [
+    { id: alphaCatcher.id, name: alphaCatcher.name, team: "Alpha", wpaPer162: 1.0, warPer162: { total: 3.5 } },
+    { id: betaCatcher.id, name: betaCatcher.name, team: "Beta", wpaPer162: 4.0, warPer162: { total: 0.5 } }
+  ];
+
+  const byWpa = buildAllStarDepthChart(teams, { hitters: lines, pitchers: [] }).find((slot) => slot.position === "C");
+  assert.equal(byWpa.leader.name, betaCatcher.name, "a sim without attribution still ranks on WPA");
+
+  const byWpar = buildAllStarDepthChart(teams, { attribution: true, hitters: lines, pitchers: [] }).find((slot) => slot.position === "C");
+  assert.equal(byWpar.leader.name, alphaCatcher.name);
+  assert.equal(byWpar.leader.wparPer162, 3.5);
+  assert.equal(byWpar.leader.wpaPer162, 1.0);
+});
+
 test("small All-Star fields show every challenger while large fields summarize two", () => {
   const depth = Array.from({ length: 7 }, (_, index) => ({ rank: index + 1 }));
 
