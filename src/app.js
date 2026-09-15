@@ -4457,7 +4457,7 @@ function renderBatch() {
         <td class="num">${formatAverage(wobaNumerator(line), line.pa)}</td>
         <td class="num">${wrcPlus(line, leagueWoba)}</td>
         ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
-        ${hasWar ? `<td class="num">${formatWar(line.warPer162?.hitting)}</td><td class="num"><strong>${formatWar(hitterWar(line))}</strong></td>` : ""}
+        ${hasWar ? `<td class="num">${formatWar(line.warPer162?.hitting)}</td><td class="num">${formatWar(line.warPer162?.defense)}</td><td class="num">${formatWar(line.warPer162?.baserunning)}</td><td class="num"><strong>${formatWar(hitterWar(line))}</strong></td>` : ""}
       </tr>`
     )
     .join("");
@@ -4771,7 +4771,7 @@ function renderBatch() {
       <h2>Hitters, 162-game pace</h2>
       ${renderBatchTeamFilter("hitters", hitterTeamFilter, teamNames)}
     </div>
-    ${hasWar ? `<p class="batch-note"><strong>WPAR</strong> is WPA over replacement: win probability added over the room's replacement card at the hitter's position, per 162 games. It is <strong>Hit WPAR</strong> (on-base and chart, every plate appearance replayed with the same dice and the replacement's numbers) plus baserunning and defense, which are broken out on the Baserunning &amp; defense tab.</p>` : ""}
+    ${hasWar ? `<p class="batch-note"><strong>WPAR</strong> is WPA over replacement: win probability added over the room's replacement card at the hitter's position, per 162 games. It is <strong>Hit WPAR</strong> (on-base and chart, every plate appearance replayed with the same dice and the replacement's numbers) plus <strong>Def WPAR</strong> and <strong>BsR WPAR</strong> (glove and speed against the replacement's), whose inputs are on the Baserunning &amp; defense tab.</p>` : ""}
     <div class="table-scroll">
       <table>
         <thead><tr>
@@ -4797,7 +4797,7 @@ function renderBatch() {
           ${renderBatchSortHeader("hitters", "woba", "wOBA", "num")}
           ${renderBatchSortHeader("hitters", "wrcPlus", "wRC+", "num")}
           ${renderBatchSortHeader("hitters", "wpa162", "WPA", "num")}
-          ${hasWar ? `${renderBatchSortHeader("hitters", "hitWar", "Hit WPAR", "num")}${renderBatchSortHeader("hitters", "war", "WPAR", "num")}` : ""}
+          ${hasWar ? `${renderBatchSortHeader("hitters", "hitWar", "Hit WPAR", "num")}${renderBatchSortHeader("hitters", "defWar", "Def WPAR", "num")}${renderBatchSortHeader("hitters", "bsrWar", "BsR WPAR", "num")}${renderBatchSortHeader("hitters", "war", "WPAR", "num")}` : ""}
         </tr></thead>
         <tbody>${hitterRows}</tbody>
       </table>
@@ -5443,30 +5443,34 @@ function renderBatchSkillsSection(summary, playersById, runs) {
       totals.defense += line.warPer162?.defense ?? 0;
     }
   }
-  const warHeader = (tip) => (hasWar ? [{ label: "WPAR", tip }] : []);
+  const warHeader = (tip) => (hasWar ? [{ sort: "war", label: "WPAR", tip }] : []);
   const warCell = (value) => (hasWar ? `<td class="num"><strong>${formatWar(value)}</strong></td>` : "");
-  const sortedBaserunning = [...summary.teams].sort(compareTournamentBaserunning);
-  const sortedDefense = [...summary.teams].sort(compareTournamentDefense);
+  // Both team tables open on WPAR; a sim that predates it has no such column, so
+  // they fall back to WPA.
+  if (!hasWar) {
+    for (const table of ["baserunning", "defense"]) {
+      const config = batchSortConfig(table);
+      if (config.sort === "war") state.batchSorts = { ...state.batchSorts, [table]: { ...config, sort: "wpa" } };
+    }
+  }
+  const teamSkillTable = (table, title, headers, renderRow) => {
+    const rows = sortBatchRows(summary.teams, table, (row, sort) => batchTeamSkillSortValue(row, table, sort, teamWar))
+      .map((row) => renderRow(row, warCell(teamWar.get(row.team)?.[table])))
+      .join("");
+    return `<div class="stat-table-block">
+        <h3>${title}</h3>
+        <div class="table-scroll">
+          <table class="tournament-stat-table team-stat-table">
+            <thead><tr>${headers.map((header) => renderBatchSortHeader(table, header.sort, header.label, header.className ?? "num", header.tip)).join("")}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  };
 
   const teamTables = `<div class="team-skill-grid">
-      <div class="stat-table-block">
-        <h3>Baserunning</h3>
-        <div class="table-scroll">
-          <table class="tournament-stat-table team-stat-table">
-            <thead>${renderSkillHeaderRow([...BASERUNNING_HEADERS, ...warHeader("WPA over replacement from speed per 162 games, summed over the team's runners. Higher is better.")])}</thead>
-            <tbody>${sortedBaserunning.map((row) => renderBatchBaserunningRow(row, warCell(teamWar.get(row.team)?.baserunning))).join("")}</tbody>
-          </table>
-        </div>
-      </div>
-      <div class="stat-table-block">
-        <h3>Defense</h3>
-        <div class="table-scroll">
-          <table class="tournament-stat-table team-stat-table">
-            <thead>${renderSkillHeaderRow([...DEFENSE_HEADERS, ...warHeader("WPA over replacement from fielding per 162 games, summed over the team's fielders. Higher is better.")])}</thead>
-            <tbody>${sortedDefense.map((row) => renderBatchDefenseRow(row, warCell(teamWar.get(row.team)?.defense))).join("")}</tbody>
-          </table>
-        </div>
-      </div>
+      ${teamSkillTable("baserunning", "Baserunning", [...BASERUNNING_HEADERS, ...warHeader("WPA over replacement from speed per 162 games, summed over the team's runners. Higher is better.")], renderBatchBaserunningRow)}
+      ${teamSkillTable("defense", "Defense", [...DEFENSE_HEADERS, ...warHeader("WPA over replacement from fielding per 162 games, summed over the team's fielders. Higher is better.")], renderBatchDefenseRow)}
     </div>`;
 
   const warSections = hasWar ? `<h3>What fielding is worth</h3>
@@ -5499,23 +5503,23 @@ function renderBatchSkillPlayersTable(hitters, playersById) {
     return signed && value >= 0 ? `+${text}` : text;
   };
   const count = (value) => formatSeasonCount(value ?? 0);
-  const header = (sort, label, className = "num") => renderBatchSortHeader("skillPlayers", sort, label, className);
+  const header = (sort, label, hint, className = "num") => renderBatchSortHeader("skillPlayers", sort, label, className, hint);
   return `<div class="table-scroll">
     <table class="tournament-stat-table">
       <thead><tr>
-        <th>#</th>
-        ${header("name", "Player", "")}
-        ${header("team", "Team", "")}
-        ${header("position", "Pos", "")}
-        ${header("glove", "Glove")}
-        ${header("replacementGlove", "Repl glove")}
-        ${header("fieldChances", "Fld ch")}
-        ${header("defense", "Def WPAR")}
-        ${header("speed", "Speed")}
-        ${header("replacementSpeed", "Repl speed")}
-        ${header("runChances", "Run ch")}
-        ${header("baserunning", "BsR WPAR")}
-        ${header("total", "BsR+Def")}
+        <th><abbr class="col-hint" data-hint="Rank in the current sort" aria-label="#: Rank in the current sort">#</abbr></th>
+        ${header("name", "Player", "Hitter card", "")}
+        ${header("team", "Team", "Drafted roster", "")}
+        ${header("position", "Pos", "Where the lineup played him, with the printed position in parentheses when his card does not play there", "")}
+        ${header("glove", "Glove", "Fielding rating he carried at that position, averaged over his fielding chances. Blank for a DH.")}
+        ${header("replacementGlove", "Repl glove", "Fielding rating of the room's replacement card at that position, averaged over the same chances")}
+        ${header("fieldChances", "Fld ch", "Fielding chances per 162 games: steal, extra-base, tag-up and double-play plays where his unit made a play on a runner")}
+        ${header("defense", "Def WPAR", "WPA over replacement from his glove per 162 games: the win probability his fielding rating added over the replacement's at the same chances. Higher is better.")}
+        ${header("speed", "Speed", "Speed he carried on the bases, averaged over his running chances")}
+        ${header("replacementSpeed", "Repl speed", "Speed of the room's replacement card, averaged over the same chances")}
+        ${header("runChances", "Run ch", "Running chances per 162 games: steal, extra-base, tag-up and double-play plays where he was a runner who could go or be thrown at")}
+        ${header("baserunning", "BsR WPAR", "WPA over replacement from his speed per 162 games: the win probability his legs added over the replacement's at the same chances, with the go/hold decision re-made. Higher is better.")}
+        ${header("total", "BsR+Def", "Baserunning plus defense WPAR per 162 games")}
       </tr></thead>
       <tbody>${rows.map((line, index) => {
         const inputs = line.warInputs ?? {};
@@ -5580,14 +5584,20 @@ function renderBatchPlayerName(line, playersById, tagName = "strong", className 
   return renderPlayerPreviewName(player, line.name, tagName, className);
 }
 
-function renderBatchSortHeader(table, sort, label, className = "") {
+// A `hint` rides in data-hint and shows through the app's own floating tip (see
+// handlePointerMove), not the browser's native title tooltip, which lags by a
+// second and never appears on touch. aria-label keeps it for readers.
+function renderBatchSortHeader(table, sort, label, className = "", hint = "") {
   const config = batchSortConfig(table);
   const active = config.sort === sort;
   const direction = active ? config.direction : null;
   const arrow = direction === "asc" ? "^" : direction === "desc" ? "v" : "";
+  const content = hint
+    ? `<abbr class="col-hint" data-hint="${escapeHtml(hint)}" aria-label="${escapeHtml(`${label}: ${hint}`)}">${escapeHtml(label)}</abbr>`
+    : `<span>${escapeHtml(label)}</span>`;
   return `<th class="${escapeHtml(className)}" aria-sort="${active ? (direction === "asc" ? "ascending" : "descending") : "none"}">
     <button type="button" class="column-sort ${active ? "active" : ""}" data-batch-table="${escapeHtml(table)}" data-batch-sort="${escapeHtml(sort)}">
-      <span>${escapeHtml(label)}</span>${arrow ? `<span class="sort-arrow">${arrow}</span>` : ""}
+      ${content}${arrow ? `<span class="sort-arrow">${arrow}</span>` : ""}
     </button>
   </th>`;
 }
@@ -5639,6 +5649,8 @@ function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
   if (sort === "wrcPlus") return wrcPlus(line, leagueWoba);
   if (sort === "wpa162") return batchPace(line, "wpaPer162", "wpa", teamGamesByName);
   if (sort === "hitWar") return line.warPer162?.hitting ?? 0;
+  if (sort === "defWar") return line.warPer162?.defense ?? 0;
+  if (sort === "bsrWar") return line.warPer162?.baserunning ?? 0;
   if (sort === "war") return hitterWar(line);
   return line.ops;
 }
@@ -5713,7 +5725,9 @@ function defaultBatchSorts() {
     starters: { sort: "team", direction: "asc" },
     hitters: { sort: "ops", direction: "desc" },
     pitchers: { sort: "era", direction: "asc" },
-    skillPlayers: { sort: "total", direction: "desc" }
+    skillPlayers: { sort: "total", direction: "desc" },
+    baserunning: { sort: "war", direction: "desc" },
+    defense: { sort: "war", direction: "desc" }
   };
 }
 
@@ -5732,6 +5746,7 @@ function normalizeBatchSorts(value) {
 function defaultBatchSortDirection(table, sort) {
   if (["name", "team", "position", "role"].includes(sort)) return "asc";
   if (table === "pitchers" && ["era", "fip", "bb9"].includes(sort)) return "asc";
+  if (SKILL_SORTS_BEST_LOW[table]?.includes(sort)) return "asc";
   return "desc";
 }
 
@@ -6349,39 +6364,65 @@ function renderTournamentPitcherRow(row, fipConstant) {
 }
 
 // Column headers for the team-skill tables. Each abbreviation carries its full
-// explanation as a hover title, so the tight per-162 labels stay legible.
+// explanation as a hover hint, so the tight per-162 labels stay legible. `sort`
+// is the key batchTeamSkillSortValue reads.
 const BASERUNNING_HEADERS = [
-  { label: "Team", tip: "Drafted roster", className: "" },
-  { label: "SB", tip: "Stolen bases per 162 games" },
-  { label: "CS", tip: "Times caught stealing per 162 games" },
-  { label: "Adv", tip: "Extra bases taken on hits and fly balls per 162 games (first to third, scoring from second, tagging up)" },
-  { label: "Att", tip: "Extra-base attempts per 162 games, whether safe or out" },
-  { label: "Adv%", tip: "Share of extra-base attempts that were safe" },
-  { label: "Tag%", tip: "Share of tag-up attempts on fly balls that were safe" },
-  { label: "OOB", tip: "Runners thrown out on the bases per 162 games (caught stealing plus advances gunned down)" },
-  { label: "WPA", tip: "Win probability added by baserunning per 162 games — steals and extra bases taken. Higher is better." }
+  { sort: "team", label: "Team", tip: "Drafted roster", className: "" },
+  { sort: "sb", label: "SB", tip: "Stolen bases per 162 games" },
+  { sort: "cs", label: "CS", tip: "Times caught stealing per 162 games" },
+  { sort: "adv", label: "Adv", tip: "Extra bases taken on hits and fly balls per 162 games (first to third, scoring from second, tagging up)" },
+  { sort: "att", label: "Att", tip: "Extra-base attempts per 162 games, whether safe or out" },
+  { sort: "advPct", label: "Adv%", tip: "Share of extra-base attempts that were safe" },
+  { sort: "tagPct", label: "Tag%", tip: "Share of tag-up attempts on fly balls that were safe" },
+  { sort: "oob", label: "OOB", tip: "Runners thrown out on the bases per 162 games (caught stealing plus advances gunned down)" },
+  { sort: "wpa", label: "WPA", tip: "Win probability added by baserunning per 162 games — steals and extra bases taken. Higher is better." }
 ];
 
 const DEFENSE_HEADERS = [
-  { label: "Team", tip: "Drafted roster", className: "" },
-  { label: "SB allw", tip: "Stolen bases allowed per 162 games" },
-  { label: "CS", tip: "Runners this defense caught stealing per 162 games" },
-  { label: "XB allw", tip: "Extra bases allowed on hits and fly balls per 162 games" },
-  { label: "Cut", tip: "Runners thrown out trying to take a base per 162 games (advances plus caught stealing)" },
-  { label: "Home", tip: "Runners thrown out at home plate per 162 games" },
-  { label: "DP%", tip: "Share of double-play chances turned" },
-  { label: "Ch", tip: "Chances to make a play on a runner per 162 games (steal and advance attempts faced)" },
-  { label: "Stop%", tip: "Share of baserunner chances where this defense threw the runner out" },
-  { label: "WPA", tip: "Opponent win probability added on the bases against this defense per 162 games. Lower is better." }
+  { sort: "team", label: "Team", tip: "Drafted roster", className: "" },
+  { sort: "sbAllowed", label: "SB allw", tip: "Stolen bases allowed per 162 games" },
+  { sort: "cs", label: "CS", tip: "Runners this defense caught stealing per 162 games" },
+  { sort: "xbAllowed", label: "XB allw", tip: "Extra bases allowed on hits and fly balls per 162 games" },
+  { sort: "cut", label: "Cut", tip: "Runners thrown out trying to take a base per 162 games (advances plus caught stealing)" },
+  { sort: "home", label: "Home", tip: "Runners thrown out at home plate per 162 games" },
+  { sort: "dpPct", label: "DP%", tip: "Share of double-play chances turned" },
+  { sort: "chances", label: "Ch", tip: "Chances to make a play on a runner per 162 games (steal and advance attempts faced)" },
+  { sort: "stopPct", label: "Stop%", tip: "Share of baserunner chances where this defense threw the runner out" },
+  { sort: "wpa", label: "WPA", tip: "Win probability this defense saved on the bases per 162 games: the opponents' baserunning WPA against it, sign flipped. Higher is better." }
 ];
 
-function renderSkillHeaderRow(headers) {
-  // The explanation rides in data-hint and shows through the app's own floating
-  // tip (see handlePointerMove), not the browser's native title tooltip, which
-  // lags by a second and never appears on touch. aria-label keeps it for readers.
-  return `<tr>${headers
-    .map((header) => `<th class="${header.className ?? "num"}"><abbr class="col-hint" data-hint="${escapeHtml(header.tip)}" aria-label="${escapeHtml(`${header.label}: ${header.tip}`)}">${escapeHtml(header.label)}</abbr></th>`)
-    .join("")}</tr>`;
+// Where a lower number is the better one, a first click sorts ascending so every
+// skill table opens best to worst.
+const SKILL_SORTS_BEST_LOW = {
+  baserunning: ["cs", "oob"],
+  defense: ["sbAllowed", "xbAllowed"]
+};
+
+function batchTeamSkillSortValue(row, table, sort, teamWar) {
+  const games = teamSkillGames(row);
+  const war = teamWar.get(row.team)?.[table] ?? 0;
+  if (sort === "team") return row.team;
+  if (table === "baserunning") {
+    if (sort === "sb") return per162(row.steals, games);
+    if (sort === "cs") return per162(row.caughtStealing, games);
+    if (sort === "adv") return per162(row.advances, games);
+    if (sort === "att") return per162(row.advanceAttempts, games);
+    if (sort === "advPct") return rateValue(row.advances, row.advanceAttempts);
+    if (sort === "tagPct") return rateValue(row.tagAdvances, row.tagAttempts);
+    if (sort === "oob") return per162(row.outsOnBases, games);
+    if (sort === "wpa") return per162(row.baserunningWpa, games);
+    return war;
+  }
+  if (sort === "sbAllowed") return per162(row.stealsAllowed, games);
+  if (sort === "cs") return per162(row.caughtStealingByDefense, games);
+  if (sort === "xbAllowed") return per162(row.advancesAllowed, games);
+  if (sort === "cut") return per162(row.cutDowns, games);
+  if (sort === "home") return per162(row.homeCutDowns, games);
+  if (sort === "dpPct") return rateValue(row.doublePlays, row.doublePlayChances);
+  if (sort === "chances") return per162(row.advanceChances, games);
+  if (sort === "stopPct") return rateValue(row.cutDowns, row.advanceChances);
+  if (sort === "wpa") return -per162(row.baserunningWpaAllowed, games);
+  return war;
 }
 
 function renderBatchBaserunningRow(row, extraCell = "") {
@@ -6412,7 +6453,7 @@ function renderBatchDefenseRow(row, extraCell = "") {
     <td class="num">${formatPercent(row.doublePlays, row.doublePlayChances)}</td>
     <td class="num">${formatSeasonCount(per162(row.advanceChances, games))}</td>
     <td class="num">${formatPercent(row.cutDowns, row.advanceChances)}</td>
-    <td class="num">${formatWpaStat(per162(row.baserunningWpaAllowed, games))}</td>
+    <td class="num">${formatWpaStat(-per162(row.baserunningWpaAllowed, games))}</td>
     ${extraCell}
   </tr>`;
 }
