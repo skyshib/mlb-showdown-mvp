@@ -1,6 +1,7 @@
 import { createRng } from "./rng.js?v=20260716-records";
 import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality, spSlotFactor } from "./valuation.js?v=20260716-records";
 import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260716-records";
+import { lineupProfile, runsPerPa } from "./pitching.js?v=20260716-records";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -1830,11 +1831,55 @@ function bucketNeed(needs, bucket) {
   return needs.hitter;
 }
 
+// Arms, ranked the way the game will actually settle them.
+//
+// The valuation adds control to chart quality. But control is not a quality of
+// its own: it decides HOW OFTEN the pitcher's card is the one consulted (he
+// wins the roll when d20 + control beats the batter's on-base). So it
+// MULTIPLIES his chart's sign. On a clean chart it is worth a fortune; on a bad
+// one it is the fastest way to lose, because his own card is what the league
+// hits against. Added up instead, a control-10 arm whose chart is nineteen
+// walks reads as a front-line starter — which is how a computer came to pay
+// $159 for one who then allowed 145 runs a nine.
+//
+// The engine already knows how to weigh the two: runsPerPa is the hook rule's
+// own reckoning of what an arm gives up against a given lineup, on real run
+// values rather than the chart table's deliberately out-heavy scoring. Ranking
+// the board's arms by it against the bats the room will actually field tracks
+// simulated runs allowed at 0.94-0.97 (Spearman) where the sum manages
+// 0.67-0.97, with the misses concentrated exactly where they cost the most.
+//
+// The ORDER is all that is taken. Each role's values are dealt back out in
+// their existing order, so the board's k-th best arm is worth what the model
+// already said its k-th best arm was worth: the same money goes to pitching, it
+// just goes to the right arms. That is the difference from the interaction form
+// tried in July, which re-priced arms against bats as well and lost 1-2 win
+// points; this reads +2.8 to +6.2 against matched nulls on every deck, table
+// size, temperature and persona tried.
+function pitcherRanking(draft, model) {
+  const hitters = draft.pool.filter((card) => card.kind === "hitter")
+    .sort((a, b) => model.value(b) - model.value(a));
+  // The bats a room this size will actually field, not the whole board's tail.
+  const batters = lineupProfile(hitters.slice(0, Math.max(HITTER_TARGET, draft.managers.length * HITTER_TARGET)));
+  const ranked = new Map();
+  for (const role of ["SP", "RP"]) {
+    const arms = draft.pool.filter((card) => card.kind === "pitcher" && pitcherRole(card) === role);
+    const values = arms.map((card) => model.value(card)).sort((a, b) => b - a);
+    [...arms]
+      .sort((a, b) => runsPerPa(a, 0, batters) - runsPerPa(b, 0, batters))
+      .forEach((card, index) => ranked.set(card.id, values[index]));
+  }
+  return {
+    ...model,
+    value: (player) => (ranked.has(player?.id) ? ranked.get(player.id) : model.value(player))
+  };
+}
+
 // What the next man at each spot is worth, as this manager reads what is still
 // coming. Any card is then priced by what it adds OVER the field it competes
 // with.
 function auctionMarket(draft, manager) {
-  const model = managerValuation(draft, manager);
+  const model = pitcherRanking(draft, managerValuation(draft, manager));
   // The REPLACEMENT LEVEL, read PER POSITION — the freely-had scrub at each spot,
   // because the board deals far more than the rosters hold and sweeps the rest
   // out for nothing. The literal replacement level at a spot is the WORST card

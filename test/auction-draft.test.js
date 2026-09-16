@@ -1131,3 +1131,31 @@ test("no computer ever bids money it has not got", () => {
     assert.equal(validateRoster(manager).length, 0, `${manager.name} ended up with an illegal roster`);
   }
 });
+
+// Control is not quality of its own: it decides how often the pitcher's card is
+// the one the game reads. A control-10 arm whose chart is all walks is the worst
+// thing on the board, and adding control to chart quality called him an ace.
+test("a high-control walk machine is bid under a clean low-control arm", () => {
+  const walker = makePitcher({
+    id: "arm-walker", name: "Walk Machine", role: "SP", control: 10, ip: 7, points: 400,
+    chart: [{ from: 1, to: 1, result: "SO" }, { from: 2, to: 20, result: "BB" }]
+  });
+  const clean = makePitcher({
+    id: "arm-clean", name: "Clean Chart", role: "SP", control: 3, ip: 7, points: 140,
+    chart: [{ from: 1, to: 6, result: "PU" }, { from: 7, to: 17, result: "SO" }, { from: 18, to: 20, result: "1B" }]
+  });
+  const pool = [...makeDraftPool("arms", 24, 8), walker, clean];
+  const draft = makeAuctionDraft(["Alpha", "Beta"], pool, { budget: 600, nomination: "manual" });
+  const [alpha, beta] = draft.managers;
+  beta.cpu = true;
+  beta.persona = "balanced";
+
+  const bidOn = (player) => {
+    draft.auction.lot = null;
+    nominatePlayer(draft, player.id, 0);
+    return cpuSealedBid(draft, beta);
+  };
+  const walkerBid = bidOn(walker);
+  const cleanBid = bidOn(clean);
+  assert.ok(cleanBid > walkerBid, `walk machine drew ${walkerBid}, clean arm ${cleanBid}`);
+});
