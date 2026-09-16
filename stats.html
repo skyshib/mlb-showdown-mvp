@@ -201,6 +201,7 @@
 <div id="tip" role="status" aria-live="polite"></div>
 
 <script type="module">
+import { groupSessions, namesIn } from "./src/ui/sessions.js";
 // The three-letter codes are Fly's edges, not the visitor's country — the edge
 // that took the connection is simply the one nearest them. Naming the city is
 // honest about the resolution in a way that "nrt" is not.
@@ -358,7 +359,6 @@ function dailyTable(days) {
 // /api/visits is the per-visit log, and unlike /api/stats it has no public mode.
 // No token, or a token the server does not like, and this section simply never
 // appears — the page above it is the whole page, as it always was.
-const SESSION_GAP_MS = 30 * 60 * 1000;
 
 async function loadVisits() {
   if (!token) return;
@@ -372,47 +372,15 @@ async function loadVisits() {
   document.getElementById("visit-list").innerHTML = sessionsHtml(groupSessions(visits));
 }
 
-// The log arrives newest first. A session is one device's run of lines with no
-// half-hour hole in it; lines from a browser that refused the cookie fall back to
-// the visitor hash, which is a whole household but better than nothing.
-function groupSessions(visits) {
-  const sessions = [];
-  const open = new Map();
-  for (const line of [...visits].reverse()) {
-    const key = line.device || `ip:${line.visitor}`;
-    const at = Date.parse(line.t);
-    let session = open.get(key);
-    if (!session || at - session.lastAt > SESSION_GAP_MS) {
-      session = { key, startedAt: at, lastAt: at, lines: [], names: new Set() };
-      open.set(key, session);
-      sessions.push(session);
-    }
-    session.lastAt = at;
-    session.lines.push(line);
-    for (const name of namesIn(line)) session.names.add(name);
-  }
-  return sessions.reverse();
-}
-
-// Who this was, in their own words: the names typed into a draft or a campaign.
-// Computer managers are the app's, not theirs, so they are left out.
-function namesIn(line) {
-  const data = line.data ?? {};
-  const cpu = new Set(data.cpu ?? []);
-  if (line.kind === "local-draft-start" || line.kind === "sim") {
-    return (data.humans ?? data.managers ?? []).filter((name) => !cpu.has(name));
-  }
-  if (line.kind === "room-create") return (data.managers ?? []).filter((name) => !cpu.has(name));
-  if (line.kind === "room-join") return data.manager ? [data.manager] : [];
-  if (line.kind === "adventure-start" || line.kind === "adventure-open") return data.name ? [data.name] : [];
-  return [];
-}
-
 function sessionsHtml(sessions) {
   if (!sessions.length) return '<p class="empty">Nobody has been here in this window.</p>';
   return sessions.map((session) => {
     const first = session.lines[0];
-    const minutes = Math.round((session.lastAt - session.startedAt) / 60000);
+    // The page counts its own life more honestly than the log can: the last
+    // line is the last thing worth logging, not the moment they left.
+    const minutes = Math.round((session.seconds != null
+      ? session.seconds * 1000
+      : session.lastAt - session.startedAt) / 60000);
     const who = session.names.size ? [...session.names].join(", ") : "";
     // What the browser said about itself when it opened, if it got the chance.
     const hello = session.lines.find((line) => line.kind === "hello")?.data ?? {};
