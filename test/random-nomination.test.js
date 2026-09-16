@@ -19,6 +19,7 @@ import {
   randomNominationCounts,
   randomNominationQuotas,
   randomNominationShortfalls,
+  managerValuation,
   standingReplacements,
   submitCpuSealedBids,
   undoLastPick,
@@ -579,4 +580,31 @@ test("relievers are bid on as the pen they join", () => {
   const wouldLead = bid(pen, weakPen, second);
   const behindAce = bid(pen, [ace, weakPen[0]], second);
   assert.ok(wouldLead > behindAce, `the same reliever bid ${wouldLead} to lead a pen vs ${behindAce} behind a better arm`);
+});
+
+// Pass on every catcher and the sweep hands you the standing one. If he is the
+// better card — the classic set's fields 10 — then the catchers on the board are
+// worth nothing, and a computer that prices them against the board's own worst
+// man bids real money on cards worse than the one it gets free.
+test("a card worse than the standing replacement draws no bid", () => {
+  const { draft, pool } = roomOf(4, "sub-replacement");
+  const cpu = draft.managers[1];
+  const standing = standingReplacements(draft).find((card) => poolGroup(card) === "C");
+  assert.ok(standing, "the classic board deals a standing catcher");
+
+  const model = managerValuation(draft, cpu);
+  const catchers = pool.filter((card) => !card.replacement && poolGroup(card) === "C");
+  const worse = catchers.filter((card) => model.value(card) < model.value(standing));
+  assert.ok(worse.length, "some catcher on this board is worse than the standing one");
+  const better = catchers.filter((card) => model.value(card) > model.value(standing));
+  assert.ok(better.length, "and some catcher is better");
+
+  const bidOn = (card) => {
+    draft.auction.lot = {
+      playerId: card.id, nominatorId: null, round: 1, bids: {}, pending: [], tie: null, clock: null
+    };
+    return cpuSealedBid(draft, cpu);
+  };
+  for (const card of worse) assert.equal(bidOn(card), 0, `${card.name} is worse than the free card and drew a bid`);
+  assert.ok(bidOn(better[0]) > 0, "a catcher better than the standing card is still worth buying");
 });

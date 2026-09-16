@@ -1890,6 +1890,20 @@ function auctionMarket(draft, manager) {
   // the same value clears little and is worth almost nothing. Read over the WHOLE
   // deck so the floor is a fixed property of the spot, not a lone late survivor.
   const replacement = new Map();
+  // A room that deals STANDING replacements has a different floor: pass on
+  // every catcher and you are handed that card, not the worst catcher on the
+  // board. It can be the better of the two — the classic set's standing catcher
+  // fields 10, which beat four of the five catchers that came up in room
+  // emerald-zebra-willow — and then every one of those catchers is worth
+  // nothing, however far they clear the board's own worst man. Pricing them
+  // against the board instead had computers bidding real money on cards that
+  // were worse than the free one.
+  const standing = new Map();
+  for (const card of standingReplacements(draft)) {
+    const group = poolGroup(card);
+    const value = model.value(card);
+    if (!standing.has(group) || value > standing.get(group)) standing.set(group, value);
+  }
   // Also collect every value in the deck (by THIS manager's weights), sorted, so
   // a card's standing across the WHOLE pool — not just its spot — can earn the
   // studs a premium. Pool-elite scarcity helps; positional scarcity does not.
@@ -1900,6 +1914,10 @@ function auctionMarket(draft, manager) {
     allValues.push(value);
     const current = replacement.get(group);
     if (current === undefined || value < current) replacement.set(group, value);
+  }
+  for (const [group, value] of standing) {
+    const floor = replacement.get(group);
+    if (floor === undefined || value > floor) replacement.set(group, value);
   }
   allValues.sort((a, b) => a - b);
   return { model, replacement, allValues };
@@ -2041,16 +2059,6 @@ const SHARE_EXPONENT = 1.1;
 const POOL_PREMIUM_STRENGTH = 0.7;
 const POOL_PREMIUM_THRESHOLD = 0.8;
 
-// The draft's tail: 0 until ~60% of the nomination queue is gone, ramping to 1
-// at the end. Only random nomination has a queue, so manual returns 0 and the
-// end-game upgrade logic below simply never engages there.
-function auctionEndgamePressure(draft) {
-  const total = isRandomNomination(draft) ? draft.auction.queue.length : 0;
-  if (!total) return 0;
-  const fracDone = 1 - nominationQueueRemaining(draft) / total;
-  return Math.max(0, Math.min(1, (fracDone - 0.6) / 0.4));
-}
-
 // The value of this manager's WEAKEST fielded card at each bucket — its worst
 // starter, worst reliever, worst regular. A card that clears the floor at its
 // bucket is a genuine upgrade to the nine/staff, which is the only thing a team
@@ -2147,19 +2155,22 @@ function auctionWillingness(draft, manager, player) {
   // when the spot is already full: a third starter to a man who needs two is
   // bench depth, not a need, and must not pull budget off the holes still open.
   //
-  // The exception is the END GAME. A manager whose roster is full but whose
-  // budget will otherwise expire unspent should still buy a genuine UPGRADE to
-  // its fielded nine or staff (and make a leader pay for the ones it wants),
-  // rather than sit on money for nothing while the board is picked clean. So in
-  // the draft's tail, a full-bucket card is worth the larger of its damped depth
-  // and how far it clears the manager's OWN weakest fielded card at that bucket,
-  // scaled by how near the end we are. Upgrade-gated, so it never chases scrubs.
+  // A card at a spot that is already manned is worth exactly what it UPGRADES:
+  // how far it clears the manager's own weakest man at that bucket. A fourth
+  // starter behind three better ones plays no innings, so he is worth nothing,
+  // however high he stands against the board's replacement level. Marking him
+  // down by a flat share instead left a computer paying $447 of a $1500 budget
+  // for ten cards that never took the field (room emerald-zebra-willow), and a
+  // flat markdown is the wrong shape besides: it scales with the board's floor
+  // rather than with the man he would have to beat. (Until a bucket is manned
+  // at all there is nobody to clear, so those keep the old damped depth price.)
+  // This also subsumes the end-game upgrade term it replaces, which only fired
+  // in the draft's tail and, measured, almost never won the max() it sat in.
   const bestReliever = Math.max(
     market.replacement.get("RP") ?? 0,
     ...manager.roster.filter((card) => playerBucket(card) === "bullpen").map((card) => market.model.value(card))
   );
-  const endgame = auctionEndgamePressure(draft);
-  const fieldedFloor = endgame > 0 ? fieldedBucketFloor(manager, market.model) : null;
+  const fieldedFloor = fieldedBucketFloor(manager, market.model);
   const effectiveWorth = (card) => {
     // A card fills a need only if it would take an OPEN slot — an empty lineup
     // spot for a bat (its own position, or the util slot behind it), an empty
@@ -2175,11 +2186,9 @@ function auctionWillingness(draft, manager, player) {
       : auctionWorth(market, card);
     const base = surplus * (1 + URGENCY_WEIGHT * urgency);
     if (fills) return base;
-    const damped = base * DEPTH_DAMP;
-    if (!endgame) return damped;
-    const floor = fieldedFloor.get(playerBucket(card));
-    const upgrade = floor == null ? 0 : Math.max(0, market.model.value(card) - floor);
-    return Math.max(damped, upgrade * endgame);
+    const ownFloor = fieldedFloor.get(playerBucket(card));
+    if (ownFloor == null) return base * DEPTH_DAMP;
+    return Math.max(0, market.model.value(card) - ownFloor);
   };
   const worth = effectiveWorth(player);
   if (worth <= 0) return 0;
