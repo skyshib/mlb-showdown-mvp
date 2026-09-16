@@ -161,12 +161,29 @@ function cookieDevice(request) {
   return /^[a-f0-9]{16}$/.test(id) ? id : "";
 }
 
+// The query string is worth keeping — it carries the room a link was for — but
+// not the tokens in it: this page is read at /stats.html?token=…, and a log that
+// writes down the key to itself is a log that hands it to whoever reads it.
+function safeQuery(query) {
+  if (!query) return "";
+  try {
+    const params = new URLSearchParams(query.startsWith("?") ? query.slice(1) : query);
+    for (const key of [...params.keys()]) {
+      if (/token|key|secret|password/i.test(key)) params.set(key, "…");
+    }
+    const text = params.toString();
+    return text ? `?${decodeURIComponent(text)}`.slice(0, 200) : "";
+  } catch {
+    return "";
+  }
+}
+
 export function logPageView(store, request, { path, query, device, setCookie }, now = new Date()) {
   append(store, {
     ...requestBasics(store, request, device, now),
     kind: "view",
     path,
-    query: query ? query.slice(0, 200) : "",
+    query: safeQuery(query),
     newDevice: Boolean(setCookie),
     referrer: String(request.headers.referer ?? "").slice(0, 300),
     fetchSite: String(request.headers["sec-fetch-site"] ?? "")

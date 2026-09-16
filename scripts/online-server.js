@@ -1763,7 +1763,9 @@ async function serveStatic(store, request, response, url) {
       recordView(store, request, page);
       const { device, setCookie } = deviceFor(request);
       if (setCookie) cookieHeaders["Set-Cookie"] = setCookie;
-      logPageView(store, request, { path: page, query: url.search, device, setCookie });
+      // Reading the log must not write to the log, for the same reason the
+      // counters skip this page: otherwise the dashboard is its own best visitor.
+      if (page !== "/stats.html") logPageView(store, request, { path: page, query: url.search, device, setCookie });
     }
     // Size and mtime, which a rebuilt image restamps — so shipping a new module
     // invalidates it on its own, without anyone having to remember to bump a query.
