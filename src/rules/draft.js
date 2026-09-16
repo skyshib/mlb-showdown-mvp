@@ -1681,7 +1681,7 @@ function bestAutopickTarget(draft, manager) {
     throw new Error("No legal players are available");
   }
   const model = managerValuation(draft, manager);
-  const values = new Map(legal.map((player) => [player.id, model.value(player)]));
+  const values = new Map(legal.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
   const dropoffs = positionDropoffs(legal, values);
   return legal
     .map((player) => ({
@@ -3263,6 +3263,30 @@ function hitterPositionBonus(roster, player) {
   if (lineup.missingPositions.includes("1B")) return 20;
   if (!lineup.dhFilled) return 15;
   return 0;
+}
+
+// A card priced for THIS roster rather than in the abstract. The valuation
+// scores a bat's glove off its printed rating, which is the rating at the spot
+// it plays — and that spot may already be taken. A second catcher's +11 is the
+// clearest case: he catches nothing, he covers first at -1, and the valuation
+// was paying full price for an arm that never throws. So the glove handed to
+// the model is the one the SEATED NINE gains by adding him, which is his own
+// rating on an open spot, the improvement on a worse card at the same spot, and
+// about nothing for a third man at a position already twice covered. Pitchers
+// are returned untouched.
+function asRostered(roster, player) {
+  if (player?.kind !== "hitter") return player;
+  return { ...player, fielding: seatedGloveTotal([...roster, player]) - seatedGloveTotal(roster) };
+}
+
+// The gloves of the best nine this roster can field, each counted at the slot it
+// actually stands in: nothing at DH, -1 at first for a card that doesn't list it.
+function seatedGloveTotal(roster) {
+  const { slots } = assignLineupSlots(roster, bestLineupAssignment(roster));
+  return slots.reduce(
+    (total, slot) => total + (slot.player ? gloveAtLineupSlot(slot.player, slot.label) : 0),
+    0
+  );
 }
 
 function assignFirst(slots, used, label, player, options = {}) {
