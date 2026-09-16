@@ -82,7 +82,7 @@ body {
 }
 
 main {
-  width: min(1440px, calc(100vw - 32px));
+  width: min(1600px, calc(100vw - 32px));
   margin: 24px auto 40px;
   border: var(--rule-thick) solid var(--navy);
   padding: 32px;
@@ -97,7 +97,7 @@ main {
    Showdown Quest was unreachable from here for its whole life: two pages, no
    thread between them, and you had to know the URL to find the game. */
 .quest-door {
-  width: min(1440px, calc(100vw - 32px));
+  width: min(1600px, calc(100vw - 32px));
   margin: 16px auto -8px;
   display: flex;
   justify-content: flex-end;
@@ -4722,8 +4722,15 @@ button.interesting-game-card:focus-visible {
 /* The name and its badges stay on one line. Letting "Replacement level" or
    "last of tier 2" wrap under the name grew that one row by a whole line and
    left its numbers floating off-centre against every row around it — a board
-   reads by scanning down a column, so the rows have to keep a common height. */
+   reads by scanning down a column, so the rows have to keep a common height.
+
+   The column is also the widest one on the board, and an auto-layout table
+   hands its spare width to whichever column already measures widest — so the
+   names sat in a lake of dead space while the chart on the right ran off the
+   end of the panel. A token width reads as "no wider than your content", and
+   the spare width goes to the numbers instead. */
 .player-table td.player-cell {
+  width: 1%;
   min-width: 130px;
   white-space: nowrap;
 }
