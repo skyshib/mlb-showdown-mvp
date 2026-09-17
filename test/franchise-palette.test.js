@@ -205,3 +205,15 @@ test("a club's named third color is used when it can be seen", () => {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(named.boldFlare.slice(i, i + 2), 16));
   assert.ok(r > g + 60 && r > b + 60, "the named red carries through");
 });
+
+// The deep accent is a fill on a club's dark page, not a word: set as text it
+// was 2.3:1 for most of the league, and the auction clocks vanished into it.
+test("every club's accent text reads on the card it is set on", () => {
+  for (const [code, colors] of Object.entries(FRANCHISE_COLORS)) {
+    const p = derivePalette(colors);
+    for (const [surface, bg] of Object.entries({ sheet: p.boldSheet, panel: p.boldPanel, card: p.boldCard })) {
+      const ratio = contrast(p.boldAccentText, bg);
+      assert.ok(ratio >= AA, `${code}: accent text is ${ratio.toFixed(2)}:1 on the ${surface}, under AA`);
+    }
+  }
+});

@@ -15,6 +15,10 @@
   --hairline: #b3a88e;
   --accent: #b8352e;
   --accent-dark: #9a2a24;
+  /* The deep accent as a WORD rather than a fill. On cream they are the same
+     color; on a club's dark ground the deep accent is a shadow, and a shadow is
+     not something you can read the clock in. */
+  --accent-text: var(--accent-dark);
   /* The accent twice over. --accent has to be READ — it is text on the sheet in
      eight places — so it can never be brighter than cream can bear. The buttons
      do not have that problem: they are a fill inside a dark rule, so they can
@@ -291,7 +295,7 @@ th {
 .column-sort:hover,
 .column-sort.active {
   background: transparent;
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .sort-arrow {
@@ -529,7 +533,7 @@ td span {
 
 .setup-buttons button[data-action="create-online"]:hover {
   background: var(--sheet);
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .pool-mode {
@@ -628,7 +632,7 @@ td span {
 }
 
 .pool-option:has(input:checked) strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .pool-option:has(input:checked) small {
@@ -751,7 +755,7 @@ td span {
   border-radius: 0;
   padding: 12px 14px;
   background: var(--panel);
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 14px;
   font-weight: 600;
 }
@@ -822,7 +826,7 @@ td span {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .pick-clock.low {
@@ -982,7 +986,7 @@ body.auction-clock-urgent .auction-lot-rail {
 }
 
 .auction-lot-rail-state strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 22px;
   font-variant-numeric: tabular-nums;
 }
@@ -1125,7 +1129,7 @@ body.auction-clock-urgent .auction-lot-rail-time strong {
 
 .auction-lot-rail-budgets em {
   justify-self: end;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 11px;
   font-style: normal;
   font-weight: 800;
@@ -1237,7 +1241,7 @@ body.auction-clock-urgent .auction-lot-rail-time strong {
 }
 
 .auction-remaining strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-family: var(--display);
   font-size: 42px;
   line-height: 0.9;
@@ -1490,7 +1494,7 @@ body.auction-clock-urgent .auction-lot-rail-time strong {
 }
 
 .auction-focus-budget strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-family: var(--display);
   font-size: 24px;
   font-style: italic;
@@ -1903,7 +1907,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--accent);
   border-radius: 5px;
   background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%);
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 11px;
   font-weight: 850;
   white-space: nowrap;
@@ -1976,7 +1980,7 @@ button.roster-slot[draggable="true"]:active {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel);
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 12px;
   font-weight: 850;
   text-align: center;
@@ -2090,7 +2094,7 @@ button.roster-slot[draggable="true"]:active {
 
 .tier-remove:hover {
   border-color: var(--accent);
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 /* The last card of a tier still gettable: the board's scarcity light. */
@@ -2104,7 +2108,7 @@ button.roster-slot[draggable="true"]:active {
   padding: 1px 6px;
   border: 1px solid var(--accent);
   border-radius: 999px;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.03em;
@@ -2168,7 +2172,7 @@ tr:focus-within .row-tools {
 
 .row-tool:hover {
   border-color: var(--accent);
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 /* ---- the prep readout on the lot rail ---- */
@@ -2183,7 +2187,7 @@ tr:focus-within .row-tools {
   padding: 0 6px;
   border: 1px solid var(--accent);
   border-radius: 999px;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.03em;
@@ -2527,7 +2531,7 @@ tr:focus-within .row-tools {
 }
 
 .dock-bar.own-bar .dock-team {
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .own-tag {
@@ -3626,7 +3630,7 @@ tr:focus-within .row-tools {
   font-size: 22px;
   font-weight: 900;
   font-style: italic;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -3768,7 +3772,7 @@ tr:focus-within .row-tools {
 }
 
 .board-note strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-family: var(--display);
   font-size: 16px;
   font-weight: 900;
@@ -3886,7 +3890,7 @@ tr:focus-within .row-tools {
 
 .game-tab.active em {
   background: var(--sheet);
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 /* ---- what the roster still wants ---- */
@@ -4117,7 +4121,7 @@ tr:focus-within .row-tools {
 
 .star-filter:hover {
   background: var(--sheet);
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .star-filter.active {
@@ -4142,7 +4146,7 @@ tr:focus-within .row-tools {
 
 .star-filter.active .star-filter-count {
   background: var(--sheet);
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .target-row {
@@ -4280,7 +4284,7 @@ tr:focus-within .row-tools {
 }
 
 .all-star-slot-header > strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 16px;
   white-space: nowrap;
 }
@@ -4336,7 +4340,7 @@ tr:focus-within .row-tools {
 }
 
 .all-star-comparison-heading > strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 10px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -4396,7 +4400,7 @@ tr:focus-within .row-tools {
 
 .all-star-depth summary {
   cursor: pointer;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 12px;
   font-weight: 900;
 }
@@ -4450,7 +4454,7 @@ tr:focus-within .row-tools {
 }
 
 .all-star-depth-leader {
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .head-to-head-table {
@@ -4573,7 +4577,7 @@ tr:focus-within .row-tools {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--panel);
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 13px;
   font-weight: 850;
   font-variant-numeric: tabular-nums;
@@ -4624,7 +4628,7 @@ tr:focus-within .row-tools {
 
 .interesting-game-group h4 {
   margin: 0;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 14px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -4973,7 +4977,7 @@ button.interesting-game-card:focus-visible {
 }
 
 .award-card .award-stat {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 14px;
   font-weight: 700;
 }
@@ -5012,7 +5016,7 @@ button.interesting-game-card:focus-visible {
 }
 
 .formula-outcome {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -5371,7 +5375,7 @@ button.interesting-game-card:focus-visible {
 .tie-toast .sale-toast-mark {
   font-size: 22px;
   letter-spacing: 0.28em;
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .tie-toast .sale-toast-name {
@@ -5541,7 +5545,7 @@ button.interesting-game-card:focus-visible {
 }
 
 .wpa-pos {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -5783,7 +5787,7 @@ button.interesting-game-card:focus-visible {
 }
 
 .game-story-inning > summary > strong {
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 12px;
 }
 
@@ -6056,7 +6060,7 @@ button.interesting-game-card:focus-visible {
 .game-story-play-details > summary {
   width: fit-content;
   cursor: pointer;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   font-size: 10px;
   font-weight: 850;
 }
@@ -6235,7 +6239,7 @@ div.seat-option:not(:disabled):hover span {
 .link-button {
   border: 0;
   background: transparent;
-  color: var(--accent-dark);
+  color: var(--accent-text);
   text-decoration: underline;
   padding: 0;
   font-size: 13px;
@@ -6357,7 +6361,7 @@ div.seat-option:not(:disabled):hover span {
   font-size: 36px;
   font-weight: 800;
   line-height: 1;
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .lot-bid-holder {
@@ -6392,7 +6396,7 @@ div.seat-option:not(:disabled):hover span {
 .lot-entry-name {
   font-size: 13px;
   font-weight: 700;
-  color: var(--accent-dark);
+  color: var(--accent-text);
 }
 
 .lot-entry input {
@@ -6963,7 +6967,13 @@ html.club .target-row span { background: var(--panel); }
 html.club .dock-bar.own-bar { background: color-mix(in srgb, var(--panel) 74%, #1b5e46); }
 html.club .floor-chip.floor-empty { background: color-mix(in srgb, var(--panel) 80%, #b3563e); }
 html.club .auction-paused,
+html.club .player-table tr.on-block-row,
 html.club .player-table tr.on-block-row:hover { background: color-mix(in srgb, var(--panel) 72%, var(--accent-bright)); }
+html.club .player-table tr.replacement-level-row td,
+html.club .player-table tr.replacement-level-row:hover td { background: color-mix(in srgb, var(--panel) 80%, #526b9b); }
+html.club .player-table tr.replacement-level-row td:first-child { box-shadow: inset 4px 0 0 #8294b8; }
+html.club .replacement-level-badge,
+html.club .free-tag { border-color: var(--muted); background: var(--panel); color: var(--ink); }
 html.club .leader-bar-track,
 html.club .progress-track,
 html.club .sold-tag { background: var(--hairline); }

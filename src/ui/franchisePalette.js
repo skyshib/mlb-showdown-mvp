@@ -333,6 +333,11 @@ function bold(rawInk, rawAccent, extras) {
     // A gold button wants black on it, not white. Whichever reads.
     boldAccentInk: contrast(base, spend) >= contrast(white, spend) ? base : white,
     boldAccentDark: mix(spend, "#000000", 0.30),
+    // The club's color as small text on the lightest surface it is set on — the
+    // card — rather than on the ground. --accent-dark is a hover fill and a rule;
+    // set as a word on the dark page it was 2.3:1, and the auction clocks and
+    // a few dozen labels went with it.
+    boldAccentText: liftUntil(pop, up(0.13), 4.6),
     // The handheld's case goes dark with the rest of it. A cream plastic shell
     // around a black screen is the old palette refusing to leave.
     boldShell: up(0.16),
@@ -467,7 +472,7 @@ export function franchisePalette(universeKey) {
 const TOKENS = [
   "--bg", "--sheet", "--panel", "--ink", "--muted", "--hairline",
   "--card", "--card-2", "--card-sheer",
-  "--navy", "--navy-deep", "--line", "--accent", "--accent-dark",
+  "--navy", "--navy-deep", "--line", "--accent", "--accent-dark", "--accent-text",
   "--accent-bright", "--accent-ink",
   "--gb-darkest", "--gb-dark", "--gb-light", "--gb-lightest", "--room",
   "--gq-lead", "--gq-lead-ink", "--gq-flare",
@@ -532,6 +537,7 @@ export function applyFranchisePalette(universeKey, root = document.documentEleme
   root.style.setProperty("--line", palette.boldLine);
   root.style.setProperty("--accent", palette.boldAccent);
   root.style.setProperty("--accent-dark", palette.boldAccentDark);
+  root.style.setProperty("--accent-text", palette.boldAccentText);
   root.style.setProperty("--accent-bright", palette.boldAccent);
   root.style.setProperty("--accent-ink", palette.boldAccentInk);
   // The handheld, inverted: the screen is the club's dark ground, the text on it
