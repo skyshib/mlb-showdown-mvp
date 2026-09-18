@@ -2681,6 +2681,14 @@ tr:focus-within .row-tools {
   text-overflow: ellipsis;
 }
 
+.dock-slot-cost {
+  margin-left: 3px;
+  color: var(--ink);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
 .dock-slot-head b {
   flex: none;
   color: var(--ink);

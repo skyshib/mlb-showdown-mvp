@@ -7865,7 +7865,7 @@ function renderDockPositionSlot({ manager, slotKey, label, assignedPlayer, candi
   const card = cards[index];
   const assignedHeat = assignedPlayer ? heatStyle(heatValue(assignedPlayer, heatScale, prices), heatScale) : "";
   return `<span class="dock-slot dock-carousel-slot${assignedPlayer ? " heat" : " empty-dock-slot"}" style="${assignedHeat}" tabindex="0" data-carousel-key="${escapeHtml(carouselKey)}" data-carousel-index="${index}" data-carousel-default-index="${index}" data-carousel-cards="${escapeHtml(JSON.stringify(cards))}" data-preview-id="dock-${escapeHtml(carouselKey)}-${escapeHtml(card.id)}" data-preview-card="${escapeHtml(card.card)}">
-    <small class="dock-slot-head"><span>${escapeHtml(label)}</span><b>${cards.length}</b></small>
+    <small class="dock-slot-head"><span>${escapeHtml(label)}${dockChipCost(assignedPlayer, prices)}</span><b>${cards.length}</b></small>
     <span>${assignedPlayer ? escapeHtml(dockChipName(assignedPlayer)) : "open"}</span>
   </span>`;
 }
@@ -7923,6 +7923,17 @@ function resetDockPreview(slot) {
 }
 
 
+
+// What the starter cost, beside his position: the winning bid in an auction, and
+// his printed points unless the room is drafting blind.
+function dockChipCost(player, prices) {
+  if (!player) return "";
+  const parts = [];
+  const price = prices?.get(player.id);
+  if (price !== undefined) parts.push(money(price));
+  if (!pointsHidden()) parts.push(`${player.points}`);
+  return parts.length ? ` <em class="dock-slot-cost">${parts.join(" · ")}</em>` : "";
+}
 
 function dockChipName(player) {
   const match = player.name.match(/^(\S+)\s+(.+)$/);
