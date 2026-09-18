@@ -183,15 +183,15 @@ Before a plate appearance, the auto-manager may attempt one steal using the adva
 
 ## Coaches (optional draft mode)
 
-Tick `Deal the coaching staff` on the setup screen and the deck deals six coach cards, drawn by the seed from a catalog of twelve. A coach is a card of its own kind (`coach`): it has a name, a job, points, and an ability, and no chart, position, on-base, or control.
+Tick `Deal the coaching staff` on the setup screen and the deck deals ten coach cards on top of its usual quotas: every coach but two, drawn by the seed from a catalog of twelve. A coach is a card of its own kind (`coach`): it has a name, a job, points, and an ability, and no chart, position, on-base, or control.
 
 How coaches draft:
 
 - A coach takes no roster slot and counts toward no minimum. Every rule that asks whether a roster is full asks about the players on it; a manager with thirteen players and three coaches is exactly as full as one with thirteen and none. Nobody has to draft a coach.
 - In a snake draft a coach costs the pick he was taken with. The draft runs until every roster holds its full complement of players; the snake keeps its order but skips a seat whose players are all in, so the extra turns fall to whoever spent theirs on coaches, at the end of the draft. Taking a coach in the fourth round means your player picks each slide a round, and your last one lands after everyone else is done.
 - In a manual-nomination auction a coach is nominated and bid on like any card; his lot reserves no roster slot in the max-bid arithmetic. A manager whose player roster is full nominates and bids no more, so coaches must be bought before the thirteenth player.
-- In a random-nomination auction every coach is on the visible board, and coaches take the DH group's seats in the hidden queue: as many of the `floor(1.4n)` any-hitter seats as there are coaches. The night is exactly as long as it would have been, one fewer spare bat comes up per coach (it stays on the board for the sweep), and a small room may never see some of the six. The sweep never hands out a coach.
-- The deal: on the snake/manual-auction deck the six dealt coaches take the DH group's six seats (rooms of nine or more managers keep the extra DH seats as bats), so the board is the same size. Every other card is the card the coaches-off deal would have dealt. The random-nomination board keeps its full bat reserve and adds the six coaches on top. Which six is a seeded draw from the twelve, so a new seed deals a different staff.
+- In a random-nomination auction every dealt coach sits on the visible board and comes up for bid as a lot of its own, on top of the slot quotas, so no bat that would have come up is displaced. The sweep never hands out a coach.
+- The deal: coaches are additional draws. Every position group and the DH shelf deal exactly what they would without coaches, and the ten coaches ride on top, so a room with coaches holds every player the room without them holds. Which ten is a seeded draw from the twelve, so a new seed sits a different pair out.
 - Computer managers price a coach at his printed points, and take one in a snake only when the drop from the best available player to the replacement level at that spot is smaller than the coach is worth — late in the draft, when the board is scrubs. In an auction they bid the minimum-ish on him as bench-depth value.
 
 The twelve coaches:

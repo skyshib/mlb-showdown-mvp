@@ -20,11 +20,11 @@ export const COACH_KIND = "coach";
 // fills no slot, so no roster-shape rule ever sees one.
 export const COACH_GROUP = "COACH";
 
-// How many of the catalog a board deals: six, drawn by the seed, in lieu of the
-// DH group's seats. Twelve on every board would make the clipboards a third of
-// the draft; six keeps them scarce, and a different six each night keeps the
-// room guessing which arguments it is about to have.
-export const COACHES_PER_BOARD = 6;
+// How many of the catalog stay home each night. A board deals every coach but
+// these, drawn by the seed and added ON TOP of the usual deck — the DH shelf
+// and every position group deal exactly what they would without coaches. Two
+// out keeps the room guessing which arguments it is not going to have.
+export const COACHES_HELD_BACK = 2;
 
 // The old cards graded speed A/B/C; the later printings put a number on it. An
 // "A" is the top of the numeric scale: the 2000-01 A was a 20, and the numbered
@@ -185,6 +185,9 @@ export const COACHES = [
 }));
 
 const COACHES_BY_ID = new Map(COACHES.map((coach) => [coach.id, coach]));
+
+// How many coaches a board deals: the catalog less the ones held back.
+export const COACHES_PER_BOARD = Math.max(0, COACHES.length - COACHES_HELD_BACK);
 
 export function coachById(id) {
   return COACHES_BY_ID.get(id) ?? null;

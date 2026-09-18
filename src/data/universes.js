@@ -497,19 +497,12 @@ export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, start
     ? ""
     : `${managerCount > DECK_BASELINE_MANAGERS ? `:m${Math.round(managerCount)}` : ""}${defaultRotation ? "" : `:sp${Math.round(startingPitchers)}`}${penSalt(pen)}`;
   const rngKey = `deck-deal:${universeKey()}:${seed}${salt}`;
-  // Coaches deal IN LIEU of the DH group — the bats no position needs — so the
-  // board is the same size with them as without. The position groups deal
-  // first and deal the same cards either way; only the DH shelf gives up its
-  // seats, and a room too big for six seats keeps the rest of them as bats.
-  // Six of the catalog's twelve come, drawn by the seed (see dealCoaches).
-  const coachCount = pen.coaches ? Math.min(COACHES_PER_BOARD, quotaFor(quotas, "DH")) : 0;
-  if (!coachCount) return dealDeckToQuotas(quotas, rngKey);
-  const trimmed = quotas.map(([group, quota]) => [group, group === "DH" ? quota - coachCount : quota]);
-  return [...dealDeckToQuotas(trimmed, rngKey), ...dealCoaches(coachCount, `${rngKey}:coaches`)];
-}
-
-function quotaFor(quotas, group) {
-  return quotas.find(([name]) => name === group)?.[1] ?? 0;
+  // Coaches are ADDITIONAL draws. The position groups and the DH shelf deal
+  // exactly what they would without them, and the coaches ride on top — so a
+  // room with coaches holds every player the room without them holds. Every
+  // coach but two comes, drawn by the seed (see dealCoaches).
+  const dealt = dealDeckToQuotas(quotas, rngKey);
+  return pen.coaches ? [...dealt, ...dealCoaches(COACHES_PER_BOARD, `${rngKey}:coaches`)] : dealt;
 }
 
 // Which coaches: a seeded draw from the catalog, so the same room deals the
@@ -530,10 +523,9 @@ export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 
   const rotationSalt = Math.round(Number(startingPitchers) || 2) === 2 ? "" : `:sp${Math.round(startingPitchers)}`;
   const rngKey = `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}${rotationSalt}${penSalt(pen)}`;
   const deck = dealDeckToQuotas(visible, rngKey);
-  // The dealt coaches are on the visible board; which of them come up is the
-  // hidden queue's business, where they take the DH group's seats (see
-  // buildNominationQueue in draft.js). The bats' reserve is untouched, so the
-  // closing sweep keeps every promise it made.
+  // The dealt coaches sit on the visible board, and every one of them comes up
+  // for bid as a lot of its own (see buildNominationQueue in draft.js). The
+  // bats' quotas are untouched, so the closing sweep keeps every promise it made.
   return pen.coaches ? [...deck, ...dealCoaches(COACHES_PER_BOARD, `${rngKey}:coaches`)] : deck;
 }
 

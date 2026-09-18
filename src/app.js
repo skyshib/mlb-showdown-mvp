@@ -1811,7 +1811,7 @@ function renderCoachesFieldset(on) {
         <legend>Coaches</legend>
         <label class="pool-option">
           <input type="checkbox" name="coaches" ${on ? "checked" : ""} />
-          <span><strong>Deal the coaching staff</strong><small>Six of the twelve coaches join the board, drawn by the seed, in place of the spare DH bats. A coach takes no roster slot &mdash; draft as many as you like, or none &mdash; but he costs a pick (or a bid), and each does one small thing to the way your club plays. In a random-nomination room they come up in the queue in place of DH bats, so a small room may not see all six.</small></span>
+          <span><strong>Deal the coaching staff</strong><small>Ten of the twelve coaches join the board on top of the usual deal, drawn by the seed. A coach takes no roster slot &mdash; draft as many as you like, or none &mdash; but he costs a pick (or a bid), and each does one small thing to the way your club plays. In a random-nomination room every dealt coach comes up for bid as a lot of its own.</small></span>
         </label>
         <ul class="setup-coach-list">${roll}</ul>
       </fieldset>`;

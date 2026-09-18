@@ -5,8 +5,9 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
-import { buildDraftPool, deckEntry, deckFromIds } from "../src/data/universes.js";
-import { RESULTS, resolveSwing } from "../src/rules/cards.js";
+import { buildDraftPool, cardById, deckEntry, deckFromIds, setUniverse, universePool } from "../src/data/universes.js";
+import { RESULTS, resolveChart, resolveSwing } from "../src/rules/cards.js";
+import { actAcceptRealign, actAdvance, actPitch, actSwing, battlePhase, createBattle, fastForward } from "../src/rules/battle/controller.js";
 import {
   COACHES,
   COACHES_PER_BOARD,
@@ -134,9 +135,9 @@ function coachRoom(managerCount, seed, options = {}) {
 
 // ---- the cards ----------------------------------------------------------------
 
-test("the catalog holds twelve distinct coaches, deals six, and only the Wild Card asks a question", () => {
+test("the catalog holds twelve distinct coaches, deals ten, and only the Wild Card asks a question", () => {
   assert.equal(COACHES.length, 12);
-  assert.equal(COACHES_PER_BOARD, 6);
+  assert.equal(COACHES_PER_BOARD, 10);
   assert.equal(new Set(COACHES.map((card) => card.id)).size, 12);
   assert.ok(COACHES.every(isCoach));
   assert.ok(COACHES.every((card) => card.points > 0 && card.blurb && card.title));
@@ -219,44 +220,39 @@ test("coachEffects folds a staff into counts and the Wild Card into a mark on on
 
 // ---- the deal ----------------------------------------------------------------
 
-test("coaches deal in place of the DH group's seats on the snake board", () => {
+test("coaches are extra draws on top of the snake board, the DH shelf included", () => {
   const plain = buildDraftPool("classic", "coach-deal", { managerCount: 4 });
   const dealt = buildDraftPool("classic", "coach-deal", { managerCount: 4, coaches: true });
   assert.equal(plain.filter(isCoach).length, 0);
-  assert.equal(dealt.length, plain.length, "the board is the same size");
-  assert.equal(dealt.filter(isCoach).length, COACHES_PER_BOARD);
-  assert.equal(new Set(dealt.filter(isCoach).map((card) => card.id)).size, COACHES_PER_BOARD, "six different coaches");
-  assert.ok(dealt.filter(isCoach).every((card) => coachById(card.id)), "every one of them is in the catalog");
-  assert.equal(dealt.filter((card) => card.position === "DH").length, 0, "the six DH seats went to the coaches");
-  assert.equal(plain.filter((card) => card.position === "DH").length, 6);
-  // The biddable board is the board it was. The ten standing replacements are
-  // drawn from whoever the deal left out, so they may differ once the DH seats
-  // hold coaches instead of bats — that is the deal working as designed.
-  const plainIds = new Set(plain.map((card) => card.id));
-  assert.ok(dealt.filter((card) => !isCoach(card) && !card.replacement).every((card) => plainIds.has(card.id)), "every other biddable card is the card it was");
-  assert.equal(dealt.filter((card) => card.replacement).length, plain.filter((card) => card.replacement).length, "the standing replacements are still all there");
-  assert.ok(dealt.filter(isCoach).every((card) => card.slot === "COACH"));
+  assert.equal(COACHES_PER_BOARD, COACHES.length - 2, "every coach but two");
+  assert.equal(dealt.length, plain.length + COACHES_PER_BOARD, "the board grew by the staff and nothing else");
+  const coaches = dealt.filter(isCoach);
+  assert.equal(coaches.length, COACHES_PER_BOARD);
+  assert.equal(new Set(coaches.map((card) => card.id)).size, COACHES_PER_BOARD, "ten different coaches");
+  assert.ok(coaches.every((card) => coachById(card.id) && card.slot === "COACH"), "every one of them is in the catalog");
+  assert.equal(dealt.filter((card) => card.position === "DH").length, plain.filter((card) => card.position === "DH").length, "the DH shelf is still there");
+  // Every other card — the biddable deck and the standing replacements alike —
+  // is exactly the card the coaches-off deal dealt, in the same order.
+  assert.deepEqual(dealt.filter((card) => !isCoach(card)).map((card) => card.id), plain.map((card) => card.id));
+  // Two sit out, by the seed.
+  const sitOut = (deck) => COACHES.filter((coach) => !deck.some((card) => card.id === coach.id)).map((coach) => coach.id);
+  assert.equal(sitOut(dealt).length, 2);
+  assert.equal(sitOut(buildDraftPool("classic", "coach-deal-2", { managerCount: 4, coaches: true })).length, 2);
 });
 
-test("a random-nomination board shows every coach and the queue seats them in place of DH bats", () => {
-  const withCoaches = coachRoom(3, "coach-rn", { draftType: "auction", nomination: "random", budget: 5000 });
+test("a random-nomination board shows every dealt coach and puts each of them up as an extra lot", () => {
   const plainDraft = createDraft(["M1", "M2", "M3"], buildDraftPool("classic", "coach-rn", { managerCount: 3, nomination: "random" }), 13, "coach-rn", {
     draftType: "auction", nomination: "random", budget: 5000, timer: false
   });
+  const withCoaches = coachRoom(3, "coach-rn", { draftType: "auction", nomination: "random", budget: 5000 });
   assert.equal(plainDraft.coaches, false);
   assert.equal(withCoaches.pool.filter(isCoach).length, COACHES_PER_BOARD);
   assert.equal(withCoaches.pool.length, plainDraft.pool.length + COACHES_PER_BOARD, "the visible board grew by the staff, no bat lost");
   const queue = withCoaches.draft.auction.queue;
-  assert.equal(queue.length, plainDraft.auction.queue.length, "the night is exactly as long");
-  const queuedCoaches = queue.filter((id) => isCoach(coachById(id)));
-  // Three managers hide floor(1.4 * 3) = 4 DH seats, so four coaches come up.
-  assert.equal(queuedCoaches.length, 4);
-  // Nothing about the coaches-off queue moved: the same room deals the same
-  // order it dealt before the mode existed.
-  const again = createDraft(["M1", "M2", "M3"], buildDraftPool("classic", "coach-rn", { managerCount: 3, nomination: "random" }), 13, "coach-rn", {
-    draftType: "auction", nomination: "random", budget: 5000, timer: false
-  });
-  assert.deepEqual(again.auction.queue, plainDraft.auction.queue);
+  assert.equal(queue.length, plainDraft.auction.queue.length + COACHES_PER_BOARD, "every coach is a lot of its own");
+  assert.equal(queue.filter((id) => isCoach(coachById(id))).length, COACHES_PER_BOARD, "every dealt coach comes up");
+  // The bats that come up are exactly the bats that came up without coaches.
+  assert.deepEqual(queue.filter((id) => !isCoach(coachById(id))).sort(), [...plainDraft.auction.queue].sort());
 });
 
 test("a saved deck rebuilds its coaches from their ids", () => {
@@ -688,6 +684,179 @@ test("old school turns two and never runs", () => {
   const plain = twoOn([]);
   assert.equal(plain.fielding, 0);
   assert.equal(plain.batterOut, false);
+});
+
+// ---- the sweep ----------------------------------------------------------------
+//
+// Every coach, on every kind of card set, through real games: nothing throws,
+// every result is a printed result, and a swing pushed off the die reads the
+// row the card prints for it — the 20's row when the chart stops at 20, the
+// printed 21+ row when the old card has one.
+
+const SWEEP_SETS = ["classic", "mlb-history", "fictional", "decade-1920", "franchise-SEA"];
+const VALID_RESULTS = new Set(Object.values(RESULTS));
+
+// Hand a manager a staff — any coaches, dealt to his board or not — and name
+// the Wild Card's man: heads on an odd-sized staff, tails on an even one.
+function staffed(manager, coachIds) {
+  const roster = manager.roster.filter((card) => !isCoach(card));
+  const coaches = coachIds.map((id) => coachById(id));
+  const bat = roster.find((card) => card.kind === "hitter");
+  const wild = coaches.find((card) => needsCoachTarget(card));
+  return {
+    ...manager,
+    roster: [...roster, ...coaches],
+    coachTargets: wild ? { [wild.id]: { playerId: bat.id, swing: coachIds.length % 2 ? 1 : -1 } } : {}
+  };
+}
+
+// The row each swing read, checked against the runtime card the game says it
+// was read on — whose chart already carries Punchouts' and Contact's edits.
+function checkSwings(game, tally) {
+  const sides = { away: game.away, home: game.home };
+  for (const event of game.events) {
+    if (event.type === "steal" || typeof event.resultRoll !== "number") continue;
+    assert.ok(VALID_RESULTS.has(event.result), `${event.result} is a result`);
+    const battingSide = event.half === "top" ? "away" : "home";
+    const pitchingSide = battingSide === "away" ? "home" : "away";
+    const card = event.chartOwner === "pitcher"
+      ? sides[pitchingSide].pitchers.find((arm) => arm.id === event.pitcherId)
+      : sides[battingSide].lineup.find((bat) => bat.id === event.batterId);
+    if (!card) continue;
+    const roll = event.swingRoll ?? event.resultRoll;
+    assert.equal(event.result, event.swingBonus ? resolveSwing(card.chart, roll) : resolveChart(card.chart, roll), `${card.name} at ${roll}`);
+    if (roll > 20) {
+      tally.past20 += 1;
+      const printed = card.chart.find((row) => roll >= row.from && roll <= (Number.isFinite(row.to) ? row.to : Infinity));
+      const topRow = card.chart.reduce((top, row) => (row.from > top.from ? row : top));
+      const expected = printed ? printed.result : topRow.from <= 20 ? resolveChart(card.chart, 20) : topRow.result;
+      assert.equal(event.result, expected, `a ${roll} on ${card.name}`);
+      if (!printed) tally.readAsTwenty += 1;
+    }
+    if (roll < 1) {
+      tally.underOne += 1;
+      assert.equal(event.result, resolveChart(card.chart, 1), `a ${roll} on ${card.name} reads the 1`);
+    }
+  }
+}
+
+test("every coach, on every kind of card set, plays whole seasons without breaking a game", () => {
+  const tally = { games: 0, past20: 0, readAsTwenty: 0, underOne: 0 };
+  for (const mode of SWEEP_SETS) {
+    const seed = `sweep-${mode}`;
+    const pool = buildDraftPool(mode, seed, { managerCount: 3, coaches: true });
+    const draft = createDraft(["A", "B", "C"], pool, 13, seed);
+    while (!draft.complete) autopick(draft);
+    const everyone = COACHES.map((coach) => coach.id);
+    const configs = [
+      ...COACHES.map((coach) => [[coach.id], []]),
+      [everyone, []],
+      [everyone, everyone]
+    ];
+    configs.forEach(([aIds, bIds], index) => {
+      const teams = [staffed(draft.managers[0], aIds), staffed(draft.managers[1], bIds), draft.managers[2]]
+        .map((manager) => buildTeam(manager, { optimize: true }));
+      const names = teams.map((team) => team.name);
+      for (const { game } of replayBatchGames(teams, `${seed}-${index}`, 0, 30)) {
+        tally.games += 1;
+        assert.ok(names.includes(game.winner), `${mode}: ${game.winner} won`);
+        checkSwings(game, tally);
+      }
+    });
+  }
+  assert.ok(tally.games >= 2000, `${tally.games} games`);
+  assert.ok(tally.past20 > 0, "swings were pushed past the die");
+  assert.ok(tally.readAsTwenty > 0, "on charts that stop at 20, they read the 20");
+  assert.ok(tally.underOne > 0, "swings were pushed under the die");
+});
+
+test("on the old cards a pushed swing reads the 20 where the chart stops, and the printed 21+ row where it doesn't", () => {
+  setUniverse("boundary", "classic", { priceNoise: false });
+  const stopsAt20 = (card) => card.chart.every((row) => Number.isFinite(row.to) && row.to <= 20);
+  const printsPast20 = (card) => card.chart.some((row) => row.from > 20);
+  const pool = universePool();
+  const cappedBat = pool.find((card) => card.kind === "hitter" && stopsAt20(card));
+  const cappedArm = pool.find((card) => card.kind === "pitcher" && stopsAt20(card));
+  const deepArm = pool.find((card) => card.kind === "pitcher" && printsPast20(card) && card.chart.some((row) => row.from === 21));
+  const deepBat = pool.find((card) => card.kind === "hitter" && printsPast20(card));
+  assert.ok(cappedBat && cappedArm && deepArm && deepBat, "the classic set prints both kinds of chart");
+  assert.equal(cardById(cappedBat.id), cappedBat);
+
+  const batting = (card, coaches, setup, rolls) => {
+    const away = makeTeam("away", { coaches });
+    away.lineup[0] = { ...card, defensivePosition: "C" };
+    return playFirstBatter(away, makeTeam("home"), rolls, setup ?? (() => {})).event;
+  };
+  const pitching = (card, coaches, setup, rolls) => {
+    const home = makeTeam("home");
+    home.pitchers = [{ ...card }];
+    return playFirstBatter(makeTeam("away", { coaches }), home, rolls, setup ?? (() => {})).event;
+  };
+  const ninthTied = (state) => { state.inning = 9; };
+
+  // A chart that stops at 20: the Clutch Gene's 22 and the hitting coach's 21
+  // both read the 20's row. Nothing throws, nothing invents a row.
+  const clutch = batting(cappedBat, [coach("coach-clutch-gene")], null, [1, 20]);
+  assert.equal(clutch.swingRoll, 22);
+  assert.equal(clutch.result, resolveChart(cappedBat.chart, 20), cappedBat.name);
+  const late = batting(cappedBat, [coach("coach-late-innings")], ninthTied, [1, 20]);
+  assert.equal(late.swingRoll, 21);
+  assert.equal(late.result, resolveChart(cappedBat.chart, 20), cappedBat.name);
+  // Pushed under the die, it reads the 1's row.
+  const under = batting(cappedBat, [coach("coach-wild-card", { playerId: cappedBat.id, swing: -1 })], null, [1, 1]);
+  assert.equal(under.swingRoll, 0);
+  assert.equal(under.result, resolveChart(cappedBat.chart, 1), cappedBat.name);
+  // The same on a pitcher's chart that stops at 20, read when the arm wins the pitch.
+  const armCapped = pitching(cappedArm, [coach("coach-late-innings")], ninthTied, [20, 20]);
+  assert.equal(armCapped.chartOwner, "pitcher");
+  assert.equal(armCapped.swingRoll, 21);
+  assert.equal(armCapped.result, resolveChart(cappedArm.chart, 20), cappedArm.name);
+
+  // A chart that prints a 21+ row: the +1 reaches it, which no bare die could.
+  const armDeep = pitching(deepArm, [coach("coach-late-innings")], ninthTied, [20, 20]);
+  assert.equal(armDeep.chartOwner, "pitcher");
+  const row21 = deepArm.chart.find((row) => row.from === 21);
+  assert.equal(armDeep.result, row21.result, `${deepArm.name}'s printed 21+ row`);
+  // A bare 20 stops at the 20's row, which is not that row.
+  assert.equal(pitching(deepArm, [], null, [20, 20]).result, resolveChart(deepArm.chart, 20));
+  assert.notEqual(row21.result, resolveChart(deepArm.chart, 20), `${deepArm.name} prints something past the die`);
+  const batDeep = batting(deepBat, [coach("coach-clutch-gene")], null, [1, 20]);
+  assert.equal(batDeep.result, resolveSwing(deepBat.chart, 22), `${deepBat.name} at 22`);
+});
+
+test("the interactive game runs two fully coached clubs to the final out", () => {
+  const { draft } = coachRoom(2, "battle-coaches");
+  while (!draft.complete) autopick(draft);
+  const everyone = COACHES.map((coach) => coach.id);
+  const battle = createBattle({
+    playerManager: staffed(draft.managers[0], everyone),
+    npcManager: staffed(draft.managers[1], everyone),
+    seed: "battle-coaches"
+  });
+  // The autopilot first, then every phase by hand, the way the screen does it.
+  fastForward(battle, { maxEvents: 200 });
+  let guard = 4000;
+  while (battlePhase(battle).type !== "over" && guard > 0) {
+    guard -= 1;
+    const phase = battlePhase(battle);
+    if (phase.type === "player-batting") {
+      // Old School: the club never runs, so the screen is never offered a steal.
+      assert.deepEqual(phase.stealOptions, []);
+      actSwing(battle);
+    } else if (phase.type === "player-pitching") {
+      actPitch(battle);
+    } else if (phase.type === "advance-decision") {
+      actAdvance(battle, phase.pending.autoSend ?? 0);
+    } else if (phase.type === "realign") {
+      actAcceptRealign(battle);
+    } else {
+      throw new Error(`unexpected phase ${phase.type}`);
+    }
+  }
+  const final = battlePhase(battle);
+  assert.equal(final.type, "over");
+  assert.ok(guard > 0, "the game ended on its own");
+  assert.ok(battle.events.some((event) => event.coachNotes?.length), "the coaches showed up in the game");
 });
 
 // ---- the room ----------------------------------------------------------------

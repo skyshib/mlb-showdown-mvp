@@ -536,29 +536,24 @@ function dealtInSlot(player, group) {
 function buildNominationQueue(draft) {
   const rng = createRng(`${draft.seed}:nomination-queue`);
   const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft);
-  // Coaches come up IN LIEU of any-hitter bats: each takes one of the DH
-  // group's seats in the queue, so the night is exactly as long as it would
-  // have been and one fewer spare bat comes up for bid (it sits on the board
-  // for the sweep instead, which only widens the reserve). A small room has
-  // fewer DH seats than there are coaches, and then some coaches never come
-  // up at all — that is the deal, same as the DH bats the queue leaves behind.
-  // A room with no coaches draws nothing extra from the rng, so every room
-  // dealt before this mode existed still deals the same queue.
-  const coaches = draft.pool.filter(isCoach);
   const queue = [];
   const queued = new Set();
   for (const [group, count] of hidden) {
-    const coachSeats = group === ANY_HITTER ? Math.min(coaches.length, count) : 0;
     const cards = draft.pool.filter((player) =>
       !player.replacement && !queued.has(player.id) && dealtInSlot(player, group));
-    for (const player of shuffleSeeded(cards, rng).slice(0, count - coachSeats)) {
+    for (const player of shuffleSeeded(cards, rng).slice(0, count)) {
       queued.add(player.id);
       queue.push(player);
     }
-    for (const coach of coachSeats ? shuffleSeeded(coaches, rng).slice(0, coachSeats) : []) {
-      queued.add(coach.id);
-      queue.push(coach);
-    }
+  }
+  // Coaches are ADDITIONAL lots: every coach the board dealt comes up, on top
+  // of the slot quotas, so no bat that would have come up is displaced. A room
+  // with no coaches draws nothing extra from the rng, so every room dealt
+  // before this mode existed still deals the same queue.
+  for (const coach of draft.pool.filter(isCoach)) {
+    if (queued.has(coach.id)) continue;
+    queued.add(coach.id);
+    queue.push(coach);
   }
   return shuffleSeeded(queue, rng).map((player) => player.id);
 }
