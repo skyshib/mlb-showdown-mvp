@@ -4523,7 +4523,6 @@ function renderBatch() {
   const pitcherLines = pitcherTeamFilter === "all"
     ? allPitcherLines
     : allPitcherLines.filter((line) => line.team === pitcherTeamFilter);
-  const fipConstant = tournamentFipConstant(allPitcherLines);
   const teamGamesByName = new Map(summary.teams.map((row) => [row.team, row.games ?? teamScheduleGames(row)]));
   const sortedTeams = sortBatchRows(summary.teams, "teams", (row, sort) => batchTeamSortValue(row, sort));
   const starterResults = summary.starterResults ?? [];
@@ -4537,7 +4536,7 @@ function renderBatch() {
     }
   }
   const sortedHitters = sortBatchRows(hitterLines, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
-  const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, fipConstant, teamGamesByName));
+  const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, teamGamesByName));
   const winProbabilityNote = "Win probability comes from a simulated table calibrated to a modern MLB run environment (about 4.4 runs a game) with no home-field edge, so a swing is measured against what that state is worth in an average ballgame, not in this room's.";
 
   const teamRows = sortedTeams
@@ -4596,7 +4595,6 @@ function renderBatch() {
         <td class="num">${formatPerNine(line.so, line.outs)}</td>
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
-        <td class="num">${formatFip(line, fipConstant)}</td>
         ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
         ${hasWar ? `<td class="num">${line.warPer162 ? formatWar(line.warPer162.pitching) : "—"}</td>` : ""}
       </tr>`
@@ -4956,7 +4954,6 @@ function renderBatch() {
           ${renderBatchSortHeader("pitchers", "k9", "K/9", "num")}
           ${renderBatchSortHeader("pitchers", "bb9", "BB/9", "num")}
           ${renderBatchSortHeader("pitchers", "era", "ERA", "num")}
-          ${renderBatchSortHeader("pitchers", "fip", "FIP", "num")}
           ${renderBatchSortHeader("pitchers", "wpa162", "WPA", "num")}
           ${hasWar ? renderBatchSortHeader("pitchers", "war", "Pitch WPAR", "num") : ""}
         </tr></thead>
@@ -5810,7 +5807,7 @@ function batchStarterSortValue(row, sort) {
   return row.team;
 }
 
-function batchPitcherSortValue(line, sort, fipConstant, teamGamesByName) {
+function batchPitcherSortValue(line, sort, teamGamesByName) {
   if (sort === "name") return line.name;
   if (sort === "team") return line.team;
   if (sort === "role") return line.role;
@@ -5818,7 +5815,6 @@ function batchPitcherSortValue(line, sort, fipConstant, teamGamesByName) {
   if (sort === "k9") return rateValue(line.so * 27, line.outs);
   if (sort === "bb9") return rateValue(line.bb * 27, line.outs);
   if (sort === "era") return rateValue(line.r * 27, line.outs);
-  if (sort === "fip") return line.outs ? rawFip(line) + fipConstant : Number.POSITIVE_INFINITY;
   if (sort === "wpa162") return batchPace(line, "wpaPer162", "wpa", teamGamesByName);
   if (sort === "war") return line.warPer162?.pitching ?? 0;
   return rateValue(line.r * 27, line.outs);
@@ -5887,12 +5883,15 @@ function normalizeBatchSorts(value) {
   // old defaults opens on WPAR like a fresh one.
   if (sorts.hitters?.sort === "ops" && sorts.hitters.direction === "desc") sorts.hitters = { sort: "war", direction: "desc" };
   if (sorts.pitchers?.sort === "era" && sorts.pitchers.direction === "asc") sorts.pitchers = { sort: "war", direction: "desc" };
+  // FIP left the pitcher table; a save still sorted on it opens on the ERA
+  // column next door, sorted the way FIP was.
+  if (sorts.pitchers?.sort === "fip") sorts.pitchers = { sort: "era", direction: sorts.pitchers.direction ?? "asc" };
   return sorts;
 }
 
 function defaultBatchSortDirection(table, sort) {
   if (["name", "team", "position", "role"].includes(sort)) return "asc";
-  if (table === "pitchers" && ["era", "fip", "bb9"].includes(sort)) return "asc";
+  if (table === "pitchers" && ["era", "bb9"].includes(sort)) return "asc";
   if (SKILL_SORTS_BEST_LOW[table]?.includes(sort)) return "asc";
   return "desc";
 }
@@ -6425,7 +6424,6 @@ function renderTournamentStats(games) {
   const playersById = draftedPlayersById();
   const stats = aggregateTournamentStats(games, playersById);
   const leagueWoba = tournamentWoba(stats.hitters);
-  const fipConstant = tournamentFipConstant(stats.pitchers);
   const hitters = stats.hitters.sort((a, b) => compareTournamentHitters(a, b, leagueWoba));
   const pitchers = stats.pitchers.sort(compareTournamentPitchers);
   const baserunning = stats.teams.sort(compareTournamentBaserunning);
@@ -6460,8 +6458,8 @@ function renderTournamentStats(games) {
         <h3>Pitchers</h3>
         <div class="table-scroll">
           <table class="tournament-stat-table">
-            <thead><tr><th>Player</th><th>Team</th><th class="num">IP</th><th class="num">K/9</th><th class="num">BB/9</th><th class="num">ERA</th><th class="num">FIP</th></tr></thead>
-            <tbody>${pitchers.map((row) => renderTournamentPitcherRow(row, fipConstant)).join("")}</tbody>
+            <thead><tr><th>Player</th><th>Team</th><th class="num">IP</th><th class="num">K/9</th><th class="num">BB/9</th><th class="num">ERA</th></tr></thead>
+            <tbody>${pitchers.map((row) => renderTournamentPitcherRow(row)).join("")}</tbody>
           </table>
         </div>
       </div>
@@ -6542,7 +6540,7 @@ function renderTournamentHitterRow(row, leagueWoba) {
   </tr>`;
 }
 
-function renderTournamentPitcherRow(row, fipConstant) {
+function renderTournamentPitcherRow(row) {
   return `<tr>
     <td>${renderTournamentPlayerName(row)}</td>
     <td>${escapeHtml(row.team)}</td>
@@ -6550,7 +6548,6 @@ function renderTournamentPitcherRow(row, fipConstant) {
     <td class="num">${formatPerNine(row.so, row.outs)}</td>
     <td class="num">${formatPerNine(row.bb, row.outs)}</td>
     <td class="num">${formatPerNine(row.r, row.outs)}</td>
-    <td class="num">${formatFip(row, fipConstant)}</td>
   </tr>`;
 }
 
@@ -6849,11 +6846,6 @@ function formatRunsPerNine(runs, outs) {
   return formatPerNine(runs, outs);
 }
 
-function formatFip(row, constant) {
-  if (!row.outs) return "---";
-  return (rawFip(row) + constant).toFixed(2);
-}
-
 function totalBases(row) {
   return singles(row) + (row.d ?? 0) * 2 + (row.t ?? 0) * 3 + (row.hr ?? 0) * 4;
 }
@@ -6889,26 +6881,8 @@ function wrcPlus(row, leagueWoba) {
   return Math.round((woba(row) / leagueWoba) * 100);
 }
 
-function inningsPitched(row) {
-  return row.outs / 3;
-}
-
 function runsPerNine(runs, outs) {
   return outs ? (runs * 27) / outs : Number.POSITIVE_INFINITY;
-}
-
-function rawFip(row) {
-  const innings = inningsPitched(row);
-  if (!innings) return 0;
-  return (13 * row.hr + 3 * row.bb - 2 * row.so) / innings;
-}
-
-function tournamentFipConstant(rows) {
-  const outs = rows.reduce((sum, row) => sum + row.outs, 0);
-  if (!outs) return 0;
-  const runs = rows.reduce((sum, row) => sum + row.r, 0);
-  const raw = rows.reduce((sum, row) => sum + rawFip(row) * inningsPitched(row), 0) / (outs / 3);
-  return runsPerNine(runs, outs) - raw;
 }
 
 function formatInnings(outs) {
