@@ -203,6 +203,22 @@ export function resolveChart(chart, roll) {
   return match.result;
 }
 
+// A swing with a modifier on it can leave the die: a 20 with +1 on it is a 21,
+// a 1 with -1 on it is a 0. The card has an answer for both, the way the printed
+// cards do — the top row is "20+" and anything past the top reads there, and
+// nothing reads below the first row. Only the coaches' swing bonuses ever roll
+// off the die, so plain swings still go through resolveChart untouched.
+export function resolveSwing(chart, roll) {
+  const value = Number(roll);
+  const match = chart.find((entry) => value >= entry.from && value <= (Number.isFinite(entry.to) ? entry.to : Infinity));
+  if (match) return match.result;
+  const sorted = [...chart].sort((a, b) => a.from - b.from);
+  if (!sorted.length) {
+    throw new Error(`No chart result for roll ${roll}`);
+  }
+  return (value < sorted[0].from ? sorted[0] : sorted[sorted.length - 1]).result;
+}
+
 export function compactChart(chart) {
   return chart.map((entry) => `${formatRange(entry)}: ${entry.result}`).join(", ");
 }

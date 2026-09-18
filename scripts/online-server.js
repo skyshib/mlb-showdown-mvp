@@ -221,7 +221,8 @@ function roomPool(room) {
     startingPitchers: room.startingPitchers,
     bullpenSlots: room.bullpenSlots,
     bullpenMin: room.bullpenMin,
-    temperature: room.temperature
+    temperature: room.temperature,
+    coaches: room.coaches
   });
 }
 
@@ -239,6 +240,7 @@ function reviveRoom(saved) {
   const { bullpenSlots, bullpenMin } = roomBullpen(saved, nomination === "random");
   const rosterSize = rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin });
   const temperature = normalizeTemperature(saved.temperature);
+  const coaches = Boolean(saved.coaches);
   const savedDeck = Array.isArray(saved.deck) && saved.deck.length ? saved.deck : null;
   const pool = roomPool({
     universe,
@@ -250,6 +252,7 @@ function reviveRoom(saved) {
     bullpenSlots,
     bullpenMin,
     temperature,
+    coaches,
     managerCount: managerNames.length,
     deck: savedDeck
   });
@@ -293,6 +296,7 @@ function reviveRoom(saved) {
     draftType,
     nomination,
     hidePoints: Boolean(saved.hidePoints),
+    coaches,
     auctionBudget,
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
@@ -340,6 +344,7 @@ function roomRecord(room) {
     draftType: room.draftType,
     nomination: room.nomination ?? "manual",
     hidePoints: Boolean(room.hidePoints),
+    coaches: Boolean(room.coaches),
     auctionBudget: room.auctionBudget,
     auctionTimer: room.auctionTimer,
     cpuNames: room.cpuNames ?? [],
@@ -972,6 +977,9 @@ async function createRoom(store, request, response) {
   // Display-only house rule: hide every card's printed points. It never touches
   // the deal or the replay, so it just rides along as a room setting.
   const hidePoints = Boolean(body.hidePoints);
+  // The optional coaching staff. It changes the deal (the deck is written down
+  // with the coaches in it), so it is a room setting the deck remembers.
+  const coaches = Boolean(body.coaches);
   const auctionBudget = draftType === "auction" ? normalizeAuctionBudget(body.budget, rosterSize) : null;
   const auctionTimer = draftType === "auction" ? normalizeAuctionTimerConfig(body.auctionTimer) : null;
   const snakeTimer = draftType === "auction" ? null : normalizeSnakeTimerConfig(body.snakeTimer);
@@ -984,7 +992,7 @@ async function createRoom(store, request, response) {
   // random-nomination board is dealt to the size of the ROOM, so how many
   // managers it seats is not a question — whether the set is deep enough to
   // deal it is.
-  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, ...pen, temperature });
+  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, ...pen, temperature, coaches });
   if (nomination === "random") {
     const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers, pen);
     if (shortfalls.length) {
@@ -1026,6 +1034,7 @@ async function createRoom(store, request, response) {
     draftType,
     nomination,
     hidePoints,
+    coaches,
     auctionBudget,
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
@@ -1407,8 +1416,17 @@ function denyAction(draft, seat, isHost, action) {
   // A paused room is a room holding still: the clocks are stopped, so no move
   // that would spend one may land. Setting a lineup is not a move on the draft,
   // and stays open — a break is exactly when people tinker with their team.
-  if (isDraftPaused(draft) && type !== "lineup" && type !== "staff" && type !== "seat" && !SIM_ACTION_TYPES.has(type)) {
+  if (isDraftPaused(draft) && type !== "lineup" && type !== "staff" && type !== "seat" && type !== "coach-target" && !SIM_ACTION_TYPES.has(type)) {
     return "The draft is paused";
+  }
+  // The Wild Card's pick is a roster decision like a lineup: it is the
+  // manager's own to make (the host may make it for a stalled seat), it is
+  // legal whether the draft is live or done, and the rules decide whether the
+  // coach is his and whether the flip has already happened.
+  if (type === "coach-target") {
+    if (!draft.managers.some((manager) => manager.id === action?.managerId)) return "No such manager";
+    if (!isHost && action.managerId !== seat?.managerId) return "You can only pick for your own coach";
+    return null;
   }
   if (type === "pick" || type === "autopick") {
     if (draft.complete) return "The draft is already complete";
@@ -1656,6 +1674,7 @@ function roomSnapshot(room, port = null) {
     bullpenSlots: room.bullpenSlots ?? null,
     bullpenMin: room.bullpenMin ?? null,
     hidePoints: Boolean(room.hidePoints),
+    coaches: Boolean(room.coaches),
     auctionBudget: room.auctionBudget ?? null,
     auctionTimer: room.auctionTimer ?? null,
     managers: room.draft.managers.map((manager) => ({

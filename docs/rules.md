@@ -181,6 +181,43 @@ Before a plate appearance, the auto-manager may attempt one steal using the adva
 - Catcher throw-out mechanics use the catcher's numeric fielding value; there is no separate catcher Arm stat in this prototype.
 - Strategy cards are not implemented. Treat them as v4 or later.
 
+## Coaches (optional draft mode)
+
+Tick `Deal the coaching staff` on the setup screen and the deck deals six coach cards, drawn by the seed from a catalog of twelve. A coach is a card of its own kind (`coach`): it has a name, a job, points, and an ability, and no chart, position, on-base, or control.
+
+How coaches draft:
+
+- A coach takes no roster slot and counts toward no minimum. Every rule that asks whether a roster is full asks about the players on it; a manager with thirteen players and three coaches is exactly as full as one with thirteen and none. Nobody has to draft a coach.
+- In a snake draft a coach costs the pick he was taken with. The draft runs until every roster holds its full complement of players; the snake keeps its order but skips a seat whose players are all in, so the extra turns fall to whoever spent theirs on coaches, at the end of the draft. Taking a coach in the fourth round means your player picks each slide a round, and your last one lands after everyone else is done.
+- In a manual-nomination auction a coach is nominated and bid on like any card; his lot reserves no roster slot in the max-bid arithmetic. A manager whose player roster is full nominates and bids no more, so coaches must be bought before the thirteenth player.
+- In a random-nomination auction every coach is on the visible board, and coaches take the DH group's seats in the hidden queue: as many of the `floor(1.4n)` any-hitter seats as there are coaches. The night is exactly as long as it would have been, one fewer spare bat comes up per coach (it stays on the board for the sweep), and a small room may never see some of the six. The sweep never hands out a coach.
+- The deal: on the snake/manual-auction deck the six dealt coaches take the DH group's six seats (rooms of nine or more managers keep the extra DH seats as bats), so the board is the same size. Every other card is the card the coaches-off deal would have dealt. The random-nomination board keeps its full bat reserve and adds the six coaches on top. Which six is a seeded draw from the twelve, so a new seed deals a different staff.
+- Computer managers price a coach at his printed points, and take one in a snake only when the drop from the best available player to the replacement level at that spot is smaller than the coach is worth — late in the draft, when the board is scrubs. In an auction they bid the minimum-ish on him as bench-depth value.
+
+The twelve coaches:
+
+| Coach | Job | Effect |
+| --- | --- | --- |
+| Green Light | First base coach | Every Speed A runner (speed 18 or better) gets +1 on his target on stolen-base attempts. Steals only, not tag-ups or extra bases. |
+| Cannon Arms | Outfield coach | +1 to the outfield's fielding total on every throw: tag-ups and runners trying for the extra base. |
+| Lefty Specialist | Pitching coach | Left-handed pitchers get +1 control against left-handed hitters. Switch hitters bat right against a lefty and get no such treatment. Fatigue still applies. |
+| Late Innings | Hitting coach | From the 9th inning on, every swing gets +1 while the batting club is tied or trailing (read at the start of the plate appearance). |
+| Punchouts | Bullpen coach | Every pitcher's chart turns its lowest fly-ball face into a strikeout: `14-16 FB` becomes `14 SO, 15-16 FB`. A chart with no fly balls is unchanged. Applied to the runtime copy of each arm, never to the drafted card. |
+| Wild Card | Bench coach | The manager names one of his hitters. A coin flip gives that man +1 on every swing, or -1 on every swing, for the season. The flip is a seeded function of the room, the manager, the coach, and the hitter named, so it cannot be read before the naming and every replica of the draft agrees on it; the naming is one-way (a draft action, `coach-target`) and is undone only if the coach or the hitter leaves the roster. The hitter need not be in the lineup. A computer manager names his highest-point hitter when the draft completes. |
+| Framing | Catching coach | With two outs, a control check that lands exactly on the batter's on-base number (the tie that otherwise goes to the hitter) is read on the pitcher's chart. |
+| Platoon | Hitting coach | Right-handed and switch hitters get +1 on-base against left-handed pitchers. The batter's half of the same roll Lefty Specialist works the pitcher's half of. |
+| Contact | Hitting coach | Every hitter's chart turns its lowest strikeout face into a ground ball: `1-2 SO` becomes `1 GB, 2 SO`. Applied to the runtime copies of the bats, lineup and bench, never to the drafted cards. |
+| Rotation | Pitching coach | In the batch sim, the club's best starter by printed points draws three starts in five (`ROTATION_ACE_SHARE`), and the other starters split the rest evenly. The interactive game's starter is whoever you hand the ball; two of this coach do not stack. |
+| Clutch Gene | Mental skills coach | A natural 20 on any swing adds +2 before the chart is read, whichever chart won the control check, so the `21+` and `22+` rows some printed cards carry become reachable. |
+| Old School | Infield coach | +1 to the infield's fielding total on double-play attempts, and the club never attempts a steal — not in the sim, and not in the interactive game either. |
+
+Mechanics notes:
+
+- A swing bonus is added to the swing die before the chart is read, whichever chart won the control check. A swing pushed past 20 reads the card's top row (the printed `20+`), and one pushed below 1 reads the first row. The box score keeps the raw die.
+- Two of the same coach (a pool that dealt duplicates) stack, except Rotation.
+- Every plate appearance records `controlBonus`, `onBaseBonus`, `swingBonus`, `swingRoll`, and `coachNotes` on its event, and `onBase` is the number the pitch was actually read against; the play-by-play prints a modified die as `(14+1)`.
+- Scale: every effect is tuned to a few percent of plate appearances or a fraction of a run a game. Platoon and Framing are deliberately narrow (on-base rather than the swing; two outs only) because a +1 swing on half the plate appearances, or a tie-break on all of them, would be worth as much as a star card.
+
 ## Deferred
 
 - Sacrifice bunts.

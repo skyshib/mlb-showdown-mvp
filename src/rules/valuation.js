@@ -1,5 +1,6 @@
 import { createRng } from "./rng.js?v=20260716-records";
 import { RESULTS, chartSpan } from "./cards.js?v=20260716-records";
+import { isCoach } from "./coaches.js?v=20260910-coaches";
 
 const HITTER_BASE_WEIGHTS = {
   onBase: 20,
@@ -158,6 +159,11 @@ export function createValuationModel(seed, personalityKey = "balanced", starting
     bias: persona.bias,
     startingPitchers,
     value(player) {
+      // A coach is worth his sticker, on the same scale the bats and arms come
+      // out at — a late pick, never a star. The computer's real question about
+      // a coach is not this number but what a pick spent on him costs (see
+      // bestAutopickTarget in draft.js).
+      if (isCoach(player)) return Number(player.points) || 0;
       if (player?.kind !== "pitcher") return hitterValue(player, weights.hitter);
       const base = pitcherValue(player, weights.pitcher);
       // Only starters ride the rotation-size lift; relievers are format-neutral.

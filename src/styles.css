@@ -7194,3 +7194,80 @@ html.club .war-panel {
   color: var(--muted);
 }
 html.club .auction-focus-budget.dead-money strong { color: #ff7a6b; }
+/* ---- coaches ---- */
+
+/* The setup screen's roll call: every coach the mode deals, and what he does. */
+.setup-coach-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  columns: 2;
+  column-gap: 20px;
+}
+.setup-coach-list li { break-inside: avoid; }
+.setup-coach-list li { margin-bottom: 3px; }
+.setup-coach-list strong { color: inherit; }
+
+/* The board's coach rows: the job and the ability where the die ranges go. */
+.coach-blurb-cell {
+  max-width: 44ch;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* The roster panel's coaching shelf. */
+.coach-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.coach-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f5f8f5;
+}
+.coach-card.needs-pick { border-color: var(--warn); }
+.coach-card > strong { font-size: 14px; }
+.coach-card > small {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.coach-card > p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.coach-target-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.coach-target-form select { max-width: 100%; }
+.coach-target-form small { flex-basis: 100%; font-size: 11px; color: var(--muted); }
+.coach-flip {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+.coach-flip.up { color: var(--ok); }
+.coach-flip.down { color: var(--warn); }
+.coach-flip.pending { color: var(--warn); font-weight: 700; }
+
+/* Dark club palettes: the shelf sits on a dark panel there. */
+html.club .coach-card { background: rgb(255 255 255 / 0.06); }
+html.club .coach-flip.up { color: #58d59b; }
+html.club .coach-flip.down,
+html.club .coach-flip.pending { color: #ff7a6b; }

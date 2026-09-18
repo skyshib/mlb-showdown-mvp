@@ -2,6 +2,7 @@ import { createRng } from "./rng.js?v=20260716-records";
 import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPersonality, spSlotFactor } from "./valuation.js?v=20260716-records";
 import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260716-records";
 import { lineupProfile, runsPerPa } from "./pitching.js?v=20260716-records";
+import { COACH_GROUP, coachFlip, isCoach, needsCoachTarget } from "./coaches.js?v=20260910-coaches";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -178,6 +179,7 @@ export const ROSTER_SLOTS = rosterSlots();
 // 2B/SS card is a second baseman here, whatever else it can cover), or SP/RP
 // for an arm.
 export function poolGroup(player) {
+  if (isCoach(player)) return COACH_GROUP;
   return player?.kind === "pitcher" ? pitcherRole(player) : player?.position;
 }
 
@@ -232,7 +234,7 @@ export function randomNominationShortfalls(pool, managerCount, startingPitchers 
   // The standing replacements are not supply: they are dealt on top of the
   // board, one per slot, and counting them would tell a room its thin catcher
   // pile is one catcher deeper than it is.
-  const biddable = pool.filter((player) => !player.replacement);
+  const biddable = pool.filter((player) => !player.replacement && !isCoach(player));
   for (const [group, quota] of randomNominationQuotas(managerCount, startingPitchers, pen).visible) {
     const available = biddable.filter((player) => !taken.has(player.id) && poolGroupMatches(player, group));
     for (const player of available.slice(0, quota)) taken.add(player.id);
@@ -251,7 +253,7 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
   const bullpenTarget = bullpenRequirement(pen);
   // Same reason the shortfall check skips them: a card nobody can draft seats
   // nobody, however many rosters it ends up on.
-  const biddable = pool.filter((player) => !player.replacement);
+  const biddable = pool.filter((player) => !player.replacement && !isCoach(player));
   const hitters = biddable.filter((player) => player.kind === "hitter");
   const pitchers = biddable.filter((player) => player.kind === "pitcher");
   const countPosition = (position) => hitters.filter((player) => player.position === position).length;
@@ -389,7 +391,10 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
     // A display-only house rule: keep every card's printed points off the
     // board so managers draft on the baseball, not the number. It never
     // touches the rules — replay and determinism are indifferent to it.
-    hidePoints: Boolean(options.hidePoints)
+    hidePoints: Boolean(options.hidePoints),
+    // The optional mode: the deck dealt coaches into the board (see
+    // buildDraftPool). A room with none plays exactly as it always did.
+    coaches: pool.some(isCoach)
   };
 
   if (draft.draftType === "auction") {
@@ -444,6 +449,59 @@ export function hasUnlimitedRoster(draft) {
   return Boolean(draft?.unlimitedRoster);
 }
 
+// ---- Coaches on a roster -----------------------------------------------------
+//
+// A coach is a card a manager owns and not a player he fields: he takes no
+// roster slot, counts toward no minimum, and never runs out of room. So every
+// rule that asks "is this roster full?" asks about the PLAYERS on it, and a
+// manager with thirteen players and two coaches is exactly as full as one with
+// thirteen players and none.
+export function rosterPlayers(manager) {
+  return (manager?.roster ?? []).filter((card) => !isCoach(card));
+}
+
+export function rosterCoaches(manager) {
+  return (manager?.roster ?? []).filter(isCoach);
+}
+
+export function rosterPlayerCount(manager) {
+  return rosterPlayers(manager).length;
+}
+
+export function rosterFull(draft, manager) {
+  return rosterPlayerCount(manager) >= draft.rosterSize;
+}
+
+// The Wild Card's question, and whether this manager may answer it now: it is
+// his coach, the coach is the kind that asks, he has not answered already (the
+// flip is one flip — see coachFlip), and the man he names is one of his bats.
+export function canSetCoachTarget(draft, manager, coachId, playerId) {
+  const coach = manager?.roster?.find((card) => card.id === coachId && isCoach(card));
+  if (!coach) return { ok: false, reason: "that coach is not on this roster" };
+  if (!needsCoachTarget(coach)) return { ok: false, reason: `${coach.name} does not pick a player` };
+  if (manager.coachTargets?.[coachId]) return { ok: false, reason: `${coach.name} has already made his pick` };
+  const player = manager.roster.find((card) => card.id === playerId);
+  if (!player || player.kind !== "hitter") return { ok: false, reason: "pick one of your hitters" };
+  return { ok: true, reason: "" };
+}
+
+// Names the hitter and flips the coin, in that order and only once. Recorded
+// as a draft action ("coach-target") so an online room replays it and every
+// replica sees the same man with the same sign on his swings.
+export function setCoachTarget(draft, managerId, coachId, playerId) {
+  const manager = draft.managers.find((item) => item.id === managerId);
+  if (!manager) throw new Error("Unknown manager for coach target");
+  const legality = canSetCoachTarget(draft, manager, coachId, playerId);
+  if (!legality.ok) throw new Error(legality.reason);
+  const target = { playerId, swing: coachFlip(draft.seed, managerId, coachId, playerId) };
+  manager.coachTargets = { ...(manager.coachTargets ?? {}), [coachId]: target };
+  return target;
+}
+
+export function coachTargetOf(manager, coach) {
+  return manager?.coachTargets?.[coach?.id] ?? null;
+}
+
 // Fisher-Yates on a copy, driven by the seeded rng, so every replica of the
 // room deals the same queue in the same order.
 function shuffleSeeded(items, rng) {
@@ -478,14 +536,28 @@ function dealtInSlot(player, group) {
 function buildNominationQueue(draft) {
   const rng = createRng(`${draft.seed}:nomination-queue`);
   const { hidden } = randomNominationQuotas(draft.managers.length, draft.startingPitchers, draft);
+  // Coaches come up IN LIEU of any-hitter bats: each takes one of the DH
+  // group's seats in the queue, so the night is exactly as long as it would
+  // have been and one fewer spare bat comes up for bid (it sits on the board
+  // for the sweep instead, which only widens the reserve). A small room has
+  // fewer DH seats than there are coaches, and then some coaches never come
+  // up at all — that is the deal, same as the DH bats the queue leaves behind.
+  // A room with no coaches draws nothing extra from the rng, so every room
+  // dealt before this mode existed still deals the same queue.
+  const coaches = draft.pool.filter(isCoach);
   const queue = [];
   const queued = new Set();
   for (const [group, count] of hidden) {
+    const coachSeats = group === ANY_HITTER ? Math.min(coaches.length, count) : 0;
     const cards = draft.pool.filter((player) =>
       !player.replacement && !queued.has(player.id) && dealtInSlot(player, group));
-    for (const player of shuffleSeeded(cards, rng).slice(0, count)) {
+    for (const player of shuffleSeeded(cards, rng).slice(0, count - coachSeats)) {
       queued.add(player.id);
       queue.push(player);
+    }
+    for (const coach of coachSeats ? shuffleSeeded(coaches, rng).slice(0, coachSeats) : []) {
+      queued.add(coach.id);
+      queue.push(coach);
     }
   }
   return shuffleSeeded(queue, rng).map((player) => player.id);
@@ -534,10 +606,12 @@ export function guaranteedNominationMinimums(draft) {
 // nomination plus a sealed bid per manager, plus a rebid round, plus slack. A
 // random-nomination room runs as long as its queue, not as long as its rosters.
 export function auctionStepGuard(draft) {
-  if (!isAuctionDraft(draft)) return draft.managers.length * draft.rosterSize + 20;
+  // A coach is a lot (or a pick) on top of the roster count.
+  const coachLots = draft.pool.filter(isCoach).length;
+  if (!isAuctionDraft(draft)) return draft.managers.length * draft.rosterSize + coachLots + 20;
   const lots = isRandomNomination(draft)
     ? nominationQueueRemaining(draft)
-    : draft.managers.length * draft.rosterSize;
+    : draft.managers.length * draft.rosterSize + coachLots;
   return lots * (draft.managers.length * 2 + 4) + 20;
 }
 
@@ -552,12 +626,46 @@ export function currentManager(draft) {
   return managerForPickNumber(draft, draft.pickNumber);
 }
 
-function managerForPickNumber(draft, pickNumber) {
+// The seat a snake position belongs to: down the table, back up it, and so on.
+function snakeSeat(teamCount, position) {
+  const round = Math.floor(position / teamCount);
+  const indexInRound = position % teamCount;
+  return round % 2 === 0 ? indexInRound : teamCount - 1 - indexInRound;
+}
+
+// Whose pick is pick number N. Without coaches on the board the snake is the
+// whole answer, and the same pure arithmetic it always was.
+//
+// With coaches it is not, because a coach costs a pick and fills no slot: the
+// manager who takes one still owes the room thirteen players and needs a turn
+// more than everyone else to get them. So the snake keeps its order but skips
+// a seat whose players are all in — the draft runs until every roster is full
+// of PLAYERS, and the extra turns fall to whoever spent theirs on the
+// clipboard. That is the price of a coach: not a slot, but a pick that lands
+// at the end of the draft instead of where you spent it.
+//
+// The walk replays the snake from the first pick, so it can be asked about any
+// pick — past ones read off the rosters (a coach in a manager's roster at that
+// point in his sequence did not count toward his players), and future ones are
+// projected as player picks, which is what an upcoming-turn display wants.
+export function managerForPickNumber(draft, pickNumber) {
   const teamCount = draft.managers.length;
-  const round = Math.floor(pickNumber / teamCount);
-  const indexInRound = pickNumber % teamCount;
-  const managerIndex = round % 2 === 0 ? indexInRound : teamCount - 1 - indexInRound;
-  return draft.managers[managerIndex];
+  if (!draft.coaches) return draft.managers[snakeSeat(teamCount, pickNumber)];
+  const taken = new Array(teamCount).fill(0);
+  const players = new Array(teamCount).fill(0);
+  const coachCount = draft.pool.filter(isCoach).length;
+  const limit = teamCount * (draft.rosterSize + coachCount + 1);
+  let pick = 0;
+  for (let position = 0; position < limit; position += 1) {
+    const seat = snakeSeat(teamCount, position);
+    if (players[seat] >= draft.rosterSize) continue;
+    if (pick === pickNumber) return draft.managers[seat];
+    const card = draft.managers[seat].roster[taken[seat]];
+    taken[seat] += 1;
+    if (!card || !isCoach(card)) players[seat] += 1;
+    pick += 1;
+  }
+  return draft.managers[snakeSeat(teamCount, pickNumber)];
 }
 
 // What the room can still take: the unpicked board, minus the replacements.
@@ -595,6 +703,14 @@ export function canPickPlayer(draft, manager, player) {
   if (player.replacement) {
     return { ok: false, reason: "replacements are not auctioned" };
   }
+  // A coach takes no slot, so there is no slot to run out of, no position to
+  // reserve, and nothing the rest of the league could be left short of. The
+  // only thing he needs is a turn — and a manager whose players are all in has
+  // no turns left to spend.
+  if (isCoach(player)) {
+    if (!hasUnlimitedRoster(draft) && rosterFull(draft, manager)) return { ok: false, reason: "roster full" };
+    return { ok: true, reason: "" };
+  }
   // With unlimited inactive slots the only thing standing between a manager
   // and a card is the money: no roster cap, no position cap, and no duty to
   // leave the rest of the league a catcher — the closing sweep guarantees
@@ -602,7 +718,7 @@ export function canPickPlayer(draft, manager, player) {
   if (hasUnlimitedRoster(draft)) {
     return { ok: true, reason: "" };
   }
-  if (manager.roster.length >= draft.rosterSize) {
+  if (rosterFull(draft, manager)) {
     return { ok: false, reason: "roster full" };
   }
   const hitterLegality = canAddHitterToLineup(manager.roster, player);
@@ -615,7 +731,7 @@ export function canPickPlayer(draft, manager, player) {
   }
 
   const nextRoster = [...manager.roster, player];
-  const remainingSlots = draft.rosterSize - nextRoster.length;
+  const remainingSlots = draft.rosterSize - nextRoster.filter((card) => !isCoach(card)).length;
   const needs = getRosterNeeds(nextRoster, draft);
   const remainingRequired = needs.hitter + needs.starter + needs.bullpen;
   if (remainingRequired > remainingSlots) {
@@ -644,7 +760,7 @@ export function pickPlayer(draft, playerId, now = Date.now()) {
   if (!player || draft.pickedIds.has(playerId)) {
     throw new Error("Player is not available");
   }
-  if (manager.roster.length >= draft.rosterSize) {
+  if (rosterFull(draft, manager)) {
     throw new Error("Roster is already full");
   }
   const legality = canPickPlayer(draft, manager, player);
@@ -658,7 +774,7 @@ export function pickPlayer(draft, playerId, now = Date.now()) {
   manager.roster.push(player);
   draft.pickedIds.add(playerId);
   draft.pickNumber += 1;
-  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  draft.complete = draft.managers.every((item) => rosterFull(draft, item));
   syncCpuTeamChoices(draft);
   return draft;
 }
@@ -675,7 +791,11 @@ export function auctionBudget(draft, manager) {
 // like it costs.
 export function auctionMaxBid(draft, manager) {
   if (hasUnlimitedRoster(draft)) return auctionBudget(draft, manager);
-  const slotsAfterThisPlayer = draft.rosterSize - manager.roster.length - 1;
+  // A coach on the block takes no slot, so buying him leaves every open slot
+  // still to be funded at the minimum.
+  const lot = auctionLotPlayer(draft);
+  const openSlots = draft.rosterSize - rosterPlayerCount(manager);
+  const slotsAfterThisPlayer = openSlots - (lot && isCoach(lot) ? 0 : 1);
   return auctionBudget(draft, manager) - Math.max(0, slotsAfterThisPlayer) * AUCTION_MIN_BID;
 }
 
@@ -1055,7 +1175,7 @@ function pendingBidders(draft, player) {
   const pending = [];
   for (let offset = 0; offset < count; offset += 1) {
     const manager = draft.managers[(draft.auction.nominatorIndex + offset) % count];
-    if (!hasUnlimitedRoster(draft) && manager.roster.length >= draft.rosterSize) continue;
+    if (!hasUnlimitedRoster(draft) && rosterFull(draft, manager)) continue;
     if (auctionMaxBid(draft, manager) < AUCTION_MIN_BID) continue;
     if (!canPickPlayer(draft, manager, player).ok) continue;
     pending.push(manager.id);
@@ -1275,7 +1395,7 @@ function createLotClock(draft, now, creditManagerIds = []) {
   for (const managerId of creditManagerIds) {
     const manager = draft.managers.find((item) => item.id === managerId);
     if (!manager) continue;
-    if (!hasUnlimitedRoster(draft) && manager.roster.length >= draft.rosterSize) continue;
+    if (!hasUnlimitedRoster(draft) && rosterFull(draft, manager)) continue;
     draft.auction.clockBanks[manager.id] = auctionClockBankMs(draft, manager) + draft.auction.timer.incrementMs;
   }
   return { startedAt: normalizeTimestamp(now), timedOut: [] };
@@ -1348,7 +1468,7 @@ function closeLot(draft) {
     }
     return;
   }
-  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  draft.complete = draft.managers.every((item) => rosterFull(draft, item));
   syncCpuTeamChoices(draft);
 }
 
@@ -1381,7 +1501,7 @@ export function upcomingNominators(draft, count) {
   let index = draft.auction.nominatorIndex;
   for (let step = 0; step < count; step += 1) {
     const manager = draft.managers[index];
-    if (!manager || manager.roster.length >= draft.rosterSize) break;
+    if (!manager || rosterFull(draft, manager)) break;
     nominators.push(manager);
     index = nextNominatorIndex(draft, index);
   }
@@ -1395,7 +1515,7 @@ function nextNominatorIndex(draft, fromIndex) {
   if (hasUnlimitedRoster(draft)) return (fromIndex + 1) % count;
   for (let offset = 1; offset <= count; offset += 1) {
     const index = (fromIndex + offset) % count;
-    if (draft.managers[index].roster.length < draft.rosterSize) return index;
+    if (!rosterFull(draft, draft.managers[index])) return index;
   }
   return fromIndex;
 }
@@ -1412,6 +1532,10 @@ function forgetRosterPlayer(manager, playerId) {
       if (bench.length) assignments[ROSTER_BENCH_KEY] = bench;
       else delete assignments[ROSTER_BENCH_KEY];
     }
+  }
+  // A coach's pick dies with the man he picked — or with the coach himself.
+  for (const [coachId, target] of Object.entries(manager?.coachTargets ?? {})) {
+    if (coachId === playerId || target?.playerId === playerId) delete manager.coachTargets[coachId];
   }
 }
 
@@ -1583,6 +1707,9 @@ export function applyDraftAction(draft, action) {
       manager.battingOrder = [...(action.order ?? [])];
       return;
     }
+    case "coach-target":
+      setCoachTarget(draft, action.managerId, action.coachId, action.playerId);
+      return;
     default:
       throw new Error(`Unknown draft action: ${action?.type}`);
   }
@@ -1638,9 +1765,10 @@ export function autopick(draft, now = Date.now()) {
 export function currentManagerMustReplace(draft) {
   if (!draft || draft.complete || isAuctionDraft(draft)) return false;
   const manager = currentManager(draft);
-  if (!manager || manager.roster.length >= draft.rosterSize) return false;
+  if (!manager || rosterFull(draft, manager)) return false;
   if (!neediestGap(manager.roster, draft)) return false;
-  return !availablePlayers(draft).some((player) => canPickPlayer(draft, manager, player).ok);
+  // A coach is always legal and never fills a hole, so he is no answer here.
+  return !availablePlayers(draft).some((player) => !isCoach(player) && canPickPlayer(draft, manager, player).ok);
 }
 
 // Fills the current manager's neediest hole with a replacement and passes the
@@ -1656,7 +1784,7 @@ export function pickReplacement(draft, now = Date.now()) {
   manager.roster.push(replacement);
   draft.pickedIds.add(replacement.id);
   draft.pickNumber += 1;
-  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  draft.complete = draft.managers.every((item) => rosterFull(draft, item));
   syncCpuTeamChoices(draft);
   return draft;
 }
@@ -1677,18 +1805,37 @@ function bestAutopickTarget(draft, manager) {
   const rosterNeeds = getRosterNeeds(manager.roster, draft);
   const candidates = availablePlayers(draft);
   const legal = candidates.filter((player) => canPickPlayer(draft, manager, player).ok);
-  if (!legal.length) {
+  const players = legal.filter((player) => !isCoach(player));
+  if (!players.length) {
     throw new Error("No legal players are available");
   }
   const model = managerValuation(draft, manager);
-  const values = new Map(legal.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
-  const dropoffs = positionDropoffs(legal, values);
-  return legal
+  const values = new Map(players.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
+  const dropoffs = positionDropoffs(players, values);
+  const best = players
     .map((player) => ({
       player,
       score: autopickScore(draft, manager, player, rosterNeeds, values.get(player.id), dropoffs.get(player.id), model.bias)
     }))
     .sort((a, b) => b.score - a.score)[0].player;
+  return coachInsteadOf(draft, best, legal.filter(isCoach), model) ?? best;
+}
+
+// A coach costs a pick, and a pick is a player. Take one now and every player
+// pick after it slides a round later, which works out to swapping the best man
+// on the board now for the best man left when everyone else is done — the
+// replacement level at his spot. When the coach is worth more than that drop
+// he is the pick. Early, with stars still up, he never is; late, when every
+// spot is scrubs, he sometimes is — which is when a human takes one too.
+function coachInsteadOf(draft, bestPlayer, coaches, model) {
+  if (!coaches.length) return null;
+  const group = poolGroup(bestPlayer);
+  const floor = Math.min(...availablePlayers(draft)
+    .filter((player) => poolGroup(player) === group)
+    .map((player) => model.value(player)));
+  const deferralCost = model.value(bestPlayer) - (Number.isFinite(floor) ? floor : model.value(bestPlayer));
+  const coach = [...coaches].sort((a, b) => model.value(b) - model.value(a) || a.id.localeCompare(b.id))[0];
+  return model.value(coach) > deferralCost ? coach : null;
 }
 
 // Puts the next card on the block: whatever the hidden queue deals in a
@@ -1821,6 +1968,7 @@ function forthcomingPlayers(draft) {
 // are read at this coarseness; the fine positional matching is priced by the
 // per-position replacement floor in auctionWorth.
 function playerBucket(player) {
+  if (isCoach(player)) return "coach";
   if (player?.kind === "pitcher") return pitcherRole(player) === "SP" ? "starter" : "bullpen";
   return "hitter";
 }
@@ -1828,6 +1976,8 @@ function playerBucket(player) {
 function bucketNeed(needs, bucket) {
   if (bucket === "starter") return needs.starter;
   if (bucket === "bullpen") return needs.bullpen;
+  // Nobody NEEDS a coach.
+  if (bucket === "coach") return 0;
   return needs.hitter;
 }
 
@@ -1909,6 +2059,8 @@ function auctionMarket(draft, manager) {
   // studs a premium. Pool-elite scarcity helps; positional scarcity does not.
   const allValues = [];
   for (const player of draft.pool) {
+    // Coaches are not a market: no floor, no percentile, no replacement.
+    if (isCoach(player)) continue;
     const group = poolGroup(player);
     const value = model.value(player);
     allValues.push(value);
@@ -1930,6 +2082,9 @@ function auctionMarket(draft, manager) {
 // a star towers and a filler barely counts, and the same value is worth more at
 // a thin spot (a low floor) than a deep one (a high floor).
 function auctionWorth(market, player) {
+  // One coach is no substitute for another, so there is no floor to clear: a
+  // coach is worth what he is worth.
+  if (isCoach(player)) return Math.max(0, market.model.value(player));
   const value = market.model.value(player);
   const replacement = market.replacement.get(poolGroup(player)) ?? 0;
   return Math.max(0, value - replacement);
@@ -2118,6 +2273,7 @@ function auctionNeeds(draft, manager) {
 }
 
 function cardFillsNeed(manager, draft, card) {
+  if (isCoach(card)) return false;
   if (card?.kind === "pitcher") {
     const needs = auctionNeeds(draft, manager);
     return pitcherRole(card) === "SP" ? needs.starter > 0 : needs.bullpen > 0;
@@ -2133,7 +2289,7 @@ function auctionWillingness(draft, manager, player) {
   // not against a roster cap it no longer has.
   const needSlots = hasUnlimitedRoster(draft)
     ? needs.hitter + needs.starter + needs.bullpen
-    : draft.rosterSize - manager.roster.length;
+    : draft.rosterSize - rosterPlayerCount(manager);
   // A limited-roster draft has a real cap, so a full roster is genuinely done.
   // But under unlimited rosters, money left at the last out is money you never
   // had — so a computer whose nine and staff are whole keeps SHOPPING FOR VALUE:
@@ -2314,7 +2470,8 @@ export function activeRoster(manager) {
 
 export function benchPlayers(manager) {
   const active = new Set(activeRoster(manager).map((player) => player.id));
-  return manager.roster.filter((player) => !active.has(player.id));
+  // A coach is not benched; he is on the staff. He has his own shelf.
+  return manager.roster.filter((player) => !active.has(player.id) && !isCoach(player));
 }
 
 // DEAD MONEY. What a manager paid for the players he is NOT fielding: his
@@ -2465,6 +2622,17 @@ export function syncCpuTeamChoices(draft) {
   const seedHumans = !draft.teamChoicesSeeded;
   for (const manager of draft.managers) {
     if (manager.cpu || seedHumans) setBestTeamChoices(manager);
+    // The Wild Card asks the manager a question; a computer answers it with his
+    // best bat and lives with the flip like anyone else. A human answers it
+    // himself, so his coaches wait for him.
+    if (!manager.cpu) continue;
+    for (const coach of rosterCoaches(manager)) {
+      if (!needsCoachTarget(coach) || manager.coachTargets?.[coach.id]) continue;
+      const bat = manager.roster
+        .filter((card) => card.kind === "hitter")
+        .sort((a, b) => lineupRankValue(b) - lineupRankValue(a) || a.id.localeCompare(b.id))[0];
+      if (bat) setCoachTarget(draft, manager.id, coach.id, bat.id);
+    }
   }
   draft.teamChoicesSeeded = true;
   return draft;
@@ -2528,6 +2696,13 @@ export function buildTeam(manager, options = {}) {
     starterIndex,
     pitchers: [activeStarter, ...bullpen].filter(Boolean)
   };
+  // The coaching staff rides along with its choices made, so the game can read
+  // what each coach does without knowing whose roster he came off. A club with
+  // no coaches gets the exact team it always got.
+  const coaches = rosterCoaches(manager);
+  if (coaches.length) {
+    team.coaches = coaches.map((coach) => ({ ...coach, target: manager.coachTargets?.[coach.id] ?? null }));
+  }
   // The bench rides along only when asked for. Rosters that carry one (the
   // adventure's full-roster format) say so; every other consumer — the batch
   // sim, tournaments, the draft rooms — gets the exact team it always got.
@@ -2758,7 +2933,7 @@ export function repairDraftRosters(draft) {
   for (const manager of draft.managers) {
     repairManagerRoster(draft, manager);
   }
-  draft.complete = draft.managers.every((item) => item.roster.length >= draft.rosterSize);
+  draft.complete = draft.managers.every((item) => rosterFull(draft, item));
   syncCpuTeamChoices(draft);
   return draft;
 }
@@ -2947,7 +3122,7 @@ function repairManagerRoster(draft, manager) {
       .filter((player) => neededKind !== "hitter" || canAddHitterToLineup(manager.roster, player).ok)
       .sort((a, b) => b.points - a.points)[0] ?? makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPosition);
 
-    if (manager.roster.length >= draft.rosterSize) {
+    if (rosterFull(draft, manager)) {
       const removableKind = neededKind === "pitcher" ? "hitter" : "pitcher";
       const removable = manager.roster
         .filter((player) => player.kind === removableKind)
@@ -3182,7 +3357,7 @@ function fabricateReplacement({ id, name, slot, kind }) {
 
 function autopickScore(draft, manager, player, needs, personalValue, dropoff, bias = null) {
   const lean = bias ?? cpuPersonality(manager.persona).bias;
-  const remainingSlots = draft.rosterSize - manager.roster.length;
+  const remainingSlots = draft.rosterSize - rosterPlayerCount(manager);
   const matchingNeed = player.kind === "pitcher" ? pitcherNeed(player, needs) : needs.hitter;
   const forcedNeed = matchingNeed > 0 && matchingNeed >= remainingSlots;
   const needBonus = matchingNeed > 0 ? 80 + (matchingNeed / Math.max(1, remainingSlots)) * 120 : 0;

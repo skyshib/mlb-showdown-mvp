@@ -53,10 +53,16 @@ function duelLine(event) {
   if (typeof event.controlRoll !== "number" || typeof event.resultRoll !== "number") return null;
   // A tired pitcher's control roll is docked by the fatigue penalty; show the
   // raw die and the deduction, e.g. (5-1), so the math on the mound is visible.
-  const pitch = event.fatiguePenalty > 0
-    ? `(${event.controlRoll}-${event.fatiguePenalty})`
+  // A coach's say shows the same way: (14+1) is a fourteen with the hitting
+  // coach's thumb on it, and the chart was read at fifteen.
+  const controlBonus = event.controlBonus > 0 ? `+${event.controlBonus}` : "";
+  const pitch = event.fatiguePenalty > 0 || controlBonus
+    ? `(${event.controlRoll}${event.fatiguePenalty > 0 ? `-${event.fatiguePenalty}` : ""}${controlBonus})`
     : `${event.controlRoll}`;
-  return `PITCH ${pitch} vs SWING ${event.resultRoll}.`;
+  const swing = event.swingBonus
+    ? `(${event.resultRoll}${event.swingBonus > 0 ? "+" : "-"}${Math.abs(event.swingBonus)})`
+    : `${event.resultRoll}`;
+  return `PITCH ${pitch} vs SWING ${swing}.`;
 }
 
 // Scores always read from the player's side: up 3-0 is "3-0" whether the

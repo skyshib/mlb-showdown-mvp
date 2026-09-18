@@ -1,4 +1,5 @@
-import { RESULTS, resolveChart } from "./cards.js?v=20260716-records";
+import { RESULTS, resolveChart, resolveSwing } from "./cards.js?v=20260716-records";
+import { CLUTCH_GENE_BONUS, coachEffects, convertFlyoutsToStrikeouts, convertStrikeoutsToGroundBalls, speedGrade } from "./coaches.js?v=20260910-coaches";
 import { reliefDecision, lineupProfile } from "./pitching.js?v=20260716-records";
 import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
@@ -277,12 +278,48 @@ export function playPlateAppearance(state, rng) {
   // has it automatically, and the swing is read off HIS chart. (This only
   // ever comes up when a club has killed its own DH — see dhTakesTheField.)
   const armAtThePlate = Boolean(batter.battingAsPitcher);
-  const effectiveControl = pitcher.control - fatiguePenalty;
+  // The coaching staffs' say in the duel. The pitching coach's lefty bonus
+  // rides on the pitch; the hitting coach's late-innings bonus and the Wild
+  // Card's mark on one man ride on the swing. A club without coaches adds
+  // nothing to either die, and the roll the box score keeps is the raw die.
+  const pitchingEffects = pitchingTeam.coachEffects ?? NO_COACH_EFFECTS;
+  const battingEffects = battingTeam.coachEffects ?? NO_COACH_EFFECTS;
+  const controlBonus = pitchingEffects.leftyControl && pitcher.throws === "L" && batter.bats === "L"
+    ? pitchingEffects.leftyControl
+    : 0;
+  // The platoon: a right-handed bat (a switch hitter turns around and is one)
+  // against a lefty arm gets +1 on-base — the batter's half of the same roll
+  // the lefty specialist's control is the pitcher's half of.
+  const onBaseBonus = battingEffects.platoonOnBase && pitcher.throws === "L" && (batter.bats === "R" || batter.bats === "S")
+    ? battingEffects.platoonOnBase
+    : 0;
+  const onBase = batter.onBase + onBaseBonus;
+  const lateSwing = battingEffects.lateSwing && state.inning >= 9 && battingEdge(state) <= 0
+    ? battingEffects.lateSwing
+    : 0;
+  const targetSwing = battingEffects.swingTargets?.[batter.id] ?? 0;
+  const effectiveControl = pitcher.control - fatiguePenalty + controlBonus;
   const controlRoll = armAtThePlate ? null : rollD20(state, dice);
   const controlTotal = armAtThePlate ? null : controlRoll + effectiveControl;
-  const chartOwner = armAtThePlate || controlTotal > batter.onBase ? "pitcher" : "hitter";
+  // Framing: with two outs, a pitch that lands exactly on the number — the
+  // tie that has always gone to the hitter — is the pitcher's.
+  const framed = !armAtThePlate && pitchingEffects.framing > 0 && state.outs === 2 && controlTotal === onBase;
+  const chartOwner = armAtThePlate || controlTotal > onBase || framed ? "pitcher" : "hitter";
   const resultRoll = rollD20(state, dice);
-  const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, resultRoll);
+  // The Clutch Gene: a natural 20 on the swing carries the chart past the die,
+  // to the 21+ rows the printed cards keep for exactly this.
+  const clutchSwing = battingEffects.clutchGene && resultRoll === 20 ? CLUTCH_GENE_BONUS * battingEffects.clutchGene : 0;
+  const swingBonus = lateSwing + targetSwing + clutchSwing;
+  const coachNotes = [];
+  if (controlBonus) coachNotes.push(`${pitchingEffects.names.leftyControl ?? "Pitching coach"} +${controlBonus} control`);
+  if (onBaseBonus) coachNotes.push(`${battingEffects.names.platoonOnBase ?? "Hitting coach"} +${onBaseBonus} on-base`);
+  if (framed) coachNotes.push(`${pitchingEffects.names.framing ?? "Catching coach"}: tie to the pitcher`);
+  if (lateSwing) coachNotes.push(`${battingEffects.names.lateSwing ?? "Hitting coach"} +${lateSwing} swing`);
+  if (targetSwing) coachNotes.push(`${battingEffects.names[`swing:${batter.id}`] ?? "Bench coach"} ${targetSwing > 0 ? "+" : ""}${targetSwing} swing`);
+  if (clutchSwing) coachNotes.push(`${battingEffects.names.clutchGene ?? "Mental skills coach"} +${clutchSwing} swing`);
+  const swingRoll = resultRoll + swingBonus;
+  const chart = chartOwner === "pitcher" ? pitcher.chart : batter.chart;
+  const result = swingBonus ? resolveSwing(chart, swingRoll) : resolveChart(chart, resultRoll);
   state.lastPlayDetails = null;
   const runs = applyResult(state, result, batter, battingSide, pitchingSide, dice, responsiblePitcher);
   if (state.pendingAdvance) state.pendingAdvance.batter = { id: batter.id, name: batter.name };
@@ -330,10 +367,19 @@ export function playPlateAppearance(state, rng) {
     pitcherControl: pitcher.control,
     effectiveControl,
     fatiguePenalty,
+    controlBonus,
     controlTotal,
-    onBase: batter.onBase,
+    // The on-base the pitch was read against, coach included; the bonus rides
+    // alongside so the log can say why the number is not the one on the card.
+    onBase,
+    onBaseBonus,
     chartOwner,
     resultRoll,
+    // What the chart was actually read at: the die plus the coaches' say. The
+    // same number as the die on every plate appearance without a coach in it.
+    swingBonus,
+    swingRoll,
+    coachNotes,
     result,
     outsBefore,
     outsAfter: state.outs,
@@ -378,6 +424,9 @@ export function playStealAttempt(state, rng) {
 export function stealCandidates(state) {
   if (state.outs >= 3 || state.pendingAdvance) return [];
   const pitchingSide = state.half === "top" ? "home" : "away";
+  const battingSide = pitchingSide === "home" ? "away" : "home";
+  // Old School: the club does not run. Not even when asked.
+  if (state[battingSide].coachEffects?.noSteals) return [];
   const [runnerOnFirst, runnerOnSecond, runnerOnThird] = state.bases;
   const fielding = totalCatcherFielding(state[pitchingSide]);
   const candidates = [];
@@ -392,7 +441,8 @@ export function stealCandidates(state) {
       outsForDecision: state.outs,
       fielding,
       // The throw to third is shorter: +5 to the catcher, not the runner.
-      targetBonus: -5
+      targetBonus: -5,
+      coachBonus: coachStealBonus(state[battingSide], runnerOnSecond)
     }));
   }
   if (runnerOnFirst && !runnerOnSecond && canStealThisPA(state, runnerOnFirst)) {
@@ -402,12 +452,23 @@ export function stealCandidates(state) {
       toIndex: 1,
       outsForDecision: state.outs,
       fielding,
-      targetBonus: 0
+      targetBonus: 0,
+      coachBonus: coachStealBonus(state[battingSide], runnerOnFirst)
     }));
   }
 
   return annotateAdvanceOptions(state, candidates);
 }
+
+// The first base coach's green light: a Speed A runner gets +n on his steal
+// target. Only on steals — he is no faster going first to third on a single.
+function coachStealBonus(team, runner) {
+  const bonus = team?.coachEffects?.stealSpeedA ?? 0;
+  return bonus && speedGrade(runner?.speed) === "A" ? bonus : 0;
+}
+
+// Nothing to add: the shape every club without a coaching staff reads.
+const NO_COACH_EFFECTS = coachEffects([]);
 
 // Force a steal attempt for the runner on the given base index, regardless of
 // what the break-even says. Returns the steal event, or null when that runner
@@ -868,13 +929,26 @@ function canStealThisPA(state, runner) {
 }
 
 function createRuntimeTeam(team) {
+  // The coaching staff, folded into the numbers the engine reads. The bullpen
+  // coach's edit is a chart edit, so it is made once here, on the runtime
+  // copies of the arms — the drafted cards themselves are never touched.
+  const effects = coachEffects(team.coaches ?? []);
+  const pitchers = effects.flyToStrikeout
+    ? team.pitchers.map((pitcher) => ({ ...pitcher, chart: convertFlyoutsToStrikeouts(pitcher.chart, effects.flyToStrikeout) }))
+    : team.pitchers;
+  // The contact coach's edit is the same kind of thing on the other side of
+  // the ball: every bat's chart, lineup and bench alike.
+  const bat = (player) => (effects.strikeoutToGroundBall && player.kind !== "pitcher" && Array.isArray(player.chart)
+    ? { ...player, chart: convertStrikeoutsToGroundBalls(player.chart, effects.strikeoutToGroundBall) }
+    : { ...player });
   return {
     ...team,
     plateAppearances: 0,
-    lineup: team.lineup.map((player) => ({ ...player })),
+    lineup: team.lineup.map(bat),
     // Only full-roster teams carry one; everyone else's dugout is just the nine.
-    bench: (team.bench ?? []).map((player) => ({ ...player })),
-    pitchers: buildPitchingPlan(team.pitchers)
+    bench: (team.bench ?? []).map(bat),
+    pitchers: buildPitchingPlan(pitchers),
+    coachEffects: effects
   };
 }
 
@@ -2034,6 +2108,9 @@ function chooseStealAttempt(state, pitchingSide) {
 // The steals auto play would consider right now, priced but not yet chosen.
 function stealOptions(state, pitchingSide) {
   if (state.outs >= 3) return [];
+  const battingSide = pitchingSide === "home" ? "away" : "home";
+  // Old School: the club does not run.
+  if (state[battingSide].coachEffects?.noSteals) return [];
   const [first, runnerOnSecond, runnerOnThird] = state.bases;
   // Auto play honors the same rule: one attempt per runner per at-bat.
   const runnerOnFirst = canStealThisPA(state, first) ? first : null;
@@ -2048,7 +2125,8 @@ function stealOptions(state, pitchingSide) {
       outsForDecision: state.outs,
       fielding,
       // The throw to third is shorter: +5 to the catcher, not the runner.
-      targetBonus: -5
+      targetBonus: -5,
+      coachBonus: coachStealBonus(state[battingSide], runnerOnSecond)
     }));
   } else if (runnerOnFirst && !runnerOnSecond) {
     candidates.push(createAdvanceCandidate({
@@ -2057,7 +2135,8 @@ function stealOptions(state, pitchingSide) {
       toIndex: 1,
       outsForDecision: state.outs,
       fielding,
-      targetBonus: 0
+      targetBonus: 0,
+      coachBonus: coachStealBonus(state[battingSide], runnerOnFirst)
     }));
   }
 
@@ -2157,10 +2236,10 @@ function resolveHitExtraBaseAttempts({ state, batter, battingSide, pitchingSide,
   return attemptResult.runs;
 }
 
-function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, fielding, targetBonus = 0 }) {
+function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, fielding, targetBonus = 0, coachBonus = 0 }) {
   const runnerSpeed = speedTarget(runner);
   const destination = destinationKey(toIndex);
-  const target = runnerSpeed + targetBonus;
+  const target = runnerSpeed + targetBonus + coachBonus;
   const safeChance = advanceSafeChance(target, fielding);
   return {
     runner,
@@ -2170,6 +2249,7 @@ function createAdvanceCandidate({ runner, fromIndex, toIndex, outsForDecision, f
     fielding,
     runnerSpeed,
     targetBonus,
+    coachBonus,
     target,
     safeChance,
     destination,
@@ -2440,6 +2520,7 @@ function describeAdvanceAttempt(candidate, outcome) {
     target: outcome.target,
     runnerSpeed: candidate.runnerSpeed,
     targetBonus: candidate.targetBonus,
+    coachBonus: candidate.coachBonus ?? 0,
     destination: candidate.destination,
     decisionMinimum: candidate.decisionMinimum,
     safeChance: candidate.safeChance,
@@ -2451,18 +2532,22 @@ function describeAdvanceAttempt(candidate, outcome) {
 
 function totalInfieldFielding(team) {
   const infieldPositions = ["1B", "2B", "3B", "SS"];
-  return infieldPositions.reduce((sum, position) => {
+  const gloves = infieldPositions.reduce((sum, position) => {
     const player = team.lineup.find((item) => playerDefensivePosition(item) === position);
     return sum + fieldingValue(player);
   }, 0);
+  // Old School's infield: +n on the double play, the only throw it makes.
+  return gloves + (team.coachEffects?.infieldDefense ?? 0);
 }
 
 function totalOutfieldFielding(team) {
   const outfieldPositions = ["LF", "CF", "RF"];
-  return outfieldPositions.reduce((sum, position) => {
+  const gloves = outfieldPositions.reduce((sum, position) => {
     const player = team.lineup.find((item) => playerDefensivePosition(item) === position);
     return sum + fieldingValue(player);
   }, 0);
+  // The outfield coach's arms: +n on every throw the outfield makes.
+  return gloves + (team.coachEffects?.outfieldDefense ?? 0);
 }
 
 // The man behind the plate — the only fielder any record cares about by name, and

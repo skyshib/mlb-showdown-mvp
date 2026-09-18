@@ -3,6 +3,7 @@ import { aggregateEventSkillStats, createTeamSkillLine } from "./teamSkillStats.
 import { simulateGame } from "./game.js?v=20260717-draft-wpa";
 import { createRng } from "./rng.js?v=20260716-records";
 import { FIELDING_SWEEP, FIELDING_UNITS } from "./attribution.js?v=20260914-war";
+import { ROTATION_ACE_SHARE, aceStarterIndex, coachEffects } from "./coaches.js?v=20260910-coaches";
 import {
   considerInterestingGame,
   createInterestingGameState,
@@ -589,7 +590,7 @@ function teamForGame(team, gameSeed, side) {
   const starters = team.starters?.length ? team.starters : team.pitchers?.slice(0, 1) ?? [];
   const bullpen = team.bullpen?.length ? team.bullpen : team.pitchers?.slice(1) ?? [];
   const starterIndex = starters.length
-    ? createRng(`${gameSeed}:${side}:sp`).int(0, starters.length - 1)
+    ? drawStarter(starters, team, createRng(`${gameSeed}:${side}:sp`))
     : 0;
   const starter = starters.length ? starters[starterIndex] : null;
   return {
@@ -597,6 +598,20 @@ function teamForGame(team, gameSeed, side) {
     starterIndex,
     pitchers: [starter, ...bullpen].filter(Boolean)
   };
+}
+
+// Who takes the ball. An even draw across the rotation, unless the club has
+// the Rotation coach: then the ace goes ROTATION_ACE_SHARE of the time and the
+// rest split what is left. A club without him draws exactly the numbers it
+// always drew, so every seeded season before the coaches is still the same
+// season.
+function drawStarter(starters, team, rng) {
+  const effects = coachEffects(team.coaches ?? []);
+  if (starters.length < 2 || !effects.rotationAce) return rng.int(0, starters.length - 1);
+  const ace = aceStarterIndex(starters);
+  if (rng.next() < ROTATION_ACE_SHARE) return ace;
+  const others = starters.map((_, index) => index).filter((index) => index !== ace);
+  return others[rng.int(0, others.length - 1)];
 }
 
 function formatDistributionTotal(value) {

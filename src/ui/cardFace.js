@@ -1,4 +1,5 @@
 import { formatRange, positionFieldingLabel } from "../rules/cards.js?v=20260716-records";
+import { isCoach } from "../rules/coaches.js?v=20260910-coaches";
 import { dualPartnerCard } from "../data/universes.js";
 import { CARD_IMAGE_FILES } from "../data/cardImages.js";
 import { MLB_TEAM_CODES, MLB_PLAYER_TEAMS, MLB_TEAM_CLUB_NAMES } from "../data/mlbTeams.js";
@@ -416,7 +417,27 @@ export function cardScanUrl(card) {
   return scan ? `assets/cards/${scan}` : null;
 }
 
+// A coach's face: no photo, no chart, no plate. A chalkboard with his job on
+// it, a name bar, and the one thing he does written out in full — the card is
+// its own rulebook, because a coach is an ability and nothing else.
+function coachCardHtml(card, hidePoints = false) {
+  const points = hidePoints ? "" : `<span>${card.points} PTS</span>`;
+  return `<div class="gq-card gq-card-coach gq-rarity-border-${card.rarity ?? "uncommon"}"><div class="gq-face">
+    <div class="gq-coach-board">
+      <span class="gq-coach-eyebrow">COACHING STAFF</span>
+      <span class="gq-coach-icon">${escapeHtml(card.icon ?? "")}</span>
+      <span class="gq-coach-title">${escapeHtml(String(card.title ?? "coach").toUpperCase())}</span>
+    </div>
+    <div class="gq-coach-strip">
+      <div class="gq-coach-name-bar"><span class="gq-coach-name">${escapeHtml(String(card.name).toUpperCase())}</span><span class="gq-coach-badge">COACH</span></div>
+      <p class="gq-coach-blurb">${escapeHtml(card.blurb ?? "")}</p>
+      <div class="gq-coach-stat-line">${points}<span>NO ROSTER SLOT</span></div>
+    </div>
+  </div></div>`;
+}
+
 export function cardPanelHtml(card, { count = null, hidePoints = false } = {}) {
+  if (isCoach(card)) return coachCardHtml(card, hidePoints);
   // Classic cards with a real scan ARE the card: the printed scan fills the
   // frame (courtesy of ShowdownCards.com), with just a compact chart tray
   // below at the scan's width — no rarity chip, no set tag; the print

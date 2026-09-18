@@ -1042,3 +1042,105 @@
   paint-order: stroke fill;
   text-anchor: middle;
 }
+
+/* ---- Coach cards ---- */
+
+/* A coach is an ability, not a ballplayer: the face is a chalkboard with his
+   job on it over a strip that spells out what he does. Same 5:7 box as every
+   other card, so he sits on the board and in a hover preview like one. */
+.gq-card-coach .gq-face { background: linear-gradient(160deg, #1a1a1a, #050505); }
+.gq-coach-board {
+  position: absolute;
+  left: 1.75cqw;
+  right: 1.75cqw;
+  top: 2.25cqw;
+  height: 72cqw;
+  border-radius: 2.25cqw;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5cqw;
+  background: radial-gradient(ellipse at 30% 20%, #34633f, #1d3d27 60%, #122619);
+  box-shadow: inset 0 0 7cqw rgba(0, 0, 0, 0.5);
+  color: #f4f1e7;
+  text-align: center;
+}
+.gq-coach-eyebrow {
+  position: absolute;
+  top: 3cqw;
+  left: 0;
+  right: 0;
+  font-size: 3.4cqw;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  opacity: 0.7;
+}
+.gq-coach-icon {
+  font-size: 24cqw;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+  text-shadow: 0 0 3cqw rgba(255, 255, 255, 0.35);
+}
+.gq-coach-title {
+  font-size: 5cqw;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.gq-coach-strip {
+  position: absolute;
+  left: 1.75cqw;
+  right: 1.75cqw;
+  top: 77cqw;
+  bottom: 3.25cqw;
+  border-radius: 2.25cqw;
+  display: flex;
+  flex-direction: column;
+  gap: 1.6cqw;
+  padding: 2cqw 2.6cqw;
+  background: linear-gradient(180deg, #2c2c2c, #101010);
+}
+.gq-coach-name-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1cqw;
+  border-radius: 1.2cqw;
+  padding: 1.2cqw 2.2cqw;
+  background: linear-gradient(90deg, #ececec, #bcbcbc);
+  color: #111;
+}
+.gq-coach-name {
+  font-size: 6cqw;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.gq-coach-badge {
+  border-radius: 0.8cqw;
+  padding: 0.6cqw 1.4cqw;
+  background: #111;
+  color: #fff;
+  font-size: 3.2cqw;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+}
+.gq-coach-blurb {
+  flex: 1;
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 4cqw;
+  line-height: 1.25;
+  color: #f1efe8;
+}
+.gq-coach-stat-line {
+  display: flex;
+  gap: 3cqw;
+  font-size: 3.6cqw;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #cfd8cf;
+}

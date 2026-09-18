@@ -74,6 +74,7 @@ import {
   canPickPlayer,
   canPlaceSealedBid,
   canPlayerFillLineupSlot,
+  canSetCoachTarget,
   cancelLot,
   completeAuctionReview,
   cpuSealedBid,
@@ -90,6 +91,7 @@ import {
   isCornerOutfielder,
   isRandomNomination,
   lineupStatus,
+  managerForPickNumber,
   managerValuation,
   maxPoolManagers,
   nominateBestTarget,
@@ -111,6 +113,9 @@ import {
   placeSealedBid,
   randomNominationCounts,
   randomNominationShortfalls,
+  rosterCoaches,
+  rosterFull,
+  rosterPlayerCount,
   rosterSizeForStartingPitchers,
   resumeAuction,
   resumeSnake,
@@ -131,6 +136,7 @@ import {
   upcomingNominators,
   validateRoster
 } from "./rules/draft.js?v=20260716-records";
+import { COACHES, coachTargetLabel, isCoach, needsCoachTarget } from "./rules/coaches.js?v=20260910-coaches";
 import {
   createRoom,
   fetchRoom,
@@ -1015,6 +1021,9 @@ function defaultState() {
     // managers pick and bid on the baseball rather than the number. On by
     // default — the number is the least interesting thing on the card.
     hidePoints: true,
+    // The optional coaching staff: six coach cards dealt into the board in
+    // place of the spare DH bats. Off by default — it is a house rule.
+    coaches: false,
     auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS)),
     auctionTimer: {
       reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
@@ -1214,6 +1223,7 @@ function openRoom(roomId, room) {
   state.draftType = room.draftType === "auction" ? "auction" : "snake";
   state.nomination = room.nomination === "random" ? "random" : "manual";
   state.hidePoints = Boolean(room.hidePoints);
+  state.coaches = Boolean(room.coaches);
   state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, state.rosterSize);
   state.auctionTimer = normalizeAuctionTimerState(room.auctionTimer);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
@@ -1298,7 +1308,8 @@ function rebuildOnlineDraft(room) {
       startingPitchers: state.startingPitchers,
       bullpenSlots: state.bullpenSlots,
       bullpenMin: state.bullpenMin,
-      temperature: state.temperature
+      temperature: state.temperature,
+      coaches: state.coaches
     });
   state.draft = createDraft(
     room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
@@ -1786,7 +1797,24 @@ function draftModeFromForm(form) {
     { bullpenSlots: form.get("bullpenSlots"), bullpenMin: form.get("bullpenMin") },
     nomination === "random"
   );
-  return { draftType, nomination, hidePoints, bullpenSlots, bullpenMin };
+  const coaches = Boolean(form.get("coaches"));
+  return { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches };
+}
+
+// The setup screen's roll call of the coaching staff, so the room knows what
+// it is drafting before the board is dealt.
+function renderCoachesFieldset(on) {
+  const roll = COACHES
+    .map((coach) => `<li><strong>${escapeHtml(coach.name)}</strong> (${escapeHtml(coach.title.toLowerCase())}) &mdash; ${escapeHtml(coach.blurb)}</li>`)
+    .join("");
+  return `<fieldset class="pool-mode coaches-mode">
+        <legend>Coaches</legend>
+        <label class="pool-option">
+          <input type="checkbox" name="coaches" ${on ? "checked" : ""} />
+          <span><strong>Deal the coaching staff</strong><small>Six of the twelve coaches join the board, drawn by the seed, in place of the spare DH bats. A coach takes no roster slot &mdash; draft as many as you like, or none &mdash; but he costs a pick (or a bid), and each does one small thing to the way your club plays. In a random-nomination room they come up in the queue in place of DH bats, so a small room may not see all six.</small></span>
+        </label>
+        <ul class="setup-coach-list">${roll}</ul>
+      </fieldset>`;
 }
 
 // Whether the chosen card set can actually seat the room, phrased for the setup
@@ -2134,6 +2162,7 @@ function renderSetup(setupError = "") {
           <span><strong>Blind draft</strong><small>Hide every card's printed points until it is drafted &mdash; the board, the card faces, and the picks all go numberless. Card colours stay, so you still see roughly how good a card is, just not its exact worth.</small></span>
         </label>
       </fieldset>
+      ${renderCoachesFieldset(state.coaches)}
       ${renderUniverseFieldset(state.universe)}
       </div>
       <div class="setup-actions">
@@ -2357,6 +2386,7 @@ function renderSetup(setupError = "") {
     state.bullpenMin = mode.bullpenMin;
     state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers, mode);
     state.hidePoints = mode.hidePoints;
+    state.coaches = mode.coaches;
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
     state.auctionTimer = normalizeAuctionTimerInput(form);
     const snakeClock = snakeClockFromForm(form);
@@ -2368,7 +2398,8 @@ function renderSetup(setupError = "") {
       startingPitchers: state.startingPitchers,
       bullpenSlots: mode.bullpenSlots,
       bullpenMin: mode.bullpenMin,
-      temperature: state.temperature
+      temperature: state.temperature,
+      coaches: state.coaches
     });
     const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers, mode);
     if (poolError) {
@@ -2440,7 +2471,7 @@ function renderSetup(setupError = "") {
     const universe = universeFromForm(form);
     const snakeClock = snakeClockFromForm(form);
     const pickTimer = snakeClock.pickTimerSeconds;
-    const { draftType, nomination, hidePoints, bullpenSlots, bullpenMin } = draftModeFromForm(form);
+    const { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches } = draftModeFromForm(form);
     const rosterSize = rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin });
     const budget = normalizeAuctionBudget(form.get("auctionBudget"), rosterSize);
     const auctionTimer = normalizeAuctionTimerInput(form);
@@ -2465,6 +2496,7 @@ function renderSetup(setupError = "") {
         draftType,
         nomination,
         hidePoints,
+        coaches,
         budget,
         auctionTimer,
         snakeTimer: snakeTimerConfig(snakeClock, draftType)
@@ -2689,9 +2721,9 @@ function renderDraft() {
         // An empty board under the watchlist filter means the list is empty, not
         // that the deck is — say which.
         emptyMessage: state.filters.starredOnly
-          ? `${watchlistOwner()?.name ?? "This manager"} hasn't starred any ${state.filters.type === "pitcher" ? "pitchers" : "hitters"} yet. Tap a star to start a list.`
+          ? `${watchlistOwner()?.name ?? "This manager"} hasn't starred any ${filterTypeNoun()} yet. Tap a star to start a list.`
           : state.filters.flaggedOnly
-          ? `${watchlistOwner()?.name ?? "This manager"} hasn't flagged any ${state.filters.type === "pitcher" ? "pitchers" : "hitters"} yet. Tap a flag to start a list.`
+          ? `${watchlistOwner()?.name ?? "This manager"} hasn't flagged any ${filterTypeNoun()} yet. Tap a flag to start a list.`
           : undefined,
         action: auction ? "nominate" : "pick",
         label: queued ? "Queued" : auction ? "Nominate" : "Pick",
@@ -2778,6 +2810,23 @@ function renderDraft() {
   bindDraftActions();
   syncAuctionUrgency(draft, draftNow());
   pickClockTick();
+}
+
+function filterTypeNoun() {
+  if (state.filters.type === "pitcher") return "pitchers";
+  if (state.filters.type === "coach") return "coaches";
+  return "hitters";
+}
+
+// How many picks a draft is: every roster slot, plus a pick for every coach
+// somebody has spent one on — a coach takes no slot, so he lengthens the
+// draft by exactly the pick he cost.
+function coachesDrafted(draft) {
+  return draft.managers.reduce((sum, manager) => sum + rosterCoaches(manager).length, 0);
+}
+
+function totalDraftPicks(draft) {
+  return draft.managers.length * draft.rosterSize + coachesDrafted(draft);
 }
 
 // Returns true when it actually moved the board — the caller uses that to know
@@ -3029,7 +3078,7 @@ function auctionPlayersStillToCome(draft, lot) {
     // only after it settles.
     return Math.max(0, nominationQueueRemaining(draft) - (lot ? 1 : 0));
   }
-  const target = draft.managers.length * draft.rosterSize;
+  const target = totalDraftPicks(draft);
   // Manual-auction nominations always sell because the nominator must open.
   return Math.max(0, target - draft.pickNumber - (lot ? 1 : 0));
 }
@@ -3046,7 +3095,7 @@ function renderAuctionStatusPanel(draft) {
   // hold. The queue is the whole slate in a random room; a manual room runs one
   // lot per roster spot. Only settled lots count as done — the card on the block
   // is in flight, so it sits in neither the done pile nor the still-to-come one.
-  const totalLots = random ? (draft.auction.queue?.length ?? 0) : draft.managers.length * draft.rosterSize;
+  const totalLots = random ? (draft.auction.queue?.length ?? 0) : totalDraftPicks(draft);
   const settled = Math.max(0, totalLots - remaining - (lot ? 1 : 0));
   const pct = totalLots ? Math.round((settled / totalLots) * 100) : 0;
 
@@ -3408,6 +3457,37 @@ function bindDraftActions() {
       state.filters.position = alreadyThere ? "all" : needPosition;
       saveState();
       renderDraft();
+      return;
+    }
+
+    // The Wild Card's pick. One-way — the coin is flipped by the naming — so a
+    // confirm stands between the click and the coin.
+    const coachTarget = event.target.closest("button[data-action='coach-target']");
+    if (coachTarget) {
+      const { managerId, coachId } = coachTarget.dataset;
+      const select = coachTarget.closest(".coach-target-form")?.querySelector("[data-coach-target-select]");
+      const playerId = select?.value;
+      const manager = findDraftManager(managerId);
+      if (!playerId || !manager || !canManageRoster(managerId)) return;
+      if (!canSetCoachTarget(state.draft, manager, coachId, playerId).ok) return;
+      const batName = findRosterPlayer(managerId, playerId)?.name ?? "this hitter";
+      confirmOverlay({
+        eyebrow: "Wild Card",
+        title: `Flip the coin on ${batName}?`,
+        body: "Heads he gets +1 on every swing, tails he gets -1 — for the whole season. There is no second flip and no other player once it lands.",
+        confirmLabel: "Flip it"
+      }).then((yes) => {
+        if (!yes) return;
+        const action = { type: "coach-target", managerId, coachId, playerId };
+        if (state.online) {
+          sendOnlineAction(action);
+          return;
+        }
+        applyDraftAction(state.draft, action);
+        invalidateBatch();
+        saveState();
+        renderDraft();
+      });
       return;
     }
 
@@ -5869,6 +5949,12 @@ function buildBidTipMap(draft, colorForManager) {
 function buildPickNumberMap(draft) {
   if (!draft?.managers?.length || !draft.rosterSize) return {};
   const map = {};
+  // A snake's own ledger knows whose pick was whose — and with coaches on the
+  // board the picks stop falling in pure snake order (see managerForPickNumber).
+  if (!isAuctionDraft(draft)) {
+    for (const pick of draftHistory(draft)) map[pick.player.id] = pick.pickNumber;
+    return map;
+  }
   const rosterIndexes = new Map();
   const teamCount = draft.managers.length;
   const totalPicks = teamCount * draft.rosterSize;
@@ -7031,7 +7117,10 @@ function renderControlResult(event) {
   }
   const effectiveControl = event.effectiveControl ?? event.controlTotal - event.controlRoll;
   const fatigue = event.fatiguePenalty ? `, fatigue -${event.fatiguePenalty}` : "";
-  return `${event.controlRoll}+${effectiveControl}=${event.controlTotal} vs OB ${event.onBase}. ${event.chartOwner}${fatigue}`;
+  // Everything about the pitch — control, on-base, a framed tie — reads here;
+  // the swing's notes read on the result line.
+  const coach = (event.coachNotes ?? []).filter((note) => !note.endsWith("swing")).map((note) => `, ${note}`).join("");
+  return `${event.controlRoll}+${effectiveControl}=${event.controlTotal} vs OB ${event.onBase}. ${event.chartOwner}${fatigue}${coach}`;
 }
 
 function stealDestination(value) {
@@ -7051,7 +7140,12 @@ function renderEventResult(event) {
     return `${outcome}; ${renderAdvanceAttempts([attempt], "catcher defense")}`;
   }
 
-  const base = `${event.resultRoll} => ${event.result}`;
+  // A coach's thumb on the swing shows as its own term, so the die the batter
+  // threw and the number the chart was read at are both on the page.
+  const swingNotes = (event.coachNotes ?? []).filter((note) => note.endsWith("swing"));
+  const base = event.swingBonus
+    ? `${event.resultRoll} ${event.swingBonus > 0 ? "+" : "-"} ${Math.abs(event.swingBonus)} (${swingNotes.join(", ")}) = ${event.swingRoll} => ${event.result}`
+    : `${event.resultRoll} => ${event.result}`;
   if (event.playDetails?.kind === "groundout" && event.playDetails.doublePlayAttempt) {
     const attempt = event.playDetails.doublePlayAttempt;
     const outcome = attempt.batterOut ? "DP" : "batter safe";
@@ -7130,9 +7224,11 @@ function renderRoster(manager, draft) {
     : "";
   // Nothing to count up to when the roster has no ceiling: a manager owns as
   // many cards as they bought, one active roster of which takes the field.
+  const players = rosterPlayerCount(manager);
+  const coachNote = counts.coaches ? ` &middot; ${counts.coaches} coach${counts.coaches === 1 ? "" : "es"}` : "";
   const draftedLine = hasUnlimitedRoster(draft)
-    ? `${manager.roster.length} card${manager.roster.length === 1 ? "" : "s"}`
-    : `${manager.roster.length}/${draft.rosterSize} drafted`;
+    ? `${players} card${players === 1 ? "" : "s"}${coachNote}`
+    : `${players}/${draft.rosterSize} drafted${coachNote}`;
   // A computer manager says what he believes, so a pick that looks mad has a
   // reason you can read.
   const persona = manager.cpu ? cpuPersonality(manager.persona) : null;
@@ -7151,6 +7247,7 @@ function renderRoster(manager, draft) {
       <span class="${counts.hitters >= 9 ? "ok" : "warn"}">${counts.hitters}/9 hitters</span>
       <span class="${counts.starters >= draft.startingPitchers ? "ok" : "warn"}">${counts.starters}/${draft.startingPitchers} starters</span>
       <span class="${counts.bullpen >= bullpenRequirement(draft) ? "ok" : "warn"}">${counts.bullpen}/${bullpenRequirement(draft)} bullpen</span>
+      ${counts.coaches ? `<span class="ok">${counts.coaches} coach${counts.coaches === 1 ? "" : "es"}</span>` : ""}
     </div>
     ${renderRosterDepthChart(manager, slotContext)}
   </article>`;
@@ -7159,6 +7256,7 @@ function renderRoster(manager, draft) {
 function renderRosterDepthChart(manager, slotContext = {}) {
   const lineupSlots = assignHittersToLineupSlots(manager).slots;
   const staffSlots = assignStaffSlots(manager.roster, manager.staffAssignments, state.draft ?? {});
+  const coaches = rosterCoaches(manager);
 
   return `<div class="mini-roster-board">
     <div class="mini-roster-section">
@@ -7169,6 +7267,10 @@ function renderRosterDepthChart(manager, slotContext = {}) {
       <span class="mini-roster-heading">Staff</span>
       <div class="mini-slot-grid staff-mini-slots">${staffSlots.map((slot) => renderMiniRosterSlot(slot.player, slot.role, slotContext)).join("")}</div>
     </div>
+    ${coaches.length ? `<div class="mini-roster-section">
+      <span class="mini-roster-heading">Coaches</span>
+      <div class="mini-slot-grid staff-mini-slots">${coaches.map((coach) => renderMiniRosterSlot(coach, "Coach", slotContext)).join("")}</div>
+    </div>` : ""}
   </div>`;
 }
 
@@ -7207,24 +7309,26 @@ function renderWarGrid(draft, history) {
   if (isAuctionDraft(draft)) return "";
   const scale = draftHeatScale(draft);
   const seats = draft.managers;
-  const rounds = draft.rosterSize;
-  const byRound = new Map();
+  // Each manager's picks fill his column top to bottom. In a plain snake that
+  // is one pick a round; with coaches on the board a manager who took one
+  // picks past the roster's last round, and the grid grows a row for him.
+  const byRow = new Map();
+  const picksBySeat = new Map();
   for (const pick of history) {
-    byRound.set(`${pick.round}:${pick.manager.id}`, pick);
+    const row = (picksBySeat.get(pick.manager.id) ?? 0) + 1;
+    picksBySeat.set(pick.manager.id, row);
+    byRow.set(`${row}:${pick.manager.id}`, pick);
   }
-
-  const nextPick = draft.complete ? null : draft.pickNumber + 1;
+  const rounds = Math.max(draft.rosterSize, ...picksBySeat.values());
+  const current = draft.complete ? null : currentManager(draft);
+  const currentRow = current ? (picksBySeat.get(current.id) ?? 0) + 1 : null;
   const head = seats.map((manager) => `<th>${escapeHtml(manager.name)}</th>`).join("");
   const rows = Array.from({ length: rounds }, (_, index) => {
     const round = index + 1;
-    // The snake turns at the end of every round, and the board turns with it.
-    const order = round % 2 === 0 ? [...seats].reverse() : seats;
     const cells = seats
       .map((manager) => {
-        const pick = byRound.get(`${round}:${manager.id}`);
-        const seat = order.indexOf(manager);
-        const pickNumber = (round - 1) * seats.length + seat + 1;
-        const onClock = pickNumber === nextPick;
+        const pick = byRow.get(`${round}:${manager.id}`);
+        const onClock = Boolean(current) && manager.id === current.id && round === currentRow;
         if (!pick) {
           return `<td class="war-cell ${onClock ? "on-clock" : "empty"}">${onClock ? "ON THE CLOCK" : ""}</td>`;
         }
@@ -7270,7 +7374,7 @@ function renderWarRoom() {
   const prices = auction ? new Map(history.map((pick) => [pick.player.id, pick.price])) : null;
   const heatScale = draftHeatScale(draft);
   const current = draft.complete ? null : currentManager(draft);
-  const totalPicks = draft.managers.length * draft.rosterSize;
+  const totalPicks = totalDraftPicks(draft);
   const lastPick = history.at(-1);
 
   const status = draft.complete
@@ -7389,6 +7493,7 @@ function updateWarClock() {
 
 
 function positionGroupOf(player) {
+  if (isCoach(player)) return "Coach";
   if (player.kind === "pitcher") return player.role === "SP" ? "SP" : "RP";
   if (isCornerOutfielder(player.position)) return "LF/RF";
   return BOARD_POSITION_GROUPS.includes(player.position) ? player.position : "DH";
@@ -7397,9 +7502,10 @@ function positionGroupOf(player) {
 // Grouped, color-coded team view for the TV board: one cell per printed
 // position, every player the team owns there stacked inside it.
 function renderWarTeamPositions(manager, auction, prices, heatScale) {
-  const groups = new Map(BOARD_POSITION_GROUPS.map((group) => [group, []]));
-  for (const player of manager.roster) groups.get(positionGroupOf(player)).push(player);
-  const cells = BOARD_POSITION_GROUPS.map((group) => {
+  const groupNames = state.draft?.coaches ? [...BOARD_POSITION_GROUPS, "Coach"] : BOARD_POSITION_GROUPS;
+  const groups = new Map(groupNames.map((group) => [group, []]));
+  for (const player of manager.roster) groups.get(positionGroupOf(player))?.push(player);
+  const cells = groupNames.map((group) => {
     const players = groups
       .get(group)
       .sort((a, b) =>
@@ -7711,7 +7817,8 @@ function renderDockBar(draft, manager, auction, prices, heatScale, { own = false
   const activeAt = new Map([...lineupSlots, ...staffSlots]
     .filter((slot) => slot.player)
     .map((slot) => [slot.player.id, slot.label]));
-  const bench = manager.roster.filter((player) => !activeAt.has(player.id));
+  // Coaches have a chip of their own (renderDockCoachSlot); they are not bench.
+  const bench = manager.roster.filter((player) => !activeAt.has(player.id) && !isCoach(player));
   const hitterSlots = lineupSlots.map((slot) => renderDockPositionSlot({
     manager,
     slotKey: slot.label,
@@ -7736,8 +7843,30 @@ function renderDockBar(draft, manager, auction, prices, heatScale, { own = false
   })).join("");
   return `<div class="dock-bar${own ? " own-bar" : ""}">
     <span class="dock-team">${escapeHtml(manager.name)}${own && ownTag ? ` <em class="own-tag">${escapeHtml(ownTag)}</em>` : ""}</span>
-    <div class="dock-slots">${hitterSlots}${pitcherSlots}${renderDockBenchSlot(manager, bench, activeAt, heatScale, prices)}</div>
+    <div class="dock-slots">${hitterSlots}${pitcherSlots}${renderDockBenchSlot(manager, bench, activeAt, heatScale, prices)}${renderDockCoachSlot(manager, heatScale, prices)}</div>
   </div>`;
+}
+
+// The rival boards show the clipboards too: who has bought coaches is half of
+// what the dock is for. Only in a room that dealt them.
+function renderDockCoachSlot(manager, heatScale, prices) {
+  if (!state.draft?.coaches) return "";
+  const coaches = rosterCoaches(manager);
+  const carouselKey = `${manager.id}:coaches`;
+  if (!coaches.length) {
+    return `<span class="dock-slot empty-dock-slot dock-bench-slot"><small class="dock-slot-head"><span>Coach</span><b>0</b></small><span>none</span></span>`;
+  }
+  const cards = coaches.map((coach) => ({
+    id: coach.id,
+    card: previewCard(coach),
+    status: coach.title,
+    heat: heatStyle(heatValue(coach, heatScale, prices), heatScale)
+  }));
+  const card = cards[0];
+  return `<span class="dock-slot dock-bench-slot dock-carousel-slot heat" style="${card.heat}" tabindex="0" data-carousel-key="${escapeHtml(carouselKey)}" data-carousel-index="0" data-carousel-default-index="0" data-carousel-cards="${escapeHtml(JSON.stringify(cards))}" data-preview-id="dock-${escapeHtml(carouselKey)}-${escapeHtml(card.id)}" data-preview-card="${escapeHtml(card.card)}">
+    <small class="dock-slot-head"><span>Coach</span><b>${cards.length}</b></small>
+    <span>${escapeHtml(coaches.length === 1 ? coaches[0].name : `${coaches.length} coaches`)}</span>
+  </span>`;
 }
 
 function dockHitterEligibleAt(player, label, assignedPlayer = null) {
@@ -7860,7 +7989,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
   // count — the draft ends when the last card has come up, however many cards
   // anybody has bought by then.
   const queueTotal = queued ? draft.auction.queue.length : 0;
-  const totalPicks = queued ? queueTotal : draft.managers.length * draft.rosterSize;
+  const totalPicks = queued ? queueTotal : totalDraftPicks(draft);
   const lotNumber = queued ? draft.auction.queueIndex + 1 : draft.pickNumber + 1;
   const eyebrow = draft.complete
     ? "Roster view"
@@ -8069,6 +8198,7 @@ function renderRosterSlots(manager, draft) {
       <span>Staff</span>
       <div class="slot-grid staff-slots">${staffSlots.map((slot) => renderRosterSlot(slot.player, slot.label, manager)).join("")}</div>
     </div>
+    ${renderCoachShelf(manager)}
     ${mine || bench.length ? `<div class="slot-group bench-group">
       <span>Bench${bench.length ? ` &middot; ${bench.length} inactive` : ""}${mine ? " &mdash; drag a player here to keep their slot open" : ""}</span>
       <div class="slot-grid bench-slots">
@@ -8076,6 +8206,47 @@ function renderRosterSlots(manager, draft) {
         ${bench.map((player) => renderBenchCard(player, manager)).join("")}
       </div>
     </div>` : ""}
+  </div>`;
+}
+
+// The coaching shelf: every coach the manager owns, what he does, and — for
+// the Wild Card — the one question he asks. The answer is a draft action
+// (coach-target): it goes through the room online, and it is one-way, because
+// the coin is flipped by the choice itself (see coachFlip in coaches.js).
+function renderCoachShelf(manager) {
+  const coaches = rosterCoaches(manager);
+  if (!coaches.length) return "";
+  const mine = canManageRoster(manager.id);
+  const cards = coaches
+    .map((coach) => {
+      const target = manager.coachTargets?.[coach.id] ?? null;
+      let question = "";
+      if (needsCoachTarget(coach)) {
+        if (target) {
+          const bat = manager.roster.find((card) => card.id === target.playerId);
+          question = `<p class="coach-flip ${target.swing > 0 ? "up" : "down"}">${escapeHtml(bat?.name ?? "?")}: ${escapeHtml(coachTargetLabel(coach, target))}</p>`;
+        } else if (mine) {
+          const bats = manager.roster.filter((card) => card.kind === "hitter");
+          question = `<div class="coach-target-form">
+            <select data-coach-target-select aria-label="Which hitter gets the Wild Card">${bats.map((bat) => `<option value="${escapeHtml(bat.id)}">${escapeHtml(bat.name)}</option>`).join("")}</select>
+            <button type="button" class="small" data-action="coach-target" data-manager-id="${escapeHtml(manager.id)}" data-coach-id="${escapeHtml(coach.id)}" ${bats.length ? "" : "disabled"}>Flip the coin</button>
+            <small>One flip, no take-backs: the coin lands the moment you name him. He need not be in the lineup.</small>
+          </div>`;
+        } else {
+          question = `<p class="coach-flip pending">no player picked yet</p>`;
+        }
+      }
+      return `<div class="coach-card${needsCoachTarget(coach) && !target ? " needs-pick" : ""}">
+        <strong class="player-name-preview" tabindex="0" data-preview-id="coach-${escapeHtml(manager.id)}-${escapeHtml(coach.id)}" data-preview-card="${escapeHtml(previewCard(coach))}">${escapeHtml(coach.name)}</strong>
+        <small>${escapeHtml(coach.title)}</small>
+        <p>${escapeHtml(coach.blurb)}</p>
+        ${question}
+      </div>`;
+    })
+    .join("");
+  return `<div class="slot-group coach-group">
+    <span>Coaches &middot; ${coaches.length}</span>
+    <div class="coach-cards">${cards}</div>
   </div>`;
 }
 
@@ -8186,6 +8357,7 @@ function renderLineupSlot(player, slotLabel, manager) {
 }
 
 function rosterSlotDescription(player, slotLabel) {
+  if (isCoach(player)) return player.title ?? "Coach";
   if (player.kind === "pitcher") return playerPosition(player);
   if (slotLabel === "1B" && !playsPosition(player, "1B")) return `${player.position} at 1B | Field -1`;
   return playerPosition(player);
@@ -8414,6 +8586,8 @@ function renderFilters() {
   const hasDesignatedHitters = state.draft?.pool.some((player) => player.position === "DH");
   const positions = state.filters.type === "pitcher"
     ? ["all", "SP", "RP"]
+    : state.filters.type === "coach"
+    ? ["all"]
     : ["all", "C", "1B", "2B", "3B", "SS", "LF/RF", "CF", ...(hasDesignatedHitters ? ["DH"] : [])];
   const sortOptions = [
     // A blind draft drops "best points": there is no points column to sort on.
@@ -8429,7 +8603,9 @@ function renderFilters() {
   const ranking = activePositionRanking();
   const typeOptions = [
     ["hitter", "Hitters"],
-    ["pitcher", "Pitchers"]
+    ["pitcher", "Pitchers"],
+    // The coaching shelf only exists in a room that dealt one.
+    ...(state.draft?.coaches ? [["coach", "Coaches"]] : [])
   ];
   // The watchlist button names its owner, because at a shared screen the list on
   // the board belongs to whoever is on the clock — not to whoever is holding the
@@ -8540,15 +8716,12 @@ function draftPickInfo(draft) {
 
 function upcomingManagers(draft, count) {
   const managers = [];
-  const teamCount = draft.managers.length;
   for (let offset = 0; offset < count; offset += 1) {
-    const pickNumber = draft.pickNumber + offset;
-    const round = Math.floor(pickNumber / teamCount);
-    const indexInRound = pickNumber % teamCount;
-    const managerIndex = round % 2 === 0 ? indexInRound : teamCount - 1 - indexInRound;
-    managers.push(draft.managers[managerIndex]);
+    // The rules own the order: a plain snake, or the snake that skips full
+    // rosters once somebody has spent a pick on a coach.
+    managers.push(managerForPickNumber(draft, draft.pickNumber + offset));
   }
-  return managers;
+  return managers.filter(Boolean);
 }
 
 // ---- the watchlist ----
@@ -9162,15 +9335,22 @@ function draftRecap(draft) {
       return { ...entry, worth, swing: worth - (entry.price ?? 0) };
     });
 
-    const steal = picks.reduce((best, pick) => (pick.swing > best.swing ? pick : best), picks[0]);
-    const reach = picks.reduce((worst, pick) => (pick.swing < worst.swing ? pick : worst), picks[0]);
+    // Coaches are priced like late picks on purpose, so a coach bought for real
+    // money always reads as an overpay; the argument is about the players.
+    const priced = picks.filter((pick) => !isCoach(pick.player));
+    const judged = priced.length ? priced : picks;
+    const steal = judged.reduce((best, pick) => (pick.swing > best.swing ? pick : best), judged[0]);
+    const reach = judged.reduce((worst, pick) => (pick.swing < worst.swing ? pick : worst), judged[0]);
     return { picks, steal, reach, auction: true, rate };
   }
 
   // A snake draft is a queue, so its argument is about position: a card's rank by
   // printed points is where the board says it should have gone, and the gap
   // between that and where it actually went is who reached and who got lucky.
-  const ranked = [...draft.pool].sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
+  // Coaches sit under every player by points on purpose, so a coach taken in
+  // the fourth round would always be the reach of the night; the argument is
+  // about the players, and the coaches are ranked among themselves only.
+  const ranked = draft.pool.filter((card) => !isCoach(card)).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
   const rankOf = new Map(ranked.map((card, index) => [card.id, index + 1]));
 
   const picks = history.map((entry) => {
@@ -9178,8 +9358,10 @@ function draftRecap(draft) {
     return { ...entry, rank, swing: rank - entry.pickNumber };
   });
 
-  const steal = picks.reduce((best, pick) => (pick.swing < best.swing ? pick : best), picks[0]);
-  const reach = picks.reduce((worst, pick) => (pick.swing > worst.swing ? pick : worst), picks[0]);
+  const priced = picks.filter((pick) => !isCoach(pick.player));
+  const judged = priced.length ? priced : picks;
+  const steal = judged.reduce((best, pick) => (pick.swing < best.swing ? pick : best), judged[0]);
+  const reach = judged.reduce((worst, pick) => (pick.swing > worst.swing ? pick : worst), judged[0]);
   return { picks, steal, reach, auction: false };
 }
 
@@ -9390,7 +9572,7 @@ function renderAuctionBudgetSection(draft) {
 // rest.
 function rosterOpenings(manager, draft) {
   if (!manager || !draft || hasUnlimitedRoster(draft)) return null;
-  if (manager.roster.length >= draft.rosterSize) return null;
+  if (rosterFull(draft, manager)) return null;
 
   const lineup = lineupStatus(manager.roster);
   const needs = getRosterNeeds(manager.roster, draft);
@@ -9408,6 +9590,8 @@ function rosterOpenings(manager, draft) {
   // true, and it is why the greying only bites late, once the shape of the
   // roster has actually closed in.
   const fills = (player) => {
+    // A coach fills no slot and needs none: never a hole, never greyed.
+    if (isCoach(player)) return true;
     if (player.kind === "pitcher") {
       const role = player.role === "SP" ? "SP" : "RP";
       return role === "SP" ? needs.starter > 0 : needs.bullpen > 0;
@@ -9432,8 +9616,8 @@ function renderBigBoard(manager, draft) {
   const rows = entries
     .map((entry, index) => {
       const player = entry.player;
-      const rating = player.kind === "pitcher" ? `CTRL ${player.control}` : `OB ${player.onBase}`;
-      const spot = player.kind === "pitcher" ? player.role : positionsLabel(player);
+      const rating = isCoach(player) ? player.title : player.kind === "pitcher" ? `CTRL ${player.control}` : `OB ${player.onBase}`;
+      const spot = isCoach(player) ? "Coach" : player.kind === "pitcher" ? player.role : positionsLabel(player);
       const status = entry.gone
         ? `<span class="board-status gone">Drafted</span>`
         : !entry.legal
@@ -9631,7 +9815,7 @@ function formatSignedNumber(value) {
 }
 
 function chartMinimum(player, result) {
-  const entry = player.chart.find((item) => item.result === result);
+  const entry = (player.chart ?? []).find((item) => item.result === result);
   return entry ? entry.from : 999;
 }
 
@@ -9642,6 +9826,7 @@ function rosterCounts(roster) {
     pitchers: staff.pitchers.length,
     starters: staff.starters.length,
     bullpen: staff.bullpen.length,
+    coaches: roster.filter(isCoach).length,
     needs: getRosterNeeds(roster, state.draft)
   };
 }
@@ -9812,11 +9997,13 @@ function reviveState(value) {
     Object.assign(draft, roomBullpen(draft, draft.unlimitedRoster));
     draft.rosterSize = rosterSizeForStartingPitchers(draft.startingPitchers, draft);
     draft.hidePoints = Boolean(draft.hidePoints);
+    // The coaching staff is whatever the saved board holds.
+    draft.coaches = draft.pool.some(isCoach);
     // A random-nomination draft ends when the queue runs out, not when the
     // rosters fill — they never do, there is no cap to fill to.
     draft.complete = draft.unlimitedRoster
       ? Boolean(draft.complete)
-      : draft.managers.every((manager) => manager.roster.length >= draft.rosterSize);
+      : draft.managers.every((manager) => rosterFull(draft, manager));
     // Rooms saved before corners were lumped still carry bare LF/RF labels.
     draft.pool = draft.pool.map(normalizeCardPosition);
     for (const manager of draft.managers) {
@@ -9851,6 +10038,7 @@ function reviveState(value) {
     snakeTimer: normalizeSnakeTimerState(value.snakeTimer),
     maskBids: Boolean(value.maskBids),
     hidePoints: Boolean(value.hidePoints),
+    coaches: Boolean(value.coaches),
     cpuManagers: Array.isArray(value.cpuManagers) ? value.cpuManagers.filter((name) => typeof name === "string") : [],
     starred: normalizeStarred(value.starred),
     flagged: normalizeStarred(value.flagged),

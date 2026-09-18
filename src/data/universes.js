@@ -5,6 +5,7 @@ import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260716-records";
 import { ANY_HITTER, CORNER_OUTFIELD_POSITION, boardBullpenSlots, poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
+import { COACHES, COACHES_PER_BOARD, COACH_GROUP, coachById } from "../rules/coaches.js?v=20260910-coaches";
 import { authenticPoints } from "../rules/pricing.js?v=20260716-records";
 import { PRICE_MODEL } from "./priceModel.js";
 
@@ -495,7 +496,28 @@ export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, start
   const salt = quotas === DECK_QUOTAS
     ? ""
     : `${managerCount > DECK_BASELINE_MANAGERS ? `:m${Math.round(managerCount)}` : ""}${defaultRotation ? "" : `:sp${Math.round(startingPitchers)}`}${penSalt(pen)}`;
-  return dealDeckToQuotas(quotas, `deck-deal:${universeKey()}:${seed}${salt}`);
+  const rngKey = `deck-deal:${universeKey()}:${seed}${salt}`;
+  // Coaches deal IN LIEU of the DH group — the bats no position needs — so the
+  // board is the same size with them as without. The position groups deal
+  // first and deal the same cards either way; only the DH shelf gives up its
+  // seats, and a room too big for six seats keeps the rest of them as bats.
+  // Six of the catalog's twelve come, drawn by the seed (see dealCoaches).
+  const coachCount = pen.coaches ? Math.min(COACHES_PER_BOARD, quotaFor(quotas, "DH")) : 0;
+  if (!coachCount) return dealDeckToQuotas(quotas, rngKey);
+  const trimmed = quotas.map(([group, quota]) => [group, group === "DH" ? quota - coachCount : quota]);
+  return [...dealDeckToQuotas(trimmed, rngKey), ...dealCoaches(coachCount, `${rngKey}:coaches`)];
+}
+
+function quotaFor(quotas, group) {
+  return quotas.find(([name]) => name === group)?.[1] ?? 0;
+}
+
+// Which coaches: a seeded draw from the catalog, so the same room deals the
+// same staff and a new seed deals a different one. Every coach carries the
+// COACH slot tag the way a dealt bat carries its position group.
+function dealCoaches(count, rngKey) {
+  const rng = createRng(rngKey);
+  return shuffled(COACHES, rng).slice(0, count).map((coach) => ({ ...coach, slot: COACH_GROUP }));
 }
 
 // The board a random-nomination room reads. Unlike the standard deck this one
@@ -506,7 +528,13 @@ export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, start
 export function dealRandomNominationDeck(seed, managerCount, startingPitchers = 2, pen = {}) {
   const { visible } = randomNominationQuotas(managerCount, startingPitchers, pen);
   const rotationSalt = Math.round(Number(startingPitchers) || 2) === 2 ? "" : `:sp${Math.round(startingPitchers)}`;
-  return dealDeckToQuotas(visible, `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}${rotationSalt}${penSalt(pen)}`);
+  const rngKey = `deck-deal:${universeKey()}:${seed}:random-nomination:${managerCount}${rotationSalt}${penSalt(pen)}`;
+  const deck = dealDeckToQuotas(visible, rngKey);
+  // The dealt coaches are on the visible board; which of them come up is the
+  // hidden queue's business, where they take the DH group's seats (see
+  // buildNominationQueue in draft.js). The bats' reserve is untouched, so the
+  // closing sweep keeps every promise it made.
+  return pen.coaches ? [...deck, ...dealCoaches(COACHES_PER_BOARD, `${rngKey}:coaches`)] : deck;
 }
 
 // Salted into the deal only when the pen changes the quotas, so a two-reliever
@@ -521,6 +549,8 @@ function penSalt(pen) {
 // to hunt bargains in, and a card's price is what the auction bids in.
 export function buildDraftPool(mode, seed, options = {}) {
   setUniverse(seed, mode, { priceNoise: false, temperature: options.temperature });
+  // `options.coaches` rides into the deal with the pen settings: the deck
+  // functions read it off the same object.
   const deck = options.nomination === "random"
     ? dealRandomNominationDeck(seed, options.managerCount, options.startingPitchers, options)
     : dealDraftDeck(seed, options.managerCount, options.startingPitchers, options);
@@ -648,7 +678,8 @@ export function deckFromIds(mode, seed, entries, temperature = 0) {
   // and deal exactly as they always did — an old room's log still replays.
   return entries.map((entry) => {
     const id = typeof entry === "string" ? entry : entry?.id;
-    const card = cardById(id);
+    // A coach is in no card set; he is on the staff of every one of them.
+    const card = cardById(id) ?? coachById(id);
     if (!card) throw new Error(`Deck card ${id} is not in the ${mode} set`);
     const slot = typeof entry === "string" ? null : entry?.slot ?? null;
     if (entry?.replacement) return { ...card, slot, replacement: true };

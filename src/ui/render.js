@@ -3,22 +3,25 @@ import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/
 import { eventLeverage } from "../rules/game.js?v=20260717-draft-wpa";
 import { cardPanelHtml } from "./cardFace.js?v=20260725-golden-serial";
 import { MAX_NOTE_LENGTH } from "./draftRankings.js?v=20260725-prep-tiers";
+import { isCoach } from "../rules/coaches.js?v=20260910-coaches";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
 const HISTORY_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
 
 export function playerPosition(player) {
+  if (isCoach(player)) return "Coach";
   return player.kind === "hitter" ? player.position : player.role;
 }
 
 export function playerPrimary(player) {
+  if (isCoach(player)) return 0;
   return player.kind === "hitter" ? player.onBase : player.control;
 }
 
 export function playerPower(player) {
   const weights = { BB: 1, "1B": 2, "1B+": 2, "2B": 4, "3B": 5, HR: 6 };
-  return player.chart.reduce((sum, entry) => sum + chartSpan(entry) * (weights[entry.result] ?? 0), 0);
+  return (player.chart ?? []).reduce((sum, entry) => sum + chartSpan(entry) * (weights[entry.result] ?? 0), 0);
 }
 
 export function renderPlayerTable(players, options = {}) {
@@ -26,7 +29,9 @@ export function renderPlayerTable(players, options = {}) {
     return `<p class="empty">${escapeHtml(options.emptyMessage ?? "No matching players.")}</p>`;
   }
   const mode = options.mode ?? "hitter";
-  const outcomes = mode === "pitcher" ? PITCHER_OUTCOMES : HITTER_OUTCOMES;
+  // A coach has no chart, so his board has no outcome columns — his job and
+  // what he does stand where the die ranges would.
+  const outcomes = mode === "pitcher" ? PITCHER_OUTCOMES : mode === "coach" ? [] : HITTER_OUTCOMES;
   // The watchlist only has an owner when somebody is on the clock, so a
   // spectator's board simply has no star column to click.
   const starred = options.starred ?? null;
@@ -59,6 +64,15 @@ export function renderPlayerTable(players, options = {}) {
         { label: "IP", sort: "ip" },
         ...pointsHeader,
         ...outcomes.map((outcome) => ({ label: outcome, sort: `chart:${outcome}` }))
+      ]
+    : mode === "coach"
+    ? [
+        ...starHeader,
+        { label: "" },
+        { label: "Coach", sort: "name" },
+        { label: "Job" },
+        { label: "What he does" },
+        ...pointsHeader
       ]
     : [
         ...starHeader,
@@ -97,7 +111,10 @@ export function renderPlayerTable(players, options = {}) {
         : options.action && (legality.ok || !options.hideBlocked)
           ? `<button class="small" data-action="${options.action}" data-player-id="${player.id}" ${legality.ok ? "" : "disabled"} title="${escapeHtml(legality.reason)}">${legality.ok ? (options.label ?? "Pick") : "Blocked"}</button>`
           : "";
-      const detailCells = player.kind === "pitcher"
+      const detailCells = isCoach(player)
+        ? `<td class="card-stat">${escapeHtml(player.title ?? "Coach")}</td>
+        <td class="coach-blurb-cell">${escapeHtml(player.blurb ?? "")}</td>`
+        : player.kind === "pitcher"
         ? `<td class="card-stat">${escapeHtml(player.role)}</td>
         <td class="card-stat num">${player.control}</td>
         <td class="card-stat num">${player.ip}</td>`
@@ -304,7 +321,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong></td>
         <td>${escapeHtml(playerPosition(player))}</td>
         ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? renderTipTarget(`$${price.toLocaleString()}`, bidTipsByPlayerId?.[player.id]) : "&mdash;"}</td>` : ""}
-        <td class="num">${playerPrimary(player)}</td>
+        <td class="num">${isCoach(player) ? "&mdash;" : playerPrimary(player)}</td>
         ${hidePoints ? "" : `<td class="num">${player.points}</td>`}
         ${showWpar ? `<td class="num">${Number.isFinite(wparByPlayerId.get(player.id)) ? formatWpar(wparByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
         ${showWpa ? `<td class="num">${Number.isFinite(wpaByPlayerId.get(player.id)) ? formatWpa(wpaByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
@@ -333,7 +350,9 @@ export function renderDraftHistoryTable(picks, options = {}) {
 }
 
 function renderHeaderCell(header, mode, index, options) {
-  const className = `${tableHeaderClass(mode, index)}${outcomeBoundaryClass(header.label)}`.trim();
+  const className = mode === "coach"
+    ? (header.label === "Pts" ? "num" : "")
+    : `${tableHeaderClass(mode, index)}${outcomeBoundaryClass(header.label)}`.trim();
   if (!header.sort) return `<th class="${className}">${escapeHtml(header.label)}</th>`;
   const active = options.sort === header.sort;
   const direction = active ? options.sortDirection ?? "desc" : null;
@@ -359,7 +378,7 @@ function outcomeBoundaryClass(outcome) {
 }
 
 function renderOutcomeCells(player, outcomes) {
-  const ranges = chartRanges(player.chart);
+  const ranges = chartRanges(player.chart ?? []);
   return outcomes
     .map((outcome) => `<td class="num chart-range-cell${outcomeBoundaryClass(outcome)}">${ranges.get(outcome) ?? ""}</td>`)
     .join("");
