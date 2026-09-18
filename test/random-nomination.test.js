@@ -20,8 +20,10 @@ import {
   randomNominationQuotas,
   randomNominationShortfalls,
   managerValuation,
+  roomDraftOptions,
   standingReplacements,
   submitCpuSealedBids,
+  UNLIMITED_BULLPEN,
   undoLastPick,
   validateRoster
 } from "../src/rules/draft.js";
@@ -607,4 +609,51 @@ test("a card worse than the standing replacement draws no bid", () => {
   };
   for (const card of worse) assert.equal(bidOn(card), 0, `${card.name} is worse than the free card and drew a bid`);
   assert.ok(bidOn(better[0]) > 0, "a catcher better than the standing card is still worth buying");
+});
+
+// A room's rules come from the room. Server and client both rebuild a draft
+// from the room record, and a browser that reads its own setup screen instead
+// bids for the computers under rules the room never had — room misty-fox-open
+// was drafted with an uncapped pen and priced all 202 computer bids as though
+// the pen held two.
+test("a room's own settings decide the draft, whoever rebuilds it", () => {
+  const room = {
+    draftType: "auction",
+    nomination: "random",
+    startingPitchers: 3,
+    bullpenSlots: "all",
+    bullpenMin: 2,
+    auctionBudget: 1400,
+    hidePoints: true
+  };
+  const options = roomDraftOptions(room);
+  assert.equal(options.bullpenSlots, UNLIMITED_BULLPEN, "an uncapped pen stays uncapped");
+  assert.equal(options.bullpenMin, 2);
+  assert.equal(options.startingPitchers, 3);
+  assert.equal(options.rosterSize, 14);
+  assert.equal(options.budget, 1400);
+  assert.equal(options.hidePoints, true);
+  assert.equal(options.timer, false, "a room that names no clock has none");
+
+  // The pen the room set is the pen the bidder budgets against.
+  const pool = buildDraftPool(UNIVERSE, "pen-rules", { nomination: "random", managerCount: 4, startingPitchers: 3, bullpenSlots: "all", bullpenMin: 2 });
+  const managers = Array.from({ length: 4 }, (_, index) => ({ name: `M${index + 1}`, cpu: true }));
+  const uncapped = createDraft(managers, pool, options.rosterSize, "pen-rules", options);
+  const capped = createDraft(managers, pool, options.rosterSize, "pen-rules", { ...options, bullpenSlots: 2 });
+  assert.equal(uncapped.bullpenSlots, UNLIMITED_BULLPEN);
+  assert.equal(capped.bullpenSlots, 2);
+
+  // With two relievers aboard the capped room's pen is full and the uncapped
+  // room's is not, so the same arm is worth different money in each.
+  const arms = pool.filter((card) => card.kind === "pitcher" && card.role !== "SP" && !card.replacement)
+    .sort((a, b) => b.points - a.points);
+  const lotOn = (draft) => {
+    const cpu = draft.managers[0];
+    cpu.roster = arms.slice(-2).map((card) => draft.pool.find((item) => item.id === card.id));
+    for (const card of cpu.roster) draft.pickedIds.add(card.id);
+    draft.auction.budgets[cpu.id] = 800;
+    draft.auction.lot = { playerId: arms[0].id, nominatorId: null, round: 1, bids: {}, pending: [], tie: null, clock: null };
+    return cpuSealedBid(draft, cpu);
+  };
+  assert.notEqual(lotOn(uncapped), lotOn(capped), "the pen setting moves what a reliever is worth");
 });

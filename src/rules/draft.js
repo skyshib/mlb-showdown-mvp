@@ -346,6 +346,35 @@ export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE)
   return Math.max(rosterSize * AUCTION_MIN_BID, value);
 }
 
+// The rules a ROOM plays by, read off the room itself. Server and client both
+// rebuild a draft from a room record — the server on restart, every browser on
+// join — and they have to arrive at the same draft, because a browser computes
+// the computers' sealed bids and sends them in as actions. Room misty-fox-open
+// was set to an uncapped pen and every one of its 202 computer bids was priced
+// as though the pen held two, because the browser bidding for them rebuilt the
+// draft from ITS OWN setup screen instead of from the room.
+export function roomDraftOptions(room = {}) {
+  const draftType = room.draftType === "auction" ? "auction" : "snake";
+  const nomination = draftType === "auction" && room.nomination === "random" ? "random" : "manual";
+  const startingPitchers = normalizeStartingPitchers(room.startingPitchers);
+  const pen = roomBullpen(room, nomination === "random");
+  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, pen);
+  return {
+    draftType,
+    nomination,
+    startingPitchers,
+    ...pen,
+    rosterSize,
+    hidePoints: Boolean(room.hidePoints),
+    budget: draftType === "auction" ? normalizeAuctionBudget(room.auctionBudget, rosterSize) : null,
+    // A room that names no clock has no clock — left undefined these normalize
+    // to a TIMED auction, which invents a review period the room never had, and
+    // then the room's own log will not replay through it.
+    timer: room.auctionTimer ?? false,
+    snakeTimer: room.snakeTimer ?? false
+  };
+}
+
 // Managers arrive as plain names or as { name, cpu } descriptors; cpu
 // managers play themselves (instant autopicks and sealed bids).
 export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, seed = "showdown", options = {}) {

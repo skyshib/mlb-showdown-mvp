@@ -102,6 +102,7 @@ import {
   normalizeCardPosition,
   normalizePickTimerSeconds,
   roomBullpen,
+  roomDraftOptions,
   normalizeStartingPitchers,
   bullpenRequirement,
   UNLIMITED_BULLPEN,
@@ -1297,19 +1298,27 @@ function applyRoomSnapshot(room) {
 function rebuildOnlineDraft(room) {
   state.seed = room.seed;
   if (state.seed) rememberLastSeed(state.seed);
-  // The board is the one the ROOM dealt, not one this browser deals for itself.
-  // Re-dealing from the seed asks every client to reproduce a deal that only
-  // holds while nobody touches the dealing code — and the room outlives that.
+  // Every rule of the draft comes from the ROOM, never from this browser's own
+  // setup screen. They are supposed to agree — openRoom copies the room's
+  // settings into state — but a browser that disagrees does not merely display
+  // the draft wrongly: a client computes the COMPUTERS' bids (see the auction
+  // autopilot below) and sends them in as actions. Room misty-fox-open was
+  // drafted with an uncapped pen and every one of its 202 computer bids was
+  // priced as though the pen held two, because whichever browser was bidding
+  // for them thought so. Read the room and the question cannot arise.
+  const universe = universeConfig(room.universe)?.key ?? state.universe;
+  const temperature = normalizeTemperature(room.temperature);
+  const options = roomDraftOptions(room);
   const pool = room.deck?.length
-    ? deckFromIds(state.universe, room.seed, room.deck, state.temperature)
-    : buildDraftPool(state.universe, room.seed, {
-      nomination: state.nomination,
+    ? deckFromIds(universe, room.seed, room.deck, temperature)
+    : buildDraftPool(universe, room.seed, {
+      nomination: options.nomination,
       managerCount: room.managers.length,
-      startingPitchers: state.startingPitchers,
-      bullpenSlots: state.bullpenSlots,
-      bullpenMin: state.bullpenMin,
-      temperature: state.temperature,
-      coaches: state.coaches
+      startingPitchers: options.startingPitchers,
+      bullpenSlots: options.bullpenSlots,
+      bullpenMin: options.bullpenMin,
+      temperature,
+      coaches: Boolean(room.coaches)
     });
   state.draft = createDraft(
     room.managers.map((manager) => ({ name: manager.name, cpu: Boolean(manager.cpu) })),
@@ -1317,22 +1326,7 @@ function rebuildOnlineDraft(room) {
     room.rosterSize,
     room.seed,
     {
-      draftType: state.draftType,
-      startingPitchers: state.startingPitchers,
-      nomination: state.nomination,
-      bullpenSlots: state.bullpenSlots,
-      bullpenMin: state.bullpenMin,
-      hidePoints: state.hidePoints,
-      budget: state.auctionBudget,
-      // A room that names no clock has no clock — the same default reviveRoom
-      // takes on the server. Left undefined this normalizes to a TIMED auction
-      // (the house rule), which invents a review period the room never had, and
-      // then the room's own log will not replay through it: the nomination that
-      // was legal when it was recorded throws "Review period is still open" and
-      // the room can never be opened again.
-      timer: room.auctionTimer ?? false,
-      // Same rule for the snake's chess clock: a room that names none has none.
-      snakeTimer: room.snakeTimer ?? false
+      ...options
     }
   );
   // The bids on the card currently up are withheld until it sells, so the

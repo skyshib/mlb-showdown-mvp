@@ -33,6 +33,7 @@ import {
   isRandomNomination,
   maxPoolManagers,
   roomBullpen,
+  roomDraftOptions,
   nominateBestTarget,
   randomNominationShortfalls,
   normalizeAuctionBudget,
@@ -259,12 +260,14 @@ function reviveRoom(saved) {
   const auctionBudget = draftType === "auction"
     ? normalizeAuctionBudget(saved.auctionBudget, rosterSize)
     : null;
+  // The same reading of the room the clients use, so a revived draft and a
+  // browser's rebuilt one cannot disagree about the rules.
   const draft = createDraft(
     managerNames.map((name) => ({ name, cpu: cpuNames.includes(name) })),
     pool,
     rosterSize,
     saved.seed,
-    { draftType, nomination, startingPitchers, bullpenSlots, bullpenMin, budget: auctionBudget, timer: saved.auctionTimer ?? false, snakeTimer: saved.snakeTimer ?? false }
+    roomDraftOptions({ ...saved, draftType, nomination, startingPitchers, bullpenSlots, bullpenMin, auctionBudget })
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
