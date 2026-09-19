@@ -63,7 +63,7 @@ function closestOpen(live, openedAt) {
 export function namesIn(line) {
   const data = line.data ?? {};
   const cpu = new Set(data.cpu ?? []);
-  if (line.kind === "local-draft-start" || line.kind === "sim") {
+  if (line.kind === "local-draft-start" || line.kind === "sim" || line.kind === "draft-done") {
     return (data.humans ?? data.managers ?? []).filter((name) => !cpu.has(name));
   }
   if (line.kind === "room-create") return (data.managers ?? []).filter((name) => !cpu.has(name));

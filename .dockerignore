@@ -21,6 +21,7 @@ scripts/*
 !scripts/traffic.js
 !scripts/geo.js
 !scripts/visits.js
+!scripts/drafts.js
 
 # Never opened by the running server.
 test

@@ -142,6 +142,33 @@
   .beats li { color: var(--text-secondary); font-size: 13px; margin-bottom: 3px; }
   .beats .beat-time { color: var(--text-muted); font-variant-numeric: tabular-nums; margin-right: 8px; }
   .beats b { color: var(--text-primary); font-weight: 600; }
+
+  .drafts { margin-top: 24px; }
+  .drafts select { padding: 3px 6px; }
+  .draft { border-top: 1px solid var(--gridline); padding: 10px 0; }
+  .draft:first-child { border-top: 0; }
+  .draft > summary { cursor: pointer; list-style: none; }
+  .draft > summary::-webkit-details-marker { display: none; }
+  .draft-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .draft-head .session-when::before { content: "▸ "; color: var(--text-muted); }
+  .draft[open] .draft-head .session-when::before { content: "▾ "; }
+  .draft-seats { color: var(--text-secondary); font-size: 12px; margin-top: 8px; }
+  .draft-seats div + div { margin-top: 2px; }
+  .rosters {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 16px; margin-top: 12px;
+  }
+  .roster h3 { font-size: 14px; font-weight: 600; margin: 0; }
+  .roster .cpu { color: var(--text-muted); font-weight: 400; font-size: 12px; }
+  .roster-sum { color: var(--text-secondary); font-size: 12px; margin-bottom: 6px; }
+  .cards { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+  .cards li {
+    display: grid; grid-template-columns: 44px 1fr auto 40px;
+    gap: 6px; padding: 1px 0; color: var(--text-secondary);
+  }
+  .cards .card-cost { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .cards .card-name { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cards .card-pts { text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -176,6 +203,25 @@
       <section class="card"><h2>Referrers</h2><ul class="rank" id="referrers"></ul></section>
     </div>
 
+    <section class="card drafts" id="drafts" hidden>
+      <div class="chart-head">
+        <h2>The draft book</h2>
+        <div class="legend">
+          <label class="key">Last
+            <select class="toggle" id="draft-limit">
+              <option value="25">25 drafts</option>
+              <option value="100" selected>100 drafts</option>
+              <option value="1000">Everything</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <p class="note">Every draft played through to the last pick — a room or a single screen —
+        and the teams that came out of it. Open one for every roster, what each card cost, and
+        who was in the chair.</p>
+      <div id="draft-list"></div>
+    </section>
+
     <section class="card visits" id="visits" hidden>
       <div class="chart-head">
         <h2>Sessions</h2>
@@ -191,9 +237,9 @@
           <label class="key"><input type="checkbox" id="visit-bots" /> Show crawlers</label>
         </div>
       </div>
-      <p class="note">One block per device, split when it goes quiet for half an hour. Names are
-        whatever was typed into the draft or the adventure, so this is the only place a draft
-        played on one screen shows up at all.</p>
+      <p class="note">One block per page load, with the beats somebody left inside it. Names are
+        whatever was typed into the draft or the adventure, and a draft played through to the end
+        links to its teams in the book above.</p>
       <div id="visit-list"></div>
     </section>
   </div>
@@ -434,6 +480,10 @@ function beat(line) {
     case "local-draft-start":
       return say(`Dealt a local <b>${esc(data.draftType ?? "")}</b> draft — ${esc((data.managers ?? []).join(", "))}
         · ${esc(data.universe ?? "")} · ${data.startingPitchers ?? "?"} SP`);
+    case "draft-done":
+      // The draft itself is in the book below; the beat is the way in.
+      return say(`Finished the <b>${esc(data.draftType ?? "")}</b> draft —
+        <a href="#" data-open-draft="${esc(data.draftId ?? "")}">see the teams</a>`);
     case "sim": {
       const top = (data.standings ?? [])[0];
       return say(`Simmed <b>${(data.runs ?? 0).toLocaleString()}</b> games${top ? ` — ${esc(top.team)} won ${(top.winPct * 100).toFixed(1)}%` : ""}`);
@@ -479,6 +529,125 @@ function esc(value) {
 document.getElementById("visit-days").addEventListener("change", loadVisits);
 document.getElementById("visit-bots").addEventListener("change", loadVisits);
 await loadVisits();
+
+// ── The draft book ─────────────────────────────────────────────────────────
+// /api/drafts is the finished drafts, and like the visit log it has no public
+// mode: a record names its managers and says roughly where they played from.
+// The list carries counts only; a draft's rosters are fetched when it is opened.
+
+async function loadDrafts() {
+  if (!token) return;
+  const limit = document.getElementById("draft-limit").value;
+  const response = await fetch(`/api/drafts?token=${encodeURIComponent(token)}&limit=${limit}`).catch(() => null);
+  if (!response?.ok) return;
+  const { drafts } = await response.json();
+  document.getElementById("drafts").hidden = false;
+  document.getElementById("draft-list").innerHTML = drafts.length
+    ? drafts.map(draftRow).join("")
+    : '<p class="empty">Nobody has finished a draft yet.</p>';
+}
+
+function draftRow(draft) {
+  const humans = draft.managers.filter((manager) => !manager.cpu);
+  const places = [...new Set(draft.who.map((seat) => seat.place).filter(Boolean))];
+  const meta = [
+    draft.draftType === "auction"
+      ? `auction${draft.nomination === "random" ? ", random nomination" : ""}`
+      : "snake draft",
+    draft.universe ?? "",
+    draft.budget ? `${money(draft.budget)} each` : "",
+    `${draft.managers.length} managers`,
+    `${draft.rosterSize}-man rosters`,
+    `${draft.startingPitchers} SP`,
+    draft.source === "online" ? `room ${draft.roomId}` : "one screen",
+    ...places,
+    `seed ${draft.seed}`
+  ].filter(Boolean);
+  return `<details class="draft" data-draft="${esc(draft.id)}">
+    <summary>
+      <div class="draft-head">
+        <span class="session-when">${when(Date.parse(draft.at))}</span>
+        <span class="session-who">${esc(humans.map((manager) => manager.name).join(", ")) || "computers only"}</span>
+      </div>
+      <div class="session-meta">${meta.map((part) => `<span>${esc(part)}</span>`).join("")}</div>
+    </summary>
+    <div class="draft-body"><p class="empty">Opening…</p></div>
+  </details>`;
+}
+
+// One fetch per draft, the first time it is opened. `toggle` does not bubble,
+// so it is caught on the way down.
+document.getElementById("draft-list").addEventListener("toggle", async (event) => {
+  const details = event.target.closest(".draft");
+  if (!details?.open || details.dataset.loaded) return;
+  details.dataset.loaded = "1";
+  const body = details.querySelector(".draft-body");
+  const response = await fetch(
+    `/api/drafts/${encodeURIComponent(details.dataset.draft)}?token=${encodeURIComponent(token)}`
+  ).catch(() => null);
+  if (!response?.ok) {
+    body.innerHTML = '<p class="empty">That draft could not be read.</p>';
+    details.dataset.loaded = "";
+    return;
+  }
+  const { draft } = await response.json();
+  body.innerHTML = `${seatsHtml(draft)}${rostersHtml(draft)}`;
+}, true);
+
+// Who was in each chair, and what the address said about where from. The same
+// guess the map above is drawing, at the resolution of one player.
+function seatsHtml(draft) {
+  if (!draft.who?.length) return "";
+  return `<div class="draft-seats">${draft.who.map((seat) => {
+    const parts = [
+      seat.place || "unknown place",
+      seat.org || "",
+      `${seat.browser} on ${seat.os}${seat.mobile ? " (phone)" : ""}`,
+      seat.host ? "host" : "",
+      `device ${String(seat.device || "").slice(0, 8) || "none"}`
+    ].filter(Boolean);
+    const who = seat.manager ? `<b>${esc(seat.manager)}</b> — ` : "";
+    return `<div>${who}${esc(parts.join(" · "))}</div>`;
+  }).join("")}</div>`;
+}
+
+function rostersHtml(draft) {
+  return `<div class="rosters">${draft.managers.map((manager) => {
+    const summary = [
+      `${(manager.points ?? 0).toLocaleString()} pts`,
+      manager.spent != null ? `${money(manager.spent)} spent` : "",
+      manager.left != null ? `${money(manager.left)} left` : ""
+    ].filter(Boolean).join(" · ");
+    return `<div class="roster">
+      <h3>${esc(manager.name)}${manager.cpu ? ` <span class="cpu">computer${manager.persona ? ` · ${esc(manager.persona)}` : ""}</span>` : ""}</h3>
+      <div class="roster-sum">${summary}</div>
+      <ol class="cards">${manager.roster.map((card) => `<li>
+        <span class="card-cost">${card.price != null ? money(card.price) : card.pick ? `#${card.pick}` : ""}</span>
+        <span class="card-name">${esc(card.name)}${card.replacement ? " *" : ""}</span>
+        <span class="card-pos">${esc(card.pos)}</span>
+        <span class="card-pts">${(card.pts ?? 0).toLocaleString()}</span>
+      </li>`).join("")}</ol>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+function money(value) {
+  return `$${(Number(value) || 0).toLocaleString()}`;
+}
+
+document.getElementById("draft-limit").addEventListener("change", loadDrafts);
+await loadDrafts();
+
+// A finished draft in somebody's session opens the book at that draft.
+document.getElementById("visit-list").addEventListener("click", (event) => {
+  const link = event.target.closest("[data-open-draft]");
+  if (!link) return;
+  event.preventDefault();
+  const details = document.querySelector(`.draft[data-draft="${CSS.escape(link.dataset.openDraft)}"]`);
+  if (!details) return;
+  details.open = true;
+  details.scrollIntoView({ behavior: "smooth", block: "center" });
+});
 
 function rank(id, rows, name) {
   const list = document.getElementById(id);

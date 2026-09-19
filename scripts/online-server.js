@@ -11,7 +11,9 @@ import { buildRealDraftPool } from "../src/data/realPlayers.js";
 import { buildMarinersDraftPool } from "../src/data/marinersPlayers.js";
 import { buildDraftPool, deckEntry, deckFromIds, universeConfig } from "../src/data/universes.js";
 import { flushTraffic, loadTrafficFile, recordView, trafficSummary } from "./traffic.js";
-import { deviceFor, flushVisits, loadVisitLog, logClientEvent, logPageView, logServerEvent, readVisits } from "./visits.js";
+import { describeRequest, deviceFor, flushVisits, loadVisitLog, logClientEvent, logPageView, logServerEvent, readVisits } from "./visits.js";
+import { allowFiling, draftId, flushDrafts, listDrafts, loadDraftArchive, readDraft, sanitizeDraftRecord, saveDraft } from "./drafts.js";
+import { draftRecord } from "../src/rules/draftRecord.js";
 import {
   applyDraftAction,
   auctionReviewComplete,
@@ -120,10 +122,15 @@ export function createOnlineServer(options = {}) {
     hallOfFame: loadHallOfFameFile(dataDir),
     records: loadRecordsFile(dataDir),
     traffic: loadTrafficFile(dataDir),
-    visits: loadVisitLog(dataDir)
+    visits: loadVisitLog(dataDir),
+    drafts: loadDraftArchive(dataDir)
   };
   for (const room of store.rooms.values()) {
     scheduleRoomTimer(store, room);
+    // A room that finished before the book existed — or before this machine
+    // last came up — still belongs in it. Filing is keyed on the room, so a
+    // restart rewrites the same record rather than adding another.
+    fileRoomDraft(store, room);
     if (room.unpinnedDeck) {
       room.unpinnedDeck = false;
       persistRoom(store, room);
@@ -173,7 +180,8 @@ export async function flushSaves(store) {
     // Pageviews are batched rather than written one at a time, so on the way down
     // there is almost always a few seconds of them still only in memory.
     flushTraffic(store),
-    flushVisits(store)
+    flushVisits(store),
+    flushDrafts(store)
   ]);
 }
 
@@ -359,6 +367,37 @@ function roomRecord(room) {
     waitingForPlayers: Boolean(room.waitingForPlayers),
     createdAt: room.createdAt
   };
+}
+
+// ---- The draft book ---------------------------------------------------------
+//
+// A room is deleted when it empties; the draft it held should outlive it. The
+// moment a room's rosters fill, the finished draft is filed in the archive
+// (scripts/drafts.js) with the seats that played it. Filing again after a
+// further change rewrites the same record rather than adding a second one, so
+// an undo and a re-finish leave one draft behind, not three.
+function fileRoomDraft(store, room) {
+  if (!room.draft?.complete) return;
+  if (room.filedPicks === room.draft.pickNumber) return;
+  room.filedPicks = room.draft.pickNumber;
+  // Stamped with the last action rather than with now, so a room finished
+  // months ago and filed on a restart keeps the night it actually happened.
+  const endedAt = Number(room.actions.at(-1)?.action?.at);
+  const record = draftRecord(room.draft, {
+    source: "online",
+    roomId: room.id,
+    universe: room.universe ?? null,
+    at: new Date(Number.isFinite(endedAt) ? endedAt : Date.now()).toISOString(),
+    startedAt: new Date(room.createdAt).toISOString(),
+    who: [...room.seats.values()]
+      .filter((seat) => seat.who)
+      .map((seat) => ({
+        manager: room.draft.managers.find((manager) => manager.id === seat.managerId)?.name ?? "",
+        host: Boolean(seat.isHost),
+        ...seat.who
+      }))
+  });
+  saveDraft(store, draftId({ roomId: room.id }), record);
 }
 
 // ---- Hall of fame -----------------------------------------------------------
@@ -876,6 +915,36 @@ async function postHallOfFameEntry(store, request, response) {
   sendJson(response, 201, { ok: true });
 }
 
+// A browser filing the draft it just finished on its own screen. The endpoint is
+// public — every page is — so nothing in the body is trusted: the record is
+// rebuilt field by field, and the id it lands under is ours, hashed from the
+// device cookie and the key the page made up for this draft, so one browser can
+// neither guess another's id nor fill the archive with one draft under a
+// thousand names.
+async function postDraft(store, request, response) {
+  const body = await readJsonBody(request).catch(() => null);
+  const record = body && sanitizeDraftRecord(body);
+  if (!record) return sendJson(response, 400, { error: "That is not a draft" });
+  const who = describeRequest(store, request);
+  const key = /^[a-z0-9-]{1,60}$/i.test(String(body.key ?? "")) ? String(body.key) : "";
+  if (!key) return sendJson(response, 400, { error: "A filed draft needs a key" });
+  if (!allowFiling(store, who.visitor || who.device)) {
+    return sendJson(response, 429, { error: "That is more drafts than anybody finishes in an hour" });
+  }
+  const id = draftId({ device: who.device, key });
+  saveDraft(store, id, { ...record, source: "local", who: [who] });
+  // Filed in the archive, and noted in the visit log too, so the session that
+  // played it reads as a story rather than stopping at the deal.
+  logServerEvent(store, request, "draft-done", {
+    draftId: id,
+    draftType: record.draftType,
+    universe: record.universe,
+    managers: record.managers.map((manager) => manager.name),
+    cpu: record.managers.filter((manager) => manager.cpu).map((manager) => manager.name)
+  });
+  sendJson(response, 201, { ok: true, id });
+}
+
 async function handleApi(store, request, response, url) {
   const segments = url.pathname.split("/").filter(Boolean);
   // /api/hall-of-fame — the shared leaderboard of finished adventure runs.
@@ -937,6 +1006,24 @@ async function handleApi(store, request, response, url) {
         humansOnly: params.get("humans") === "1"
       })
     });
+  }
+  // /api/drafts — the draft book. POST files a finished local draft (the room
+  // server files its own; a draft played on one screen has nobody else to file
+  // it). GET reads, and reading takes VISITS_TOKEN: a record names its managers
+  // and says where they played from, so it is as private as the visit log.
+  if (segments[1] === "drafts") {
+    if (request.method === "POST" && !segments[2]) return postDraft(store, request, response);
+    if (request.method !== "GET") return sendJson(response, 404, { error: "Unknown API route" });
+    const required = process.env.VISITS_TOKEN;
+    if (!required || url.searchParams.get("token") !== required) {
+      return sendJson(response, 401, { error: "The draft book is private." });
+    }
+    if (segments[2]) {
+      const record = readDraft(store, decodeURIComponent(segments[2]));
+      if (!record) return sendJson(response, 404, { error: "No such draft" });
+      return sendJson(response, 200, { draft: record });
+    }
+    return sendJson(response, 200, { drafts: listDrafts(store, { limit: url.searchParams.get("limit") ?? 100 }) });
   }
   // /api/rooms | /api/rooms/:id | /api/rooms/:id/(join|actions|stream)
   if (segments[1] !== "rooms") return sendJson(response, 404, { error: "Unknown API route" });
@@ -1085,7 +1172,11 @@ async function joinRoom(store, room, request, response) {
   // Claiming counts as sitting down. Otherwise there is a gap between taking a
   // seat and opening the stream in which the seat looks empty and the next
   // person through the door can take it out from under you.
-  const seat = { managerId: manager.id, token: newToken(), isHost, lastSeenAt: Date.now() };
+  // What the chair knows about whoever is in it: the same device/browser/edge
+  // line the visit log writes, kept so the finished draft can say who played it
+  // and roughly where from. No raw address here either — the visitor hash is
+  // what joins to a place.
+  const seat = { managerId: manager.id, token: newToken(), isHost, lastSeenAt: Date.now(), who: describeRequest(store, request) };
   room.seats.set(manager.id, seat);
   startRoomIfFull(store, room);
   persistRoom(store, room);
@@ -1171,6 +1262,7 @@ async function postAction(store, room, request, response) {
     broadcastSeats(room);
   }
   runCpuAuction(store, room);
+  fileRoomDraft(store, room);
   broadcastLot(room);
   scheduleRoomTimer(store, room);
   // Hand the result straight back to whoever acted. They will hear it again on
@@ -1291,6 +1383,7 @@ function scheduleRoomTimer(store, room) {
     room.timer = null;
     syncRoomTimer(store, room, Date.now());
     runCpuAuction(store, room);
+    fileRoomDraft(store, room);
     broadcastLot(room);
     scheduleRoomTimer(store, room);
   }, Math.max(1, deadline - Date.now()));

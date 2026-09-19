@@ -156,6 +156,14 @@ function requestBasics(store, request, device, now) {
   };
 }
 
+// What a request says about whoever sent it, for a record that is not a visit —
+// the seat somebody took, the draft they filed. Same fields the log writes, so
+// place and ISP join in from the geo cache the same way.
+export function describeRequest(store, request, now = new Date()) {
+  const { t, ...rest } = requestBasics(store, request, cookieDevice(request), now);
+  return rest;
+}
+
 function cookieDevice(request) {
   const id = readCookie(request, DEVICE_COOKIE);
   return /^[a-f0-9]{16}$/.test(id) ? id : "";

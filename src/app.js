@@ -209,6 +209,7 @@ import {
   tierOfRank
 } from "./ui/draftRankings.js?v=20260725-prep-tiers";
 import { track, trackSession } from "./ui/telemetry.js?v=20260915-visits";
+import { fileFinishedDraft } from "./ui/draftReport.js?v=20260919-drafts";
 
 trackSession();
 
@@ -260,6 +261,16 @@ const SEED_NOUNS = [
   "mound", "diamond", "outfield", "infield", "batflip", "rally", "moonshot",
   "screwball", "cutter", "heater", "gapper", "chopper", "squeeze", "pickoff"
 ];
+
+// A name for one local draft, unique to the browser that dealt it. It travels
+// with the filed record and is hashed with the device cookie on the way in, so
+// it identifies a draft without naming anything about whoever played it.
+function newDraftKey() {
+  return [...crypto.getRandomValues(new Uint8Array(8))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 function randomBaseballSeed() {
   const pick = (list) => list[Math.floor(Math.random() * list.length)];
   return `${pick(SEED_ADJECTIVES)}-${pick(SEED_NOUNS)}`;
@@ -803,6 +814,17 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
 
   if (draft.complete && !heardComplete && !first) playDraftComplete();
 
+  // A finished local draft goes in the book. Online rooms are filed by the
+  // server — every browser in the room holds the same draft, and one record is
+  // wanted, not one per manager watching.
+  if (draft.complete && !state.online && !spectator) {
+    // A board dealt before the book existed, or opened from a saved room file,
+    // carries no name yet. It gets one here rather than going unfiled; the next
+    // save keeps it, so a reload does not file the same draft twice.
+    state.draftKey ??= newDraftKey();
+    fileFinishedDraft(draft, { key: state.draftKey, universe: state.universe });
+  }
+
   heardPickNumber = picks;
   heardComplete = Boolean(draft.complete);
   heardAuctionLotKey = lotKey;
@@ -1053,6 +1075,9 @@ function defaultState() {
     // Wildness of the generated (fictional) pool; 0 = normal. Ignored by real sets.
     temperature: 0,
     draft: null,
+    // The name the draft on the board will be filed under in the draft book
+    // when it finishes (see fileFinishedDraft). Minted with the board.
+    draftKey: null,
     draftTab: "available",
     draftHistorySort: { sort: "pick", direction: "asc" },
     rosterTab: "roster",
@@ -2435,7 +2460,12 @@ function renderSetup(setupError = "") {
     state.selectedTeamName = state.managers[0];
     state.rosterManagerId = null;
     cpuPaused = false;
+    // The name this draft will be filed under when it finishes. Minted with the
+    // board and saved with it, so a draft left half-done overnight is still the
+    // same draft when it ends the next morning rather than a second one.
+    state.draftKey = newDraftKey();
     track("local-draft-start", {
+      draftKey: state.draftKey,
       managers: state.managers,
       cpu: state.cpuManagers,
       draftType: state.draftType,
