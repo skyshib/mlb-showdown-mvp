@@ -9157,14 +9157,19 @@ const primaryFielding = (card) => (Array.isArray(card.fielding) ? card.fielding[
 // ---- grading against the pool ----
 //
 // A grade only means something if it is a grade of something. "Best defence at
-// this table" is a fact about two other people; "your average glove is in the
-// top tenth of every glove you could have drafted" is a fact about the roster.
+// this table" is a fact about two other people; "your gloves are in the top
+// tenth of any nine this board could have fielded" is a fact about the roster.
 // So every measure is placed against the pool the cards actually came out of.
 //
-// The comparison is card-for-card: the manager's average hitter against every
-// hitter he could have had, his starters against every starter on the board. A
-// pool of weak arms grades a weak rotation kindly, and it should — that was the
-// board everybody was drafting from.
+// The comparison is lineup against lineup: the manager's nine hitters against
+// nine hitters drawn at random from the board, his two starters against two
+// random starters. Comparing an average of nine against single cards buried
+// every lineup in the middle — averaging pulls toward the mean, and on an
+// integer stat every team's average fell between the same two values, so a
+// whole room shared one percentile (room breezy-husky-meadow: 16 of 24 grades
+// were C, and every on-base and speed grade was identical). A pool of weak arms
+// still grades a weak rotation kindly, and it should — that was the board
+// everybody was drafting from.
 const POOL_MEASURES = {
   onBase: { of: "hitter", read: (card) => Number(card.onBase) || 0, better: "high" },
   chart: { of: "hitter", read: chartOps, better: "high" },
@@ -9193,26 +9198,33 @@ function poolScales(draft) {
 
   const scales = {};
   for (const [name, measure] of Object.entries(POOL_MEASURES)) {
-    scales[name] = draft.pool
-      .filter((card) => belongs(card, measure.of))
-      .map(measure.read)
-      .sort((a, b) => a - b);
+    const values = draft.pool.filter((card) => belongs(card, measure.of)).map(measure.read);
+    const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+    const variance = values.length
+      ? values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length
+      : 0;
+    scales[name] = { count: values.length, mean, sd: Math.sqrt(variance) };
   }
   poolScaleCache = { key, scales };
   return scales;
 }
 
-// Where a number sits among the cards it could have been. Ties count as half, so
-// a pool where everybody is a 10 puts a 10 in the middle rather than the top.
-function percentile(sorted, value) {
-  if (!sorted.length) return 0.5;
-  let below = 0;
-  let equal = 0;
-  for (const entry of sorted) {
-    if (entry < value) below += 1;
-    else if (entry === value) equal += 1;
-  }
-  return (below + equal / 2) / sorted.length;
+// Where an average of `size` cards sits among the averages of `size` cards
+// drawn at random from the pool, without replacement: normal approximation.
+function lineupPercentile(scale, size, value) {
+  if (!scale.count || size >= scale.count) return 0.5;
+  const spread = (scale.sd / Math.sqrt(size)) * Math.sqrt((scale.count - size) / (scale.count - 1));
+  if (!(spread > 0)) return 0.5;
+  return normalCdf((value - scale.mean) / spread);
+}
+
+// Abramowitz–Stegun 7.1.26; good to ~1e-7, far finer than a letter grade.
+function normalCdf(z) {
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * x);
+  const poly = ((((1.061405429 * t - 1.453152014) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+  const erf = 1 - poly * Math.exp(-x * x);
+  return z >= 0 ? (1 + erf) / 2 : (1 - erf) / 2;
 }
 
 const GRADE_BANDS = [
@@ -9250,7 +9262,7 @@ function teamComposition(manager, draft) {
     const value = cards.length
       ? cards.reduce((sum, card) => sum + measure.read(card), 0) / cards.length
       : 0;
-    const place = percentile(scales[name], value);
+    const place = lineupPercentile(scales[name], cards.length, value);
     // A small number is the good one on a pitcher's chart, so the standing is
     // read from the other end of the board.
     const share = measure.better === "low" ? 1 - place : place;
@@ -9264,23 +9276,19 @@ function teamComposition(manager, draft) {
   };
 }
 
-// A chart is graded and not priced. The OPS behind it reads nothing like a real
-// slash line — a hitter comes out around 1.8 where a good season is 0.9, because
-// it reads the card alone, with the pitcher taken out of it — so the figure is
-// good for ranking charts against charts and good for nothing else. Printing it
-// only invites an argument about a decimal place that was never meant to be read
-// aloud. The letter is the answer; the number was only ever how it got there.
-//
-// `decimals: null` is a row that shows its grade and keeps its arithmetic.
+// A chart row prints the average on-chart OPS behind its grade. It reads nothing
+// like a real slash line — a hitter comes out around 1.8 where a good season is
+// 0.9, because it reads the card alone, with the pitcher taken out of it — so
+// the figure is for comparing charts against charts, not seasons.
 const COMPOSITION_ROWS = [
   { key: "onBase", label: "On-base", decimals: 1 },
-  { key: "chart", label: "Chart quality", decimals: null },
+  { key: "chart", label: "Chart quality", decimals: 3 },
   { key: "speed", label: "Speed", decimals: 1 },
   { key: "defence", label: "Defense", decimals: 1 },
   { key: "spControl", label: "Starters · control", decimals: 1, group: "sp" },
-  { key: "spChart", label: "Starters · chart", decimals: null, group: "sp" },
+  { key: "spChart", label: "Starters · chart", decimals: 3, group: "sp" },
   { key: "rpControl", label: "Bullpen · control", decimals: 1, group: "rp" },
-  { key: "rpChart", label: "Bullpen · chart", decimals: null, group: "rp" }
+  { key: "rpChart", label: "Bullpen · chart", decimals: 3, group: "rp" }
 ];
 
 function compositionTable(draft) {
@@ -9357,7 +9365,7 @@ function recapText(draft) {
   lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(col)).join("")}`);
   for (const row of rows) {
     const cells = row.cells
-      .map((cell) => `${cell.grade}${row.decimals === null ? "" : ` (${cell.value.toFixed(row.decimals)})`}`.padStart(col))
+      .map((cell) => `${cell.grade} (${cell.value.toFixed(row.decimals)})`.padStart(col))
       .join("");
     lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
@@ -9407,7 +9415,7 @@ function renderDraftDone(draft) {
           .map(
             (cell) => `<td class="comp-cell"><span class="comp-score">
               <span class="comp-grade grade-${cell.grade}">${cell.grade}</span>
-              ${row.decimals === null ? "" : `<span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>`}
+              <span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>
             </span>
             </td>`
           )
