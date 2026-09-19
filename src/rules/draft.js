@@ -2545,6 +2545,54 @@ export function activeRoster(manager) {
   return [...lineup, ...staff];
 }
 
+// AUTO-SORT. The assignments that put the most card points on the field:
+// the nine bats as a max-weight matching onto the lineup slots (a DP over
+// which slots are filled, at most 2^9 states per card), then the best-pointed
+// starters and relievers into the staff seats. Ties go to the better glove
+// sum, then roster order. Everyone left over is benched explicitly, so the
+// result replays the same online. An unlimited pen seats every reliever.
+export function pointMaximalAssignments(manager, options = {}) {
+  const points = (player) => Number(player.points) || 0;
+  const hitters = manager.roster.filter((player) => player.kind === "hitter");
+  let best = new Map([[0, { score: 0, seats: [] }]]);
+  for (const player of hitters) {
+    const next = new Map(best);
+    for (const [mask, entry] of best) {
+      LINEUP_SLOT_LABELS.forEach((label, index) => {
+        const bit = 1 << index;
+        if (mask & bit || !canPlayerFillLineupSlot(player, label)) return;
+        const score = entry.score + points(player) * 1000 + gloveAtLineupSlot(player, label);
+        const held = next.get(mask | bit);
+        if (!held || score > held.score) next.set(mask | bit, { score, seats: [...entry.seats, [label, player.id]] });
+      });
+    }
+    best = next;
+  }
+  const lineup = [...best.values()].reduce((top, entry) => (entry.score > top.score ? entry : top));
+  const lineupAssignments = Object.fromEntries(lineup.seats);
+  const seatedBats = new Set(Object.values(lineupAssignments));
+  withBench(lineupAssignments, hitters.filter((player) => !seatedBats.has(player.id)));
+
+  const byPoints = (list) => [...list].sort((a, b) => points(b) - points(a));
+  const { starters, bullpen } = staffStatus(manager.roster);
+  const rotation = byPoints(starters).slice(0, startingPitcherTarget(options));
+  const penSize = normalizeBullpenSlots(options?.bullpenSlots) === UNLIMITED_BULLPEN
+    ? bullpen.length
+    : normalizeBullpenSlots(options?.bullpenSlots);
+  const pen = byPoints(bullpen).slice(0, penSize);
+  const staffAssignments = {};
+  rotation.forEach((player, index) => { staffAssignments[`SP${index + 1}`] = player.id; });
+  pen.forEach((player, index) => { staffAssignments[`RP${index + 1}`] = player.id; });
+  const seatedArms = new Set([...rotation, ...pen].map((player) => player.id));
+  withBench(staffAssignments, [...starters, ...bullpen].filter((player) => !seatedArms.has(player.id)));
+  return { lineupAssignments, staffAssignments };
+}
+
+function withBench(assignments, players) {
+  if (players.length) assignments[ROSTER_BENCH_KEY] = players.map((player) => player.id);
+  return assignments;
+}
+
 export function benchPlayers(manager) {
   const active = new Set(activeRoster(manager).map((player) => player.id));
   // A coach is not benched; he is on the staff. He has his own shelf.

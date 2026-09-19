@@ -68,6 +68,7 @@ import {
   availablePlayers,
   benchLedger,
   benchPlayers,
+  pointMaximalAssignments,
   buildTeam,
   canCancelLot,
   canNominatePlayer,
@@ -3783,6 +3784,10 @@ function bindDraftActions() {
       selectedOrderMove = null;
       saveState();
       renderDraft();
+      return;
+    }
+    if (action === "auto-sort-roster") {
+      autoSortRoster(button.dataset.managerId);
       return;
     }
     if (action === "adopt-manager") {
@@ -8030,6 +8035,7 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
       <div class="game-tabs roster-tabs">
         <button class="game-tab ${state.rosterTab === "order" ? "" : "active"}" data-action="roster-tab" data-tab="roster">Roster</button>
         <button class="game-tab ${state.rosterTab === "order" ? "active" : ""}" data-action="roster-tab" data-tab="order">Batting order</button>
+        ${state.rosterTab !== "order" && canManageRoster(manager.id) ? `<button type="button" class="small roster-auto-sort" data-action="auto-sort-roster" data-manager-id="${escapeHtml(manager.id)}" title="Field the lineup and staff with the most card points">Auto-sort</button>` : ""}
       </div>
       ${renderRosterAdoptNotice(draft, shown)}
       ${state.rosterTab === "order" ? renderBattingOrder(manager) : renderRosterSlots(manager, draft)}
@@ -8159,6 +8165,19 @@ function moveBattingOrder(managerId, playerId, toIndex) {
   }
   manager.battingOrder = order;
   return true;
+}
+
+// One click to the lineup and staff with the most card points on the field.
+function autoSortRoster(managerId) {
+  const manager = findDraftManager(managerId);
+  if (!manager || !canManageRoster(managerId)) return;
+  const { lineupAssignments, staffAssignments } = pointMaximalAssignments(manager, state.draft);
+  commitRosterAssignments(manager, "lineup", lineupAssignments);
+  commitRosterAssignments(manager, "staff", staffAssignments);
+  selectedLineupMove = null;
+  invalidateBatch();
+  saveState();
+  renderDraft();
 }
 
 function renderRosterSlots(manager, draft) {

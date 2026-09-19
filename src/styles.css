@@ -6833,6 +6833,11 @@ div.seat-option:not(:disabled):hover span {
 
 .roster-tabs {
   justify-self: start;
+  align-items: center;
+}
+
+.roster-auto-sort {
+  margin-left: 8px;
 }
 
 .roster-manager-tabs {
