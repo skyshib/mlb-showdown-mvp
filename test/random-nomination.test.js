@@ -657,3 +657,33 @@ test("a room's own settings decide the draft, whoever rebuilds it", () => {
   };
   assert.notEqual(lotOn(uncapped), lotOn(capped), "the pen setting moves what a reliever is worth");
 });
+
+// A reliever's season is decided by whether he beats the rotation he works
+// behind: clear it and he throws 400 innings, fall short and he throws 20. The
+// printed points barely separate the two, so the board's relievers are spaced
+// by the season each one's quality earns him — but only in a deck whose
+// relievers can beat its rotations at all.
+test("the best reliever on the board is priced far above a mediocre one", () => {
+  const { draft, pool } = roomOf(4, "reliever-spread");
+  const cpu = draft.managers[1];
+  const model = managerValuation(draft, cpu);
+  const relievers = pool.filter((card) => !card.replacement && poolGroup(card) === "RP");
+  assert.ok(relievers.length >= 4, "the board deals a pen to bid on");
+
+  const bidOn = (card) => {
+    draft.auction.lot = { playerId: card.id, nominatorId: null, round: 1, bids: {}, pending: [], tie: null, clock: null };
+    return cpuSealedBid(draft, cpu);
+  };
+  // auctionMarket ranks arms by what the engine says they allow, so the model's
+  // own ordering is the one to read the board with.
+  const ranked = [...relievers].sort((a, b) => model.value(b) - model.value(a));
+  const best = ranked[0];
+  const middling = ranked[Math.floor(ranked.length / 2)];
+  const bestBid = bidOn(best);
+  const middlingBid = bidOn(middling);
+  assert.ok(bestBid > 0, "the best reliever is worth buying");
+  assert.ok(
+    bestBid >= middlingBid * 2,
+    `best reliever drew ${bestBid}, middling one ${middlingBid} — the board is not spaced`
+  );
+});

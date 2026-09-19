@@ -2030,18 +2030,71 @@ function bucketNeed(needs, bucket) {
 // tried in July, which re-priced arms against bats as well and lost 1-2 win
 // points; this reads +2.8 to +6.2 against matched nulls on every deck, table
 // size, temperature and persona tried.
-function pitcherRanking(draft, model) {
+// A reliever pitches only while he is better than the man he would relieve, so
+// his innings — and with them his whole season — ride on the gap between him and
+// the rotation he works behind. Measured over CPU-drafted leagues, an arm who
+// clears his rotation by 0.04 runs a plate appearance throws about 390 innings a
+// 162 where one who is worse throws about 20, and the pen's innings a game track
+// that gap at a correlation of 0.835 (its SIZE barely matters, 0.07).
+function relieverSeasonInnings(gap) {
+  return Math.max(20, Math.min(450, 150 + 6000 * gap));
+}
+
+// The bats a room this size will actually field, not the whole board's tail.
+function roomBatters(draft, model) {
   const hitters = draft.pool.filter((card) => card.kind === "hitter")
     .sort((a, b) => model.value(b) - model.value(a));
-  // The bats a room this size will actually field, not the whole board's tail.
-  const batters = lineupProfile(hitters.slice(0, Math.max(HITTER_TARGET, draft.managers.length * HITTER_TARGET)));
+  return lineupProfile(hitters.slice(0, Math.max(HITTER_TARGET, draft.managers.length * HITTER_TARGET)));
+}
+
+// How far apart a deck's relievers should stand. Spacing them by the season
+// they will actually throw is right only where relievers can beat rotations at
+// all: the share that clears one by 0.02 runs a plate appearance runs ~30% on
+// classic, 10-20% on fictional and 0% on mlb-history, and spacing measured +1 to
+// +2 win points where the share is high and −1 where it is zero, because there
+// the spread is noise about arms that will never pitch. So the deck decides.
+const RELIEVER_SPACING_SHARE = 0.3;
+
+function pitcherRanking(draft, model) {
+  const batters = roomBatters(draft, model);
   const ranked = new Map();
+  // The rotation a room this size fields — what a reliever has to beat.
+  const rotationRates = draft.pool
+    .filter((card) => card.kind === "pitcher" && pitcherRole(card) === "SP" && !card.replacement)
+    .map((card) => runsPerPa(card, 0, batters))
+    .sort((a, b) => a - b);
+  const fielded = Math.floor(draft.managers.length * normalizeStartingPitchers(draft.startingPitchers) / 2);
+  const rotationRpa = rotationRates.length ? rotationRates[Math.min(rotationRates.length - 1, fielded)] : 0;
   for (const role of ["SP", "RP"]) {
     const arms = draft.pool.filter((card) => card.kind === "pitcher" && pitcherRole(card) === role);
     const values = arms.map((card) => model.value(card)).sort((a, b) => b - a);
-    [...arms]
-      .sort((a, b) => runsPerPa(a, 0, batters) - runsPerPa(b, 0, batters))
-      .forEach((card, index) => ranked.set(card.id, values[index]));
+    const byRate = [...arms].sort((a, b) => runsPerPa(a, 0, batters) - runsPerPa(b, 0, batters));
+    const byRank = new Map();
+    byRate.forEach((card, index) => byRank.set(card.id, values[index]));
+    // Relievers also get SPACED by the season each one's quality earns him: the
+    // printed points barely separate a 647-inning arm from a 29-inning one (161
+    // against 111), which is how a computer came to bid $119 on the best card in
+    // a room and $182 on a replacement-level one two lots from the end.
+    const share = role === "RP" && arms.length > 1
+      ? arms.filter((card) => rotationRpa - runsPerPa(card, 0, batters) > 0.02).length / arms.length
+      : 0;
+    const spacing = Math.max(0, Math.min(1, share / RELIEVER_SPACING_SHARE));
+    if (!spacing) {
+      arms.forEach((card) => ranked.set(card.id, byRank.get(card.id)));
+      continue;
+    }
+    const seasons = arms.map((card) => {
+      const rate = runsPerPa(card, 0, batters);
+      return (batters.runValue - rate) * relieverSeasonInnings(rotationRpa - rate);
+    });
+    const low = Math.min(...seasons);
+    const high = Math.max(...seasons);
+    const bottom = values[values.length - 1];
+    const slope = high > low ? (values[0] - bottom) / (high - low) : 0;
+    arms.forEach((card, index) => {
+      const spaced = bottom + slope * (seasons[index] - low);
+      ranked.set(card.id, spacing * spaced + (1 - spacing) * byRank.get(card.id));
+    });
   }
   return {
     ...model,
