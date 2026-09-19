@@ -4275,7 +4275,9 @@ test("one man per roster holds in the classic league, where the id doesn't name 
   setUniverseSeed("one-man-test", "classic");
   const pool = adventurePool();
 
-  const sosas = pool.filter((card) => cardPerson(card) === "name:sammy sosa");
+  // The key's spelling is cardPerson's business; ask it who the man is.
+  const sosaKey = cardPerson(pool.find((card) => /^Sammy Sosa\b/.test(card.name)));
+  const sosas = pool.filter((card) => cardPerson(card) === sosaKey);
   assert.ok(sosas.length > 2, "the classic pool prints the same man many times over");
   const [first, second] = sosas;
   assert.ok(personConflict([first], second), "two printings of one man conflict, whatever the season on the face");

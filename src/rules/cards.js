@@ -51,8 +51,21 @@ export function cardPerson(card) {
   const person = identity
     ? identity.person
     : (() => {
-        const name = String(card?.name ?? "").replace(/\s+'\d{2,4}$/, "").trim();
-        return name ? `name:${name.toLowerCase()}` : null;
+        // The same man, however the card spells him. The Showdown sets print one
+        // player's name several ways — "A.J. Burnett" and "A. J. Burnett",
+        // "Jeff D'Amico" with either apostrophe, "hee seop choi" and
+        // "hee-seop choi" — and a deal that reads those as different people puts
+        // two of him on the board, which is what the roster rule exists to make
+        // impossible. So the key keeps the letters and digits and drops the
+        // rest: punctuation, spacing and accents. A suffix still counts, because
+        // Ken Griffey and Ken Griffey Jr. are two men.
+        const name = String(card?.name ?? "")
+          .replace(/\s+'\d{2,4}$/, "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+        return name ? `name:${name}` : null;
       })();
   if (key) personCache.set(key, person);
   return person;
