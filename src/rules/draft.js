@@ -2065,9 +2065,27 @@ function pitcherRanking(draft, model) {
     .sort((a, b) => a - b);
   const fielded = Math.floor(draft.managers.length * normalizeStartingPitchers(draft.startingPitchers) / 2);
   const rotationRpa = rotationRates.length ? rotationRates[Math.min(rotationRates.length - 1, fielded)] : 0;
+  // Starters are worth paying a premium for only where they really differ. Read
+  // the spread of what this board's starters allow: sets whose starters sit in a
+  // narrow band (0.019-0.045 runs a plate appearance, which is every real card
+  // set measured) hand back 3 to 6.9 win points when the computers pay 40% less
+  // for them, because the ace and the fourth starter are nearly the same card
+  // and the money buys far more on a bat or a reliever. Wide-spread boards
+  // (0.045-0.14) have a real cliff, their top arms earn the premium, and the
+  // same discount costs 5 to 11 — so the discount fades out across the gap
+  // between the two, rather than switching.
+  const meanOf = (list) => (list.length ? list.reduce((sum, value) => sum + value, 0) / list.length : 0);
+  const rateMean = meanOf(rotationRates);
+  const starterSpread = Math.sqrt(meanOf(rotationRates.map((rate) => (rate - rateMean) ** 2)));
+  const STARTER_DISCOUNT = 0.65; // what a narrow board's starters are worth
+  const NARROW_SPREAD = 0.04; // full discount at or below this
+  const WIDE_SPREAD = 0.05; // none at or above it
+  const widening = Math.max(0, Math.min(1, (starterSpread - NARROW_SPREAD) / (WIDE_SPREAD - NARROW_SPREAD)));
+  const starterTilt = STARTER_DISCOUNT + (1 - STARTER_DISCOUNT) * widening;
   for (const role of ["SP", "RP"]) {
     const arms = draft.pool.filter((card) => card.kind === "pitcher" && pitcherRole(card) === role);
-    const values = arms.map((card) => model.value(card)).sort((a, b) => b - a);
+    const tilt = role === "SP" ? starterTilt : 1;
+    const values = arms.map((card) => model.value(card) * tilt).sort((a, b) => b - a);
     const byRate = [...arms].sort((a, b) => runsPerPa(a, 0, batters) - runsPerPa(b, 0, batters));
     const byRank = new Map();
     byRate.forEach((card, index) => byRank.set(card.id, values[index]));
