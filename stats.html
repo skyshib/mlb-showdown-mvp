@@ -446,10 +446,31 @@ function col(x, yTop, w, h, fill) {
     L${x + w - r} ${yTop} Q${x + w} ${yTop} ${x + w} ${yTop + r} L${x + w} ${yTop + h} Z" fill="${fill}" />`;
 }
 
+// Counts were once filed under the city in a zone's id ("Los Angeles") and are
+// now filed under the id itself. A bare city is put back together with the zone
+// it came from, so the old rows and the new ones are one row rather than two
+// saying the same thing in different words.
+const ZONE_PREFIXES = ["America", "Europe", "Asia", "Australia", "Africa", "Pacific", "Atlantic", "Indian"];
+
+function zoneForCity(city) {
+  const name = String(city ?? "").trim().replace(/ /g, "_");
+  if (!name || name.includes("/")) return "";
+  for (const prefix of ZONE_PREFIXES) {
+    const id = `${prefix}/${name}`;
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: id });
+      return id;
+    } catch {
+      // Not that continent.
+    }
+  }
+  return "";
+}
+
 function mergeByLabel(rows) {
   const totals = new Map();
   for (const row of rows) {
-    const label = zoneLabel(row.key) || `${row.key} time`;
+    const label = zoneLabel(row.key) || zoneLabel(zoneForCity(row.key)) || `${row.key} time`;
     totals.set(label, (totals.get(label) ?? 0) + row.views);
   }
   return [...totals].map(([key, views]) => ({ key, views })).sort((a, b) => b.views - a.views);
