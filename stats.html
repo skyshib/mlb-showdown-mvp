@@ -208,8 +208,8 @@
         <h2>Where people are playing</h2>
         <p class="note">By the clock on their own machine — the one location signal that is
           not a guess made about somebody, and the one a VPN or a phone carrier cannot move.
-          A zone is a region, not a city: everyone from San Diego to Vancouver keeps
-          Los Angeles time.</p>
+          A zone is a region, not a city: Seattle, Portland, San Diego and Las Vegas all
+          keep Pacific time, and none of them is Los Angeles.</p>
         <ul class="rank" id="zones"></ul>
         <h2 class="sub-head">What the addresses say</h2>
         <p class="note">The same people as read off their IP, which is a third party's guess:
@@ -291,6 +291,35 @@ function zoneCity(zone) {
   return text.split("/").pop().replace(/_/g, " ");
 }
 
+// What a zone should be CALLED, which is not the city in its name.
+//
+// A zone id names one representative city for a region that holds dozens:
+// Seattle, Portland, San Diego and Las Vegas all report America/Los_Angeles,
+// and printing that as "Los Angeles time" invites the reader to put somebody
+// in a city they have never been to. The zone's real name — "Pacific time" —
+// says exactly as much as is known and no more.
+//
+// The season is dropped: whether it is currently Daylight or Standard is a
+// fact about today's date, not about the visitor.
+function zoneLabel(zone) {
+  const text = String(zone ?? "").trim();
+  if (!text) return "";
+  try {
+    const named = new Intl.DateTimeFormat("en-US", { timeZone: text, timeZoneName: "long" })
+      .formatToParts(new Date())
+      .find((part) => part.type === "timeZoneName")?.value ?? "";
+    // Some zones have no name, only an offset ("GMT+5:30"), which is no use as
+    // a place. Those fall back to the city the id is named for.
+    if (named && !/^(GMT|UTC)[+\-]/i.test(named)) {
+      return `${named.replace(/\s+(Daylight|Standard|Summer)\s+/i, " ").replace(/\bTime\b/, "time")}`;
+    }
+  } catch {
+    // An id this browser does not know. The city is still better than nothing.
+  }
+  const city = zoneCity(text);
+  return city ? `${city} time` : "";
+}
+
 const token = new URLSearchParams(location.search).get("token");
 const compact = (n) => n >= 10000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K` : n.toLocaleString();
 
@@ -318,7 +347,9 @@ function render(stats) {
 
   drawDaily(stats.days);
   dailyTable(stats.days);
-  rank("zones", stats.zones ?? [], (k) => k);
+  // Two zone ids can share a name — America/Vancouver and America/Los_Angeles
+  // are both Pacific time — so they are added together rather than listed twice.
+  rank("zones", mergeByLabel(stats.zones ?? []), (k) => k);
   rank("places", stats.places, (k) => k);
   rank("paths", stats.paths, (k) => k);
   rank("regions", stats.regions, (k) => EDGES[k] ?? k);
@@ -415,6 +446,15 @@ function col(x, yTop, w, h, fill) {
     L${x + w - r} ${yTop} Q${x + w} ${yTop} ${x + w} ${yTop + r} L${x + w} ${yTop + h} Z" fill="${fill}" />`;
 }
 
+function mergeByLabel(rows) {
+  const totals = new Map();
+  for (const row of rows) {
+    const label = zoneLabel(row.key) || `${row.key} time`;
+    totals.set(label, (totals.get(label) ?? 0) + row.views);
+  }
+  return [...totals].map(([key, views]) => ({ key, views })).sort((a, b) => b.views - a.views);
+}
+
 function niceMax(value) {
   const magnitude = 10 ** Math.floor(Math.log10(value));
   for (const factor of [1, 1.5, 2, 2.5, 5, 10]) {
@@ -466,7 +506,7 @@ function sessionsHtml(sessions) {
     const hello = session.lines.find((line) => line.kind === "hello")?.data ?? {};
     // Read the same way the draft book reads it: the browser's own clock first,
     // the address second, the edge as the floor.
-    const seat = { ...first, zone: zoneCity(hello.tz) };
+    const seat = { ...first, tz: hello.tz, zone: zoneCity(hello.tz) };
     const meta = [
       `${first.browser} on ${first.os}${first.mobile ? " (phone)" : ""}`,
       placeOf(seat),
@@ -697,9 +737,10 @@ async function openDraftDetails(event) {
 // So: the clock leads, the address corroborates or contradicts it in its own
 // words, and the edge fills in when both are silent.
 function placeOf(seat) {
-  if (seat.zone) return `${seat.zone} time`;
+  const zone = zoneLabel(seat.tz) || (seat.zone ? `${seat.zone} time` : "");
+  if (zone) return zone;
   if (seat.place) return seat.place;
-  if (seat.edge && EDGES[seat.edge]) return `near ${EDGES[seat.edge]}`;
+  if (seat.edge && EDGES[seat.edge]) return `near the ${EDGES[seat.edge]} edge`;
   return "unknown place";
 }
 
@@ -720,11 +761,14 @@ function seatsHtml(draft) {
   return `<div class="draft-seats">${draft.who.map((seat) => {
     const parts = [
       placeOf(seat),
+      // The id behind the label, because "Pacific time" covers Vancouver to San
+      // Diego and the id is the narrowest thing actually known.
+      seat.tz && zoneLabel(seat.tz) ? seat.tz : "",
       addressNote(seat),
       seat.org || "",
       (seat.langs ?? []).join("/"),
       `${seat.browser} on ${seat.os}${seat.mobile ? " (phone)" : ""}`,
-      seat.edge && EDGES[seat.edge] && seat.zone ? `${EDGES[seat.edge]} edge` : "",
+      seat.edge && EDGES[seat.edge] ? `${EDGES[seat.edge]} edge` : "",
       seat.host ? "host" : "",
       `device ${String(seat.device || "").slice(0, 8) || "none"}`
     ].filter(Boolean);

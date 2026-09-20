@@ -221,9 +221,11 @@ export function ensurePlace(store, request) {
 // so the two lists are read against each other honestly.
 export function noteZone(store, zone) {
   const traffic = store.traffic;
-  const city = zoneCity(zone);
-  if (!traffic || !city) return;
-  bump(traffic.zones, city);
+  // zoneCity doubles as the check that this is a real zone id and not a string
+  // somebody made up; what gets counted is the id itself, which is the narrowest
+  // true thing said. The page turns it into a name a person would use.
+  if (!traffic || !zoneCity(zone)) return;
+  bump(traffic.zones, String(zone).slice(0, 60));
   persistTraffic(store);
 }
 
