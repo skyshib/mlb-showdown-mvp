@@ -14,6 +14,7 @@ import { rename, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { readVisits } from "./visits.js";
+import { zoneCity } from "./geo.js";
 
 const DRAFTS_DIR = "drafts";
 const RETAIN_DAYS = 365;
@@ -252,6 +253,21 @@ function seatFromLine(line, manager, host) {
   };
 }
 
+// What a browser said about itself when it opened. The time zone is the part
+// worth keeping: it is a location the machine reports about itself, so it holds
+// up where the IP does not — through a VPN, a relay, or a carrier gateway that
+// puts a player in Vancouver because the exit node is.
+function helloFacts(line) {
+  const data = line.data ?? {};
+  const zone = zoneCity(data.tz);
+  if (!zone && !data.tz) return null;
+  return {
+    zone,
+    tz: String(data.tz ?? "").slice(0, 60),
+    langs: (Array.isArray(data.languages) ? data.languages : []).slice(0, 3).map((item) => String(item).slice(0, 12))
+  };
+}
+
 // The season somebody ran on these teams, best record first. The standings are
 // the client's own summary of the batch, so they are read defensively.
 function simFromLine(line) {
@@ -282,9 +298,17 @@ function visitIndex(store, now = Date.now()) {
     if (!byDraft.has(id)) byDraft.set(id, { seats: [], sims: [] });
     return byDraft.get(id);
   };
+  // What each device last said about itself, so a seat can carry its own clock
+  // and language rather than only what its address was taken for.
+  const hellos = new Map();
   // 90 days is the whole visit log; a draft older than that keeps whatever it
   // was filed with and gains nothing here, which is the honest answer.
+  // Newest first, so the first hello seen for a device is its latest.
   for (const line of readVisits(store, { days: 90 })) {
+    if (line.kind === "hello" && line.device && !hellos.has(line.device)) {
+      const facts = helloFacts(line);
+      if (facts) hellos.set(line.device, facts);
+    }
     for (const id of draftIdsForLine(line)) {
       const found = entry(id);
       if (line.kind === "sim") {
@@ -297,7 +321,11 @@ function visitIndex(store, now = Date.now()) {
       }
     }
   }
-  log.index = { stamp, byDraft };
+  // The clock a seat kept, folded in once every line has been read.
+  for (const found of byDraft.values()) {
+    for (const seat of found.seats) Object.assign(seat, hellos.get(seat.device) ?? {});
+  }
+  log.index = { stamp, byDraft, hellos };
   return byDraft;
 }
 
@@ -327,10 +355,12 @@ function mergeSeats(filed, logged) {
 // the seasons somebody ran on those teams came out.
 function withSessions(store, row, index) {
   const found = index.get(row.id) ?? { seats: [], sims: [] };
+  const hellos = store.drafts?.index?.hellos ?? new Map();
+  const filed = (row.who ?? []).map((seat) => ({ ...(hellos.get(seat.device) ?? {}), ...seat }));
   const sims = [...found.sims].sort((a, b) => String(b.at).localeCompare(String(a.at)));
   return {
     ...row,
-    who: mergeSeats(row.who ?? [], found.seats),
+    who: mergeSeats(filed, found.seats),
     // Newest first; the one at the front is the season the book reports.
     sims: sims.slice(0, 5),
     winner: sims[0]?.standings?.[0] ?? null

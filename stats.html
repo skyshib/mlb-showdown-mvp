@@ -118,6 +118,7 @@
   .rank-track { height: 6px; border-radius: 3px; background: var(--track); margin-top: 4px; overflow: hidden; }
   .rank-fill { height: 100%; border-radius: 3px; background: var(--series-1); }
   .empty { color: var(--text-muted); }
+  .sub-head { font-size: 14px; font-weight: 600; margin: 20px 0 0; }
 
   #tip {
     position: fixed; pointer-events: none; opacity: 0; transition: opacity 90ms;
@@ -205,8 +206,15 @@
     <div class="lists">
       <section class="card">
         <h2>Where people are playing</h2>
-        <p class="note">From the IP, so it is a good guess and not a fact — mobile often
-          resolves to the carrier's gateway city rather than the player.</p>
+        <p class="note">By the clock on their own machine — the one location signal that is
+          not a guess made about somebody, and the one a VPN or a phone carrier cannot move.
+          A zone is a region, not a city: everyone from San Diego to Vancouver keeps
+          Los Angeles time.</p>
+        <ul class="rank" id="zones"></ul>
+        <h2 class="sub-head">What the addresses say</h2>
+        <p class="note">The same people as read off their IP, which is a third party's guess:
+          mobile resolves to the carrier's gateway, and a relay resolves to wherever it
+          happens to exit.</p>
         <ul class="rank" id="places"></ul>
       </section>
       <section class="card"><h2>Top pages</h2><ul class="rank" id="paths"></ul></section>
@@ -273,6 +281,15 @@ const EDGES = {
   yul: "Montreal", yyz: "Toronto", local: "Local (no edge)"
 };
 
+// "America/Los_Angeles" → "Los Angeles". Mirrors zoneCity in scripts/geo.js;
+// the sessions panel reads a browser's raw tz straight off its hello line.
+function zoneCity(zone) {
+  const text = String(zone ?? "").trim();
+  if (!/^[A-Za-z][\w+-]*(\/[\w+-]+)+$/.test(text)) return "";
+  if (/^(Etc|UTC|GMT|Universal|Zulu)\b/i.test(text)) return "";
+  return text.split("/").pop().replace(/_/g, " ");
+}
+
 const token = new URLSearchParams(location.search).get("token");
 const compact = (n) => n >= 10000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K` : n.toLocaleString();
 
@@ -300,6 +317,7 @@ function render(stats) {
 
   drawDaily(stats.days);
   dailyTable(stats.days);
+  rank("zones", stats.zones ?? [], (k) => k);
   rank("places", stats.places, (k) => k);
   rank("paths", stats.paths, (k) => k);
   rank("regions", stats.regions, (k) => EDGES[k] ?? k);
@@ -445,13 +463,16 @@ function sessionsHtml(sessions) {
     const who = session.names.size ? [...session.names].join(", ") : "";
     // What the browser said about itself when it opened, if it got the chance.
     const hello = session.lines.find((line) => line.kind === "hello")?.data ?? {};
+    // Read the same way the draft book reads it: the browser's own clock first,
+    // the address second, the edge as the floor.
+    const seat = { ...first, zone: zoneCity(hello.tz) };
     const meta = [
       `${first.browser} on ${first.os}${first.mobile ? " (phone)" : ""}`,
-      first.place || "unknown place",
+      placeOf(seat),
+      addressNote(seat),
       first.org || "",
       first.bot ? "crawler" : "",
       hello.screen ? `${hello.screen} screen` : "",
-      hello.tz ?? "",
       `device ${session.key.slice(0, 8)}`,
       arrival(first)
     ].filter(Boolean);
@@ -575,7 +596,7 @@ async function loadDrafts() {
 
 function draftRow(draft) {
   const humans = draft.managers.filter((manager) => !manager.cpu);
-  const places = [...new Set(draft.who.map((seat) => seat.place).filter(Boolean))];
+  const places = [...new Set(draft.who.map(placeOf).filter((place) => place !== "unknown place"))];
   const meta = [
     draft.draftType === "auction"
       ? `auction${draft.nomination === "random" ? ", random nomination" : ""}`
@@ -662,15 +683,43 @@ async function openDraftDetails(event) {
   body.innerHTML = `${seatsHtml(draft)}${standingsHtml(draft)}${openLink(draft)}${rostersHtml(draft)}`;
 }
 
-// Who was in each chair, and what the address said about where from. The same
-// guess the map above is drawing, at the resolution of one player.
+// Where somebody played from, out of three signals that disagree.
+//
+// The IP is a guess a third party makes about an address, and it is wrong in
+// the ways that matter most here: a VPN, an iCloud relay or a carrier gateway
+// puts a player in whatever city the exit node sits in, and often the provider
+// has nothing at all. The browser's own time zone is what the player's machine
+// says about itself, so it survives all of that — it is coarse, but it is not
+// somebody else's guess. The Fly edge is the floor: the nearest place the
+// connection could have entered from, which is never nothing.
+//
+// So: the clock leads, the address corroborates or contradicts it in its own
+// words, and the edge fills in when both are silent.
+function placeOf(seat) {
+  if (seat.zone) return `${seat.zone} time`;
+  if (seat.place) return seat.place;
+  if (seat.edge && EDGES[seat.edge]) return `near ${EDGES[seat.edge]}`;
+  return "unknown place";
+}
+
+// The address's own answer, printed only when it adds something the clock did
+// not already say.
+function addressNote(seat) {
+  if (!seat.place) return "";
+  if (!seat.zone) return "";
+  return seat.place.startsWith(seat.zone) ? "" : `address says ${seat.place}`;
+}
+
 function seatsHtml(draft) {
   if (!draft.who?.length) return "";
   return `<div class="draft-seats">${draft.who.map((seat) => {
     const parts = [
-      seat.place || "unknown place",
+      placeOf(seat),
+      addressNote(seat),
       seat.org || "",
+      (seat.langs ?? []).join("/"),
       `${seat.browser} on ${seat.os}${seat.mobile ? " (phone)" : ""}`,
+      seat.edge && EDGES[seat.edge] && seat.zone ? `${EDGES[seat.edge]} edge` : "",
       seat.host ? "host" : "",
       `device ${String(seat.device || "").slice(0, 8) || "none"}`
     ].filter(Boolean);

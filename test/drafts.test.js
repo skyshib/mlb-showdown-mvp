@@ -346,3 +346,30 @@ test("a room filed before seats knew anybody still names them, from the visit lo
   assert.ok(summary.who.some((seat) => seat.manager === "Bo"));
   assert.equal(summary.who.length, 2, "the room's own creation line is not a third person");
 });
+
+test("a seat's own clock places it when the address will not", async (t) => {
+  const { base } = await startServer(t);
+  const device = "beefbeefbeefbeef";
+  // An address the geo provider has nothing to say about — a relay exit, a
+  // carrier gateway, the usual reasons.
+  const headers = { cookie: `sd_device=${device}`, "user-agent": CHROME, "x-forwarded-for": "203.0.113.7" };
+  await fetch(`${base}/index.html`, { headers });
+  await api(base, "POST", "/api/events", {
+    kind: "hello",
+    page: "/index.html",
+    data: { tz: "America/Los_Angeles", languages: ["en-US", "en"], screen: "1512x982" }
+  }, headers);
+  await settle();
+
+  const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
+  const filed = await api(base, "POST", "/api/drafts", { key: "clockkey", ...record }, headers);
+  assert.equal(filed.status, 201);
+  await settle();
+
+  const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
+  const [seat] = summary.who;
+  assert.equal(seat.place, "", "the provider placed nobody");
+  assert.equal(seat.zone, "Los Angeles", "but the browser's own clock did");
+  assert.equal(seat.tz, "America/Los_Angeles");
+  assert.deepEqual(seat.langs, ["en-US", "en"]);
+});

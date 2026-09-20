@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { createGeoQueue, isPrivateIp } from "./geo.js";
+import { createGeoQueue, isPrivateIp, zoneCity } from "./geo.js";
 
 const TRAFFIC_FILE = "traffic.json";
 // The place a visitor's IP resolved to, remembered against the same hash the day
@@ -65,6 +65,10 @@ export function loadTrafficFile(dataDir) {
     regions: plainCounts(saved?.regions, countOf),
     referrers: plainCounts(saved?.referrers, countOf),
     places: plainCounts(saved?.places, countOf),
+    // Where people are by their own clock. The addresses above are a third
+    // party's guess and are wrong wherever a VPN, a relay or a carrier gateway
+    // sits in the way; a browser's time zone comes from the machine itself.
+    zones: plainCounts(saved?.zones, countOf),
     geoCache: plainCounts(saved?.geoCache, (value) => (typeof value === "string" ? value : "")),
     // The network behind a visitor ("Comcast Cable", "UC Berkeley", "Google LLC"),
     // kept beside the place and pruned with it.
@@ -157,11 +161,11 @@ export function recordView(store, request, pathname, now = new Date()) {
 // away while we wait: it is parked against the visitor and counted when the
 // answer lands, so a page opened three times by a stranger arrives as three views
 // from their city rather than one, or none.
-function attributePlace(store, visitor, ip) {
+function attributePlace(store, visitor, ip, views = 1) {
   const traffic = store.traffic;
   const known = traffic.geoCache[visitor];
   if (known !== undefined) {
-    if (known) bump(traffic.places, known);
+    if (known && views) bump(traffic.places, known);
     if (known && traffic.orgs[visitor] === undefined) backfillOrg(store, visitor, ip);
     return;
   }
@@ -173,23 +177,49 @@ function attributePlace(store, visitor, ip) {
 
   const waiting = (store.geoPending ??= new Map());
   if (waiting.has(visitor)) {
-    waiting.set(visitor, waiting.get(visitor) + 1);
+    waiting.set(visitor, waiting.get(visitor) + views);
     return;
   }
-  waiting.set(visitor, 1);
+  waiting.set(visitor, views);
 
   const queue = (store.geoQueue ??= createGeoQueue(store.geoLookup, store.geoIntervalMs));
   queue.submit(ip).then((found) => {
-    const views = waiting.get(visitor) ?? 1;
+    const pending = waiting.get(visitor) ?? 0;
     waiting.delete(visitor);
     const place = typeof found === "string" ? found : found?.place ?? "";
     if (!place) return;
     traffic.geoCache[visitor] = place;
     traffic.orgs[visitor] = typeof found === "object" ? found?.org ?? "" : "";
-    for (let i = 0; i < views; i++) bump(traffic.places, place);
+    for (let i = 0; i < pending; i++) bump(traffic.places, place);
     pruneGeoCache(traffic);
     persistTraffic(store);
   });
+}
+
+// A page view is not the only moment we hear from somebody, and the view's own
+// lookup can fail — the provider times out, or the machine stops with the
+// question still in the air. Every other thing the server logs (a seat taken, a
+// draft filed, a season simmed) is another chance at the same answer, so it
+// takes one. Nothing is counted here: this asks where somebody is, it does not
+// claim they visited again.
+export function ensurePlace(store, request) {
+  const traffic = store.traffic;
+  if (!traffic) return;
+  const ip = clientIp(request);
+  const visitor = visitorId(traffic.salt, ip);
+  if (!visitor || traffic.geoCache[visitor] !== undefined) return;
+  attributePlace(store, visitor, ip, 0);
+}
+
+// A browser saying what time zone it is in, counted as a place. One per page
+// that says hello, which is one per page load — the same thing `places` counts,
+// so the two lists are read against each other honestly.
+export function noteZone(store, zone) {
+  const traffic = store.traffic;
+  const city = zoneCity(zone);
+  if (!traffic || !city) return;
+  bump(traffic.zones, city);
+  persistTraffic(store);
 }
 
 // Visitors placed before networks were recorded get one more lookup, for the
@@ -295,6 +325,7 @@ export function trafficSummary(traffic, now = new Date()) {
     days: recent,
     paths: topKeys(traffic.paths),
     places: topKeys(traffic.places),
+    zones: topKeys(traffic.zones ?? {}),
     regions: topKeys(traffic.regions),
     referrers: topKeys(traffic.referrers)
   };

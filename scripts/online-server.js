@@ -181,8 +181,26 @@ export async function flushSaves(store) {
     // there is almost always a few seconds of them still only in memory.
     flushTraffic(store),
     flushVisits(store),
-    flushDrafts(store)
+    flushDrafts(store),
+    // Lookups already asked for, given a few seconds to answer. A place is
+    // never worth holding a shutdown open for long, but dropping the one
+    // lookup a first-time visitor ever gets gives them no place at all.
+    settledGeo(store)
   ]);
+  // Answers that landed during the wait are counted, so the file is written
+  // again rather than losing them.
+  await flushTraffic(store);
+}
+
+const GEO_DRAIN_MS = 4000;
+
+async function settledGeo(store) {
+  const queue = store.geoQueue;
+  if (!queue || queue.idle) return;
+  await Promise.race([
+    queue.drained,
+    new Promise((resolve) => setTimeout(resolve, GEO_DRAIN_MS).unref?.())
+  ]).catch(() => {});
 }
 
 // Rooms are persisted as one JSON file each: metadata, seats, and the action

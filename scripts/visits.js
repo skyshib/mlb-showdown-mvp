@@ -20,7 +20,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { clientIp, isBotAgent, visitorId } from "./traffic.js";
+import { clientIp, ensurePlace, isBotAgent, noteZone, visitorId } from "./traffic.js";
 
 const VISITS_DIR = "visits";
 const RETAIN_DAYS = 90;
@@ -144,6 +144,9 @@ export function describeAgent(agent) {
 function requestBasics(store, request, device, now) {
   const agent = String(request.headers["user-agent"] ?? "");
   const salt = store.traffic?.salt;
+  // Anything worth logging is worth another try at placing, for a visitor the
+  // geo cache has nothing on yet. Known visitors cost a map lookup.
+  if (!isBotAgent(agent)) ensurePlace(store, request);
   return {
     t: now.toISOString(),
     visitor: salt ? visitorId(salt, clientIp(request)) : "",
@@ -212,6 +215,9 @@ export function logClientEvent(store, request, body, now = new Date()) {
   const data = body.data && typeof body.data === "object" ? body.data : {};
   const json = JSON.stringify(data);
   if (json.length > MAX_EVENT_BYTES) return false;
+  // A page's hello carries the one location signal that is not a guess made
+  // about somebody: the clock on their own machine.
+  if (kind === "hello" && !isBotAgent(String(request.headers["user-agent"] ?? ""))) noteZone(store, data.tz);
   append(store, {
     ...requestBasics(store, request, cookieDevice(request), now),
     kind,
