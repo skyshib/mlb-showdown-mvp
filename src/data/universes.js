@@ -4,7 +4,7 @@ import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260716-records";
-import { ANY_HITTER, CORNER_OUTFIELD_POSITION, boardBullpenSlots, poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
+import { ANY_HITTER, CORNER_OUTFIELD_POSITION, boardBullpenSlots, minimumSnakePicks, normalizeSnakePicks, poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
 import { COACHES, COACHES_PER_BOARD, COACH_GROUP, coachById } from "../rules/coaches.js?v=20260910-coaches";
 import { authenticPoints } from "../rules/pricing.js?v=20260716-records";
 import { PRICE_MODEL } from "./priceModel.js";
@@ -405,11 +405,27 @@ function deckQuotas(managerCount, startingPitchers = 2, pen = {}) {
   const starterAdjusted = starterScale === 1 && relieverScale === 1
     ? DECK_QUOTAS
     : DECK_QUOTAS.map(([group, quota]) => [group, scale[group] ? Math.ceil(quota * scale[group]) : quota]);
-  if (managers <= DECK_BASELINE_MANAGERS) return starterAdjusted;
-  return starterAdjusted.map(([group, quota]) => [
+  const depth = deckDepthScale(startingPitchers, pen);
+  const deepened = depth === 1
+    ? starterAdjusted
+    : starterAdjusted.map(([group, quota]) => [group, Math.ceil(quota * depth)]);
+  if (managers <= DECK_BASELINE_MANAGERS) return deepened;
+  return deepened.map(([group, quota]) => [
     group,
     Math.ceil((quota * managers) / DECK_BASELINE_MANAGERS)
   ]);
+}
+
+// A snake draft that runs past a roster needs a board that runs past one too,
+// or the last rounds pick over an empty table. Every group widens by the same
+// factor the draft lengthened by, so the shape of the board is unchanged and
+// the reserve the closing sweep leans on grows with it. A draft of exactly a
+// roster — which is every draft that came before the picks slider — scales by
+// one and deals the very same cards it always did.
+function deckDepthScale(startingPitchers, pen = {}) {
+  const minimum = minimumSnakePicks(startingPitchers, pen);
+  const picks = normalizeSnakePicks(pen?.picks, startingPitchers, pen);
+  return picks > minimum ? picks / minimum : 1;
 }
 
 // Fisher-Yates on a copy, driven by the seeded rng.
@@ -493,9 +509,10 @@ function dealDeckToQuotas(quotas, rngKey) {
 export function dealDraftDeck(seed, managerCount = DECK_BASELINE_MANAGERS, startingPitchers = 2, pen = {}) {
   const quotas = deckQuotas(managerCount, startingPitchers, pen);
   const defaultRotation = Math.round(Number(startingPitchers) || 2) === 2;
+  const depth = deckDepthScale(startingPitchers, pen);
   const salt = quotas === DECK_QUOTAS
     ? ""
-    : `${managerCount > DECK_BASELINE_MANAGERS ? `:m${Math.round(managerCount)}` : ""}${defaultRotation ? "" : `:sp${Math.round(startingPitchers)}`}${penSalt(pen)}`;
+    : `${managerCount > DECK_BASELINE_MANAGERS ? `:m${Math.round(managerCount)}` : ""}${defaultRotation ? "" : `:sp${Math.round(startingPitchers)}`}${penSalt(pen)}${depth === 1 ? "" : `:k${normalizeSnakePicks(pen?.picks, startingPitchers, pen)}`}`;
   const rngKey = `deck-deal:${universeKey()}:${seed}${salt}`;
   // Coaches are ADDITIONAL draws. The position groups and the DH shelf deal
   // exactly what they would without them, and the coaches ride on top — so a

@@ -19,10 +19,16 @@ import {
   applyDraftAction,
   auctionReviewComplete,
   auctionTimerEnabled,
+  draftReviewComplete,
+  draftReviewEnabled,
   normalizeSnakeTimerConfig,
+  normalizeSnakeReviewMs,
+  normalizeSnakePicks,
   restoreSnakeClockState,
   snakeClockBankMs,
   snakeClockEnabled,
+  snakeReviewComplete,
+  snakeReviewEnabled,
   snakeClockState,
   canCancelLot,
   cpuSealedBid,
@@ -266,7 +272,15 @@ function reviveRoom(saved) {
   );
   // A room saved before the pen was configurable played with two relievers.
   const { bullpenSlots, bullpenMin } = roomBullpen(saved, nomination === "random");
-  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin });
+  // A snake room saved before the picks slider ran exactly a roster long, which
+  // is what a missing count normalizes to — so it revives at its own length.
+  const snakePicks = draftType === "auction"
+    ? null
+    : normalizeSnakePicks(saved.snakePicks, startingPitchers, { bullpenSlots, bullpenMin });
+  const snakeReview = draftType === "auction" ? 0 : Math.round(normalizeSnakeReviewMs(saved.snakeReview) / 1000);
+  const rosterSize = draftType === "auction"
+    ? rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin })
+    : snakePicks;
   const temperature = normalizeTemperature(saved.temperature);
   const coaches = Boolean(saved.coaches);
   const savedDeck = Array.isArray(saved.deck) && saved.deck.length ? saved.deck : null;
@@ -279,6 +293,7 @@ function reviveRoom(saved) {
     startingPitchers,
     bullpenSlots,
     bullpenMin,
+    picks: snakePicks ?? undefined,
     temperature,
     coaches,
     managerCount: managerNames.length,
@@ -294,7 +309,7 @@ function reviveRoom(saved) {
     pool,
     rosterSize,
     saved.seed,
-    roomDraftOptions({ ...saved, draftType, nomination, startingPitchers, bullpenSlots, bullpenMin, auctionBudget })
+    roomDraftOptions({ ...saved, draftType, nomination, startingPitchers, bullpenSlots, bullpenMin, auctionBudget, snakePicks, snakeReview })
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
@@ -323,6 +338,8 @@ function reviveRoom(saved) {
     realPool,
     pickTimer: normalizePickTimerSeconds(saved.pickTimer),
     snakeTimer: draft.clock?.timer ?? null,
+    snakeReview,
+    snakePicks,
     draftType,
     nomination,
     hidePoints: Boolean(saved.hidePoints),
@@ -370,6 +387,8 @@ function roomRecord(room) {
     realPool: room.realPool,
     pickTimer: room.pickTimer,
     snakeTimer: room.snakeTimer ?? null,
+    snakeReview: room.snakeReview ?? 0,
+    snakePicks: room.snakePicks ?? null,
     snakeClock: snakeClockState(room.draft),
     draftType: room.draftType,
     nomination: room.nomination ?? "manual",
@@ -1096,7 +1115,13 @@ async function createRoom(store, request, response) {
   const draftType = body.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && body.nomination === "random" ? "random" : "manual";
   const pen = roomBullpen(body, nomination === "random");
-  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, pen);
+  // A snake room is as long as its picks slider; an auction is a roster long.
+  const snakePicks = draftType === "auction"
+    ? null
+    : normalizeSnakePicks(body.snakePicks, startingPitchers, pen);
+  const rosterSize = draftType === "auction"
+    ? rosterSizeForStartingPitchers(startingPitchers, pen)
+    : snakePicks;
   // Display-only house rule: hide every card's printed points. It never touches
   // the deal or the replay, so it just rides along as a room setting.
   const hidePoints = Boolean(body.hidePoints);
@@ -1106,6 +1131,7 @@ async function createRoom(store, request, response) {
   const auctionBudget = draftType === "auction" ? normalizeAuctionBudget(body.budget, rosterSize) : null;
   const auctionTimer = draftType === "auction" ? normalizeAuctionTimerConfig(body.auctionTimer) : null;
   const snakeTimer = draftType === "auction" ? null : normalizeSnakeTimerConfig(body.snakeTimer);
+  const snakeReview = draftType === "auction" ? 0 : Math.round(normalizeSnakeReviewMs(body.snakeReview) / 1000);
   const cpuNames = Array.isArray(body.cpu)
     ? body.cpu.map((name) => String(name)).filter((name) => managers.includes(name))
     : [];
@@ -1115,7 +1141,10 @@ async function createRoom(store, request, response) {
   // random-nomination board is dealt to the size of the ROOM, so how many
   // managers it seats is not a question — whether the set is deep enough to
   // deal it is.
-  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, ...pen, temperature, coaches });
+  // The board widens with the draft: a room picking past a roster needs cards
+  // past a roster, or its last rounds pick over an empty table.
+  const poolPen = { ...pen, ...(snakePicks === null ? {} : { picks: snakePicks }) };
+  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, ...poolPen, temperature, coaches });
   if (nomination === "random") {
     const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers, pen);
     if (shortfalls.length) {
@@ -1125,7 +1154,7 @@ async function createRoom(store, request, response) {
       });
     }
   } else {
-    const managerLimit = maxPoolManagers(pool, startingPitchers, pen);
+    const managerLimit = maxPoolManagers(pool, startingPitchers, poolPen);
     if (managers.length > managerLimit) {
       return sendJson(response, 400, {
         error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers`
@@ -1137,7 +1166,7 @@ async function createRoom(store, request, response) {
     pool,
     rosterSize,
     seed,
-    { draftType, nomination, startingPitchers, ...pen, budget: auctionBudget, timer: auctionTimer, snakeTimer }
+    { draftType, nomination, startingPitchers, ...pen, budget: auctionBudget, timer: auctionTimer, snakeTimer, snakeReview, snakePicks }
   );
   const createdAt = Date.now();
   const room = {
@@ -1154,6 +1183,8 @@ async function createRoom(store, request, response) {
     deck: pool.map(deckEntry),
     pickTimer,
     snakeTimer: draft.clock?.timer ?? null,
+    snakeReview,
+    snakePicks,
     draftType,
     nomination,
     hidePoints,
@@ -1377,9 +1408,22 @@ function syncRoomAuctionTimer(store, room, now = Date.now()) {
 
 function syncRoomSnakeTimer(store, room, now = Date.now()) {
   const draft = room.draft;
-  if (!snakeClockEnabled(draft) || isDraftPaused(draft) || draft.complete) return false;
+  if (isDraftPaused(draft) || draft.complete) return false;
   const timestamp = Number.isFinite(Number(now)) ? Number(now) : Date.now();
   let changed = false;
+  // A review that ran out is WRITTEN DOWN, not merely noticed: it is what
+  // starts the clocks, and a replay that only notices it would replay every
+  // pick after it against a clock that never started.
+  if (snakeReviewEnabled(draft) && draft.review.completedAt === null && snakeReviewComplete(draft, timestamp)) {
+    const action = { type: "complete-review", at: draft.review.endsAt };
+    applyDraftAction(draft, action);
+    appendAction(store, room, action);
+    changed = true;
+  }
+  // A clock that has not started reads as started at zero, which is long
+  // expired — so nothing may time out until the review has actually opened the
+  // draft. (waitingForPlayers is the same guard for the same reason.)
+  if (!snakeClockEnabled(draft) || draft.complete || !snakeReviewComplete(draft, timestamp)) return changed;
   // A room can wake after several zero-bank managers should have picked. Catch
   // all of them up in one pass, bounded by every pick the draft could still owe.
   let guard = draft.managers.length * draft.rosterSize + 1;
@@ -1425,7 +1469,10 @@ function scheduleRoomTimer(store, room) {
 
 function nextRoomTimerDeadline(draft) {
   if (!isAuctionDraft(draft)) {
-    if (!snakeClockEnabled(draft) || isDraftPaused(draft) || draft.complete) return null;
+    if (isDraftPaused(draft) || draft.complete) return null;
+    const review = draft.review;
+    if (snakeReviewEnabled(draft) && review.completedAt === null && Number.isFinite(review.endsAt)) return review.endsAt;
+    if (!snakeClockEnabled(draft)) return null;
     const manager = currentManager(draft);
     const startedAt = Number(draft.clock?.turnStartedAt);
     if (!manager || !Number.isFinite(startedAt)) return null;
@@ -1559,6 +1606,7 @@ function denyAction(draft, seat, isHost, action) {
   }
   if (type === "pick" || type === "autopick") {
     if (draft.complete) return "The draft is already complete";
+    if (!draftReviewComplete(draft, action.at)) return "Pool review is still open";
     // An autopick resolves a whole lot, entering bids for managers who never
     // made them. Only a deliberate host finish may do that; a room's auto
     // button uses auto-nominate.
@@ -1580,7 +1628,8 @@ function denyAction(draft, seat, isHost, action) {
   if (type === "finish") {
     if (draft.complete) return "The draft is already complete";
     if (!isHost) return "Only the host can auto-finish the draft";
-    if (isAuctionDraft(draft) && !auctionReviewComplete(draft, action.at)) return "Pool review is still open";
+    // A finish ENDS the review rather than waiting on it — it is the host
+    // saying he is done with the board, which is what the review is for.
     return null;
   }
   if (type === "nominate") {
@@ -1608,7 +1657,7 @@ function denyAction(draft, seat, isHost, action) {
     return null;
   }
   if (type === "complete-review") {
-    if (!isAuctionDraft(draft)) return "This room is not an auction draft";
+    if (!draftReviewEnabled(draft)) return "This room has no pool review";
     if (!isHost) return "Only the host can end pool review early";
     return null;
   }
@@ -1713,7 +1762,10 @@ function startRoomIfFull(store, room) {
   if (!humans.every((manager) => seatIsLive(room, manager.id))) return false;
   room.waitingForPlayers = false;
   const at = Date.now();
-  if (isAuctionDraft(room.draft)) {
+  // A room that asked to read the board first opens on the review, whichever
+  // draft it is; the snake's clock follows when the review ends, which
+  // completeSnakeReview does for it.
+  if (isAuctionDraft(room.draft) || snakeReviewEnabled(room.draft)) {
     const action = { type: "start-review", at };
     applyDraftAction(room.draft, action);
     appendAction(store, room, action);
@@ -1797,6 +1849,8 @@ function roomSnapshot(room, port = null) {
     realPool: room.realPool ?? "stars",
     pickTimer: room.pickTimer ?? 0,
     snakeTimer: room.snakeTimer ?? null,
+    snakeReview: room.snakeReview ?? 0,
+    snakePicks: room.snakePicks ?? null,
     snakeClock: snakeClockState(room.draft),
     draftType: room.draftType ?? "snake",
     nomination: room.nomination ?? "manual",

@@ -264,7 +264,10 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
     Math.floor(pitchers.filter((player) => player.role === "SP").length / starterTarget),
     // A league with no pen seats as many as its other slots allow.
     bullpenTarget ? Math.floor(pitchers.filter((player) => player.role !== "SP").length / bullpenTarget) : Infinity,
-    Math.floor(biddable.length / rosterSizeForStartingPitchers(starterTarget, pen))
+    // A snake room drafting past a roster needs that many cards a seat, not a
+    // roster's worth. `pen.picks` is the slider; without one this is the
+    // minimum, which is what every draft before it asked for.
+    Math.floor(biddable.length / normalizeSnakePicks(pen?.picks, starterTarget, pen))
   );
 }
 
@@ -305,6 +308,44 @@ function normalizeTimerMs(ms, seconds, fallbackSeconds) {
 
 export const SNAKE_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
 export const SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS = 20;
+export const SNAKE_DEFAULT_REVIEW_SECONDS = 5 * 60;
+const MAX_REVIEW_MS = 3600 * MS_PER_SECOND;
+
+// The board review a snake draft opens with: the same held breath the auction
+// takes before its first lot, so a room can read the deck it was just dealt
+// before anybody is on the clock.
+//
+// Unlike the auction's, it is its OWN setting rather than a field of the clock
+// config — a snake draft with no clock at all can still want a look at the
+// board, and there is nothing about a countdown before the draft that needs a
+// countdown during it. Zero seconds is no review, which is what every snake
+// room played with before this existed, so a room that names none has none.
+export function normalizeSnakeReviewMs(review) {
+  if (review === false || review === true || review === null || review === undefined) return 0;
+  const ms = typeof review === "object"
+    ? normalizeTimerMs(review.reviewMs, review.reviewSeconds, 0)
+    : normalizeTimerMs(undefined, review, 0);
+  return Math.min(MAX_REVIEW_MS, ms);
+}
+
+// ---- how many picks a snake draft is -----------------------------------------
+//
+// A snake draft used to be exactly as long as a roster: nine hitters, the
+// rotation, the pen, and the last pick of the last round filled the last slot.
+// Now the room says how long it is. The floor is still that minimum — a draft
+// shorter than a roster could not field one — and everything above it is bench.
+export const MAX_SNAKE_BENCH_PICKS = 12;
+
+export function minimumSnakePicks(startingPitchers = DEFAULT_STARTING_PITCHERS, pen = {}) {
+  return rosterSizeForStartingPitchers(startingPitchers, pen);
+}
+
+export function normalizeSnakePicks(value, startingPitchers = DEFAULT_STARTING_PITCHERS, pen = {}) {
+  const min = minimumSnakePicks(startingPitchers, pen);
+  const picks = Math.round(Number(value));
+  if (!Number.isFinite(picks)) return min;
+  return Math.min(min + MAX_SNAKE_BENCH_PICKS, Math.max(min, picks));
+}
 
 // The snake's chess clock: one bank for the WHOLE draft, plus an increment
 // handed back on every pick. It is the auction's model, and it asks the same
@@ -358,20 +399,28 @@ export function roomDraftOptions(room = {}) {
   const nomination = draftType === "auction" && room.nomination === "random" ? "random" : "manual";
   const startingPitchers = normalizeStartingPitchers(room.startingPitchers);
   const pen = roomBullpen(room, nomination === "random");
-  const rosterSize = rosterSizeForStartingPitchers(startingPitchers, pen);
+  // A snake room is as long as its picks slider says; an auction is as long as
+  // a roster, because that is the cap the bidding is priced against.
+  const snakePicks = normalizeSnakePicks(room.snakePicks, startingPitchers, pen);
+  const rosterSize = draftType === "auction"
+    ? rosterSizeForStartingPitchers(startingPitchers, pen)
+    : snakePicks;
   return {
     draftType,
     nomination,
     startingPitchers,
     ...pen,
     rosterSize,
+    snakePicks,
     hidePoints: Boolean(room.hidePoints),
     budget: draftType === "auction" ? normalizeAuctionBudget(room.auctionBudget, rosterSize) : null,
     // A room that names no clock has no clock — left undefined these normalize
     // to a TIMED auction, which invents a review period the room never had, and
-    // then the room's own log will not replay through it.
+    // then the room's own log will not replay through it. The snake's review is
+    // the same trap wearing the same answer: no setting means no review.
     timer: room.auctionTimer ?? false,
-    snakeTimer: room.snakeTimer ?? false
+    snakeTimer: room.snakeTimer ?? false,
+    snakeReview: room.snakeReview ?? 0
   };
 }
 
@@ -454,6 +503,22 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
       draft.auction.queueIndex = 0;
     }
   } else {
+    // A snake draft is as many picks long as the room asked for, never fewer
+    // than a roster takes. Above that floor the extra turns are bench depth.
+    // The positional rosterSize is not the answer here and never was: a snake
+    // draft has always sized itself off the rotation and the pen. A room that
+    // names no pick count gets that same minimum.
+    draft.rosterSize = normalizeSnakePicks(options.snakePicks, startingPitchers, { bullpenSlots, bullpenMin });
+    // And within those turns the board is open: no position to reserve, no
+    // duty to leave the room a catcher, no roster shape to respect. It is the
+    // random-nomination auction's rule, and it leans on the same promise — a
+    // roster that ends the night short is finished by the closing sweep, at
+    // replacement level, out of the cards nobody took.
+    draft.unlimitedRoster = true;
+    const reviewMs = normalizeSnakeReviewMs(options.snakeReview);
+    if (reviewMs > 0) {
+      draft.review = { reviewMs, startedAt: null, endsAt: null, completedAt: null };
+    }
     const timer = normalizeSnakeTimerConfig(options.snakeTimer);
     if (timer.enabled) {
       draft.clock = {
@@ -714,6 +779,16 @@ export function availablePlayers(draft) {
   return draft.pool.filter((player) => !player.replacement && !draft.pickedIds.has(player.id));
 }
 
+// Has this manager run out of room? An auction with unlimited rosters never
+// does — there is no cap there, only a budget — but a snake draft with the same
+// open board still caps the number of TURNS, which is what the picks slider
+// sets. So "full" means something in one unlimited draft and nothing in the
+// other.
+function outOfPicks(draft, manager) {
+  if (hasUnlimitedRoster(draft) && isAuctionDraft(draft)) return false;
+  return rosterFull(draft, manager);
+}
+
 // Nothing here asks whether the manager already owns another era of this man.
 // The BOARD settles that: it deals each person once, so the second Ken Griffey
 // a manager might have tripped over was never printed. A rule that cannot fire
@@ -732,14 +807,16 @@ export function canPickPlayer(draft, manager, player) {
   // only thing he needs is a turn — and a manager whose players are all in has
   // no turns left to spend.
   if (isCoach(player)) {
-    if (!hasUnlimitedRoster(draft) && rosterFull(draft, manager)) return { ok: false, reason: "roster full" };
+    if (outOfPicks(draft, manager)) return { ok: false, reason: "roster full" };
     return { ok: true, reason: "" };
   }
   // With unlimited inactive slots the only thing standing between a manager
-  // and a card is the money: no roster cap, no position cap, and no duty to
-  // leave the rest of the league a catcher — the closing sweep guarantees
-  // everyone a legal nine out of the cards the board never bid on.
+  // and a card is what he has left to spend it with: no position cap, and no
+  // duty to leave the rest of the league a catcher — the closing sweep
+  // guarantees everyone a legal nine out of the cards nobody took. In an
+  // auction that currency is money; in a snake draft it is turns.
   if (hasUnlimitedRoster(draft)) {
+    if (outOfPicks(draft, manager)) return { ok: false, reason: "roster full" };
     return { ok: true, reason: "" };
   }
   if (rosterFull(draft, manager)) {
@@ -779,6 +856,9 @@ export function pickPlayer(draft, playerId, now = Date.now()) {
   if (isAuctionDraft(draft)) {
     throw new Error("Auction drafts add players by selling lots");
   }
+  if (!snakeReviewComplete(draft, now)) {
+    throw new Error("Review period is still open");
+  }
   const manager = currentManager(draft);
   const player = draft.pool.find((item) => item.id === playerId);
   if (!player || draft.pickedIds.has(playerId)) {
@@ -798,9 +878,19 @@ export function pickPlayer(draft, playerId, now = Date.now()) {
   manager.roster.push(player);
   draft.pickedIds.add(playerId);
   draft.pickNumber += 1;
-  draft.complete = draft.managers.every((item) => rosterFull(draft, item));
-  syncCpuTeamChoices(draft);
+  finishSnakeIfFull(draft);
   return draft;
+}
+
+// The last pick is in. Every hole still open on every roster is filled here,
+// for free, out of what nobody took — the same closing sweep the auction ends
+// on, for the same reason: a draft that lets you take anything has to promise
+// you a legal nine at the end of it, or taking anything is a trap.
+function finishSnakeIfFull(draft) {
+  draft.complete = draft.managers.every((item) => rosterFull(draft, item));
+  if (draft.complete) sweepRosters(draft);
+  syncCpuTeamChoices(draft);
+  return draft.complete;
 }
 
 export function auctionBudget(draft, manager) {
@@ -916,6 +1006,12 @@ export function pauseSnake(draft, remainingMs = null, now = Date.now()) {
     if (manager) draft.clock.banks[manager.id] = snakeTimeRemainingMs(draft, manager, timestamp);
     draft.clock.turnStartedAt = timestamp;
   }
+  // The review is nobody's bank, so it only has to stop running out. It keeps
+  // what was left of it and picks that up again on the resume.
+  const review = draft.review;
+  if (snakeReviewEnabled(draft) && review.completedAt === null && review.startedAt !== null) {
+    review.pausedRemainingMs = Math.max(0, review.endsAt - timestamp);
+  }
   draft.pausedAt = timestamp;
   draft.pausedRemainingMs = Number.isFinite(remainingMs) ? Math.max(0, remainingMs) : null;
   return true;
@@ -923,9 +1019,15 @@ export function pauseSnake(draft, remainingMs = null, now = Date.now()) {
 
 export function resumeSnake(draft, now = Date.now()) {
   if (isAuctionDraft(draft) || !isSnakePaused(draft)) return false;
+  const timestamp = normalizeTimestamp(now);
   // The bank was settled at the pause; the clock simply starts again.
   if (snakeClockEnabled(draft) && draft.clock.turnStartedAt !== null) {
-    draft.clock.turnStartedAt = normalizeTimestamp(now);
+    draft.clock.turnStartedAt = timestamp;
+  }
+  const review = draft.review;
+  if (snakeReviewEnabled(draft) && review.completedAt === null && review.startedAt !== null) {
+    review.endsAt = timestamp + Math.max(0, Number(review.pausedRemainingMs) || 0);
+    review.pausedRemainingMs = null;
   }
   draft.pausedAt = null;
   // The remainder has been handed back to whoever is resuming; a room replayed
@@ -997,6 +1099,103 @@ export function resumeAuction(draft, now = Date.now()) {
   return true;
 }
 
+// ---- the snake's pool review -------------------------------------------------
+//
+// The auction's opening pause, given to the snake: a countdown during which the
+// board is on the table and nobody may pick. It runs out by itself, or the host
+// starts the draft early, and only then does the first clock start.
+//
+// Its shape copies the auction's deliberately — startedAt/endsAt/completedAt,
+// frozen by a pause, settled into completedAt the moment anything asks — so
+// that the two read the same way to the screen and to a replay. See
+// startAuctionReview, which this is the other half of.
+export function snakeReviewEnabled(draft) {
+  return !isAuctionDraft(draft) && Number(draft?.review?.reviewMs) > 0;
+}
+
+export function startSnakeReview(draft, now = Date.now()) {
+  if (!snakeReviewEnabled(draft)) return null;
+  const review = draft.review;
+  if (review.completedAt !== null) return review;
+  const timestamp = normalizeTimestamp(now);
+  if (review.startedAt === null) {
+    review.startedAt = timestamp;
+    review.endsAt = timestamp + review.reviewMs;
+  }
+  return review;
+}
+
+export function completeSnakeReview(draft, now = Date.now()) {
+  if (isAuctionDraft(draft)) return null;
+  const review = draft?.review;
+  if (review?.completedAt === null) {
+    review.completedAt = normalizeTimestamp(now);
+    // The gun follows the buzzer. A snake draft's clocks start when the review
+    // ends, not when the board was dealt, so nobody's bank burns down while the
+    // room is still reading it.
+    startSnakeClock(draft, review.completedAt);
+  }
+  return review ?? null;
+}
+
+// The review ran out on its own and nobody said so. Settling it here — at the
+// instant it ENDED, never at the instant somebody noticed — is what keeps the
+// server, a replaying client and a browser that was asleep on the same draft.
+// It is syncAuctionTimer's other half; see that for the same trick in the
+// auction, where the sealed-bid clocks need it too.
+export function syncSnakeTimer(draft, now = Date.now()) {
+  if (!snakeReviewEnabled(draft) || isSnakePaused(draft)) return false;
+  const review = draft.review;
+  if (review.completedAt !== null || review.startedAt === null) return false;
+  if (normalizeTimestamp(now) < review.endsAt) return false;
+  review.completedAt = review.endsAt;
+  startSnakeClock(draft, review.endsAt);
+  return true;
+}
+
+export function snakeReviewRemainingMs(draft, now = Date.now()) {
+  if (!snakeReviewEnabled(draft)) return 0;
+  const review = draft.review;
+  if (review.completedAt !== null) return 0;
+  if (review.startedAt === null) return review.reviewMs;
+  if (isSnakePaused(draft)) return Math.max(0, Number(review.pausedRemainingMs) || 0);
+  return Math.max(0, review.endsAt - normalizeTimestamp(now));
+}
+
+export function snakeReviewComplete(draft, now = Date.now()) {
+  if (!snakeReviewEnabled(draft)) return true;
+  const review = draft.review;
+  if (review.completedAt !== null) return true;
+  // A review that was running when the room paused is still running; it just
+  // isn't running out.
+  if (isSnakePaused(draft)) return false;
+  return review.endsAt !== null && normalizeTimestamp(now) >= review.endsAt;
+}
+
+// ---- the review, whichever draft is asking ----------------------------------
+//
+// Both drafts open the same way now, so the screen and the action log ask these
+// rather than picking a side first.
+export function draftReviewEnabled(draft) {
+  return isAuctionDraft(draft) ? auctionTimerEnabled(draft) : snakeReviewEnabled(draft);
+}
+
+export function draftReviewRemainingMs(draft, now = Date.now()) {
+  return isAuctionDraft(draft) ? auctionReviewRemainingMs(draft, now) : snakeReviewRemainingMs(draft, now);
+}
+
+export function draftReviewComplete(draft, now = Date.now()) {
+  return isAuctionDraft(draft) ? auctionReviewComplete(draft, now) : snakeReviewComplete(draft, now);
+}
+
+export function startDraftReview(draft, now = Date.now()) {
+  return isAuctionDraft(draft) ? startAuctionReview(draft, now) : startSnakeReview(draft, now);
+}
+
+export function completeDraftReview(draft, now = Date.now()) {
+  return isAuctionDraft(draft) ? completeAuctionReview(draft, now) : completeSnakeReview(draft, now);
+}
+
 // ---- the snake's chess clock -------------------------------------------------
 //
 // One bank each, running only while it is your turn, with an increment paid
@@ -1011,6 +1210,9 @@ export function snakeClockEnabled(draft) {
 
 export function startSnakeClock(draft, now = Date.now()) {
   if (!snakeClockEnabled(draft) || draft.clock.turnStartedAt !== null) return false;
+  // Nobody is on the clock while the board is still being read. The gun is
+  // fired for them when the review ends — see completeSnakeReview.
+  if (!snakeReviewComplete(draft, now)) return false;
   draft.clock.turnStartedAt = normalizeTimestamp(now);
   return true;
 }
@@ -1566,6 +1768,10 @@ function forgetRosterPlayer(manager, playerId) {
 export function undoLastPick(draft) {
   if (!draft) return null;
   if (isAuctionDraft(draft)) return undoAuctionAction(draft);
+  // The sweep sits on top of the last pick, so it has to come off first — and
+  // all of it, not one card: the holes it filled are only holes again once the
+  // pick that closed the draft is gone, and the next pick will sweep afresh.
+  unsweepSnake(draft);
   if (draft.pickNumber <= 0) return null;
   const manager = managerForPickNumber(draft, draft.pickNumber - 1);
   const player = manager?.roster.pop();
@@ -1583,6 +1789,31 @@ export function undoLastPick(draft) {
   draft.teamChoicesSeeded = false;
   forgetRosterPlayer(manager, player.id);
   return { manager, player };
+}
+
+// Takes the closing sweep back off a snake draft: every free card it handed out
+// leaves the roster, the pool it was minted into, and the picked list. A board
+// card it merely dealt goes back on the board unowned, which is where it was.
+function unsweepSnake(draft) {
+  const swept = draft.swept ?? [];
+  if (!swept.length) return false;
+  for (const entry of swept) {
+    const manager = draft.managers.find((item) => item.id === entry.managerId);
+    if (!manager) continue;
+    const index = manager.roster.findIndex((card) => card.id === entry.playerId);
+    if (index === -1) continue;
+    const [card] = manager.roster.splice(index, 1);
+    draft.pickedIds.delete(card.id);
+    // A minted replacement exists only because the sweep printed it; leave it
+    // in the pool and the next sweep prints its twin under the same id.
+    if (card.replacement) {
+      draft.pool = draft.pool.filter((item) => !(item.replacement && item.id === card.id));
+    }
+    forgetRosterPlayer(manager, card.id);
+  }
+  draft.swept = [];
+  draft.complete = false;
+  return true;
 }
 
 // Undo in an auction unwinds one step at a time: an open lot goes back to
@@ -1683,10 +1914,10 @@ export function applyDraftAction(draft, action) {
       nominateBestTarget(draft, action.at);
       return;
     case "start-review":
-      startAuctionReview(draft, action.at);
+      startDraftReview(draft, action.at);
       return;
     case "complete-review":
-      completeAuctionReview(draft, action.at);
+      completeDraftReview(draft, action.at);
       return;
     case "pause":
       if (isAuctionDraft(draft)) pauseAuction(draft, action.at);
@@ -1707,7 +1938,7 @@ export function applyDraftAction(draft, action) {
       autopick(draft, action.at);
       return;
     case "finish":
-      completeAuctionReview(draft, action.at);
+      completeDraftReview(draft, action.at);
       while (!draft.complete) autopick(draft, action.at);
       return;
     case "undo":
@@ -1790,7 +2021,11 @@ export function currentManagerMustReplace(draft) {
   if (!draft || draft.complete || isAuctionDraft(draft)) return false;
   const manager = currentManager(draft);
   if (!manager || rosterFull(draft, manager)) return false;
-  if (!neediestGap(manager.roster, draft)) return false;
+  // With a roster cap, a stall is a HOLE the board can no longer fill. With an
+  // open board every card is legal, so the only way to stall is to run the
+  // board out entirely — which the deal is sized against, but a long draft on a
+  // thin set can still manage it, and a turn nobody can take softlocks the room.
+  if (!hasUnlimitedRoster(draft) && !neediestGap(manager.roster, draft)) return false;
   // A coach is always legal and never fills a hole, so he is no answer here.
   return !availablePlayers(draft).some((player) => !isCoach(player) && canPickPlayer(draft, manager, player).ok);
 }
@@ -1801,15 +2036,17 @@ export function pickReplacement(draft, now = Date.now()) {
   if (draft.complete) return draft;
   if (isAuctionDraft(draft)) throw new Error("Auction rosters are filled by the closing sweep");
   const manager = currentManager(draft);
-  const gap = neediestGap(manager.roster, draft);
+  // A roster with no hole left still owes this turn a card when the board has
+  // nothing on it — the extra picks are bench, and the bench takes a bat.
+  const gap = neediestGap(manager.roster, draft)
+    ?? (hasUnlimitedRoster(draft) ? { kind: "hitter", role: null, position: null } : null);
   if (!gap) throw new Error("Roster has no hole to fill");
   const replacement = makeReplacementPlayer(draft, manager, gap.kind, gap.role, gap.position);
   chargeSnakeClock(draft, now);
   manager.roster.push(replacement);
   draft.pickedIds.add(replacement.id);
   draft.pickNumber += 1;
-  draft.complete = draft.managers.every((item) => rosterFull(draft, item));
-  syncCpuTeamChoices(draft);
+  finishSnakeIfFull(draft);
   return draft;
 }
 
@@ -1827,6 +2064,9 @@ function neediestGap(roster, options = {}) {
 
 function bestAutopickTarget(draft, manager) {
   const rosterNeeds = getRosterNeeds(manager.roster, draft);
+  // Read once for the whole board rather than once per candidate: it is the
+  // same roster either way, and the board can run to hundreds of cards.
+  const rosterGaps = activeRosterGaps(manager.roster, draft);
   const candidates = availablePlayers(draft);
   const legal = candidates.filter((player) => canPickPlayer(draft, manager, player).ok);
   const players = legal.filter((player) => !isCoach(player));
@@ -1839,7 +2079,7 @@ function bestAutopickTarget(draft, manager) {
   const best = players
     .map((player) => ({
       player,
-      score: autopickScore(draft, manager, player, rosterNeeds, values.get(player.id), dropoffs.get(player.id), model.bias)
+      score: autopickScore(draft, manager, player, rosterNeeds, values.get(player.id), dropoffs.get(player.id), model.bias, rosterGaps)
     }))
     .sort((a, b) => b.score - a.score)[0].player;
   return coachInsteadOf(draft, best, legal.filter(isCoach), model) ?? best;
@@ -3056,16 +3296,27 @@ export function sweepRosters(draft) {
 
       manager.roster.push(replacement);
       draft.pickedIds.add(replacement.id);
-      draft.pickNumber += 1;
-      draft.auction.history.push({
-        playerId: replacement.id,
-        managerId: manager.id,
-        price: 0,
-        swept: true,
-        bids: {},
-        nominatorId: null,
-        nominatorIndex: draft.auction.nominatorIndex
-      });
+      if (isAuctionDraft(draft)) {
+        // The auction reads its history back as the draft's pick list, so a
+        // swept card is a line in it and counts as a pick.
+        draft.pickNumber += 1;
+        draft.auction.history.push({
+          playerId: replacement.id,
+          managerId: manager.id,
+          price: 0,
+          swept: true,
+          bids: {},
+          nominatorId: null,
+          nominatorIndex: draft.auction.nominatorIndex
+        });
+      } else {
+        // A snake draft derives its pick list from the turn order instead (see
+        // draftHistory), and the sweep took no turns: these cards are handed out
+        // after the last pick, not instead of one. Counting them would shift
+        // every seat's picks onto the wrong manager. They are written down here
+        // so an undo can hand them back — see undoLastPick.
+        draft.swept = [...(draft.swept ?? []), { managerId: manager.id, playerId: replacement.id }];
+      }
       swept.push({ managerId: manager.id, playerId: replacement.id });
     }
   }
@@ -3498,11 +3749,35 @@ function fabricateReplacement({ id, name, slot, kind }) {
   };
 }
 
-function autopickScore(draft, manager, player, needs, personalValue, dropoff, bias = null) {
+// The turns a roster still owes its own holes: bats (however they are labelled),
+// the rotation, the pen. The two hitter counts overlap — a missing catcher is
+// also a missing bat — so the bigger of them is the number of bats still owed.
+function requiredPicks(gaps) {
+  return Math.max(gaps.hitter, gaps.positions.length) + gaps.starter + gaps.bullpen;
+}
+
+// Does this card close one of them? A bare bat only does while the roster is
+// shorter on bats than on positions it cannot cover.
+function fillsRosterGap(gaps, player) {
+  if (isCoach(player)) return false;
+  if (player.kind === "pitcher") {
+    return pitcherRole(player) === "SP" ? gaps.starter > 0 : gaps.bullpen > 0;
+  }
+  if (gaps.positions.some((position) => positionMatchesSlot(player, position))) return true;
+  return gaps.hitter > gaps.positions.length;
+}
+
+function autopickScore(draft, manager, player, needs, personalValue, dropoff, bias = null, gaps = null) {
   const lean = bias ?? cpuPersonality(manager.persona).bias;
   const remainingSlots = draft.rosterSize - rosterPlayerCount(manager);
   const matchingNeed = player.kind === "pitcher" ? pitcherNeed(player, needs) : needs.hitter;
-  const forcedNeed = matchingNeed > 0 && matchingNeed >= remainingSlots;
+  // The board used to refuse a pick that stranded a slot, so a computer could
+  // not draft nine bats and no catcher however much it wanted to. With an open
+  // board nothing refuses it, and the forcing has to live here instead: once a
+  // roster owes its holes as many picks as it has turns left, a card that
+  // closes one beats every card that does not.
+  const holes = gaps ?? activeRosterGaps(manager.roster, draft);
+  const forcedNeed = requiredPicks(holes) >= remainingSlots && fillsRosterGap(holes, player);
   const needBonus = matchingNeed > 0 ? 80 + (matchingNeed / Math.max(1, remainingSlots)) * 120 : 0;
   const balanceBonus = player.kind === "pitcher" && pitcherNeed(player, needs) > 0 ? 35 : 0;
   const positionBonus = hitterPositionBonus(manager.roster, player);

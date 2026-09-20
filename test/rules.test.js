@@ -961,13 +961,17 @@ test("draft blocks picks that would make pitcher minimum impossible", () => {
     makePitcher({ id: "draft-rp-1", name: "Draft Bullpen 1", role: "RP", ip: 1 }),
     makePitcher({ id: "draft-rp-2", name: "Draft Bullpen 2", role: "RP", ip: 1 })
   ];
-  const draft = createDraft(["Solo"], [...hitters, ...pitchers], 13);
+  // A capped auction still counts the roster slot by slot, so a tenth hitter
+  // is a hitter the lineup has nowhere to put. The snake draft used to read the
+  // same way and no longer does — see "an open snake board takes any card".
+  const draft = createDraft(["Solo"], [...hitters, ...pitchers], 13, "pitcher-minimum", {
+    draftType: "auction",
+    timer: false
+  });
+  const manager = draft.managers[0];
+  manager.roster = hitters.slice(0, 9);
+  draft.pickedIds = new Set(manager.roster.map((player) => player.id));
 
-  for (let i = 0; i < 9; i += 1) {
-    pickPlayer(draft, hitters[i].id);
-  }
-
-  const manager = currentManager(draft);
   const legality = canPickPlayer(draft, manager, hitters[9]);
   assert.equal(legality.ok, false);
   assert.match(legality.reason, /lineup/);
@@ -985,14 +989,20 @@ test("draft allows one duplicate hitter as DH and blocks another duplicate", () 
     makePitcher({ id: "dh-rp-1", name: "DH Bullpen 1", role: "RP", ip: 1 }),
     makePitcher({ id: "dh-rp-2", name: "DH Bullpen 2", role: "RP", ip: 1 })
   ];
-  const draft = createDraft(["Solo"], [firstBase, dhFirstBase, extraFirstBase, catcher, dhCatcher, ...pitchers], 13);
+  // A capped auction's rule: one spare bat DHs, the next has nowhere to stand.
+  const draft = createDraft(
+    ["Solo"],
+    [firstBase, dhFirstBase, extraFirstBase, catcher, dhCatcher, ...pitchers],
+    13,
+    "duplicate-dh",
+    { draftType: "auction", timer: false }
+  );
+  const manager = draft.managers[0];
+  manager.roster = [firstBase, dhFirstBase, catcher];
+  draft.pickedIds = new Set(manager.roster.map((player) => player.id));
 
-  pickPlayer(draft, firstBase.id);
-  pickPlayer(draft, dhFirstBase.id);
-  pickPlayer(draft, catcher.id);
-
-  assert.equal(canPickPlayer(draft, currentManager(draft), extraFirstBase).ok, false);
-  const secondDuplicate = canPickPlayer(draft, currentManager(draft), dhCatcher);
+  assert.equal(canPickPlayer(draft, manager, extraFirstBase).ok, false);
+  const secondDuplicate = canPickPlayer(draft, manager, dhCatcher);
   assert.equal(secondDuplicate.ok, false);
   assert.match(secondDuplicate.reason, /lineup/);
 });
@@ -1707,7 +1717,10 @@ test("draft blocks picks that would consume another manager's only required posi
   ];
   const lastThirdBase = makeHitter({ id: "scarce-last-3b", position: "3B", points: 300 });
   const dhOption = makeHitter({ id: "scarce-dh-option", position: "1B", points: 250 });
-  const draft = createDraft(["One", "Two"], [...teamOneRoster, ...teamTwoRoster, lastThirdBase, dhOption], 13);
+  const draft = createDraft(["One", "Two"], [...teamOneRoster, ...teamTwoRoster, lastThirdBase, dhOption], 13, "scarce", {
+    draftType: "auction",
+    timer: false
+  });
   draft.managers[0].roster = [...teamOneRoster];
   draft.managers[1].roster = [...teamTwoRoster];
   draft.pickedIds = new Set([...teamOneRoster, ...teamTwoRoster].map((player) => player.id));
@@ -1772,21 +1785,24 @@ test("snake hands a stalled manager a copy of the cheapest card at the slot", ()
   draft.pickNumber = 24; // round 12, snake turns back to Team One
 
   assert.equal(currentManager(draft).id, draft.managers[0].id);
-  assert.equal(currentManagerMustReplace(draft), true, "no legal pick fills Team One's open catcher slot");
+  // The board still holds cards, so nothing stalls: an open board takes the
+  // spare bat and the catcher-shaped hole is left for the closing sweep.
+  assert.equal(currentManagerMustReplace(draft), false);
+  assert.equal(canPickPlayer(draft, draft.managers[0], spareBat).ok, true);
 
-  autopick(draft);
+  while (!draft.complete) autopick(draft);
 
   const printed = draft.managers[0].roster.find((player) => player.replacement);
-  assert.ok(printed, "the stall is filled rather than throwing");
+  assert.ok(printed, "the hole is filled rather than left open");
   assert.equal(printed.name, "Replacement C");
   assert.equal(printed.sourceId, "stall-two-c", "copies the cheapest catcher on the board");
   assert.equal(printed.onBase, 11, "his numbers come across");
   assert.equal(printed.points, 175);
   assert.deepEqual(printed.positions, [{ pos: "C", fielding: 4 }]);
-  assert.deepEqual(validateRoster(draft.managers[0]).filter((issue) => issue.includes("C")), []);
+  assert.deepEqual(validateRoster(draft.managers[0], draft).filter((issue) => issue.includes("C")), []);
 
-  // Undo the forced pick and the printed card leaves the pool too, or it would
-  // return as a pickable card on the board.
+  // Undo the last pick and the sweep comes off with it — the printed card
+  // leaves the pool too, or it would return as a pickable card on the board.
   undoLastPick(draft);
   assert.deepEqual(draft.pool.filter((player) => player.replacement), []);
   assert.equal(draft.managers[0].roster.some((player) => player.replacement), false);
@@ -1824,7 +1840,7 @@ test("a catcher-short snake league finishes on a replacement instead of stalling
 
   assert.ok(draft.complete, "the draft finishes rather than throwing on the last catcher");
   for (const manager of draft.managers) {
-    assert.deepEqual(validateRoster(manager), [], `${manager.name} fields a legal roster`);
+    assert.deepEqual(validateRoster(manager, draft), [], `${manager.name} fields a legal roster`);
   }
   // Exactly one C slot in the room must be a replacement — there is only one
   // real catcher for two seats — and the real one is taken once a replacement
@@ -1860,7 +1876,7 @@ test("autopick keeps rosters legal", () => {
 });
 
 test("draft requires two starters and two bullpen pitchers", () => {
-  const draft = createDraft(["Solo"], [], 13);
+  const draft = createDraft(["Solo"], [], 13, "staff-minimum", { draftType: "auction", timer: false });
   const manager = draft.managers[0];
   manager.roster = [
     makePitcher({ id: "role-sp-1", role: "SP" }),

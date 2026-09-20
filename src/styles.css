@@ -6286,6 +6286,19 @@ div.seat-option:not(:disabled):hover span {
   line-height: 1.35;
 }
 
+/* The picks slider wants the whole width — the 180px above is for the number
+   boxes it sits among. Its reading rides on the label, the way the wildness
+   slider's does. */
+.snake-picks-field input[type="range"] {
+  max-width: none;
+  width: 100%;
+}
+
+.snake-picks-value {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .auction-lot {
   display: grid;
   gap: 14px;

@@ -3,7 +3,7 @@ const SEAT_STORAGE_PREFIX = "mlb-showdown-online-seat-";
 // Every field the setup screen chose has to make the trip. A name left out of
 // this list is silently dropped and the room quietly opens on the default —
 // which is how a random-nomination room came out as a manual auction.
-export async function createRoom({ seed, managers, universe, startingPitchers, bullpenSlots, bullpenMin, temperature, pickTimer, cpu, draftType, nomination, hidePoints, coaches, budget, auctionTimer, snakeTimer }) {
+export async function createRoom({ seed, managers, universe, startingPitchers, bullpenSlots, bullpenMin, temperature, pickTimer, cpu, draftType, nomination, hidePoints, coaches, budget, auctionTimer, snakeTimer, snakeReview, snakePicks }) {
   return request("POST", "/api/rooms", {
     seed,
     managers,
@@ -14,6 +14,8 @@ export async function createRoom({ seed, managers, universe, startingPitchers, b
     temperature,
     pickTimer,
     snakeTimer,
+    snakeReview,
+    snakePicks,
     cpu,
     draftType,
     nomination,

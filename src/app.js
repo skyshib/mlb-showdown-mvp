@@ -43,6 +43,7 @@ import {
   AUCTION_DEFAULT_REVIEW_SECONDS,
   SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
   SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS,
+  SNAKE_DEFAULT_REVIEW_SECONDS,
   AUCTION_MIN_BID,
   AUCTION_MIN_RAISE,
   CORNER_OUTFIELD_POSITION,
@@ -77,7 +78,9 @@ import {
   canPlayerFillLineupSlot,
   canSetCoachTarget,
   cancelLot,
-  completeAuctionReview,
+  completeDraftReview,
+  draftReviewComplete,
+  draftReviewRemainingMs,
   cpuSealedBid,
   createDraft,
   currentManager,
@@ -107,7 +110,11 @@ import {
   normalizeStartingPitchers,
   bullpenRequirement,
   UNLIMITED_BULLPEN,
+  normalizeSnakeReviewMs,
+  normalizeSnakePicks,
   normalizeSnakeTimerConfig,
+  minimumSnakePicks,
+  MAX_SNAKE_BENCH_PICKS,
   pauseAuction,
   pauseSnake,
   pendingCpuBidder,
@@ -131,9 +138,10 @@ import {
   staffStatus,
   standingReplacement,
   standingReplacements,
-  startAuctionReview,
+  startDraftReview,
   startSnakeClock,
   syncAuctionTimer,
+  syncSnakeTimer,
   undoLastPick,
   upcomingNominators,
   validateRoster
@@ -164,7 +172,9 @@ import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuatio
 import { aggregateEventSkillStats, getTeamSkillLine } from "./rules/teamSkillStats.js?v=20260716-records";
 import {
   allStarComparisonCandidates,
+  analysisPosition,
   buildAllStarDepthChart,
+  buildWpaaIndex,
   shouldShowFullAllStarDepth
 } from "./rules/allStars.js?v=20260725-inline-depth";
 import {
@@ -376,6 +386,8 @@ function pickClockTurn() {
   // Paused means paused: an untimed auction's pick clock stops too, so a break
   // never times anybody out of a nomination they were about to make.
   if (isDraftPaused(draft)) return null;
+  // Nobody is on a clock while the board is still being read.
+  if (!draftReviewComplete(draft, draftNow())) return null;
   if (isAuctionDraft(draft) && auctionTimerEnabled(draft)) return null;
   // Computer turns resolve instantly, so the clock only times humans: picks,
   // nominations, and each sealed-bid entry while a lot is on the block.
@@ -403,6 +415,9 @@ function pickClockTurn() {
 function auctionClockTick() {
   const draft = state.draft;
   const now = draftNow();
+  // The snake's review is the only clock a snake draft runs off the wall rather
+  // than off a turn, so it ticks here beside the auction's.
+  snakeReviewTick(draft, now);
   if (!draft || !isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) {
     clearAuctionUrgency();
     return;
@@ -421,6 +436,19 @@ function auctionClockTick() {
     const manager = draft.managers.find((item) => item.id === clock.dataset.managerId);
     if (manager) clock.textContent = formatAuctionClock(auctionBidTimeRemainingMs(live, manager, now));
   }
+}
+
+// Repaint the snake's review countdown, and when it runs out, open the draft:
+// locally by settling it here, online by leaving it to the room server (which
+// records the action every client then replays).
+function snakeReviewTick(draft, now) {
+  const clock = document.querySelector("[data-draft-review-clock]");
+  if (clock) clock.textContent = formatAuctionClock(draftReviewRemainingMs(draft, now));
+  if (!draft || isAuctionDraft(draft) || state.online) return;
+  if (!syncSnakeTimer(draft, now)) return;
+  selectedLineupMove = null;
+  invalidateBatch();
+  afterLocalDraftAction();
 }
 
 function syncAuctionUrgency(draft, now = draftNow()) {
@@ -510,6 +538,18 @@ function bullpenRangeNote(random) {
     : "Every team drafts nine hitters, its starters, and exactly the minimum relievers, and all of them pitch. A separate max is a random-nomination auction setting.";
 }
 
+// The floor of the picks slider for the setup screen as it currently stands:
+// nine hitters, the rotation it is set to, and the relievers it owes.
+function snakeMinPicks(value) {
+  return minimumSnakePicks(value.startingPitchers, value);
+}
+
+function snakePicksLabel(picks, minimum) {
+  const bench = Math.max(0, picks - minimum);
+  if (!bench) return `${picks} — a starting roster, no bench`;
+  return `${picks} — ${bench} bench spot${bench === 1 ? "" : "s"}`;
+}
+
 // A snake draft has one clock or none: the per-pick countdown, or the chess
 // clock. Which one is a question about the draft, so it is a question about
 // state, not two settings that can quietly both be on.
@@ -536,6 +576,23 @@ function snakeClockFromForm(form) {
 // at all. An auction never has one — it has its own.
 function snakeTimerConfig(value, draftType) {
   return draftType !== "auction" && value.snakeTimer?.enabled ? { ...value.snakeTimer } : false;
+}
+
+// The snake's pool review, in seconds, read off the form. An auction has its
+// own review inside its timer, so this is zero there.
+function snakeReviewFromForm(form, draftType) {
+  if (draftType === "auction") return 0;
+  if (String(form.get("snakeReview") ?? "off") !== "on") return 0;
+  return Math.round(
+    normalizeSnakeReviewMs(normalizeTimerSeconds(form.get("snakeReviewSeconds"), SNAKE_DEFAULT_REVIEW_SECONDS)) / 1000
+  );
+}
+
+// How many turns each manager gets. The slider's floor is the minimum a legal
+// roster takes, which moves with the rotation and the pen, so a form left alone
+// while those change follows them rather than pinning an old number.
+function snakePicksFromForm(form, startingPitchers, pen) {
+  return normalizeSnakePicks(form.get("snakePicks"), startingPitchers, pen);
 }
 
 function normalizeAuctionTimerInput(form) {
@@ -684,7 +741,7 @@ function advanceCpuTurns() {
   const draft = state.draft;
   if (!draft || state.online || cpuPaused) return;
   if (isDraftPaused(draft)) return;
-  if (isAuctionDraft(draft) && !auctionReviewComplete(draft, draftNow())) return;
+  if (!draftReviewComplete(draft, draftNow())) return;
   let guard = auctionStepGuard(draft);
   while (!draft.complete && guard > 0) {
     guard -= 1;
@@ -1062,6 +1119,13 @@ function defaultState() {
       bankSeconds: SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
       incrementSeconds: SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS
     },
+    // The auction's opening pause, offered to the snake as well. Off by
+    // default, and its own setting rather than part of the clock: a draft with
+    // no clock can still want a look at the board first.
+    snakeReviewSeconds: 0,
+    // How many turns a snake draft gives each manager. The minimum is a roster;
+    // anything above it is bench.
+    snakePicks: minimumSnakePicks(DEFAULT_STARTING_PITCHERS),
     // Which seat is yours. Kept outside `online`, which is cleared when the
     // room ends — see viewerManager().
     myManagerId: null,
@@ -1243,7 +1307,11 @@ function openRoom(roomId, room) {
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
   Object.assign(state, roomBullpen(room, room.draftType === "auction" && room.nomination === "random"));
-  state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers, state);
+  state.snakePicks = normalizeSnakePicks(room.snakePicks, state.startingPitchers, state);
+  state.snakeReviewSeconds = Math.round(normalizeSnakeReviewMs(room.snakeReview) / 1000);
+  state.rosterSize = room.draftType === "auction"
+    ? rosterSizeForStartingPitchers(state.startingPitchers, state)
+    : state.snakePicks;
   state.temperature = normalizeTemperature(room.temperature);
   state.universe = universeConfig(room.universe)?.key ?? DEFAULT_UNIVERSE;
   state.pickTimerSeconds = normalizePickTimerSeconds(room.pickTimer);
@@ -1343,6 +1411,7 @@ function rebuildOnlineDraft(room) {
       startingPitchers: options.startingPitchers,
       bullpenSlots: options.bullpenSlots,
       bullpenMin: options.bullpenMin,
+      picks: options.draftType === "auction" ? undefined : options.snakePicks,
       temperature,
       coaches: Boolean(room.coaches)
     });
@@ -2104,6 +2173,30 @@ function renderSetup(setupError = "") {
           <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
         </label>
         <div class="pool-suboptions snake-suboptions" ${state.draftType === "auction" ? "hidden" : ""}>
+          <p class="suboption-heading">Rounds</p>
+          <label class="auction-budget-field snake-picks-field">
+            Picks per manager <span class="snake-picks-value" data-snake-picks-value>${snakePicksLabel(state.snakePicks, snakeMinPicks(state))}</span>
+            <input name="snakePicks" type="range" min="${snakeMinPicks(state)}" max="${snakeMinPicks(state) + MAX_SNAKE_BENCH_PICKS}" step="1" value="${state.snakePicks}" data-snake-picks />
+            <small>Everyone drafts this many times. The floor is what a legal roster takes &mdash; nine hitters, the rotation and the pen &mdash; and every pick above it is bench. Whatever you take, you take: the board sets no position, and any hole left at the end is filled for free with the cheapest card nobody wanted.</small>
+          </label>
+          <p class="suboption-heading">Pool review</p>
+          <label class="pool-option">
+            <input type="radio" name="snakeReview" value="off" ${state.snakeReviewSeconds > 0 ? "" : "checked"} />
+            <span><strong>Off</strong><small>The first pick is on the clock as soon as the board is dealt.</small></span>
+          </label>
+          <label class="pool-option">
+            <input type="radio" name="snakeReview" value="on" ${state.snakeReviewSeconds > 0 ? "checked" : ""} />
+            <span><strong>Read the board first</strong><small>A countdown before anybody picks, the way an auction opens. Nobody is on the clock until it runs out &mdash; or until the host starts the draft early.</small></span>
+          </label>
+          <div class="pool-suboptions snake-review-suboptions" ${state.snakeReviewSeconds > 0 ? "" : "hidden"}>
+            <label class="auction-budget-field">
+              Review seconds
+              <!-- Any whole number of seconds. A coarser step is a form that
+                   silently refuses to submit when somebody types 20. -->
+              <input name="snakeReviewSeconds" type="number" min="0" max="3600" step="1" value="${state.snakeReviewSeconds || SNAKE_DEFAULT_REVIEW_SECONDS}" />
+              <small>Seconds to inspect the dealt pool before the draft starts.</small>
+            </label>
+          </div>
           <p class="suboption-heading">Snake clock</p>
           <label class="pool-option">
             <input type="radio" name="snakeClock" value="off" ${snakeClockMode(state) === "off" ? "checked" : ""} />
@@ -2247,9 +2340,29 @@ function renderSetup(setupError = "") {
   // The snake has one clock or none, so each clock shows only its own settings —
   // and reaching for a setting says you want the clock it belongs to.
   const syncSnakeClockOptions = () => {
-    const mode = new FormData(setupForm).get("snakeClock");
+    const form = new FormData(setupForm);
+    const mode = form.get("snakeClock");
     setupForm.querySelector(".snake-pick-suboptions").hidden = mode !== "pick";
     setupForm.querySelector(".snake-chess-suboptions").hidden = mode !== "chess";
+    setupForm.querySelector(".snake-review-suboptions").hidden = form.get("snakeReview") !== "on";
+  };
+  // The floor of the picks slider is whatever a legal roster costs, so it moves
+  // with the rotation and the pen. A slider sitting on the old floor follows it
+  // up; one a manager has dragged above it keeps its bench, and only ever
+  // shifts because the floor rose past it.
+  const syncSnakePicks = () => {
+    const slider = setupForm.querySelector("[data-snake-picks]");
+    if (!slider) return;
+    const form = new FormData(setupForm);
+    const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
+    const pen = draftModeFromForm(form);
+    const minimum = minimumSnakePicks(startingPitchers, pen);
+    const bench = Math.max(0, Number(slider.value) - Number(slider.min));
+    slider.min = minimum;
+    slider.max = minimum + MAX_SNAKE_BENCH_PICKS;
+    slider.value = normalizeSnakePicks(minimum + bench, startingPitchers, pen);
+    const output = setupForm.querySelector("[data-snake-picks-value]");
+    if (output) output.textContent = snakePicksLabel(Number(slider.value), minimum);
   };
   // The one button offers whichever move is left: check them all, or clear them.
   const syncDecadeToggle = () => {
@@ -2278,7 +2391,13 @@ function renderSetup(setupError = "") {
     if (["snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
       setupForm.querySelector('input[name="snakeClock"][value="chess"]').checked = true;
     }
-    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
+    // Typing a review length says you want a review, exactly as typing a bank
+    // says you want the chess clock.
+    if (event.target.name === "snakeReviewSeconds") {
+      setupForm.querySelector('input[name="snakeReview"][value="on"]').checked = true;
+    }
+    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds", "snakeReview", "snakeReviewSeconds", "snakePicks"]
+      .includes(event.target.name)) {
       setupForm.querySelector('input[name="draftType"][value="snake"]').checked = true;
       syncAuctionOptions();
       syncSnakeClockOptions();
@@ -2298,8 +2417,14 @@ function renderSetup(setupError = "") {
       event.target.dataset.userEdited = "1";
       return;
     }
+    if (event.target.name === "snakePicks") {
+      const output = setupForm.querySelector("[data-snake-picks-value]");
+      if (output) output.textContent = snakePicksLabel(Number(event.target.value), Number(event.target.min));
+      return;
+    }
     if (event.target.name === "bullpenMin" || event.target.name === "bullpenSlots") syncBullpenOptions();
     if (["startingPitchers", "bullpenMin", "bullpenSlots"].includes(event.target.name)) {
+      syncSnakePicks();
       const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
       const rosterSize = rosterSizeForStartingPitchers(startingPitchers, draftModeFromForm(new FormData(setupForm)));
       // The default budget is $100 a slot, so it moves with the roster until a
@@ -2404,7 +2529,12 @@ function renderSetup(setupError = "") {
     // The form remembers the random-nomination max, even when a capped draft ignores it.
     state.bullpenSlots = roomBullpen({ bullpenSlots: setupForm.querySelector('select[name="bullpenSlots"]').dataset.randomValue, bullpenMin: form.get("bullpenMin") }, true).bullpenSlots;
     state.bullpenMin = mode.bullpenMin;
-    state.rosterSize = rosterSizeForStartingPitchers(state.startingPitchers, mode);
+    state.snakePicks = snakePicksFromForm(form, state.startingPitchers, mode);
+    // An auction is priced against a roster; a snake draft is as long as its
+    // slider says. Either way this is the number of cards a seat drafts.
+    state.rosterSize = state.draftType === "auction"
+      ? rosterSizeForStartingPitchers(state.startingPitchers, mode)
+      : state.snakePicks;
     state.hidePoints = mode.hidePoints;
     state.coaches = mode.coaches;
     state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
@@ -2412,16 +2542,21 @@ function renderSetup(setupError = "") {
     const snakeClock = snakeClockFromForm(form);
     state.pickTimerSeconds = snakeClock.pickTimerSeconds;
     state.snakeTimer = snakeClock.snakeTimer;
-    const pool = buildDraftPool(state.universe, state.seed, {
+    state.snakeReviewSeconds = snakeReviewFromForm(form, state.draftType);
+    const poolOptions = {
       nomination: state.nomination,
       managerCount: state.managers.length,
       startingPitchers: state.startingPitchers,
       bullpenSlots: mode.bullpenSlots,
       bullpenMin: mode.bullpenMin,
+      // A longer draft is dealt a wider board, or its last rounds pick over an
+      // empty table. An auction never asks for one.
+      picks: state.draftType === "auction" ? undefined : state.snakePicks,
       temperature: state.temperature,
       coaches: state.coaches
-    });
-    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers, mode);
+    };
+    const pool = buildDraftPool(state.universe, state.seed, poolOptions);
+    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers, { ...mode, picks: poolOptions.picks });
     if (poolError) {
       renderSetup(poolError);
       return;
@@ -2435,7 +2570,9 @@ function renderSetup(setupError = "") {
       hidePoints: state.hidePoints,
       budget: state.auctionBudget,
       timer: state.auctionTimer,
-      snakeTimer: snakeTimerConfig(state, state.draftType)
+      snakeTimer: snakeTimerConfig(state, state.draftType),
+      snakeReview: state.snakeReviewSeconds,
+      snakePicks: state.snakePicks
     });
     // A new local room gets a fresh private board. Otherwise an override keyed
     // to the same manager/position from the previous room could filter down to
@@ -2443,10 +2580,11 @@ function renderSetup(setupError = "") {
     state.draftRankings = {};
     state.draftNotes = {};
     editingNoteId = null;
-    if (isAuctionDraft(state.draft)) startAuctionReview(state.draft, draftNow());
+    startDraftReview(state.draft, draftNow());
     // The gun. Both clocks start when the board is dealt, not when somebody
-    // first looks at it.
-    else startSnakeClock(state.draft, draftNow());
+    // first looks at it — or, where the room asked to read the board first,
+    // when that reading is over (startSnakeClock will not fire before then).
+    if (!isAuctionDraft(state.draft)) startSnakeClock(state.draft, draftNow());
     // The whistle to go with the gun. This runs inside the submit gesture, so we
     // can ask for the audio context and play in the same breath; unlock never
     // waits, so a browser still deciding stays silent rather than stalling.
@@ -2497,7 +2635,11 @@ function renderSetup(setupError = "") {
     const snakeClock = snakeClockFromForm(form);
     const pickTimer = snakeClock.pickTimerSeconds;
     const { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches } = draftModeFromForm(form);
-    const rosterSize = rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin });
+    const snakePicks = snakePicksFromForm(form, startingPitchers, { bullpenSlots, bullpenMin });
+    const snakeReview = snakeReviewFromForm(form, draftType);
+    const rosterSize = draftType === "auction"
+      ? rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin })
+      : snakePicks;
     const budget = normalizeAuctionBudget(form.get("auctionBudget"), rosterSize);
     const auctionTimer = normalizeAuctionTimerInput(form);
     const cpuChecked = form.getAll("cpu").map(String);
@@ -2524,7 +2666,9 @@ function renderSetup(setupError = "") {
         coaches,
         budget,
         auctionTimer,
-        snakeTimer: snakeTimerConfig(snakeClock, draftType)
+        snakeTimer: snakeTimerConfig(snakeClock, draftType),
+        snakeReview,
+        snakePicks
       });
       storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
       location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
@@ -2684,7 +2828,7 @@ function renderDraft() {
   // into the middle of a stranger's shelf; the new board starts at the top.
   const boardSwitched = syncAuctionPositionFilter(draft);
   const auction = isAuctionDraft(draft);
-  const reviewOpen = auction && !auctionReviewComplete(draft, draftNow());
+  const reviewOpen = !draftReviewComplete(draft, draftNow());
   const queued = isRandomNomination(draft);
   const lot = auction ? draft.auction.lot : null;
   const current = draft.complete ? null : currentManager(draft);
@@ -2769,6 +2913,7 @@ function renderDraft() {
         canPick: (player) => {
           if (!current) return { ok: false, reason: "draft complete" };
           if (paused) return { ok: false, reason: "the draft is paused" };
+          if (reviewOpen) return { ok: false, reason: "pool review is still open" };
           // Which of these ever come up is the room's one secret, so the board
           // says nothing about it: every card reads the same until it is called.
           if (queued) return { ok: false, reason: "the queue decides what comes up" };
@@ -2779,6 +2924,7 @@ function renderDraft() {
       })}`}
     </section>`;
   const leadPanels = `${paused ? renderPausedPanel(draft) : ""}
+    ${!auction && reviewOpen ? renderSnakeReviewPanel(draft) : ""}
     ${draft.complete ? renderDraftDone(draft) : ""}
     ${draft.complete ? renderAuctionBudgetSection(draft) : ""}
     `;
@@ -2951,6 +3097,31 @@ function renderPausedPanel(draft) {
     </div>
     ${host ? `<div class="lot-actions"><button data-action="resume-draft">&#9654; Resume draft</button></div>` : ""}
     ${host ? renderGrantTimeControl(draft) : ""}
+  </section>`;
+}
+
+// The snake's opening pause on screen: the board is dealt, the clocks are cold,
+// and there is a countdown. It is the auction's review rail said in the one
+// place a snake draft has room for it — above the board, where the paused
+// panel goes — because the snake has no lot rail to hang it off.
+function renderSnakeReviewPanel(draft) {
+  const online = state.online;
+  const clocked = snakeClockEnabled(draft) || state.pickTimerSeconds > 0;
+  return `<section class="panel auction-paused snake-review" aria-label="Pool review">
+    <div class="lot-header">
+      <div>
+        <p class="eyebrow">Pool review</p>
+        <h2>Read the board before the draft starts</h2>
+        <p class="muted">Nobody is on the clock yet. Star the cards you want and set your OB/Control rankings now &mdash; they carry into the draft.${clocked ? " The first clock starts when this runs out." : ""}</p>
+      </div>
+      <div class="auction-lot-rail-state">
+        <small>Review remaining</small>
+        <strong data-draft-review-clock>${formatAuctionClock(draftReviewRemainingMs(draft, draftNow()))}</strong>
+      </div>
+    </div>
+    <div class="lot-actions">
+      <button data-action="complete-review" ${(online && !online.host) || isDraftPaused(draft) ? "disabled" : ""}>Start draft now</button>
+    </div>
   </section>`;
 }
 
@@ -3576,7 +3747,7 @@ function bindDraftActions() {
         sendOnlineAction({ type: "complete-review" });
         return;
       }
-      completeAuctionReview(state.draft, draftNow());
+      completeDraftReview(state.draft, draftNow());
       afterLocalDraftAction();
       return;
     }
@@ -4546,6 +4717,20 @@ function renderBatch() {
     // rather than showing all work.
     ? summary.pitchers.map((line) => ({ ...line, ...(line.fresh ?? {}), warPer162: line.fresh?.warPer162 ?? null }))
     : summary.pitchers;
+  // The optimized rosters the sim played. Both the All-Star shelves and the
+  // positional averages WPAA subtracts read a card's position off them, so they
+  // are built once and shared.
+  let analysisTeamsCache = null;
+  const analysisTeams = () => (analysisTeamsCache ??= state.draft.managers.map((manager) => buildTeam(manager, { optimize: true })));
+  // WPAA is WPAR less the average WPAR at the card's position, so a catcher is
+  // read against catchers rather than against the whole room. The pitchers' Not
+  // tired split carries averages of its own, measured on the same split.
+  const wpaaIndex = hasWar ? buildWpaaIndex(analysisTeams(), summary) : null;
+  const pitcherWpaaIndex = hasWar && pitcherSplit === "fresh"
+    ? buildWpaaIndex(analysisTeams(), summary, { value: (line) => line.fresh?.warPer162?.total })
+    : wpaaIndex;
+  const hitterWpaa = (line) => wpaaIndex?.wpaaFor(line) ?? null;
+  const pitcherWpaa = (line) => pitcherWpaaIndex?.wpaaFor(line) ?? null;
   const teamNames = summary.teams.map((row) => row.team);
   const hitterTeamFilter = normalizeBatchTeamFilter(state.batchTeamFilters?.hitters, teamNames);
   const pitcherTeamFilter = normalizeBatchTeamFilter(state.batchTeamFilters?.pitchers, teamNames);
@@ -4567,8 +4752,8 @@ function renderBatch() {
       if (config.sort === "war") state.batchSorts = { ...state.batchSorts, [table]: { ...config, sort: "wpa162" } };
     }
   }
-  const sortedHitters = sortBatchRows(hitterLines, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName));
-  const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, teamGamesByName));
+  const sortedHitters = sortBatchRows(hitterLines, "hitters", (row, sort) => batchHitterSortValue(row, sort, leagueWoba, teamGamesByName, hitterWpaa));
+  const sortedPitchers = sortBatchRows(pitcherLines, "pitchers", (row, sort) => batchPitcherSortValue(row, sort, teamGamesByName, pitcherWpaa));
   const winProbabilityNote = "Win probability comes from a simulated table calibrated to a modern MLB run environment (about 4.4 runs a game) with no home-field edge, so a swing is measured against what that state is worth in an average ballgame, not in this room's.";
 
   const teamRows = sortedTeams
@@ -4610,7 +4795,7 @@ function renderBatch() {
         <td class="num">${formatAverage(wobaNumerator(line), line.pa)}</td>
         <td class="num">${wrcPlus(line, leagueWoba)}</td>
         ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
-        ${hasWar ? `<td class="num">${formatWar(line.warPer162?.hitting)}</td><td class="num">${formatWar(line.warPer162?.defense)}</td><td class="num">${formatWar(line.warPer162?.baserunning)}</td><td class="num"><strong>${formatWar(hitterWar(line))}</strong></td>` : ""}
+        ${hasWar ? `<td class="num">${formatWar(line.warPer162?.hitting)}</td><td class="num">${formatWar(line.warPer162?.defense)}</td><td class="num">${formatWar(line.warPer162?.baserunning)}</td><td class="num"><strong>${formatWar(hitterWar(line))}</strong></td><td class="num">${formatWpaa(hitterWpaa(line))}</td>` : ""}
       </tr>`
     )
     .join("");
@@ -4628,7 +4813,7 @@ function renderBatch() {
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
         ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
-        ${hasWar ? `<td class="num">${line.warPer162 ? formatWar(line.warPer162.pitching) : "—"}</td>` : ""}
+        ${hasWar ? `<td class="num">${line.warPer162 ? formatWar(line.warPer162.pitching) : "—"}</td><td class="num">${line.warPer162 ? formatWpaa(pitcherWpaa(line)) : "—"}</td>` : ""}
       </tr>`
     )
     .join("");
@@ -4671,6 +4856,7 @@ function renderBatch() {
     const id = player?.id ?? line.id;
     const wpa162 = batchPace(line, "wpaPer162", "wpa", teamGamesByName);
     const wpar162 = hasWar && Number.isFinite(line.warPer162?.total) ? line.warPer162.total : null;
+    const wpaa162 = wpaaIndex?.wpaaFor(line) ?? null;
     let statLine;
     if (kind === "hitter") {
       const hr = Math.round(batchPace(line, "hrPer162", "hr", teamGamesByName));
@@ -4691,6 +4877,7 @@ function renderBatch() {
       points: Number.isFinite(player?.points) ? player.points : null,
       wpa162,
       wpar162,
+      wpaa162,
       pick: acquisitionPickMap[id],
       price: pricePaidMap[id],
       pickNumber: pickNumberMap[id],
@@ -4735,18 +4922,22 @@ function renderBatch() {
     ? (state.batchChartXAxis ?? "price")
     : (state.batchChartXAxis === "points" ? "points" : "pick");
   // WPAR leads when the sim measured it; a sim that predates it opens on WPA.
-  const yOptions = [...(hasWar ? [["wpar", "WPAR/162"]] : []), ["wpa", "WPA/162"], ["points", "Points"]];
+  const yOptions = [...(hasWar ? [["wpar", "WPAR/162"], ["wpaa", "WPAA/162"]] : []), ["wpa", "WPA/162"], ["points", "Points"]];
   const yMode = yOptions.some(([value]) => value === state.batchChartY) ? state.batchChartY : yOptions[0][0];
-  const yValue = (rec) => (yMode === "points" ? rec.points : yMode === "wpar" ? rec.wpar162 : rec.wpa162);
-  const yAxisLabel = { wpar: "WPAR / 162 games", wpa: "WPA / 162 games", points: "Card points" }[yMode];
-  // Hover shows WPAR and WPA side by side whichever one is plotted.
+  const yValue = (rec) => (yMode === "points" ? rec.points
+    : yMode === "wpar" ? rec.wpar162
+    : yMode === "wpaa" ? rec.wpaa162
+    : rec.wpa162);
+  const yAxisLabel = { wpar: "WPAR / 162 games", wpaa: "WPAA / 162 games", wpa: "WPA / 162 games", points: "Card points" }[yMode];
+  // Hover shows WPAR, WPAA and WPA side by side whichever one is plotted.
   const yTip = (rec) => [
     yMode === "points" ? `Points: ${rec.points ?? "—"}` : "",
     Number.isFinite(rec.wpar162) ? `WPAR/162: ${formatWar(rec.wpar162)}` : "",
+    Number.isFinite(rec.wpaa162) ? `WPAA/162: ${formatWar(rec.wpaa162)}` : "",
     `WPA/162: ${formatWpaStat(rec.wpa162)}`
   ].filter(Boolean).join(" · ");
   const X_TITLES = { price: "Dollars spent", max: "Top bid", manager: "Manager's bid", allbids: "Every bid", points: "Points", pick: "Draft slot" };
-  const yTitle = { wpar: "WPAR per 162", wpa: "WPA per 162", points: "Points" }[yMode];
+  const yTitle = { wpar: "WPAR per 162", wpaa: "WPAA per 162", wpa: "WPA per 162", points: "Points" }[yMode];
 
   const scatterPoints = [];
   const connectors = [];
@@ -4924,7 +5115,7 @@ function renderBatch() {
       <h2>Hitters, 162-game pace</h2>
       ${renderBatchTeamFilter("hitters", hitterTeamFilter, teamNames)}
     </div>
-    ${hasWar ? `<p class="batch-note"><strong>WPAR</strong> is WPA over replacement: win probability added over the room's replacement card at the hitter's position, per 162 games. It is <strong>Hit WPAR</strong> (on-base and chart, every plate appearance replayed with the same dice and the replacement's numbers) plus <strong>Def WPAR</strong> and <strong>BsR WPAR</strong> (glove and speed against the replacement's), whose inputs are on the Baserunning &amp; defense tab.</p>` : ""}
+    ${hasWar ? `<p class="batch-note"><strong>WPAR</strong> is WPA over replacement: win probability added over the room's replacement card at the hitter's position, per 162 games. It is <strong>Hit WPAR</strong> (on-base and chart, every plate appearance replayed with the same dice and the replacement's numbers) plus <strong>Def WPAR</strong> and <strong>BsR WPAR</strong> (glove and speed against the replacement's), whose inputs are on the Baserunning &amp; defense tab. <strong>WPAA</strong> is the same value read against the average instead of the floor: WPAR less the average WPAR of the league's rostered players at his position, so a catcher is measured against catchers. Left and right field count as one position.</p>` : ""}
     <div class="table-scroll">
       <table class="batch-stat-table">
         <thead><tr>
@@ -4950,7 +5141,7 @@ function renderBatch() {
           ${renderBatchSortHeader("hitters", "woba", "wOBA", "num")}
           ${renderBatchSortHeader("hitters", "wrcPlus", "wRC+", "num")}
           ${renderBatchSortHeader("hitters", "wpa162", "WPA", "num")}
-          ${hasWar ? `${renderBatchSortHeader("hitters", "hitWar", "Hit WPAR", "num")}${renderBatchSortHeader("hitters", "defWar", "Def WPAR", "num")}${renderBatchSortHeader("hitters", "bsrWar", "BsR WPAR", "num")}${renderBatchSortHeader("hitters", "war", "WPAR", "num")}` : ""}
+          ${hasWar ? `${renderBatchSortHeader("hitters", "hitWar", "Hit WPAR", "num")}${renderBatchSortHeader("hitters", "defWar", "Def WPAR", "num")}${renderBatchSortHeader("hitters", "bsrWar", "BsR WPAR", "num")}${renderBatchSortHeader("hitters", "war", "WPAR", "num")}${renderBatchSortHeader("hitters", "wpaa", "WPAA", "num")}` : ""}
         </tr></thead>
         <tbody>${hitterRows}</tbody>
       </table>
@@ -4964,7 +5155,7 @@ function renderBatch() {
           ? "This simulation predates fatigue splits. Run it again to compare fresh and tired work."
           : pitcherSplit === "fresh"
           ? "Only plate appearances that began before the pitcher was tired."
-          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? ` <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers.` : ""}</p>
+          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? ` <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers. <strong>Pitch WPAA</strong> is the same figure read against the average rather than the floor: WPAR less the average WPAR of the league's rostered arms in his role.` : ""}</p>
       </div>
       <div class="batch-stat-controls">
         ${renderBatchTeamFilter("pitchers", pitcherTeamFilter, teamNames)}
@@ -4987,7 +5178,7 @@ function renderBatch() {
           ${renderBatchSortHeader("pitchers", "bb9", "BB/9", "num")}
           ${renderBatchSortHeader("pitchers", "era", "ERA", "num")}
           ${renderBatchSortHeader("pitchers", "wpa162", "WPA", "num")}
-          ${hasWar ? renderBatchSortHeader("pitchers", "war", "Pitch WPAR", "num") : ""}
+          ${hasWar ? `${renderBatchSortHeader("pitchers", "war", "Pitch WPAR", "num")}${renderBatchSortHeader("pitchers", "wpaa", "Pitch WPAA", "num")}` : ""}
         </tr></thead>
         <tbody>${pitcherRows}</tbody>
       </table>
@@ -5004,13 +5195,14 @@ function renderBatch() {
     ${renderDraftHistoryTable(draftHistory(state.draft), {
       wpaByPlayerId: batchWpaByPlayerId(summary),
       wparByPlayerId: hasWar ? batchWparByPlayerId(summary) : null,
+      wpaaByPlayerId: wpaaIndex?.wpaaByPlayerId ?? null,
       bidTipsByPlayerId: bidTips,
       ...normalizeDraftHistorySort(state.draftHistorySort)
     })}
   </section>`;
   const batchSections = {
     overview: overviewSection,
-    allStars: activeBatchTab === "allStars" ? renderBatchAllStars(summary, playersById, bidTips) : "",
+    allStars: activeBatchTab === "allStars" ? renderBatchAllStars(summary, playersById, bidTips, analysisTeams(), wpaaIndex) : "",
     headToHead: headToHeadSection,
     starters: `${starterResultsSection}${starterMatchupSection}`,
     hitters: hittersSection,
@@ -5070,9 +5262,8 @@ function normalizeBatchPitcherSplit(value) {
   return value === "fresh" ? "fresh" : "overall";
 }
 
-function renderBatchAllStars(summary, playersById, bidTips = {}) {
-  const teams = state.draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
-  const slots = buildAllStarDepthChart(teams, summary);
+function renderBatchAllStars(summary, playersById, bidTips = {}, teams = null, wpaaIndex = null) {
+  const slots = buildAllStarDepthChart(teams ?? state.draft.managers.map((manager) => buildTeam(manager, { optimize: true })), summary);
   const pricePaidMap = buildPricePaidMap(state.draft);
   const byWpar = Boolean(summary.attribution);
   const filled = slots.filter((slot) => slot.leader);
@@ -5088,16 +5279,16 @@ function renderBatchAllStars(summary, playersById, bidTips = {}) {
         <p class="eyebrow">Best at every position</p>
         <h2>Simulation All-Stars</h2>
         <p class="batch-note">${byWpar
-          ? "Each card shows the leader in WPAR (WPA over replacement) per 162 games and the closest competition, with WPA and draft prices alongside. Larger fields also include a full depth chart."
-          : "Each card shows the WPA/162 leader and closest competition with their draft prices. Larger fields also include a full depth chart."}</p>
+          ? "Each card shows the leader in WPAR (WPA over replacement) per 162 games and the closest competition, with WPAA, WPA and draft prices alongside. Larger fields also include a full depth chart. Left and right field are one shelf: an LF/RF card plays either corner at the same glove."
+          : "Each card shows the WPA/162 leader and closest competition with their draft prices. Larger fields also include a full depth chart. Left and right field are one shelf: an LF/RF card plays either corner at the same glove."}</p>
       </div>
       <span>${filled.length} roster spots</span>
     </div>
-    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap, byWpar, bidTips)).join("")}</div>
+    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap, byWpar, bidTips, wpaaIndex)).join("")}</div>
   </section>`;
 }
 
-function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidTips = {}) {
+function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidTips = {}, wpaaIndex = null) {
   if (!slot.leader) {
     return `<article class="all-star-slot all-star-slot-empty">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
@@ -5106,6 +5297,8 @@ function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidT
   }
   const leader = slot.leader;
   const pricePaid = pricePaidMap[leader.id];
+  // How far clear of the position's league average the leader finished.
+  const leaderWpaa = wpaaIndex?.wpaaByPlayerId.get(leader.id);
   const closestCompetition = allStarComparisonCandidates(slot.depth);
   const comparisonRows = closestCompetition.map((candidate) => renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar, bidTips)).join("");
   const showFullDepth = shouldShowFullAllStarDepth(slot.depth);
@@ -5125,7 +5318,7 @@ function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidT
     <div class="all-star-card-face">${renderPlayerCard(leader.player)}</div>
     <div class="all-star-identity">
       <strong>${escapeHtml(leader.name)}</strong>
-      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; ${renderTipTarget(`Paid ${money(pricePaid)}`, bidTips[leader.id])}` : ""}${byWpar ? ` &middot; ${formatWpaStat(leader.wpaPer162)} WPA` : ""}</span>
+      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; ${renderTipTarget(`Paid ${money(pricePaid)}`, bidTips[leader.id])}` : ""}${byWpar && Number.isFinite(leaderWpaa) ? ` &middot; ${formatWar(leaderWpaa)} WPAA` : ""}${byWpar ? ` &middot; ${formatWpaStat(leader.wpaPer162)} WPA` : ""}</span>
     </div>
     ${comparisonRows ? `<section class="all-star-comparison" aria-label="Closest competition at ${escapeHtml(allStarPositionLabel(slot.position))}">
       <div class="all-star-comparison-heading">
@@ -5699,7 +5892,7 @@ function renderBatchSkillPlayersTable(hitters, playersById) {
           <td>${index + 1}</td>
           <td>${renderBatchPlayerName(line, playersById)}</td>
           <td>${escapeHtml(line.team)}</td>
-          <td class="wpar-pos">${escapeHtml(line.fieldPosition ?? line.position ?? "")}${playedOffCard(line) ? `<span class="wpar-card-pos"> (${escapeHtml(line.position)} card)</span>` : ""}</td>
+          <td class="wpar-pos">${escapeHtml(analysisPosition(line.fieldPosition ?? line.position ?? ""))}${playedOffCard(line) ? `<span class="wpar-card-pos"> (${escapeHtml(line.position)} card)</span>` : ""}</td>
           <td class="num">${rating(inputs.glove, true)}</td>
           <td class="num">${rating(inputs.replacementGlove, true)}</td>
           <td class="num">${count(inputs.fieldChancesPer162)}</td>
@@ -5716,18 +5909,18 @@ function renderBatchSkillPlayersTable(hitters, playersById) {
 }
 
 // Stationed somewhere his card does not print: a DH card at first, say. A corner
-// outfielder in left or right is on his card.
+// outfielder in left or right is on his card, since both corners are LF/RF.
 function playedOffCard(line) {
-  const { fieldPosition, position } = line;
-  if (!fieldPosition || !position || fieldPosition === position) return false;
-  return !(position === "LF/RF" && (fieldPosition === "LF" || fieldPosition === "RF"));
+  const fieldPosition = analysisPosition(line.fieldPosition);
+  const position = analysisPosition(line.position);
+  return Boolean(fieldPosition && position && fieldPosition !== position);
 }
 
 function batchSkillPlayerSortValue(line, sort) {
   const inputs = line.warInputs ?? {};
   if (sort === "name") return line.name;
   if (sort === "team") return line.team;
-  if (sort === "position") return line.fieldPosition ?? line.position ?? "";
+  if (sort === "position") return analysisPosition(line.fieldPosition ?? line.position ?? "");
   if (sort === "defense") return line.warPer162?.defense ?? 0;
   if (sort === "baserunning") return line.warPer162?.baserunning ?? 0;
   if (sort === "fieldChances") return inputs.fieldChancesPer162 ?? 0;
@@ -5749,6 +5942,12 @@ function hitterWar(line) {
 function formatWar(value) {
   const number = Number(value) || 0;
   return `${number >= 0 ? "+" : ""}${number.toFixed(1)}`;
+}
+
+// WPAA needs an average to subtract: a card at a position nobody rostered, or in
+// a sim that never measured WPAR, has none.
+function formatWpaa(value) {
+  return Number.isFinite(value) ? formatWar(value) : "—";
 }
 
 function renderBatchPlayerName(line, playersById, tagName = "strong", className = "batch-player-name") {
@@ -5799,7 +5998,7 @@ function batchTeamSortValue(row, sort) {
   return row.winPct ?? row.titleShare ?? 0;
 }
 
-function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
+function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName, wpaaOf = null) {
   if (sort === "name") return line.name;
   if (sort === "team") return line.team;
   if (sort === "position") return line.position ?? "";
@@ -5824,6 +6023,7 @@ function batchHitterSortValue(line, sort, leagueWoba, teamGamesByName) {
   if (sort === "defWar") return line.warPer162?.defense ?? 0;
   if (sort === "bsrWar") return line.warPer162?.baserunning ?? 0;
   if (sort === "war") return hitterWar(line);
+  if (sort === "wpaa") return wpaaOf?.(line) ?? 0;
   return line.ops;
 }
 
@@ -5839,7 +6039,7 @@ function batchStarterSortValue(row, sort) {
   return row.team;
 }
 
-function batchPitcherSortValue(line, sort, teamGamesByName) {
+function batchPitcherSortValue(line, sort, teamGamesByName, wpaaOf = null) {
   if (sort === "name") return line.name;
   if (sort === "team") return line.team;
   if (sort === "role") return line.role;
@@ -5849,6 +6049,7 @@ function batchPitcherSortValue(line, sort, teamGamesByName) {
   if (sort === "era") return rateValue(line.r * 27, line.outs);
   if (sort === "wpa162") return batchPace(line, "wpaPer162", "wpa", teamGamesByName);
   if (sort === "war") return line.warPer162?.pitching ?? 0;
+  if (sort === "wpaa") return wpaaOf?.(line) ?? 0;
   return rateValue(line.r * 27, line.outs);
 }
 
@@ -5870,7 +6071,7 @@ function updateBatchSort(table, sort) {
 }
 
 function updateDraftHistorySort(sort) {
-  if (!["pick", "paid", "points", "wpar", "wpa"].includes(sort)) return;
+  if (!["pick", "paid", "points", "wpar", "wpaa", "wpa"].includes(sort)) return;
   const current = normalizeDraftHistorySort(state.draftHistorySort);
   state.draftHistorySort = current.sort === sort
     ? { sort, direction: current.direction === "asc" ? "desc" : "asc" }
@@ -5878,7 +6079,7 @@ function updateDraftHistorySort(sort) {
 }
 
 function normalizeDraftHistorySort(value, legacyPaidSort = null) {
-  if (value && ["pick", "paid", "points", "wpar", "wpa"].includes(value.sort)) {
+  if (value && ["pick", "paid", "points", "wpar", "wpaa", "wpa"].includes(value.sort)) {
     return {
       sort: value.sort,
       direction: value.direction === "asc" ? "asc" : "desc"
@@ -7228,13 +7429,16 @@ function renderRoster(manager, draft) {
   const budgetLine = auction
     ? ` &middot; ${money(auctionBudget(draft, manager))} left &middot; max bid ${money(draft.complete ? 0 : auctionMaxBid(draft, manager))}${deadMoneyNote(draft, manager)}`
     : "";
-  // Nothing to count up to when the roster has no ceiling: a manager owns as
-  // many cards as they bought, one active roster of which takes the field.
+  // Nothing to count up to when the roster has no ceiling: a random-nomination
+  // manager owns as many cards as they bought, one active roster of which takes
+  // the field. A snake draft has a pick count even with an open board, so it
+  // still counts up to it — and the free cards the closing sweep hands over are
+  // not picks, so they do not count against it.
   const players = rosterPlayerCount(manager);
   const coachNote = counts.coaches ? ` &middot; ${counts.coaches} coach${counts.coaches === 1 ? "" : "es"}` : "";
-  const draftedLine = hasUnlimitedRoster(draft)
+  const draftedLine = auction && hasUnlimitedRoster(draft)
     ? `${players} card${players === 1 ? "" : "s"}${coachNote}`
-    : `${players}/${draft.rosterSize} drafted${coachNote}`;
+    : `${Math.min(players, draft.rosterSize)}/${draft.rosterSize} drafted${coachNote}`;
   // A computer manager says what he believes, so a pick that looks mad has a
   // reason you can read.
   const persona = manager.cpu ? cpuPersonality(manager.persona) : null;
@@ -9606,11 +9810,15 @@ function renderAuctionBudgetSection(draft) {
 // looking. This says it above the board, and greys the cards that fill none of
 // them.
 //
-// An unlimited roster (the random-nomination auction) has no slots to fill and
-// therefore no needs: everything is legal, and the closing sweep handles the
-// rest.
+// An unlimited AUCTION roster has no slots to fill and therefore no needs:
+// everything is legal, the money is the only limit, and the closing sweep
+// handles the rest. A snake draft has an open board too, but it also has a
+// finite number of turns — so the holes it still owes are worth naming, because
+// spending the last of those turns elsewhere is what makes the sweep fill them
+// at replacement level.
 function rosterOpenings(manager, draft) {
-  if (!manager || !draft || hasUnlimitedRoster(draft)) return null;
+  if (!manager || !draft) return null;
+  if (hasUnlimitedRoster(draft) && isAuctionDraft(draft)) return null;
   if (rosterFull(draft, manager)) return null;
 
   const lineup = lineupStatus(manager.roster);
@@ -10031,16 +10239,25 @@ function reviveState(value) {
     draft.seed = draft.seed ?? value.seed ?? "showdown";
     draft.draftType = draft.draftType === "auction" ? "auction" : "snake";
     draft.nomination = draft.draftType === "auction" && draft.nomination === "random" ? "random" : "manual";
-    draft.unlimitedRoster = draft.nomination === "random";
+    // An auction is unlimited only under random nomination; a snake draft is
+    // always unlimited now, and one saved before it was reads the same way —
+    // its rosters are legal either way, and its board never refused it anything
+    // the new rule allows.
+    draft.unlimitedRoster = draft.draftType === "auction" ? draft.nomination === "random" : true;
     // A draft saved before the pen was configurable played with two relievers.
-    Object.assign(draft, roomBullpen(draft, draft.unlimitedRoster));
-    draft.rosterSize = rosterSizeForStartingPitchers(draft.startingPitchers, draft);
+    Object.assign(draft, roomBullpen(draft, draft.draftType === "auction" && draft.nomination === "random"));
+    // A snake draft saved before the picks slider ran exactly a roster long, so
+    // a missing count normalizes to that and it replays at its own length.
+    draft.rosterSize = draft.draftType === "auction"
+      ? rosterSizeForStartingPitchers(draft.startingPitchers, draft)
+      : normalizeSnakePicks(draft.rosterSize, draft.startingPitchers, draft);
     draft.hidePoints = Boolean(draft.hidePoints);
     // The coaching staff is whatever the saved board holds.
     draft.coaches = draft.pool.some(isCoach);
     // A random-nomination draft ends when the queue runs out, not when the
-    // rosters fill — they never do, there is no cap to fill to.
-    draft.complete = draft.unlimitedRoster
+    // rosters fill — they never do, there is no cap to fill to. A snake draft
+    // still fills to its pick count, open board or not.
+    draft.complete = draft.draftType === "auction" && draft.unlimitedRoster
       ? Boolean(draft.complete)
       : draft.managers.every((manager) => rosterFull(draft, manager));
     // Rooms saved before corners were lumped still carry bare LF/RF labels.
@@ -10075,6 +10292,12 @@ function reviveState(value) {
     auctionTimer: normalizeAuctionTimerState(value.auctionTimer),
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
     snakeTimer: normalizeSnakeTimerState(value.snakeTimer),
+    snakeReviewSeconds: Math.round(normalizeSnakeReviewMs(value.snakeReviewSeconds) / 1000),
+    snakePicks: normalizeSnakePicks(
+      value.snakePicks,
+      draft?.startingPitchers ?? normalizeStartingPitchers(value.startingPitchers),
+      draft ?? value
+    ),
     maskBids: Boolean(value.maskBids),
     hidePoints: Boolean(value.hidePoints),
     coaches: Boolean(value.coaches),

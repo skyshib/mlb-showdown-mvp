@@ -1316,3 +1316,60 @@ test("the record book keeps the day a mark was set, not the day it was last sent
   const bo = (await board("runs-game")).find((row) => row.name === "BO");
   assert.ok(bo.at >= before && bo.at <= Date.now(), "a date in the future is filed as today");
 });
+
+test("an online snake room carries its picks slider and its pool review", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "snake-picks",
+    managers: ["Ana", "Robo"],
+    cpu: ["Robo"],
+    snakePicks: 17,
+    snakeReview: 300,
+    snakeTimer: { bankSeconds: 60, incrementSeconds: 10 }
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.data.snakePicks, 17, "seventeen turns a seat");
+  assert.equal(created.data.snakeReview, 300);
+  assert.equal(created.data.rosterSize, 17, "which is how many cards a roster ends up with");
+  const roomId = created.data.roomId;
+
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken });
+  const room = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(room.data.waiting, false);
+  // The review opens the room, and the clock waits behind it.
+  assert.deepEqual(room.data.actions.map((entry) => entry.action.type), ["start-review"]);
+  assert.equal(room.data.snakeClock.turnStartedAt, null, "nobody is on the clock yet");
+
+  // And nothing can be picked until it is over.
+  const early = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "autopick" }
+  });
+  assert.equal(early.status, 409);
+  assert.match(early.data.error, /review/i);
+
+  const opened = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "complete-review" }
+  });
+  assert.equal(opened.status, 200);
+  const started = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.ok(Number.isFinite(started.data.snakeClock.turnStartedAt), "ending the review fires the gun");
+  assert.equal((await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "autopick" }
+  })).status, 200);
+
+  // The room revives at the same length with the same review, and replays.
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const restarted = await startServer(t, dataDir);
+  const revived = await api(restarted, "GET", `/api/rooms/${roomId}`);
+  assert.equal(revived.data.snakePicks, 17);
+  assert.equal(revived.data.snakeReview, 300);
+  assert.equal(revived.data.rosterSize, 17);
+  assert.deepEqual(
+    revived.data.actions.map((entry) => entry.action.type),
+    started.data.actions.map((entry) => entry.action.type).concat("autopick")
+  );
+});
