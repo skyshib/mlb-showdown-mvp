@@ -174,6 +174,11 @@
   .draft-result b { font-weight: 600; }
   .draft-open { font-size: 12px; margin-top: 8px; }
   .session-meta a { color: var(--series-1); }
+  .as-link {
+    background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+    color: var(--series-1); text-decoration: underline;
+  }
+  .as-link:disabled { color: var(--text-muted); cursor: default; text-decoration: none; }
   .standings { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; max-width: 320px; }
   .standings li { display: flex; justify-content: space-between; gap: 12px; color: var(--text-secondary); }
   .standings li:first-child { color: var(--text-primary); font-weight: 600; }
@@ -660,12 +665,7 @@ async function loadDrafts() {
 function draftRow(draft) {
   const humans = draft.managers.filter((manager) => !manager.cpu);
   const places = [...new Set(draft.who.map(placeOf).filter((place) => place !== "unknown place"))];
-  // A room can be opened from the row itself; a draft played on one screen
-  // lives in that browser and has nowhere to send anybody.
-  const room = draft.source === "online" && draft.roomId
-    ? `<a href="/index.html?room=${encodeURIComponent(draft.roomId)}" target="_blank" rel="noopener"
-         data-room>open room ${esc(draft.roomId)}</a>`
-    : esc("one screen");
+  const room = roomCell(draft);
   // Escaped part by part, in order, because one of them is a link rather than
   // text and the line can no longer be escaped wholesale on the way out.
   const meta = [
@@ -692,6 +692,118 @@ function draftRow(draft) {
     </summary>
     <div class="draft-body"><p class="empty">Opening…</p></div>
   </details>`;
+}
+
+// The way into a draft from its row.
+//
+// An online draft has a room already. A draft played on one screen never had
+// one — it lived in that browser's storage and nowhere else — but the book
+// knows the board it was dealt from and every pick in the order it was made,
+// which is enough to deal the same board again and play the same picks into it.
+// So the row offers to build the room it never had.
+//
+// A room built once is remembered here, so the second person to click the same
+// draft opens the room the first one built rather than a second copy of it.
+function rebuiltRoomOf(draftId) {
+  try {
+    return localStorage.getItem(`rebuilt:${draftId}`) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberRebuilt(draftId, roomId) {
+  try {
+    localStorage.setItem(`rebuilt:${draftId}`, roomId);
+  } catch {
+    // A browser that refuses storage just builds it again next time.
+  }
+}
+
+function roomLink(roomId) {
+  return `<a href="/index.html?room=${encodeURIComponent(roomId)}" target="_blank" rel="noopener"
+     data-room>open room ${esc(roomId)}</a>`;
+}
+
+function roomCell(draft) {
+  if (draft.source === "online" && draft.roomId) return roomLink(draft.roomId);
+  const already = rebuiltRoomOf(draft.id);
+  if (already) return roomLink(already);
+  // Only a snake draft can be played back. An auction's log is its bidding, and
+  // the book keeps what each card sold for rather than what was bid for it.
+  if (draft.draftType !== "snake") return `${esc("one screen")} · auction, not replayable`;
+  return `<button class="as-link" data-rebuild="${esc(draft.id)}">build the room it never had</button>`;
+}
+
+// Deal the same board, sit everyone down, and play the picks back in the order
+// they were made. All of it over the same public endpoints a browser uses to
+// run a real room, so nothing here is a special case the server has to know
+// about.
+async function buildRoomFor(draft, button) {
+  const say = (text) => { button.textContent = text; };
+  const post = async (path, body) => {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `${response.status}`);
+    return data;
+  };
+
+  const picks = draft.managers
+    .flatMap((manager) => manager.roster)
+    .filter((card) => card.pick)
+    .sort((a, b) => a.pick - b.pick);
+  if (picks.length !== draft.managers.reduce((sum, manager) => sum + manager.roster.length, 0)) {
+    throw new Error("this draft did not write down the order its picks were made in");
+  }
+  if (picks.some((card) => card.replacement)) {
+    throw new Error("this draft ended on a replacement card, which is not on any board to pick again");
+  }
+
+  say("dealing the board…");
+  const created = await post("/api/rooms", {
+    seed: draft.seed,
+    managers: draft.managers.map((manager) => manager.name),
+    // The computer seats it was played with, so the room reads as the room it
+    // was. A snake room's computers are driven by whoever is host, and nobody
+    // is host while this runs, so none of them move on their own.
+    cpu: draft.managers.filter((manager) => manager.cpu).map((manager) => manager.name),
+    universe: draft.universe,
+    draftType: "snake",
+    startingPitchers: draft.startingPitchers,
+    bullpenSlots: draft.bullpenSlots ?? undefined,
+    bullpenMin: draft.bullpenMin ?? undefined,
+    hidePoints: draft.hidePoints,
+    coaches: draft.coaches,
+    // No clock of any kind: a clock that runs during a replay picks for people.
+    pickTimer: 0,
+    snakeTimer: { enabled: false }
+  });
+  const roomId = created.roomId;
+  const token = created.hostToken;
+
+  // The board stays on the server until every human seat is occupied at once,
+  // so the seats are taken before a pick is played.
+  const humans = draft.managers.filter((manager) => !manager.cpu);
+  for (const [index, manager] of humans.entries()) {
+    say(`sitting ${manager.name} down…`);
+    await post(`/api/rooms/${roomId}/join`, index === 0
+      ? { managerId: manager.id, hostToken: token }
+      : { managerId: manager.id });
+  }
+
+  for (const [index, card] of picks.entries()) {
+    say(`replaying pick ${index + 1} of ${picks.length}…`);
+    await post(`/api/rooms/${roomId}/actions`, {
+      token,
+      action: { type: "pick", playerId: card.id }
+    });
+  }
+  rememberRebuilt(draft.id, roomId);
+  return roomId;
 }
 
 // How the season came out, when somebody ran one. The sim is logged against the
@@ -735,11 +847,45 @@ function openLink(draft) {
 // so it is caught on the way down. The same handler serves both panels.
 function wireDraftDetails(container) {
   container.addEventListener("toggle", openDraftDetails, true);
-  // A click on the room link is a click on the summary too, which would open
-  // the draft on the way out. It opens the room; that is all it does.
-  container.addEventListener("click", (event) => {
-    if (event.target.closest("[data-room]")) event.stopPropagation();
+  // A click on the room link or the build button is a click on the summary too,
+  // which would open the draft on the way out. They do their own job and no
+  // more.
+  container.addEventListener("click", async (event) => {
+    const link = event.target.closest("[data-room]");
+    if (link) {
+      event.stopPropagation();
+      return;
+    }
+    const button = event.target.closest("[data-rebuild]");
+    if (!button) return;
+    event.stopPropagation();
+    event.preventDefault();
+    if (button.disabled) return;
+    button.disabled = true;
+    const details = button.closest(".draft");
+    const draft = await loadDraft(details.dataset.draft);
+    if (!draft) {
+      button.textContent = "that draft could not be read";
+      return;
+    }
+    try {
+      const roomId = await buildRoomFor(draft, button);
+      // Swapped for the link rather than opened: a window opened after this
+      // much awaiting is a popup as far as the browser is concerned.
+      button.outerHTML = roomLink(roomId);
+    } catch (error) {
+      button.textContent = `could not rebuild it — ${error.message}`;
+      button.disabled = false;
+    }
   });
+}
+
+async function loadDraft(id) {
+  const response = await fetch(
+    `/api/drafts/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`
+  ).catch(() => null);
+  if (!response?.ok) return null;
+  return (await response.json()).draft;
 }
 
 async function openDraftDetails(event) {
@@ -747,15 +893,12 @@ async function openDraftDetails(event) {
   if (!details?.open || details.dataset.loaded) return;
   details.dataset.loaded = "1";
   const body = details.querySelector(".draft-body");
-  const response = await fetch(
-    `/api/drafts/${encodeURIComponent(details.dataset.draft)}?token=${encodeURIComponent(token)}`
-  ).catch(() => null);
-  if (!response?.ok) {
+  const draft = await loadDraft(details.dataset.draft);
+  if (!draft) {
     body.innerHTML = '<p class="empty">That draft could not be read.</p>';
     details.dataset.loaded = "";
     return;
   }
-  const { draft } = await response.json();
   body.innerHTML = `${seatsHtml(draft)}${standingsHtml(draft)}${openLink(draft)}${rostersHtml(draft)}`;
 }
 
