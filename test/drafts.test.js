@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createOnlineServer, flushSaves } from "../scripts/online-server.js";
 import { draftRecord } from "../src/rules/draftRecord.js";
 import { buildDraftPool } from "../src/data/universes.js";
-import { applyDraftAction, createDraft } from "../src/rules/draft.js";
+import { applyDraftAction, createDraft, isAuctionDraft } from "../src/rules/draft.js";
 
 const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
@@ -458,4 +458,64 @@ test("a sighting with no hello still places the device", async (t) => {
   const [seat] = summary.who;
   assert.equal(seat.place, "Seattle, Washington, US", "a silent clock contradicts nothing");
   assert.equal(seat.fromDevice, true);
+});
+
+test("an auction record keeps the bidding, not just the prices", () => {
+  const pool = buildDraftPool("fictional", "bid-book", { managerCount: 2, startingPitchers: 2 });
+  const draft = createDraft([{ name: "Ana" }, { name: "Bo" }], pool, undefined, "bid-book", {
+    draftType: "auction", startingPitchers: 2, bullpenSlots: 2, bullpenMin: 2
+  });
+  applyDraftAction(draft, { type: "start-review" });
+  applyDraftAction(draft, { type: "complete-review" });
+  applyDraftAction(draft, { type: "finish" });
+
+  const record = draftRecord(draft, { source: "local", universe: "fictional" });
+  assert.ok(record.auction, "an auction writes its auction down");
+  assert.equal(record.auction.budget, draft.auction.budget);
+  assert.equal(record.auction.log.length, draft.auction.history.length);
+
+  const sold = record.auction.log.filter((entry) => entry.managerId && !entry.swept);
+  assert.ok(sold.length > 0);
+  for (const entry of sold) {
+    assert.ok(entry.playerId && entry.nominatorId !== undefined);
+    // The bids are the point: a price is the second-highest of these plus one,
+    // so without them the lot cannot be settled again.
+    assert.ok(Object.keys(entry.bids).length > 0, "every lot keeps who bid what");
+    const amounts = Object.values(entry.bids).sort((a, b) => b - a);
+    assert.equal(typeof amounts[0], "number");
+  }
+  // And the board it was all dealt from.
+  assert.equal(record.deck.length, draft.pool.length);
+});
+
+test("a recorded lot settles at the price it settled at the first time", () => {
+  // Replaying the stored bid map into a fresh draft must reproduce the sale,
+  // which is what makes an auction rebuildable at all.
+  const build = () => {
+    const pool = buildDraftPool("fictional", "replay-seed", { managerCount: 2, startingPitchers: 2 });
+    const draft = createDraft([{ name: "Ana" }, { name: "Bo" }], pool, undefined, "replay-seed", {
+      draftType: "auction", startingPitchers: 2, bullpenSlots: 2, bullpenMin: 2
+    });
+    applyDraftAction(draft, { type: "start-review" });
+    applyDraftAction(draft, { type: "complete-review" });
+    return draft;
+  };
+  const played = build();
+  applyDraftAction(played, { type: "finish" });
+  const record = draftRecord(played, { source: "local", universe: "fictional" });
+
+  const replayed = build();
+  for (const entry of record.auction.log) {
+    if (entry.swept) continue;
+    applyDraftAction(replayed, { type: "nominate", playerId: entry.playerId });
+    for (const [managerId, amount] of Object.entries(entry.bids)) {
+      applyDraftAction(replayed, { type: "seal-bid", managerId, amount });
+    }
+  }
+  assert.equal(replayed.complete, played.complete, "the replay ends where the night ended");
+  const rosters = (draft) => draft.managers.map((manager) => manager.roster.map((card) => card.id));
+  assert.deepEqual(rosters(replayed), rosters(played), "same cards to the same managers");
+  const prices = (draft) => draft.auction.history.map((entry) => [entry.playerId, entry.managerId, entry.price]);
+  assert.deepEqual(prices(replayed), prices(played), "at the same prices");
+  assert.ok(isAuctionDraft(replayed));
 });

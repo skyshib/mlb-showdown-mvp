@@ -729,9 +729,12 @@ function roomCell(draft) {
   if (draft.source === "online" && draft.roomId) return roomLink(draft.roomId);
   const already = rebuiltRoomOf(draft.id);
   if (already) return roomLink(already);
-  // Only a snake draft can be played back. An auction's log is its bidding, and
-  // the book keeps what each card sold for rather than what was bid for it.
-  if (draft.draftType !== "snake") return `${esc("one screen")} · auction, not replayable`;
+  // An auction can only be played back if the book kept its bidding. Drafts
+  // filed before it did keep what each card sold for, which is not enough: a
+  // price is the second-highest bid plus one, so the bids are what settled it.
+  if (draft.draftType === "auction" && !draft.auctionLogged) {
+    return `${esc("one screen")} · bidding not recorded, so it cannot be rebuilt`;
+  }
   return `<button class="as-link" data-rebuild="${esc(draft.id)}">build the room it never had</button>`;
 }
 
@@ -752,58 +755,108 @@ async function buildRoomFor(draft, button) {
     return data;
   };
 
+  const auction = draft.draftType === "auction";
+  const log = (draft.auction?.log ?? []).filter((entry) => !entry.swept);
   const picks = draft.managers
     .flatMap((manager) => manager.roster)
     .filter((card) => card.pick)
     .sort((a, b) => a.pick - b.pick);
-  if (picks.length !== draft.managers.reduce((sum, manager) => sum + manager.roster.length, 0)) {
-    throw new Error("this draft did not write down the order its picks were made in");
+  if (auction && !log.length) {
+    throw new Error("this auction's bidding was not written down, so it cannot be settled again");
   }
-  if (picks.some((card) => card.replacement)) {
-    throw new Error("this draft ended on a replacement card, which is not on any board to pick again");
+  if (!auction) {
+    if (picks.length !== draft.managers.reduce((sum, manager) => sum + manager.roster.length, 0)) {
+      throw new Error("this draft did not write down the order its picks were made in");
+    }
+    if (picks.some((card) => card.replacement)) {
+      throw new Error("this draft ended on a replacement card, which is not on any board to pick again");
+    }
   }
 
   say("dealing the board…");
+  // The computer seats it was played with — except in an auction, where the
+  // SERVER bids for a computer and would start bidding over the replay. Those
+  // seats are handed back at the end instead.
+  const cpuNames = draft.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
   const created = await post("/api/rooms", {
     seed: draft.seed,
     managers: draft.managers.map((manager) => manager.name),
-    // The computer seats it was played with, so the room reads as the room it
-    // was. A snake room's computers are driven by whoever is host, and nobody
-    // is host while this runs, so none of them move on their own.
-    cpu: draft.managers.filter((manager) => manager.cpu).map((manager) => manager.name),
+    cpu: auction ? [] : cpuNames,
     universe: draft.universe,
-    draftType: "snake",
+    draftType: draft.draftType,
+    nomination: draft.nomination,
+    budget: draft.auction?.budget ?? draft.budget ?? undefined,
     startingPitchers: draft.startingPitchers,
     bullpenSlots: draft.bullpenSlots ?? undefined,
     bullpenMin: draft.bullpenMin ?? undefined,
     hidePoints: draft.hidePoints,
     coaches: draft.coaches,
-    // No clock of any kind: a clock that runs during a replay picks for people.
+    // No clock of any kind: a clock that runs during a replay picks and bids
+    // for people who are not there.
     pickTimer: 0,
-    snakeTimer: { enabled: false }
+    snakeTimer: { enabled: false },
+    auctionTimer: { enabled: false }
   });
   const roomId = created.roomId;
   const token = created.hostToken;
 
   // The board stays on the server until every human seat is occupied at once,
-  // so the seats are taken before a pick is played.
-  const humans = draft.managers.filter((manager) => !manager.cpu);
-  for (const [index, manager] of humans.entries()) {
+  // so the seats are taken before a card moves.
+  const seats = auction ? draft.managers : draft.managers.filter((manager) => !manager.cpu);
+  for (const [index, manager] of seats.entries()) {
     say(`sitting ${manager.name} down…`);
     await post(`/api/rooms/${roomId}/join`, index === 0
       ? { managerId: manager.id, hostToken: token }
       : { managerId: manager.id });
   }
 
-  for (const [index, card] of picks.entries()) {
-    say(`replaying pick ${index + 1} of ${picks.length}…`);
-    await post(`/api/rooms/${roomId}/actions`, {
-      token,
-      action: { type: "pick", playerId: card.id }
-    });
+  const act = (action) => post(`/api/rooms/${roomId}/actions`, { token, action });
+
+  if (auction) {
+    // A room opens on a pool review; with no clock there is nothing to wait for.
+    await act({ type: "complete-review" }).catch(() => {});
+    for (const [index, entry] of log.entries()) {
+      say(`replaying lot ${index + 1} of ${log.length}…`);
+      await act({ type: "nominate", playerId: entry.playerId });
+      for (const [managerId, amount] of Object.entries(entry.bids ?? {})) {
+        await act({ type: "seal-bid", managerId, amount });
+      }
+    }
+    // The seats that were the computer's are handed back, now that the bidding
+    // is over and nothing is left for anybody to bid on.
+    for (const manager of draft.managers.filter((item) => item.cpu)) {
+      await act({ type: "seat", managerId: manager.id, cpu: true }).catch(() => {});
+    }
+  } else {
+    for (const [index, card] of picks.entries()) {
+      say(`replaying pick ${index + 1} of ${picks.length}…`);
+      await act({ type: "pick", playerId: card.id });
+    }
   }
+
+  say("checking it came out the same…");
+  const wrong = await differenceFromRecord(draft, roomId);
+  if (wrong) throw new Error(wrong);
   rememberRebuilt(draft.id, roomId);
   return roomId;
+}
+
+// The rebuilt room files its own draft in the book the moment it fills, so the
+// check is simply to read it back and hold it against the record it was built
+// from. A room that came out different is not the draft anybody asked for, and
+// is not worth handing over as though it were.
+async function differenceFromRecord(original, roomId) {
+  let rebuilt = null;
+  for (let tries = 0; tries < 6 && !rebuilt; tries++) {
+    rebuilt = await loadDraft(`room-${roomId}`);
+    if (!rebuilt) await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  if (!rebuilt) return "the rebuilt room never reached the book, so it could not be checked";
+  const shape = (draft) => draft.managers
+    .map((manager) => `${manager.name}:${manager.roster.map((card) => `${card.id}@${card.price ?? card.pick}`).join(",")}`)
+    .join("|");
+  if (shape(original) !== shape(rebuilt)) return "the rebuild came out with different teams";
+  return "";
 }
 
 // How the season came out, when somebody ran one. The sim is logged against the

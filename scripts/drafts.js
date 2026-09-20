@@ -23,6 +23,10 @@ const RETAIN_DAYS = 365;
 const MAX_DRAFTS = 1000;
 const MAX_MANAGERS = 24;
 const MAX_ROSTER = 60;
+// A dealt board and the lots called on it. Both are bounded by the deal itself;
+// these are the ceilings a made-up record hits.
+const MAX_DECK = 1500;
+const MAX_LOTS = 1500;
 
 export function loadDraftArchive(dataDir) {
   const dir = join(dataDir, DRAFTS_DIR);
@@ -179,6 +183,11 @@ function summarize(record) {
     budget: record.budget ?? null,
     complete: Boolean(record.complete),
     page: record.page ?? "",
+    // Whether this one can be played back: an auction needs its bidding, and a
+    // snake draft needs the order its picks were made in. The listing says so,
+    // so a row can offer the rebuild without fetching the whole record first.
+    auctionLogged: Boolean(record.auction?.log?.length),
+    deckSize: (record.deck ?? []).length,
     managers: (record.managers ?? []).map((manager) => ({
       name: manager.name,
       cpu: Boolean(manager.cpu),
@@ -469,6 +478,34 @@ function manager(entry) {
   return clean;
 }
 
+// A dealt card is an id, or an id with the slot it was dealt to fill.
+function deckCard(entry) {
+  if (typeof entry === "string") return text(entry, 60);
+  const id = text(entry?.id, 60);
+  if (!id) return "";
+  const slot = entry?.slot ? text(entry.slot, 20) : null;
+  if (entry?.replacement) return { id, slot, replacement: true };
+  return slot ? { id, slot } : id;
+}
+
+// One lot: who called it, what everybody bid, and how it ended.
+function lot(entry) {
+  const bids = {};
+  for (const [managerId, amount] of Object.entries(entry?.bids ?? {}).slice(0, MAX_MANAGERS)) {
+    bids[text(managerId, 40)] = number(amount, 1e6);
+  }
+  const clean = {
+    playerId: text(entry?.playerId, 60),
+    managerId: entry?.managerId ? text(entry.managerId, 40) : null,
+    price: number(entry?.price, 1e6),
+    bids,
+    nominatorId: entry?.nominatorId ? text(entry.nominatorId, 40) : null
+  };
+  if (entry?.passed) clean.passed = true;
+  if (entry?.swept) clean.swept = true;
+  return clean;
+}
+
 export function sanitizeDraftRecord(body) {
   const managers = Array.isArray(body?.managers) ? body.managers.slice(0, MAX_MANAGERS).map(manager) : [];
   if (!managers.length) return null;
@@ -488,6 +525,15 @@ export function sanitizeDraftRecord(body) {
     picks: number(body?.picks, 10000),
     complete: Boolean(body?.complete),
     page: text(body?.page, 100),
+    deck: (Array.isArray(body?.deck) ? body.deck : []).slice(0, MAX_DECK).map(deckCard).filter(Boolean),
+    ...(body?.auction
+      ? {
+          auction: {
+            budget: body.auction.budget == null ? null : number(body.auction.budget, 1e7),
+            log: (Array.isArray(body.auction.log) ? body.auction.log : []).slice(0, MAX_LOTS).map(lot)
+          }
+        }
+      : {}),
     managers
   };
 }
