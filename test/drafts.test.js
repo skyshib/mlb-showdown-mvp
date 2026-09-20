@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createOnlineServer } from "../scripts/online-server.js";
+import { createOnlineServer, flushSaves } from "../scripts/online-server.js";
 import { draftRecord } from "../src/rules/draftRecord.js";
 import { buildDraftPool } from "../src/data/universes.js";
 import { applyDraftAction, createDraft } from "../src/rules/draft.js";
@@ -33,8 +33,12 @@ async function api(base, method, path, body, headers = {}) {
   return { status: response.status, data: await response.json().catch(() => ({})) };
 }
 
-async function settle() {
+async function settle(store) {
   for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r));
+  // The visit log and the draft archive both write through a promise chain, and
+  // the join reads them back off the disk. Without this the assertions race the
+  // writes — and win, sometimes, which is worse than failing.
+  if (store) await flushSaves(store);
 }
 
 function finishedLocalDraft() {
@@ -98,21 +102,21 @@ test("an auction record carries the price of every card and what was left", () =
 });
 
 test("a browser files its own local draft, and the book names where it came from", async (t) => {
-  const { base } = await startServer(t);
+  const { base, store } = await startServer(t);
   const device = "0123456789abcdef";
   const headers = { cookie: `sd_device=${device}`, "user-agent": CHROME, "x-forwarded-for": "198.51.100.30" };
   const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
   // A page load is what teaches the geo cache who this address is; the filing
   // joins to what it already knows, exactly as the visit log does.
   await fetch(`${base}/index.html`, { headers });
-  await settle();
+  await settle(store);
 
   const filed = await api(base, "POST", "/api/drafts", { key: "aa11bb22", ...record }, headers);
   assert.equal(filed.status, 201);
   assert.match(filed.data.id, /^local-[a-f0-9]{16}$/);
   // Filing the same draft again rewrites it rather than filling the book with copies.
   await api(base, "POST", "/api/drafts", { key: "aa11bb22", ...record }, headers);
-  await settle();
+  await settle(store);
 
   const listed = await api(base, "GET", "/api/drafts?token=sesame");
   assert.equal(listed.status, 200);
@@ -140,7 +144,7 @@ test("a browser files its own local draft, and the book names where it came from
 });
 
 test("the book is private, and junk never reaches it", async (t) => {
-  const { base } = await startServer(t);
+  const { base, store } = await startServer(t);
   assert.equal((await api(base, "GET", "/api/drafts")).status, 401);
   assert.equal((await api(base, "GET", "/api/drafts?token=nope")).status, 401);
 
@@ -163,7 +167,7 @@ test("the book is private, and junk never reaches it", async (t) => {
     }]
   }, { cookie: "sd_device=0123456789abcdef" });
   assert.equal(filed.status, 201);
-  await settle();
+  await settle(store);
 
   const { data } = await api(base, "GET", `/api/drafts/${filed.data.id}?token=sesame`);
   assert.equal(data.draft.seed.length, 60);
@@ -177,7 +181,7 @@ test("the book is private, and junk never reaches it", async (t) => {
 });
 
 test("a room files its draft the moment it fills, with the seats that played it", async (t) => {
-  const { base, dataDir } = await startServer(t);
+  const { base, dataDir, store } = await startServer(t);
   const created = await api(base, "POST", "/api/rooms", {
     seed: "room-book", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
   });
@@ -186,7 +190,7 @@ test("a room files its draft the moment it fills, with the seats that played it"
 
   const anaHeaders = { cookie: "sd_device=aaaaaaaaaaaaaaaa", "user-agent": CHROME, "x-forwarded-for": "198.51.100.30" };
   await fetch(`${base}/index.html`, { headers: anaHeaders });
-  await settle();
+  await settle(store);
   await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken }, anaHeaders);
   const bo = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" },
     { cookie: "sd_device=bbbbbbbbbbbbbbbb", "user-agent": CHROME });
@@ -197,7 +201,7 @@ test("a room files its draft the moment it fills, with the seats that played it"
     action: { type: "finish" }
   });
   assert.equal(finish.status, 200);
-  await settle();
+  await settle(store);
 
   const listed = await api(base, "GET", "/api/drafts?token=sesame");
   assert.equal(listed.data.drafts.length, 1);
@@ -223,7 +227,7 @@ test("a room files its draft the moment it fills, with the seats that played it"
 });
 
 test("the book cannot be flooded off its own shelf", async (t) => {
-  const { base } = await startServer(t);
+  const { base, store } = await startServer(t);
   const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
   const statuses = [];
   for (let i = 0; i < 15; i++) {
@@ -236,7 +240,7 @@ test("the book cannot be flooded off its own shelf", async (t) => {
 });
 
 test("a room finished before the book existed is filed when the server comes up", async (t) => {
-  const { base, dataDir } = await startServer(t);
+  const { base, dataDir, store } = await startServer(t);
   const created = await api(base, "POST", "/api/rooms", {
     seed: "old-room", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
   });
@@ -244,7 +248,7 @@ test("a room finished before the book existed is filed when the server comes up"
   await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken });
   await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
   await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: created.data.hostToken, action: { type: "finish" } });
-  await settle();
+  await settle(store);
 
   // The book is emptied, the room file left alone: a volume that carries rooms
   // from before any of this was written.
@@ -254,14 +258,14 @@ test("a room finished before the book existed is filed when the server comes up"
   server.listen(0);
   await once(server, "listening");
   t.after(() => server.close());
-  await settle();
+  await settle(store);
 
   const files = await readdir(join(dataDir, "drafts"));
   assert.deepEqual(files, [`room-${roomId}.json`]);
 });
 
 test("a restart leaves a room's filed draft alone, date and all", async (t) => {
-  const { base, dataDir } = await startServer(t);
+  const { base, dataDir, store } = await startServer(t);
   const created = await api(base, "POST", "/api/rooms", {
     seed: "kept-room", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
   });
@@ -269,7 +273,7 @@ test("a restart leaves a room's filed draft alone, date and all", async (t) => {
   await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken });
   await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
   await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: created.data.hostToken, action: { type: "finish" } });
-  await settle();
+  await settle(store);
 
   // The record as it would look months later, written on the night it happened.
   const path = join(dataDir, "drafts", `room-${roomId}.json`);
@@ -280,7 +284,7 @@ test("a restart leaves a room's filed draft alone, date and all", async (t) => {
   server.listen(0);
   await once(server, "listening");
   t.after(() => server.close());
-  await settle();
+  await settle(store);
 
   const reread = JSON.parse(await readFile(path, "utf8"));
   assert.equal(reread.at, "2026-01-02T03:04:05.000Z", "booting does not restamp a draft already in the book");
@@ -288,11 +292,11 @@ test("a restart leaves a room's filed draft alone, date and all", async (t) => {
 });
 
 test("the book joins a draft to the session that played it and the season it ran", async (t) => {
-  const { base } = await startServer(t);
+  const { base, store } = await startServer(t);
   const device = "0123456789abcdef";
   const headers = { cookie: `sd_device=${device}`, "user-agent": CHROME, "x-forwarded-for": "198.51.100.30" };
   await fetch(`${base}/index.html`, { headers });
-  await settle();
+  await settle(store);
 
   const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
   const filed = await api(base, "POST", "/api/drafts", { key: "seasonkey", ...record }, headers);
@@ -308,7 +312,7 @@ test("the book joins a draft to the session that played it and the season it ran
       standings: [{ team: "Hal", winPct: 0.462 }, { team: "Skylar", winPct: 0.538 }]
     }
   }, headers);
-  await settle();
+  await settle(store);
 
   const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
   assert.equal(summary.winner.team, "Skylar", "the winner is the best record, whatever order it arrived in");
@@ -321,7 +325,7 @@ test("a room filed before seats knew anybody still names them, from the visit lo
   const { base, store } = await startServer(t);
   const anaHeaders = { cookie: "sd_device=aaaaaaaaaaaaaaaa", "user-agent": CHROME, "x-forwarded-for": "198.51.100.30" };
   await fetch(`${base}/index.html`, { headers: anaHeaders });
-  await settle();
+  await settle(store);
 
   const created = await api(base, "POST", "/api/rooms", {
     seed: "seatless", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
@@ -335,7 +339,7 @@ test("a room filed before seats knew anybody still names them, from the visit lo
   const room = store.rooms.get(roomId);
   for (const seat of room.seats.values()) delete seat.who;
   await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: created.data.hostToken, action: { type: "finish" } });
-  await settle();
+  await settle(store);
 
   const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
   const ana = summary.who.find((seat) => seat.manager === "Ana");
@@ -348,7 +352,7 @@ test("a room filed before seats knew anybody still names them, from the visit lo
 });
 
 test("a seat's own clock places it when the address will not", async (t) => {
-  const { base } = await startServer(t);
+  const { base, store } = await startServer(t);
   const device = "beefbeefbeefbeef";
   // An address the geo provider has nothing to say about — a relay exit, a
   // carrier gateway, the usual reasons.
@@ -359,12 +363,12 @@ test("a seat's own clock places it when the address will not", async (t) => {
     page: "/index.html",
     data: { tz: "America/Los_Angeles", languages: ["en-US", "en"], screen: "1512x982" }
   }, headers);
-  await settle();
+  await settle(store);
 
   const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
   const filed = await api(base, "POST", "/api/drafts", { key: "clockkey", ...record }, headers);
   assert.equal(filed.status, 201);
-  await settle();
+  await settle(store);
 
   const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
   const [seat] = summary.who;
