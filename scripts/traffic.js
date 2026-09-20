@@ -72,7 +72,11 @@ export function loadTrafficFile(dataDir) {
     geoCache: plainCounts(saved?.geoCache, (value) => (typeof value === "string" ? value : "")),
     // The network behind a visitor ("Comcast Cable", "UC Berkeley", "Google LLC"),
     // kept beside the place and pruned with it.
-    orgs: plainCounts(saved?.orgs, (value) => (typeof value === "string" ? value : ""))
+    orgs: plainCounts(saved?.orgs, (value) => (typeof value === "string" ? value : "")),
+    // Addresses the provider calls a proxy or VPN exit. The place recorded for
+    // one of these is where the exit node is, not where anybody is sitting, and
+    // saying so is the difference between a wrong answer and a caveated one.
+    proxies: plainCounts(saved?.proxies, (value) => (value ? 1 : 0))
   };
 }
 
@@ -190,6 +194,7 @@ function attributePlace(store, visitor, ip, views = 1) {
     if (!place) return;
     traffic.geoCache[visitor] = place;
     traffic.orgs[visitor] = typeof found === "object" ? found?.org ?? "" : "";
+    if (typeof found === "object" && found?.proxy) traffic.proxies[visitor] = 1;
     for (let i = 0; i < pending; i++) bump(traffic.places, place);
     pruneGeoCache(traffic);
     persistTraffic(store);
@@ -243,6 +248,7 @@ function pruneGeoCache(traffic) {
   for (let i = 0; i < keys.length - MAX_GEO_CACHE; i++) {
     delete traffic.geoCache[keys[i]];
     delete traffic.orgs[keys[i]];
+    delete traffic.proxies[keys[i]];
   }
 }
 

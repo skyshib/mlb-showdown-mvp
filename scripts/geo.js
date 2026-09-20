@@ -6,19 +6,38 @@
 // written to our disk — what gets written is the place that comes back, counted
 // in aggregate. The IP is a means, not a record.
 //
-// Two providers. ipinfo.io is the better one — more accurate, 50k lookups a
-// month — but it wants a token, so it is the upgrade rather than the default;
-// set IPINFO_TOKEN and this switches to it on the next boot. Out of the box it
-// uses ipwho.is, which needs no account and answers over TLS. (ipapi.co was the
-// obvious first choice and is not used: its keyless tier 429s on the first call
-// from a datacentre address, which is exactly where this runs.)
+// Three providers, tried in order until one of them names a place.
 //
-// And the caveat that matters when reading the dashboard: this is a guess. Ask
-// the two providers where 8.8.8.8 is and one says Mountain View, the other says
-// Ashburn — the same address, two cities, a continent apart. An IP lands on the
-// right city maybe half to three-quarters of the time, and on mobile it tends to
-// land on the carrier's gateway rather than the person holding the phone. It
-// says roughly where people are playing. It does not say where anyone lives.
+// They are not equally good, and the difference is a whole city. Asked about
+// addresses whose real location is not in doubt — universities — ipwho.is
+// answered with the nearest big city rather than the right one: Boston for MIT
+// in Cambridge, San Francisco for Berkeley (twice), San Jose for Stanford. On
+// the same five addresses ipinfo and freeipapi each named the right city.
+//
+//   1. ipinfo.io, when IPINFO_TOKEN is set. The best of them, 50k lookups a
+//      month, and it wants an account, so it is the upgrade rather than the
+//      default.
+//   2. freeipapi.com. No account, no key, HTTPS, and as accurate as ipinfo on
+//      the cases above. It also says whether the address is a proxy or VPN
+//      exit, which is the single most useful thing a geo provider can say here:
+//      it is exactly how a player in California reads as Vancouver.
+//   3. ipwho.is. Coarse, but keyless and dependable, so it is the floor rather
+//      than nothing.
+//
+// (ipapi.co was the obvious first choice and is not used: its keyless tier 429s
+// on the first call from a datacentre address, which is exactly where this runs.)
+//
+// And the caveat that matters however good the provider is: this is a guess
+// about an address, not about a person. On mobile it lands on the carrier's
+// gateway; behind a VPN or a relay it lands on the exit node. That is why the
+// browser's own time zone leads everywhere this is displayed (see zoneCity),
+// and why an address that a provider calls a proxy is marked as one. It says
+// roughly where people are playing. It does not say where anyone lives.
+//
+// Nothing here can be re-run over old visitors: the raw IP is never written
+// down, and the cache is keyed by a salted hash of it. A better provider
+// improves the places recorded from now on, and leaves the old ones as they
+// were answered.
 
 const LOOKUP_TIMEOUT_MS = 5000;
 // The free tiers are generous per day but unfriendly to bursts, and a link doing
@@ -72,16 +91,34 @@ async function fetchJson(url) {
   return response.json();
 }
 
-// The place, and the network the address belongs to. The network is often the
-// better answer to "who is this": a university, an employer, a carrier, or a
-// cloud provider running somebody's crawler.
-export async function lookupPlace(ip) {
-  if (isPrivateIp(ip)) return { place: "", org: "" };
-  const token = process.env.IPINFO_TOKEN;
-  if (token) {
-    const data = await fetchJson(`https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(token)}`);
-    return { place: placeName(data.city, data.region, data.country), org: String(data.org ?? "").replace(/^AS\d+\s+/, "") };
-  }
+// A provider's answer, in our own words: where, whose network, and whether the
+// address is somewhere a person could actually be sitting.
+//
+// The network is often the better answer to "who is this": a university, an
+// employer, a carrier, or a cloud provider running somebody's crawler.
+
+async function fromIpinfo(ip, token) {
+  const data = await fetchJson(`https://ipinfo.io/${encodeURIComponent(ip)}/json?token=${encodeURIComponent(token)}`);
+  return {
+    place: placeName(data.city, data.region, data.country),
+    org: String(data.org ?? "").replace(/^AS\d+\s+/, ""),
+    proxy: false
+  };
+}
+
+// freeipapi names the neighbourhood in brackets — "Berkeley (South Berkeley)" —
+// which is more precision than an IP has earned. The city is what is kept.
+async function fromFreeIpApi(ip) {
+  const data = await fetchJson(`https://freeipapi.com/api/json/${encodeURIComponent(ip)}`);
+  const city = String(data.cityName ?? "").replace(/\s*\(.*\)\s*$/, "");
+  return {
+    place: placeName(city, data.regionName, data.countryCode),
+    org: String(data.asnOrganization ?? ""),
+    proxy: Boolean(data.isProxy)
+  };
+}
+
+async function fromIpWhoIs(ip) {
   const data = await fetchJson(`https://ipwho.is/${encodeURIComponent(ip)}`);
   // ipwho.is answers 200 even when it has nothing, and says so only in `success`.
   // Left unchecked, a failed lookup reads as a successful one and "undefined"
@@ -89,8 +126,36 @@ export async function lookupPlace(ip) {
   if (!data.success) throw new Error(String(data.message ?? "lookup failed"));
   return {
     place: placeName(data.city, data.region, data.country_code),
-    org: String(data.connection?.isp || data.connection?.org || "")
+    org: String(data.connection?.isp || data.connection?.org || ""),
+    proxy: false
   };
+}
+
+// Best first. The token one is only in the chain when there is a token.
+export function providerChain(token = process.env.IPINFO_TOKEN) {
+  return [
+    ...(token ? [(ip) => fromIpinfo(ip, token)] : []),
+    fromFreeIpApi,
+    fromIpWhoIs
+  ];
+}
+
+// Down the chain until somebody names a place. A provider that throws, times
+// out, or answers with nothing is simply the wrong provider for this address;
+// the next one gets its turn. Only when all of them come up empty is the
+// lookup a failure — and a failure is not cached, so the address is tried
+// again the next time its owner turns up.
+export async function lookupPlace(ip, chain = providerChain()) {
+  if (isPrivateIp(ip)) return { place: "", org: "", proxy: false };
+  for (const provider of chain) {
+    try {
+      const found = await provider(ip);
+      if (found?.place) return { place: found.place, org: found.org ?? "", proxy: Boolean(found.proxy) };
+    } catch {
+      // Try the next one.
+    }
+  }
+  return { place: "", org: "", proxy: false };
 }
 
 // One at a time, spaced out, and dropped on the floor if the queue backs up —

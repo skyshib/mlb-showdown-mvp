@@ -214,7 +214,8 @@
         <h2 class="sub-head">What the addresses say</h2>
         <p class="note">The same people as read off their IP, which is a third party's guess:
           mobile resolves to the carrier's gateway, and a relay resolves to wherever it
-          happens to exit.</p>
+          happens to exit. City-level where the provider can manage it — freeipapi, or
+          ipinfo when IPINFO_TOKEN is set.</p>
         <ul class="rank" id="places"></ul>
       </section>
       <section class="card"><h2>Top pages</h2><ul class="rank" id="paths"></ul></section>
@@ -706,8 +707,12 @@ function placeOf(seat) {
 // not already say.
 function addressNote(seat) {
   if (!seat.place) return "";
-  if (!seat.zone) return "";
-  return seat.place.startsWith(seat.zone) ? "" : `address says ${seat.place}`;
+  // A proxy exit is worth naming even when it agrees with the clock: the
+  // agreement is a coincidence, not a confirmation.
+  const via = seat.proxy ? " (a proxy or VPN exit)" : "";
+  if (seat.zone && seat.place.startsWith(seat.zone) && !via) return "";
+  if (!seat.zone && !via) return "";
+  return `address says ${seat.place}${via}`;
 }
 
 function seatsHtml(draft) {

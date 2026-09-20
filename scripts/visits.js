@@ -240,6 +240,7 @@ export function readVisits(store, { days = 3, kind = "", visitor = "", device = 
   }
   const geo = store.traffic?.geoCache ?? {};
   const orgs = store.traffic?.orgs ?? {};
+  const proxies = store.traffic?.proxies ?? {};
   const lines = [];
   for (const file of safeReaddir(log.dir).filter((name) => wanted.has(name)).sort()) {
     let text = "";
@@ -260,7 +261,12 @@ export function readVisits(store, { days = 3, kind = "", visitor = "", device = 
       if (visitor && line.visitor !== visitor) continue;
       if (device && line.device !== device) continue;
       if (humansOnly && line.bot) continue;
-      lines.push({ ...line, place: geo[line.visitor] || "", org: orgs[line.visitor] || "" });
+      lines.push({
+        ...line,
+        place: geo[line.visitor] || "",
+        org: orgs[line.visitor] || "",
+        proxy: Boolean(proxies[line.visitor])
+      });
     }
   }
   return lines.reverse();

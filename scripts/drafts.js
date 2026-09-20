@@ -197,12 +197,14 @@ function summarize(record) {
 function withPlaces(store, row) {
   const geo = store.traffic?.geoCache ?? {};
   const orgs = store.traffic?.orgs ?? {};
+  const proxies = store.traffic?.proxies ?? {};
   return {
     ...row,
     who: (row.who ?? []).map((seat) => ({
       ...seat,
       place: geo[seat.visitor] || "",
-      org: orgs[seat.visitor] || ""
+      org: orgs[seat.visitor] || "",
+      proxy: Boolean(proxies[seat.visitor])
     }))
   };
 }
@@ -249,7 +251,8 @@ function seatFromLine(line, manager, host) {
     lang: line.lang ?? "",
     edge: line.edge ?? "",
     place: line.place ?? "",
-    org: line.org ?? ""
+    org: line.org ?? "",
+    proxy: Boolean(line.proxy)
   };
 }
 
