@@ -169,6 +169,17 @@
   .cards .card-cost { color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .cards .card-name { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cards .card-pts { text-align: right; font-variant-numeric: tabular-nums; }
+  .draft-result { font-size: 13px; margin-top: 2px; }
+  .draft-result b { font-weight: 600; }
+  .draft-open { font-size: 12px; margin-top: 8px; }
+  .standings { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; max-width: 320px; }
+  .standings li { display: flex; justify-content: space-between; gap: 12px; color: var(--text-secondary); }
+  .standings li:first-child { color: var(--text-primary); font-weight: 600; }
+  .standings .win-pct { font-variant-numeric: tabular-nums; }
+  .draft.inline { border: 0; padding: 0; margin: 2px 0 6px; }
+  .draft.inline > summary { font-size: 13px; color: var(--series-1); }
+  .draft.inline > summary::before { content: "▸ "; color: var(--text-muted); }
+  .draft.inline[open] > summary::before { content: "▾ "; }
 </style>
 </head>
 <body>
@@ -406,6 +417,10 @@ function dailyTable(days) {
 // No token, or a token the server does not like, and this section simply never
 // appears — the page above it is the whole page, as it always was.
 
+// Which drafts the book holds, so a session can open one where it happened
+// rather than sending the reader off to another panel to find it.
+let inTheBook = new Set();
+
 async function loadVisits() {
   if (!token) return;
   const days = document.getElementById("visit-days").value;
@@ -481,15 +496,15 @@ function beat(line) {
       return say(`Dealt a local <b>${esc(data.draftType ?? "")}</b> draft — ${esc((data.managers ?? []).join(", "))}
         · ${esc(data.universe ?? "")} · ${data.startingPitchers ?? "?"} SP`);
     case "draft-done":
-      // The draft itself is in the book below; the beat is the way in.
-      return say(`Finished the <b>${esc(data.draftType ?? "")}</b> draft —
-        <a href="#" data-open-draft="${esc(data.draftId ?? "")}">see the teams</a>`);
+      // The teams open here, in the session that played them.
+      return say(`Finished the <b>${esc(data.draftType ?? "")}</b> draft${inlineDraft(data.draftId)}`);
     case "sim": {
       const top = (data.standings ?? [])[0];
       return say(`Simmed <b>${(data.runs ?? 0).toLocaleString()}</b> games${top ? ` — ${esc(top.team)} won ${(top.winPct * 100).toFixed(1)}%` : ""}`);
     }
     case "room-create":
-      return say(`Made online room <b>${esc(data.roomId ?? "")}</b> — ${esc((data.managers ?? []).join(", "))}`);
+      return say(`Made online room <b>${esc(data.roomId ?? "")}</b> — ${esc((data.managers ?? []).join(", "))}
+        ${inlineDraft(data.roomId ? `room-${data.roomId}` : "")}`);
     case "room-join":
       return say(`Sat down as <b>${esc(data.manager ?? "")}</b> in ${esc(data.roomId ?? "")}`);
     case "adventure-start":
@@ -503,6 +518,17 @@ function beat(line) {
     default:
       return say(esc(line.kind));
   }
+}
+
+// The same expander the book uses, dropped into a beat. Only offered for a
+// draft the book actually holds: a room abandoned in the third round was never
+// finished and has no teams to show.
+function inlineDraft(id) {
+  if (!id || !inTheBook.has(id)) return "";
+  return `<details class="draft inline" data-draft="${esc(id)}">
+    <summary>see the teams</summary>
+    <div class="draft-body"><p class="empty">Opening…</p></div>
+  </details>`;
 }
 
 function fmtDuration(seconds) {
@@ -528,7 +554,6 @@ function esc(value) {
 
 document.getElementById("visit-days").addEventListener("change", loadVisits);
 document.getElementById("visit-bots").addEventListener("change", loadVisits);
-await loadVisits();
 
 // ── The draft book ─────────────────────────────────────────────────────────
 // /api/drafts is the finished drafts, and like the visit log it has no public
@@ -541,6 +566,7 @@ async function loadDrafts() {
   const response = await fetch(`/api/drafts?token=${encodeURIComponent(token)}&limit=${limit}`).catch(() => null);
   if (!response?.ok) return;
   const { drafts } = await response.json();
+  inTheBook = new Set(drafts.map((draft) => draft.id));
   document.getElementById("drafts").hidden = false;
   document.getElementById("draft-list").innerHTML = drafts.length
     ? drafts.map(draftRow).join("")
@@ -570,14 +596,56 @@ function draftRow(draft) {
         <span class="session-who">${esc(humans.map((manager) => manager.name).join(", ")) || "computers only"}</span>
       </div>
       <div class="session-meta">${meta.map((part) => `<span>${esc(part)}</span>`).join("")}</div>
+      ${wonLine(draft)}
     </summary>
     <div class="draft-body"><p class="empty">Opening…</p></div>
   </details>`;
 }
 
+// How the season came out, when somebody ran one. The sim is logged against the
+// draft it was run on, so the book can say who won without being told twice.
+function wonLine(draft) {
+  const sim = draft.sims?.[0];
+  if (!sim) return '<div class="draft-result session-meta"><span>never simmed</span></div>';
+  const [first, second] = sim.standings;
+  const margin = second ? ` over ${esc(second.team)} (${pct(second.winPct)})` : "";
+  return `<div class="draft-result"><b>${esc(first.team)}</b> won it at ${pct(first.winPct)}${margin}
+    <span class="session-meta"><span>${sim.runs.toLocaleString()} games</span></span></div>`;
+}
+
+function pct(value) {
+  return (Number(value) || 0).toFixed(3).replace(/^0/, "");
+}
+
+// The full table, plus every other season anybody ran on these same teams.
+function standingsHtml(draft) {
+  const sim = draft.sims?.[0];
+  if (!sim) return "";
+  const later = draft.sims.length > 1 ? ` <span class="session-meta"><span>${draft.sims.length} sims run in all</span></span>` : "";
+  return `<ol class="standings">${sim.standings.map((row) => `<li>
+      <span>${esc(row.team)}</span><span class="win-pct">${pct(row.winPct)}</span>
+    </li>`).join("")}</ol>
+    <div class="session-meta"><span>${sim.runs.toLocaleString()} games, ${when(Date.parse(sim.at))}</span></div>${later}`;
+}
+
+// A room can be opened again; a draft played on one screen lives in that
+// browser and nowhere else, so there is nothing to link to.
+function openLink(draft) {
+  if (draft.source !== "online" || !draft.roomId) return "";
+  const room = `/index.html?room=${encodeURIComponent(draft.roomId)}`;
+  return `<div class="draft-open">
+    <a href="${esc(room)}" target="_blank" rel="noopener">Open this room</a> ·
+    <a href="${esc(room)}&board" target="_blank" rel="noopener">TV board</a>
+  </div>`;
+}
+
 // One fetch per draft, the first time it is opened. `toggle` does not bubble,
-// so it is caught on the way down.
-document.getElementById("draft-list").addEventListener("toggle", async (event) => {
+// so it is caught on the way down. The same handler serves both panels.
+function wireDraftDetails(container) {
+  container.addEventListener("toggle", openDraftDetails, true);
+}
+
+async function openDraftDetails(event) {
   const details = event.target.closest(".draft");
   if (!details?.open || details.dataset.loaded) return;
   details.dataset.loaded = "1";
@@ -591,8 +659,8 @@ document.getElementById("draft-list").addEventListener("toggle", async (event) =
     return;
   }
   const { draft } = await response.json();
-  body.innerHTML = `${seatsHtml(draft)}${rostersHtml(draft)}`;
-}, true);
+  body.innerHTML = `${seatsHtml(draft)}${standingsHtml(draft)}${openLink(draft)}${rostersHtml(draft)}`;
+}
 
 // Who was in each chair, and what the address said about where from. The same
 // guess the map above is drawing, at the resolution of one player.
@@ -636,18 +704,12 @@ function money(value) {
 }
 
 document.getElementById("draft-limit").addEventListener("change", loadDrafts);
-await loadDrafts();
+wireDraftDetails(document.getElementById("draft-list"));
+wireDraftDetails(document.getElementById("visit-list"));
 
-// A finished draft in somebody's session opens the book at that draft.
-document.getElementById("visit-list").addEventListener("click", (event) => {
-  const link = event.target.closest("[data-open-draft]");
-  if (!link) return;
-  event.preventDefault();
-  const details = document.querySelector(`.draft[data-draft="${CSS.escape(link.dataset.openDraft)}"]`);
-  if (!details) return;
-  details.open = true;
-  details.scrollIntoView({ behavior: "smooth", block: "center" });
-});
+// The book first: the sessions below it only offer to open a draft it holds.
+await loadDrafts();
+await loadVisits();
 
 function rank(id, rows, name) {
   const list = document.getElementById(id);

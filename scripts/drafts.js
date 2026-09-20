@@ -13,6 +13,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node
 import { rename, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { readVisits } from "./visits.js";
 
 const DRAFTS_DIR = "drafts";
 const RETAIN_DAYS = 365;
@@ -118,6 +119,7 @@ function safeReaddir(dir) {
 export function listDrafts(store, { limit = 100 } = {}) {
   const log = store.drafts;
   if (!log) return [];
+  const index = visitIndex(store);
   const rows = [];
   for (const name of safeReaddir(log.dir)) {
     if (!name.endsWith(".json")) continue;
@@ -146,14 +148,15 @@ export function listDrafts(store, { limit = 100 } = {}) {
   return rows
     .sort((a, b) => String(b.at).localeCompare(String(a.at)))
     .slice(0, Math.max(1, Math.min(MAX_DRAFTS, Math.floor(Number(limit)) || 100)))
-    .map((row) => withPlaces(store, row));
+    .map((row) => withSessions(store, withPlaces(store, row), index));
 }
 
 export function readDraft(store, id) {
   const log = store.drafts;
   if (!log || !/^[a-z0-9-]{1,80}$/i.test(String(id))) return null;
   try {
-    return withPlaces(store, JSON.parse(readFileSync(join(log.dir, `${id}.json`), "utf8")));
+    const record = withPlaces(store, JSON.parse(readFileSync(join(log.dir, `${id}.json`), "utf8")));
+    return withSessions(store, record, visitIndex(store));
   } catch {
     return null;
   }
@@ -200,6 +203,137 @@ function withPlaces(store, row) {
       place: geo[seat.visitor] || "",
       org: orgs[seat.visitor] || ""
     }))
+  };
+}
+
+// ---- What the visit log knows about a draft ---------------------------------
+//
+// A draft record holds the teams; the visit log holds the evening around them —
+// who sat down, from where, how they got to the site, and how the season came
+// out when somebody simmed it. They are two halves of one story and were being
+// read as two, so the halves are joined here, on the way out.
+//
+// It also repairs the drafts filed before seats remembered anybody: a room from
+// last week has no `who` of its own, but its room-join lines are still in the
+// log, and they name the same people.
+//
+// The whole log is scanned to build this, so it is cached — but keyed on the
+// size of the day being written, not on a clock: somebody who has just simmed
+// their draft and hit refresh should see the season, not a minute of the old
+// answer. Only today's file is ever appended to, so its size is the whole
+// question of whether the log has moved.
+
+// Every line that belongs to a draft says so in its own way.
+function draftIdsForLine(line) {
+  const data = line.data ?? {};
+  const ids = [];
+  if (data.roomId) ids.push(draftId({ roomId: data.roomId }));
+  if (data.draftId) ids.push(String(data.draftId));
+  // A local draft names itself by the key its page minted; the id it was filed
+  // under is that key hashed with the device, which the line itself carries.
+  if (data.draftKey && line.device) ids.push(draftId({ device: line.device, key: data.draftKey }));
+  return ids;
+}
+
+function seatFromLine(line, manager, host) {
+  return {
+    manager: manager ?? "",
+    host: Boolean(host),
+    at: line.t,
+    visitor: line.visitor,
+    device: line.device,
+    browser: line.browser,
+    os: line.os,
+    mobile: Boolean(line.mobile),
+    lang: line.lang ?? "",
+    edge: line.edge ?? "",
+    place: line.place ?? "",
+    org: line.org ?? ""
+  };
+}
+
+// The season somebody ran on these teams, best record first. The standings are
+// the client's own summary of the batch, so they are read defensively.
+function simFromLine(line) {
+  const data = line.data ?? {};
+  const standings = (Array.isArray(data.standings) ? data.standings : [])
+    .map((row) => ({ team: String(row?.team ?? ""), winPct: Number(row?.winPct) || 0 }))
+    .sort((a, b) => b.winPct - a.winPct);
+  if (!standings.length) return null;
+  return { at: line.t, runs: Number(data.runs) || 0, standings };
+}
+
+function logStamp(store, now) {
+  const day = new Date(now).toISOString().slice(0, 10);
+  try {
+    return `${day}:${statSync(join(store.visits.dir, `${day}.jsonl`)).size}`;
+  } catch {
+    return `${day}:0`;
+  }
+}
+
+function visitIndex(store, now = Date.now()) {
+  const log = store.drafts;
+  if (!log || !store.visits) return new Map();
+  const stamp = logStamp(store, now);
+  if (log.index?.stamp === stamp) return log.index.byDraft;
+  const byDraft = new Map();
+  const entry = (id) => {
+    if (!byDraft.has(id)) byDraft.set(id, { seats: [], sims: [] });
+    return byDraft.get(id);
+  };
+  // 90 days is the whole visit log; a draft older than that keeps whatever it
+  // was filed with and gains nothing here, which is the honest answer.
+  for (const line of readVisits(store, { days: 90 })) {
+    for (const id of draftIdsForLine(line)) {
+      const found = entry(id);
+      if (line.kind === "sim") {
+        const sim = simFromLine(line);
+        if (sim) found.sims.push(sim);
+      } else if (line.kind === "room-join") {
+        found.seats.push(seatFromLine(line, line.data?.manager, line.data?.host));
+      } else if (line.kind === "room-create" || line.kind === "draft-done" || line.kind === "local-draft-start") {
+        found.seats.push(seatFromLine(line, "", false));
+      }
+    }
+  }
+  log.index = { stamp, byDraft };
+  return byDraft;
+}
+
+// One line per person. A seat filed with the draft is the better record — it
+// names the chair — so it goes in first and the log only fills what it left
+// blank. A line that names nobody (a room made, a draft filed) is the same
+// person as the named seat on that device rather than a second one.
+function mergeSeats(filed, logged) {
+  const seats = [];
+  for (const seat of [...filed, ...logged]) {
+    if (!seat.device && !seat.visitor) continue;
+    const held = seats.find((held) =>
+      ((held.device && held.device === seat.device) || (held.visitor && held.visitor === seat.visitor))
+      && (!seat.manager || !held.manager || held.manager === seat.manager));
+    if (!held) {
+      seats.push({ ...seat });
+      continue;
+    }
+    for (const [field, value] of Object.entries(seat)) {
+      if (value !== "" && value != null && (held[field] === "" || held[field] == null)) held[field] = value;
+    }
+  }
+  return seats;
+}
+
+// A draft, with the evening around it: everyone the log can tie to it, and how
+// the seasons somebody ran on those teams came out.
+function withSessions(store, row, index) {
+  const found = index.get(row.id) ?? { seats: [], sims: [] };
+  const sims = [...found.sims].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return {
+    ...row,
+    who: mergeSeats(row.who ?? [], found.seats),
+    // Newest first; the one at the front is the season the book reports.
+    sims: sims.slice(0, 5),
+    winner: sims[0]?.standings?.[0] ?? null
   };
 }
 

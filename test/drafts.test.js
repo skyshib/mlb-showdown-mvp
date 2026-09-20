@@ -286,3 +286,63 @@ test("a restart leaves a room's filed draft alone, date and all", async (t) => {
   assert.equal(reread.at, "2026-01-02T03:04:05.000Z", "booting does not restamp a draft already in the book");
   assert.deepEqual(reread, filed);
 });
+
+test("the book joins a draft to the session that played it and the season it ran", async (t) => {
+  const { base } = await startServer(t);
+  const device = "0123456789abcdef";
+  const headers = { cookie: `sd_device=${device}`, "user-agent": CHROME, "x-forwarded-for": "198.51.100.30" };
+  await fetch(`${base}/index.html`, { headers });
+  await settle();
+
+  const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
+  const filed = await api(base, "POST", "/api/drafts", { key: "seasonkey", ...record }, headers);
+  assert.equal(filed.status, 201);
+
+  // The page reports its season against the draft key it was run on.
+  await api(base, "POST", "/api/events", {
+    kind: "sim",
+    page: "/index.html",
+    data: {
+      draftKey: "seasonkey",
+      runs: 100000,
+      standings: [{ team: "Hal", winPct: 0.462 }, { team: "Skylar", winPct: 0.538 }]
+    }
+  }, headers);
+  await settle();
+
+  const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
+  assert.equal(summary.winner.team, "Skylar", "the winner is the best record, whatever order it arrived in");
+  assert.equal(summary.sims[0].runs, 100000);
+  assert.deepEqual(summary.sims[0].standings.map((row) => row.team), ["Skylar", "Hal"]);
+  assert.equal(summary.who[0].place, "Seattle, Washington, US");
+});
+
+test("a room filed before seats knew anybody still names them, from the visit log", async (t) => {
+  const { base, store } = await startServer(t);
+  const anaHeaders = { cookie: "sd_device=aaaaaaaaaaaaaaaa", "user-agent": CHROME, "x-forwarded-for": "198.51.100.30" };
+  await fetch(`${base}/index.html`, { headers: anaHeaders });
+  await settle();
+
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "seatless", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
+  });
+  const roomId = created.data.roomId;
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken }, anaHeaders);
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" }, { cookie: "sd_device=bbbbbbbbbbbbbbbb" });
+
+  // A room from before seats remembered anybody: the record is filed with no
+  // `who` at all, exactly as the drafts already on the volume were.
+  const room = store.rooms.get(roomId);
+  for (const seat of room.seats.values()) delete seat.who;
+  await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: created.data.hostToken, action: { type: "finish" } });
+  await settle();
+
+  const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
+  const ana = summary.who.find((seat) => seat.manager === "Ana");
+  assert.ok(ana, "the room-join line names the chair the record forgot");
+  assert.equal(ana.place, "Seattle, Washington, US");
+  assert.equal(ana.browser, "Chrome");
+  assert.equal(ana.host, true);
+  assert.ok(summary.who.some((seat) => seat.manager === "Bo"));
+  assert.equal(summary.who.length, 2, "the room's own creation line is not a third person");
+});

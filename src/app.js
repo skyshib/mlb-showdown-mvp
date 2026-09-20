@@ -4358,6 +4358,9 @@ function startBatchRun(runs, options = {}) {
     if (!options.instant) {
       track("sim", {
         roomId: state.online?.roomId ?? null,
+        // Which draft these teams came out of, so the book can say how the
+        // season went. A room is named by its id; a local board by its key.
+        draftKey: state.online ? null : state.draftKey,
         runs: count,
         humans: state.draft.managers.filter((manager) => !manager.cpu).map((manager) => manager.name),
         standings: state.batch.summary.teams.map((row) => ({ team: row.team, winPct: Math.round(row.winPct * 1000) / 1000 }))
