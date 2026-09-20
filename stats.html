@@ -173,6 +173,7 @@
   .draft-result { font-size: 13px; margin-top: 2px; }
   .draft-result b { font-weight: 600; }
   .draft-open { font-size: 12px; margin-top: 8px; }
+  .session-meta a { color: var(--series-1); }
   .standings { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12px; max-width: 320px; }
   .standings li { display: flex; justify-content: space-between; gap: 12px; color: var(--text-secondary); }
   .standings li:first-child { color: var(--text-primary); font-weight: 600; }
@@ -659,18 +660,26 @@ async function loadDrafts() {
 function draftRow(draft) {
   const humans = draft.managers.filter((manager) => !manager.cpu);
   const places = [...new Set(draft.who.map(placeOf).filter((place) => place !== "unknown place"))];
+  // A room can be opened from the row itself; a draft played on one screen
+  // lives in that browser and has nowhere to send anybody.
+  const room = draft.source === "online" && draft.roomId
+    ? `<a href="/index.html?room=${encodeURIComponent(draft.roomId)}" target="_blank" rel="noopener"
+         data-room>open room ${esc(draft.roomId)}</a>`
+    : esc("one screen");
+  // Escaped part by part, in order, because one of them is a link rather than
+  // text and the line can no longer be escaped wholesale on the way out.
   const meta = [
-    draft.draftType === "auction"
+    esc(draft.draftType === "auction"
       ? `auction${draft.nomination === "random" ? ", random nomination" : ""}`
-      : "snake draft",
-    draft.universe ?? "",
-    draft.budget ? `${money(draft.budget)} each` : "",
-    `${draft.managers.length} managers`,
-    `${draft.rosterSize}-man rosters`,
-    `${draft.startingPitchers} SP`,
-    draft.source === "online" ? `room ${draft.roomId}` : "one screen",
-    ...places,
-    `seed ${draft.seed}`
+      : "snake draft"),
+    esc(draft.universe ?? ""),
+    draft.budget ? esc(`${money(draft.budget)} each`) : "",
+    esc(`${draft.managers.length} managers`),
+    esc(`${draft.rosterSize}-man rosters`),
+    esc(`${draft.startingPitchers} SP`),
+    room,
+    ...places.map(esc),
+    esc(`seed ${draft.seed}`)
   ].filter(Boolean);
   return `<details class="draft" data-draft="${esc(draft.id)}">
     <summary>
@@ -678,7 +687,7 @@ function draftRow(draft) {
         <span class="session-when">${when(Date.parse(draft.at))}</span>
         <span class="session-who">${esc(humans.map((manager) => manager.name).join(", ")) || "computers only"}</span>
       </div>
-      <div class="session-meta">${meta.map((part) => `<span>${esc(part)}</span>`).join("")}</div>
+      <div class="session-meta">${meta.map((part) => `<span>${part}</span>`).join("")}</div>
       ${wonLine(draft)}
     </summary>
     <div class="draft-body"><p class="empty">Opening…</p></div>
@@ -726,6 +735,11 @@ function openLink(draft) {
 // so it is caught on the way down. The same handler serves both panels.
 function wireDraftDetails(container) {
   container.addEventListener("toggle", openDraftDetails, true);
+  // A click on the room link is a click on the summary too, which would open
+  // the draft on the way out. It opens the room; that is all it does.
+  container.addEventListener("click", (event) => {
+    if (event.target.closest("[data-room]")) event.stopPropagation();
+  });
 }
 
 async function openDraftDetails(event) {
