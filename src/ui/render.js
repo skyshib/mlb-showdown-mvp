@@ -254,13 +254,17 @@ export function renderDraftHistoryTable(picks, options = {}) {
   const wparByPlayerId = options.wparByPlayerId ?? null;
   const showWpar = Boolean(wparByPlayerId);
   const formatWpar = (value) => (value >= 0 ? "+" : "") + value.toFixed(1);
+  // WPAA reads the same value against the average at the pick's position rather
+  // than against the replacement floor, and rides along on the same sims.
+  const wpaaByPlayerId = options.wpaaByPlayerId ?? null;
+  const showWpaa = Boolean(wpaaByPlayerId);
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
   // The post-draft recap also hands over each lot's bids, keyed by player id,
   // to float over the price.
   const bidTipsByPlayerId = options.bidTipsByPlayerId ?? null;
-  const requestedSort = ["pick", "paid", "points", "wpar", "wpa"].includes(options.sort)
+  const requestedSort = ["pick", "paid", "points", "wpar", "wpaa", "wpa"].includes(options.sort)
     ? options.sort
     : options.paidSortDirection
       ? "paid"
@@ -270,6 +274,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
     ...(auction ? ["paid"] : []),
     ...(!hidePoints ? ["points"] : []),
     ...(showWpar ? ["wpar"] : []),
+    ...(showWpaa ? ["wpaa"] : []),
     ...(showWpa ? ["wpa"] : [])
   ]);
   const requestedSortAllowed = allowedSorts.has(requestedSort);
@@ -288,8 +293,9 @@ export function renderDraftHistoryTable(picks, options = {}) {
   const sortValue = (pick) => {
     if (sort === "paid") return Number.isFinite(pick.price) ? pick.price : null;
     if (sort === "points") return Number.isFinite(pick.player.points) ? pick.player.points : null;
-    if (sort === "wpa" || sort === "wpar") {
-      const value = (sort === "wpa" ? wpaByPlayerId : wparByPlayerId)?.get(pick.player.id);
+    if (sort === "wpa" || sort === "wpar" || sort === "wpaa") {
+      const maps = { wpa: wpaByPlayerId, wpar: wparByPlayerId, wpaa: wpaaByPlayerId };
+      const value = maps[sort]?.get(pick.player.id);
       return Number.isFinite(value) ? value : null;
     }
     return pick.pickNumber;
@@ -324,6 +330,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         <td class="num">${isCoach(player) ? "&mdash;" : playerPrimary(player)}</td>
         ${hidePoints ? "" : `<td class="num">${player.points}</td>`}
         ${showWpar ? `<td class="num">${Number.isFinite(wparByPlayerId.get(player.id)) ? formatWpar(wparByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
+        ${showWpaa ? `<td class="num">${Number.isFinite(wpaaByPlayerId.get(player.id)) ? formatWpar(wpaaByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
         ${showWpa ? `<td class="num">${Number.isFinite(wpaByPlayerId.get(player.id)) ? formatWpa(wpaByPlayerId.get(player.id)) : "&mdash;"}</td>` : ""}
         ${renderOutcomeCells(player, HISTORY_OUTCOMES)}
       </tr>`)
@@ -341,6 +348,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         <th class="num">OB/CT</th>
         ${hidePoints ? "" : sortHeader("points", "Pts")}
         ${showWpar ? sortHeader("wpar", "WPAR/162", "Win probability added over the room's replacement card per 162 games in the simulation") : ""}
+        ${showWpaa ? sortHeader("wpaa", "WPAA/162", "WPAR less the average WPAR of the league's rostered players at this position, per 162 games") : ""}
         ${showWpa ? sortHeader("wpa", "WPA/162", "Win probability added per 162 games in the simulation") : ""}
         ${HISTORY_OUTCOMES.map((outcome) => `<th class="num${outcomeBoundaryClass(outcome)}">${outcome}</th>`).join("")}
       </tr>

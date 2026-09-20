@@ -1,5 +1,17 @@
-export const ALL_STAR_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "SP", "RP"];
+// Left and right field are one position everywhere analysis looks at a card: an
+// LF/RF card plays either corner at the same glove, so the two corners pool into
+// a single field of candidates with a single positional average.
+export const CORNER_OUTFIELD_POSITION = "LF/RF";
+export const ALL_STAR_POSITIONS = ["C", "1B", "2B", "3B", "SS", CORNER_OUTFIELD_POSITION, "CF", "DH", "SP", "RP"];
 const INLINE_ALL_STAR_DEPTH_LIMIT = 5;
+
+// The position a card is analysed at: the lineup slot it filled, with left and
+// right lumped. Mirrors replacementSlotFor in attribution.js, which sends both
+// corners to the one LF/RF replacement card.
+export function analysisPosition(position) {
+  if (position === "LF" || position === "RF" || position === CORNER_OUTFIELD_POSITION) return CORNER_OUTFIELD_POSITION;
+  return position;
+}
 
 // Ranks each position on WPA over replacement (WPAR) when the sim measured it,
 // and on WPA for sims that predate it. Every candidate carries both.
@@ -12,7 +24,7 @@ export function buildAllStarDepthChart(teams, summary) {
 
   for (const team of teams ?? []) {
     for (const player of team.lineup ?? []) {
-      const position = player.assignedPosition ?? player.defensivePosition;
+      const position = analysisPosition(player.assignedPosition ?? player.defensivePosition);
       if (!candidates.has(position)) continue;
       addCandidate(candidates.get(position), player, team.name, hitterLines);
     }
@@ -39,6 +51,64 @@ export function buildAllStarDepthChart(teams, summary) {
   });
 }
 
+// WPAA: WPAR read against the league's average WPAR at the same position, so a
+// catcher is measured against catchers rather than against the room's whole
+// field. The average is taken over the cards the rooms rostered at that position
+// — every club's lineup regular there, every rostered starter, every rostered
+// reliever — so a bench card is held to the same yardstick as the regular he
+// sits behind without dragging that yardstick down.
+//
+// `value` picks which WPAR is averaged; the pitchers' Not-tired split hands over
+// its own so the split's WPAA is measured against the split's average.
+export function buildWpaaIndex(teams, summary, { value = (line) => line.warPer162?.total } = {}) {
+  if (!summary?.attribution) return null;
+  const hitterLines = statLineIndex(summary.hitters ?? []);
+  const pitcherLines = statLineIndex(summary.pitchers ?? []);
+  const positionById = new Map();
+  const totals = new Map();
+
+  const register = (player, team, lines, position) => {
+    if (!player?.id || !position) return;
+    positionById.set(player.id, position);
+    const line = findLine(lines, team, player);
+    const wpar = Number(value(line ?? {}));
+    if (!Number.isFinite(wpar)) return;
+    const bucket = totals.get(position) ?? { sum: 0, count: 0 };
+    bucket.sum += wpar;
+    bucket.count += 1;
+    totals.set(position, bucket);
+  };
+
+  for (const team of teams ?? []) {
+    for (const player of team.lineup ?? []) {
+      register(player, team.name, hitterLines, analysisPosition(player.assignedPosition ?? player.defensivePosition ?? player.position));
+    }
+    for (const player of team.starters ?? []) register(player, team.name, pitcherLines, "SP");
+    for (const player of team.bullpen ?? []) register(player, team.name, pitcherLines, "RP");
+  }
+
+  const averages = new Map([...totals].map(([position, bucket]) => [position, bucket.sum / bucket.count]));
+  // A card that never took a roster spot — a bench bat that got into games, an
+  // arm the auto-manager reached for — is read at the position printed on it.
+  const positionOf = (line) => positionById.get(line?.id)
+    ?? analysisPosition(line?.role ?? line?.fieldPosition ?? line?.position);
+  const wpaaByPlayerId = new Map();
+  for (const line of [...(summary.hitters ?? []), ...(summary.pitchers ?? [])]) {
+    if (line?.id == null) continue;
+    const wpar = Number(value(line));
+    const average = averages.get(positionOf(line));
+    if (!Number.isFinite(wpar) || !Number.isFinite(average)) continue;
+    wpaaByPlayerId.set(line.id, wpar - average);
+  }
+
+  return {
+    averages,
+    positionOf,
+    wpaaByPlayerId,
+    wpaaFor: (line) => (line?.id == null ? null : wpaaByPlayerId.get(line.id) ?? null)
+  };
+}
+
 export function allStarComparisonCandidates(depth) {
   if (!Array.isArray(depth)) return [];
   return depth.length <= INLINE_ALL_STAR_DEPTH_LIMIT
@@ -59,9 +129,13 @@ function statLineIndex(lines) {
   return index;
 }
 
+function findLine(lines, team, player) {
+  return lines.get(`${team}\u0000${player.id}`) ?? lines.get(`${team}\u0000${player.name}`) ?? null;
+}
+
 function addCandidate(bucket, player, team, lines) {
   if (!bucket || !player) return;
-  const line = lines.get(`${team}\u0000${player.id}`) ?? lines.get(`${team}\u0000${player.name}`);
+  const line = findLine(lines, team, player);
   if (!line) return;
   bucket.push({
     id: player.id,
