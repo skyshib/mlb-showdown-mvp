@@ -450,12 +450,12 @@ function col(x, yTop, w, h, fill) {
 // now filed under the id itself. A bare city is put back together with the zone
 // it came from, so the old rows and the new ones are one row rather than two
 // saying the same thing in different words.
-const ZONE_PREFIXES = ["America", "Europe", "Asia", "Australia", "Africa", "Pacific", "Atlantic", "Indian"];
-
 function zoneForCity(city) {
   const name = String(city ?? "").trim().replace(/ /g, "_");
   if (!name || name.includes("/")) return "";
-  for (const prefix of ZONE_PREFIXES) {
+  // Inline rather than a module const: this runs during the first render, which
+  // happens above where a `const` at this point in the file is initialised.
+  for (const prefix of ["America", "Europe", "Asia", "Australia", "Africa", "Pacific", "Atlantic", "Indian"]) {
     const id = `${prefix}/${name}`;
     try {
       new Intl.DateTimeFormat("en-US", { timeZone: id });
