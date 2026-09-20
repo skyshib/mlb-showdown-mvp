@@ -362,16 +362,23 @@ function noteDevicePlace(devicePlaces, line, zonesByVisitor) {
 // resolve to nothing, but the same phone on the home wifi resolved to a city —
 // so the device is the thing that has a location, not the address.
 //
-// Only a place seen while the device kept the SAME clock is borrowed. That is
+// A place is disqualified only by a clock that is known and DIFFERENT, which is
 // what keeps a laptop's Vancouver-relay evening from being pinned onto its
-// Toronto ones: a place from another time zone is another trip, not this one.
-// Most-seen wins, with the most recent breaking a tie.
+// Toronto ones. A place seen on a visit that never said hello has no clock
+// recorded against it and contradicts nothing — and that is the common case,
+// since the sighting that places a phone is often a single page load. A place
+// whose clock matches outright is still preferred to one that is merely silent;
+// after that, most-seen wins and the most recent breaks a tie.
 function placeFromDevice(devicePlaces, seat) {
   const seen = devicePlaces.get(seat.device);
   if (!seen?.length) return null;
-  const matching = seat.tz ? seen.filter((row) => row.tz === seat.tz) : seen;
-  const best = [...(matching.length ? matching : [])]
-    .sort((a, b) => b.count - a.count || String(b.at).localeCompare(String(a.at)))[0];
+  const usable = seen.filter((row) => !row.tz || !seat.tz || row.tz === seat.tz);
+  const best = usable
+    .map((row) => ({ ...row, sameClock: Boolean(row.tz && seat.tz && row.tz === seat.tz) }))
+    .sort((a, b) =>
+      Number(b.sameClock) - Number(a.sameClock)
+      || b.count - a.count
+      || String(b.at).localeCompare(String(a.at)))[0];
   return best ? { place: best.place, org: best.org, fromDevice: true } : null;
 }
 

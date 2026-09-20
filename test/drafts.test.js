@@ -434,3 +434,28 @@ test("a place from another time zone is another trip, not this one", async (t) =
   assert.equal(seat.place, "", "Seattle belonged to the trip, not to this evening");
   assert.equal(seat.tz, "America/Toronto", "and the clock still places them");
 });
+
+test("a sighting with no hello still places the device", async (t) => {
+  const { base, store } = await startServer(t);
+  const device = "5eab0a7d5eab0a7d";
+  const chrome = { cookie: `sd_device=${device}`, "user-agent": CHROME };
+
+  // One page load from the home wifi and nothing else — no hello, so no clock
+  // is recorded against the city. This is how a phone usually gets placed.
+  await fetch(`${base}/index.html`, { headers: { ...chrome, "x-forwarded-for": "198.51.100.30" } });
+  await settle(store);
+
+  // The draft comes later, from a carrier address nobody can place.
+  const carrier = { ...chrome, "x-forwarded-for": "203.0.113.77" };
+  await fetch(`${base}/index.html`, { headers: carrier });
+  await api(base, "POST", "/api/events",
+    { kind: "hello", page: "/index.html", data: { tz: "America/Los_Angeles" } }, carrier);
+  const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
+  await api(base, "POST", "/api/drafts", { key: "silentkey", ...record }, carrier);
+  await settle(store);
+
+  const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
+  const [seat] = summary.who;
+  assert.equal(seat.place, "Seattle, Washington, US", "a silent clock contradicts nothing");
+  assert.equal(seat.fromDevice, true);
+});
