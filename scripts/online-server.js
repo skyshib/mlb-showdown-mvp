@@ -379,15 +379,25 @@ function roomRecord(room) {
 function fileRoomDraft(store, room) {
   if (!room.draft?.complete) return;
   if (room.filedPicks === room.draft.pickNumber) return;
+  const id = draftId({ roomId: room.id });
   room.filedPicks = room.draft.pickNumber;
+  // A record of this room at exactly this pick is already in the book, so the
+  // book already knows everything this filing would tell it. Leaving it alone
+  // keeps the day it was first written: rewriting it on every restart walked
+  // the date of a long-finished room forward to whenever the machine last
+  // booted, for any room whose last action carried no timestamp.
+  const held = readDraft(store, id);
+  if (held?.complete && held.picks === room.draft.pickNumber) return;
   // Stamped with the last action rather than with now, so a room finished
   // months ago and filed on a restart keeps the night it actually happened.
+  // A log with no timestamp on its last action falls back to the night the
+  // room opened, which is at least a night the draft was alive.
   const endedAt = Number(room.actions.at(-1)?.action?.at);
   const record = draftRecord(room.draft, {
     source: "online",
     roomId: room.id,
     universe: room.universe ?? null,
-    at: new Date(Number.isFinite(endedAt) ? endedAt : Date.now()).toISOString(),
+    at: new Date(Number.isFinite(endedAt) ? endedAt : room.createdAt).toISOString(),
     startedAt: new Date(room.createdAt).toISOString(),
     who: [...room.seats.values()]
       .filter((seat) => seat.who)
@@ -397,7 +407,7 @@ function fileRoomDraft(store, room) {
         ...seat.who
       }))
   });
-  saveDraft(store, draftId({ roomId: room.id }), record);
+  saveDraft(store, id, record);
 }
 
 // ---- Hall of fame -----------------------------------------------------------

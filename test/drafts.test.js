@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
@@ -258,4 +258,31 @@ test("a room finished before the book existed is filed when the server comes up"
 
   const files = await readdir(join(dataDir, "drafts"));
   assert.deepEqual(files, [`room-${roomId}.json`]);
+});
+
+test("a restart leaves a room's filed draft alone, date and all", async (t) => {
+  const { base, dataDir } = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "kept-room", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
+  });
+  const roomId = created.data.roomId;
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken });
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+  await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: created.data.hostToken, action: { type: "finish" } });
+  await settle();
+
+  // The record as it would look months later, written on the night it happened.
+  const path = join(dataDir, "drafts", `room-${roomId}.json`);
+  const filed = { ...JSON.parse(await readFile(path, "utf8")), at: "2026-01-02T03:04:05.000Z" };
+  await writeFile(path, JSON.stringify(filed));
+
+  const { server } = createOnlineServer({ dataDir });
+  server.listen(0);
+  await once(server, "listening");
+  t.after(() => server.close());
+  await settle();
+
+  const reread = JSON.parse(await readFile(path, "utf8"));
+  assert.equal(reread.at, "2026-01-02T03:04:05.000Z", "booting does not restamp a draft already in the book");
+  assert.deepEqual(reread, filed);
 });
