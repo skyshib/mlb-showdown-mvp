@@ -757,23 +757,54 @@ async function openDraftDetails(event) {
 //
 // So: the clock leads, the address corroborates or contradicts it in its own
 // words, and the edge fills in when both are silent.
+// The best answer available about where somebody was, in the order the answers
+// deserve to be believed.
+//
+// A city from this session's own address leads when it agrees with the clock —
+// it is the most specific thing known. A city inherited from the same device's
+// other evenings comes next, said out loud as inherited. The clock is the
+// backstop, because it is never wrong and never precise. The edge is the floor.
 function placeOf(seat) {
   const zone = zoneLabel(seat.tz) || (seat.zone ? `${seat.zone} time` : "");
+  if (seat.place && !seat.proxy && agreesWithClock(seat)) return seat.place;
+  if (seat.fromDevice && seat.place) return `${seat.place} (this device, other sessions)`;
   if (zone) return zone;
   if (seat.place) return seat.place;
   if (seat.edge && EDGES[seat.edge]) return `near the ${EDGES[seat.edge]} edge`;
   return "unknown place";
 }
 
+// Whether a city and a clock can both be true at once. Without a city-to-zone
+// table the honest test is the offset: a place in the wrong half of the world
+// for this clock is the exit node talking, not the player.
+function agreesWithClock(seat) {
+  if (!seat.tz) return true;
+  const country = seat.place.split(",").pop().trim();
+  const zoneRegion = seat.tz.split("/")[0];
+  // The cheap, reliable half of the check: a North American clock and a
+  // European address disagree, whatever the city.
+  const continents = {
+    "America": ["US", "CA", "MX", "BR", "AR", "CL", "CO", "PE", "United States", "Canada"],
+    "Europe": ["GB", "FR", "DE", "ES", "IT", "NL", "SE", "NO", "DK", "PL", "IE", "PT", "CH", "AT", "BE", "FI"],
+    "Asia": ["JP", "CN", "IN", "KR", "SG", "HK", "TW", "TH", "VN", "PH", "ID", "IL", "AE"],
+    "Australia": ["AU"],
+    "Pacific": ["NZ", "AU", "US"],
+    "Africa": ["ZA", "NG", "KE", "EG", "MA"]
+  };
+  const expected = continents[zoneRegion];
+  if (!expected) return true;
+  return expected.includes(country);
+}
+
 // The address's own answer, printed only when it adds something the clock did
 // not already say.
 function addressNote(seat) {
   if (!seat.place) return "";
+  // Already the headline; no need to say it twice.
+  if (placeOf(seat).startsWith(seat.place)) return "";
   // A proxy exit is worth naming even when it agrees with the clock: the
   // agreement is a coincidence, not a confirmation.
   const via = seat.proxy ? " (a proxy or VPN exit)" : "";
-  if (seat.zone && seat.place.startsWith(seat.zone) && !via) return "";
-  if (!seat.zone && !via) return "";
   return `address says ${seat.place}${via}`;
 }
 

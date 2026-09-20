@@ -377,3 +377,60 @@ test("a seat's own clock places it when the address will not", async (t) => {
   assert.equal(seat.tz, "America/Los_Angeles");
   assert.deepEqual(seat.langs, ["en-US", "en"]);
 });
+
+test("a device carries the city its other sessions found", async (t) => {
+  const { base, store } = await startServer(t);
+  const device = "cafef00dcafef00d";
+  const chrome = { cookie: `sd_device=${device}`, "user-agent": CHROME };
+  const hello = {
+    kind: "hello", page: "/index.html",
+    data: { tz: "America/Los_Angeles", languages: ["en-US"], screen: "430x932" }
+  };
+
+  // Evening one, on the home wifi: the address resolves to a city.
+  await fetch(`${base}/index.html`, { headers: { ...chrome, "x-forwarded-for": "198.51.100.30" } });
+  await api(base, "POST", "/api/events", hello, { ...chrome, "x-forwarded-for": "198.51.100.30" });
+  await settle(store);
+
+  // Evening two, out on a carrier: a different address, and one the provider
+  // has nothing for. This is the session that files the draft.
+  const carrier = { ...chrome, "x-forwarded-for": "203.0.113.55" };
+  await fetch(`${base}/index.html`, { headers: carrier });
+  await api(base, "POST", "/api/events", hello, carrier);
+  const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
+  await api(base, "POST", "/api/drafts", { key: "carrierkey", ...record }, carrier);
+  await settle(store);
+
+  const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
+  const [seat] = summary.who;
+  assert.equal(seat.place, "Seattle, Washington, US", "the phone's own evening places it");
+  assert.equal(seat.fromDevice, true, "and it is marked as borrowed, not claimed");
+  assert.equal(seat.org, "Comcast Cable");
+});
+
+test("a place from another time zone is another trip, not this one", async (t) => {
+  const { base, store } = await startServer(t);
+  const device = "0ddba11c0ffee000";
+  const chrome = { cookie: `sd_device=${device}`, "user-agent": CHROME };
+
+  // A trip: the address resolves, and the laptop's clock is set to match.
+  await fetch(`${base}/index.html`, { headers: { ...chrome, "x-forwarded-for": "198.51.100.30" } });
+  await api(base, "POST", "/api/events",
+    { kind: "hello", page: "/index.html", data: { tz: "America/Los_Angeles" } },
+    { ...chrome, "x-forwarded-for": "198.51.100.30" });
+  await settle(store);
+
+  // Home again, on a different clock and an address nobody can place.
+  const home = { ...chrome, "x-forwarded-for": "203.0.113.90" };
+  await fetch(`${base}/index.html`, { headers: home });
+  await api(base, "POST", "/api/events",
+    { kind: "hello", page: "/index.html", data: { tz: "America/Toronto" } }, home);
+  const record = draftRecord(finishedLocalDraft(), { source: "local", universe: "fictional" });
+  await api(base, "POST", "/api/drafts", { key: "homekey", ...record }, home);
+  await settle(store);
+
+  const [summary] = (await api(base, "GET", "/api/drafts?token=sesame")).data.drafts;
+  const [seat] = summary.who;
+  assert.equal(seat.place, "", "Seattle belonged to the trip, not to this evening");
+  assert.equal(seat.tz, "America/Toronto", "and the clock still places them");
+});

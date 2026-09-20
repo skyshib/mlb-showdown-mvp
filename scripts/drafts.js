@@ -304,14 +304,26 @@ function visitIndex(store, now = Date.now()) {
   // What each device last said about itself, so a seat can carry its own clock
   // and language rather than only what its address was taken for.
   const hellos = new Map();
+  // Every place a device has ever been placed at, and the clock it was keeping
+  // at the time. A phone changes address all day and most of those addresses
+  // resolve to nothing; the evening it was on the home wifi resolved to a city,
+  // and that is a fact about the phone, not about that one address.
+  const devicePlaces = new Map();
   // 90 days is the whole visit log; a draft older than that keeps whatever it
   // was filed with and gains nothing here, which is the honest answer.
   // Newest first, so the first hello seen for a device is its latest.
+  const zonesByVisitor = new Map();
   for (const line of readVisits(store, { days: 90 })) {
     if (line.kind === "hello" && line.device && !hellos.has(line.device)) {
       const facts = helloFacts(line);
       if (facts) hellos.set(line.device, facts);
     }
+    // The clock an address was seen keeping, so a place borrowed from another
+    // session can be checked against the clock of the session borrowing it.
+    if (line.kind === "hello" && line.visitor && line.data?.tz && !zonesByVisitor.has(line.visitor)) {
+      zonesByVisitor.set(line.visitor, String(line.data.tz));
+    }
+    if (line.device && line.place) noteDevicePlace(devicePlaces, line, zonesByVisitor);
     for (const id of draftIdsForLine(line)) {
       const found = entry(id);
       if (line.kind === "sim") {
@@ -328,8 +340,39 @@ function visitIndex(store, now = Date.now()) {
   for (const found of byDraft.values()) {
     for (const seat of found.seats) Object.assign(seat, hellos.get(seat.device) ?? {});
   }
-  log.index = { stamp, byDraft, hellos };
+  log.index = { stamp, byDraft, hellos, devicePlaces };
   return byDraft;
+}
+
+function noteDevicePlace(devicePlaces, line, zonesByVisitor) {
+  const seen = devicePlaces.get(line.device) ?? [];
+  const tz = zonesByVisitor.get(line.visitor) ?? "";
+  const held = seen.find((row) => row.place === line.place && row.tz === tz);
+  if (held) {
+    held.count += 1;
+    held.at = held.at > line.t ? held.at : line.t;
+  } else {
+    seen.push({ place: line.place, org: line.org ?? "", tz, count: 1, at: line.t });
+  }
+  devicePlaces.set(line.device, seen);
+}
+
+// The city a device is known to sit in, for a session whose own address named
+// none. A phone on a carrier is a different address every hour and most of them
+// resolve to nothing, but the same phone on the home wifi resolved to a city —
+// so the device is the thing that has a location, not the address.
+//
+// Only a place seen while the device kept the SAME clock is borrowed. That is
+// what keeps a laptop's Vancouver-relay evening from being pinned onto its
+// Toronto ones: a place from another time zone is another trip, not this one.
+// Most-seen wins, with the most recent breaking a tie.
+function placeFromDevice(devicePlaces, seat) {
+  const seen = devicePlaces.get(seat.device);
+  if (!seen?.length) return null;
+  const matching = seat.tz ? seen.filter((row) => row.tz === seat.tz) : seen;
+  const best = [...(matching.length ? matching : [])]
+    .sort((a, b) => b.count - a.count || String(b.at).localeCompare(String(a.at)))[0];
+  return best ? { place: best.place, org: best.org, fromDevice: true } : null;
 }
 
 // One line per person. A seat filed with the draft is the better record — it
@@ -359,11 +402,16 @@ function mergeSeats(filed, logged) {
 function withSessions(store, row, index) {
   const found = index.get(row.id) ?? { seats: [], sims: [] };
   const hellos = store.drafts?.index?.hellos ?? new Map();
+  const devicePlaces = store.drafts?.index?.devicePlaces ?? new Map();
   const filed = (row.who ?? []).map((seat) => ({ ...(hellos.get(seat.device) ?? {}), ...seat }));
   const sims = [...found.sims].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  // A seat whose own address named nowhere borrows what the rest of its device's
+  // evenings know.
+  const who = mergeSeats(filed, found.seats).map((seat) =>
+    seat.place ? seat : { ...seat, ...(placeFromDevice(devicePlaces, seat) ?? {}) });
   return {
     ...row,
-    who: mergeSeats(filed, found.seats),
+    who,
     // Newest first; the one at the front is the season the book reports.
     sims: sims.slice(0, 5),
     winner: sims[0]?.standings?.[0] ?? null
