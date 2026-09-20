@@ -19,7 +19,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { createGeoQueue, isPrivateIp, zoneCity } from "./geo.js";
+import { createGeoQueue, ipIdentity, isPrivateIp, zoneCity } from "./geo.js";
 
 const TRAFFIC_FILE = "traffic.json";
 // The place a visitor's IP resolved to, remembered against the same hash the day
@@ -274,10 +274,16 @@ export function clientIp(request) {
 
 export function visitorId(salt, ip) {
   if (!ip) return "";
+  // Hashed off the household rather than the exact address: an IPv6 client
+  // rewrites the low half of its address every day or so under privacy
+  // extensions, and hashing that made one returning player read as a parade of
+  // strangers — each one a fresh geo lookup for the same living room. The /64
+  // is the IPv6 answer to the one IPv4 address a whole house shares.
+  //
   // Truncated because the whole digest is not needed to tell two people apart at
   // this scale, and a shorter one is a weaker handle on somebody if the file ever
   // leaves the volume.
-  return createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 16);
+  return createHash("sha256").update(`${salt}:${ipIdentity(ip)}`).digest("hex").slice(0, 16);
 }
 
 function referrerHost(referer) {

@@ -14,6 +14,7 @@ import { flushTraffic, loadTrafficFile, recordView, trafficSummary } from "./tra
 import { describeRequest, deviceFor, flushVisits, loadVisitLog, logClientEvent, logPageView, logServerEvent, readVisits } from "./visits.js";
 import { allowFiling, draftId, flushDrafts, listDrafts, loadDraftArchive, readDraft, sanitizeDraftRecord, saveDraft } from "./drafts.js";
 import { draftRecord } from "../src/rules/draftRecord.js";
+import { geoFailures } from "./geo.js";
 import {
   applyDraftAction,
   auctionReviewComplete,
@@ -1026,6 +1027,10 @@ async function handleApi(store, request, response, url) {
     }
     const params = url.searchParams;
     return sendJson(response, 200, {
+      // How the geo providers are doing, for the reader of a log full of
+      // placeless visitors: the answer is either "nobody is out there" or
+      // "the provider is refusing us", and those look identical without this.
+      geo: geoFailures(),
       visits: readVisits(store, {
         days: params.get("days") ?? 3,
         kind: params.get("kind") ?? "",

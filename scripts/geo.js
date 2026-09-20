@@ -62,10 +62,21 @@ export function zoneCity(zone) {
   return text.split("/").pop().replace(/_/g, " ");
 }
 
+// Addresses nobody outside this machine could be sitting at, which are the ones
+// never sent to a provider.
+//
+// This used to answer "private" for every IPv6 address on earth: anything that
+// did not parse as four dotted numbers fell through to true. Most of a modern
+// audience arrives over IPv6 — it is the default on the mobile carriers and on
+// plenty of home fibre — so their lookup was never even attempted, and they
+// showed up in the log as people from nowhere. The providers place an IPv6
+// address perfectly well when asked.
 export function isPrivateIp(ip) {
   if (!ip) return true;
-  const address = ip.replace(/^::ffff:/, "");
-  if (address === "::1" || address.startsWith("fc") || address.startsWith("fd")) return true;
+  // A bracketed literal, and the ::ffff: form an IPv4 client arrives in when the
+  // socket is dual-stack, both reduce to the address itself.
+  const address = String(ip).trim().replace(/^\[|\]$/g, "").replace(/^::ffff:/i, "");
+  if (address.includes(":")) return isPrivateIpv6(address);
   const parts = address.split(".").map(Number);
   if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
   const [a, b] = parts;
@@ -73,6 +84,34 @@ export function isPrivateIp(ip) {
     || (a === 192 && b === 168)
     || (a === 172 && b >= 16 && b <= 31)
     || (a === 169 && b === 254);
+}
+
+// ::1 loopback, :: unspecified, fc00::/7 unique-local, fe80::/10 link-local.
+// Everything else routes, so everything else is somebody.
+function isPrivateIpv6(address) {
+  const lower = address.toLowerCase();
+  if (lower === "::1" || lower === "::") return true;
+  const head = lower.split(":")[0];
+  if (/^f[cd]/.test(head)) return true;
+  if (/^fe[89ab]/.test(head)) return true;
+  return false;
+}
+
+// The part of an IPv6 address that identifies the household rather than the
+// moment. Privacy extensions rewrite the last 64 bits every day or so, which
+// made one phone look like a stream of strangers and asked the provider about
+// each of them; the /64 is the stable half, and it is the IPv6 equivalent of
+// the single IPv4 address a whole house shares behind NAT.
+export function ipIdentity(ip) {
+  const address = String(ip ?? "").trim().replace(/^\[|\]$/g, "").replace(/^::ffff:/i, "");
+  if (!address.includes(":")) return address;
+  const groups = address.split("::");
+  // A compressed address (one "::") is only truncatable when the part before it
+  // already holds the four groups we want; otherwise the prefix is short enough
+  // to keep whole.
+  const head = groups[0].split(":").filter(Boolean);
+  if (head.length >= 4) return `${head.slice(0, 4).join(":")}::/64`;
+  return address.includes("::") ? address : `${address.split(":").slice(0, 4).join(":")}::/64`;
 }
 
 // "San Jose, California, US" — city first, because that is the thing being asked;
@@ -147,15 +186,63 @@ export function providerChain(token = process.env.IPINFO_TOKEN) {
 // again the next time its owner turns up.
 export async function lookupPlace(ip, chain = providerChain()) {
   if (isPrivateIp(ip)) return { place: "", org: "", proxy: false };
+  const refused = [];
   for (const provider of chain) {
+    const name = provider.name || "provider";
     try {
       const found = await provider(ip);
-      if (found?.place) return { place: found.place, org: found.org ?? "", proxy: Boolean(found.proxy) };
-    } catch {
-      // Try the next one.
+      if (found?.place) {
+        note(name, "ok");
+        return { place: found.place, org: found.org ?? "", proxy: Boolean(found.proxy) };
+      }
+      note(name, "empty");
+      refused.push(`${name}: no place`);
+    } catch (error) {
+      note(name, error.message);
+      refused.push(`${name}: ${error.message}`);
     }
   }
+  // Every provider refusing is worth saying out loud. Swallowed, it looks like
+  // a site whose visitors have no location — which is exactly how this went
+  // unnoticed until somebody read the log and asked where everybody was. The
+  // address is not logged; only what the providers said about it.
+  noteGeoFailure(refused.join("; "));
   return { place: "", org: "", proxy: false };
+}
+
+// The last handful of refusals, and a count, kept in memory for whoever asks.
+// Printed once a minute at most: a provider that is down is down for every
+// visitor, and one line a minute says so without burying the log.
+const failures = { count: 0, last: "", at: 0 };
+const FAILURE_LOG_MS = 60_000;
+
+// A tally per provider — answered, came up empty, or refused us, and with what.
+// A provider that works from a laptop and not from the machine the site runs on
+// is a thing that has happened here, and it is invisible without this.
+const health = new Map();
+
+function note(provider, outcome) {
+  const row = health.get(provider) ?? { ok: 0, empty: 0, failed: 0, last: "" };
+  if (outcome === "ok") row.ok += 1;
+  else if (outcome === "empty") row.empty += 1;
+  else {
+    row.failed += 1;
+    row.last = String(outcome).slice(0, 120);
+  }
+  health.set(provider, row);
+}
+
+function noteGeoFailure(reason) {
+  failures.count += 1;
+  failures.last = reason;
+  const now = Date.now();
+  if (now - failures.at < FAILURE_LOG_MS) return;
+  failures.at = now;
+  console.warn(`Geo lookup failed (${failures.count} so far) — ${reason}`);
+}
+
+export function geoFailures() {
+  return { ...failures, providers: Object.fromEntries(health) };
 }
 
 // One at a time, spaced out, and dropped on the floor if the queue backs up —
