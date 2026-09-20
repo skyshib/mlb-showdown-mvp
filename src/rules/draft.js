@@ -2062,7 +2062,10 @@ function neediestGap(roster, options = {}) {
   return null;
 }
 
-function bestAutopickTarget(draft, manager) {
+// Which card the computer would take, without taking it. An online room asks
+// this so it can write the CARD into its log rather than the instruction to
+// work the card out again — see pinnedSnakeAction in the room server.
+export function bestAutopickTarget(draft, manager) {
   const rosterNeeds = getRosterNeeds(manager.roster, draft);
   // Read once for the whole board rather than once per candidate: it is the
   // same roster either way, and the board can run to hundreds of cards.

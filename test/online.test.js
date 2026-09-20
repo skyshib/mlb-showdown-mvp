@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
 import { generatePlayerPool } from "../src/data/playerGeneration.js";
 import { buildDraftPool, deckFromIds, setUniverse, universePool } from "../src/data/universes.js";
+import { CPU_PERSONALITY_KEYS } from "../src/rules/valuation.js";
 import {
   applyDraftAction,
   createDraft,
@@ -112,8 +113,14 @@ test("online room lifecycle: create, join, turn enforcement, replay parity", asy
   assert.equal(room.status, 200);
   assert.equal(room.data.complete, true);
 
-  // Replay parity: rebuilding from seed + action log matches the server replica.
-  const pool = generatePlayerPool(room.data.seed, room.data.managers.length, room.data.rosterSize);
+  // Replay parity: rebuilding from the room's own board + action log matches
+  // the server replica. The board has to be the ROOM's, not one re-generated
+  // from the seed: the log names the cards that were taken, so a replica
+  // holding a different deck cannot replay it. (It used to pass against a
+  // re-generated pool only because the log said "autopick" and each side
+  // re-derived the choice inside its own board — which is exactly the bug
+  // pinning the picks fixed.)
+  const pool = deckFromIds(room.data.universe, room.data.seed, room.data.deck, room.data.temperature);
   const replica = createDraft(room.data.managers.map((manager) => manager.name), pool, room.data.rosterSize, room.data.seed);
   for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
   assert.equal(replica.complete, true);
@@ -257,7 +264,8 @@ test("online rooms carry the configured rotation size into roster construction",
 // same log must land on the same rosters, which is what clients rely on.
 async function serverRosters(base, roomId) {
   const room = await api(base, "GET", `/api/rooms/${roomId}`);
-  const pool = generatePlayerPool(room.data.seed, room.data.managers.length, room.data.rosterSize);
+  // The room's own board, not one re-dealt from the seed: the log names cards.
+  const pool = deckFromIds(room.data.universe, room.data.seed, room.data.deck, room.data.temperature);
   const replica = createDraft(room.data.managers.map((manager) => manager.name), pool, room.data.rosterSize, room.data.seed);
   for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
   return replica.managers.map((manager) => manager.roster.map((player) => player.id));
@@ -660,7 +668,7 @@ test("online snake chess clocks use server timestamps and authoritative snapshot
   assert.equal(picked.status, 200);
 
   const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
-  const pickAction = room.data.actions.find((entry) => entry.action.type === "autopick").action;
+  const pickAction = room.data.actions.find((entry) => entry.action.type === "pick").action;
   assert.ok(Number.isFinite(pickAction.at));
   assert.notEqual(pickAction.at, 1, "the server replaces the browser timestamp");
 
@@ -712,10 +720,14 @@ test("the room server expires snake chess clocks without a browser driving them"
   // picks, just as a timed auction continues without a host tab backstopping it.
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 175));
   const room = await api(base, "GET", `/api/rooms/${created.data.roomId}`);
+  // A flag-fall pick is written down as the card it took, not as the
+  // instruction to work the card out again — but it still carries the flag that
+  // says nobody chose it.
   const timeouts = room.data.actions.filter(
-    (entry) => entry.action.type === "autopick" && entry.action.timedOut
+    (entry) => entry.action.type === "pick" && entry.action.timedOut
   );
   assert.ok(timeouts.length >= 1);
+  assert.ok(timeouts[0].action.playerId, "the timed-out pick names its card");
   assert.equal(timeouts[0].action.managerId, "team-1");
   assert.equal(timeouts[0].action.at, startedAt + 50);
   assert.equal(room.data.snakeClock.banks["team-1"], 100, "the timeout autopick awards the increment");
@@ -1370,6 +1382,63 @@ test("an online snake room carries its picks slider and its pool review", async 
   assert.equal(revived.data.rosterSize, 17);
   assert.deepEqual(
     revived.data.actions.map((entry) => entry.action.type),
-    started.data.actions.map((entry) => entry.action.type).concat("autopick")
+    started.data.actions.map((entry) => entry.action.type).concat("pick")
   );
+});
+
+test("a finished snake log names every card, so a change of the computer's taste cannot re-deal it", async (t) => {
+  const base = await startServer(t);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "pinned-picks",
+    managers: ["Ana", "Robo", "Cyber"],
+    cpu: ["Robo", "Cyber"]
+  });
+  assert.equal(created.status, 201);
+  const roomId = created.data.roomId;
+  const ana = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken: created.data.hostToken });
+
+  // One turn driven the way the host's browser drives a computer seat, then the
+  // rest of the draft auto-finished.
+  assert.equal((await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "autopick" }
+  })).status, 200);
+  assert.equal((await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana.data.token,
+    action: { type: "finish" }
+  })).status, 200);
+
+  const room = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(room.data.complete, true);
+
+  // Nothing in the log is an instruction to work a pick out again: every action
+  // that put a card on a roster names the card.
+  const types = room.data.actions.map((entry) => entry.action.type);
+  assert.equal(types.includes("autopick"), false, "no un-named choices survive in the log");
+  assert.equal(types.includes("finish"), false, "the auto-finish is the picks it made");
+  assert.ok(types.filter((type) => type === "pick").length >= 3 * 13 - 1);
+  for (const entry of room.data.actions) {
+    if (entry.action.type === "pick") assert.ok(entry.action.playerId, "every pick names its card");
+  }
+
+  const pool = deckFromIds(room.data.universe, room.data.seed, room.data.deck, room.data.temperature);
+  const rosters = (managers) => {
+    const replica = createDraft(managers, pool, room.data.rosterSize, room.data.seed);
+    for (const entry of room.data.actions) applyDraftAction(replica, entry.action);
+    return replica.managers.map((manager) => manager.roster.map((player) => player.id));
+  };
+  const asPlayed = rosters(room.data.managers.map((manager) => ({ name: manager.name, cpu: manager.cpu })));
+
+  // Now replay the same log against computers who want completely different
+  // things. Before the picks were pinned this re-ran each autopick through the
+  // new taste and dealt a different draft — which is how room
+  // happy-panda-valley stopped replaying. Now the log says what happened, so
+  // the taste is irrelevant and the rosters are the ones that were drafted.
+  for (const persona of CPU_PERSONALITY_KEYS) {
+    assert.deepEqual(
+      rosters(room.data.managers.map((manager) => ({ name: manager.name, cpu: manager.cpu, persona }))),
+      asPlayed,
+      `replay is unchanged when every computer drafts as "${persona}"`
+    );
+  }
 });

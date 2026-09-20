@@ -19,6 +19,8 @@ import {
   applyDraftAction,
   auctionReviewComplete,
   auctionTimerEnabled,
+  bestAutopickTarget,
+  currentManagerMustReplace,
   draftReviewComplete,
   draftReviewEnabled,
   normalizeSnakeTimerConfig,
@@ -1303,19 +1305,30 @@ async function postAction(store, room, request, response) {
   // before the draft runs away from the clients.
   if (action?.type === "finish") flushSealedBids(store, room);
 
+  // Settle the computer's choice before it is applied, so the card and not the
+  // instruction is what reaches the log (see pinnedSnakeAction).
+  const settled = pinnedNominateAction(room.draft, pinnedSnakeAction(room.draft, action));
+
+  // Auto-finishing a snake draft is the same problem N times over: one `finish`
+  // in the log stands for every pick left in the draft, and replaying it
+  // re-derives all of them. Run it here instead, a settled pick at a time.
+  if (settled.type === "finish" && !isAuctionDraft(room.draft)) {
+    return finishSnakeDraft(store, room, settled, response);
+  }
+
   try {
-    if (!SIM_ACTION_TYPES.has(action?.type)) applyDraftAction(room.draft, action);
+    if (!SIM_ACTION_TYPES.has(settled?.type)) applyDraftAction(room.draft, settled);
   } catch (error) {
     return sendJson(response, 409, { error: error.message });
   }
 
-  if (action.type === "seal-bid") {
-    recordSealedBid(store, room, action);
+  if (settled.type === "seal-bid") {
+    recordSealedBid(store, room, settled);
   } else {
     // Throwing the lot away throws its withheld bids away with it: the room
     // never saw them, so no replica ever has to unwind them.
-    if (action.type === "cancel-lot" || action.type === "undo") room.pendingBids = [];
-    appendAction(store, room, action);
+    if (settled.type === "cancel-lot" || settled.type === "undo") room.pendingBids = [];
+    appendAction(store, room, settled);
   }
   if (action.type === "seat") {
     // A seat handed to the computer is nobody's any more: the token that held
@@ -1346,6 +1359,97 @@ function canonicalizeAction(draft, action) {
   const canonical = { ...action, at: Date.now() };
   if (isAuctionDraft(draft) && canonical.type === "seal-bid") canonical.timedOut = false;
   return canonical;
+}
+
+// ---- pinning the computer's choices into the log ----------------------------
+//
+// An autopick names no card. Replaying one re-runs the computer's CHOICE
+// against whatever the valuation code says TODAY — and that code moves. Room
+// happy-panda-valley replayed cleanly for weeks and then stopped the day the
+// autopick scoring changed: the computer took a different card on the way
+// through, and the human pick recorded after it found its man already gone
+// ("Player is not available"). The room is not corrupt; the log simply never
+// said what happened, only how to work it out again, and the working-out
+// changed underneath it.
+//
+// So the server settles the choice ONCE, here, and writes the card down. After
+// this a log is a record rather than a recipe, and no amount of later tuning to
+// the computer's taste can re-deal a room that has already been played.
+//
+// It cannot repair the rooms already broken this way — their logs are still
+// recipes — but every room from here on replays the draft that was played.
+function pinnedSnakeAction(draft, action) {
+  if (action?.type !== "autopick") return action;
+  if (isAuctionDraft(draft) || draft.complete) return action;
+  // A board with nothing legal left on it mints a replacement rather than
+  // taking a card, and a minted card has no id until it is minted. That path
+  // stays an autopick: it fires only when the board is empty at a slot, and
+  // what it does is read off the roster's own holes rather than off the
+  // valuation, so it does not drift the way a choice between cards does.
+  if (currentManagerMustReplace(draft)) return action;
+  const manager = currentManager(draft);
+  if (!manager) return action;
+  try {
+    const target = bestAutopickTarget(draft, manager);
+    return target ? { ...action, type: "pick", playerId: target.id } : action;
+  } catch {
+    // No legal card to name. Let the draft's own autopick raise it, so the
+    // failure reads the same as it always did.
+    return action;
+  }
+}
+
+// The manual auction's version of the same thing: auto-nominate puts "the
+// nominator's best target" on the block, which is another choice re-derived at
+// replay time. Under RANDOM nomination the card comes off the seeded queue
+// instead, and naming it here would desync the queue index, so that one is left
+// exactly as it is.
+function pinnedNominateAction(draft, action) {
+  if (action?.type !== "auto-nominate") return action;
+  if (!isAuctionDraft(draft) || isRandomNomination(draft) || draft.auction.lot) return action;
+  const nominator = currentManager(draft);
+  if (!nominator) return action;
+  try {
+    const target = bestAutopickTarget(draft, nominator);
+    return target ? { ...action, type: "nominate", playerId: target.id } : action;
+  } catch {
+    return action;
+  }
+}
+
+// Auto-finishing a snake draft, settled pick by settled pick. `finish` used to
+// be a single line in the log standing for every pick left in the draft, which
+// made it the largest re-derived surface of all: one action, replayed, re-ran
+// the computer's taste over the whole rest of the board. Now the rest of the
+// draft goes into the log as the picks it actually was.
+function finishSnakeDraft(store, room, action, response) {
+  const draft = room.draft;
+  // The review ending is a fact of its own — it is what starts the clocks — so
+  // it is written down before the picks it opened the way for.
+  if (draftReviewEnabled(draft) && !draftReviewComplete(draft, action.at)) {
+    const opening = { type: "complete-review", at: action.at };
+    applyDraftAction(draft, opening);
+    appendAction(store, room, opening);
+  }
+  // Bounded by every turn the draft could still owe, plus the coach picks that
+  // lengthen it — a coach costs a pick and fills no slot.
+  let guard = draft.managers.length * (draft.rosterSize + 1) + 1;
+  try {
+    while (!draft.complete && guard > 0) {
+      guard -= 1;
+      const step = pinnedSnakeAction(draft, { type: "autopick", at: action.at });
+      applyDraftAction(draft, step);
+      appendAction(store, room, step);
+    }
+  } catch (error) {
+    // Whatever landed before the failure is real and stays in the log; the
+    // room is simply not finished.
+    return sendJson(response, 409, { error: error.message });
+  }
+  fileRoomDraft(store, room);
+  broadcastLot(room);
+  scheduleRoomTimer(store, room);
+  return sendJson(response, 200, { seq: room.actions.length, lot: lotView(room) });
 }
 
 function appendAction(store, room, action) {
@@ -1434,7 +1538,9 @@ function syncRoomSnakeTimer(store, room, now = Date.now()) {
     if (!manager || !Number.isFinite(startedAt)) break;
     const deadline = startedAt + snakeClockBankMs(draft, manager);
     if (timestamp < deadline) break;
-    const action = { type: "autopick", managerId: manager.id, timedOut: true, at: deadline };
+    // A flag-fall pick is the computer's choice just as much as a CPU turn is,
+    // so it is settled into a card before it is written down.
+    const action = pinnedSnakeAction(draft, { type: "autopick", managerId: manager.id, timedOut: true, at: deadline });
     applyDraftAction(draft, action);
     appendAction(store, room, action);
     changed = true;
