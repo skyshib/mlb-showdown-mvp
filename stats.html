@@ -766,8 +766,10 @@ async function openDraftDetails(event) {
 // backstop, because it is never wrong and never precise. The edge is the floor.
 function placeOf(seat) {
   const zone = zoneLabel(seat.tz) || (seat.zone ? `${seat.zone} time` : "");
-  if (seat.place && !seat.proxy && agreesWithClock(seat)) return seat.place;
+  // Checked before the measured case, because an inherited place sits in the
+  // same field and would otherwise be read as this session's own.
   if (seat.fromDevice && seat.place) return `${seat.place} (this device, other sessions)`;
+  if (seat.place && !seat.proxy && agreesWithClock(seat)) return seat.place;
   if (zone) return zone;
   if (seat.place) return seat.place;
   if (seat.edge && EDGES[seat.edge]) return `near the ${EDGES[seat.edge]} edge`;
