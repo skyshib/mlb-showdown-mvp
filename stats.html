@@ -170,6 +170,23 @@
   .cards .card-cost { color: var(--text-muted); font-variant-numeric: tabular-nums; }
   .cards .card-name { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cards .card-pts { text-align: right; font-variant-numeric: tabular-nums; }
+  .cards li.has-scan { cursor: zoom-in; }
+  .cards li.has-scan .card-name { text-decoration: underline dotted var(--baseline); text-underline-offset: 2px; }
+  .cards li.has-scan:hover { background: var(--track); border-radius: 4px; }
+
+  /* The card itself, following the pointer. Pointer-events off so it can never
+     sit between the mouse and the row that summoned it. */
+  #scan {
+    position: fixed; z-index: 20; pointer-events: none; opacity: 0;
+    transition: opacity 90ms; filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.45));
+  }
+  #scan.shown { opacity: 1; }
+  /* Its own size, never blown up: the scans are 255px wide and an upscaled
+     photograph of a card is a worse picture of it than the card itself. */
+  #scan img {
+    display: block; width: auto; max-width: min(320px, 42vw); border-radius: 12px;
+    background: var(--surface-1);
+  }
   .draft-result { font-size: 13px; margin-top: 2px; }
   .draft-result b { font-weight: 600; }
   .draft-open { font-size: 12px; margin-top: 8px; }
@@ -271,9 +288,15 @@
   </div>
 </main>
 <div id="tip" role="status" aria-live="polite"></div>
+<div id="scan" aria-hidden="true"><img alt="" /></div>
 
 <script type="module">
 import { groupSessions, namesIn } from "./src/ui/sessions.js";
+// The card scans the app already ships: 3,891 photographs of real printings,
+// filed by the id the card is drafted under. A classic draft's ids ARE those
+// printing ids, so a roster line can show the card it means without asking the
+// server anything or the book storing anything new.
+import { CARD_IMAGE_FILES } from "./src/data/cardImages.js";
 // The three-letter codes are Fly's edges, not the visitor's country — the edge
 // that took the connection is simply the one nearest them. Naming the city is
 // honest about the resolution in a way that "nrt" is not.
@@ -898,7 +921,62 @@ function openLink(draft) {
 
 // One fetch per draft, the first time it is opened. `toggle` does not bubble,
 // so it is caught on the way down. The same handler serves both panels.
+// ── The card under the pointer ─────────────────────────────────────────────
+// One floating image, reused by every row on the page. It follows the pointer,
+// flips to whichever side of it has room, and is never allowed to hang off the
+// bottom of the window.
+const scanBox = document.getElementById("scan");
+const scanImg = scanBox.querySelector("img");
+let scanFor = "";
+
+function showScan(row, event) {
+  const src = row.dataset.scan;
+  if (src !== scanFor) {
+    scanFor = src;
+    scanImg.src = src;
+    scanImg.alt = `${row.dataset.cardName ?? ""} card`;
+  }
+  scanBox.classList.add("shown");
+  moveScan(event);
+}
+
+function moveScan(event) {
+  const margin = 16;
+  const width = scanBox.offsetWidth || 300;
+  const height = scanBox.offsetHeight || 420;
+  // To the right of the pointer, unless the right is where the window ends.
+  const right = event.clientX + margin;
+  const left = right + width > innerWidth ? event.clientX - margin - width : right;
+  const top = Math.min(Math.max(margin, event.clientY - height / 2), innerHeight - height - margin);
+  scanBox.style.left = `${Math.max(margin, left)}px`;
+  scanBox.style.top = `${Math.max(margin, top)}px`;
+}
+
+function hideScan() {
+  scanBox.classList.remove("shown");
+}
+
+function wireScans(container) {
+  container.addEventListener("mouseover", (event) => {
+    const row = event.target.closest("li.has-scan");
+    if (row) showScan(row, event);
+  });
+  container.addEventListener("mousemove", (event) => {
+    if (scanBox.classList.contains("shown")) moveScan(event);
+  });
+  container.addEventListener("mouseout", (event) => {
+    const row = event.target.closest("li.has-scan");
+    if (row && !row.contains(event.relatedTarget)) hideScan();
+  });
+  // A roster that scrolls out from under a held pointer should not leave the
+  // card hanging over the page.
+  container.addEventListener("scroll", hideScan, true);
+}
+
+addEventListener("scroll", hideScan, { passive: true });
+
 function wireDraftDetails(container) {
+  wireScans(container);
   container.addEventListener("toggle", openDraftDetails, true);
   // A click on the room link or the build button is a click on the summary too,
   // which would open the draft on the way out. They do their own job and no
@@ -1051,14 +1129,25 @@ function rostersHtml(draft) {
     return `<div class="roster">
       <h3>${esc(manager.name)}${manager.cpu ? ` <span class="cpu">computer${manager.persona ? ` · ${esc(manager.persona)}` : ""}</span>` : ""}</h3>
       <div class="roster-sum">${summary}</div>
-      <ol class="cards">${manager.roster.map((card) => `<li>
+      <ol class="cards">${manager.roster.map((card) => {
+        const scan = scanOf(card);
+        return `<li${scan ? ` class="has-scan" data-scan="${esc(scan)}" data-card-name="${esc(card.name)}"` : ""}>
         <span class="card-cost">${card.price != null ? money(card.price) : card.pick ? `#${card.pick}` : ""}</span>
         <span class="card-name">${esc(card.name)}${card.replacement ? " *" : ""}</span>
         <span class="card-pos">${esc(card.pos)}</span>
         <span class="card-pts">${(card.pts ?? 0).toLocaleString()}</span>
-      </li>`).join("")}</ol>
+      </li>`;
+      }).join("")}</ol>
     </div>`;
   }).join("")}</div>`;
+}
+
+// A generated player was never printed, so there is no photograph of him. A
+// standing replacement is a copy of a printing and asks under the id it was
+// copied from, the way the app's own card face does.
+function scanOf(card) {
+  const file = CARD_IMAGE_FILES[card.id] ?? (card.sourceId ? CARD_IMAGE_FILES[card.sourceId] : null);
+  return file ? `/assets/cards/${file}` : "";
 }
 
 function money(value) {
