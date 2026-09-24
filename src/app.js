@@ -4444,9 +4444,10 @@ function renderLiveGame() {
 
 // Every batch run gets a fresh salt so its seeded games differ from the
 // last run's; online rooms carry the salt inside the shared action so every
-// client still simulates the identical games.
+// client still simulates the identical games. A spectator has no seat to post
+// the action from, so their sim runs on their own screen and nobody else's.
 function requestBatchRun(runs) {
-  if (state.online) {
+  if (state.online?.token) {
     sendOnlineAction({ type: "batch", runs: normalizeBatchRuns(runs), salt: newBatchSalt() });
     return;
   }
