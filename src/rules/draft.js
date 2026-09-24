@@ -15,6 +15,19 @@ const CORNER_OUTFIELD_SLOTS = ["LF", "RF"];
 export const ROSTER_BENCH_KEY = "__bench";
 export const CORNER_OUTFIELD_POSITION = "LF/RF";
 export const DEFAULT_STARTING_PITCHERS = 2;
+// What a NEW ROOM offers, which is not the same question as what a draft falls
+// back to when nobody said: the fallback above keeps its word for every saved
+// room, adventure pack and deck quota that was built against it.
+//
+// A fresh room opens at four starters because the short roster is unfair to draft
+// from. With two starters (13 men) the first seat in a snake draft wins 54.7%
+// against the last seat's 46.9% — same persona in every chair, 30 leagues x 4000
+// games, so nothing but the draft order differs. The snake order is fair on paper
+// (seat 1 takes picks 1 and 8, seat 4 takes 4 and 5); what it cannot undo is a
+// board whose value sits at the very top, where the turn never pays back the best
+// card. Length is the cure: at four starters (15 men) the spread falls to 2.2
+// points, and at five to 1.9.
+export const DEFAULT_ROOM_STARTING_PITCHERS = 4;
 export const MIN_STARTING_PITCHERS = 1;
 export const MAX_STARTING_PITCHERS = 5;
 

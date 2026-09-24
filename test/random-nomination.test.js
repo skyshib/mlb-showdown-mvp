@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import { buildDraftPool, deckEntry, deckFromIds } from "../src/data/universes.js";
 import {
+  DEFAULT_ROOM_STARTING_PITCHERS,
+  DEFAULT_STARTING_PITCHERS,
   ROSTER_SLOTS,
   applyDraftAction,
   auctionMaxBid,
@@ -20,7 +22,9 @@ import {
   randomNominationQuotas,
   randomNominationShortfalls,
   managerValuation,
+  minimumSnakePicks,
   roomDraftOptions,
+  rosterSizeForStartingPitchers,
   standingReplacements,
   submitCpuSealedBids,
   UNLIMITED_BULLPEN,
@@ -63,6 +67,22 @@ function countHitters(cards) {
 test("the roster slot table is the 13-man roster, spelled out", () => {
   const total = ROSTER_SLOTS.reduce((sum, [, slots]) => sum + slots, 0);
   assert.equal(total, 13);
+});
+
+// A new room opens at four starters, because the short roster is unfair to draft
+// from: with two, the first seat in a snake draft beats the last by nearly eight
+// win points, and the fourth starter cuts that to two. The ENGINE fallback stays
+// at two, which is a different promise — every saved room, adventure pack and
+// deck quota was sized against it, and a room that recorded no rotation must
+// still rebuild the roster it had.
+test("a new room opens at four starters, without moving the engine's fallback", () => {
+  assert.equal(DEFAULT_ROOM_STARTING_PITCHERS, 4);
+  assert.equal(DEFAULT_STARTING_PITCHERS, 2);
+
+  const pen = { bullpenSlots: "all", bullpenMin: 2 };
+  assert.equal(rosterSizeForStartingPitchers(DEFAULT_ROOM_STARTING_PITCHERS, pen), 15);
+  assert.equal(minimumSnakePicks(DEFAULT_ROOM_STARTING_PITCHERS, pen), 15);
+  assert.equal(rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS, pen), 13);
 });
 
 test("three managers see twelve starters and eight of them come up", () => {

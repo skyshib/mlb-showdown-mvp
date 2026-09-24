@@ -48,6 +48,7 @@ import {
   AUCTION_MIN_RAISE,
   CORNER_OUTFIELD_POSITION,
   DEFAULT_STARTING_PITCHERS,
+  DEFAULT_ROOM_STARTING_PITCHERS,
   MAX_BULLPEN_SLOTS,
   MAX_STARTING_PITCHERS,
   MIN_STARTING_PITCHERS,
@@ -1105,7 +1106,7 @@ function defaultState() {
     // The optional coaching staff: six coach cards dealt into the board in
     // place of the spare DH bats. Off by default — it is a house rule.
     coaches: false,
-    auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS)),
+    auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_ROOM_STARTING_PITCHERS)),
     auctionTimer: {
       reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
       bankSeconds: AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
@@ -1125,17 +1126,17 @@ function defaultState() {
     snakeReviewSeconds: 0,
     // How many turns a snake draft gives each manager. The minimum is a roster;
     // anything above it is bench.
-    snakePicks: minimumSnakePicks(DEFAULT_STARTING_PITCHERS),
+    snakePicks: minimumSnakePicks(DEFAULT_ROOM_STARTING_PITCHERS),
     // Which seat is yours. Kept outside `online`, which is cleared when the
     // room ends — see viewerManager().
     myManagerId: null,
     maskBids: false,
-    startingPitchers: DEFAULT_STARTING_PITCHERS,
+    startingPitchers: DEFAULT_ROOM_STARTING_PITCHERS,
     // The pen range: every team owns at least two relievers, and in a
     // random-nomination room all the relievers it owns pitch.
     bullpenSlots: UNLIMITED_BULLPEN,
     bullpenMin: 2,
-    rosterSize: rosterSizeForStartingPitchers(DEFAULT_STARTING_PITCHERS),
+    rosterSize: rosterSizeForStartingPitchers(DEFAULT_ROOM_STARTING_PITCHERS),
     // Wildness of the generated (fictional) pool; 0 = normal. Ignored by real sets.
     temperature: 0,
     draft: null,
