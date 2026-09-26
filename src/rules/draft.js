@@ -90,9 +90,10 @@ function startingPitcherTarget(options = {}) {
 
 // A draft room's pen is a range. bullpenMin is how many relievers a roster must
 // own; a manager short at the end of the draft is filled out to it. bullpenSlots
-// is the most that pitch in a game, a count or unlimited. A random-nomination
-// room sets both. A capped room's roster is counted slot by slot, so it drafts
-// one count, and every reliever it drafts pitches. The adventure's full-roster
+// is the most that pitch in a game, a count or unlimited. A snake room and a
+// random-nomination auction set both. A manual-nomination auction's roster is
+// counted slot by slot, so it drafts one count, and every reliever it drafts
+// pitches. The adventure's full-roster
 // format hands whole rosters over, where the pen is however many relievers the
 // twenty cards hold — zero to seven.
 export const MAX_BULLPEN_SLOTS = 7;
@@ -119,10 +120,17 @@ export function normalizeBullpenMin(value, bullpenSlots) {
   return Math.min(ceiling, Math.max(0, count));
 }
 
+// Which rooms take the pen as a range: the ones with an open board, where no
+// roster is counted slot by slot. That is every snake draft and a random-
+// nomination auction; a manual-nomination auction drafts one count.
+export function hasBullpenRange(draftType, nomination) {
+  return draftType !== "auction" || nomination === "random";
+}
+
 // A draft room's pen, settled for its mode. A capped room drafts one count: its
 // floor, since that is the number it has to fill, and all of those pitch.
-export function roomBullpen(pen = {}, randomNomination = false) {
-  if (!randomNomination) {
+export function roomBullpen(pen = {}, ranged = false) {
+  if (!ranged) {
     // No max is a capped room's ceiling: a set min is the count whatever max
     // rides along (the setup form sends none), and only a room saved before
     // the range reads its count off the max.
@@ -411,7 +419,7 @@ export function roomDraftOptions(room = {}) {
   const draftType = room.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && room.nomination === "random" ? "random" : "manual";
   const startingPitchers = normalizeStartingPitchers(room.startingPitchers);
-  const pen = roomBullpen(room, nomination === "random");
+  const pen = roomBullpen(room, hasBullpenRange(draftType, nomination));
   // A snake room is as long as its picks slider says; an auction is as long as
   // a roster, because that is the cap the bidding is priced against.
   const snakePicks = normalizeSnakePicks(room.snakePicks, startingPitchers, pen);
@@ -443,9 +451,9 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
   const startingPitchers = normalizeStartingPitchers(
     options.startingPitchers ?? Number(rosterSize) - BASE_ROSTER_SIZE
   );
-  // Only a random-nomination room can leave the pen unlimited: a capped roster
-  // is sized slot by slot, so it needs a count, and falls back to two.
-  const { bullpenSlots, bullpenMin } = roomBullpen(options, options.draftType === "auction" && options.nomination === "random");
+  // Only an open-board room can leave the pen unlimited: a capped roster is
+  // sized slot by slot, so it needs a count, and falls back to two.
+  const { bullpenSlots, bullpenMin } = roomBullpen(options, hasBullpenRange(options.draftType === "auction" ? "auction" : "snake", options.nomination));
   // A computer manager gets an opinion, dealt from the seed so the same room
   // always faces the same table. A human's seat carries none: he has his own.
   const personaRng = createRng(`${seed}:personas`);

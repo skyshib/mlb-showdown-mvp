@@ -43,6 +43,7 @@ import {
   isPendingBidder,
   isRandomNomination,
   maxPoolManagers,
+  hasBullpenRange,
   roomBullpen,
   roomDraftOptions,
   nominateBestTarget,
@@ -273,7 +274,7 @@ function reviveRoom(saved) {
     saved.startingPitchers ?? Number(saved.rosterSize) - 11
   );
   // A room saved before the pen was configurable played with two relievers.
-  const { bullpenSlots, bullpenMin } = roomBullpen(saved, nomination === "random");
+  const { bullpenSlots, bullpenMin } = roomBullpen(saved, hasBullpenRange(draftType, nomination));
   // A snake room saved before the picks slider ran exactly a roster long, which
   // is what a missing count normalizes to — so it revives at its own length.
   const snakePicks = draftType === "auction"
@@ -1116,7 +1117,7 @@ async function createRoom(store, request, response) {
   const pickTimer = normalizePickTimerSeconds(body.pickTimer);
   const draftType = body.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && body.nomination === "random" ? "random" : "manual";
-  const pen = roomBullpen(body, nomination === "random");
+  const pen = roomBullpen(body, hasBullpenRange(draftType, nomination));
   // A snake room is as long as its picks slider; an auction is a roster long.
   const snakePicks = draftType === "auction"
     ? null

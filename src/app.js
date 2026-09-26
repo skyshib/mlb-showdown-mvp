@@ -106,6 +106,7 @@ import {
   normalizeAuctionTimerConfig,
   normalizeCardPosition,
   normalizePickTimerSeconds,
+  hasBullpenRange,
   roomBullpen,
   roomDraftOptions,
   normalizeStartingPitchers,
@@ -419,7 +420,9 @@ function auctionClockTick() {
   // The snake's review is the only clock a snake draft runs off the wall rather
   // than off a turn, so it ticks here beside the auction's.
   snakeReviewTick(draft, now);
-  if (!draft || !isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) {
+  // A snake's heartbeat belongs to the pick clock, which keeps it on its own.
+  if (draft && !isAuctionDraft(draft)) return;
+  if (!draft || !auctionTimerEnabled(draft) || draft.complete) {
     clearAuctionUrgency();
     return;
   }
@@ -466,7 +469,12 @@ function syncAuctionUrgency(draft, now = draftNow()) {
     .map((manager) => auctionBidTimeRemainingMs(live, manager, now))
     .filter((left) => left > 0 && left <= 10_000)
     .map((left) => Math.ceil(left / 1000));
-  const second = urgentSeconds.length ? Math.min(...urgentSeconds) : null;
+  setClockUrgency(urgentSeconds.length ? Math.min(...urgentSeconds) : null);
+}
+
+// The last ten seconds of a human's clock: the rail turns and the screen beats
+// once a second. `second` is the whole seconds left, or null for no urgency.
+function setClockUrgency(second) {
   const urgent = second !== null;
   document.body.classList.toggle("auction-clock-urgent", urgent);
   if (!urgent) {
@@ -494,17 +502,17 @@ function formatAuctionClock(ms) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function setupRandomNomination(value) {
-  return value.draftType === "auction" && value.nomination === "random";
+function setupBullpenRange(value) {
+  return hasBullpenRange(value.draftType === "auction" ? "auction" : "snake", value.nomination);
 }
 
 // The pitching staff on the setup screen: the rotation, and the pen as a range.
 // Min is how many relievers every team must own. Max, how many of them pitch,
-// is a random-nomination setting; a capped draft drafts exactly the min, so
-// there its max sits disabled at the min and remembers the random-nomination
-// choice for when that mode comes back.
+// is a snake and random-nomination setting; a manual-nomination auction drafts
+// exactly the min, so there its max sits disabled at the min and remembers the
+// ranged choice for when a ranged mode comes back.
 function renderStaffFieldset(value) {
-  const random = setupRandomNomination(value);
+  const random = setupBullpenRange(value);
   const { bullpenSlots, bullpenMin } = roomBullpen(value, true);
   const counts = Array.from({ length: MAX_BULLPEN_SLOTS + 1 }, (_, count) => count);
   const shownMax = random ? bullpenSlots : bullpenMin;
@@ -536,7 +544,7 @@ function renderStaffFieldset(value) {
 function bullpenRangeNote(random) {
   return random
     ? "Every team drafts nine hitters, its starters, and at least the minimum relievers; a team short at the end gets the replacement reliever. Up to the max pitch in a game, and the rest sit on the bench."
-    : "Every team drafts nine hitters, its starters, and exactly the minimum relievers, and all of them pitch. A separate max is a random-nomination auction setting.";
+    : "Every team drafts nine hitters, its starters, and exactly the minimum relievers, and all of them pitch. A separate max is a snake and random-nomination auction setting.";
 }
 
 // The floor of the picks slider for the setup screen as it currently stands:
@@ -636,6 +644,7 @@ function pickClockTick() {
   if (!turn) {
     pickClockKey = null;
     updatePickClockDisplay(null);
+    if (state.draft && !isAuctionDraft(state.draft)) clearAuctionUrgency();
     return;
   }
   if (turn.key !== pickClockKey) {
@@ -661,6 +670,7 @@ function pickClockTick() {
   const chess = snakeClockEnabled(state.draft);
   if (!state.pickTimerSeconds && !chess) {
     updatePickClockDisplay(null);
+    if (!isAuctionDraft(state.draft)) clearAuctionUrgency();
     return;
   }
   const remaining = chess
@@ -668,6 +678,10 @@ function pickClockTick() {
     : pickClockDeadline - Date.now();
   updatePickClockDisplay(remaining, chess ? turn.current : null);
   updateSnakeBankDisplays();
+  if (!isAuctionDraft(state.draft)) {
+    const mine = shouldChimeForTurn(turn.current) && !turn.current.cpu;
+    setClockUrgency(mine && remaining > 0 && remaining <= 10_000 ? Math.ceil(remaining / 1000) : null);
+  }
   // Ten seconds out, the clock stops being furniture and starts being a threat.
   if (!pickClockWarned && remaining > 0 && remaining <= 10_000 && shouldChimeForTurn(turn.current)) {
     pickClockWarned = true;
@@ -921,9 +935,15 @@ function driveOnlineCpuTurn() {
 }
 
 function updatePickClockDisplay(remaining, onTheClock = null) {
+  const railClock = document.querySelector("[data-snake-rail-clock]");
+  if (railClock && remaining !== null) {
+    railClock.textContent = formatPickClock(remaining);
+    railClock.classList.toggle("low", remaining <= 10_000);
+  }
   const clock = document.querySelector("[data-pick-timer]");
   if (!clock) return;
-  if (remaining === null || (!state.pickTimerSeconds && !snakeClockEnabled(state.draft))) {
+  // The rail carries the snake's clock; the toolbar would only repeat it.
+  if (remaining === null || railClock || (!state.pickTimerSeconds && !snakeClockEnabled(state.draft))) {
     clock.hidden = true;
     return;
   }
@@ -1307,7 +1327,7 @@ function openRoom(roomId, room) {
   state = defaultState();
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
-  Object.assign(state, roomBullpen(room, room.draftType === "auction" && room.nomination === "random"));
+  Object.assign(state, roomBullpen(room, hasBullpenRange(room.draftType, room.nomination)));
   state.snakePicks = normalizeSnakePicks(room.snakePicks, state.startingPitchers, state);
   state.snakeReviewSeconds = Math.round(normalizeSnakeReviewMs(room.snakeReview) / 1000);
   state.rosterSize = room.draftType === "auction"
@@ -1885,7 +1905,7 @@ function draftModeFromForm(form) {
   const hidePoints = Boolean(form.get("hidePoints"));
   const { bullpenSlots, bullpenMin } = roomBullpen(
     { bullpenSlots: form.get("bullpenSlots"), bullpenMin: form.get("bullpenMin") },
-    nomination === "random"
+    hasBullpenRange(draftType, nomination)
   );
   const coaches = Boolean(form.get("coaches"));
   return { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches };
@@ -2311,15 +2331,15 @@ function renderSetup(setupError = "") {
   // snake's clock — belong to their type, so they only show when it is
   // chosen; and reaching for one of them says you want that type, so it
   // selects it.
-  // The pen's max belongs to random nomination; a capped room drafts the min
-  // and pitches all of it. The max never sits below the min: raising the min
+  // The pen's max belongs to snake and random-nomination rooms; a manual-
+  // nomination auction drafts the min and pitches all of it. The max never sits below the min: raising the min
   // past it drags the max along.
   const syncBullpenOptions = () => {
     const form = new FormData(setupForm);
-    const random = form.get("draftType") === "auction" && form.get("nomination") === "random";
+    const random = hasBullpenRange(form.get("draftType"), form.get("nomination"));
     const min = setupForm.querySelector('select[name="bullpenMin"]');
     const max = setupForm.querySelector('select[name="bullpenSlots"]');
-    // The random-nomination max is kept aside while a capped mode shows the min.
+    // The ranged max is kept aside while a capped mode shows the min.
     if (!max.disabled) max.dataset.randomValue = max.value;
     let shown = random ? max.dataset.randomValue : min.value;
     if (shown !== UNLIMITED_BULLPEN && Number(shown) < Number(min.value)) shown = min.value;
@@ -2527,7 +2547,7 @@ function renderSetup(setupError = "") {
     const mode = draftModeFromForm(form);
     state.draftType = mode.draftType;
     state.nomination = mode.nomination;
-    // The form remembers the random-nomination max, even when a capped draft ignores it.
+    // The form remembers the ranged max, even when a capped draft ignores it.
     state.bullpenSlots = roomBullpen({ bullpenSlots: setupForm.querySelector('select[name="bullpenSlots"]').dataset.randomValue, bullpenMin: form.get("bullpenMin") }, true).bullpenSlots;
     state.bullpenMin = mode.bullpenMin;
     state.snakePicks = snakePicksFromForm(form, state.startingPitchers, mode);
@@ -2956,6 +2976,7 @@ function renderDraft() {
       online ? "" : `<a class="tv-board-link" href="?board" target="_blank" rel="noopener" title="Read-only broadcast view for a second screen on this machine">&#128250; TV board</a>`}
   </section>
   ${auction && !draft.complete ? renderAuctionDecisionRail(draft) : ""}
+  ${!auction && !draft.complete && !reviewOpen ? renderSnakePickRail(draft) : ""}
   ${workspace}
   ${renderRosterDock(draft, dockViewerId)}`;
 
@@ -3441,6 +3462,47 @@ function renderAuctionDecisionRail(draft) {
     </div>
     ${allowCancelLot(draft) ? `<div class="auction-lot-rail-cancel"><button class="secondary-button" data-action="cancel-lot" ${online && !online.host ? "disabled" : ""}>Cancel nomination</button></div>` : ""}
   </section>`;
+}
+
+// The snake's answer to the auction's lot rail: who is on the clock, how long
+// they have, and what just went, pinned to the top of the screen so it follows
+// the board down. The table's chess clocks ride along in it when there are any.
+function renderSnakePickRail(draft) {
+  const current = currentManager(draft);
+  if (!current) return "";
+  const { round, pickInRound } = draftPickInfo(draft);
+  const chess = snakeClockEnabled(draft);
+  const timed = chess || state.pickTimerSeconds > 0;
+  const mine = state.online ? state.online.managerId === current.id : false;
+  const next = upcomingManagers(draft, 4).slice(1).map((manager) => escapeHtml(manager.name)).join(" · ");
+  const left = chess
+    ? snakeTimeRemainingMs(liveDraft(draft), current, draftNow())
+    : pickClockDeadline && pickClockKey ? pickClockDeadline - Date.now() : state.pickTimerSeconds * 1000;
+  return `<section class="panel auction-lot-rail snake-pick-rail${timed ? "" : " auction-lot-rail-untimed"}" aria-label="On the clock">
+    <div class="auction-lot-rail-player">
+      <p class="eyebrow">Round ${round}, pick ${pickInRound} &middot; ${draft.pickNumber + 1} of ${totalDraftPicks(draft)}</p>
+      <h2>${mine ? "You're on the clock" : `${escapeHtml(current.name)} is on the clock`}</h2>
+      ${next ? `<p class="auction-lot-rail-meta">Next: ${next}</p>` : ""}
+    </div>
+    ${timed ? `<div class="auction-lot-rail-state auction-lot-rail-time" aria-label="Time left to pick">
+      <small>Time left</small>
+      <strong data-snake-rail-clock>${formatPickClock(left)}</strong>
+    </div>` : ""}
+    <div class="auction-lot-rail-overview">
+      ${renderLastPickSummary(draft)}
+      ${snakeClocksHtml(draft)}
+    </div>
+  </section>`;
+}
+
+// The pick that just landed, the snake's version of the auction's last sale.
+function renderLastPickSummary(draft) {
+  const last = draftHistory(draft).at(-1);
+  if (!last) return `<p class="snake-last-pick muted">No picks yet.</p>`;
+  return `<p class="snake-last-pick"><small>Last pick</small>
+    ${renderPlayerPreviewName(last.player, last.player.name, "strong")}
+    <span>to ${escapeHtml(last.manager.name)} &middot; ${escapeHtml(playerPosition(last.player))} &middot; R${last.round}, #${last.pickNumber}</span>
+  </p>`;
 }
 
 function renderAuctionBudgetStrip(draft) {
@@ -8206,6 +8268,8 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
   const auction = isAuctionDraft(draft);
   const queued = isRandomNomination(draft);
   const lot = auction ? draft.auction.lot : null;
+  // The snake's rail says who is up, what is next, and whose clock is running.
+  const snakeRail = !auction && !draft.complete && draftReviewComplete(draft, draftNow());
   const totalPoints = manager.roster.reduce((sum, player) => sum + player.points, 0);
   const fieldingSums = lineupFieldingSums(manager);
   // A random-nomination room runs on the length of the queue, not on a roster
@@ -8263,11 +8327,11 @@ function renderDraftFocus(draft, clockManager, boardManager = clockManager) {
   return `<section class="panel draft-focus">
     <div class="draft-focus-main">
       <p class="eyebrow">${eyebrow}</p>
-      ${auction && lot ? "" : `<h1>${heading}</h1>`}
+      ${(auction && lot) || snakeRail ? "" : `<h1>${heading}</h1>`}
       ${focusSummary}
       ${stallNotice}
-      ${snakeClocksHtml(draft)}
-      ${draft.complete || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
+      ${snakeRail ? "" : snakeClocksHtml(draft)}
+      ${draft.complete || snakeRail || !nextNames ? "" : `<p class="next-up">${auction ? "Nominates after" : "Next"}: ${nextNames}</p>`}
     </div>
     <div class="roster-view">
       ${renderRosterManagerToggle(draft, shown)}
@@ -10247,7 +10311,7 @@ function reviveState(value) {
     // the new rule allows.
     draft.unlimitedRoster = draft.draftType === "auction" ? draft.nomination === "random" : true;
     // A draft saved before the pen was configurable played with two relievers.
-    Object.assign(draft, roomBullpen(draft, draft.draftType === "auction" && draft.nomination === "random"));
+    Object.assign(draft, roomBullpen(draft, hasBullpenRange(draft.draftType, draft.nomination)));
     // A snake draft saved before the picks slider ran exactly a roster long, so
     // a missing count normalizes to that and it replays at its own length.
     draft.rosterSize = draft.draftType === "auction"

@@ -1232,6 +1232,48 @@ body.auction-clock-urgent .auction-lot-rail-time strong {
   font-style: italic;
 }
 
+/* The snake's rail borrows the auction's: who is up | time left | last pick. */
+.auction-lot-rail.snake-pick-rail {
+  grid-template-columns: minmax(240px, 1fr) auto minmax(280px, 1.4fr);
+}
+
+.auction-lot-rail.snake-pick-rail.auction-lot-rail-untimed {
+  grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.4fr);
+}
+
+.snake-pick-rail .snake-clocks {
+  margin-top: 0;
+}
+
+.snake-pick-rail [data-snake-rail-clock].low {
+  color: var(--warn);
+  animation: pick-clock-pulse 1s ease-in-out infinite;
+}
+
+.snake-last-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.snake-last-pick small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.snake-last-pick strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
 .auction-remaining {
   display: flex;
   gap: 10px;
@@ -4891,6 +4933,11 @@ button.interesting-game-card:focus-visible {
   }
 
   .auction-lot-rail-idle {
+    grid-template-columns: 1fr;
+  }
+
+  .auction-lot-rail.snake-pick-rail,
+  .auction-lot-rail.snake-pick-rail.auction-lot-rail-untimed {
     grid-template-columns: 1fr;
   }
 

@@ -773,15 +773,25 @@ test("the pen is a range: a floor every roster is filled to, and a ceiling on wh
   assert.equal(buildTeam(beta).bullpen.length, 3, "three of five pitch");
 
   // The floor never sits above the ceiling, and a capped room drafts the floor.
+  const manual = { draftType: "auction", timer: false };
   assert.equal(normalizeBullpenMin(5, 3), 3);
-  const capped = createDraft(["One"], pool, 13, "pen-range", { bullpenMin: 3, bullpenSlots: UNLIMITED_BULLPEN });
+  const capped = createDraft(["One"], pool, 13, "pen-range", { ...manual, bullpenMin: 3, bullpenSlots: UNLIMITED_BULLPEN });
   assert.deepEqual([capped.bullpenMin, capped.bullpenSlots, capped.rosterSize], [3, 3, 14]);
   // The setup form sends a capped room no max at all, and a max below the min is no ceiling.
   for (const bullpenSlots of [undefined, null, 2]) {
-    const draft = createDraft(["One"], pool, 13, "pen-range", { bullpenMin: 4, bullpenSlots });
+    const draft = createDraft(["One"], pool, 13, "pen-range", { ...manual, bullpenMin: 4, bullpenSlots });
     assert.deepEqual([draft.bullpenMin, draft.bullpenSlots], [4, 4], `max ${bullpenSlots}`);
   }
-  assert.equal(createDraft(["One"], pool, 13, "pen-range", { bullpenSlots: 3 }).bullpenMin, 3, "a saved count still reads off the max");
+  assert.equal(createDraft(["One"], pool, 13, "pen-range", { ...manual, bullpenSlots: 3 }).bullpenMin, 3, "a saved count still reads off the max");
+  // A snake room's board is open, so it takes the range too: the floor sizes
+  // the draft, and the ceiling is who pitches.
+  const snake = createDraft(["One"], pool, 13, "pen-range", { bullpenMin: 3, bullpenSlots: UNLIMITED_BULLPEN });
+  assert.deepEqual([snake.bullpenMin, snake.bullpenSlots, snake.rosterSize], [3, UNLIMITED_BULLPEN, 14]);
+  const snakeRanged = createDraft(["One"], pool, 13, "pen-range", { bullpenMin: 1, bullpenSlots: 3 });
+  const gamma = snakeRanged.managers[0];
+  gamma.roster = [...roster, ...relievers];
+  assert.deepEqual(validateRoster(gamma, snakeRanged), []);
+  assert.equal(buildTeam(gamma).bullpen.length, 3, "snake: three of five pitch");
   // Rooms saved with one count before the range keep requiring all of it.
   assert.equal(makeAuctionDraft(["Alpha"], pool, { nomination: "random", bullpenSlots: 4 }).bullpenMin, 4);
 });
@@ -804,7 +814,7 @@ test("a roster short of the pen floor is swept up to it with the replacement rel
 test("a capped draft drafts exactly the set number of relievers", () => {
   const pool = makeDraftPool("capped-pen", 40, 24);
   // Unlimited has no meaning on a roster counted slot by slot.
-  assert.equal(createDraft(["One"], pool, 13, "capped-pen", { bullpenSlots: UNLIMITED_BULLPEN }).bullpenSlots, 2);
+  assert.equal(createDraft(["One"], pool, 13, "capped-pen", { draftType: "auction", timer: false, bullpenSlots: UNLIMITED_BULLPEN }).bullpenSlots, 2);
   assert.equal(makeAuctionDraft(["One"], pool, { bullpenSlots: UNLIMITED_BULLPEN }).bullpenSlots, 2);
 
   for (const [options, label] of [[{}, "snake"], [{ draftType: "auction", timer: false }, "manual auction"]]) {
