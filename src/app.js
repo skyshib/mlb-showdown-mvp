@@ -1073,9 +1073,9 @@ if (warRoomMode) {
 // `const` and `let` below this point is still in its temporal dead zone at that
 // moment — twelve of them — and a render that reaches one throws a
 // ReferenceError instead of drawing anything. Restoring a FINISHED draft did
-// exactly that: the results screen wants poolScaleCache, which is declared 4700
-// lines further down, and the page came up blank with "Cannot access
-// 'poolScaleCache' before initialization" and no way out but clearing storage.
+// exactly that: the results screen wanted a grading table declared 4700 lines
+// further down, and the page came up blank with "Cannot access ... before
+// initialization" and no way out but clearing storage.
 //
 // A microtask is enough. It runs the instant the module is evaluated, before the
 // browser has a chance to paint anything, so nothing is deferred that anyone can
@@ -9476,23 +9476,30 @@ function chartOps(card) {
 
 const primaryFielding = (card) => (Array.isArray(card.fielding) ? card.fielding[0] : card.fielding) || 0;
 
-// ---- grading against the pool ----
+// ---- grading against the room ----
 //
-// A grade only means something if it is a grade of something. "Best defence at
-// this table" is a fact about two other people; "your gloves are in the top
-// tenth of any nine this board could have fielded" is a fact about the roster.
-// So every measure is placed against the pool the cards actually came out of.
+// A grade only means something if it is a grade of something, and what a manager
+// has to beat is the other managers — not the undrafted cards nobody wanted. So
+// every measure is placed against the cards the room took off the board: every
+// drafted card, benches included. Grading against the whole board handed out
+// A's for nothing, because a board holds far more cards than a room drafts and
+// the ones left on it are the ones nobody wanted — room crisp-otter-mound drafted
+// 51 of 179 cards and every manager graded A in on-base. Keeping the benches in
+// leaves a grade something absolute to say: beating the cards nobody started
+// still counts for something.
 //
 // The comparison is lineup against lineup: the manager's nine hitters against
-// nine hitters drawn at random from the board, his two starters against two
-// random starters. Comparing an average of nine against single cards buried
-// every lineup in the middle — averaging pulls toward the mean, and on an
-// integer stat every team's average fell between the same two values, so a
-// whole room shared one percentile (room breezy-husky-meadow: 16 of 24 grades
-// were C, and every on-base and speed grade was identical). A pool of weak arms
-// still grades a weak rotation kindly, and it should — that was the board
-// everybody was drafting from.
-const POOL_MEASURES = {
+// nine hitters drawn at random from the room's drafted bats, his two starters
+// against two of the room's starters. Comparing an average of nine against
+// single cards buried every lineup in the middle — averaging pulls toward the
+// mean, and on an integer stat every team's average fell between the same two
+// values, so a whole room shared one percentile (room breezy-husky-meadow: 16 of
+// 24 grades were C, and every on-base and speed grade was identical).
+//
+// Grading off the room rather than the board means a grade is mostly relative: a
+// manager's own cards are part of what he is measured against, which pulls a
+// small room's grades toward the middle.
+const GRADE_MEASURES = {
   onBase: { of: "hitter", read: (card) => Number(card.onBase) || 0, better: "high" },
   chart: { of: "hitter", read: chartOps, better: "high" },
   speed: { of: "hitter", read: (card) => Number(card.speed) || 0, better: "high" },
@@ -9509,30 +9516,58 @@ const POOL_MEASURES = {
   rpChart: { of: "RP", read: chartOps, better: "low" }
 };
 
-let poolScaleCache = null;
+// The cards a manager actually fields, split the way the measures read them.
+// Reading the live assignments means a post-draft lineup change moves the grade
+// with it instead of leaving a stale one behind.
+function fieldedCards(manager, draft) {
+  const bats = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
+    .map((slot) => slot.player)
+    .filter(Boolean);
+  const arms = assignStaffSlots(manager.roster, manager.staffAssignments, draft)
+    .map((slot) => slot.player)
+    .filter(Boolean);
+  return {
+    hitter: bats,
+    SP: arms.filter((card) => card.role === "SP"),
+    RP: arms.filter((card) => card.role !== "SP"),
+    all: [...bats, ...arms]
+  };
+}
 
-function poolScales(draft) {
-  const key = `${draft.seed}:${draft.pool.length}`;
-  if (poolScaleCache?.key === key) return poolScaleCache.scales;
+// Which measures a card can answer for. A bench card has no assignment to read
+// it off, so this goes by what the card is.
+function gradeGroup(card) {
+  if (card.kind === "hitter") return "hitter";
+  if (card.kind !== "pitcher") return null;
+  return card.role === "SP" ? "SP" : "RP";
+}
 
-  const belongs = (card, of) =>
-    of === "hitter" ? card.kind === "hitter" : card.kind === "pitcher" && (of === "SP" ? card.role === "SP" : card.role !== "SP");
-
+// Mean and spread of every drafted card in the room, per measure — the yardstick
+// every lineup is then read against.
+function roomScales(draft) {
+  const room = { hitter: [], SP: [], RP: [] };
+  for (const manager of draft.managers) {
+    for (const card of manager.roster) {
+      const group = gradeGroup(card);
+      if (group) room[group].push(card);
+    }
+  }
   const scales = {};
-  for (const [name, measure] of Object.entries(POOL_MEASURES)) {
-    const values = draft.pool.filter((card) => belongs(card, measure.of)).map(measure.read);
+  for (const [name, measure] of Object.entries(GRADE_MEASURES)) {
+    const values = room[measure.of].map(measure.read);
     const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
     const variance = values.length
       ? values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length
       : 0;
     scales[name] = { count: values.length, mean, sd: Math.sqrt(variance) };
   }
-  poolScaleCache = { key, scales };
   return scales;
 }
 
 // Where an average of `size` cards sits among the averages of `size` cards
-// drawn at random from the pool, without replacement: normal approximation.
+// drawn at random from the room's drafted cards, without replacement: normal
+// approximation. A lineup that is the whole population — a one-manager room with
+// no bench — has nothing to be placed against and sits at the middle.
 function lineupPercentile(scale, size, value) {
   if (!scale.count || size >= scale.count) return 0.5;
   const spread = (scale.sd / Math.sqrt(size)) * Math.sqrt((scale.count - size) / (scale.count - 1));
@@ -9561,25 +9596,10 @@ function gradeFor(share) {
   return GRADE_BANDS.find(([floor]) => share >= floor)?.[1] ?? "F";
 }
 
-function teamComposition(manager, draft) {
-  const scales = poolScales(draft);
-  // This is a report card for the team on the field, not everything it owns.
-  // Reading the live assignments also means a post-draft lineup change updates
-  // the report immediately instead of leaving a stale grade behind.
-  const bats = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
-    .map((slot) => slot.player)
-    .filter(Boolean);
-  const arms = assignStaffSlots(manager.roster, manager.staffAssignments, draft)
-    .map((slot) => slot.player)
-    .filter(Boolean);
-  const groups = {
-    hitter: bats,
-    SP: arms.filter((card) => card.role === "SP"),
-    RP: arms.filter((card) => card.role !== "SP")
-  };
-
+// A report card for the team on the field, not everything it owns.
+function teamComposition(manager, groups, scales) {
   const graded = {};
-  for (const [name, measure] of Object.entries(POOL_MEASURES)) {
+  for (const [name, measure] of Object.entries(GRADE_MEASURES)) {
     const cards = groups[measure.of];
     const value = cards.length
       ? cards.reduce((sum, card) => sum + measure.read(card), 0) / cards.length
@@ -9594,7 +9614,7 @@ function teamComposition(manager, draft) {
   return {
     manager,
     ...graded,
-    points: [...bats, ...arms].reduce((sum, card) => sum + card.points, 0)
+    points: groups.all.reduce((sum, card) => sum + card.points, 0)
   };
 }
 
@@ -9614,7 +9634,9 @@ const COMPOSITION_ROWS = [
 ];
 
 function compositionTable(draft) {
-  const teams = draft.managers.map((manager) => teamComposition(manager, draft));
+  const fielded = draft.managers.map((manager) => fieldedCards(manager, draft));
+  const scales = roomScales(draft);
+  const teams = draft.managers.map((manager, index) => teamComposition(manager, fielded[index], scales));
   const rows = COMPOSITION_ROWS.map((row) => ({
     ...row,
     cells: teams.map((team) => ({ manager: team.manager, ...team[row.key] }))
@@ -9681,7 +9703,7 @@ function recapText(draft) {
   const names = draft.managers.map((manager) => manager.name);
 
   const lines = [`MLB Showdown draft — seed "${draft.seed}"`, ""];
-  lines.push(`What each manager is fielding, graded against the ${draft.pool.length} cards on the board:`);
+  lines.push("What each manager is fielding, graded against every card the room drafted:");
   const width = 16;
   const col = 14;
   lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(col)).join("")}`);
@@ -9823,7 +9845,7 @@ function renderDraftDone(draft) {
         <button class="small" data-action="export-save">Save the room</button>
       </div>
     </div>
-    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card on the board &mdash; the bench isn't graded. Active points adds up those same starters.${isAuctionDraft(draft) ? " Dead money is what each manager paid for the cards on the bench, and it moves when the lineup does." : ""}</p>
+    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card the room drafted, benches included &mdash; cards nobody drafted are left out, so an average lineup grades around C however strong the board was. Active points adds up those same starters.${isAuctionDraft(draft) ? " Dead money is what each manager paid for the cards on the bench, and it moves when the lineup does." : ""}</p>
     <div class="table-scroll">
       <table class="comp-table">
         <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
