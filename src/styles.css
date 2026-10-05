@@ -658,6 +658,11 @@ td span {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+/* As many fields as are showing, side by side, wrapping only when narrow. */
+.field-row.fluid {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
 /* A row whose third field is hidden closes up rather than leaving a hole. */
 .field-row.three:has(> [hidden]) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -800,25 +805,13 @@ td span {
   margin: 0;
   padding: 0;
   list-style: none;
-  counter-reset: pick;
 }
 
 .manager-row {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto 32px;
+  grid-template-columns: minmax(0, 1fr) auto 32px;
   gap: 8px;
   align-items: center;
-  counter-increment: pick;
-}
-
-.manager-row::before {
-  content: counter(pick);
-  font-family: var(--display);
-  font-size: 18px;
-  font-weight: 900;
-  font-style: italic;
-  color: var(--navy);
-  text-align: right;
 }
 
 .manager-row input[name="managerName"] {
@@ -1091,10 +1084,10 @@ td span {
 
 .lobby-seat {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
-    "pick name action"
-    "pick status action";
+    "name action"
+    "status action";
   column-gap: 10px;
   align-items: center;
   padding: 8px 0;
@@ -1103,16 +1096,6 @@ td span {
 
 .lobby-seat:last-child {
   border-bottom: 0;
-}
-
-.lobby-seat-pick {
-  grid-area: pick;
-  font-family: var(--display);
-  font-size: 18px;
-  font-weight: 900;
-  font-style: italic;
-  color: var(--navy);
-  text-align: right;
 }
 
 .lobby-seat-name {

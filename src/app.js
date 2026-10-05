@@ -66,6 +66,11 @@ import {
   auctionReviewRemainingMs,
   auctionStepGuard,
   auctionTimerEnabled,
+  auctionClockRuns,
+  orderDrawDurationMs,
+  ORDER_DRAW_LEAD_MS,
+  ORDER_DRAW_STEP_MS,
+  ORDER_DRAW_HOLD_MS,
   autopick,
   availablePlayers,
   benchLedger,
@@ -310,6 +315,67 @@ function lastUsedSeed() {
   }
 }
 
+// ---- the draft clock, as the setup form sees it ----
+//
+// Snake and auction offer the same three clocks — none, a fixed time per pick
+// (per card in an auction), or a chess clock — and both open with a board
+// review. The form keeps that one shape in state.clock; clockStateFields spells
+// it out in the settings each format's draft is built from.
+const DEFAULT_CLOCK = {
+  mode: "chess",
+  reviewSeconds: 300,
+  pickSeconds: 60,
+  bankSeconds: SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
+  incrementSeconds: SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS
+};
+const CLOCK_MODES = ["off", "pick", "chess"];
+
+function clockSettings(value) {
+  const clock = { ...DEFAULT_CLOCK, ...(value?.clock ?? {}) };
+  if (!CLOCK_MODES.includes(clock.mode)) clock.mode = DEFAULT_CLOCK.mode;
+  return clock;
+}
+
+function clockStateFields(clock) {
+  return {
+    clock,
+    pickTimerSeconds: clock.mode === "pick" ? normalizePickTimerSeconds(clock.pickSeconds) : 0,
+    snakeTimer: { enabled: clock.mode === "chess", bankSeconds: clock.bankSeconds, incrementSeconds: clock.incrementSeconds },
+    snakeReviewSeconds: clock.reviewSeconds,
+    auctionTimer: {
+      mode: clock.mode,
+      reviewSeconds: clock.reviewSeconds,
+      bankSeconds: clock.bankSeconds,
+      incrementSeconds: clock.incrementSeconds,
+      lotSeconds: clock.pickSeconds
+    }
+  };
+}
+
+// The other way: a room's stored clocks read back into the form's one clock.
+function clockFromRoom(room) {
+  if (room.draftType === "auction") {
+    const timer = normalizeAuctionTimerState(room.auctionTimer);
+    return {
+      ...DEFAULT_CLOCK,
+      mode: room.auctionTimer?.enabled === false ? "off" : timer.mode,
+      reviewSeconds: timer.reviewSeconds,
+      ...(timer.mode === "chess" ? { bankSeconds: timer.bankSeconds, incrementSeconds: timer.incrementSeconds } : {}),
+      ...(timer.mode === "pick" ? { pickSeconds: timer.lotSeconds } : {})
+    };
+  }
+  const timer = normalizeSnakeTimerState(room.snakeTimer);
+  const pickSeconds = normalizePickTimerSeconds(room.pickTimer);
+  return {
+    ...DEFAULT_CLOCK,
+    mode: timer.enabled ? "chess" : pickSeconds > 0 ? "pick" : "off",
+    reviewSeconds: Math.round(normalizeSnakeReviewMs(room.snakeReview) / 1000),
+    bankSeconds: timer.bankSeconds,
+    incrementSeconds: timer.incrementSeconds,
+    pickSeconds: pickSeconds || DEFAULT_CLOCK.pickSeconds
+  };
+}
+
 let state = loadState() ?? defaultState();
 // A restored draft carries its own dealt cards, so it never re-deals — but
 // the card faces still look the rest of the universe up (a two-way player's
@@ -423,7 +489,7 @@ function auctionClockTick() {
   snakeReviewTick(draft, now);
   // A snake's heartbeat belongs to the pick clock, which keeps it on its own.
   if (draft && !isAuctionDraft(draft)) return;
-  if (!draft || !auctionTimerEnabled(draft) || draft.complete) {
+  if (!draft || !auctionClockRuns(draft) || draft.complete) {
     clearAuctionUrgency();
     return;
   }
@@ -458,7 +524,7 @@ function snakeReviewTick(draft, now) {
 
 function syncAuctionUrgency(draft, now = draftNow()) {
   const lot = liveLot(draft);
-  if (!lot || isDraftPaused(draft) || !auctionTimerEnabled(draft)) {
+  if (!lot || isDraftPaused(draft) || !auctionClockRuns(draft)) {
     clearAuctionUrgency();
     return;
   }
@@ -519,42 +585,10 @@ function snakePicksLabel(picks, minimum) {
   return `${picks} — ${bench} bench spot${bench === 1 ? "" : "s"}`;
 }
 
-// A snake draft has one clock or none: the per-pick countdown, or the chess
-// clock. Which one is a question about the draft, so it is a question about
-// state, not two settings that can quietly both be on.
-function snakeClockMode(value) {
-  if (value.snakeTimer?.enabled) return "chess";
-  return value.pickTimerSeconds > 0 ? "pick" : "off";
-}
-
-// The form's three radios, read back into the two settings the rest of the app
-// already understands. Only one of them can be live at a time.
-function snakeClockFromForm(form) {
-  const mode = String(form.get("snakeClock") ?? "off");
-  return {
-    pickTimerSeconds: mode === "pick" ? normalizePickTimerSeconds(form.get("pickTimer") || 60) : 0,
-    snakeTimer: {
-      enabled: mode === "chess",
-      bankSeconds: normalizeTimerSeconds(form.get("snakeBankSeconds"), SNAKE_DEFAULT_CLOCK_BANK_SECONDS),
-      incrementSeconds: normalizeTimerSeconds(form.get("snakeIncrementSeconds"), SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS)
-    }
-  };
-}
-
 // What createDraft wants: the config, or false for a draft with no chess clock
 // at all. An auction never has one — it has its own.
 function snakeTimerConfig(value, draftType) {
   return draftType !== "auction" && value.snakeTimer?.enabled ? { ...value.snakeTimer } : false;
-}
-
-// The snake's pool review, in seconds, read off the form. An auction has its
-// own review inside its timer, so this is zero there.
-function snakeReviewFromForm(form, draftType) {
-  if (draftType === "auction") return 0;
-  if (String(form.get("snakeReview") ?? "off") !== "on") return 0;
-  return Math.round(
-    normalizeSnakeReviewMs(normalizeTimerSeconds(form.get("snakeReviewSeconds"), SNAKE_DEFAULT_REVIEW_SECONDS)) / 1000
-  );
 }
 
 // How many turns each manager gets. The slider's floor is the minimum a legal
@@ -562,14 +596,6 @@ function snakeReviewFromForm(form, draftType) {
 // while those change follows them rather than pinning an old number.
 function snakePicksFromForm(form, startingPitchers, pen) {
   return normalizeSnakePicks(form.get("snakePicks"), startingPitchers, pen);
-}
-
-function normalizeAuctionTimerInput(form) {
-  return {
-    reviewSeconds: normalizeTimerSeconds(form.get("auctionReviewSeconds"), AUCTION_DEFAULT_REVIEW_SECONDS),
-    bankSeconds: normalizeTimerSeconds(form.get("auctionBankSeconds"), AUCTION_DEFAULT_CLOCK_BANK_SECONDS),
-    incrementSeconds: normalizeTimerSeconds(form.get("auctionIncrementSeconds"), AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS)
-  };
 }
 
 function normalizeTimerSeconds(value, fallback) {
@@ -593,9 +619,11 @@ function normalizeAuctionTimerState(value) {
     incrementSeconds: AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS
   });
   return {
+    mode: timer.mode,
     reviewSeconds: Math.round(timer.reviewMs / 1000),
     bankSeconds: Math.round(timer.bankMs / 1000),
-    incrementSeconds: Math.round(timer.incrementMs / 1000)
+    incrementSeconds: Math.round(timer.incrementMs / 1000),
+    lotSeconds: Math.round(timer.lotMs / 1000)
   };
 }
 
@@ -1087,23 +1115,9 @@ function defaultState() {
     // place of the spare DH bats. Off by default — it is a house rule.
     coaches: false,
     auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_ROOM_STARTING_PITCHERS)),
-    auctionTimer: {
-      reviewSeconds: AUCTION_DEFAULT_REVIEW_SECONDS,
-      bankSeconds: AUCTION_DEFAULT_CLOCK_BANK_SECONDS,
-      incrementSeconds: AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS
-    },
-    pickTimerSeconds: 0,
-    // The snake's chess clock: off by default, because the per-pick clock was
-    // the only clock a snake draft ever had and a room that names none has none.
-    snakeTimer: {
-      enabled: false,
-      bankSeconds: SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
-      incrementSeconds: SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS
-    },
-    // The auction's opening pause, offered to the snake as well. Off by
-    // default, and its own setting rather than part of the clock: a draft with
-    // no clock can still want a look at the board first.
-    snakeReviewSeconds: 0,
+    // One clock for either format, chess by default, with a five-minute look
+    // at the board before anyone is on it. See clockStateFields.
+    ...clockStateFields({ ...DEFAULT_CLOCK }),
     // How many turns a snake draft gives each manager. The minimum is a roster;
     // anything above it is bench.
     snakePicks: minimumSnakePicks(DEFAULT_ROOM_STARTING_PITCHERS),
@@ -1305,6 +1319,7 @@ function applyRoomSettings(room) {
   state.auctionTimer = normalizeAuctionTimerState(room.auctionTimer);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
   state.snakeTimer = normalizeSnakeTimerState(room.snakeTimer);
+  state.clock = clockFromRoom(room);
   // Only the host is sent the seed before the draft opens.
   if (room.seed) state.seed = room.seed;
 }
@@ -1382,6 +1397,13 @@ function applyRoomSnapshot(room) {
   online.liveSeats = room.managers.filter((manager) => manager.live).map((manager) => manager.id);
   if (!online.waiting) {
     rebuildOnlineDraft(room);
+    // A room that has only just opened is still drawing its order on everyone
+    // else's screen; join the draw where it is.
+    const draw = room.actions.find((entry) => entry.action?.type === "draw-order")?.action;
+    const elapsed = Number(room.serverNow) - Number(draw?.at);
+    if (draw && elapsed < orderDrawDurationMs(draw.order.length)) {
+      playOrderDraw(state.draft.managers.map((manager) => manager.name), Math.max(0, elapsed));
+    }
   } else {
     state.draft = null;
     applyRoomSettings(room);
@@ -1765,7 +1787,7 @@ function lobbyRoomPanel() {
   const liveSeats = online.liveSeats ?? online.claimedSeats;
   const missing = online.managers.filter((manager) => !manager.cpu && !liveSeats.includes(manager.id));
   const seats = online.managers
-    .map((manager, index) => {
+    .map((manager) => {
       const mine = manager.id === online.managerId;
       const claimed = online.claimedSeats.includes(manager.id);
       const here = liveSeats.includes(manager.id);
@@ -1785,7 +1807,6 @@ function lobbyRoomPanel() {
           : "";
       const tone = manager.cpu ? "is-cpu" : mine ? "is-you" : here ? "is-here" : "is-open";
       return `<li class="lobby-seat ${tone}">
-        <span class="lobby-seat-pick">${index + 1}</span>
         <span class="lobby-seat-name">${escapeHtml(manager.name)}</span>
         <span class="lobby-seat-status">${status}</span>
         ${button}
@@ -2130,66 +2151,77 @@ function confirmHostAction(draft, current, playerId, { verb, outcome }) {
   });
 }
 
-// ---- the lottery ----
+// ---- the order draw ----
 //
-// Draft order was whatever order the names got typed in, which is a strange way
-// to decide who gets the first card in the set. Roll for it — and roll for it
-// properly: the last seat comes out of the hat first, and the room works its way
-// up to the first pick, because that is the only order that has any suspense in
-// it.
-let lotteryRunning = false;
+// The pick order is drawn at random as the draft opens, and drawn in front of
+// the whole room: the last seat comes out of the hat first and the room works
+// its way up to the first pick, because that is the only order with any
+// suspense in it. This only shows a draw that has already been made — offline
+// it is made on the Start button, online by the server as the room opens. The
+// timings are the draft's own, so the server can hold the review back until
+// the draw has finished on everyone's screen.
+let orderDrawShowing = false;
 
-async function runLottery(setupForm) {
-  if (lotteryRunning) return;
-  const entries = managerEntries(setupForm).filter((entry) => entry.name);
-  if (entries.length < 2) return;
-
-  lotteryRunning = true;
+async function playOrderDraw(names, elapsedMs = 0) {
+  if (orderDrawShowing || names.length < 2) return;
+  const total = orderDrawDurationMs(names.length);
+  if (elapsedMs >= total) return;
+  orderDrawShowing = true;
   // Ask for sound, but never wait on it. A browser that has not yet decided the
   // page is allowed to make noise leaves `resume()` pending indefinitely, and a
   // ceremony that waits for permission to be loud is a ceremony that never runs.
   unlockSounds();
 
-  const order = [...entries];
-  for (let i = order.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [order[i], order[j]] = [order[j], order[i]];
-  }
-
   const stage = document.createElement("div");
   stage.className = "lottery-stage";
   stage.innerHTML = `<div class="lottery-card">
-    <p class="eyebrow">The lottery</p>
-    <h2>Drawing the order</h2>
-    <ol class="lottery-list">${order
+    <p class="eyebrow">The draw</p>
+    <h2>Drawing the pick order</h2>
+    <ol class="lottery-list">${names
       .map((_, index) => `<li class="lottery-slot" data-slot="${index}"><span class="lottery-pick">${index + 1}</span><span class="lottery-name">&mdash;</span></li>`)
       .join("")}</ol>
   </div>`;
   document.body.append(stage);
 
   const slots = [...stage.querySelectorAll(".lottery-slot")];
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  await wait(450);
-
-  // Last seat first: the room counts down to who picks first.
-  for (let index = order.length - 1; index >= 0; index -= 1) {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+  // A screen that arrives late joins the draw where it is, rather than
+  // starting it over after everyone else has seen the result.
+  let clock = elapsedMs;
+  const reveal = (index, sound) => {
     const slot = slots[index];
     slot.classList.add("drawn");
-    slot.querySelector(".lottery-name").textContent = order[index].name;
-    playLotteryBall(order.length - 1 - index, order.length);
+    slot.querySelector(".lottery-name").textContent = names[index];
+    if (sound) playLotteryBall(names.length - 1 - index, names.length);
     if (index === 0) slot.classList.add("first");
-    await wait(index === 0 ? 200 : 620);
+  };
+  // Last seat first: the room counts down to who picks first.
+  for (let index = names.length - 1; index >= 0; index -= 1) {
+    const at = ORDER_DRAW_LEAD_MS + (names.length - 1 - index) * ORDER_DRAW_STEP_MS;
+    if (at > clock) {
+      await wait(at - clock);
+      clock = at;
+      reveal(index, true);
+    } else {
+      reveal(index, false);
+    }
   }
-
-  await wait(1100);
+  await wait(total - clock - 280);
   stage.classList.add("closing");
   await wait(280);
   stage.remove();
-  lotteryRunning = false;
+  orderDrawShowing = false;
+}
 
-  // The order the room just drew is the order the room drafts in.
-  setupForm.querySelector("[data-manager-rows]").innerHTML = order.map((entry) => managerRowHtml(entry.name, entry.cpu)).join("");
-  setupForm.dispatchEvent(new Event("input", { bubbles: true }));
+// Offline, the draw is made here: a shuffle of the table, shown before the
+// board is dealt.
+function drawOrder(entries) {
+  const order = [...entries];
+  for (let i = order.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return order;
 }
 
 // ---- the setup screens ----
@@ -2320,7 +2352,7 @@ function renderOfflineSetup(setupError) {
   };
 }
 
-function startOfflineDraft(setupForm) {
+async function startOfflineDraft(setupForm) {
   setupImportError = null;
   const { value, error } = settingsFromForm(setupForm);
   if (error) {
@@ -2348,6 +2380,11 @@ function startOfflineDraft(setupForm) {
     renderSetup(poolError);
     return;
   }
+  // The order is drawn now, in front of the table, and the board is dealt
+  // once the draw is over.
+  state.managers = drawOrder(state.managers);
+  for (const button of app.querySelectorAll("button")) button.disabled = true;
+  await playOrderDraw(state.managers);
   state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
     draftType: state.draftType,
     startingPitchers: state.startingPitchers,
@@ -2479,12 +2516,11 @@ function renderSettingsForm(value) {
   </label>`;
 
   const managers = settingsCard("Managers", `
-    <ol class="manager-rows" data-manager-rows>${value.managers.map((name) => managerRowHtml(name, cpuSet.has(name))).join("")}</ol>
+    <ul class="manager-rows" data-manager-rows>${value.managers.map((name) => managerRowHtml(name, cpuSet.has(name))).join("")}</ul>
     <div class="manager-tools">
       <button type="button" class="small" data-action="add-manager">+ Add manager</button>
-      <button type="button" class="small" data-action="lottery">&#127922; Roll for order</button>
     </div>
-    <small class="setting-hint">They pick in this order. Tick CPU and the computer drafts that seat.</small>`);
+    <small class="setting-hint">The pick order is drawn at random, in front of everyone, when the draft starts. Tick CPU and the computer drafts that seat.</small>`);
 
   const format = settingsCard("Format", `
     ${segmentedControl("draftType", value.draftType === "auction" ? "auction" : "snake", [["snake", "Snake"], ["auction", "Auction"]])}
@@ -2509,39 +2545,28 @@ function renderSettingsForm(value) {
         "A strong roster runs to roughly 5000 card points, so $5000 bids like the classic cap.")}
     </div>`);
 
-  const clockMode = snakeClockMode(value);
+  const clockValue = clockSettings(value);
+  const perUnit = (snake, auction) => `<span data-when="draftType=snake">${snake}</span><span data-when="draftType=auction">${auction}</span>`;
   const clock = settingsCard("Clock", `
-    <div class="setting-group" data-when="draftType=snake">
-      ${segmentedControl("snakeClock", clockMode, [["off", "No clock"], ["pick", "Per pick"], ["chess", "Chess clock"]])}
-      <small class="setting-hint" data-when="snakeClock=off">Take as long as you like.</small>
-      <small class="setting-hint" data-when="snakeClock=pick">Run out the clock and the pick is made for you.</small>
-      <small class="setting-hint" data-when="snakeClock=chess">One bank for the whole draft, plus time back on every pick. It only runs on your turn.</small>
-      <div class="field-row" data-when="snakeClock=pick">
-        ${settingField("Seconds per pick", `<select name="pickTimer">
-          ${[[30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
-            .map(([seconds, label]) => option(seconds, label, (value.pickTimerSeconds || 60) === seconds))
-            .join("")}
-        </select>`)}
-      </div>
-      <div class="field-row" data-when="snakeClock=chess">
-        ${settingField("Bank (seconds)", `<input name="snakeBankSeconds" type="number" min="0" max="7200" step="30" value="${value.snakeTimer.bankSeconds}" />`)}
-        ${settingField("Back per pick", `<input name="snakeIncrementSeconds" type="number" min="0" max="600" step="5" value="${value.snakeTimer.incrementSeconds}" />`)}
-      </div>
-      ${settingSwitch("snakeReview", value.snakeReviewSeconds > 0, "Read the board first", "A countdown before anyone picks. The host can start early.")}
-      <div class="field-row" data-when="snakeReview=on">
-        <!-- Any whole number of seconds. A coarser step is a form that
-             silently refuses to submit when somebody types 20. -->
-        ${settingField("Review (seconds)", `<input name="snakeReviewSeconds" type="number" min="0" max="3600" step="1" value="${value.snakeReviewSeconds || SNAKE_DEFAULT_REVIEW_SECONDS}" />`)}
-      </div>
+    ${segmentedControl("clockMode", clockValue.mode, [["off", "No clock"], ["pick", "Per pick"], ["chess", "Chess clock"]])}
+    <small class="setting-hint" data-when="clockMode=off">${perUnit("Take as long as you like.", "Each card waits until every bid is in.")}</small>
+    <small class="setting-hint" data-when="clockMode=pick">${perUnit(
+      "The same time on every pick. Run it out and the pick is made for you.",
+      "The same time on every card. Run it out and you pass on that card.")}</small>
+    <small class="setting-hint" data-when="clockMode=chess">${perUnit(
+      "One bank for the whole draft, plus time back on every pick. It only runs on your turn.",
+      "One bank for the whole draft, plus time added as each card comes up. Run it out and you pass.")}</small>
+    <div class="field-row fluid">
+      ${settingField("Board review (seconds)", `<input name="clockReviewSeconds" type="number" min="0" max="3600" step="1" value="${clockValue.reviewSeconds}" />`)}
+      ${settingField(perUnit("Seconds per pick", "Seconds per card"), `<select name="clockPickSeconds">
+        ${[[30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
+          .map(([seconds, label]) => option(seconds, label, Number(clockValue.pickSeconds) === seconds))
+          .join("")}
+      </select>`, "", 'data-when="clockMode=pick"')}
+      ${settingField("Bank (seconds)", `<input name="clockBankSeconds" type="number" min="0" max="7200" step="30" value="${clockValue.bankSeconds}" />`, "", 'data-when="clockMode=chess"')}
+      ${settingField(perUnit("Back per pick", "Added per card"), `<input name="clockIncrementSeconds" type="number" min="0" max="600" step="5" value="${clockValue.incrementSeconds}" />`, "", 'data-when="clockMode=chess"')}
     </div>
-    <div class="setting-group" data-when="draftType=auction">
-      <div class="field-row three">
-        ${settingField("Review (s)", `<input name="auctionReviewSeconds" type="number" min="0" max="3600" step="30" value="${value.auctionTimer.reviewSeconds}" />`)}
-        ${settingField("Bid bank (s)", `<input name="auctionBankSeconds" type="number" min="0" max="3600" step="30" value="${value.auctionTimer.bankSeconds}" />`)}
-        ${settingField("Per card (s)", `<input name="auctionIncrementSeconds" type="number" min="0" max="120" step="1" value="${value.auctionTimer.incrementSeconds}" />`)}
-      </div>
-      <small class="setting-hint">Time to read the dealt board, each manager's bank for sealed bids, and the seconds added as each card comes up.</small>
-    </div>`);
+    <small class="setting-hint">Everyone reads the dealt board before the first ${perUnit("pick", "card")}; the host can start early.</small>`);
 
   const cardSet = settingsCard("Card set", `
     <div class="set-tiles">
@@ -2625,8 +2650,7 @@ function settingsFacts(setupForm) {
   return {
     draftType,
     nomination,
-    snakeClock: String(form.get("snakeClock") ?? "off"),
-    snakeReview: form.get("snakeReview") ? "on" : "off",
+    clockMode: String(form.get("clockMode") ?? DEFAULT_CLOCK.mode),
     coaches: form.get("coaches") ? "on" : "off",
     universe: String(form.get("universe") ?? DEFAULT_UNIVERSE),
     pen: hasBullpenRange(draftType, nomination) ? "ranged" : "fixed"
@@ -2721,7 +2745,7 @@ function bindSettingsForm(setupForm, { onChange = null } = {}) {
       event.target.closest(".manager-row").querySelector('input[name="managerCpu"]').checked = true;
     }
     if (name === "decade") syncDecadeToggle();
-    if (["draftType", "nomination", "snakeClock", "snakeReview", "coaches", "universe", "bullpenMin", "bullpenSlots", "startingPitchers"].includes(name)) {
+    if (["draftType", "nomination", "clockMode", "coaches", "universe", "bullpenMin", "bullpenSlots", "startingPitchers"].includes(name)) {
       syncAll();
     }
     changed();
@@ -2750,9 +2774,7 @@ function bindSettingsForm(setupForm, { onChange = null } = {}) {
   setupForm.addEventListener("click", (event) => {
     const action = event.target.closest("[data-action]")?.dataset.action;
     if (!action) return;
-    if (action === "lottery") {
-      runLottery(setupForm);
-    } else if (action === "add-manager") {
+    if (action === "add-manager") {
       if (rowsList.children.length >= MAX_SETUP_MANAGERS) return;
       rowsList.insertAdjacentHTML("beforeend", managerRowHtml("", false));
       rowsList.lastElementChild.querySelector("input").focus();
@@ -2792,7 +2814,7 @@ function settingsFromForm(setupForm) {
   // An auction is priced against a roster; a snake draft is as long as its
   // slider says. Either way this is the number of cards a seat drafts.
   const rosterSize = mode.draftType === "auction" ? rosterSizeForStartingPitchers(startingPitchers, mode) : snakePicks;
-  const snakeClock = snakeClockFromForm(form);
+  const clock = clockFromForm(form);
   const universe = universeFromForm(form);
   return {
     error: universe ? "" : "Check at least one decade, or pick a different card set.",
@@ -2813,11 +2835,19 @@ function settingsFromForm(setupForm) {
       hidePoints: mode.hidePoints,
       coaches: mode.coaches,
       auctionBudget: normalizeAuctionBudget(form.get("auctionBudget"), rosterSize),
-      auctionTimer: normalizeAuctionTimerInput(form),
-      pickTimerSeconds: snakeClock.pickTimerSeconds,
-      snakeTimer: snakeClock.snakeTimer,
-      snakeReviewSeconds: snakeReviewFromForm(form, mode.draftType)
+      ...clockStateFields(clock)
     }
+  };
+}
+
+function clockFromForm(form) {
+  const mode = String(form.get("clockMode") ?? DEFAULT_CLOCK.mode);
+  return {
+    mode: CLOCK_MODES.includes(mode) ? mode : DEFAULT_CLOCK.mode,
+    reviewSeconds: Math.min(3600, normalizeTimerSeconds(form.get("clockReviewSeconds"), DEFAULT_CLOCK.reviewSeconds)),
+    pickSeconds: normalizePickTimerSeconds(form.get("clockPickSeconds") || DEFAULT_CLOCK.pickSeconds),
+    bankSeconds: normalizeTimerSeconds(form.get("clockBankSeconds"), DEFAULT_CLOCK.bankSeconds),
+    incrementSeconds: normalizeTimerSeconds(form.get("clockIncrementSeconds"), DEFAULT_CLOCK.incrementSeconds)
   };
 }
 
@@ -2825,6 +2855,7 @@ function settingsFromForm(setupForm) {
 // make the trip: one left out is silently dropped and the room quietly opens on
 // the default.
 function roomSettingsBody(value) {
+  const clock = clockStateFields(clockSettings(value));
   return {
     seed: value.seed,
     managers: value.managers,
@@ -2834,16 +2865,18 @@ function roomSettingsBody(value) {
     bullpenSlots: value.bullpenSlots,
     bullpenMin: value.bullpenMin,
     temperature: value.temperature,
-    pickTimer: value.pickTimerSeconds,
+    pickTimer: clock.pickTimerSeconds,
     draftType: value.draftType,
     nomination: value.nomination,
     hidePoints: value.hidePoints,
     coaches: value.coaches,
     budget: value.auctionBudget,
-    auctionTimer: value.auctionTimer,
-    snakeTimer: snakeTimerConfig(value, value.draftType),
-    snakeReview: value.snakeReviewSeconds,
-    snakePicks: value.snakePicks
+    auctionTimer: clock.auctionTimer,
+    snakeTimer: snakeTimerConfig(clock, value.draftType),
+    snakeReview: clock.snakeReviewSeconds,
+    snakePicks: value.snakePicks,
+    // An online room draws its pick order when it opens.
+    drawOrder: true
   };
 }
 
@@ -2857,9 +2890,10 @@ function renderSettingsSummary(value) {
   const pen = bullpenSlots === bullpenMin
     ? `${bullpenMin}`
     : `${bullpenMin}&ndash;${bullpenSlots === UNLIMITED_BULLPEN ? "any" : bullpenSlots}`;
-  const clockMode = snakeClockMode(value);
-  const snakeClock = clockMode === "pick" ? `${seconds(value.pickTimerSeconds)} per pick`
-    : clockMode === "chess" ? `Chess clock &middot; ${seconds(value.snakeTimer.bankSeconds)} bank, +${seconds(value.snakeTimer.incrementSeconds)} a pick`
+  const clock = clockSettings(value);
+  const unit = auction ? "card" : "pick";
+  const clockLine = clock.mode === "pick" ? `${seconds(clock.pickSeconds)} per ${unit}`
+    : clock.mode === "chess" ? `Chess clock &middot; ${seconds(clock.bankSeconds)} bank, +${seconds(clock.incrementSeconds)} a ${unit}`
     : "No clock";
   const rows = [
     ["Format", auction
@@ -2867,9 +2901,7 @@ function renderSettingsSummary(value) {
       : `Snake &middot; ${value.snakePicks} picks each`],
     ["Card set", `${escapeHtml(set?.name ?? value.universe)}${value.universe === "fictional" && value.temperature ? ` &middot; ${escapeHtml(temperatureLabel(value.temperature))}` : ""}`],
     ["Roster", `${value.startingPitchers} starters &middot; ${pen} relievers`],
-    ["Clock", auction
-      ? `${seconds(value.auctionTimer.reviewSeconds)} review &middot; ${seconds(value.auctionTimer.bankSeconds)} bid bank &middot; +${seconds(value.auctionTimer.incrementSeconds)} a card`
-      : `${snakeClock}${value.snakeReviewSeconds > 0 ? ` &middot; ${seconds(value.snakeReviewSeconds)} to read the board` : ""}`],
+    ["Clock", `${clockLine}${clock.reviewSeconds > 0 ? ` &middot; ${seconds(clock.reviewSeconds)} to read the board` : ""}`],
     ["House rules", [value.hidePoints ? "Blind draft" : "", value.coaches ? "Coaching staff" : ""].filter(Boolean).join(" &middot; ") || "None"]
   ];
   return `<section class="settings-card settings-summary">
@@ -3330,7 +3362,7 @@ function renderSnakeReviewPanel(draft) {
 // repair gets made — stop the room, fix the clock, start it again.
 function renderGrantTimeControl(draft) {
   const auction = isAuctionDraft(draft);
-  if (draft.complete || !(auction ? auctionTimerEnabled(draft) : snakeClockEnabled(draft))) return "";
+  if (draft.complete || !(auction ? auctionClockRuns(draft) : snakeClockEnabled(draft))) return "";
   const now = draftNow();
   const live = liveDraft(draft);
   // The room re-renders whenever anyone moves, even paused; the markup is built
@@ -3484,7 +3516,7 @@ function renderAuctionStatusPanel(draft) {
   const live = liveDraft(draft);
   const random = isRandomNomination(draft);
   const remaining = auctionPlayersStillToCome(draft, lot);
-  const timed = auctionTimerEnabled(draft);
+  const timed = auctionClockRuns(draft);
   const lotPlayer = auctionLotPlayer(draft);
 
   // How far the slate has run, as a fraction of every lot the draft will ever
@@ -3614,7 +3646,7 @@ function renderAuctionDecisionRail(draft) {
   const budgetAmount = metricManager ? auctionBudget(draft, metricManager) : null;
   const maxBidAmount = metricManager ? Math.max(0, auctionMaxBid(draft, metricManager)) : null;
   const constrained = budgetAmount !== null && maxBidAmount < budgetAmount;
-  const timed = metricManager && auctionTimerEnabled(draft);
+  const timed = metricManager && auctionClockRuns(draft);
   const timeLeft = timed ? formatAuctionClock(auctionBidTimeRemainingMs(liveDraft(draft), metricManager, draftNow())) : "Untimed";
   const source = nominator ? `Nominated by ${escapeHtml(nominator.name)}` : "Dealt by the queue";
 
@@ -3687,7 +3719,7 @@ function renderAuctionBudgetStrip(draft) {
   const viewerId = viewerManager(draft)?.id;
   const lot = liveLot(draft);
   const live = liveDraft(draft);
-  const timed = auctionTimerEnabled(draft);
+  const timed = auctionClockRuns(draft);
   const seatOrder = new Map(draft.managers.map((manager, index) => [manager.id, index]));
   const managers = [...draft.managers]
     .sort((a, b) => auctionBudget(draft, b) - auctionBudget(draft, a) || seatOrder.get(a.id) - seatOrder.get(b.id))

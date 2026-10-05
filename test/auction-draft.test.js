@@ -17,6 +17,7 @@ import {
   auctionReviewComplete,
   auctionReviewRemainingMs,
   auctionTimerEnabled,
+  auctionClockRuns,
   autopick,
   benchPlayers,
   buildTeam,
@@ -28,6 +29,7 @@ import {
   createDraft,
   currentManager,
   draftHistory,
+  drawManagerOrder,
   isAuctionDraft,
   isAuctionPaused,
   nominateBestTarget,
@@ -1168,4 +1170,47 @@ test("a high-control walk machine is bid under a clean low-control arm", () => {
   const walkerBid = bidOn(walker);
   const cleanBid = bidOn(clean);
   assert.ok(cleanBid > walkerBid, `walk machine drew ${walkerBid}, clean arm ${cleanBid}`);
+});
+
+test("a per-card auction clock starts every lot on the same time, carrying nothing", () => {
+  const draft = createDraft(["Alpha", "Beta"], makeDraftPool(), 13, "per-card", {
+    draftType: "auction",
+    timer: { mode: "pick", reviewSeconds: 0, lotSeconds: 30 }
+  });
+  const [alpha, beta] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id, 1000);
+  assert.equal(auctionBidTimeRemainingMs(draft, beta, 11000), 20000);
+  placeSealedBid(draft, alpha.id, 60, 2000);
+  placeSealedBid(draft, beta.id, 50, 11000);
+  // Beta spent ten seconds on the first card; the next one still gets thirty.
+  nominatePlayer(draft, draft.pool[1].id, 20000);
+  assert.equal(auctionBidTimeRemainingMs(draft, beta, 20000), 30000);
+  assert.equal(auctionBidTimeRemainingMs(draft, alpha, 20000), 30000);
+});
+
+test("an auction with no bid clock keeps its review but never times a bid out", () => {
+  const draft = createDraft(["Alpha", "Beta"], makeDraftPool(), 13, "no-clock", {
+    draftType: "auction",
+    timer: { mode: "off", reviewSeconds: 60 }
+  });
+  assert.equal(auctionTimerEnabled(draft), true, "the review still runs");
+  assert.equal(auctionClockRuns(draft), false);
+  startAuctionReview(draft, 0);
+  assert.equal(auctionReviewComplete(draft, 59000), false);
+  assert.equal(auctionReviewComplete(draft, 61000), true);
+  nominatePlayer(draft, draft.pool[0].id, 61000);
+  assert.equal(draft.auction.lot.clock, null);
+  syncAuctionTimer(draft, 10 ** 9);
+  assert.deepEqual(draft.auction.lot.pending, ["team-1", "team-2"], "nobody is timed out of a lot");
+  assert.equal(canPlaceSealedBid(draft, draft.managers[1], 50, 10 ** 9).ok, true);
+});
+
+test("the drawn order reorders the table before the first pick, and only then", () => {
+  const draft = createDraft(["Alpha", "Beta", "Gamma"], makeDraftPool(), 13, "draw");
+  applyDraftAction(draft, { type: "draw-order", order: ["team-3", "team-1", "team-2"], at: 0 });
+  assert.deepEqual(draft.managers.map((manager) => manager.name), ["Gamma", "Alpha", "Beta"]);
+  assert.equal(currentManager(draft).name, "Gamma");
+  assert.throws(() => drawManagerOrder(draft, ["team-1", "team-1", "team-2"]), /exactly once/);
+  pickPlayer(draft, draft.pool[0].id, 1);
+  assert.throws(() => drawManagerOrder(draft, ["team-1", "team-2", "team-3"]), /before the first pick/);
 });

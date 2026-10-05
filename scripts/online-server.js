@@ -4,7 +4,7 @@ import { networkInterfaces } from "node:os";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildFictionalDraftPool, normalizeTemperature } from "../src/data/playerGeneration.js";
 import { buildRealDraftPool } from "../src/data/realPlayers.js";
@@ -55,7 +55,9 @@ import {
   pendingCpuBidder,
   rosterSizeForStartingPitchers,
   timedOutAuctionBidderIds,
-  SIM_ACTION_TYPES
+  SIM_ACTION_TYPES,
+  auctionClockRuns,
+  orderDrawDurationMs
 } from "../src/rules/draft.js";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -357,6 +359,7 @@ function reviveRoom(saved) {
     // Rooms saved before the waiting room existed were already underway.
     waitingForPlayers: Boolean(saved.waitingForPlayers),
     configuring: Boolean(saved.configuring),
+    drawOrder: Boolean(saved.drawOrder),
     seats: new Map(Object.entries(saved.seats ?? {})),
     hostToken: saved.hostToken,
     streams: new Set(),
@@ -408,6 +411,7 @@ function roomRecord(room) {
     pendingBids: room.pendingBids ?? [],
     waitingForPlayers: Boolean(room.waitingForPlayers),
     configuring: Boolean(room.configuring),
+    drawOrder: Boolean(room.drawOrder),
     createdAt: room.createdAt
   };
 }
@@ -1150,6 +1154,9 @@ function roomConfigFromBody(body) {
   const cpuNames = Array.isArray(body.cpu)
     ? body.cpu.map((name) => String(name)).filter((name) => managers.includes(name))
     : [];
+  // Draw the pick order at random when the room opens, rather than seating
+  // managers in the order they were listed.
+  const drawOrder = Boolean(body.drawOrder);
 
   // Every universe deals a seeded deck out of a deep card set; the deal is
   // deterministic in the seed so clients rebuild the identical deck. A
@@ -1202,6 +1209,7 @@ function roomConfigFromBody(body) {
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
     managerNames: managers,
+    drawOrder,
     draft
   };
 }
@@ -1754,7 +1762,7 @@ function denyAction(draft, seat, isHost, action) {
   if (type === "grant-time") {
     if (!isHost) return "Only the host can grant time";
     if (draft.complete) return "The draft is already complete";
-    if (isAuctionDraft(draft) ? !auctionTimerEnabled(draft) : !snakeClockEnabled(draft)) {
+    if (isAuctionDraft(draft) ? !auctionClockRuns(draft) : !snakeClockEnabled(draft)) {
       return "This room has no clock";
     }
     if (!draft.managers.some((manager) => manager.id === action?.managerId)) return "No such manager";
@@ -1942,7 +1950,20 @@ function startRoomIfFull(store, room) {
   const humans = room.draft.managers.filter((manager) => !manager.cpu);
   if (!humans.every((manager) => seatIsLive(room, manager.id))) return false;
   room.waitingForPlayers = false;
-  const at = Date.now();
+  let at = Date.now();
+  // The pick order is drawn now, in front of everyone, and the board opens
+  // once the draw has played out on their screens.
+  if (room.drawOrder) {
+    const order = room.draft.managers.map((manager) => manager.id);
+    for (let i = order.length - 1; i > 0; i -= 1) {
+      const j = randomInt(i + 1);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    const draw = { type: "draw-order", order, at };
+    applyDraftAction(room.draft, draw);
+    appendAction(store, room, draw);
+    at += orderDrawDurationMs(order.length);
+  }
   // A room that asked to read the board first opens on the review, whichever
   // draft it is; the snake's clock follows when the review ends, which
   // completeSnakeReview does for it.
@@ -2045,7 +2066,9 @@ function roomSnapshot(room, port = null, viewer = {}) {
     coaches: Boolean(room.coaches),
     auctionBudget: room.auctionBudget ?? null,
     auctionTimer: room.auctionTimer ?? null,
-    managers: room.draft.managers.map((manager) => ({
+    // In seat order, not draft order: a client rebuilds the draft from this list
+    // and then replays the log, and the log's order draw reorders it again.
+    managers: seatOrder(room.draft.managers).map((manager) => ({
       id: manager.id,
       name: manager.name,
       cpu: Boolean(manager.cpu),
@@ -2059,6 +2082,11 @@ function roomSnapshot(room, port = null, viewer = {}) {
     complete: room.draft.complete,
     serverNow: Date.now()
   };
+}
+
+function seatOrder(managers) {
+  const seat = (manager) => Number(String(manager.id).replace(/\D+/g, "")) || 0;
+  return [...managers].sort((a, b) => seat(a) - seat(b));
 }
 
 function claimedSeats(room) {

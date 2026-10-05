@@ -298,6 +298,7 @@ export const AUCTION_DEFAULT_BUDGET = 1000;
 export const AUCTION_DEFAULT_REVIEW_SECONDS = 5 * 60;
 export const AUCTION_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
 export const AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS = 20;
+export const AUCTION_DEFAULT_LOT_SECONDS = 60;
 
 const MS_PER_SECOND = 1000;
 
@@ -308,15 +309,32 @@ const MS_PER_SECOND = 1000;
 // its own action log (the nomination that was legal when it happened throws
 // "Review period is still open"). See reviveRoom and rebuildOnlineDraft, which
 // both default a missing timer to off for exactly that reason.
+//
+// A timed auction always has its review; the bid clock after it is one of three
+// modes, the same three a snake draft offers:
+// - "chess": a bank per manager, plus an increment each time a card comes up.
+//   Every room before the modes existed is this one, so a missing mode reads
+//   as chess.
+// - "pick": a fixed number of seconds on every card (lotMs), nothing carried.
+// - "off": no bid clock at all; lots wait for every bid.
 export function normalizeAuctionTimerConfig(timer = {}) {
   if (timer === false || timer?.enabled === false) {
-    return { enabled: false, reviewMs: 0, bankMs: 0, incrementMs: 0 };
+    return { enabled: false, mode: "off", reviewMs: 0, bankMs: 0, incrementMs: 0, lotMs: 0 };
   }
+  const mode = timer?.mode === "pick" || timer?.mode === "off" ? timer.mode : "chess";
+  const reviewMs = normalizeTimerMs(timer.reviewMs, timer.reviewSeconds, AUCTION_DEFAULT_REVIEW_SECONDS);
+  if (mode === "pick") {
+    const lotMs = normalizeTimerMs(timer.lotMs, timer.lotSeconds, AUCTION_DEFAULT_LOT_SECONDS);
+    return { enabled: true, mode, reviewMs, bankMs: lotMs, incrementMs: 0, lotMs };
+  }
+  if (mode === "off") return { enabled: true, mode, reviewMs, bankMs: 0, incrementMs: 0, lotMs: 0 };
   return {
     enabled: true,
-    reviewMs: normalizeTimerMs(timer.reviewMs, timer.reviewSeconds, AUCTION_DEFAULT_REVIEW_SECONDS),
+    mode,
+    reviewMs,
     bankMs: normalizeTimerMs(timer.bankMs, timer.bankSeconds, AUCTION_DEFAULT_CLOCK_BANK_SECONDS),
-    incrementMs: normalizeTimerMs(timer.incrementMs, timer.incrementSeconds, AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS)
+    incrementMs: normalizeTimerMs(timer.incrementMs, timer.incrementSeconds, AUCTION_DEFAULT_CLOCK_INCREMENT_SECONDS),
+    lotMs: 0
   };
 }
 
@@ -729,6 +747,36 @@ export function isAuctionDraft(draft) {
   return draft?.draftType === "auction";
 }
 
+// ---- the order draw ----------------------------------------------------------
+//
+// The pick order is drawn in front of the room as the draft opens, so nobody
+// gets to arrange it in setup. The draw is recorded as the order it came out
+// in, never re-drawn on replay. It reorders the table and nothing else: ids,
+// rosters and personas all travel with their manager.
+export function drawManagerOrder(draft, order) {
+  const started = draft.pickNumber > 0 || draft.auction?.lot || draft.auction?.history?.length;
+  if (started) throw new Error("The order can only be drawn before the first pick");
+  const byId = new Map(draft.managers.map((manager) => [manager.id, manager]));
+  const valid = Array.isArray(order)
+    && order.length === draft.managers.length
+    && new Set(order).size === order.length
+    && order.every((id) => byId.has(id));
+  if (!valid) throw new Error("A drawn order must name every manager exactly once");
+  draft.managers = order.map((id) => byId.get(id));
+  draft.orderDrawn = true;
+  return draft;
+}
+
+// How long the room's order-draw animation runs for a table this size: a beat
+// before the first name, one per seat after it, and a pause on the result. The
+// server holds the review back by this much so the board opens as the draw ends.
+export const ORDER_DRAW_LEAD_MS = 450;
+export const ORDER_DRAW_STEP_MS = 620;
+export const ORDER_DRAW_HOLD_MS = 1600;
+export function orderDrawDurationMs(managerCount) {
+  return ORDER_DRAW_LEAD_MS + Math.max(0, managerCount - 1) * ORDER_DRAW_STEP_MS + ORDER_DRAW_HOLD_MS;
+}
+
 export function currentManager(draft) {
   if (isAuctionDraft(draft)) {
     return draft.managers[draft.auction.nominatorIndex];
@@ -942,6 +990,12 @@ export function auctionLotPlayer(draft) {
 
 export function auctionTimerEnabled(draft) {
   return Boolean(draft?.auction?.timer?.enabled);
+}
+
+// Whether bids are on a clock. A timed auction with mode "off" still has its
+// review, but no bid clock after it.
+export function auctionClockRuns(draft) {
+  return auctionTimerEnabled(draft) && draft.auction.timer.mode !== "off";
 }
 
 export function startAuctionReview(draft, now = Date.now()) {
@@ -1336,7 +1390,7 @@ export function auctionClockBankMs(draft, manager) {
 // The auction's version of grantSnakeTime: the grant lands on the bank, so a
 // manager with a live lot is still charged for the time already spent on it.
 export function grantAuctionTime(draft, managerId, ms) {
-  if (!isAuctionDraft(draft) || !auctionTimerEnabled(draft) || draft.complete) return false;
+  if (!isAuctionDraft(draft) || !auctionClockRuns(draft) || draft.complete) return false;
   const manager = draft.managers.find((entry) => entry.id === managerId);
   if (!manager) return false;
   const amount = Number(ms);
@@ -1637,13 +1691,19 @@ function resolveSealedLot(draft, now = Date.now()) {
 // turn — the tied managers are being asked for a fresh decision, at a price
 // they have never had to think about — so they are paid again rather than
 // being made to settle it out of what the first round left them.
+//
+// A per-card clock is the same clock with nothing carried over: each manager the
+// lot runs for starts it on a full card's worth of time.
 function createLotClock(draft, now, creditManagerIds = []) {
-  if (!auctionTimerEnabled(draft)) return null;
+  if (!auctionClockRuns(draft)) return null;
+  const perCard = draft.auction.timer.mode === "pick";
   for (const managerId of creditManagerIds) {
     const manager = draft.managers.find((item) => item.id === managerId);
     if (!manager) continue;
     if (!hasUnlimitedRoster(draft) && rosterFull(draft, manager)) continue;
-    draft.auction.clockBanks[manager.id] = auctionClockBankMs(draft, manager) + draft.auction.timer.incrementMs;
+    draft.auction.clockBanks[manager.id] = perCard
+      ? draft.auction.timer.lotMs
+      : auctionClockBankMs(draft, manager) + draft.auction.timer.incrementMs;
   }
   return { startedAt: normalizeTimestamp(now), timedOut: [] };
 }
@@ -1933,6 +1993,9 @@ export function applyDraftAction(draft, action) {
       // Puts the nominator's best target on the block and stops there, so a
       // stalled nomination never turns into bids nobody entered.
       nominateBestTarget(draft, action.at);
+      return;
+    case "draw-order":
+      drawManagerOrder(draft, action.order);
       return;
     case "start-review":
       startDraftReview(draft, action.at);

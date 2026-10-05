@@ -165,9 +165,11 @@ test("timed online auctions share review and chess-clock state", async (t) => {
   });
   assert.deepEqual(room.auctionTimer, {
     enabled: true,
+    mode: "chess",
     reviewMs: 60000,
     bankMs: 30000,
-    incrementMs: 5000
+    incrementMs: 5000,
+    lotMs: 0
   });
   assert.deepEqual(room.actions, [], "review waits for the table to fill");
   assert.ok(Number.isFinite(room.serverNow));

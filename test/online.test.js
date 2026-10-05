@@ -12,6 +12,7 @@ import {
   applyDraftAction,
   createDraft,
   currentManager,
+  orderDrawDurationMs,
   restoreSnakeClockState,
   snakeClockState
 } from "../src/rules/draft.js";
@@ -1472,7 +1473,7 @@ test("a lobby room is set up by its host after it opens, and starts on the host'
   // Reorder the table and add a computer: Bo's seat follows Bo's name.
   const reset = await api(base, "POST", `/api/rooms/${roomId}/configure`, {
     hostToken,
-    settings: { seed: "lobby-seed-2", managers: ["Bo", "Ana", "Robo"], cpu: ["Robo"], draftType: "auction", nomination: "manual" }
+    settings: { seed: "lobby-seed-2", managers: ["Bo", "Ana", "Robo"], cpu: ["Robo"], draftType: "auction", nomination: "manual", drawOrder: true }
   });
   assert.equal(reset.status, 200);
   assert.equal(reset.data.draftType, "auction");
@@ -1488,6 +1489,14 @@ test("a lobby room is set up by its host after it opens, and starts on the host'
   assert.equal(started.data.configuring, false);
   assert.equal(started.data.waiting, false, "everyone was already seated, so the board opens at once");
   assert.equal(started.data.seed, "lobby-seed-2");
+  // The order is drawn as the room opens, and the review waits for the draw.
+  const [draw, review] = started.data.actions.map((entry) => entry.action);
+  assert.equal(draw.type, "draw-order");
+  assert.deepEqual([...draw.order].sort(), ["team-1", "team-2", "team-3"]);
+  assert.equal(review.type, "start-review");
+  assert.equal(review.at, draw.at + orderDrawDurationMs(3));
+  assert.deepEqual(started.data.managers.map((manager) => manager.id), ["team-1", "team-2", "team-3"],
+    "the room lists seats in seat order; the log carries the drawn order");
   const locked = await api(base, "POST", `/api/rooms/${roomId}/configure`, { hostToken, settings: { managers: ["A", "B"] } });
   assert.equal(locked.status, 409);
 
@@ -1496,4 +1505,5 @@ test("a lobby room is set up by its host after it opens, and starts on the host'
   const revived = await api(restarted, "GET", `/api/rooms/${roomId}`);
   assert.equal(revived.data.configuring, false);
   assert.equal(revived.data.draftType, "auction");
+  assert.deepEqual(revived.data.actions[0].action.order, draw.order);
 });
