@@ -3,8 +3,9 @@ const SEAT_STORAGE_PREFIX = "mlb-showdown-online-seat-";
 // Every field the setup screen chose has to make the trip. A name left out of
 // this list is silently dropped and the room quietly opens on the default —
 // which is how a random-nomination room came out as a manual auction.
-export async function createRoom({ seed, managers, universe, startingPitchers, bullpenSlots, bullpenMin, temperature, pickTimer, cpu, draftType, nomination, hidePoints, coaches, budget, auctionTimer, snakeTimer, snakeReview, snakePicks }) {
+export async function createRoom({ seed, managers, universe, startingPitchers, bullpenSlots, bullpenMin, temperature, pickTimer, cpu, draftType, nomination, hidePoints, coaches, budget, auctionTimer, snakeTimer, snakeReview, snakePicks, lobby }) {
   return request("POST", "/api/rooms", {
+    lobby,
     seed,
     managers,
     universe,
@@ -26,8 +27,20 @@ export async function createRoom({ seed, managers, universe, startingPitchers, b
   });
 }
 
-export async function fetchRoom(roomId) {
-  return request("GET", `/api/rooms/${encodeURIComponent(roomId)}`);
+// The token says which seat this browser holds (a lobby can move it); the host
+// token unlocks the seed, which the host is still allowed to change.
+export async function fetchRoom(roomId, viewer = {}) {
+  const query = new URLSearchParams();
+  if (viewer.token) query.set("token", viewer.token);
+  if (viewer.host) query.set("host", viewer.host);
+  const suffix = query.size ? `?${query}` : "";
+  return request("GET", `/api/rooms/${encodeURIComponent(roomId)}${suffix}`);
+}
+
+// The host setting up a lobby room: `settings` is a createRoom body, and
+// `start` locks them and opens the room to the draft.
+export async function configureRoom(roomId, hostToken, { settings, start } = {}) {
+  return request("POST", `/api/rooms/${encodeURIComponent(roomId)}/configure`, { hostToken, settings, start });
 }
 
 export async function joinRoom(roomId, managerId, hostToken) {
@@ -60,6 +73,8 @@ export function subscribeRoom(roomId, since, handlers, token = null) {
   });
   listen("action", handlers.onAction);
   listen("seats", handlers.onSeats);
+  // A lobby's settings changed, or the host started the draft.
+  listen("room", handlers.onRoom);
   listen("hello", handlers.onHello);
   // A live auction lot: who is up and who has bid, but never the amounts —
   // those only arrive as actions once the card sells.

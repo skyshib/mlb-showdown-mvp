@@ -154,6 +154,7 @@ import {
   fetchRoom,
   joinRoom,
   sendRoomAction,
+  configureRoom,
   subscribeRoom,
   loadOnlineSeat,
   storeOnlineSeat
@@ -504,47 +505,6 @@ function formatAuctionClock(ms) {
 
 function setupBullpenRange(value) {
   return hasBullpenRange(value.draftType === "auction" ? "auction" : "snake", value.nomination);
-}
-
-// The pitching staff on the setup screen: the rotation, and the pen as a range.
-// Min is how many relievers every team must own. Max, how many of them pitch,
-// is a snake and random-nomination setting; a manual-nomination auction drafts
-// exactly the min, so there its max sits disabled at the min and remembers the
-// ranged choice for when a ranged mode comes back.
-function renderStaffFieldset(value) {
-  const random = setupBullpenRange(value);
-  const { bullpenSlots, bullpenMin } = roomBullpen(value, true);
-  const counts = Array.from({ length: MAX_BULLPEN_SLOTS + 1 }, (_, count) => count);
-  const shownMax = random ? bullpenSlots : bullpenMin;
-  const option = (optionValue, label, selected, disabled = false) =>
-    `<option value="${optionValue}" ${selected ? "selected" : ""} ${disabled ? "disabled" : ""}>${label}</option>`;
-  return `<fieldset class="pool-mode staff-mode">
-    <legend>Pitching staff</legend>
-    <div class="staff-fields">
-      <label>
-        Starters
-        <input name="startingPitchers" type="number" min="${MIN_STARTING_PITCHERS}" max="${MAX_STARTING_PITCHERS}" step="1" value="${value.startingPitchers}" />
-      </label>
-      <label>
-        Relievers min
-        <select name="bullpenMin">${counts.map((count) => option(count, count, count === bullpenMin)).join("")}</select>
-      </label>
-      <label class="${random ? "" : "is-disabled"}">
-        Relievers max
-        <select name="bullpenSlots" data-random-value="${bullpenSlots}" ${random ? "" : "disabled"}>${[
-          option(UNLIMITED_BULLPEN, "Unlimited", shownMax === UNLIMITED_BULLPEN),
-          ...counts.map((count) => option(count, count, count === shownMax, count < bullpenMin))
-        ].join("")}</select>
-      </label>
-    </div>
-    <small class="staff-note" data-bullpen-note>${escapeHtml(bullpenRangeNote(random))}</small>
-  </fieldset>`;
-}
-
-function bullpenRangeNote(random) {
-  return random
-    ? "Every team drafts nine hitters, its starters, and at least the minimum relievers; a team short at the end gets the replacement reliever. Up to the max pitch in a game, and the rest sit on the bench."
-    : "Every team drafts nine hitters, its starters, and exactly the minimum relievers, and all of them pitch. A separate max is a snake and random-nomination auction setting.";
 }
 
 // The floor of the picks slider for the setup screen as it currently stands:
@@ -1266,10 +1226,10 @@ function renderCurrentScreen() {
     renderWarRoom();
     return;
   }
-  if (state.online && !state.online.managerId && !state.online.spectator) {
+  if (state.online?.waiting) {
+    renderLobby();
+  } else if (state.online && !state.online.managerId && !state.online.spectator) {
     renderSeatSelect();
-  } else if (state.online?.waiting) {
-    renderWaitingRoom();
   } else if (liveGame) {
     renderLiveGame();
   } else if (state.view === "batch" && state.batch && state.draft) {
@@ -1305,7 +1265,8 @@ async function bootOnlineRoom(roomId) {
   renderOnlineMessage(`Connecting to room ${roomId}…`);
   let room;
   try {
-    room = await fetchRoom(roomId);
+    const seat = loadOnlineSeat(roomId);
+    room = await fetchRoom(roomId, { token: seat?.token, host: seat?.hostToken });
   } catch (error) {
     renderOnlineMessage(error.message, true);
     return;
@@ -1322,9 +1283,9 @@ async function bootOnlineRoom(roomId) {
   }
 }
 
-function openRoom(roomId, room) {
-  const seat = loadOnlineSeat(roomId);
-  state = defaultState();
+// The room's rules copied into state, where the settings form and the summary
+// read them. A lobby calls this again whenever the host changes them.
+function applyRoomSettings(room) {
   state.managers = room.managers.map((manager) => manager.name);
   state.startingPitchers = normalizeStartingPitchers(room.startingPitchers);
   Object.assign(state, roomBullpen(room, hasBullpenRange(room.draftType, room.nomination)));
@@ -1343,6 +1304,15 @@ function openRoom(roomId, room) {
   state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, state.rosterSize);
   state.auctionTimer = normalizeAuctionTimerState(room.auctionTimer);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
+  state.snakeTimer = normalizeSnakeTimerState(room.snakeTimer);
+  // Only the host is sent the seed before the draft opens.
+  if (room.seed) state.seed = room.seed;
+}
+
+function openRoom(roomId, room) {
+  const seat = loadOnlineSeat(roomId);
+  state = defaultState();
+  applyRoomSettings(room);
   state.online = {
     roomId,
     managerId: seat?.managerId ?? null,
@@ -1398,13 +1368,23 @@ function releaseSeatHandedToCpu() {
 function applyRoomSnapshot(room) {
   const online = state.online;
   online.waiting = Boolean(room.waiting);
+  online.configuring = Boolean(room.configuring);
   online.managers = room.managers;
+  // A lobby moves seats when the host edits the manager list, so the room says
+  // which one this browser's token now holds.
+  if (room.yourSeat !== undefined && online.token && room.yourSeat !== online.managerId) {
+    online.managerId = room.yourSeat;
+    if (!room.yourSeat) online.token = null;
+    state.myManagerId = room.yourSeat;
+    storeOnlineSeat(online.roomId, { managerId: online.managerId, token: online.token });
+  }
   online.claimedSeats = room.managers.filter((manager) => manager.claimed).map((manager) => manager.id);
   online.liveSeats = room.managers.filter((manager) => manager.live).map((manager) => manager.id);
   if (!online.waiting) {
     rebuildOnlineDraft(room);
   } else {
     state.draft = null;
+    applyRoomSettings(room);
     online.appliedSeq = room.actions.length ? room.actions.at(-1).seq : 0;
   }
   releaseSeatHandedToCpu();
@@ -1542,6 +1522,9 @@ function subscribeOnline() {
       }
       scheduleScreenRender();
     },
+    onRoom: () => {
+      if (state.online?.waiting) refreshLobby();
+    },
     onLot: (payload) => {
       if (!state.online) return;
       state.online.lot = payload.lot;
@@ -1571,7 +1554,7 @@ async function resyncOnlineRoom(snapshot = null) {
   const online = state.online;
   if (!online) return;
   try {
-    const room = snapshot ?? await fetchRoom(online.roomId);
+    const room = snapshot ?? await fetchRoom(online.roomId, { token: online.token, host: online.hostToken });
     if (state.online !== online) return;
     online.serverOffsetMs = Number(room.serverNow) - Date.now() || online.serverOffsetMs || 0;
     online.status = "";
@@ -1692,77 +1675,230 @@ function renderSeatSelect() {
     }
     const button = event.target.closest("[data-action='claim-seat']");
     if (!button || button.disabled) return;
-    try {
-      const result = await joinRoom(state.online.roomId, button.dataset.managerId, state.online.hostToken ?? undefined);
-      state.online.managerId = result.managerId;
-      state.online.token = result.token;
-      state.online.host = Boolean(result.host);
-      // Remembered OUTSIDE the online block, which is cleared when the room
-      // ends: the seat is who you are, and you are still that when the draft is
-      // over and the room has gone.
-      state.myManagerId = result.managerId;
-      storeOnlineSeat(state.online.roomId, {
-        managerId: result.managerId,
-        token: result.token,
-        host: state.online.host,
-        spectator: false
-      });
-      renderCurrentScreen();
-    } catch (error) {
-      state.online.status = error.message;
-      renderSeatSelect();
+    claimOnlineSeat(button.dataset.managerId);
+  };
+}
+
+// The room before the draft. While the host is setting it up, the host gets
+// the settings form and everyone else watches the rules settle; once the host
+// starts it, the rules lock and the board opens as soon as every seat is
+// filled. The board is never on this screen: the server has not sent it.
+let lobbySaveTimer = null;
+let lobbySaveChain = Promise.resolve();
+
+function renderLobby() {
+  const online = state.online;
+  const editing = Boolean(online.hostToken) && Boolean(online.configuring);
+  // The host's form is drawn once and then left alone, so a seat changing
+  // hands never pulls the box they are typing in out from under them.
+  const open = app.querySelector(".lobby");
+  if (open && editing && open.dataset.roomId === online.roomId && open.dataset.editing === "1") {
+    open.querySelector("[data-lobby-room]").innerHTML = lobbyRoomPanel();
+    return;
+  }
+  resetAppHandlers();
+  const title = editing ? "Set up the draft"
+    : online.configuring ? "The host is setting up"
+    : "Waiting for managers";
+  app.innerHTML = `<section class="setup settings-page lobby" data-room-id="${escapeHtml(online.roomId)}" data-editing="${editing ? "1" : "0"}">
+    <header class="settings-head">
+      <p class="eyebrow">Online room &middot; ${escapeHtml(online.roomId)}</p>
+      <h1>${title}</h1>
+    </header>
+    <div class="lobby-grid">
+      <aside class="lobby-room" data-lobby-room>${lobbyRoomPanel()}</aside>
+      <div class="lobby-settings">${editing ? renderSettingsForm(state) : renderSettingsSummary(state)}</div>
+    </div>
+  </section>`;
+  if (editing) {
+    const setupForm = app.querySelector("#setup-form");
+    bindSettingsForm(setupForm, { onChange: () => queueLobbySave(setupForm) });
+    setupForm.addEventListener("submit", (event) => event.preventDefault());
+  }
+
+  app.onclick = async (event) => {
+    const action = event.target.closest("[data-action]");
+    if (!action || action.disabled) return;
+    switch (action.dataset.action) {
+      case "reset":
+        leaveOnlineRoom();
+        return;
+      case "copy-invite":
+        try {
+          await navigator.clipboard.writeText(lobbyInviteUrl(online));
+          action.textContent = "Copied";
+        } catch {
+          action.textContent = "Copy failed";
+        }
+        return;
+      case "spectate":
+        online.spectator = true;
+        storeOnlineSeat(online.roomId, { spectator: true });
+        renderCurrentScreen();
+        return;
+      case "claim-seat":
+        claimOnlineSeat(action.dataset.managerId);
+        return;
+      case "seat":
+        sendOnlineAction({ type: "seat", managerId: action.dataset.managerId, cpu: action.dataset.cpu === "1" });
+        return;
+      case "start-room": {
+        const setupForm = app.querySelector("#setup-form");
+        if (!setupForm) return;
+        action.disabled = true;
+        const saved = await saveLobbySettings(setupForm, { start: true });
+        if (!saved) action.disabled = false;
+        return;
+      }
+      default:
     }
   };
 }
 
-// The room before the draft: who is here, who is still coming, and the link to
-// send them. The board is not on this screen because the server has not sent it.
-function renderWaitingRoom() {
-  resetAppHandlers();
+function lobbyInviteUrl(online) {
+  return `${inviteOrigin(online)}${location.pathname}?room=${encodeURIComponent(online.roomId)}`;
+}
+
+function lobbyRoomPanel() {
   const online = state.online;
+  const editing = Boolean(online.hostToken) && Boolean(online.configuring);
   const liveSeats = online.liveSeats ?? online.claimedSeats;
-  const mySeat = online.managers.find((manager) => manager.id === online.managerId);
-  const shareUrl = `${inviteOrigin(online)}${location.pathname}?room=${encodeURIComponent(online.roomId)}`;
   const missing = online.managers.filter((manager) => !manager.cpu && !liveSeats.includes(manager.id));
   const seats = online.managers
-    .map((manager) => {
+    .map((manager, index) => {
+      const mine = manager.id === online.managerId;
+      const claimed = online.claimedSeats.includes(manager.id);
       const here = liveSeats.includes(manager.id);
-      const label = manager.cpu ? "Computer"
-        : here ? (manager.id === online.managerId ? "You &middot; in the room" : "In the room")
-        : online.claimedSeats.includes(manager.id) ? "Stepped away"
-        : "Not here yet";
-      // The host's way out of a room somebody never shows up to.
-      const seatButton = online.host && manager.id !== online.managerId
-        ? `<button type="button" class="small seat-button" data-action="seat" data-manager-id="${escapeHtml(manager.id)}" data-cpu="${manager.cpu ? "0" : "1"}">${manager.cpu ? "Hand back" : "Hand to CPU"}</button>`
-        : "";
-      return `<div class="seat-option ${manager.cpu || here ? "" : "reseat-option"}">
-        <strong>${escapeHtml(manager.name)}</strong>
-        <span>${label}</span>
-        ${seatButton}
-      </div>`;
+      const status = manager.cpu ? "Computer"
+        : mine ? "You"
+        : here ? "In the room"
+        : claimed ? "Stepped away"
+        : "Open";
+      // A seat nobody is in belongs to whoever sits down; the host can take
+      // back any seat at all.
+      const canTake = !online.managerId && !manager.cpu && (!claimed || !here || online.hostToken);
+      const button = canTake
+        ? `<button type="button" class="small" data-action="claim-seat" data-manager-id="${escapeHtml(manager.id)}">${claimed ? "Take seat" : "Sit here"}</button>`
+        // The host's way out of a locked room somebody never shows up to.
+        : online.host && !online.configuring && !mine
+          ? `<button type="button" class="small" data-action="seat" data-manager-id="${escapeHtml(manager.id)}" data-cpu="${manager.cpu ? "0" : "1"}">${manager.cpu ? "Hand back" : "Hand to CPU"}</button>`
+          : "";
+      const tone = manager.cpu ? "is-cpu" : mine ? "is-you" : here ? "is-here" : "is-open";
+      return `<li class="lobby-seat ${tone}">
+        <span class="lobby-seat-pick">${index + 1}</span>
+        <span class="lobby-seat-name">${escapeHtml(manager.name)}</span>
+        <span class="lobby-seat-status">${status}</span>
+        ${button}
+      </li>`;
     })
     .join("");
-  const waitingOn = missing.map((manager) => manager.name).join(", ");
-  app.innerHTML = `<section class="panel setup">
-    <div>
-      <p class="eyebrow">Online room ${escapeHtml(online.roomId)}</p>
-      <h1>Waiting for managers</h1>
-      <p class="lede">${mySeat ? `You are ${escapeHtml(mySeat.name)}. ` : ""}The player pool opens for everyone at once, as soon as every manager is in the room.${waitingOn ? ` Still waiting on ${escapeHtml(waitingOn)}.` : ""}${online.host && waitingOn ? " As host, you can hand a seat that isn't coming to the computer." : ""}</p>
-      <div class="seat-grid">${seats}</div>
-      <p>Invite link: <code>${escapeHtml(shareUrl)}</code></p>
-      <p><button type="button" data-action="reset">Leave room</button></p>
-      ${online.status ? `<p class="warn">${escapeHtml(online.status)}</p>` : ""}
-    </div>
-  </section>`;
+  const waitingOn = missing.map((manager) => escapeHtml(manager.name)).join(", ");
+  const footer = editing
+    ? `<button type="button" class="settings-start" data-action="start-room">Start the draft</button>
+       <small>The rules lock when you start. The board opens once every human seat is filled${waitingOn ? ` &mdash; still waiting on ${waitingOn}` : ""}.</small>`
+    : online.configuring
+      ? `<small>The host is choosing the rules. They lock when the draft starts.</small>`
+      : `<small>The board opens for everyone at once${waitingOn ? `, as soon as ${waitingOn} ${missing.length === 1 ? "arrives" : "arrive"}` : ""}.${online.host && waitingOn ? " You can hand a seat that isn't coming to the computer." : ""}</small>`;
+  return `<section class="settings-card lobby-card">
+      <h2 class="settings-card-title">Invite</h2>
+      <div class="invite-row">
+        <code class="invite-link">${escapeHtml(lobbyInviteUrl(online))}</code>
+        <button type="button" class="small" data-action="copy-invite">Copy</button>
+      </div>
+    </section>
+    <section class="settings-card lobby-card">
+      <h2 class="settings-card-title">Seats</h2>
+      <ol class="lobby-seats">${seats}</ol>
+      ${!online.managerId && !online.spectator ? `<button type="button" class="link-button" data-action="spectate">Watch without a seat</button>` : ""}
+    </section>
+    <div class="lobby-footer">
+      ${footer}
+      ${online.status ? `<p class="${online.statusIsError ? "form-error" : "lobby-status"}">${escapeHtml(online.status)}</p>` : ""}
+      <button type="button" class="link-button" data-action="reset">Leave room</button>
+    </div>`;
+}
 
-  app.onclick = (event) => {
-    if (event.target.closest("[data-action='reset']")) {
-      leaveOnlineRoom();
-      return;
+function setLobbyStatus(message, isError = false) {
+  if (!state.online) return;
+  state.online.status = message;
+  state.online.statusIsError = isError;
+  const panel = app.querySelector("[data-lobby-room]");
+  if (panel) panel.innerHTML = lobbyRoomPanel();
+}
+
+function queueLobbySave(setupForm) {
+  clearTimeout(lobbySaveTimer);
+  lobbySaveTimer = setTimeout(() => saveLobbySettings(setupForm), 450);
+}
+
+// Saves run one after another, so a slow save can never land on top of a
+// newer one. Resolves true when the room took the settings.
+function saveLobbySettings(setupForm, { start = false } = {}) {
+  clearTimeout(lobbySaveTimer);
+  lobbySaveTimer = null;
+  const online = state.online;
+  const run = async () => {
+    const { value, error } = settingsFromForm(setupForm);
+    if (error) {
+      setLobbyStatus(error, true);
+      return false;
     }
-    const seat = event.target.closest("[data-action='seat']");
-    if (seat) sendOnlineAction({ type: "seat", managerId: seat.dataset.managerId, cpu: seat.dataset.cpu === "1" });
+    try {
+      await configureRoom(online.roomId, online.hostToken, { settings: roomSettingsBody(value), start });
+      if (state.online !== online) return false;
+      setLobbyStatus(start ? "Starting…" : "Saved");
+      return true;
+    } catch (error) {
+      setLobbyStatus(error.message, true);
+      return false;
+    }
   };
+  const result = lobbySaveChain.then(run);
+  lobbySaveChain = result.catch(() => false);
+  return result;
+}
+
+// The room's settings or seats moved under the lobby. Fetch and repaint, without
+// tearing down the stream the way a full resync does.
+async function refreshLobby() {
+  const online = state.online;
+  if (!online) return;
+  try {
+    const room = await fetchRoom(online.roomId, { token: online.token, host: online.hostToken });
+    if (state.online !== online) return;
+    online.serverOffsetMs = Number(room.serverNow) - Date.now() || online.serverOffsetMs || 0;
+    applyRoomSnapshot(room);
+  } catch (error) {
+    online.status = error.message;
+  }
+  renderCurrentScreen();
+}
+
+async function claimOnlineSeat(managerId) {
+  const online = state.online;
+  try {
+    const result = await joinRoom(online.roomId, managerId, online.hostToken ?? undefined);
+    online.managerId = result.managerId;
+    online.token = result.token;
+    online.host = Boolean(result.host);
+    online.spectator = false;
+    // Remembered OUTSIDE the online block, which is cleared when the room
+    // ends: the seat is who you are, and you are still that when the draft is
+    // over and the room has gone.
+    state.myManagerId = result.managerId;
+    storeOnlineSeat(online.roomId, {
+      managerId: result.managerId,
+      token: result.token,
+      host: online.host,
+      spectator: false
+    });
+    // The stream carries the token that proves the seat is occupied.
+    subscribeOnline();
+    renderCurrentScreen();
+  } catch (error) {
+    online.status = error.message;
+    renderCurrentScreen();
+  }
 }
 
 // 127.0.0.1 and localhost mean "this machine" on whatever machine reads them,
@@ -1842,50 +1978,6 @@ function universeFromForm(form) {
   return UNIVERSES[pick] ? pick : DEFAULT_UNIVERSE;
 }
 
-function renderUniverseFieldset(key) {
-  const choice = universeChoice(key);
-  const option = (value, title, blurb) => `<label class="pool-option">
-    <input type="radio" name="universe" value="${value}" ${choice.pick === value ? "checked" : ""} />
-    <span><strong>${title}</strong><small>${blurb}</small></span>
-  </label>`;
-  return `<fieldset class="pool-mode universe-mode">
-    <legend>Card set</legend>
-    ${option("classic", "Classic Showdown",
-      "Every real MLB Showdown card, 2000&ndash;2005 &mdash; the printed charts, the printed points, and the printed card fronts.")}
-    ${option("mlb-history", "MLB: all time",
-      "A century of real big leaguers rated on their whole careers &mdash; stars, scrubs, and everyone between.")}
-    ${option("decades", "MLB: by decade",
-      "Real players rated on one decade's numbers. Check the decades you want in the pool.")}
-    <div class="pool-suboptions decade-checklist" ${choice.pick === "decades" ? "" : "hidden"}>
-      <button type="button" class="small decade-toggle" data-action="toggle-decades">${choice.decades.length === DECADES.length ? "Uncheck all" : "Check all"}</button>
-      ${DECADES.map((start) => `<label class="decade-option">
-        <input type="checkbox" name="decade" value="${start}" ${choice.decades.includes(start) ? "checked" : ""} />
-        <span>The ${escapeHtml(decadeLabel(start).toLowerCase())}</span>
-      </label>`).join("")}
-      <small>The ${EARLIEST_DECADE}s bucket folds in the dead-ball era and everything before it. A player who lasted three decades prints three cards &mdash; you may only roster one of them.</small>
-    </div>
-    ${option("franchise", "MLB: by franchise",
-      "One club's all-time roster, every player rated on their years there.")}
-    <div class="pool-suboptions" ${choice.pick === "franchise" ? "" : "hidden"}>
-      <label class="franchise-field">
-        Club
-        <select name="franchise">
-          ${FRANCHISES.map((franchise) => `<option value="${franchise.id}" ${choice.franchise === franchise.id ? "selected" : ""}>${escapeHtml(franchise.name)}</option>`).join("")}
-        </select>
-      </label>
-    </div>
-    ${option("fictional", "Fictional players",
-      "A made-up league, invented fresh from the seed above. Nobody has scouting reports on these guys.")}
-    <div class="pool-suboptions temperature-field" ${choice.pick === "fictional" ? "" : "hidden"}>
-      <label class="temperature-slider">
-        Wildness <span class="temperature-value" data-temperature-value>${escapeHtml(temperatureLabel(state.temperature))}</span>
-        <input type="range" name="temperature" min="0" max="${MAX_TEMPERATURE}" step="1" value="${state.temperature}" />
-        <small>Widens every stat &mdash; cards drift far outside the normal ranges: monster bats, double-digit control, oddball charts. Only touches the fictional set.</small>
-      </label>
-    </div>
-  </fieldset>`;
-}
-
 // The wildness slider's live caption. 0 is the untouched pool; the rest climb
 // through progressively sillier leagues.
 function temperatureLabel(temperature) {
@@ -1909,22 +2001,6 @@ function draftModeFromForm(form) {
   );
   const coaches = Boolean(form.get("coaches"));
   return { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches };
-}
-
-// The setup screen's roll call of the coaching staff, so the room knows what
-// it is drafting before the board is dealt.
-function renderCoachesFieldset(on) {
-  const roll = COACHES
-    .map((coach) => `<li><strong>${escapeHtml(coach.name)}</strong> (${escapeHtml(coach.title.toLowerCase())}) &mdash; ${escapeHtml(coach.blurb)}</li>`)
-    .join("");
-  return `<fieldset class="pool-mode coaches-mode">
-        <legend>Coaches</legend>
-        <label class="pool-option">
-          <input type="checkbox" name="coaches" ${on ? "checked" : ""} />
-          <span><strong>Deal the coaching staff</strong><small>Ten of the twelve coaches join the board on top of the usual deal, drawn by the seed. A coach takes no roster slot &mdash; draft as many as you like, or none &mdash; but he costs a pick (or a bid), and each does one small thing to the way your club plays. In a random-nomination room every dealt coach comes up for bid as a lot of its own.</small></span>
-        </label>
-        <ul class="setup-coach-list">${roll}</ul>
-      </fieldset>`;
 }
 
 // Whether the chosen card set can actually seat the room, phrased for the setup
@@ -2065,14 +2141,8 @@ let lotteryRunning = false;
 
 async function runLottery(setupForm) {
   if (lotteryRunning) return;
-  const textarea = setupForm.querySelector('textarea[name="managers"]');
-  const names = dedupeManagerNames(
-    String(textarea.value)
-      .split("\n")
-      .map((name) => name.trim())
-      .filter(Boolean)
-  );
-  if (names.length < 2) return;
+  const entries = managerEntries(setupForm).filter((entry) => entry.name);
+  if (entries.length < 2) return;
 
   lotteryRunning = true;
   // Ask for sound, but never wait on it. A browser that has not yet decided the
@@ -2080,7 +2150,7 @@ async function runLottery(setupForm) {
   // ceremony that waits for permission to be loud is a ceremony that never runs.
   unlockSounds();
 
-  const order = [...names];
+  const order = [...entries];
   for (let i = order.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
@@ -2105,7 +2175,7 @@ async function runLottery(setupForm) {
   for (let index = order.length - 1; index >= 0; index -= 1) {
     const slot = slots[index];
     slot.classList.add("drawn");
-    slot.querySelector(".lottery-name").textContent = order[index];
+    slot.querySelector(".lottery-name").textContent = order[index].name;
     playLotteryBall(order.length - 1 - index, order.length);
     if (index === 0) slot.classList.add("first");
     await wait(index === 0 ? 200 : 620);
@@ -2118,9 +2188,16 @@ async function runLottery(setupForm) {
   lotteryRunning = false;
 
   // The order the room just drew is the order the room drafts in.
-  textarea.value = order.join("\n");
-  textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  setupForm.querySelector("[data-manager-rows]").innerHTML = order.map((entry) => managerRowHtml(entry.name, entry.cpu)).join("");
+  setupForm.dispatchEvent(new Event("input", { bubbles: true }));
 }
+
+// ---- the setup screens ----
+//
+// The front door asks one question: online, or at this screen. Only the offline
+// draft is set up here. An online room opens first and is set up in its lobby,
+// where everyone joining can watch the rules settle before the host starts.
+let setupStage = "home";
 
 function renderSetup(setupError = "") {
   // Backing out of a club's room puts the house colors back on the way in, not
@@ -2132,214 +2209,457 @@ function renderSetup(setupError = "") {
   // remains quiet on its initial paint.
   heardAuctionLotKey = null;
   resetAppHandlers();
+  if (setupStage === "offline") {
+    renderOfflineSetup(setupError);
+    return;
+  }
   const examples = setupExamples(state.seed);
   app.innerHTML = `<section class="setup">
     <header class="setup-hero">
       <div class="setup-hero-copy">
         <p class="eyebrow">MLB Showdown Draft and Simulator</p>
         <h1>It's draft day</h1>
+        <div class="setup-doors">
+          <button type="button" class="setup-door setup-door-online" data-action="create-online">
+            <span class="setup-door-kicker">Online</span>
+            <strong>Start online draft</strong>
+            <small>Open a room, send the link, and set the rules in the lobby while everyone arrives.</small>
+          </button>
+          <button type="button" class="setup-door" data-action="offline-setup">
+            <span class="setup-door-kicker">One screen</span>
+            <strong>Draft offline</strong>
+            <small>Everyone around this computer, or you against the computer managers.</small>
+          </button>
+        </div>
+        <div class="setup-door-extras">
+          <button type="button" class="link-button" data-action="import-save" title="Open a room saved to a file">&#128193; Load a saved room</button>
+          <p class="online-note" data-online-note></p>
+          ${setupImportError ? `<p class="form-error">${escapeHtml(setupImportError)}</p>` : ""}
+        </div>
       </div>
       <ul class="setup-features">
         <li class="setup-feature">
           <div class="setup-feature-card">${exampleCardHtml(examples.printed)}</div>
           <span class="setup-feature-name">Historical cards</span>
-          <span class="setup-feature-note">Every real Showdown card, 2000&ndash;2005 &mdash; the printed charts and points.</span>
+          <span class="setup-feature-note">Every real Showdown card, 2000&ndash;2005.</span>
         </li>
         <li class="setup-feature">
           <div class="setup-feature-card">${exampleCardHtml(examples.historical)}</div>
           <span class="setup-feature-name">Real players</span>
-          <span class="setup-feature-note">A century of big leaguers, rated by career, decade, or club.</span>
+          <span class="setup-feature-note">A century of big leaguers, by career, decade, or club.</span>
         </li>
         <li class="setup-feature">
-          <div class="setup-feature-card" data-invented-example>${exampleCardHtml(examples.invented)}</div>
+          <div class="setup-feature-card">${exampleCardHtml(examples.invented)}</div>
           <span class="setup-feature-name">Fictional</span>
-          <span class="setup-feature-note">A made-up league, invented fresh from your seed.</span>
+          <span class="setup-feature-note">A made-up league, invented fresh from a seed.</span>
         </li>
       </ul>
     </header>
-    <form id="setup-form" class="setup-grid">
-      <div class="setup-col">
-        <h2 class="setup-h2">The table</h2>
-        <label>
-          Managers
-          <textarea name="managers" rows="5">${escapeHtml(state.managers.join("\n"))}</textarea>
-          <small class="managers-note">
-            <span>They pick in the order they are listed.</span>
-            <button type="button" class="small lottery-button" data-action="lottery">&#127922; Roll for order</button>
-          </small>
-        </label>
-        <fieldset class="pool-mode cpu-managers">
-          <legend>Computer managers</legend>
-          <div class="cpu-list" data-cpu-list>${renderCpuChoices(state.managers, state.cpuManagers)}</div>
-          <small class="cpu-note">Checked managers play themselves — instant picks and sealed bids.</small>
-        </fieldset>
-        <label>
-            <span class="seed-label-row">
-              <span>Seed</span>
-              <span class="seed-buttons">
-                <button type="button" class="small" data-action="seed-last" title="Refill the seed the last room ran with"${lastUsedSeed() ? "" : " disabled"}>&#8634; last</button>
-                <button type="button" class="small" data-action="seed-random" title="Roll a fresh seed">&#127922;</button>
-              </span>
-            </span>
-            <input name="seed" value="${escapeHtml(state.seed)}" />
-        </label>
-        ${renderStaffFieldset(state)}
-      </div>
-      <div class="setup-col">
-        <h2 class="setup-h2">The draft</h2>
-      <fieldset class="pool-mode draft-type-mode">
-        <legend>Draft type</legend>
-        <label class="pool-option">
-          <input type="radio" name="draftType" value="snake" ${state.draftType === "auction" ? "" : "checked"} />
-          <span><strong>Snake draft</strong><small>Managers pick in turn and the order reverses every round.</small></span>
-        </label>
-        <div class="pool-suboptions snake-suboptions" ${state.draftType === "auction" ? "hidden" : ""}>
-          <p class="suboption-heading">Rounds</p>
-          <label class="auction-budget-field snake-picks-field">
-            Picks per manager <span class="snake-picks-value" data-snake-picks-value>${snakePicksLabel(state.snakePicks, snakeMinPicks(state))}</span>
-            <input name="snakePicks" type="range" min="${snakeMinPicks(state)}" max="${snakeMinPicks(state) + MAX_SNAKE_BENCH_PICKS}" step="1" value="${state.snakePicks}" data-snake-picks />
-            <small>Everyone drafts this many times. The floor is what a legal roster takes &mdash; nine hitters, the rotation and the pen &mdash; and every pick above it is bench. Whatever you take, you take: the board sets no position, and any hole left at the end is filled for free with the cheapest card nobody wanted.</small>
-          </label>
-          <p class="suboption-heading">Pool review</p>
-          <label class="pool-option">
-            <input type="radio" name="snakeReview" value="off" ${state.snakeReviewSeconds > 0 ? "" : "checked"} />
-            <span><strong>Off</strong><small>The first pick is on the clock as soon as the board is dealt.</small></span>
-          </label>
-          <label class="pool-option">
-            <input type="radio" name="snakeReview" value="on" ${state.snakeReviewSeconds > 0 ? "checked" : ""} />
-            <span><strong>Read the board first</strong><small>A countdown before anybody picks, the way an auction opens. Nobody is on the clock until it runs out &mdash; or until the host starts the draft early.</small></span>
-          </label>
-          <div class="pool-suboptions snake-review-suboptions" ${state.snakeReviewSeconds > 0 ? "" : "hidden"}>
-            <label class="auction-budget-field">
-              Review seconds
-              <!-- Any whole number of seconds. A coarser step is a form that
-                   silently refuses to submit when somebody types 20. -->
-              <input name="snakeReviewSeconds" type="number" min="0" max="3600" step="1" value="${state.snakeReviewSeconds || SNAKE_DEFAULT_REVIEW_SECONDS}" />
-              <small>Seconds to inspect the dealt pool before the draft starts.</small>
-            </label>
-          </div>
-          <p class="suboption-heading">Snake clock</p>
-          <label class="pool-option">
-            <input type="radio" name="snakeClock" value="off" ${snakeClockMode(state) === "off" ? "checked" : ""} />
-            <span><strong>Off</strong><small>Take as long as you like.</small></span>
-          </label>
-          <label class="pool-option">
-            <input type="radio" name="snakeClock" value="pick" ${snakeClockMode(state) === "pick" ? "checked" : ""} />
-            <span><strong>Per pick</strong><small>The same clock for every pick, and it resets each turn. Run it out and the pick is made for you.</small></span>
-          </label>
-          <div class="pool-suboptions snake-pick-suboptions" ${snakeClockMode(state) === "pick" ? "" : "hidden"}>
-            <label class="auction-budget-field">
-              Seconds per pick
-              <select name="pickTimer">
-                ${[[30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
-                  .map(([seconds, label]) => `<option value="${seconds}" ${(state.pickTimerSeconds || 60) === seconds ? "selected" : ""}>${label}</option>`)
-                  .join("")}
-              </select>
-            </label>
-          </div>
-          <label class="pool-option">
-            <input type="radio" name="snakeClock" value="chess" ${snakeClockMode(state) === "chess" ? "checked" : ""} />
-            <span><strong>Chess clock</strong><small>One bank of time for the whole draft, plus an increment paid back on every pick &mdash; the model the auction uses. Your clock runs only on your turn, so a long think in the third round is a short one in the tenth. Run the bank out and that pick is made for you; its increment gives you another chance next turn.</small></span>
-          </label>
-          <div class="pool-suboptions snake-chess-suboptions" ${snakeClockMode(state) === "chess" ? "" : "hidden"}>
-            <label class="auction-budget-field">
-              Clock bank
-              <input name="snakeBankSeconds" type="number" min="0" max="7200" step="30" value="${state.snakeTimer.bankSeconds}" />
-              <small>Seconds each manager has for the whole draft.</small>
-            </label>
-            <label class="auction-budget-field">
-              Per-pick increment
-              <input name="snakeIncrementSeconds" type="number" min="0" max="600" step="5" value="${state.snakeTimer.incrementSeconds}" />
-              <small>Seconds added back to the bank each time you make a pick.</small>
-            </label>
-          </div>
-        </div>
-        <label class="pool-option">
-          <input type="radio" name="draftType" value="auction" ${state.draftType === "auction" ? "checked" : ""} />
-          <span><strong>Auction draft</strong><small>Cards go up one at a time and everyone enters one sealed bid. The high bid wins and pays the second-highest bid plus one. Online too: bids stay hidden until the card sells.</small></span>
-        </label>
-        <div class="pool-suboptions auction-suboptions" ${state.draftType === "auction" ? "" : "hidden"}>
-          <label class="pool-option">
-            <input type="radio" name="nomination" value="random" ${state.nomination === "random" ? "checked" : ""} />
-            <span><strong>Random nomination</strong><small><span data-random-nomination-blurb>${escapeHtml(randomNominationBlurb(state.managers.length, state.startingPitchers))}</span> Nobody nominates: a hidden queue deals the cards out in random order. Buy as many as you can afford — there is no roster limit, only a budget. Anyone left short at the buzzer is filled out for free with the cheapest cards still on the board.</small></span>
-          </label>
-          <label class="pool-option">
-            <input type="radio" name="nomination" value="manual" ${state.nomination === "random" ? "" : "checked"} />
-            <span><strong>Managers nominate</strong><small>Each manager takes a turn putting a card of their choosing on the block.</small></span>
-          </label>
-          <label class="auction-budget-field">
-            Budget per manager ($)
-            <input name="auctionBudget" type="number" min="${state.rosterSize * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${state.auctionBudget}" />
-            <small>Dollars, not card points &mdash; a card's printed points are what it is worth, and this is what you have to spend. A strong roster runs to roughly 5000 points, so $5000 bids like the classic Showdown cap.</small>
-          </label>
-          <label class="auction-budget-field">
-            Pool review
-            <input name="auctionReviewSeconds" type="number" min="0" max="3600" step="30" value="${state.auctionTimer.reviewSeconds}" />
-            <small>Seconds to inspect the dealt pool before auction clocks start.</small>
-          </label>
-          <label class="auction-budget-field">
-            Bid clock bank
-            <input name="auctionBankSeconds" type="number" min="0" max="3600" step="30" value="${state.auctionTimer.bankSeconds}" />
-            <small>Starting seconds each manager can spend entering sealed bids.</small>
-          </label>
-          <label class="auction-budget-field">
-            Per-card increment
-            <input name="auctionIncrementSeconds" type="number" min="0" max="120" step="1" value="${state.auctionTimer.incrementSeconds}" />
-            <small>Seconds added to each active manager when a card comes up.</small>
-          </label>
-        </div>
-      </fieldset>
-      <fieldset class="pool-mode hide-points-mode">
-        <legend>Points</legend>
-        <label class="pool-option">
-          <input type="checkbox" name="hidePoints" ${state.hidePoints ? "checked" : ""} />
-          <span><strong>Blind draft</strong><small>Hide every card's printed points until it is drafted &mdash; the board, the card faces, and the picks all go numberless. Card colours stay, so you still see roughly how good a card is, just not its exact worth.</small></span>
-        </label>
-      </fieldset>
-      ${renderCoachesFieldset(state.coaches)}
-      ${renderUniverseFieldset(state.universe)}
-      </div>
-      <div class="setup-actions">
-        ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
-        <div class="setup-buttons">
-          <button type="submit">Start offline draft</button>
-          <button type="button" data-action="create-online">Create online room</button>
-          <button type="button" data-action="import-save" title="Open a room saved to a file">&#128193; Load a room</button>
-          <!-- Empty, but it stays: this is the slot the online-room flow writes
-               its progress and its errors into. -->
-          <p class="online-note" data-online-note></p>
-        </div>
-        ${setupImportError ? `<p class="form-error">${escapeHtml(setupImportError)}</p>` : ""}
-      </div>
-    </form>
   </section>`;
 
   // The historical example wears a real face and club mark, same as it does on
   // the board; the printed one is already a scan and needs nothing.
   hydratePhotos(app);
 
-  const setupForm = document.querySelector("#setup-form");
-  // Only the selected card set shows its picker, and touching a picker
-  // selects the set it belongs to — checking a decade means you want decades.
-  const syncUniversePickers = () => {
-    const pick = new FormData(setupForm).get("universe");
-    setupForm.querySelector(".decade-checklist").hidden = pick !== "decades";
-    setupForm.querySelector(".franchise-field").closest(".pool-suboptions").hidden = pick !== "franchise";
-    setupForm.querySelector(".temperature-field").hidden = pick !== "fictional";
+  app.onclick = (event) => {
+    if (event.target.closest('[data-action="offline-setup"]')) {
+      setupStage = "offline";
+      setupImportError = null;
+      renderSetup();
+      window.scrollTo(0, 0);
+      return;
+    }
+    if (event.target.closest('[data-action="import-save"]')) {
+      pickSaveFile();
+      return;
+    }
+    const create = event.target.closest('[data-action="create-online"]');
+    if (create) createOnlineLobby(create);
   };
-  // Each draft type's sub-options — the auction's nomination and budget, the
-  // snake's clock — belong to their type, so they only show when it is
-  // chosen; and reaching for one of them says you want that type, so it
-  // selects it.
+}
+
+// The room opens on the settings this browser last drafted with, and a fresh
+// seed; the host changes any of it in the lobby.
+async function createOnlineLobby(button) {
+  const note = app.querySelector("[data-online-note]");
+  button.disabled = true;
+  note.textContent = "Opening a room…";
+  try {
+    const room = await createRoom({ ...roomSettingsBody({ ...state, seed: randomBaseballSeed() }), lobby: true });
+    storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
+    location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
+  } catch (error) {
+    button.disabled = false;
+    note.textContent = error.message;
+  }
+}
+
+function renderOfflineSetup(setupError) {
+  app.innerHTML = `<section class="setup settings-page">
+    <header class="settings-head">
+      <button type="button" class="link-button settings-back" data-action="setup-home">&larr; Back</button>
+      <p class="eyebrow">Offline draft</p>
+      <h1>Set up the draft</h1>
+    </header>
+    ${renderSettingsForm(state)}
+    <div class="settings-actions">
+      ${setupError ? `<p class="form-error">${escapeHtml(setupError)}</p>` : ""}
+      <button type="submit" form="setup-form" class="settings-start">Start draft</button>
+    </div>
+  </section>`;
+  const setupForm = app.querySelector("#setup-form");
+  bindSettingsForm(setupForm);
+  setupForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startOfflineDraft(setupForm);
+  });
+  app.onclick = (event) => {
+    if (!event.target.closest('[data-action="setup-home"]')) return;
+    setupStage = "home";
+    renderSetup();
+  };
+}
+
+function startOfflineDraft(setupForm) {
+  setupImportError = null;
+  const { value, error } = settingsFromForm(setupForm);
+  if (error) {
+    renderSetup(error);
+    return;
+  }
+  Object.assign(state, value);
+  rememberLastSeed(state.seed);
+  const mode = draftModeFromForm(new FormData(setupForm));
+  const poolOptions = {
+    nomination: state.nomination,
+    managerCount: state.managers.length,
+    startingPitchers: state.startingPitchers,
+    bullpenSlots: mode.bullpenSlots,
+    bullpenMin: mode.bullpenMin,
+    // A longer draft is dealt a wider board, or its last rounds pick over an
+    // empty table. An auction never asks for one.
+    picks: state.draftType === "auction" ? undefined : state.snakePicks,
+    temperature: state.temperature,
+    coaches: state.coaches
+  };
+  const pool = buildDraftPool(state.universe, state.seed, poolOptions);
+  const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers, { ...mode, picks: poolOptions.picks });
+  if (poolError) {
+    renderSetup(poolError);
+    return;
+  }
+  state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
+    draftType: state.draftType,
+    startingPitchers: state.startingPitchers,
+    nomination: state.nomination,
+    bullpenSlots: state.bullpenSlots,
+    bullpenMin: state.bullpenMin,
+    hidePoints: state.hidePoints,
+    budget: state.auctionBudget,
+    timer: state.auctionTimer,
+    snakeTimer: snakeTimerConfig(state, state.draftType),
+    snakeReview: state.snakeReviewSeconds,
+    snakePicks: state.snakePicks
+  });
+  // A new local room gets a fresh private board. Otherwise an override keyed
+  // to the same manager/position from the previous room could filter down to
+  // zero matching card ids and hide the new OB/Control starting ranks.
+  state.draftRankings = {};
+  state.draftNotes = {};
+  editingNoteId = null;
+  startDraftReview(state.draft, draftNow());
+  // The gun. Both clocks start when the board is dealt, not when somebody
+  // first looks at it — or, where the room asked to read the board first,
+  // when that reading is over (startSnakeClock will not fire before then).
+  if (!isAuctionDraft(state.draft)) startSnakeClock(state.draft, draftNow());
+  // The whistle to go with the gun. This runs inside the submit gesture, so we
+  // can ask for the audio context and play in the same breath; unlock never
+  // waits, so a browser still deciding stays silent rather than stalling.
+  unlockSounds().then((ok) => {
+    if (ok) playDraftStart();
+  });
+  state.tournament = null;
+  state.batch = null;
+  state.view = null;
+  state.selectedGameIndex = 0;
+  state.selectedTeamName = state.managers[0];
+  state.rosterManagerId = null;
+  cpuPaused = false;
+  // The name this draft will be filed under when it finishes. Minted with the
+  // board and saved with it, so a draft left half-done overnight is still the
+  // same draft when it ends the next morning rather than a second one.
+  state.draftKey = newDraftKey();
+  track("local-draft-start", {
+    draftKey: state.draftKey,
+    managers: state.managers,
+    cpu: state.cpuManagers,
+    draftType: state.draftType,
+    nomination: state.nomination,
+    universe: state.universe,
+    startingPitchers: state.startingPitchers,
+    rosterSize: state.rosterSize,
+    hidePoints: state.hidePoints,
+    seed: state.seed
+  });
+  advanceCpuTurns();
+  saveState();
+  renderDraft();
+}
+
+// ---- the settings form ----
+//
+// One form for both screens: the offline setup page and the online lobby. Every
+// section shows only what the chosen format uses. An element marked
+// data-when="draftType=auction" (or several such conditions, split by ";",
+// with alternatives split by "|") is hidden unless the form currently says so.
+function settingsCard(title, body) {
+  return `<section class="settings-card">
+    <h2 class="settings-card-title">${title}</h2>
+    ${body}
+  </section>`;
+}
+
+function segmentedControl(name, current, options) {
+  return `<div class="segmented" role="radiogroup">${options
+    .map(([value, label]) => `<label><input type="radio" name="${name}" value="${value}" ${current === value ? "checked" : ""} /><span>${label}</span></label>`)
+    .join("")}</div>`;
+}
+
+function settingSwitch(name, checked, title, blurb) {
+  return `<label class="setting-switch">
+    <input type="checkbox" name="${name}" ${checked ? "checked" : ""} />
+    <span class="switch-track" aria-hidden="true"></span>
+    <span class="switch-text"><strong>${title}</strong><small>${blurb}</small></span>
+  </label>`;
+}
+
+function settingField(label, control, hint = "", attrs = "") {
+  return `<label class="setting-field" ${attrs}>
+    <span class="setting-label">${label}</span>
+    ${control}
+    ${hint ? `<small>${hint}</small>` : ""}
+  </label>`;
+}
+
+function managerRowHtml(name, cpu) {
+  return `<li class="manager-row">
+    <input name="managerName" value="${escapeHtml(name)}" maxlength="40" aria-label="Manager name" placeholder="Manager name" />
+    <label class="cpu-toggle" title="The computer drafts this seat">
+      <input type="checkbox" name="managerCpu" ${cpu ? "checked" : ""} />
+      <span>CPU</span>
+    </label>
+    <button type="button" class="manager-remove" data-action="remove-manager" aria-label="Remove manager">&times;</button>
+  </li>`;
+}
+
+// The rows as they stand, in pick order, blank names and all.
+function managerEntries(setupForm) {
+  return [...setupForm.querySelectorAll(".manager-row")].map((row) => ({
+    name: row.querySelector('input[name="managerName"]').value.trim(),
+    cpu: row.querySelector('input[name="managerCpu"]').checked
+  }));
+}
+
+const MAX_SETUP_MANAGERS = 24;
+
+function renderSettingsForm(value) {
+  const choice = universeChoice(value.universe);
+  const minimum = snakeMinPicks(value);
+  const cpuSet = new Set(value.cpuManagers ?? []);
+  const random = setupBullpenRange(value);
+  const { bullpenSlots, bullpenMin } = roomBullpen(value, true);
+  const counts = Array.from({ length: MAX_BULLPEN_SLOTS + 1 }, (_, count) => count);
+  const shownMax = random ? bullpenSlots : bullpenMin;
+  const option = (optionValue, label, selected, disabled = false) =>
+    `<option value="${optionValue}" ${selected ? "selected" : ""} ${disabled ? "disabled" : ""}>${label}</option>`;
+  const setTile = (key, title, blurb) => `<label class="set-tile">
+    <input type="radio" name="universe" value="${key}" ${choice.pick === key ? "checked" : ""} />
+    <strong>${title}</strong>
+    <small>${blurb}</small>
+  </label>`;
+
+  const managers = settingsCard("Managers", `
+    <ol class="manager-rows" data-manager-rows>${value.managers.map((name) => managerRowHtml(name, cpuSet.has(name))).join("")}</ol>
+    <div class="manager-tools">
+      <button type="button" class="small" data-action="add-manager">+ Add manager</button>
+      <button type="button" class="small" data-action="lottery">&#127922; Roll for order</button>
+    </div>
+    <small class="setting-hint">They pick in this order. Tick CPU and the computer drafts that seat.</small>`);
+
+  const format = settingsCard("Format", `
+    ${segmentedControl("draftType", value.draftType === "auction" ? "auction" : "snake", [["snake", "Snake"], ["auction", "Auction"]])}
+    <small class="setting-hint" data-when="draftType=snake">Managers take turns, and the order reverses every round.</small>
+    <small class="setting-hint" data-when="draftType=auction">One card at a time, one sealed bid each. The high bid wins and pays the second bid plus one.</small>
+    <div class="setting-group" data-when="draftType=snake">
+      <label class="setting-field">
+        <span class="setting-label">Picks per manager <output class="setting-value" data-snake-picks-value>${snakePicksLabel(value.snakePicks, minimum)}</output></span>
+        <input name="snakePicks" type="range" min="${minimum}" max="${minimum + MAX_SNAKE_BENCH_PICKS}" step="1" value="${value.snakePicks}" data-snake-picks />
+        <small>The floor is a legal roster; every pick above it is bench. A hole left at the end is filled free with the cheapest card nobody wanted.</small>
+      </label>
+    </div>
+    <div class="setting-group" data-when="draftType=auction">
+      <div class="setting-field">
+        <span class="setting-label">Nomination</span>
+        ${segmentedControl("nomination", value.nomination === "random" ? "random" : "manual", [["random", "Random"], ["manual", "Managers nominate"]])}
+        <small data-when="nomination=random"><span data-random-nomination-blurb>${escapeHtml(randomNominationBlurb(value.managers.length, value.startingPitchers))}</span> A hidden queue deals the cards; buy as many as you can afford.</small>
+        <small data-when="nomination=manual">Each manager takes a turn putting a card of their choosing on the block.</small>
+      </div>
+      ${settingField("Budget per manager ($)",
+        `<input name="auctionBudget" type="number" min="${value.rosterSize * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${value.auctionBudget}" />`,
+        "A strong roster runs to roughly 5000 card points, so $5000 bids like the classic cap.")}
+    </div>`);
+
+  const clockMode = snakeClockMode(value);
+  const clock = settingsCard("Clock", `
+    <div class="setting-group" data-when="draftType=snake">
+      ${segmentedControl("snakeClock", clockMode, [["off", "No clock"], ["pick", "Per pick"], ["chess", "Chess clock"]])}
+      <small class="setting-hint" data-when="snakeClock=off">Take as long as you like.</small>
+      <small class="setting-hint" data-when="snakeClock=pick">Run out the clock and the pick is made for you.</small>
+      <small class="setting-hint" data-when="snakeClock=chess">One bank for the whole draft, plus time back on every pick. It only runs on your turn.</small>
+      <div class="field-row" data-when="snakeClock=pick">
+        ${settingField("Seconds per pick", `<select name="pickTimer">
+          ${[[30, "30 seconds"], [60, "1 minute"], [90, "90 seconds"], [120, "2 minutes"], [180, "3 minutes"]]
+            .map(([seconds, label]) => option(seconds, label, (value.pickTimerSeconds || 60) === seconds))
+            .join("")}
+        </select>`)}
+      </div>
+      <div class="field-row" data-when="snakeClock=chess">
+        ${settingField("Bank (seconds)", `<input name="snakeBankSeconds" type="number" min="0" max="7200" step="30" value="${value.snakeTimer.bankSeconds}" />`)}
+        ${settingField("Back per pick", `<input name="snakeIncrementSeconds" type="number" min="0" max="600" step="5" value="${value.snakeTimer.incrementSeconds}" />`)}
+      </div>
+      ${settingSwitch("snakeReview", value.snakeReviewSeconds > 0, "Read the board first", "A countdown before anyone picks. The host can start early.")}
+      <div class="field-row" data-when="snakeReview=on">
+        <!-- Any whole number of seconds. A coarser step is a form that
+             silently refuses to submit when somebody types 20. -->
+        ${settingField("Review (seconds)", `<input name="snakeReviewSeconds" type="number" min="0" max="3600" step="1" value="${value.snakeReviewSeconds || SNAKE_DEFAULT_REVIEW_SECONDS}" />`)}
+      </div>
+    </div>
+    <div class="setting-group" data-when="draftType=auction">
+      <div class="field-row three">
+        ${settingField("Review (s)", `<input name="auctionReviewSeconds" type="number" min="0" max="3600" step="30" value="${value.auctionTimer.reviewSeconds}" />`)}
+        ${settingField("Bid bank (s)", `<input name="auctionBankSeconds" type="number" min="0" max="3600" step="30" value="${value.auctionTimer.bankSeconds}" />`)}
+        ${settingField("Per card (s)", `<input name="auctionIncrementSeconds" type="number" min="0" max="120" step="1" value="${value.auctionTimer.incrementSeconds}" />`)}
+      </div>
+      <small class="setting-hint">Time to read the dealt board, each manager's bank for sealed bids, and the seconds added as each card comes up.</small>
+    </div>`);
+
+  const cardSet = settingsCard("Card set", `
+    <div class="set-tiles">
+      ${setTile("classic", "Classic Showdown", "The printed 2000&ndash;05 cards")}
+      ${setTile("mlb-history", "MLB all-time", "Real careers, a century deep")}
+      ${setTile("decades", "By decade", "Rated on the decades you pick")}
+      ${setTile("franchise", "By franchise", "One club's all-time roster")}
+      ${setTile("fictional", "Fictional", "Invented fresh from the seed")}
+    </div>
+    <div class="set-detail decade-checklist" data-when="universe=decades">
+      <div class="decade-chips">
+        ${DECADES.map((start) => `<label class="decade-chip">
+          <input type="checkbox" name="decade" value="${start}" ${choice.decades.includes(start) ? "checked" : ""} />
+          <span>${escapeHtml(decadeLabel(start))}</span>
+        </label>`).join("")}
+        <button type="button" class="small decade-toggle" data-action="toggle-decades">${choice.decades.length === DECADES.length ? "Uncheck all" : "Check all"}</button>
+      </div>
+      <small>The ${EARLIEST_DECADE}s fold in everything before them. A player who lasted three decades prints three cards; you may roster only one.</small>
+    </div>
+    <div class="set-detail" data-when="universe=franchise">
+      ${settingField("Club", `<select name="franchise">
+        ${FRANCHISES.map((franchise) => option(franchise.id, escapeHtml(franchise.name), choice.franchise === franchise.id)).join("")}
+      </select>`)}
+    </div>
+    <div class="set-detail" data-when="universe=fictional">
+      ${settingField(`Wildness <output class="setting-value" data-temperature-value>${escapeHtml(temperatureLabel(value.temperature))}</output>`,
+        `<input type="range" name="temperature" min="0" max="${MAX_TEMPERATURE}" step="1" value="${value.temperature}" />`,
+        "Widens every stat: monster bats, double-digit control, oddball charts.")}
+    </div>
+    <label class="setting-field seed-field">
+      <span class="setting-label">Seed
+        <span class="seed-buttons">
+          <button type="button" class="small" data-action="seed-last" title="Refill the seed the last room ran with"${lastUsedSeed() ? "" : " disabled"}>&#8634; Last</button>
+          <button type="button" class="small" data-action="seed-random" title="Roll a fresh seed">&#127922; New</button>
+        </span>
+      </span>
+      <input name="seed" value="${escapeHtml(value.seed ?? "")}" />
+      <small>The same seed and settings deal the same board.</small>
+    </label>`);
+
+  const roster = settingsCard("Roster", `
+    <div class="field-row three">
+      ${settingField("Starters", `<input name="startingPitchers" type="number" min="${MIN_STARTING_PITCHERS}" max="${MAX_STARTING_PITCHERS}" step="1" value="${value.startingPitchers}" />`)}
+      ${settingField("Relievers min", `<select name="bullpenMin">${counts.map((count) => option(count, count, count === bullpenMin)).join("")}</select>`)}
+      ${settingField("Relievers max", `<select name="bullpenSlots" data-random-value="${bullpenSlots}" ${random ? "" : "disabled"}>${[
+        option(UNLIMITED_BULLPEN, "Unlimited", shownMax === UNLIMITED_BULLPEN),
+        ...counts.map((count) => option(count, count, count === shownMax, count < bullpenMin))
+      ].join("")}</select>`, "", 'data-when="pen=ranged"')}
+    </div>
+    <small class="setting-hint" data-bullpen-note>${escapeHtml(bullpenRangeNote(random))}</small>`);
+
+  const coachRoll = COACHES
+    .map((coach) => `<li><strong>${escapeHtml(coach.name)}</strong> (${escapeHtml(coach.title.toLowerCase())}) &mdash; ${escapeHtml(coach.blurb)}</li>`)
+    .join("");
+  const houseRules = settingsCard("House rules", `
+    ${settingSwitch("hidePoints", value.hidePoints, "Blind draft", "Hide printed points until a card is drafted. Card colours still hint at how good it is.")}
+    ${settingSwitch("coaches", value.coaches, "Coaching staff", "Deal ten coaches onto the board. Each costs a pick or a bid, takes no roster slot, and does one small thing for your club.")}
+    <details class="coach-roll" data-when="coaches=on">
+      <summary>Who's on the staff</summary>
+      <ul class="setup-coach-list">${coachRoll}</ul>
+    </details>`);
+
+  return `<form id="setup-form" class="settings-form">
+    <div class="settings-col">${managers}${format}${clock}</div>
+    <div class="settings-col">${cardSet}${roster}${houseRules}</div>
+  </form>`;
+}
+
+function bullpenRangeNote(random) {
+  return random
+    ? "Each team drafts nine hitters, its starters, and at least the minimum relievers. Up to the max pitch; the rest sit."
+    : "Each team drafts nine hitters, its starters, and exactly the minimum relievers, and all of them pitch.";
+}
+
+// What the conditions in data-when read: the form's choices, plus the two
+// facts derived from them.
+function settingsFacts(setupForm) {
+  const form = new FormData(setupForm);
+  const draftType = form.get("draftType") === "auction" ? "auction" : "snake";
+  const nomination = form.get("nomination") === "random" ? "random" : "manual";
+  return {
+    draftType,
+    nomination,
+    snakeClock: String(form.get("snakeClock") ?? "off"),
+    snakeReview: form.get("snakeReview") ? "on" : "off",
+    coaches: form.get("coaches") ? "on" : "off",
+    universe: String(form.get("universe") ?? DEFAULT_UNIVERSE),
+    pen: hasBullpenRange(draftType, nomination) ? "ranged" : "fixed"
+  };
+}
+
+function syncSettingsVisibility(setupForm) {
+  const facts = settingsFacts(setupForm);
+  for (const element of setupForm.querySelectorAll("[data-when]")) {
+    element.hidden = !element.dataset.when.split(";").every((condition) => {
+      const [key, values] = condition.split("=");
+      return values.split("|").includes(facts[key]);
+    });
+  }
+}
+
+// Wires a rendered settings form. `onChange` hears every edit, for the lobby to
+// save as the host goes.
+function bindSettingsForm(setupForm, { onChange = null } = {}) {
+  const rowsList = setupForm.querySelector("[data-manager-rows]");
+  const syncManagerRows = () => {
+    const rows = rowsList.querySelectorAll(".manager-row");
+    for (const button of rowsList.querySelectorAll('[data-action="remove-manager"]')) button.disabled = rows.length <= 2;
+    setupForm.querySelector('[data-action="add-manager"]').disabled = rows.length >= MAX_SETUP_MANAGERS;
+  };
   // The pen's max belongs to snake and random-nomination rooms; a manual-
-  // nomination auction drafts the min and pitches all of it. The max never sits below the min: raising the min
-  // past it drags the max along.
+  // nomination auction drafts the min and pitches all of it. The max never
+  // sits below the min: raising the min past it drags the max along.
   const syncBullpenOptions = () => {
-    const form = new FormData(setupForm);
-    const random = hasBullpenRange(form.get("draftType"), form.get("nomination"));
+    const random = settingsFacts(setupForm).pen === "ranged";
     const min = setupForm.querySelector('select[name="bullpenMin"]');
     const max = setupForm.querySelector('select[name="bullpenSlots"]');
-    // The ranged max is kept aside while a capped mode shows the min.
+    // The ranged max is kept aside while a capped mode hides it.
     if (!max.disabled) max.dataset.randomValue = max.value;
     let shown = random ? max.dataset.randomValue : min.value;
     if (shown !== UNLIMITED_BULLPEN && Number(shown) < Number(min.value)) shown = min.value;
@@ -2349,23 +2669,7 @@ function renderSetup(setupError = "") {
     max.value = shown;
     if (random) max.dataset.randomValue = shown;
     max.disabled = !random;
-    max.closest("label").classList.toggle("is-disabled", !random);
     setupForm.querySelector("[data-bullpen-note]").textContent = bullpenRangeNote(random);
-  };
-  const syncAuctionOptions = () => {
-    const auction = new FormData(setupForm).get("draftType") === "auction";
-    setupForm.querySelector(".auction-suboptions").hidden = !auction;
-    setupForm.querySelector(".snake-suboptions").hidden = auction;
-    syncBullpenOptions();
-  };
-  // The snake has one clock or none, so each clock shows only its own settings —
-  // and reaching for a setting says you want the clock it belongs to.
-  const syncSnakeClockOptions = () => {
-    const form = new FormData(setupForm);
-    const mode = form.get("snakeClock");
-    setupForm.querySelector(".snake-pick-suboptions").hidden = mode !== "pick";
-    setupForm.querySelector(".snake-chess-suboptions").hidden = mode !== "chess";
-    setupForm.querySelector(".snake-review-suboptions").hidden = form.get("snakeReview") !== "on";
   };
   // The floor of the picks slider is whatever a legal roster costs, so it moves
   // with the rotation and the pen. A slider sitting on the old floor follows it
@@ -2373,7 +2677,6 @@ function renderSetup(setupError = "") {
   // shifts because the floor rose past it.
   const syncSnakePicks = () => {
     const slider = setupForm.querySelector("[data-snake-picks]");
-    if (!slider) return;
     const form = new FormData(setupForm);
     const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
     const pen = draftModeFromForm(form);
@@ -2382,322 +2685,197 @@ function renderSetup(setupError = "") {
     slider.min = minimum;
     slider.max = minimum + MAX_SNAKE_BENCH_PICKS;
     slider.value = normalizeSnakePicks(minimum + bench, startingPitchers, pen);
-    const output = setupForm.querySelector("[data-snake-picks-value]");
-    if (output) output.textContent = snakePicksLabel(Number(slider.value), minimum);
+    setupForm.querySelector("[data-snake-picks-value]").textContent = snakePicksLabel(Number(slider.value), minimum);
+  };
+  const syncRosterDerived = () => {
+    const form = new FormData(setupForm);
+    const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
+    const rosterSize = rosterSizeForStartingPitchers(startingPitchers, draftModeFromForm(form));
+    // The default budget is $100 a slot, so it moves with the roster until a
+    // manager overrides it.
+    const budgetInput = setupForm.querySelector('input[name="auctionBudget"]');
+    budgetInput.min = rosterSize * AUCTION_MIN_BID;
+    if (!budgetInput.dataset.userEdited) budgetInput.value = defaultAuctionBudget(rosterSize);
+    const named = managerEntries(setupForm).filter((entry) => entry.name).length;
+    setupForm.querySelector("[data-random-nomination-blurb]").textContent = randomNominationBlurb(named, startingPitchers);
   };
   // The one button offers whichever move is left: check them all, or clear them.
   const syncDecadeToggle = () => {
     const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
-    const toggle = setupForm.querySelector('[data-action="toggle-decades"]');
-    if (!toggle || !boxes.length) return;
-    toggle.textContent = boxes.every((box) => box.checked) ? "Uncheck all" : "Check all";
+    setupForm.querySelector('[data-action="toggle-decades"]').textContent = boxes.every((box) => box.checked) ? "Uncheck all" : "Check all";
   };
+  const syncAll = () => {
+    syncSettingsVisibility(setupForm);
+    syncBullpenOptions();
+    syncSnakePicks();
+    syncRosterDerived();
+    syncManagerRows();
+  };
+  syncAll();
+
+  const changed = () => onChange?.();
   setupForm.addEventListener("change", (event) => {
-    const owner = event.target.name === "decade" ? "decades"
-      : event.target.name === "franchise" ? "franchise"
-      : null;
-    if (owner) setupForm.querySelector(`input[name="universe"][value="${owner}"]`).checked = true;
-    if (owner || event.target.name === "universe") syncUniversePickers();
-    // Ticking the last box off by hand turns the button back into "Check all".
-    if (event.target.name === "decade") syncDecadeToggle();
-
-    if (["nomination", "auctionBudget", "auctionReviewSeconds", "auctionBankSeconds", "auctionIncrementSeconds"].includes(event.target.name)) {
-      setupForm.querySelector('input[name="draftType"][value="auction"]').checked = true;
+    const name = event.target.name;
+    // A name with "CPU" in it starts out computer-managed.
+    if (name === "managerName" && /cpu/i.test(event.target.value)) {
+      event.target.closest(".manager-row").querySelector('input[name="managerCpu"]').checked = true;
     }
-    if (["draftType", "nomination", "auctionBudget", "auctionReviewSeconds", "auctionBankSeconds", "auctionIncrementSeconds"].includes(event.target.name)) syncAuctionOptions();
-
-    if (event.target.name === "pickTimer") {
-      setupForm.querySelector('input[name="snakeClock"][value="pick"]').checked = true;
+    if (name === "decade") syncDecadeToggle();
+    if (["draftType", "nomination", "snakeClock", "snakeReview", "coaches", "universe", "bullpenMin", "bullpenSlots", "startingPitchers"].includes(name)) {
+      syncAll();
     }
-    if (["snakeBankSeconds", "snakeIncrementSeconds"].includes(event.target.name)) {
-      setupForm.querySelector('input[name="snakeClock"][value="chess"]').checked = true;
-    }
-    // Typing a review length says you want a review, exactly as typing a bank
-    // says you want the chess clock.
-    if (event.target.name === "snakeReviewSeconds") {
-      setupForm.querySelector('input[name="snakeReview"][value="on"]').checked = true;
-    }
-    if (["snakeClock", "pickTimer", "snakeBankSeconds", "snakeIncrementSeconds", "snakeReview", "snakeReviewSeconds", "snakePicks"]
-      .includes(event.target.name)) {
-      setupForm.querySelector('input[name="draftType"][value="snake"]').checked = true;
-      syncAuctionOptions();
-      syncSnakeClockOptions();
-    }
+    changed();
   });
-  // The computer checkboxes track the manager list as it is typed.
   setupForm.addEventListener("input", (event) => {
-    const form = new FormData(setupForm);
-    if (event.target.name === "temperature") {
-      const label = setupForm.querySelector("[data-temperature-value]");
-      if (label) label.textContent = temperatureLabel(form.get("temperature"));
-      return;
-    }
-    // A hand-typed budget stops tracking the roster size — the manager has said
-    // what they want, so a later roster change leaves it alone.
-    if (event.target.name === "auctionBudget") {
+    const name = event.target.name;
+    if (name === "temperature") {
+      setupForm.querySelector("[data-temperature-value]").textContent = temperatureLabel(event.target.value);
+    } else if (name === "auctionBudget") {
+      // A hand-typed budget stops tracking the roster size — the manager has
+      // said what they want, so a later roster change leaves it alone.
       event.target.dataset.userEdited = "1";
-      return;
-    }
-    if (event.target.name === "snakePicks") {
-      const output = setupForm.querySelector("[data-snake-picks-value]");
-      if (output) output.textContent = snakePicksLabel(Number(event.target.value), Number(event.target.min));
-      return;
-    }
-    if (event.target.name === "bullpenMin" || event.target.name === "bullpenSlots") syncBullpenOptions();
-    if (["startingPitchers", "bullpenMin", "bullpenSlots"].includes(event.target.name)) {
+    } else if (name === "snakePicks") {
+      setupForm.querySelector("[data-snake-picks-value]").textContent = snakePicksLabel(Number(event.target.value), Number(event.target.min));
+    } else if (["startingPitchers", "bullpenMin", "bullpenSlots"].includes(name)) {
+      syncBullpenOptions();
       syncSnakePicks();
-      const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
-      const rosterSize = rosterSizeForStartingPitchers(startingPitchers, draftModeFromForm(new FormData(setupForm)));
-      // The default budget is $100 a slot, so it moves with the roster until a
-      // manager overrides it.
-      const budgetInput = setupForm.querySelector('input[name="auctionBudget"]');
-      if (budgetInput) {
-        budgetInput.min = rosterSize * AUCTION_MIN_BID;
-        if (!budgetInput.dataset.userEdited) budgetInput.value = defaultAuctionBudget(rosterSize);
-      }
-      const blurb = setupForm.querySelector("[data-random-nomination-blurb]");
-      const managerCount = dedupeManagerNames(String(form.get("managers")).split("\n").map((name) => name.trim()).filter(Boolean)).length;
-      if (blurb) blurb.textContent = randomNominationBlurb(managerCount, startingPitchers);
-      return;
+      syncRosterDerived();
+    } else if (name === "managerName" || !name) {
+      syncRosterDerived();
+      syncManagerRows();
     }
-    if (event.target.name !== "managers") return;
-    const cpuList = setupForm.querySelector("[data-cpu-list]");
-    const listed = new Set([...cpuList.querySelectorAll('input[name="cpu"]')].map((input) => input.value));
-    const checked = form.getAll("cpu").map(String);
-    const names = dedupeManagerNames(
-      String(form.get("managers"))
-        .split("\n")
-        .map((name) => name.trim())
-        .filter(Boolean)
-    );
-    // A newly typed name with "CPU" in it starts out computer-managed; names
-    // already listed keep whatever their box says.
-    const typedCpu = names.filter((name) => !listed.has(name) && /cpu/i.test(name));
-    cpuList.innerHTML = renderCpuChoices(names, [...checked, ...typedCpu]);
-    const blurb = setupForm.querySelector("[data-random-nomination-blurb]");
-    if (blurb) blurb.textContent = randomNominationBlurb(names.length, normalizeStartingPitchers(form.get("startingPitchers")));
+    // Text boxes save as they are typed into; everything else saves on change.
+    if (event.target.matches?.('input[type="text"], input:not([type])') || !name) changed();
   });
-  // Check all / uncheck all for the decade list: one button that flips to
-  // whichever move is left. Reaching for it means you want decades, so it
-  // selects that set the same way touching any other picker does.
-  // Both seed buttons write the box and then fire the normal change path,
-  // so the invented example follows the new seed exactly as if it were typed.
-  const fillSeed = (seed) => {
-    if (!seed) return;
-    const input = setupForm.querySelector('input[name="seed"]');
-    input.value = seed;
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  };
   setupForm.addEventListener("click", (event) => {
-    if (event.target.closest('[data-action="lottery"]')) {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (!action) return;
+    if (action === "lottery") {
       runLottery(setupForm);
-      return;
+    } else if (action === "add-manager") {
+      if (rowsList.children.length >= MAX_SETUP_MANAGERS) return;
+      rowsList.insertAdjacentHTML("beforeend", managerRowHtml("", false));
+      rowsList.lastElementChild.querySelector("input").focus();
+      syncManagerRows();
+    } else if (action === "remove-manager") {
+      if (rowsList.children.length <= 2) return;
+      event.target.closest(".manager-row").remove();
+      syncRosterDerived();
+      syncManagerRows();
+      changed();
+    } else if (action === "seed-random" || action === "seed-last") {
+      const seed = action === "seed-random" ? randomBaseballSeed() : lastUsedSeed();
+      if (!seed) return;
+      const input = setupForm.querySelector('input[name="seed"]');
+      input.value = seed;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    } else if (action === "toggle-decades") {
+      const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
+      const checkAll = !boxes.every((box) => box.checked);
+      for (const box of boxes) box.checked = checkAll;
+      syncDecadeToggle();
+      changed();
     }
-    if (event.target.closest('[data-action="seed-random"]')) {
-      fillSeed(randomBaseballSeed());
-      return;
-    }
-    if (event.target.closest('[data-action="seed-last"]')) {
-      fillSeed(lastUsedSeed());
-      return;
-    }
-    if (event.target.closest('[data-action="import-save"]')) {
-      pickSaveFile();
-      return;
-    }
-    const toggle = event.target.closest('[data-action="toggle-decades"]');
-    if (!toggle) return;
-    const boxes = [...setupForm.querySelectorAll('input[name="decade"]')];
-    const checkAll = !boxes.every((box) => box.checked);
-    for (const box of boxes) box.checked = checkAll;
-    syncDecadeToggle();
-    setupForm.querySelector('input[name="universe"][value="decades"]').checked = true;
-    syncUniversePickers();
   });
-  // The invented example is dealt from the seed in the box, so it follows the
-  // seed: type a new one and a different player turns up.
-  setupForm.addEventListener("change", (event) => {
-    if (event.target.name !== "seed") return;
-    const slot = document.querySelector("[data-invented-example]");
-    if (slot) slot.innerHTML = exampleCardHtml(setupExamples(event.target.value).invented);
-  });
-  setupForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    setupImportError = null;
-    const form = new FormData(event.currentTarget);
-    const managers = dedupeManagerNames(
-      String(form.get("managers"))
-        .split("\n")
-        .map((name) => name.trim())
-        .filter(Boolean)
-    );
-    state.seed = String(form.get("seed")).trim() || "showdown";
-    rememberLastSeed(state.seed);
-    state.managers = managers.length >= 2 ? managers : ["Home", "Away"];
-    const cpuChecked = new Set(form.getAll("cpu").map(String));
-    state.cpuManagers = state.managers.filter((name) => cpuChecked.has(name));
-    state.startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
-    state.temperature = normalizeTemperature(form.get("temperature"));
-    const universe = universeFromForm(form);
-    if (!universe) {
-      renderSetup("Check at least one decade, or pick a different card set.");
-      return;
-    }
-    state.universe = universe;
-    const mode = draftModeFromForm(form);
-    state.draftType = mode.draftType;
-    state.nomination = mode.nomination;
-    // The form remembers the ranged max, even when a capped draft ignores it.
-    state.bullpenSlots = roomBullpen({ bullpenSlots: setupForm.querySelector('select[name="bullpenSlots"]').dataset.randomValue, bullpenMin: form.get("bullpenMin") }, true).bullpenSlots;
-    state.bullpenMin = mode.bullpenMin;
-    state.snakePicks = snakePicksFromForm(form, state.startingPitchers, mode);
-    // An auction is priced against a roster; a snake draft is as long as its
-    // slider says. Either way this is the number of cards a seat drafts.
-    state.rosterSize = state.draftType === "auction"
-      ? rosterSizeForStartingPitchers(state.startingPitchers, mode)
-      : state.snakePicks;
-    state.hidePoints = mode.hidePoints;
-    state.coaches = mode.coaches;
-    state.auctionBudget = normalizeAuctionBudget(form.get("auctionBudget"), state.rosterSize);
-    state.auctionTimer = normalizeAuctionTimerInput(form);
-    const snakeClock = snakeClockFromForm(form);
-    state.pickTimerSeconds = snakeClock.pickTimerSeconds;
-    state.snakeTimer = snakeClock.snakeTimer;
-    state.snakeReviewSeconds = snakeReviewFromForm(form, state.draftType);
-    const poolOptions = {
-      nomination: state.nomination,
-      managerCount: state.managers.length,
-      startingPitchers: state.startingPitchers,
-      bullpenSlots: mode.bullpenSlots,
-      bullpenMin: mode.bullpenMin,
-      // A longer draft is dealt a wider board, or its last rounds pick over an
-      // empty table. An auction never asks for one.
-      picks: state.draftType === "auction" ? undefined : state.snakePicks,
-      temperature: state.temperature,
-      coaches: state.coaches
-    };
-    const pool = buildDraftPool(state.universe, state.seed, poolOptions);
-    const poolError = draftPoolError(pool, state.universe, state.managers.length, state.nomination, state.startingPitchers, { ...mode, picks: poolOptions.picks });
-    if (poolError) {
-      renderSetup(poolError);
-      return;
-    }
-    state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
-      draftType: state.draftType,
-      startingPitchers: state.startingPitchers,
-      nomination: state.nomination,
-      bullpenSlots: state.bullpenSlots,
-      bullpenMin: state.bullpenMin,
-      hidePoints: state.hidePoints,
-      budget: state.auctionBudget,
-      timer: state.auctionTimer,
-      snakeTimer: snakeTimerConfig(state, state.draftType),
-      snakeReview: state.snakeReviewSeconds,
-      snakePicks: state.snakePicks
-    });
-    // A new local room gets a fresh private board. Otherwise an override keyed
-    // to the same manager/position from the previous room could filter down to
-    // zero matching card ids and hide the new OB/Control starting ranks.
-    state.draftRankings = {};
-    state.draftNotes = {};
-    editingNoteId = null;
-    startDraftReview(state.draft, draftNow());
-    // The gun. Both clocks start when the board is dealt, not when somebody
-    // first looks at it — or, where the room asked to read the board first,
-    // when that reading is over (startSnakeClock will not fire before then).
-    if (!isAuctionDraft(state.draft)) startSnakeClock(state.draft, draftNow());
-    // The whistle to go with the gun. This runs inside the submit gesture, so we
-    // can ask for the audio context and play in the same breath; unlock never
-    // waits, so a browser still deciding stays silent rather than stalling.
-    unlockSounds().then((ok) => {
-      if (ok) playDraftStart();
-    });
-    state.tournament = null;
-    state.batch = null;
-    state.view = null;
-    state.selectedGameIndex = 0;
-    state.selectedTeamName = state.managers[0];
-    state.rosterManagerId = null;
-    cpuPaused = false;
-    // The name this draft will be filed under when it finishes. Minted with the
-    // board and saved with it, so a draft left half-done overnight is still the
-    // same draft when it ends the next morning rather than a second one.
-    state.draftKey = newDraftKey();
-    track("local-draft-start", {
-      draftKey: state.draftKey,
-      managers: state.managers,
-      cpu: state.cpuManagers,
-      draftType: state.draftType,
-      nomination: state.nomination,
-      universe: state.universe,
-      startingPitchers: state.startingPitchers,
-      rosterSize: state.rosterSize,
-      hidePoints: state.hidePoints,
-      seed: state.seed
-    });
-    advanceCpuTurns();
-    saveState();
-    renderDraft();
-  });
+}
 
-  document.querySelector("[data-action='create-online']").addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    const note = document.querySelector("[data-online-note]");
-    const form = new FormData(document.querySelector("#setup-form"));
-    const managers = dedupeManagerNames(
-      String(form.get("managers"))
-        .split("\n")
-        .map((name) => name.trim())
-        .filter(Boolean)
-    );
-    const seed = String(form.get("seed")).trim() || "showdown";
-    const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
-    const universe = universeFromForm(form);
-    const snakeClock = snakeClockFromForm(form);
-    const pickTimer = snakeClock.pickTimerSeconds;
-    const { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches } = draftModeFromForm(form);
-    const snakePicks = snakePicksFromForm(form, startingPitchers, { bullpenSlots, bullpenMin });
-    const snakeReview = snakeReviewFromForm(form, draftType);
-    const rosterSize = draftType === "auction"
-      ? rosterSizeForStartingPitchers(startingPitchers, { bullpenSlots, bullpenMin })
-      : snakePicks;
-    const budget = normalizeAuctionBudget(form.get("auctionBudget"), rosterSize);
-    const auctionTimer = normalizeAuctionTimerInput(form);
-    const cpuChecked = form.getAll("cpu").map(String);
-    if (!universe) {
-      note.textContent = "Check at least one decade, or pick a different card set.";
-      return;
+// The whole form read back as the settings the rest of the app keeps in state.
+// `error` is set when the form cannot say which cards to deal.
+function settingsFromForm(setupForm) {
+  const form = new FormData(setupForm);
+  const entries = managerEntries(setupForm).filter((entry) => entry.name);
+  const names = dedupeManagerNames(entries.map((entry) => entry.name));
+  const enough = names.length >= 2;
+  const startingPitchers = normalizeStartingPitchers(form.get("startingPitchers"));
+  const mode = draftModeFromForm(form);
+  const snakePicks = snakePicksFromForm(form, startingPitchers, mode);
+  // An auction is priced against a roster; a snake draft is as long as its
+  // slider says. Either way this is the number of cards a seat drafts.
+  const rosterSize = mode.draftType === "auction" ? rosterSizeForStartingPitchers(startingPitchers, mode) : snakePicks;
+  const snakeClock = snakeClockFromForm(form);
+  const universe = universeFromForm(form);
+  return {
+    error: universe ? "" : "Check at least one decade, or pick a different card set.",
+    value: {
+      seed: String(form.get("seed") ?? "").trim() || "showdown",
+      managers: enough ? names : ["Home", "Away"],
+      cpuManagers: enough ? names.filter((_, index) => entries[index].cpu) : [],
+      startingPitchers,
+      temperature: normalizeTemperature(form.get("temperature")),
+      universe: universe ?? state.universe,
+      draftType: mode.draftType,
+      nomination: mode.nomination,
+      // The form remembers the ranged max, even when a capped draft ignores it.
+      bullpenSlots: roomBullpen({ bullpenSlots: setupForm.querySelector('select[name="bullpenSlots"]').dataset.randomValue, bullpenMin: form.get("bullpenMin") }, true).bullpenSlots,
+      bullpenMin: mode.bullpenMin,
+      snakePicks,
+      rosterSize,
+      hidePoints: mode.hidePoints,
+      coaches: mode.coaches,
+      auctionBudget: normalizeAuctionBudget(form.get("auctionBudget"), rosterSize),
+      auctionTimer: normalizeAuctionTimerInput(form),
+      pickTimerSeconds: snakeClock.pickTimerSeconds,
+      snakeTimer: snakeClock.snakeTimer,
+      snakeReviewSeconds: snakeReviewFromForm(form, mode.draftType)
     }
-    button.disabled = true;
-    note.textContent = "Creating online room…";
-    try {
-      const room = await createRoom({
-        seed,
-        startingPitchers,
-        bullpenSlots,
-        bullpenMin,
-        temperature: normalizeTemperature(form.get("temperature")),
-        managers: managers.length >= 2 ? managers : ["Home", "Away"],
-        universe,
-        pickTimer,
-        cpu: cpuChecked.filter((name) => managers.includes(name)),
-        draftType,
-        nomination,
-        hidePoints,
-        coaches,
-        budget,
-        auctionTimer,
-        snakeTimer: snakeTimerConfig(snakeClock, draftType),
-        snakeReview,
-        snakePicks
-      });
-      storeOnlineSeat(room.roomId, { hostToken: room.hostToken });
-      location.href = `${location.pathname}?room=${encodeURIComponent(room.roomId)}`;
-    } catch (error) {
-      button.disabled = false;
-      note.textContent = error.message;
-    }
-  });
+  };
+}
+
+// Settings in state's shape, as the room server takes them. Every field has to
+// make the trip: one left out is silently dropped and the room quietly opens on
+// the default.
+function roomSettingsBody(value) {
+  return {
+    seed: value.seed,
+    managers: value.managers,
+    cpu: value.cpuManagers.filter((name) => value.managers.includes(name)),
+    universe: value.universe,
+    startingPitchers: value.startingPitchers,
+    bullpenSlots: value.bullpenSlots,
+    bullpenMin: value.bullpenMin,
+    temperature: value.temperature,
+    pickTimer: value.pickTimerSeconds,
+    draftType: value.draftType,
+    nomination: value.nomination,
+    hidePoints: value.hidePoints,
+    coaches: value.coaches,
+    budget: value.auctionBudget,
+    auctionTimer: value.auctionTimer,
+    snakeTimer: snakeTimerConfig(value, value.draftType),
+    snakeReview: value.snakeReviewSeconds,
+    snakePicks: value.snakePicks
+  };
+}
+
+// The rules as a guest reads them while the host sets them: the same sections
+// as the form, one line each, and nothing a snake room doesn't use.
+function renderSettingsSummary(value) {
+  const auction = value.draftType === "auction";
+  const set = universeConfig(value.universe);
+  const seconds = (count) => count >= 60 && count % 60 === 0 ? `${count / 60} min` : `${count}s`;
+  const { bullpenSlots, bullpenMin } = roomBullpen(value, hasBullpenRange(value.draftType, value.nomination));
+  const pen = bullpenSlots === bullpenMin
+    ? `${bullpenMin}`
+    : `${bullpenMin}&ndash;${bullpenSlots === UNLIMITED_BULLPEN ? "any" : bullpenSlots}`;
+  const clockMode = snakeClockMode(value);
+  const snakeClock = clockMode === "pick" ? `${seconds(value.pickTimerSeconds)} per pick`
+    : clockMode === "chess" ? `Chess clock &middot; ${seconds(value.snakeTimer.bankSeconds)} bank, +${seconds(value.snakeTimer.incrementSeconds)} a pick`
+    : "No clock";
+  const rows = [
+    ["Format", auction
+      ? `Auction &middot; ${value.nomination === "random" ? "random nomination" : "managers nominate"} &middot; $${Number(value.auctionBudget).toLocaleString()} each`
+      : `Snake &middot; ${value.snakePicks} picks each`],
+    ["Card set", `${escapeHtml(set?.name ?? value.universe)}${value.universe === "fictional" && value.temperature ? ` &middot; ${escapeHtml(temperatureLabel(value.temperature))}` : ""}`],
+    ["Roster", `${value.startingPitchers} starters &middot; ${pen} relievers`],
+    ["Clock", auction
+      ? `${seconds(value.auctionTimer.reviewSeconds)} review &middot; ${seconds(value.auctionTimer.bankSeconds)} bid bank &middot; +${seconds(value.auctionTimer.incrementSeconds)} a card`
+      : `${snakeClock}${value.snakeReviewSeconds > 0 ? ` &middot; ${seconds(value.snakeReviewSeconds)} to read the board` : ""}`],
+    ["House rules", [value.hidePoints ? "Blind draft" : "", value.coaches ? "Coaching staff" : ""].filter(Boolean).join(" &middot; ") || "None"]
+  ];
+  return `<section class="settings-card settings-summary">
+    <h2 class="settings-card-title">The rules</h2>
+    <dl>${rows.map(([label, text]) => `<div><dt>${label}</dt><dd>${text}</dd></div>`).join("")}</dl>
+  </section>`;
 }
 
 function sealedBidLotKey(lot) {
@@ -4446,19 +4624,6 @@ function renderPlayGameControl(draft) {
       </select>
     </label>
   </span>`;
-}
-
-function renderCpuChoices(names, cpuNames) {
-  const cpuSet = new Set(cpuNames ?? []);
-  if (!names.length) return `<small class="cpu-note">Add managers above first.</small>`;
-  return names
-    .map(
-      (name) => `<label class="cpu-option">
-        <input type="checkbox" name="cpu" value="${escapeHtml(name)}" ${cpuSet.has(name) ? "checked" : ""} />
-        <span>${escapeHtml(name)}</span>
-      </label>`
-    )
-    .join("");
 }
 
 function dedupeManagerNames(names) {

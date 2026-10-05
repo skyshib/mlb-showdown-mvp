@@ -356,6 +356,7 @@ function reviveRoom(saved) {
     pendingBids,
     // Rooms saved before the waiting room existed were already underway.
     waitingForPlayers: Boolean(saved.waitingForPlayers),
+    configuring: Boolean(saved.configuring),
     seats: new Map(Object.entries(saved.seats ?? {})),
     hostToken: saved.hostToken,
     streams: new Set(),
@@ -406,6 +407,7 @@ function roomRecord(room) {
     actions: room.actions,
     pendingBids: room.pendingBids ?? [],
     waitingForPlayers: Boolean(room.waitingForPlayers),
+    configuring: Boolean(room.configuring),
     createdAt: room.createdAt
   };
 }
@@ -1090,30 +1092,40 @@ async function handleApi(store, request, response, url) {
   const room = store.rooms.get(roomId);
   if (!room) return sendJson(response, 404, { error: `Room "${roomId ?? ""}" not found` });
 
-  if (!subroute && request.method === "GET") return sendJson(response, 200, roomSnapshot(room, request.socket.localPort));
+  if (!subroute && request.method === "GET") {
+    return sendJson(response, 200, roomSnapshot(room, request.socket.localPort, {
+      // The host sets the seed, so the host may read it — but only while the
+      // rules are still open. A locked room keeps it back from everyone.
+      host: room.configuring && Boolean(url.searchParams.get("host")) && url.searchParams.get("host") === room.hostToken,
+      token: url.searchParams.get("token")
+    }));
+  }
   if (subroute === "join" && request.method === "POST") return joinRoom(store, room, request, response);
+  if (subroute === "configure" && request.method === "POST") return configureRoom(store, room, request, response);
   if (subroute === "actions" && request.method === "POST") return postAction(store, room, request, response);
   if (subroute === "stream" && request.method === "GET") return openStream(store, room, request, response, url);
   return sendJson(response, 404, { error: "Unknown API route" });
 }
 
-async function createRoom(store, request, response) {
-  const body = await readJsonBody(request);
+// Every setting a room is opened (or re-set) with, read off a request body and
+// checked against the card set it deals from. Returns { error } or the room's
+// rule fields together with the draft and the deck they deal.
+function roomConfigFromBody(body) {
   const managers = Array.isArray(body.managers)
     ? body.managers.map((name) => String(name).trim()).filter(Boolean)
     : [];
-  if (managers.length < 2) return sendJson(response, 400, { error: "At least two managers are required" });
+  if (managers.length < 2) return { error: "At least two managers are required" };
   // Blanket ceiling; the per-set depth check below is the real limit (the decks
   // deal for ~24). Team colors run out here too (see RACE_COLORS), so past 24
   // teams would start sharing a hue.
-  if (managers.length > 24) return sendJson(response, 400, { error: "At most twenty-four managers are supported" });
+  if (managers.length > 24) return { error: "At most twenty-four managers are supported" };
   const seed = String(body.seed ?? "").trim() || "showdown";
   const startingPitchers = normalizeStartingPitchers(body.startingPitchers);
   const temperature = normalizeTemperature(body.temperature);
   // No card set named is the fictional league, as it always was; a card set
   // named that we don't have is a mistake worth saying out loud.
   const universe = body.universe == null ? "fictional" : universeConfig(body.universe)?.key;
-  if (!universe) return sendJson(response, 400, { error: `Unknown card set "${body.universe}"` });
+  if (!universe) return { error: `Unknown card set "${body.universe}"` };
   const pickTimer = normalizePickTimerSeconds(body.pickTimer);
   const draftType = body.draftType === "auction" ? "auction" : "snake";
   const nomination = draftType === "auction" && body.nomination === "random" ? "random" : "manual";
@@ -1152,16 +1164,12 @@ async function createRoom(store, request, response) {
     const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers, pen);
     if (shortfalls.length) {
       const spots = shortfalls.map((short) => `${short.group} (${short.dealt} of ${short.quota})`).join(", ");
-      return sendJson(response, 400, {
-        error: `The ${universeConfig(universe).name} set is too thin to deal a ${managers.length}-manager random-nomination board: ${spots}`
-      });
+      return { error: `The ${universeConfig(universe).name} set is too thin to deal a ${managers.length}-manager random-nomination board: ${spots}` };
     }
   } else {
     const managerLimit = maxPoolManagers(pool, startingPitchers, poolPen);
     if (managers.length > managerLimit) {
-      return sendJson(response, 400, {
-        error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers`
-      });
+      return { error: `The ${universeConfig(universe).name} deck deals position depth for up to ${managerLimit} managers` };
     }
   }
   const draft = createDraft(
@@ -1171,9 +1179,7 @@ async function createRoom(store, request, response) {
     seed,
     { draftType, nomination, startingPitchers, ...pen, budget: auctionBudget, timer: auctionTimer, snakeTimer, snakeReview, snakePicks }
   );
-  const createdAt = Date.now();
-  const room = {
-    id: newRoomId(store.rooms),
+  return {
     seed,
     rosterSize,
     startingPitchers,
@@ -1196,9 +1202,23 @@ async function createRoom(store, request, response) {
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
     managerNames: managers,
-    draft,
+    draft
+  };
+}
+
+async function createRoom(store, request, response) {
+  const body = await readJsonBody(request);
+  const config = roomConfigFromBody(body);
+  if (config.error) return sendJson(response, 400, { error: config.error });
+  const createdAt = Date.now();
+  const room = {
+    id: newRoomId(store.rooms),
+    ...config,
     actions: [],
     pendingBids: [],
+    // A lobby room opens before its rules are settled: the host sets them up
+    // while the table fills, and nothing starts until they say so.
+    configuring: Boolean(body.lobby),
     // Nobody sees the board until every human manager is in the room, so the
     // first one through the door gets no head start studying it.
     waitingForPlayers: true,
@@ -1212,9 +1232,59 @@ async function createRoom(store, request, response) {
   startRoomIfFull(store, room);
   persistRoom(store, room);
   logServerEvent(store, request, "room-create", {
-    roomId: room.id, managers, cpu: cpuNames, draftType, nomination, universe, startingPitchers, seed
+    roomId: room.id,
+    managers: room.managerNames,
+    cpu: room.cpuNames,
+    draftType: room.draftType,
+    nomination: room.nomination,
+    universe: room.universe,
+    startingPitchers: room.startingPitchers,
+    seed: room.seed,
+    lobby: room.configuring
   });
-  sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room, request.socket.localPort) });
+  sendJson(response, 201, { roomId: room.id, hostToken: room.hostToken, ...roomSnapshot(room, request.socket.localPort, { host: room.configuring }) });
+}
+
+// The host setting up a lobby room: new rules, or the word to start. The deck
+// is re-dealt with every change, and a seat follows its manager's NAME across
+// it — the list can be reordered or trimmed around people already sitting.
+async function configureRoom(store, room, request, response) {
+  const body = await readJsonBody(request);
+  if (!body.hostToken || body.hostToken !== room.hostToken) {
+    return sendJson(response, 403, { error: "Only the host can change the room's settings" });
+  }
+  if (!room.configuring) return sendJson(response, 409, { error: "The room's settings are locked" });
+  if (body.settings) {
+    const config = roomConfigFromBody(body.settings);
+    if (config.error) return sendJson(response, 400, { error: config.error });
+    const oldNames = new Map(room.draft.managers.map((manager) => [manager.id, manager.name]));
+    const takenNames = new Set(oldNames.values());
+    const byName = new Map(config.draft.managers.map((manager) => [manager.name, manager]));
+    const byId = new Map(config.draft.managers.map((manager) => [manager.id, manager]));
+    const seats = new Map();
+    for (const [managerId, seat] of room.seats) {
+      // Follow the name; failing that, a rename keeps the seat in its chair,
+      // so long as the chair's new name is not somebody else's old one.
+      const renamed = byId.get(managerId);
+      const manager = byName.get(oldNames.get(managerId))
+        ?? (renamed && !takenNames.has(renamed.name) ? renamed : null);
+      if (!manager || manager.cpu || seats.has(manager.id)) continue;
+      seats.set(manager.id, { ...seat, managerId: manager.id });
+    }
+    const moved = new Map([...seats.values()].map((seat) => [seat.token, seat.managerId]));
+    for (const stream of room.streams) {
+      if (stream.seatToken) stream.seatManagerId = moved.get(stream.seatToken) ?? null;
+    }
+    Object.assign(room, config, { seats });
+  }
+  if (body.start) {
+    room.configuring = false;
+    startRoomIfFull(store, room);
+  }
+  persistRoom(store, room);
+  broadcast(room, "room", { configuring: room.configuring });
+  broadcastSeats(room);
+  sendJson(response, 200, roomSnapshot(room, request.socket.localPort, { host: room.configuring }));
 }
 
 async function joinRoom(store, room, request, response) {
@@ -1260,6 +1330,9 @@ async function postAction(store, room, request, response) {
   if (!seat && !isHost) return sendJson(response, 403, { error: "Join a seat before acting" });
   // The one move a waiting room takes: the host handing a seat that is not
   // coming to the computer, so the table can fill without them.
+  if (room.configuring) {
+    return sendJson(response, 409, { error: "The host is still setting up the room" });
+  }
   if (room.waitingForPlayers && action?.type !== "seat") {
     return sendJson(response, 409, { error: "The draft starts once every manager is in the room" });
   }
@@ -1841,6 +1914,7 @@ function openStream(store, room, request, response, url) {
   const seat = seatForToken(room, url.searchParams.get("token"));
   if (seat) {
     response.seatManagerId = seat.managerId;
+    response.seatToken = seat.token;
     seat.lastSeenAt = Date.now();
   }
   room.streams.add(response);
@@ -1856,7 +1930,7 @@ function openStream(store, room, request, response, url) {
 }
 
 function broadcastSeats(room) {
-  broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room), waiting: Boolean(room.waitingForPlayers) });
+  broadcast(room, "seats", { seats: claimedSeats(room), live: liveSeats(room), waiting: Boolean(room.waitingForPlayers), configuring: Boolean(room.configuring) });
 }
 
 // The room opens its board the moment every human seat is occupied at once,
@@ -1864,7 +1938,7 @@ function broadcastSeats(room) {
 // hide the pool from the people still there. The clocks start here, not when
 // the room was created, so nobody's bank burns down while the table fills.
 function startRoomIfFull(store, room) {
-  if (!room.waitingForPlayers) return false;
+  if (!room.waitingForPlayers || room.configuring) return false;
   const humans = room.draft.managers.filter((manager) => !manager.cpu);
   if (!humans.every((manager) => seatIsLive(room, manager.id))) return false;
   room.waitingForPlayers = false;
@@ -1935,15 +2009,19 @@ function lanOrigin(port) {
   return null;
 }
 
-function roomSnapshot(room, port = null) {
+function roomSnapshot(room, port = null, viewer = {}) {
   // Until the table is full the board stays on the server: no deck, and no seed
-  // to re-deal it from either.
+  // to re-deal it from either — except to the host, who sets the seed.
   const waiting = Boolean(room.waitingForPlayers);
   return {
     lanOrigin: port ? lanOrigin(port) : null,
     roomId: room.id,
     waiting,
-    seed: waiting ? null : room.seed,
+    configuring: Boolean(room.configuring),
+    seed: waiting && !viewer.host ? null : room.seed,
+    // Which seat a token holds. A lobby can move seats when the host edits the
+    // manager list, so the client asks rather than trusting its own note.
+    yourSeat: viewer.token ? seatForToken(room, viewer.token)?.managerId ?? null : undefined,
     rosterSize: room.rosterSize,
     startingPitchers: room.startingPitchers,
     temperature: room.temperature ?? 0,

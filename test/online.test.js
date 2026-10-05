@@ -1442,3 +1442,58 @@ test("a finished snake log names every card, so a change of the computer's taste
     );
   }
 });
+
+test("a lobby room is set up by its host after it opens, and starts on the host's word", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const created = await api(base, "POST", "/api/rooms", { seed: "lobby-seed", managers: ["Ana", "Bo"], lobby: true });
+  assert.equal(created.status, 201);
+  const roomId = created.data.roomId;
+  const hostToken = created.data.hostToken;
+  assert.equal(created.data.configuring, true);
+  assert.equal(created.data.seed, "lobby-seed", "the host sets the seed, so the host may read it");
+
+  const guest = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(guest.data.seed, null, "a guest may not");
+  const hostView = await api(base, "GET", `/api/rooms/${roomId}?host=${hostToken}`);
+  assert.equal(hostView.data.seed, "lobby-seed");
+
+  // Both humans sit down, but the room waits for the host to finish the rules.
+  const bo = await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-2" });
+  await api(base, "POST", `/api/rooms/${roomId}/join`, { managerId: "team-1", hostToken });
+  const seated = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(seated.data.waiting, true, "a full table does not open a room still being set up");
+  const early = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: bo.data.token, action: { type: "autopick" } });
+  assert.equal(early.status, 409);
+
+  const stranger = await api(base, "POST", `/api/rooms/${roomId}/configure`, { hostToken: "nope", settings: { managers: ["X", "Y"] } });
+  assert.equal(stranger.status, 403);
+
+  // Reorder the table and add a computer: Bo's seat follows Bo's name.
+  const reset = await api(base, "POST", `/api/rooms/${roomId}/configure`, {
+    hostToken,
+    settings: { seed: "lobby-seed-2", managers: ["Bo", "Ana", "Robo"], cpu: ["Robo"], draftType: "auction", nomination: "manual" }
+  });
+  assert.equal(reset.status, 200);
+  assert.equal(reset.data.draftType, "auction");
+  assert.deepEqual(reset.data.managers.map((manager) => [manager.name, manager.cpu]), [["Bo", false], ["Ana", false], ["Robo", true]]);
+  const boNow = await api(base, "GET", `/api/rooms/${roomId}?token=${bo.data.token}`);
+  assert.equal(boNow.data.yourSeat, "team-1");
+
+  const bad = await api(base, "POST", `/api/rooms/${roomId}/configure`, { hostToken, settings: { managers: ["Solo"] } });
+  assert.equal(bad.status, 400, "a bad setup is refused and the room keeps the last good one");
+
+  const started = await api(base, "POST", `/api/rooms/${roomId}/configure`, { hostToken, start: true });
+  assert.equal(started.status, 200);
+  assert.equal(started.data.configuring, false);
+  assert.equal(started.data.waiting, false, "everyone was already seated, so the board opens at once");
+  assert.equal(started.data.seed, "lobby-seed-2");
+  const locked = await api(base, "POST", `/api/rooms/${roomId}/configure`, { hostToken, settings: { managers: ["A", "B"] } });
+  assert.equal(locked.status, 409);
+
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  const restarted = await startServer(t, dataDir);
+  const revived = await api(restarted, "GET", `/api/rooms/${roomId}`);
+  assert.equal(revived.data.configuring, false);
+  assert.equal(revived.data.draftType, "auction");
+});
