@@ -6771,6 +6771,12 @@ div.seat-option:not(:disabled):hover span {
   font-size: 13px;
 }
 
+/* The base button hover paints the fill red, which on a link is red text on red. */
+.link-button:hover {
+  background: transparent;
+  color: var(--accent-dark);
+}
+
 .awards-panel {
   margin-top: 16px;
 }

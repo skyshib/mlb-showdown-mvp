@@ -9671,7 +9671,6 @@ function chartOps(card) {
   return obp + slg;
 }
 
-const primaryFielding = (card) => (Array.isArray(card.fielding) ? card.fielding[0] : card.fielding) || 0;
 
 // ---- grading against the room ----
 //
@@ -9700,7 +9699,6 @@ const GRADE_MEASURES = {
   onBase: { of: "hitter", read: (card) => Number(card.onBase) || 0, better: "high" },
   chart: { of: "hitter", read: chartOps, better: "high" },
   speed: { of: "hitter", read: (card) => Number(card.speed) || 0, better: "high" },
-  defence: { of: "hitter", read: primaryFielding, better: "high" },
   spControl: { of: "SP", read: (card) => Number(card.control) || 0, better: "high" },
   // An arm's chart is the other half of him, and it runs the other way: the
   // number is what the hitter does once the swing gets through, so the good ones
@@ -9717,9 +9715,8 @@ const GRADE_MEASURES = {
 // Reading the live assignments means a post-draft lineup change moves the grade
 // with it instead of leaving a stale one behind.
 function fieldedCards(manager, draft) {
-  const bats = assignLineupSlots(manager.roster, manager.lineupAssignments).slots
-    .map((slot) => slot.player)
-    .filter(Boolean);
+  const slots = assignLineupSlots(manager.roster, manager.lineupAssignments).slots;
+  const bats = slots.map((slot) => slot.player).filter(Boolean);
   const arms = assignStaffSlots(manager.roster, manager.staffAssignments, draft)
     .map((slot) => slot.player)
     .filter(Boolean);
@@ -9727,8 +9724,68 @@ function fieldedCards(manager, draft) {
     hitter: bats,
     SP: arms.filter((card) => card.role === "SP"),
     RP: arms.filter((card) => card.role !== "SP"),
-    all: [...bats, ...arms]
+    all: [...bats, ...arms],
+    slots
   };
+}
+
+// ---- grading the defense ----
+//
+// A glove is only worth what it is worth at the spot it plays, and the spots do
+// not share a scale: a catcher's arm runs to +13 where a fine first baseman is
+// +2. So the defense is graded slot by slot. Each of the eight fielding slots is
+// read at the rating the lineup actually fields there (out of position at first
+// is -1; the DH fields nothing and is left out), and placed against every card
+// the room drafted that lists that position. The team's figure is the total of
+// the eight, the same number the C / IF / OF panel adds up.
+//
+// It used to average each hitter's FIRST listed rating, DH included, against
+// the room's hitters as one pool. Room lucky-heron-moon graded a +32 defense F:
+// two outfielders seated at +9 and +6 were read at their other positions (0 and
+// -1), and a team whose DH was a +12 catcher was credited for a glove that
+// never took the field.
+const FIELDING_SLOTS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+
+function nativeGloveAt(card, label) {
+  if (label === "LF" || label === "RF") {
+    const corner = hitterPositions(card).find((entry) => isCornerOutfielder(entry.pos));
+    return corner ? Number(corner.fielding) || 0 : null;
+  }
+  const entry = hitterPositions(card).find((item) => item.pos === label);
+  return entry ? Number(entry.fielding) || 0 : null;
+}
+
+function defenseScales(draft) {
+  const scales = {};
+  const hitters = draft.managers.flatMap((manager) => manager.roster.filter((card) => gradeGroup(card) === "hitter"));
+  for (const label of FIELDING_SLOTS) {
+    const values = hitters.map((card) => nativeGloveAt(card, label)).filter((value) => value !== null);
+    const mean = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+    const variance = values.length ? values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length : 0;
+    scales[label] = { count: values.length, mean, sd: Math.sqrt(variance) };
+  }
+  return scales;
+}
+
+// The team's total at the eight slots, placed against eight cards drawn one per
+// slot from the room's drafted cards at each position.
+function defenseGrade(slots, scales) {
+  let value = 0;
+  let expected = 0;
+  let variance = 0;
+  let fielded = 0;
+  for (const slot of slots) {
+    if (!FIELDING_SLOTS.includes(slot.label) || !slot.player) continue;
+    fielded += 1;
+    value += Number(slot.fielding) || 0;
+    const scale = scales[slot.label];
+    if (!scale?.count) continue;
+    expected += scale.mean;
+    variance += scale.sd ** 2;
+  }
+  if (!fielded) return { value: 0, share: 0.5, grade: "—" };
+  const share = variance > 0 ? normalCdf((value - expected) / Math.sqrt(variance)) : 0.5;
+  return { value, share, grade: gradeFor(share) };
 }
 
 // Which measures a card can answer for. A bench card has no assignment to read
@@ -9794,7 +9851,7 @@ function gradeFor(share) {
 }
 
 // A report card for the team on the field, not everything it owns.
-function teamComposition(manager, groups, scales) {
+function teamComposition(manager, groups, scales, fieldingScales) {
   const graded = {};
   for (const [name, measure] of Object.entries(GRADE_MEASURES)) {
     const cards = groups[measure.of];
@@ -9808,6 +9865,7 @@ function teamComposition(manager, groups, scales) {
     graded[name] = { value, share, grade: cards.length ? gradeFor(share) : "—" };
   }
 
+  graded.defence = defenseGrade(groups.slots, fieldingScales);
   return {
     manager,
     ...graded,
@@ -9823,17 +9881,22 @@ const COMPOSITION_ROWS = [
   { key: "onBase", label: "On-base", decimals: 1 },
   { key: "chart", label: "Chart quality", decimals: 3 },
   { key: "speed", label: "Speed", decimals: 1 },
-  { key: "defence", label: "Defense", decimals: 1 },
+  { key: "defence", label: "Defense", decimals: 0, signed: true },
   { key: "spControl", label: "Starters · control", decimals: 1, group: "sp" },
   { key: "spChart", label: "Starters · chart", decimals: 3, group: "sp" },
   { key: "rpControl", label: "Bullpen · control", decimals: 1, group: "rp" },
   { key: "rpChart", label: "Bullpen · chart", decimals: 3, group: "rp" }
 ];
 
+function compositionValue(row, cell) {
+  return row.signed ? formatSignedNumber(Math.round(cell.value)) : cell.value.toFixed(row.decimals);
+}
+
 function compositionTable(draft) {
   const fielded = draft.managers.map((manager) => fieldedCards(manager, draft));
   const scales = roomScales(draft);
-  const teams = draft.managers.map((manager, index) => teamComposition(manager, fielded[index], scales));
+  const fieldingScales = defenseScales(draft);
+  const teams = draft.managers.map((manager, index) => teamComposition(manager, fielded[index], scales, fieldingScales));
   const rows = COMPOSITION_ROWS.map((row) => ({
     ...row,
     cells: teams.map((team) => ({ manager: team.manager, ...team[row.key] }))
@@ -9906,7 +9969,7 @@ function recapText(draft) {
   lines.push(`  ${"".padEnd(width)}${names.map((name) => name.padStart(col)).join("")}`);
   for (const row of rows) {
     const cells = row.cells
-      .map((cell) => `${cell.grade} (${cell.value.toFixed(row.decimals)})`.padStart(col))
+      .map((cell) => `${cell.grade} (${compositionValue(row, cell)})`.padStart(col))
       .join("");
     lines.push(`  ${row.label.padEnd(width)}${cells}`);
   }
@@ -9956,7 +10019,7 @@ function renderDraftDone(draft) {
           .map(
             (cell) => `<td class="comp-cell"><span class="comp-score">
               <span class="comp-grade grade-${cell.grade}">${cell.grade}</span>
-              <span class="comp-value">(${cell.value.toFixed(row.decimals)})</span>
+              <span class="comp-value">(${compositionValue(row, cell)})</span>
             </span>
             </td>`
           )
