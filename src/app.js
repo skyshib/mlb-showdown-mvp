@@ -3174,7 +3174,8 @@ function renderDraft() {
     <button data-action="autopick" ${canAdvance ? "" : "disabled"}>${auction ? "Auto-run next lot" : "Auto-pick next"}</button>
     <button data-action="undo-pick" ${canUndo ? "" : "disabled"}>${auction && lot && !queued ? "Undo nomination" : "Undo last pick"}</button>
     ${online && !online.host ? "" : `<button data-action="finish" ${draft.complete || reviewOpen || paused ? "disabled" : ""}>${auction ? "Auto-finish auction" : "Auto-finish draft"}</button>`}
-    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>Sim ${DEFAULT_BATCH_RUNS.toLocaleString("en-US")} games</button>
+    ${state.batch?.summary?.teams?.length ? `<button data-action="view-batch" title="Open the last sim's results without running it again">Back to sim results</button>` : ""}
+    <button data-action="batch" ${canSimulate(draft) ? "" : "disabled"}>${state.batch?.summary ? "Sim again" : `Sim ${DEFAULT_BATCH_RUNS.toLocaleString("en-US")} games`}</button>
     ${renderPlayGameControl(draft)}
     <button data-action="export-save" title="Save this room to a file you can keep, move, or send">&#128190; Save room</button>
     <button class="sound-toggle${isMuted() ? " muted" : ""}" data-action="toggle-sound" aria-pressed="${!isMuted()}" title="${isMuted() ? "Turn sound on" : "Turn sound off"}">${isMuted() ? "&#128264;" : "&#128266;"}</button>
@@ -4030,6 +4031,12 @@ function bindDraftActions() {
       renderCurrentScreen();
       return;
     }
+    if (action === "view-batch") {
+      state.view = "batch";
+      saveState();
+      renderCurrentScreen();
+      return;
+    }
     if (action === "export-save") {
       exportSave();
       return;
@@ -4039,7 +4046,7 @@ function bindDraftActions() {
       navigator.clipboard?.writeText(text).then(
         () => {
           button.textContent = "Copied";
-          setTimeout(() => renderDraft(), 1200);
+          setTimeout(() => renderCurrentScreen(), 1200);
         },
         () => {
           button.textContent = "Couldn't copy";
@@ -5445,7 +5452,10 @@ function renderBatch() {
       </table>
     </div>
   </section>`;
-  const draftRecapSection = `<section class="panel wide draft-recap-panel">
+  // The report card the draft screen opens on rides along here, so the grades
+  // can be read against the season without leaving it.
+  const draftRecapSection = `${activeBatchTab === "draft" ? `${renderDraftDone(state.draft)}${renderAuctionBudgetSection(state.draft)}` : ""}
+  <section class="panel wide draft-recap-panel">
     <div class="section-title-row">
       <div>
         <p class="eyebrow">Draft review</p>
@@ -5511,7 +5521,7 @@ function batchStatsTabs() {
     { id: "pitchers", label: "Pitchers" },
     { id: "skills", label: "Baserunning & defense" },
     { id: "games", label: "Game log" },
-    { id: "draft", label: "Draft recap" }
+    { id: "draft", label: "Draft & grades" }
   ];
 }
 
@@ -6592,6 +6602,22 @@ function bindBatchActions() {
       state.view = null;
       saveState();
       renderCurrentScreen();
+    }
+    if (action === "export-save") {
+      exportSave();
+      return;
+    }
+    if (action === "copy-recap") {
+      navigator.clipboard?.writeText(recapText(state.draft)).then(
+        () => {
+          button.textContent = "Copied";
+          setTimeout(() => renderCurrentScreen(), 1200);
+        },
+        () => {
+          button.textContent = "Couldn't copy";
+        }
+      );
+      return;
     }
     if (action === "batch-run") {
       const input = app.querySelector("[data-batch-runs]");

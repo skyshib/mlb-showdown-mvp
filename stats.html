@@ -810,10 +810,15 @@ async function buildRoomFor(draft, button) {
     nomination: draft.nomination,
     budget: draft.auction?.budget ?? draft.budget ?? undefined,
     startingPitchers: draft.startingPitchers,
+    // A snake room that picked past the minimum roster has to be dealt and
+    // drafted at that length, or it fills up before the replay is done.
+    snakePicks: auction ? undefined : draft.rosterSize ?? undefined,
     bullpenSlots: draft.bullpenSlots ?? undefined,
     bullpenMin: draft.bullpenMin ?? undefined,
     hidePoints: draft.hidePoints,
     coaches: draft.coaches,
+    // The board as it was dealt, not as today's dealer would deal the seed.
+    ...(draft.deck?.length ? { deck: draft.deck, deckToken: token } : {}),
     // No clock of any kind: a clock that runs during a replay picks and bids
     // for people who are not there.
     pickTimer: 0,
@@ -821,7 +826,12 @@ async function buildRoomFor(draft, button) {
     auctionTimer: { enabled: false }
   });
   const roomId = created.roomId;
-  const token = created.hostToken;
+  const hostToken = created.hostToken;
+  // The room numbers its seats in the order they were listed, and the record
+  // lists them in the order they DREW — a draft whose pick order was drawn
+  // keeps its old ids against new seats. Each record id is matched to the seat
+  // listed in its place.
+  const seatId = new Map(draft.managers.map((manager, index) => [manager.id, created.managers?.[index]?.id ?? manager.id]));
 
   // The board stays on the server until every human seat is occupied at once,
   // so the seats are taken before a card moves.
@@ -829,11 +839,11 @@ async function buildRoomFor(draft, button) {
   for (const [index, manager] of seats.entries()) {
     say(`sitting ${manager.name} down…`);
     await post(`/api/rooms/${roomId}/join`, index === 0
-      ? { managerId: manager.id, hostToken: token }
-      : { managerId: manager.id });
+      ? { managerId: seatId.get(manager.id), hostToken }
+      : { managerId: seatId.get(manager.id) });
   }
 
-  const act = (action) => post(`/api/rooms/${roomId}/actions`, { token, action });
+  const act = (action) => post(`/api/rooms/${roomId}/actions`, { token: hostToken, action });
 
   if (auction) {
     // A room opens on a pool review; with no clock there is nothing to wait for.
@@ -842,13 +852,13 @@ async function buildRoomFor(draft, button) {
       say(`replaying lot ${index + 1} of ${log.length}…`);
       await act({ type: "nominate", playerId: entry.playerId });
       for (const [managerId, amount] of Object.entries(entry.bids ?? {})) {
-        await act({ type: "seal-bid", managerId, amount });
+        await act({ type: "seal-bid", managerId: seatId.get(managerId) ?? managerId, amount });
       }
     }
     // The seats that were the computer's are handed back, now that the bidding
     // is over and nothing is left for anybody to bid on.
     for (const manager of draft.managers.filter((item) => item.cpu)) {
-      await act({ type: "seat", managerId: manager.id, cpu: true }).catch(() => {});
+      await act({ type: "seat", managerId: seatId.get(manager.id), cpu: true }).catch(() => {});
     }
   } else {
     for (const [index, card] of picks.entries()) {
