@@ -1166,7 +1166,18 @@ function roomConfigFromBody(body) {
   // The board widens with the draft: a room picking past a roster needs cards
   // past a roster, or its last rounds pick over an empty table.
   const poolPen = { ...pen, ...(snakePicks === null ? {} : { picks: snakePicks }) };
-  const pool = buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, ...poolPen, temperature, coaches });
+  // A hand-built deck — say, an old room's board re-run under new rules — is
+  // ours to set, not the public's: it takes the VISITS_TOKEN secret.
+  const deckToken = process.env.VISITS_TOKEN;
+  if (body.deck != null && (!deckToken || body.deckToken !== deckToken)) return { error: "A custom deck needs the admin token" };
+  let pool;
+  try {
+    pool = Array.isArray(body.deck)
+      ? deckFromIds(universe, seed, body.deck, temperature)
+      : buildDraftPool(universe, seed, { nomination, managerCount: managers.length, startingPitchers, ...poolPen, temperature, coaches });
+  } catch (error) {
+    return { error: error.message };
+  }
   if (nomination === "random") {
     const shortfalls = randomNominationShortfalls(pool, managers.length, startingPitchers, pen);
     if (shortfalls.length) {

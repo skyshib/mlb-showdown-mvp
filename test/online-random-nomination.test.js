@@ -235,3 +235,28 @@ test("the setup screen's choices all survive the trip to the room", async (t) =>
   assert.equal(room.nomination, "random", "the room came back a manual auction");
   assert.equal(room.draftType, "auction");
 });
+
+test("a room can be opened on a hand-built deck, but only with the admin token", async (t) => {
+  const previous = process.env.VISITS_TOKEN;
+  process.env.VISITS_TOKEN = "admin-secret";
+  t.after(() => {
+    if (previous === undefined) delete process.env.VISITS_TOKEN;
+    else process.env.VISITS_TOKEN = previous;
+  });
+  const { base, roomsDir } = await startServer(t);
+  const settings = { seed: SEED, managers: ["Ana", "Bo", "Cy"], universe: "classic", draftType: "auction", nomination: "random" };
+  const dealt = await api(base, "POST", "/api/rooms", settings);
+  assert.equal(dealt.status, 201);
+  await settled(roomsDir, dealt.data.roomId, 0);
+  const { deck } = JSON.parse(await readFile(join(roomsDir, `${dealt.data.roomId}.json`), "utf8"));
+  assert.ok(deck.length);
+
+  const refused = await api(base, "POST", "/api/rooms", { ...settings, seed: "other-seed", deck });
+  assert.equal(refused.status, 400);
+
+  const reused = await api(base, "POST", "/api/rooms", { ...settings, seed: "other-seed", deck, deckToken: "admin-secret" });
+  assert.equal(reused.status, 201);
+  await settled(roomsDir, reused.data.roomId, 0);
+  const saved = JSON.parse(await readFile(join(roomsDir, `${reused.data.roomId}.json`), "utf8"));
+  assert.deepEqual(saved.deck, deck);
+});

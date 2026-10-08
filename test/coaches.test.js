@@ -416,12 +416,12 @@ test("a coach on the block reserves no slot and a full roster cannot bid on him"
   const { draft } = coachRoom(2, seedDealing("coach-auction", ["coach-wild-card"]), { draftType: "auction", nomination: "manual", budget: 1300 });
   const [ana, bo] = draft.managers;
   const wild = draft.pool.find((card) => card.id === "coach-wild-card");
-  // Thirteen open slots at $5 each: a player lot must leave $60 behind, a
-  // coach lot the whole $65.
-  assert.equal(auctionMaxBid(draft, ana), 1300 - 12 * 5);
+  // Thirteen open slots at $1 each: a player lot must leave $12 behind, a
+  // coach lot the whole $13.
+  assert.equal(auctionMaxBid(draft, ana), 1300 - 12 * 1);
   nominatePlayer(draft, wild.id);
   assert.equal(auctionLotPlayer(draft).id, wild.id);
-  assert.equal(auctionMaxBid(draft, ana), 1300 - 13 * 5);
+  assert.equal(auctionMaxBid(draft, ana), 1300 - 13 * 1);
   assert.equal(sealedBidder(draft).id, ana.id);
   placeSealedBid(draft, ana.id, 40);
   const sale = placeSealedBid(draft, bo.id, 10);

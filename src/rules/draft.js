@@ -292,7 +292,7 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
   );
 }
 
-export const AUCTION_MIN_BID = 5;
+export const AUCTION_MIN_BID = 1;
 export const AUCTION_MIN_RAISE = 5;
 export const AUCTION_DEFAULT_BUDGET = 1000;
 export const AUCTION_DEFAULT_REVIEW_SECONDS = 5 * 60;
