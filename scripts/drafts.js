@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { readVisits } from "./visits.js";
 import { zoneCity } from "./geo.js";
+import { UNLIMITED_BULLPEN } from "../src/rules/draft.js";
 
 const DRAFTS_DIR = "drafts";
 const RETAIN_DAYS = 365;
@@ -156,11 +157,19 @@ export function listDrafts(store, { limit = 100 } = {}) {
     .map((row) => withSessions(store, withPlaces(store, row), index));
 }
 
+// Local drafts filed before the sanitizer kept "all" stored an unlimited pen
+// as 0. A real max of 0 forces the min to 0 too, so a 0 max with a min above
+// it can only have been unlimited.
+export function repairPen(record) {
+  if (record?.bullpenSlots === 0 && Number(record.bullpenMin) > 0) record.bullpenSlots = UNLIMITED_BULLPEN;
+  return record;
+}
+
 export function readDraft(store, id) {
   const log = store.drafts;
   if (!log || !/^[a-z0-9-]{1,80}$/i.test(String(id))) return null;
   try {
-    const record = withPlaces(store, JSON.parse(readFileSync(join(log.dir, `${id}.json`), "utf8")));
+    const record = withPlaces(store, repairPen(JSON.parse(readFileSync(join(log.dir, `${id}.json`), "utf8"))));
     return withSessions(store, record, visitIndex(store));
   } catch {
     return null;
@@ -517,7 +526,7 @@ export function sanitizeDraftRecord(body) {
     nomination: body?.nomination === "random" ? "random" : "manual",
     rosterSize: number(body?.rosterSize, 200),
     startingPitchers: number(body?.startingPitchers, 20),
-    bullpenSlots: body?.bullpenSlots == null ? null : number(body.bullpenSlots, 30),
+    bullpenSlots: body?.bullpenSlots == null ? null : body.bullpenSlots === UNLIMITED_BULLPEN ? UNLIMITED_BULLPEN : number(body.bullpenSlots, 30),
     bullpenMin: body?.bullpenMin == null ? null : number(body.bullpenMin, 30),
     hidePoints: Boolean(body?.hidePoints),
     coaches: Boolean(body?.coaches),

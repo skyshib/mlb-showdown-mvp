@@ -727,9 +727,12 @@ function draftRow(draft) {
 //
 // A room built once is remembered here, so the second person to click the same
 // draft opens the room the first one built rather than a second copy of it.
+// The key is versioned: rooms rebuilt before an unlimited pen survived filing
+// were built with no relievers, so those are forgotten and built again.
+const REBUILT_KEY = "rebuilt-v2";
 function rebuiltRoomOf(draftId) {
   try {
-    return localStorage.getItem(`rebuilt:${draftId}`) || "";
+    return localStorage.getItem(`${REBUILT_KEY}:${draftId}`) || "";
   } catch {
     return "";
   }
@@ -737,7 +740,7 @@ function rebuiltRoomOf(draftId) {
 
 function rememberRebuilt(draftId, roomId) {
   try {
-    localStorage.setItem(`rebuilt:${draftId}`, roomId);
+    localStorage.setItem(`${REBUILT_KEY}:${draftId}`, roomId);
   } catch {
     // A browser that refuses storage just builds it again next time.
   }

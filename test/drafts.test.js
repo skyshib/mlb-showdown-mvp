@@ -5,6 +5,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer, flushSaves } from "../scripts/online-server.js";
+import { repairPen, sanitizeDraftRecord } from "../scripts/drafts.js";
 import { draftRecord } from "../src/rules/draftRecord.js";
 import { buildDraftPool } from "../src/data/universes.js";
 import { applyDraftAction, createDraft, isAuctionDraft } from "../src/rules/draft.js";
@@ -518,4 +519,13 @@ test("a recorded lot settles at the price it settled at the first time", () => {
   const prices = (draft) => draft.auction.history.map((entry) => [entry.playerId, entry.managerId, entry.price]);
   assert.deepEqual(prices(replayed), prices(played), "at the same prices");
   assert.ok(isAuctionDraft(replayed));
+});
+
+test("an unlimited pen survives filing, and old records that lost it read as unlimited", () => {
+  const filed = sanitizeDraftRecord({ seed: "s", bullpenSlots: "all", bullpenMin: 2, managers: [{ name: "A", roster: [] }] });
+  assert.equal(filed.bullpenSlots, "all");
+  assert.equal(filed.bullpenMin, 2);
+  assert.equal(repairPen({ bullpenSlots: 0, bullpenMin: 2 }).bullpenSlots, "all");
+  // A real cap of zero has a floor of zero, and stays as it was.
+  assert.equal(repairPen({ bullpenSlots: 0, bullpenMin: 0 }).bullpenSlots, 0);
 });
