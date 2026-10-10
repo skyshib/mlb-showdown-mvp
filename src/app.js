@@ -101,6 +101,7 @@ import {
   isCornerOutfielder,
   isRandomNomination,
   lineupStatus,
+  positionMatchesSlot,
   managerForPickNumber,
   managerValuation,
   maxPoolManagers,
@@ -10264,7 +10265,7 @@ function rosterOpenings(manager, draft) {
       const role = player.role === "SP" ? "SP" : "RP";
       return role === "SP" ? needs.starter > 0 : needs.bullpen > 0;
     }
-    return bats.some((slot) => slot === "DH" || playsPosition(player, slot));
+    return bats.some((slot) => slot === "DH" || positionMatchesSlot(player, slot));
   };
 
   return { slots, fills };
