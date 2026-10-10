@@ -2160,7 +2160,22 @@ export function bestAutopickTarget(draft, manager) {
   if (!players.length) {
     throw new Error("No legal players are available");
   }
-  const model = managerValuation(draft, manager);
+  // Relievers are read the way the bidder reads them: ranked by what the engine
+  // says they allow, and spaced by the season each one's quality earns him. The
+  // additive price left a whole bullpen inside one flat band — room
+  // dawn-cougar-park priced every reliever on the board between 176 and 203 while
+  // the engine spread them four times as wide, and the computer spent its last
+  // two picks on the worse arm of a pair it could not tell apart. Worth +2 win
+  // points, measured half the seats against the other half.
+  //
+  // The STARTERS are deliberately left on the additive price here, though
+  // re-dealing them measures better still (+5.5 on a classic board, +13.3 on a
+  // wild one). The starter discount is read off the whole board, so on the real
+  // card sets — where every starter sits in a narrow band — it tells the ace-first
+  // man to stop reaching for arms, and he stops being the ace-first man: his
+  // bats' gloves overtake the positional purist's. That is a change to who the
+  // archetypes ARE, not to what a card is worth, and it wants deciding on its own.
+  const model = pitcherRanking(draft, managerValuation(draft, manager), ["RP"]);
   const values = new Map(players.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
   const dropoffs = positionDropoffs(players, values);
   const best = players
@@ -2382,7 +2397,9 @@ function roomBatters(draft, model) {
 // the spread is noise about arms that will never pitch. So the deck decides.
 const RELIEVER_SPACING_SHARE = 0.3;
 
-function pitcherRanking(draft, model) {
+// `roles` names which halves of the staff get re-dealt. The auction asks for
+// both; snake autopick asks for the relievers only — see bestAutopickTarget.
+export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
   const batters = roomBatters(draft, model);
   const ranked = new Map();
   // The rotation a room this size fields — what a reliever has to beat.
@@ -2409,7 +2426,7 @@ function pitcherRanking(draft, model) {
   const WIDE_SPREAD = 0.05; // none at or above it
   const widening = Math.max(0, Math.min(1, (starterSpread - NARROW_SPREAD) / (WIDE_SPREAD - NARROW_SPREAD)));
   const starterTilt = STARTER_DISCOUNT + (1 - STARTER_DISCOUNT) * widening;
-  for (const role of ["SP", "RP"]) {
+  for (const role of roles) {
     const arms = draft.pool.filter((card) => card.kind === "pitcher" && pitcherRole(card) === role);
     const tilt = role === "SP" ? starterTilt : 1;
     const values = arms.map((card) => model.value(card) * tilt).sort((a, b) => b - a);

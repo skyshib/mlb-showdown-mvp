@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildDraftPool, deckEntry, deckFromIds } from "../src/data/universes.js";
+import { lineupProfile, runsPerPa } from "../src/rules/pitching.js";
 import {
   DEFAULT_ROOM_STARTING_PITCHERS,
   DEFAULT_STARTING_PITCHERS,
@@ -23,6 +24,7 @@ import {
   randomNominationShortfalls,
   managerValuation,
   minimumSnakePicks,
+  pitcherRanking,
   roomDraftOptions,
   rosterSizeForStartingPitchers,
   standingReplacements,
@@ -33,6 +35,54 @@ import {
 } from "../src/rules/draft.js";
 
 const UNIVERSE = "classic";
+
+// The bullpen the computer sees when it DRAFTS, not when it bids. Snake autopick
+// read the additive price, which put a whole bullpen inside one flat band — room
+// dawn-cougar-park priced every reliever between 176 and 203 while the engine
+// spread them four times as wide, and the computer spent a pick on the worse arm
+// of a pair it could not tell apart. Relievers are now re-dealt in engine order.
+// The starters are deliberately NOT, so their price must come through untouched.
+test("a drafting computer reads relievers in engine order and leaves starters alone", () => {
+  const { draft, pool } = roomOf(4);
+  const manager = draft.managers[0];
+  const raw = managerValuation(draft, manager);
+  const ranked = pitcherRanking(draft, raw, ["RP"]);
+
+  const arms = pool.filter((card) => card.kind === "pitcher" && !card.replacement);
+  const starters = arms.filter((card) => card.role === "SP");
+  const relievers = arms.filter((card) => card.role !== "SP");
+  assert.ok(starters.length > 1 && relievers.length > 1);
+
+  // Starters: the same number the additive model gave.
+  for (const starter of starters) {
+    assert.equal(ranked.value(starter), raw.value(starter));
+  }
+
+  // Relievers: the arm the engine likes best is now the dearest on the board.
+  const batters = lineupProfile(
+    pool.filter((card) => card.kind === "hitter" && !card.replacement)
+      .sort((a, b) => b.points - a.points)
+      .slice(0, draft.managers.length * 9)
+  );
+  const byEngine = [...relievers].sort((a, b) => runsPerPa(a, 0, batters) - runsPerPa(b, 0, batters));
+  const dearest = [...relievers].sort((a, b) => ranked.value(b) - ranked.value(a))[0];
+  assert.equal(dearest.id, byEngine[0].id);
+
+  // Every reliever, not just the best one: the order never contradicts the
+  // engine. The re-deal hands out the SAME set of prices the additive model
+  // produced — it does not widen the band, it decides who stands where in it —
+  // so the whole bullpen reads monotonically.
+  for (let i = 1; i < byEngine.length; i++) {
+    const better = byEngine[i - 1];
+    const worse = byEngine[i];
+    if (runsPerPa(worse, 0, batters) - runsPerPa(better, 0, batters) < 1e-9) continue;
+    assert.ok(
+      ranked.value(better) >= ranked.value(worse),
+      `${better.name} allows less than ${worse.name} but is priced under him`
+    );
+  }
+});
+
 
 function roomOf(managerCount, seed = "rn-seed") {
   const managers = Array.from({ length: managerCount }, (_, index) => ({
