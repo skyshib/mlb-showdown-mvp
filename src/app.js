@@ -2213,6 +2213,13 @@ async function playOrderDraw(names, elapsedMs = 0) {
   orderDrawShowing = false;
 }
 
+// The budget field's floor: a minimum bid for every slot, rounded up to the
+// raise step. The browser counts steps up from min, so an off-step floor
+// (16 slots at $1) would reject round budgets like 1600.
+function auctionBudgetFloor(rosterSize) {
+  return Math.ceil((rosterSize * AUCTION_MIN_BID) / AUCTION_MIN_RAISE) * AUCTION_MIN_RAISE;
+}
+
 // Offline, the draw is made here: a shuffle of the table, shown before the
 // board is dealt.
 function drawOrder(entries) {
@@ -2381,10 +2388,13 @@ async function startOfflineDraft(setupForm) {
     return;
   }
   // The order is drawn now, in front of the table, and the board is dealt
-  // once the draw is over.
-  state.managers = drawOrder(state.managers);
+  // once the draw is over. A random-nomination auction has no turns, so no draw.
+  const randomNomination = state.draftType === "auction" && state.nomination === "random";
   for (const button of app.querySelectorAll("button")) button.disabled = true;
-  await playOrderDraw(state.managers);
+  if (!randomNomination) {
+    state.managers = drawOrder(state.managers);
+    await playOrderDraw(state.managers);
+  }
   state.draft = createDraft(managerDescriptors(state.managers, state.cpuManagers), pool, state.rosterSize, state.seed, {
     draftType: state.draftType,
     startingPitchers: state.startingPitchers,
@@ -2541,7 +2551,7 @@ function renderSettingsForm(value) {
         <small data-when="nomination=manual">Each manager takes a turn putting a card of their choosing on the block.</small>
       </div>
       ${settingField("Budget per manager ($)",
-        `<input name="auctionBudget" type="number" min="${value.rosterSize * AUCTION_MIN_BID}" max="100000" step="${AUCTION_MIN_RAISE}" value="${value.auctionBudget}" />`,
+        `<input name="auctionBudget" type="number" min="${auctionBudgetFloor(value.rosterSize)}" max="100000" step="${AUCTION_MIN_RAISE}" value="${value.auctionBudget}" />`,
         "A strong roster runs to roughly 5000 card points, so $5000 bids like the classic cap.")}
     </div>`);
 
@@ -2718,7 +2728,7 @@ function bindSettingsForm(setupForm, { onChange = null } = {}) {
     // The default budget is $100 a slot, so it moves with the roster until a
     // manager overrides it.
     const budgetInput = setupForm.querySelector('input[name="auctionBudget"]');
-    budgetInput.min = rosterSize * AUCTION_MIN_BID;
+    budgetInput.min = auctionBudgetFloor(rosterSize);
     if (!budgetInput.dataset.userEdited) budgetInput.value = defaultAuctionBudget(rosterSize);
     const named = managerEntries(setupForm).filter((entry) => entry.name).length;
     setupForm.querySelector("[data-random-nomination-blurb]").textContent = randomNominationBlurb(named, startingPitchers);
@@ -2875,8 +2885,9 @@ function roomSettingsBody(value) {
     snakeTimer: snakeTimerConfig(clock, value.draftType),
     snakeReview: clock.snakeReviewSeconds,
     snakePicks: value.snakePicks,
-    // An online room draws its pick order when it opens.
-    drawOrder: true
+    // An online room draws its pick order when it opens — unless it's a
+    // random-nomination auction, which has no turns to order.
+    drawOrder: !(value.draftType === "auction" && value.nomination === "random")
   };
 }
 

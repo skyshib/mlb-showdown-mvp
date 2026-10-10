@@ -1155,8 +1155,9 @@ function roomConfigFromBody(body) {
     ? body.cpu.map((name) => String(name)).filter((name) => managers.includes(name))
     : [];
   // Draw the pick order at random when the room opens, rather than seating
-  // managers in the order they were listed.
-  const drawOrder = Boolean(body.drawOrder);
+  // managers in the order they were listed. A random-nomination auction has
+  // no turns, so it never draws.
+  const drawOrder = Boolean(body.drawOrder) && nomination !== "random";
 
   // Every universe deals a seeded deck out of a deep card set; the deal is
   // deterministic in the seed so clients rebuild the identical deck. A
