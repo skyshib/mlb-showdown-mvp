@@ -68,19 +68,35 @@ test("a drafting computer reads relievers in engine order and leaves starters al
   const dearest = [...relievers].sort((a, b) => ranked.value(b) - ranked.value(a))[0];
   assert.equal(dearest.id, byEngine[0].id);
 
-  // Every reliever, not just the best one: the order never contradicts the
-  // engine. The re-deal hands out the SAME set of prices the additive model
-  // produced — it does not widen the band, it decides who stands where in it —
-  // so the whole bullpen reads monotonically.
-  for (let i = 1; i < byEngine.length; i++) {
-    const better = byEngine[i - 1];
-    const worse = byEngine[i];
-    if (runsPerPa(worse, 0, batters) - runsPerPa(better, 0, batters) < 1e-9) continue;
-    assert.ok(
-      ranked.value(better) >= ranked.value(worse),
-      `${better.name} allows less than ${worse.name} but is priced under him`
-    );
+  // Within one stamina class the order never contradicts the engine: of two
+  // one-inning arms, the one who allows less is the dearer. The re-deal hands
+  // out the SAME set of prices the additive model produced — it does not widen
+  // the band, it decides who stands where in it.
+  for (const length of [1, 2]) {
+    const sameLength = byEngine.filter((card) => (Number(card.ip) || 1) === length);
+    for (let i = 1; i < sameLength.length; i++) {
+      const better = sameLength[i - 1];
+      const worse = sameLength[i];
+      if (runsPerPa(worse, 0, batters) - runsPerPa(better, 0, batters) < 1e-9) continue;
+      assert.ok(
+        ranked.value(better) >= ranked.value(worse),
+        `${better.name} allows less than ${worse.name} at the same length but is priced under him`
+      );
+    }
   }
+
+  // ACROSS stamina classes the rate is not the whole story, and should not be: a
+  // two-inning man finishes what he starts, so at a rate a shade worse than a
+  // one-inning man's he is still worth more — he will throw the innings. The
+  // classic board prices Brett Tomko (2 IP, 0.0774) over Chris Hammond (1 IP,
+  // 0.0734) on exactly that trade. Priced purely off the rate, as relievers were
+  // before their projected SEASON counted, the longer arm loses every such pair.
+  const innings = (card) => Number(card.ip) || 1;
+  const longOverShort = relievers.some((long) => innings(long) >= 2 && relievers.some((short) =>
+    innings(short) === 1
+    && runsPerPa(short, 0, batters) < runsPerPa(long, 0, batters)
+    && ranked.value(long) > ranked.value(short)));
+  assert.ok(longOverShort, "no two-inning arm outpriced a one-inning arm with a slightly better rate");
 });
 
 

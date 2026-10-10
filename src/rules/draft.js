@@ -2181,7 +2181,7 @@ export function bestAutopickTarget(draft, manager) {
   // the discount cost the ace his identity. That was read off a 900-card raw
   // slice with no deal behind it — the pool the archetype test used to use, and
   // one no room drafts from. On a dealt board it does not happen.)
-  const model = pitcherRanking(draft, managerValuation(draft, manager));
+  const model = pitcherRanking(draft, managerValuation(draft, manager), ["SP", "RP"], RELIEVER_PICK_LIFT);
   const values = new Map(players.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
   const dropoffs = positionDropoffs(players, values);
   const best = players
@@ -2384,8 +2384,17 @@ function bucketNeed(needs, bucket) {
 // clears his rotation by 0.04 runs a plate appearance throws about 390 innings a
 // 162 where one who is worse throws about 20, and the pen's innings a game track
 // that gap at a correlation of 0.835 (its SIZE barely matters, 0.07).
-function relieverSeasonInnings(gap) {
-  return Math.max(20, Math.min(450, 150 + 6000 * gap));
+// Fitted against the innings relievers ACTUALLY threw over 320 bullpen seasons
+// of CPU-drafted leagues (four board types, two rotation sizes). The old curve
+// read the gap alone and read it three times too steeply — slope 6000 against a
+// measured 2200 — so it promised a replacement-level arm 300 innings he was
+// never going to throw, and it tracked the real seasons at r=0.56, WORSE than
+// the bare gap at 0.74. The card's own IP is the piece it was missing: a
+// two-inning man finishes what he starts, so at the same quality he outworks a
+// one-inning man (measured 211 against 191 a season, and 353 at three innings).
+// Gap still dominates — this is a correction, not a new theory. r=0.76.
+function relieverSeasonInnings(gap, ip) {
+  return Math.max(20, Math.min(550, 70 + 2200 * gap + 50 * (Number(ip) || 1)));
 }
 
 // The bats a room this size will actually field, not the whole board's tail.
@@ -2403,9 +2412,21 @@ function roomBatters(draft, model) {
 // the spread is noise about arms that will never pitch. So the deck decides.
 const RELIEVER_SPACING_SHARE = 0.3;
 
-// `roles` names which halves of the staff get re-dealt. The auction asks for
-// both; snake autopick asks for the relievers only — see bestAutopickTarget.
-export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
+// What a relieving arm is worth to a DRAFTING computer, over and above what the
+// additive price says. A bidder does not need this: auctionWillingness already
+// prices the pen's best arm at RELIEVER_TOP_RATE and the rest as depth, and a
+// flat multiplier on top of that measured worse. A drafting computer has no such
+// machinery — it compares one number against the bats — and at a flat price it
+// never reached for a closer. Swept over four boards, the gain plateaus broadly
+// between 1.3 and 1.6: +1.5 and +5.9 win points on a classic and a wild board at
+// 1.3, +1.7 and +5.5 at 1.4, and the curve is still climbing at 1.15 (+0.6,
+// +3.4) and falling away by 1.6. Measured mirrored, so the null is 0.
+const RELIEVER_PICK_LIFT = 1.3;
+
+// `roles` names which halves of the staff get re-dealt; `relieverLift` scales
+// what the bullpen's prices are drawn from. The auction asks for both roles at
+// no lift; a drafting computer asks for both and lifts the pen.
+export function pitcherRanking(draft, model, roles = ["SP", "RP"], relieverLift = 1) {
   const batters = roomBatters(draft, model);
   const ranked = new Map();
   // The rotation a room this size fields — what a reliever has to beat.
@@ -2434,7 +2455,7 @@ export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
   const starterTilt = STARTER_DISCOUNT + (1 - STARTER_DISCOUNT) * widening;
   for (const role of roles) {
     const arms = draft.pool.filter((card) => card.kind === "pitcher" && pitcherRole(card) === role);
-    const tilt = role === "SP" ? starterTilt : 1;
+    const tilt = role === "SP" ? starterTilt : relieverLift;
     const values = arms.map((card) => model.value(card) * tilt).sort((a, b) => b - a);
     const byRate = [...arms].sort((a, b) => runsPerPa(a, 0, batters) - runsPerPa(b, 0, batters));
     const byRank = new Map();
@@ -2453,7 +2474,7 @@ export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
     }
     const seasons = arms.map((card) => {
       const rate = runsPerPa(card, 0, batters);
-      return (batters.runValue - rate) * relieverSeasonInnings(rotationRpa - rate);
+      return (batters.runValue - rate) * relieverSeasonInnings(rotationRpa - rate, card.ip);
     });
     const low = Math.min(...seasons);
     const high = Math.max(...seasons);
