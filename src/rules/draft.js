@@ -2160,22 +2160,28 @@ export function bestAutopickTarget(draft, manager) {
   if (!players.length) {
     throw new Error("No legal players are available");
   }
-  // Relievers are read the way the bidder reads them: ranked by what the engine
-  // says they allow, and spaced by the season each one's quality earns him. The
-  // additive price left a whole bullpen inside one flat band — room
-  // dawn-cougar-park priced every reliever on the board between 176 and 203 while
-  // the engine spread them four times as wide, and the computer spent its last
-  // two picks on the worse arm of a pair it could not tell apart. Worth +2 win
-  // points, measured half the seats against the other half.
+  // The whole staff is read the way the bidder reads it: ranked by what the engine
+  // says each arm allows, starters discounted on a board whose starters barely
+  // differ, relievers spaced by the season each one's quality earns him. Both of
+  // those shipped for the auction years before autopick saw them, so a drafting
+  // computer was still pricing arms additively — room dawn-cougar-park put every
+  // reliever on the board between 176 and 203 while the engine spread them four
+  // times as wide, and the computer spent its last two picks on the worse arm of
+  // a pair it could not tell apart.
   //
-  // The STARTERS are deliberately left on the additive price here, though
-  // re-dealing them measures better still (+5.5 on a classic board, +13.3 on a
-  // wild one). The starter discount is read off the whole board, so on the real
-  // card sets — where every starter sits in a narrow band — it tells the ace-first
-  // man to stop reaching for arms, and he stops being the ace-first man: his
-  // bats' gloves overtake the positional purist's. That is a change to who the
-  // archetypes ARE, not to what a card is worth, and it wants deciding on its own.
-  const model = pitcherRanking(draft, managerValuation(draft, manager), ["RP"]);
+  // Mirrored paired duel, 60 leagues x2 x 4000 games: relievers alone are worth
+  // +1.5 on a classic board and +3.1 on a wild one; adding the starters is worth
+  // a further +3.2 and +8.1 (+1.2 at a two-man rotation).
+  //
+  // The archetypes survive it. The starter discount makes EVERY persona wait
+  // longer for its first arm, but by different amounts, so they spread further
+  // apart rather than converging: across dealt boards the purist still fields the
+  // best glove in 27 of 30 rooms and the ace still opens on an arm in 22 of 30,
+  // with his staff still the heaviest in the room. (An earlier note here claimed
+  // the discount cost the ace his identity. That was read off a 900-card raw
+  // slice with no deal behind it — the pool the archetype test used to use, and
+  // one no room drafts from. On a dealt board it does not happen.)
+  const model = pitcherRanking(draft, managerValuation(draft, manager));
   const values = new Map(players.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
   const dropoffs = positionDropoffs(players, values);
   const best = players
