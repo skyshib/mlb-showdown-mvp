@@ -60,6 +60,46 @@ test("renderBoxScore adds hover previews when player cards can be resolved", () 
   assert.ok(html.includes("Unknown Pitcher"));
 });
 
+test("the box score averages each man's die, and the side's", () => {
+  const diceGame = {
+    boxScore: {
+      away: {
+        team: "Away",
+        hitters: [
+          { name: "Hot Hand", ab: 4, r: 1, h: 3, bb: 0, so: 0, hr: 1, sb: 0, cs: 0, rbi: 2, rolls: 4, rollTotal: 68 },
+          { name: "Cold Bat", ab: 4, r: 0, h: 0, bb: 0, so: 2, hr: 0, sb: 0, cs: 0, rbi: 0, rolls: 4, rollTotal: 20 }
+        ],
+        pitchers: [{ name: "Wild Arm", outs: 18, h: 4, bb: 2, so: 7, hr: 1, r: 2, rolls: 24, rollTotal: 240 }]
+      },
+      home: {
+        team: "Home",
+        hitters: [{ name: "Old Timer", ab: 4, r: 0, h: 1, bb: 0, so: 1, hr: 0, sb: 0, cs: 0, rbi: 0 }],
+        pitchers: [{ name: "Old Arm", outs: 15, h: 5, bb: 1, so: 3, hr: 0, r: 1 }]
+      }
+    }
+  };
+
+  const html = renderBoxScore(diceGame);
+
+  assert.ok(html.includes(">ROLL</th>"));
+  // 68 over four swings is 17.0; 20 over four is 5.0; the side threw 88 over eight.
+  assert.match(html, /Hot Hand<\/td>[\s\S]*?17\.0<\/td>\s*<\/tr>/);
+  assert.match(html, /Cold Bat<\/td>[\s\S]*?5\.0<\/td>\s*<\/tr>/);
+  assert.match(html, /<th scope="row">Team<\/th>[\s\S]*?11\.0<\/td>/);
+  assert.match(html, /Wild Arm<\/td>[\s\S]*?10\.0<\/td>\s*<\/tr>/);
+  // A game played before the engine counted dice has nothing to average.
+  assert.match(html, /Old Timer<\/td>[\s\S]*?—<\/td>\s*<\/tr>/);
+});
+
+test("the box score totals its columns under the lineup", () => {
+  const html = renderBoxScore(game, new Map());
+  // Away threw 18 outs and the home side 15: six innings and five.
+  assert.match(html, /<th scope="row">Team<\/th>\s*<td class="num">6\.0<\/td>/);
+  assert.match(html, /<th scope="row">Team<\/th>\s*<td class="num">5\.0<\/td>/);
+  // The away club's one hitter: 3 AB, 2 H, 3 RBI.
+  assert.match(html, /<th scope="row">Team<\/th>\s*<td class="num">3<\/td>[\s\S]*?<td class="num">3<\/td>\s*<td class="num">—<\/td>/);
+});
+
 test("the game box score opens with an inning line score and R/H totals", () => {
   const lineGame = {
     away: { name: "Visitors", runs: 3 },

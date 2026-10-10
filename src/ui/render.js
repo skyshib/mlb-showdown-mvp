@@ -1069,8 +1069,29 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+// The man's own die, averaged over the afternoon: the SWING for a bat, the PITCH
+// for an arm (see recordStats in rules/game.js). A d20 averages 10.5 over a long
+// enough game, and nine innings is not a long enough game — which is the point of
+// the column. Four hits off an average of 17 is an afternoon the dice had; the
+// same four off a 9 is one the man had. Pass one line for a player or the whole
+// side for the team row.
+//
+// Games played before the engine counted dice carry no rolls, and a column that
+// cannot be filled prints a dash.
+function rollAverage(lines) {
+  const rolls = lines.reduce((sum, line) => sum + (Number(line.rolls) || 0), 0);
+  if (!rolls) return "—";
+  const total = lines.reduce((sum, line) => sum + (Number(line.rollTotal) || 0), 0);
+  return (total / rolls).toFixed(1);
+}
+
+function boxScoreTotal(lines, key) {
+  return lines.reduce((sum, line) => sum + (Number(line[key]) || 0), 0);
+}
+
 function renderHitterBox(teamBox, playersById) {
-  const rows = teamBox.hitters
+  const hitters = teamBox.hitters;
+  const rows = hitters
     .map(
       (line) => `<tr>
         <td>${renderBoxScorePlayerName(line, teamBox.team, playersById)}</td>
@@ -1083,20 +1104,35 @@ function renderHitterBox(teamBox, playersById) {
         <td class="num">${line.sb ?? 0}</td>
         <td class="num">${line.cs ?? 0}</td>
         <td class="num">${line.rbi}</td>
+        <td class="num">${rollAverage([line])}</td>
       </tr>`
     )
     .join("");
   return `<section>
     <h4>${escapeHtml(teamBox.team)} hitters</h4>
     <table>
-      <thead><tr><th>Name</th><th class="num">AB</th><th class="num">R</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">SB</th><th class="num">CS</th><th class="num">RBI</th></tr></thead>
+      <thead><tr><th>Name</th><th class="num">AB</th><th class="num">R</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">SB</th><th class="num">CS</th><th class="num">RBI</th><th class="num" title="Average swing roll — the batter's own d20, whosever chart it landed on. A d20 averages 10.5.">ROLL</th></tr></thead>
       <tbody>${rows}</tbody>
+      <tfoot><tr class="box-score-totals">
+        <th scope="row">Team</th>
+        <td class="num">${boxScoreTotal(hitters, "ab")}</td>
+        <td class="num">${boxScoreTotal(hitters, "r")}</td>
+        <td class="num">${boxScoreTotal(hitters, "h")}</td>
+        <td class="num">${boxScoreTotal(hitters, "bb")}</td>
+        <td class="num">${boxScoreTotal(hitters, "so")}</td>
+        <td class="num">${boxScoreTotal(hitters, "hr")}</td>
+        <td class="num">${boxScoreTotal(hitters, "sb")}</td>
+        <td class="num">${boxScoreTotal(hitters, "cs")}</td>
+        <td class="num">${boxScoreTotal(hitters, "rbi")}</td>
+        <td class="num">${rollAverage(hitters)}</td>
+      </tr></tfoot>
     </table>
   </section>`;
 }
 
 function renderPitcherBox(teamBox, playersById) {
-  const rows = teamBox.pitchers
+  const pitchers = teamBox.pitchers;
+  const rows = pitchers
     .map(
       (line) => `<tr>
         <td>${renderBoxScorePlayerName(line, teamBox.team, playersById)}</td>
@@ -1106,14 +1142,25 @@ function renderPitcherBox(teamBox, playersById) {
         <td class="num">${line.so}</td>
         <td class="num">${line.hr}</td>
         <td class="num">${line.r}</td>
+        <td class="num">${rollAverage([line])}</td>
       </tr>`
     )
     .join("");
   return `<section>
     <h4>${escapeHtml(teamBox.team)} pitchers</h4>
     <table>
-      <thead><tr><th>Name</th><th class="num">IP</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">R</th></tr></thead>
+      <thead><tr><th>Name</th><th class="num">IP</th><th class="num">H</th><th class="num">BB</th><th class="num">SO</th><th class="num">HR</th><th class="num">R</th><th class="num" title="Average pitch roll — the arm's own d20, before his control is added. A d20 averages 10.5.">ROLL</th></tr></thead>
       <tbody>${rows}</tbody>
+      <tfoot><tr class="box-score-totals">
+        <th scope="row">Team</th>
+        <td class="num">${formatInnings(boxScoreTotal(pitchers, "outs"))}</td>
+        <td class="num">${boxScoreTotal(pitchers, "h")}</td>
+        <td class="num">${boxScoreTotal(pitchers, "bb")}</td>
+        <td class="num">${boxScoreTotal(pitchers, "so")}</td>
+        <td class="num">${boxScoreTotal(pitchers, "hr")}</td>
+        <td class="num">${boxScoreTotal(pitchers, "r")}</td>
+        <td class="num">${rollAverage(pitchers)}</td>
+      </tr></tfoot>
     </table>
   </section>`;
 }

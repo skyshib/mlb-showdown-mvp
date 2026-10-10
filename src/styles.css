@@ -5340,6 +5340,18 @@ button.interesting-game-card:focus-visible {
   font-size: 14px;
 }
 
+/* The club's own line under its nine: the counting columns added up, and the
+   side's average die. Ruled off from the men above it so the eye reads it as a
+   summary rather than a tenth batter. */
+.box-score-totals th,
+.box-score-totals td {
+  border-top: 2px solid var(--line);
+  border-bottom: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .empty {
   color: var(--muted);
 }
