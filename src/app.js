@@ -6048,15 +6048,51 @@ function renderFormulaCard(draft, manager, outcome) {
   const standing = outcome
     ? `<span class="formula-outcome">#${outcome.place} &middot; ${formatShare(outcome.winPct)} win rate</span>`
     : `<span class="formula-outcome">did not play</span>`;
+  const persona = cpuPersonality(manager.persona);
   return `<div class="formula-card">
     <div class="formula-card-head">
       <strong>${escapeHtml(manager.name)} <span class="cpu-tag">CPU</span></strong>
       ${standing}
     </div>
+    <p class="formula-persona"><strong>${escapeHtml(persona.name)}</strong> &mdash; ${escapeHtml(persona.blurb)}</p>
+    <p class="formula-style">${escapeHtml(formulaStyleNote(terms))}</p>
     <p class="formula-line"><span class="formula-kind">Hitters</span> ${formulaTerm(hitter.onBase, "On-Base")} + ${formulaTerm(hitter.fielding, "Fielding")} + ${formulaTerm(hitter.speed, "(Speed&minus;1)")} + ${formulaTerm(hitter.chart, "Chart")}</p>
     <p class="formula-line"><span class="formula-kind">Pitchers</span> (${formulaTerm(pitcher.control, "Control")} + ${formulaTerm(pitcher.chart, "Chart")}) &times; IP-load + ${formulaTerm(pitcher.ip, "IP")}</p>
     <div class="formula-leans">${terms.map((term) => weightLeanChip(term)).join("")}</div>
   </div>`;
+}
+
+// The formula says WHAT a manager paid for; this says what it makes him. Every
+// CPU starts from its archetype's weights and the draft seed nudges each one up
+// to ±25%, so two sluggers are not the same slugger — the preferences that moved
+// FURTHEST are the ones worth naming. Read off the same numbers printed beside
+// it, so the sentence can never disagree with the formula above it.
+const LEAN_PHRASES = {
+  "On-Base": ["works the count", "swings at anything"],
+  Fielding: ["wants a glove at every position", "fields whoever is left over"],
+  Speed: ["drafts legs", "has no use for legs"],
+  "Hitter chart": ["swings for the fences", "takes contact over power"],
+  Control: ["buys command", "forgives a wild arm"],
+  IP: ["pays for innings", "will not pay for innings"],
+  "Pitcher chart": ["pays for an arm's chart", "shrugs at an arm's chart"]
+};
+
+// Below this a nudge is seed noise rather than character, and saying it out loud
+// would put a trait on a manager who hasn't got one.
+const LEAN_FLOOR = 15;
+
+function formulaStyleNote(terms) {
+  const leans = terms
+    .map((term) => ({ label: term.label, delta: Math.round((term.weight / term.base - 1) * 100) }))
+    .filter((lean) => Math.abs(lean.delta) >= LEAN_FLOOR && LEAN_PHRASES[lean.label])
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+    .slice(0, 3);
+  if (!leans.length) return "Plays the baseline straight — no preference strong enough to name.";
+  const phrases = leans.map((lean) => LEAN_PHRASES[lean.label][lean.delta > 0 ? 0 : 1]);
+  const sentence = phrases.length === 1
+    ? phrases[0]
+    : `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
 }
 
 function formulaTerm(weight, label) {

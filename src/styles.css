@@ -5548,6 +5548,29 @@ button.interesting-game-card:focus-visible {
   white-space: nowrap;
 }
 
+.formula-persona {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.formula-persona strong {
+  color: var(--ink);
+  font-weight: 750;
+}
+
+/* The manager in a sentence, drawn from the leans printed below it. */
+.formula-style {
+  margin: 0 0 2px;
+  padding-left: 9px;
+  border-left: 2px solid var(--accent-text);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink);
+  font-style: italic;
+}
+
 .formula-line {
   margin: 0;
   font-size: 12px;
