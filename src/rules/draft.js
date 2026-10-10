@@ -63,7 +63,7 @@ export function normalizeCardPosition(player) {
   return next;
 }
 
-function positionMatchesSlot(player, label) {
+export function positionMatchesSlot(player, label) {
   if (CORNER_OUTFIELD_SLOTS.includes(label)) return cardIsCornerOutfielder(player);
   return playsPosition(player, label);
 }
@@ -2181,7 +2181,7 @@ export function bestAutopickTarget(draft, manager) {
   // the discount cost the ace his identity. That was read off a 900-card raw
   // slice with no deal behind it — the pool the archetype test used to use, and
   // one no room drafts from. On a dealt board it does not happen.)
-  const model = pitcherRanking(draft, managerValuation(draft, manager), ["SP", "RP"], RELIEVER_PICK_LIFT);
+  const model = pitcherRanking(draft, managerValuation(draft, manager));
   const values = new Map(players.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
   const dropoffs = positionDropoffs(players, values);
   const best = players
@@ -2412,21 +2412,19 @@ function roomBatters(draft, model) {
 // the spread is noise about arms that will never pitch. So the deck decides.
 const RELIEVER_SPACING_SHARE = 0.3;
 
-// What a relieving arm is worth to a DRAFTING computer, over and above what the
-// additive price says. A bidder does not need this: auctionWillingness already
-// prices the pen's best arm at RELIEVER_TOP_RATE and the rest as depth, and a
-// flat multiplier on top of that measured worse. A drafting computer has no such
-// machinery — it compares one number against the bats — and at a flat price it
-// never reached for a closer. Swept over four boards, the gain plateaus broadly
-// between 1.3 and 1.6: +1.5 and +5.9 win points on a classic and a wild board at
-// 1.3, +1.7 and +5.5 at 1.4, and the curve is still climbing at 1.15 (+0.6,
-// +3.4) and falling away by 1.6. Measured mirrored, so the null is 0.
-const RELIEVER_PICK_LIFT = 1.3;
-
-// `roles` names which halves of the staff get re-dealt; `relieverLift` scales
-// what the bullpen's prices are drawn from. The auction asks for both roles at
-// no lift; a drafting computer asks for both and lifts the pen.
-export function pitcherRanking(draft, model, roles = ["SP", "RP"], relieverLift = 1) {
+// A drafting computer was given a 1.3x lift on reliever prices here and it has
+// been TAKEN BACK. It read +1.5 to +4.9 in a mirrored league duel and nothing at
+// all — 49.6% to 49.9% — in a head-to-head where both sides had it, because what
+// it buys is DENIAL rather than strength: roster composition is forced, so every
+// manager takes the same two relievers in the end, and reaching early only leaves
+// rivals the dregs. That is worth something against an opponent who waits for his
+// pen, and nothing against one who does not. Across five rooms against a man who
+// takes his closer in the first ten picks it cost the computers 6.5 win points
+// between them. See reliever-level-not-ranking and league-duels-measure-denial.
+//
+// `roles` names which halves of the staff get re-dealt. The auction asks for
+// both; so does a drafting computer.
+export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
   const batters = roomBatters(draft, model);
   const ranked = new Map();
   // The rotation a room this size fields — what a reliever has to beat.
@@ -2455,7 +2453,7 @@ export function pitcherRanking(draft, model, roles = ["SP", "RP"], relieverLift 
   const starterTilt = STARTER_DISCOUNT + (1 - STARTER_DISCOUNT) * widening;
   for (const role of roles) {
     const arms = draft.pool.filter((card) => card.kind === "pitcher" && pitcherRole(card) === role);
-    const tilt = role === "SP" ? starterTilt : relieverLift;
+    const tilt = role === "SP" ? starterTilt : 1;
     const values = arms.map((card) => model.value(card) * tilt).sort((a, b) => b - a);
     const byRate = [...arms].sort((a, b) => runsPerPa(a, 0, batters) - runsPerPa(b, 0, batters));
     const byRank = new Map();
