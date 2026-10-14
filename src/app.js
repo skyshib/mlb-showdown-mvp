@@ -1109,7 +1109,11 @@ function defaultState() {
     cpuManagers: [],
     universe: DEFAULT_UNIVERSE,
     draftType: "snake",
+    // The auction's hidden queue, unless a room says otherwise.
     nomination: "random",
+    // Set once the saved nomination is a choice somebody made rather than the
+    // leftover of a snake room; see reviveState.
+    nominationChosen: true,
     // A blind draft: hide every card's printed points until it is drafted, so
     // managers pick and bid on the baseball rather than the number. On by
     // default — the number is the least interesting thing on the card.
@@ -2518,6 +2522,14 @@ function managerEntries(setupForm) {
 
 const MAX_SETUP_MANAGERS = 24;
 
+// Which nomination the auction's control opens on. A snake room has nobody
+// nominating anything, so it stores "manual" by default and reading that back
+// would hand every fresh auction managers' nominations. Only an auction's own
+// choice sticks; everything else opens on the random queue.
+function auctionNomination(value) {
+  return value.draftType === "auction" && value.nomination === "manual" ? "manual" : "random";
+}
+
 function renderSettingsForm(value) {
   const choice = universeChoice(value.universe);
   const minimum = snakeMinPicks(value);
@@ -2555,7 +2567,7 @@ function renderSettingsForm(value) {
     <div class="setting-group" data-when="draftType=auction">
       <div class="setting-field">
         <span class="setting-label">Nomination</span>
-        ${segmentedControl("nomination", value.nomination === "random" ? "random" : "manual", [["random", "Random"], ["manual", "Managers nominate"]])}
+        ${segmentedControl("nomination", auctionNomination(value), [["random", "Random"], ["manual", "Managers nominate"]])}
         <small data-when="nomination=random"><span data-random-nomination-blurb>${escapeHtml(randomNominationBlurb(value.managers.length, value.startingPitchers))}</span> A hidden queue deals the cards; buy as many as you can afford.</small>
         <small data-when="nomination=manual">Each manager takes a turn putting a card of their choosing on the block.</small>
       </div>
@@ -10732,6 +10744,12 @@ function reviveState(value) {
     rosterSize: draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers, value.bullpenSlots),
     universe: universeConfig(value.universe)?.key ?? DEFAULT_UNIVERSE,
     draftType: value.draftType === "auction" ? "auction" : "snake",
+    // A room saved before this flag stored "manual" whenever its draft type
+    // was not an auction, so a saved "manual" is as likely to be that as a
+    // choice anyone made. Reset it to the default once; from there the setup
+    // screen keeps whatever the last auction was set to.
+    ...(value.nominationChosen ? {} : { nomination: defaultState().nomination }),
+    nominationChosen: true,
     auctionBudget: normalizeAuctionBudget(
       value.auctionBudget ?? AUCTION_DEFAULT_BUDGET,
       draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers, value.bullpenSlots)
