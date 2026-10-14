@@ -10063,56 +10063,17 @@ function compositionTable(draft) {
   return { teams, rows };
 }
 
+// What the copied recap needs off a finished draft: every lot or pick in order,
+// and for an auction the rate the room set itself — total spent over total
+// points bought — so "the room paid $0.31 a point" has a number behind it.
 function draftRecap(draft) {
   if (!draft?.complete) return null;
-  const history = draftHistory(draft);
-  if (!history.length) return null;
-
-  // An auction is not a queue, and a lot number is not a draft position: the
-  // cards come up in whatever order the room called them, so "he went too early"
-  // is not a sentence that means anything. What means something is the money. A
-  // card is worth its printed points, and this room decided what a point costs —
-  // total spent over total points bought. Every lot can then be read against the
-  // rate the room itself set: who bought points cheap, and who paid over the odds.
-  if (isAuctionDraft(draft)) {
-    const paid = history.reduce((sum, entry) => sum + (entry.price ?? 0), 0);
-    const bought = history.reduce((sum, entry) => sum + entry.player.points, 0);
-    const rate = bought > 0 ? paid / bought : 0;
-
-    const picks = history.map((entry) => {
-      const worth = entry.player.points * rate;
-      // Positive is a bargain: worth more than it cost.
-      return { ...entry, worth, swing: worth - (entry.price ?? 0) };
-    });
-
-    // Coaches are priced like late picks on purpose, so a coach bought for real
-    // money always reads as an overpay; the argument is about the players.
-    const priced = picks.filter((pick) => !isCoach(pick.player));
-    const judged = priced.length ? priced : picks;
-    const steal = judged.reduce((best, pick) => (pick.swing > best.swing ? pick : best), judged[0]);
-    const reach = judged.reduce((worst, pick) => (pick.swing < worst.swing ? pick : worst), judged[0]);
-    return { picks, steal, reach, auction: true, rate };
-  }
-
-  // A snake draft is a queue, so its argument is about position: a card's rank by
-  // printed points is where the board says it should have gone, and the gap
-  // between that and where it actually went is who reached and who got lucky.
-  // Coaches sit under every player by points on purpose, so a coach taken in
-  // the fourth round would always be the reach of the night; the argument is
-  // about the players, and the coaches are ranked among themselves only.
-  const ranked = draft.pool.filter((card) => !isCoach(card)).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
-  const rankOf = new Map(ranked.map((card, index) => [card.id, index + 1]));
-
-  const picks = history.map((entry) => {
-    const rank = rankOf.get(entry.player.id) ?? ranked.length;
-    return { ...entry, rank, swing: rank - entry.pickNumber };
-  });
-
-  const priced = picks.filter((pick) => !isCoach(pick.player));
-  const judged = priced.length ? priced : picks;
-  const steal = judged.reduce((best, pick) => (pick.swing < best.swing ? pick : best), judged[0]);
-  const reach = judged.reduce((worst, pick) => (pick.swing > worst.swing ? pick : worst), judged[0]);
-  return { picks, steal, reach, auction: false };
+  const picks = draftHistory(draft);
+  if (!picks.length) return null;
+  if (!isAuctionDraft(draft)) return { picks, auction: false };
+  const paid = picks.reduce((sum, entry) => sum + (entry.price ?? 0), 0);
+  const bought = picks.reduce((sum, entry) => sum + entry.player.points, 0);
+  return { picks, auction: true, rate: bought > 0 ? paid / bought : 0 };
 }
 
 function recapText(draft) {
@@ -10137,8 +10098,6 @@ function recapText(draft) {
   if (recap.auction) {
     const rate = Math.round(recap.rate * 100) / 100;
     lines.push(`The room paid ${money(rate)} a point.`);
-    lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} for ${money(recap.steal.price)} — ${recap.steal.player.points} pts, ${money(Math.round(recap.steal.swing))} under the rate`);
-    lines.push(`Biggest overpay: ${recap.reach.player.name} to ${recap.reach.manager.name} for ${money(recap.reach.price)} — ${recap.reach.player.points} pts, ${money(Math.round(-recap.reach.swing))} over the rate`);
     const benches = draft.managers
       .map((manager) => ({ manager, ledger: benchLedger(draft, manager) }))
       .filter(({ ledger }) => ledger.count);
@@ -10160,9 +10119,7 @@ function recapText(draft) {
       lines.push(`  ${pick.manager.name.padEnd(12)} ${money(pick.price).padStart(7)}  ${pick.player.name} (${pick.player.points} pts)`);
     }
   } else {
-    lines.push(`Best value: ${recap.steal.player.name} to ${recap.steal.manager.name} at pick ${recap.steal.pickNumber} (ranked #${recap.steal.rank})`);
-    lines.push(`Biggest reach: ${recap.reach.player.name} to ${recap.reach.manager.name} at pick ${recap.reach.pickNumber} (ranked #${recap.reach.rank})`);
-    lines.push("", "Every pick:");
+    lines.push("Every pick:");
     for (const pick of recap.picks) {
       lines.push(`  ${String(pick.pickNumber).padStart(3)}. ${pick.manager.name} — ${pick.player.name} (${pick.player.points} pts)`);
     }
