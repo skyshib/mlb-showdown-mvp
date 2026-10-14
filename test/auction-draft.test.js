@@ -32,12 +32,14 @@ import {
   drawManagerOrder,
   isAuctionDraft,
   isAuctionPaused,
+  isFirstPriceAuction,
   nominateBestTarget,
   nominatePlayer,
   normalizeAuctionBudget,
   normalizeAuctionTimerConfig,
   normalizeBullpenMin,
   normalizeBullpenSlots,
+  roomDraftOptions,
   pauseAuction,
   pickPlayer,
   placeSealedBid,
@@ -350,6 +352,60 @@ test("the high bid wins at the second-highest bid plus one", () => {
   assert.equal(history[0].manager.id, beta.id);
   assert.equal(history[0].player.id, target.id);
   assert.deepEqual(draft.auction.history[0].bids, { "team-1": 105, "team-2": 150, "team-3": 0 });
+});
+
+test("a first-price room charges the winner his own bid", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), { auctionPricing: "first" });
+  const [alpha, beta, gamma] = draft.managers;
+  assert.equal(isFirstPriceAuction(draft), true);
+  nominatePlayer(draft, draft.pool[0].id);
+
+  placeSealedBid(draft, alpha.id, 105);
+  placeSealedBid(draft, beta.id, 150);
+  const sale = placeSealedBid(draft, gamma.id, 0);
+
+  // Same bids, same winner as the Vickrey room above — only the bill changes.
+  assert.equal(sale.sold, true);
+  assert.equal(sale.manager.id, beta.id);
+  assert.equal(sale.price, 150);
+  assert.equal(auctionBudget(draft, beta), defaultAuctionBudget(draft.rosterSize) - 150);
+  assert.equal(draftHistory(draft)[0].price, 150);
+});
+
+test("a lone first-price bid is paid in full, not knocked down to the minimum", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta"], makeDraftPool(), { auctionPricing: "first" });
+  const [alpha, beta] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id);
+  placeSealedBid(draft, alpha.id, 400);
+  const sale = placeSealedBid(draft, beta.id, 0);
+  assert.equal(sale.price, 400);
+});
+
+test("a first-price tie still rebids, and the rebid winner pays his rebid", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), { auctionPricing: "first" });
+  const [alpha, beta, gamma] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id);
+
+  placeSealedBid(draft, alpha.id, 100);
+  placeSealedBid(draft, beta.id, 100);
+  const tie = placeSealedBid(draft, gamma.id, 80);
+  assert.equal(tie.sold, false);
+  assert.deepEqual(tie.tie, { amount: 100, managerIds: [alpha.id, beta.id] });
+
+  placeSealedBid(draft, alpha.id, 130);
+  const sale = placeSealedBid(draft, beta.id, 110);
+  assert.equal(sale.manager.id, alpha.id);
+  assert.equal(sale.price, 130);
+});
+
+test("a room reads its pricing rule off the room, and defaults to Vickrey", () => {
+  assert.equal(roomDraftOptions({ draftType: "auction", auctionPricing: "first" }).auctionPricing, "first");
+  assert.equal(roomDraftOptions({ draftType: "auction" }).auctionPricing, "vickrey");
+  assert.equal(roomDraftOptions({ draftType: "auction", auctionPricing: "nonsense" }).auctionPricing, "vickrey");
+  assert.equal(roomDraftOptions({ draftType: "snake", auctionPricing: "first" }).auctionPricing, null);
+  // A draft built with no pricing named is the auction this game always was.
+  assert.equal(isFirstPriceAuction(makeAuctionDraft()), false);
+  assert.equal(makeAuctionDraft().auction.pricing, "vickrey");
 });
 
 test("a lone bid sells at the minimum bid", () => {

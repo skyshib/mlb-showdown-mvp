@@ -294,6 +294,14 @@ export function maxPoolManagers(pool, startingPitchers = DEFAULT_STARTING_PITCHE
 
 export const AUCTION_MIN_BID = 1;
 export const AUCTION_MIN_RAISE = 5;
+// How a sealed lot charges the man who won it. Vickrey — the house rule this
+// auction was built on — charges the second bid plus a point, so your bid is a
+// statement of what the card is worth to you and nothing else: you can name
+// your true number without fear of paying it. First price charges the bid
+// itself, the way a blind envelope has always worked, and turns every lot into
+// two guesses at once — what the card is worth, and what the rest of the table
+// thinks it's worth. Same sealed bids, same winner; only the bill changes.
+export const AUCTION_PRICING_MODES = ["vickrey", "first"];
 export const AUCTION_DEFAULT_BUDGET = 1000;
 export const AUCTION_DEFAULT_REVIEW_SECONDS = 5 * 60;
 export const AUCTION_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
@@ -426,6 +434,10 @@ export function normalizeAuctionBudget(budget, rosterSize = DEFAULT_ROSTER_SIZE)
   return Math.max(rosterSize * AUCTION_MIN_BID, value);
 }
 
+export function normalizeAuctionPricing(pricing) {
+  return pricing === "first" ? "first" : "vickrey";
+}
+
 // The rules a ROOM plays by, read off the room itself. Server and client both
 // rebuild a draft from a room record — the server on restart, every browser on
 // join — and they have to arrive at the same draft, because a browser computes
@@ -453,6 +465,7 @@ export function roomDraftOptions(room = {}) {
     snakePicks,
     hidePoints: Boolean(room.hidePoints),
     budget: draftType === "auction" ? normalizeAuctionBudget(room.auctionBudget, rosterSize) : null,
+    auctionPricing: draftType === "auction" ? normalizeAuctionPricing(room.auctionPricing) : null,
     // A room that names no clock has no clock — left undefined these normalize
     // to a TIMED auction, which invents a review period the room never had, and
     // then the room's own log will not replay through it. The snake's review is
@@ -525,6 +538,7 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
     draft.auction = {
       budget,
       budgets: Object.fromEntries(cleanManagers.map((manager) => [manager.id, budget])),
+      pricing: normalizeAuctionPricing(options.auctionPricing),
       timer,
       clockBanks: Object.fromEntries(cleanManagers.map((manager) => [manager.id, timer.bankMs])),
       review: {
@@ -572,6 +586,12 @@ export function createDraft(managers, pool, rosterSize = DEFAULT_ROSTER_SIZE, se
   }
 
   return draft;
+}
+
+// A first-price room bills the winner his own bid; the default Vickrey room
+// bills him the next bid up from the field. See AUCTION_PRICING_MODES.
+export function isFirstPriceAuction(draft) {
+  return isAuctionDraft(draft) && draft.auction?.pricing === "first";
 }
 
 export function isRandomNomination(draft) {
@@ -1640,10 +1660,12 @@ export function placeSealedBid(draft, managerId, amount, now = Date.now(), optio
   return { sold: false, lot };
 }
 
-// Vickrey-style resolution: the high bid wins at the second-highest bid + 1.
-// A tie for the top starts one sealed rebid round among the tied managers
-// (minimum: the tied amount); a second tie is settled by a seeded coin flip
-// at that price, so every replica of the draft agrees on the winner.
+// Resolution: the high bid wins, at the second-highest bid + 1 in a Vickrey
+// room and at his own bid in a first-price one. A tie for the top starts one
+// sealed rebid round among the tied managers (minimum: the tied amount); a
+// second tie is settled by a seeded coin flip at that price, so every replica
+// of the draft agrees on the winner. The pricing rule never touches WHO wins,
+// only what he pays, so a tie is a tie either way.
 function resolveSealedLot(draft, now = Date.now()) {
   const lot = draft.auction.lot;
   const live = Object.entries(lot.bids).filter(([, amount]) => amount > 0);
@@ -1677,7 +1699,9 @@ function resolveSealedLot(draft, now = Date.now()) {
     const second = live
       .filter(([managerId]) => managerId !== winnerId)
       .reduce((best, [, amount]) => Math.max(best, amount), 0);
-    price = Math.max(AUCTION_MIN_BID, second + 1);
+    price = isFirstPriceAuction(draft)
+      ? Math.max(AUCTION_MIN_BID, top)
+      : Math.max(AUCTION_MIN_BID, second + 1);
   } else {
     const rng = createRng(`${draft.seed}:auction-tie:${draft.pickNumber}:${[...leaders].sort().join(",")}:${top}`);
     winnerId = leaders[Math.floor(rng.next() * leaders.length)];
@@ -2225,6 +2249,12 @@ export function nominateBestTarget(draft, now = Date.now()) {
 
 // A computer's sealed bid is its willingness for the card; in a rebid round
 // it re-enters at least the tied amount, capped by its budget.
+//
+// It bids the same number under either pricing rule, and that is measured, not
+// assumed: every uniform shade tried LOST win points, because auctionPace and
+// auctionRoundsFactor are a closed loop that reads the live budget — cut every
+// bid by a fifth and realised spend moves under two percent, the slower drain
+// simply raising the later bids back. See docs/first-price-bidding-spec.md.
 export function cpuSealedBid(draft, manager) {
   const lot = draft.auction?.lot;
   const player = auctionLotPlayer(draft);

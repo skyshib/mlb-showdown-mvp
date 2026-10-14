@@ -36,6 +36,7 @@ async function openAuctionRoom(base, options = {}) {
     managers: options.managers ?? ["Ana", "Bo"],
     draftType: "auction",
     budget: options.budget ?? 5000,
+    auctionPricing: options.auctionPricing,
     auctionTimer: options.auctionTimer ?? false,
     cpu: options.cpu ?? []
   });
@@ -54,7 +55,7 @@ function replay(room) {
     buildDraftPool(room.universe, room.seed),
     room.rosterSize,
     room.seed,
-    { draftType: room.draftType, budget: room.auctionBudget, timer: room.auctionTimer }
+    { draftType: room.draftType, budget: room.auctionBudget, auctionPricing: room.auctionPricing, timer: room.auctionTimer }
   );
   for (const entry of room.actions) {
     if (!SIM_ACTION_TYPES.has(entry.action?.type)) applyDraftAction(draft, entry.action);
@@ -114,6 +115,40 @@ test("an auction room deals budgets, opens a lot, and sells to the high bid at s
   assert.equal(boTeam.roster.length, 1);
   assert.equal(boTeam.roster[0].id, playerId);
   assert.equal(auctionBudget(draft, boTeam), 4000 - 201);
+  assert.equal(auctionBudget(draft, anaTeam), 4000);
+});
+
+test("a first-price room charges the top bid, and remembers the rule across a restart", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-auction-"));
+  const first = await startServer(t, dataDir);
+  const room = await openAuctionRoom(first, { budget: 4000, auctionPricing: "first" });
+  assert.equal(room.auctionPricing, "first");
+  const ana = await api(first, "POST", `/api/rooms/${room.roomId}/join`, {
+    managerId: "team-1",
+    hostToken: room.hostToken
+  });
+  const bo = await api(first, "POST", `/api/rooms/${room.roomId}/join`, { managerId: "team-2" });
+
+  const playerId = firstNominatable(room);
+  await act(first, room.roomId, ana.data.token, { type: "nominate", playerId });
+  await act(first, room.roomId, ana.data.token, { type: "seal-bid", managerId: "team-1", amount: 200 });
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+
+  // The rule has to survive the restart, or the revived room prices the half-
+  // finished lot by a different rulebook than the one it opened under.
+  const second = await startServer(t, dataDir);
+  const revived = await api(second, "GET", `/api/rooms/${room.roomId}`);
+  assert.equal(revived.data.auctionPricing, "first");
+  assert.equal(
+    (await act(second, room.roomId, bo.data.token, { type: "seal-bid", managerId: "team-2", amount: 300 })).status,
+    200
+  );
+
+  const sold = await api(second, "GET", `/api/rooms/${room.roomId}`);
+  const draft = replay(sold.data);
+  const [anaTeam, boTeam] = draft.managers;
+  assert.equal(boTeam.roster[0].id, playerId);
+  assert.equal(auctionBudget(draft, boTeam), 4000 - 300, "the winner pays his own bid, not 201");
   assert.equal(auctionBudget(draft, anaTeam), 4000);
 });
 

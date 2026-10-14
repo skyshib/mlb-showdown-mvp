@@ -97,6 +97,7 @@ import {
   hasUnlimitedRoster,
   isAuctionDraft,
   isAuctionPaused,
+  isFirstPriceAuction,
   isDraftPaused,
   isCornerOutfielder,
   isRandomNomination,
@@ -109,6 +110,7 @@ import {
   nominatePlayer,
   nominationQueueRemaining,
   normalizeAuctionBudget,
+  normalizeAuctionPricing,
   normalizeAuctionTimerConfig,
   normalizeCardPosition,
   normalizePickTimerSeconds,
@@ -1116,6 +1118,9 @@ function defaultState() {
     // place of the spare DH bats. Off by default — it is a house rule.
     coaches: false,
     auctionBudget: defaultAuctionBudget(rosterSizeForStartingPitchers(DEFAULT_ROOM_STARTING_PITCHERS)),
+    // What the winner of a sealed lot pays: the second bid plus a point
+    // (Vickrey, the house rule) or his own bid (first price).
+    auctionPricing: "vickrey",
     // One clock for either format, chess by default, with a five-minute look
     // at the board before anyone is on it. See clockStateFields.
     ...clockStateFields({ ...DEFAULT_CLOCK }),
@@ -1317,6 +1322,7 @@ function applyRoomSettings(room) {
   state.hidePoints = Boolean(room.hidePoints);
   state.coaches = Boolean(room.coaches);
   state.auctionBudget = normalizeAuctionBudget(room.auctionBudget, state.rosterSize);
+  state.auctionPricing = normalizeAuctionPricing(room.auctionPricing);
   state.auctionTimer = normalizeAuctionTimerState(room.auctionTimer);
   state.cpuManagers = room.managers.filter((manager) => manager.cpu).map((manager) => manager.name);
   state.snakeTimer = normalizeSnakeTimerState(room.snakeTimer);
@@ -2022,7 +2028,8 @@ function draftModeFromForm(form) {
     hasBullpenRange(draftType, nomination)
   );
   const coaches = Boolean(form.get("coaches"));
-  return { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches };
+  const auctionPricing = normalizeAuctionPricing(form.get("auctionPricing"));
+  return { draftType, nomination, hidePoints, bullpenSlots, bullpenMin, coaches, auctionPricing };
 }
 
 // Whether the chosen card set can actually seat the room, phrased for the setup
@@ -2404,6 +2411,7 @@ async function startOfflineDraft(setupForm) {
     bullpenMin: state.bullpenMin,
     hidePoints: state.hidePoints,
     budget: state.auctionBudget,
+    auctionPricing: state.auctionPricing,
     timer: state.auctionTimer,
     snakeTimer: snakeTimerConfig(state, state.draftType),
     snakeReview: state.snakeReviewSeconds,
@@ -2536,7 +2544,7 @@ function renderSettingsForm(value) {
   const format = settingsCard("Format", `
     ${segmentedControl("draftType", value.draftType === "auction" ? "auction" : "snake", [["snake", "Snake"], ["auction", "Auction"]])}
     <small class="setting-hint" data-when="draftType=snake">Managers take turns, and the order reverses every round.</small>
-    <small class="setting-hint" data-when="draftType=auction">One card at a time, one sealed bid each. The high bid wins and pays the second bid plus one.</small>
+    <small class="setting-hint" data-when="draftType=auction">One card at a time, one sealed bid each. The high bid wins the card.</small>
     <div class="setting-group" data-when="draftType=snake">
       <label class="setting-field">
         <span class="setting-label">Picks per manager <output class="setting-value" data-snake-picks-value>${snakePicksLabel(value.snakePicks, minimum)}</output></span>
@@ -2550,6 +2558,12 @@ function renderSettingsForm(value) {
         ${segmentedControl("nomination", value.nomination === "random" ? "random" : "manual", [["random", "Random"], ["manual", "Managers nominate"]])}
         <small data-when="nomination=random"><span data-random-nomination-blurb>${escapeHtml(randomNominationBlurb(value.managers.length, value.startingPitchers))}</span> A hidden queue deals the cards; buy as many as you can afford.</small>
         <small data-when="nomination=manual">Each manager takes a turn putting a card of their choosing on the block.</small>
+      </div>
+      <div class="setting-field">
+        <span class="setting-label">Price</span>
+        ${segmentedControl("auctionPricing", value.auctionPricing === "first" ? "first" : "vickrey", [["vickrey", "Second bid + 1"], ["first", "Top bid wins"]])}
+        <small data-when="pricing=vickrey">The winner pays one more than the next bid, so you can name what the card is truly worth to you without fear of paying it.</small>
+        <small data-when="pricing=first">The winner pays his own bid. Name the number and you own it &mdash; so the trick is reading the room, not the card.</small>
       </div>
       ${settingField("Budget per manager ($)",
         `<input name="auctionBudget" type="number" min="${auctionBudgetFloor(value.rosterSize)}" max="100000" step="${AUCTION_MIN_RAISE}" value="${value.auctionBudget}" />`,
@@ -2663,6 +2677,7 @@ function settingsFacts(setupForm) {
     nomination,
     clockMode: String(form.get("clockMode") ?? DEFAULT_CLOCK.mode),
     coaches: form.get("coaches") ? "on" : "off",
+    pricing: form.get("auctionPricing") === "first" ? "first" : "vickrey",
     universe: String(form.get("universe") ?? DEFAULT_UNIVERSE),
     pen: hasBullpenRange(draftType, nomination) ? "ranged" : "fixed"
   };
@@ -2756,7 +2771,7 @@ function bindSettingsForm(setupForm, { onChange = null } = {}) {
       event.target.closest(".manager-row").querySelector('input[name="managerCpu"]').checked = true;
     }
     if (name === "decade") syncDecadeToggle();
-    if (["draftType", "nomination", "clockMode", "coaches", "universe", "bullpenMin", "bullpenSlots", "startingPitchers"].includes(name)) {
+    if (["draftType", "nomination", "auctionPricing", "clockMode", "coaches", "universe", "bullpenMin", "bullpenSlots", "startingPitchers"].includes(name)) {
       syncAll();
     }
     changed();
@@ -2846,6 +2861,7 @@ function settingsFromForm(setupForm) {
       hidePoints: mode.hidePoints,
       coaches: mode.coaches,
       auctionBudget: normalizeAuctionBudget(form.get("auctionBudget"), rosterSize),
+      auctionPricing: mode.auctionPricing,
       ...clockStateFields(clock)
     }
   };
@@ -2882,6 +2898,7 @@ function roomSettingsBody(value) {
     hidePoints: value.hidePoints,
     coaches: value.coaches,
     budget: value.auctionBudget,
+    auctionPricing: value.auctionPricing,
     auctionTimer: clock.auctionTimer,
     snakeTimer: snakeTimerConfig(clock, value.draftType),
     snakeReview: clock.snakeReviewSeconds,
@@ -2909,7 +2926,7 @@ function renderSettingsSummary(value) {
     : "No clock";
   const rows = [
     ["Format", auction
-      ? `Auction &middot; ${value.nomination === "random" ? "random nomination" : "managers nominate"} &middot; $${Number(value.auctionBudget).toLocaleString()} each`
+      ? `Auction &middot; ${value.nomination === "random" ? "random nomination" : "managers nominate"} &middot; ${value.auctionPricing === "first" ? "top bid wins" : "second bid + 1"} &middot; $${Number(value.auctionBudget).toLocaleString()} each`
       : `Snake &middot; ${value.snakePicks} picks each`],
     ["Card set", `${escapeHtml(set?.name ?? value.universe)}${value.universe === "fictional" && value.temperature ? ` &middot; ${escapeHtml(temperatureLabel(value.temperature))}` : ""}`],
     ["Roster", `${value.startingPitchers} starters &middot; ${pen} relievers`],
@@ -3473,6 +3490,10 @@ function renderAuctionBidEntry(draft) {
   const onlineManagerId = online ? online.managerId ?? null : undefined;
   const canEnterFor = (manager) => canEnterAuctionBid(manager, onlineManagerId);
   const minBid = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
+  // Which number the box is asking for: the most you would pay (Vickrey) or
+  // the cheque you are writing (first price). Two different questions, so the
+  // rule in force sits beside the box rather than back on the setup screen.
+  const firstPrice = isFirstPriceAuction(draft);
   const lotKey = sealedBidLotKey(lot);
   const mine = draft.managers.filter((manager) => lot.pending.includes(manager.id) && canEnterFor(manager));
   if (!mine.length) {
@@ -3506,7 +3527,7 @@ function renderAuctionBidEntry(draft) {
         ${allIn}
         ${canPass ? `<button class="secondary-button" data-action="seal-pass" data-manager-id="${escapeHtml(manager.id)}">Pass</button>` : ""}
       </div>
-      <span class="auction-side-max">Maximum ${money(maxBid)}</span>
+      <span class="auction-side-max">Maximum ${money(maxBid)} &middot; ${firstPrice ? "you pay your own bid" : "you pay the second bid + 1"}</span>
       <label class="mask-toggle"><input type="checkbox" data-mask-bids ${state.maskBids ? "checked" : ""} /> Mask bids</label>
       ${error ? `<span class="warn">${escapeHtml(error)}</span>` : ""}
     </div>`;
@@ -10715,6 +10736,7 @@ function reviveState(value) {
       value.auctionBudget ?? AUCTION_DEFAULT_BUDGET,
       draft?.rosterSize ?? rosterSizeForStartingPitchers(value.startingPitchers, value.bullpenSlots)
     ),
+    auctionPricing: draft?.auction?.pricing ?? normalizeAuctionPricing(value.auctionPricing),
     auctionTimer: normalizeAuctionTimerState(value.auctionTimer),
     pickTimerSeconds: normalizePickTimerSeconds(value.pickTimerSeconds),
     snakeTimer: normalizeSnakeTimerState(value.snakeTimer),
@@ -10796,6 +10818,8 @@ function reviveAuction(draft, auction) {
   const revived = {
     budget,
     budgets,
+    // A draft saved before the pricing rule was a setting played Vickrey.
+    pricing: normalizeAuctionPricing(auction?.pricing),
     timer,
     clockBanks,
     review,

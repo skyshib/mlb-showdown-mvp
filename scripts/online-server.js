@@ -49,6 +49,7 @@ import {
   nominateBestTarget,
   randomNominationShortfalls,
   normalizeAuctionBudget,
+  normalizeAuctionPricing,
   normalizeAuctionTimerConfig,
   normalizePickTimerSeconds,
   normalizeStartingPitchers,
@@ -307,6 +308,8 @@ function reviveRoom(saved) {
   const auctionBudget = draftType === "auction"
     ? normalizeAuctionBudget(saved.auctionBudget, rosterSize)
     : null;
+  // A room saved before the pricing rule was a setting played Vickrey.
+  const auctionPricing = draftType === "auction" ? normalizeAuctionPricing(saved.auctionPricing) : null;
   // The same reading of the room the clients use, so a revived draft and a
   // browser's rebuilt one cannot disagree about the rules.
   const draft = createDraft(
@@ -314,7 +317,7 @@ function reviveRoom(saved) {
     pool,
     rosterSize,
     saved.seed,
-    roomDraftOptions({ ...saved, draftType, nomination, startingPitchers, bullpenSlots, bullpenMin, auctionBudget, snakePicks, snakeReview })
+    roomDraftOptions({ ...saved, draftType, nomination, startingPitchers, bullpenSlots, bullpenMin, auctionBudget, auctionPricing, snakePicks, snakeReview })
   );
   const actions = saved.actions ?? [];
   for (const entry of actions) {
@@ -350,6 +353,7 @@ function reviveRoom(saved) {
     hidePoints: Boolean(saved.hidePoints),
     coaches,
     auctionBudget,
+    auctionPricing,
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
     managerNames,
@@ -402,6 +406,7 @@ function roomRecord(room) {
     hidePoints: Boolean(room.hidePoints),
     coaches: Boolean(room.coaches),
     auctionBudget: room.auctionBudget,
+    auctionPricing: room.auctionPricing ?? null,
     auctionTimer: room.auctionTimer,
     cpuNames: room.cpuNames ?? [],
     managerNames: room.managerNames,
@@ -1148,6 +1153,9 @@ function roomConfigFromBody(body) {
   // with the coaches in it), so it is a room setting the deck remembers.
   const coaches = Boolean(body.coaches);
   const auctionBudget = draftType === "auction" ? normalizeAuctionBudget(body.budget, rosterSize) : null;
+  // What the winner of a sealed lot pays: the second bid plus a point, or his
+  // own bid. It never touches the deal or who wins a lot, only the bill.
+  const auctionPricing = draftType === "auction" ? normalizeAuctionPricing(body.auctionPricing) : null;
   const auctionTimer = draftType === "auction" ? normalizeAuctionTimerConfig(body.auctionTimer) : null;
   const snakeTimer = draftType === "auction" ? null : normalizeSnakeTimerConfig(body.snakeTimer);
   const snakeReview = draftType === "auction" ? 0 : Math.round(normalizeSnakeReviewMs(body.snakeReview) / 1000);
@@ -1196,7 +1204,7 @@ function roomConfigFromBody(body) {
     pool,
     rosterSize,
     seed,
-    { draftType, nomination, startingPitchers, ...pen, budget: auctionBudget, timer: auctionTimer, snakeTimer, snakeReview, snakePicks }
+    { draftType, nomination, startingPitchers, ...pen, budget: auctionBudget, auctionPricing, timer: auctionTimer, snakeTimer, snakeReview, snakePicks }
   );
   return {
     seed,
@@ -1218,6 +1226,7 @@ function roomConfigFromBody(body) {
     hidePoints,
     coaches,
     auctionBudget,
+    auctionPricing,
     auctionTimer: draft.auction?.timer ?? null,
     cpuNames,
     managerNames: managers,
@@ -2077,6 +2086,7 @@ function roomSnapshot(room, port = null, viewer = {}) {
     hidePoints: Boolean(room.hidePoints),
     coaches: Boolean(room.coaches),
     auctionBudget: room.auctionBudget ?? null,
+    auctionPricing: room.auctionPricing ?? null,
     auctionTimer: room.auctionTimer ?? null,
     // In seat order, not draft order: a client rebuilds the draft from this list
     // and then replays the log, and the log's order draw reorders it again.
