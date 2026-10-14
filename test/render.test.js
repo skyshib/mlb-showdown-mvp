@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderBoxScore, renderDraftHistoryTable, renderLineScore, renderPlayerTable, renderWinProbabilityChart, topSwingRanks } from "../src/ui/render.js";
+import { renderBoxScore, renderDraftHistoryTable, renderDraftScatter, renderLineScore, renderPlayerTable, renderWinProbabilityChart, scatterBestFit, topSwingRanks } from "../src/ui/render.js";
 import { cardPanelHtml } from "../src/ui/cardFace.js";
 
 const hitter = {
@@ -376,4 +376,35 @@ test("fictional hitters and pitchers use the finalized 2005 card template", () =
   assert.ok(legendaryHtml.includes('aria-label="LEGENDARY"'));
   assert.ok(goldenHtml.includes("gq-proto-rarity-legendary gq-proto-golden"));
   assert.ok(goldenHtml.includes('<span class="gq-proto-rarity-mark">1/1</span>'));
+});
+
+test("the draft scatter crosses the cards that never played and fits a line through the cloud", () => {
+  const points = [
+    { x: 10, y: 1, color: "#123456", cardId: "a", tipTitle: "One", tipLines: ["One"] },
+    { x: 20, y: 2, color: "#123456", cardId: "b", tipTitle: "Two", tipLines: ["Two"] },
+    { x: 30, y: 3, color: "#123456", cardId: "c", tipTitle: "Three", tipLines: ["Three"] },
+    { x: 40, y: 0, color: "#123456", cardId: "d", shape: "x", tipTitle: "Benched", tipLines: ["Never made the lineup"] }
+  ];
+  const html = renderDraftScatter({ points, xLabel: "Price paid ($)", yLabel: "WPAR / 162 games", fit: { step: 100, unit: "$100", yUnit: "WPAR/162" } });
+  // The cross carries the same card and tip handles a dot does, so clicking it
+  // still pops the card.
+  assert.ok(html.includes('class="scatter-cross scatter-dot-card"'));
+  assert.ok(html.includes('data-card-id="d"'));
+  assert.equal((html.match(/scatter-dot-card/g) ?? []).length, 4);
+  assert.ok(html.includes("scatter-fit-line"));
+  assert.ok(html.includes("per $100"));
+
+  // A clean line through the three players reads its own slope back, and that is
+  // the line drawn: the cross is plotted but left out of the fit, so the fit is
+  // over three points and not four.
+  const exact = scatterBestFit(points.slice(0, 3));
+  assert.equal(exact.slope.toFixed(3), "0.100");
+  assert.equal(exact.n, 3);
+  assert.ok(html.includes("+10.0 WPAR/162 per $100"));
+  assert.ok(html.includes("over 3 points"));
+  assert.equal(scatterBestFit(points).n, 4);
+  assert.ok(scatterBestFit(points).slope < exact.slope);
+  // Nothing to fit: two points, or a column of points at one price.
+  assert.equal(scatterBestFit(points.slice(0, 2)), null);
+  assert.equal(scatterBestFit([{ x: 5, y: 1 }, { x: 5, y: 2 }, { x: 5, y: 3 }]), null);
 });

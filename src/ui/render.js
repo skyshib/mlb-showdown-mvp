@@ -719,7 +719,31 @@ export function renderFieldingCurves(teams = [], sweep = 10) {
     <div class="war-curve-grid">${curves.map(chart).join("")}</div>`;
 }
 
-export function renderDraftScatter({ points = [], connectors = [], xLabel = "", yLabel = "", legend = [], activeManager = null } = {}) {
+// Least squares through the plotted cloud: the slope is the whole point of it —
+// what one more dollar, point or pick bought on average. Returns null when there
+// is nothing to fit (fewer than three points, or every point at one x).
+export function scatterBestFit(points = []) {
+  const data = points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (data.length < 3) return null;
+  const n = data.length;
+  const meanX = data.reduce((sum, point) => sum + point.x, 0) / n;
+  const meanY = data.reduce((sum, point) => sum + point.y, 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  for (const point of data) {
+    const dx = point.x - meanX;
+    const dy = point.y - meanY;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+  }
+  if (!sxx) return null;
+  const slope = sxy / sxx;
+  return { slope, intercept: meanY - slope * meanX, r2: syy ? (sxy * sxy) / (sxx * syy) : 1, n };
+}
+
+export function renderDraftScatter({ points = [], connectors = [], xLabel = "", yLabel = "", legend = [], activeManager = null, fit = null } = {}) {
   if (points.length < 1) {
     return `<div class="draft-chart">
       <div class="race-chart-placeholder">No players to plot for this filter.</div>
@@ -766,8 +790,67 @@ export function renderDraftScatter({ points = [], connectors = [], xLabel = "", 
     .map((line) => `<line class="scatter-connector" x1="${xFor(line.xMin).toFixed(1)}" y1="${yFor(line.y).toFixed(1)}" x2="${xFor(line.xMax).toFixed(1)}" y2="${yFor(line.y).toFixed(1)}" />`)
     .join("");
 
+  // The trend through the cloud, drawn light and dashed so it reads as a fit and
+  // not as data. `fit` says what one step along x is called — the slope is in
+  // y-units per step — and the line carries it on hover like any other mark.
+  // The crosses stay out of it: a card that never played says nothing about what
+  // a dollar buys on the field, and a row of them at zero only flattens the line.
+  const trend = (() => {
+    const line = fit ? scatterBestFit(points.filter((point) => point.shape !== "x")) : null;
+    if (!line) return "";
+    const { slope, intercept, r2, n } = line;
+    const yAt = (x) => intercept + slope * x;
+    let x1 = xLo;
+    let x2 = xHi;
+    if (slope) {
+      const edges = [(yLo - intercept) / slope, (yHi - intercept) / slope].sort((a, b) => a - b);
+      x1 = Math.max(x1, edges[0]);
+      x2 = Math.min(x2, edges[1]);
+    } else if (yAt(0) < yLo || yAt(0) > yHi) {
+      return "";
+    }
+    if (!(x2 > x1)) return "";
+    const step = Number.isFinite(fit.step) && fit.step > 0 ? fit.step : 1;
+    const perStep = slope * step;
+    const magnitude = Math.abs(perStep);
+    const shown = magnitude >= 10 ? perStep.toFixed(1) : magnitude >= 0.1 ? perStep.toFixed(2) : perStep.toFixed(3);
+    const tip = pointTipAttrs({
+      title: "Best fit",
+      color: "",
+      lines: [
+        `${perStep >= 0 ? "+" : ""}${shown} ${fit.yUnit ?? yLabel} per ${fit.unit ?? "unit"}`,
+        `R\u00b2 ${r2.toFixed(2)} over ${n} point${n === 1 ? "" : "s"}`,
+        fit.note ?? ""
+      ].filter(Boolean)
+    });
+    const coords = `x1="${xFor(x1).toFixed(1)}" y1="${yFor(yAt(x1)).toFixed(1)}" x2="${xFor(x2).toFixed(1)}" y2="${yFor(yAt(x2)).toFixed(1)}"`;
+    return `<g class="scatter-fit" ${tip} tabindex="0" role="img" aria-label="Best fit line">
+      <line class="scatter-fit-hit" ${coords} />
+      <line class="scatter-fit-line" ${coords} />
+    </g>`;
+  })();
+
+  // A point is a dot unless it asks to be a cross — the mark a card that never
+  // played wears, so the money it cost reads at a glance against the players who
+  // earned something. The cross carries the same handles as a dot: an invisible
+  // disc gives it a dot-sized hit area, and the tip and card attributes ride on
+  // the group, which is what the page-wide hover and click handlers look for.
   const dots = points
-    .map((point) => `<circle class="scatter-dot${point.cardId ? " scatter-dot-card" : ""}" cx="${xFor(point.x).toFixed(1)}" cy="${yFor(point.y).toFixed(1)}" r="5" fill="${escapeHtml(point.color ?? "#365f91")}" ${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}" />`)
+    .map((point) => {
+      const cx = xFor(point.x);
+      const cy = yFor(point.y);
+      const color = escapeHtml(point.color ?? "#365f91");
+      const handles = `${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}"`;
+      if (point.shape === "x") {
+        const arm = 3.5;
+        const d = `M${(cx - arm).toFixed(1)} ${(cy - arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy + arm).toFixed(1)}M${(cx - arm).toFixed(1)} ${(cy + arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy - arm).toFixed(1)}`;
+        return `<g class="scatter-cross${point.cardId ? " scatter-dot-card" : ""}" ${handles}>
+          <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="7" fill="transparent" />
+          <path d="${d}" stroke="${color}" />
+        </g>`;
+      }
+      return `<circle class="scatter-dot${point.cardId ? " scatter-dot-card" : ""}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${color}" ${handles} />`;
+    })
     .join("");
 
   const axisTitles = `<text x="${(margin.left + plotWidth / 2).toFixed(1)}" y="${(height - 6).toFixed(1)}" text-anchor="middle" class="chart-axis-title">${escapeHtml(xLabel)}</text>
@@ -779,6 +862,7 @@ export function renderDraftScatter({ points = [], connectors = [], xLabel = "", 
       ${xGrid.join("")}
       ${axisTitles}
       ${connectorLines}
+      ${trend}
       ${dots}
     </svg>
     ${renderChartLegend(legend, activeManager)}

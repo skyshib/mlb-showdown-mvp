@@ -5967,6 +5967,58 @@ button.interesting-game-card:focus-visible {
   outline: none;
 }
 
+/* The best-fit line through the cloud: light and dashed so it reads as a trend
+   rather than as data, with a fat invisible line under it to hover. */
+.scatter-chart .scatter-fit-line {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 7 5;
+  opacity: 0.55;
+  fill: none;
+}
+
+.scatter-chart .scatter-fit-hit {
+  stroke: transparent;
+  stroke-width: 12;
+  fill: none;
+}
+
+.scatter-chart .scatter-fit {
+  cursor: help;
+  outline: none;
+}
+
+.scatter-chart .scatter-fit:hover .scatter-fit-line,
+.scatter-chart .scatter-fit:focus-visible .scatter-fit-line {
+  opacity: 0.95;
+  stroke-width: 2;
+}
+
+/* The cross a card that never played wears. Its arms carry the manager's color
+   as a stroke, and the invisible disc under them is the hit area. */
+.scatter-chart .scatter-cross {
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.1s ease;
+}
+
+.scatter-chart .scatter-cross path {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.scatter-chart .scatter-cross:hover,
+.scatter-chart .scatter-cross:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+
+.scatter-chart .scatter-cross:hover path,
+.scatter-chart .scatter-cross:focus-visible path {
+  stroke-width: 2.4;
+}
+
 .chart-legend {
   display: flex;
   flex-wrap: wrap;

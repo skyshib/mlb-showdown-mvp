@@ -5248,6 +5248,35 @@ function renderBatch() {
   for (const line of summary.hitters) collectRecord(line, "hitter");
   for (const line of summary.pitchers) collectRecord(line, "pitcher");
 
+  // The cards that were bought and never fielded belong on the chart too: they
+  // cost real money and returned nothing, and a chart that only plots players
+  // who logged a stat hides exactly that. They ride along at zero and are drawn
+  // as crosses rather than dots. The bench is read the same way dead money
+  // reads it, so a lineup change moves both.
+  const playedIds = new Set(cardRecords.map((rec) => rec.cardId));
+  for (const manager of state.draft.managers ?? []) {
+    for (const player of benchPlayers(manager)) {
+      if (playedIds.has(player.id)) continue;
+      playedIds.add(player.id);
+      cardRecords.push({
+        cardId: player.id,
+        name: player.name,
+        team: manager.name,
+        color: colorForTeam(manager.name),
+        slot: player.kind === "hitter" ? analysisPosition(player.position) : player.role,
+        points: Number.isFinite(player.points) ? player.points : null,
+        wpa162: 0,
+        wpar162: 0,
+        wpaa162: 0,
+        pick: acquisitionPickMap[player.id],
+        price: pricePaidMap[player.id],
+        pickNumber: pickNumberMap[player.id],
+        statLine: "Never made the lineup — no stats",
+        unplayed: true
+      });
+    }
+  }
+
   // Every sealed bid on every card, keyed by the card and the manager who made
   // it, plus the top bid on each — the raw material for the bid-aware x-axes.
   const bidsByCard = {};
@@ -5290,8 +5319,9 @@ function renderBatch() {
     : yMode === "wpaa" ? rec.wpaa162
     : rec.wpa162);
   const yAxisLabel = { wpar: "WPAR / 162 games", wpaa: "WPAA / 162 games", wpa: "WPA / 162 games", points: "Card points" }[yMode];
-  // Hover shows WPAR, WPAA and WPA side by side whichever one is plotted.
-  const yTip = (rec) => [
+  // Hover shows WPAR, WPAA and WPA side by side whichever one is plotted. A card
+  // that never played has no stats to lay out — its line says so instead.
+  const yTip = (rec) => rec.unplayed ? (yMode === "points" ? `Points: ${rec.points ?? "—"}` : "") : [
     yMode === "points" ? `Points: ${rec.points ?? "—"}` : "",
     Number.isFinite(rec.wpar162) ? `WPAR/162: ${formatWar(rec.wpar162)}` : "",
     Number.isFinite(rec.wpaa162) ? `WPAA/162: ${formatWar(rec.wpaa162)}` : "",
@@ -5322,6 +5352,7 @@ function renderBatch() {
           x: amount,
           y: yv,
           color,
+          shape: rec.unplayed ? "x" : null,
           cardId: rec.cardId,
           tipTitle: rec.name,
           tipColor: color,
@@ -5348,6 +5379,7 @@ function renderBatch() {
         x: bid,
         y: yv,
         color: rec.color,
+        shape: rec.unplayed ? "x" : null,
         cardId: rec.cardId,
         tipTitle: rec.name,
         tipColor: rec.color,
@@ -5384,6 +5416,7 @@ function renderBatch() {
         x: xv,
         y: yv,
         color: rec.color,
+        shape: rec.unplayed ? "x" : null,
         cardId: rec.cardId,
         tipTitle: rec.name,
         tipColor: rec.color,
@@ -5416,8 +5449,18 @@ function renderBatch() {
     ? `Each card is a thin line at its ${yTitle}; a dot on it is one manager's sealed bid. Hover a dot for who bid what.`
     : xMode === "manager"
       ? (chartManager ? `Every card ${chartManager} bid on, at what they bid — dots in another manager's colour are ones they lost.` : "Pick a manager in the legend to see only their bids; showing each card's top bid until then.")
-      : "Each dot is a drafted player who logged a stat, colored by manager. Hover for the line, click for the card, or filter by manager in the legend.";
+      : `Each dot is a drafted player who logged a stat, colored by manager.${chartRecords.some((rec) => rec.unplayed) ? ` A cross is a card that never made the lineup${yMode === "points" ? "" : ", sitting at zero for what it cost"}.` : ""} Hover for the line, click for the card, or filter by manager in the legend.`;
   const positionNote = chartPosition === "all" ? "" : ` Showing ${escapeHtml(chartPosition)} only.`;
+  // The best-fit line's slope needs units to mean anything. A step of one dollar
+  // is too small to read, so money is quoted per $100 and points and picks per
+  // ten; the y-unit is whatever is plotted.
+  const fitUnits = {
+    ...(xMode === "points" ? { step: 10, unit: "10 points" }
+      : xMode === "pick" ? { step: 10, unit: "10 picks" }
+      : { step: 100, unit: "$100" }),
+    yUnit: { wpar: "WPAR/162", wpaa: "WPAA/162", wpa: "WPA/162", points: "card points" }[yMode],
+    note: scatterPoints.some((point) => point.shape === "x") ? "The cards that never played sit out of it." : ""
+  };
   const draftValueSection = cardRecords.length ? `<section class="panel wide draft-chart-panel">
     <div class="section-title-row">
       <div>
@@ -5427,7 +5470,15 @@ function renderBatch() {
       ${axisPicker}
     </div>
     <p class="batch-note">${chartNote}${positionNote}</p>
-    ${renderDraftScatter({ points: scatterPoints, connectors, xLabel: xAxisLabel, yLabel: yAxisLabel, legend: chartLegend, activeManager: chartManager })}
+    ${renderDraftScatter({
+      points: scatterPoints,
+      connectors,
+      xLabel: xAxisLabel,
+      yLabel: yAxisLabel,
+      legend: chartLegend,
+      activeManager: chartManager,
+      fit: fitUnits
+    })}
   </section>` : "";
 
   const overviewSection = `<section class="grid batch-overview-grid">
