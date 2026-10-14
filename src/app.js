@@ -5153,7 +5153,11 @@ function renderBatch() {
       name: line.name,
       team: line.team,
       color: colorForTeam(line.team),
-      slot: kind === "hitter" ? line.position : line.role,
+      // The position he actually filled on this roster, not the one printed on
+      // his card: a catcher stationed at first belongs on the 1B shelf, and it
+      // is the same shelf WPAA measures him against.
+      slot: wpaaIndex?.positionOf(line)
+        ?? (kind === "hitter" ? analysisPosition(line.fieldPosition ?? line.position) : line.role),
       points: Number.isFinite(player?.points) ? player.points : null,
       wpa162,
       wpar162,
