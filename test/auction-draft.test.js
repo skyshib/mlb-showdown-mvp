@@ -408,6 +408,74 @@ test("a room reads its pricing rule off the room, and defaults to Vickrey", () =
   assert.equal(makeAuctionDraft().auction.pricing, "vickrey");
 });
 
+test("a first-price computer never bids past what the room could answer with", () => {
+  // A real dealt board, so the cards differ enough for a computer to want one
+  // badly. Beta is down to pocket change, so nothing he can legally enter will
+  // beat Alpha — and under first price every dollar Alpha bids above Beta's
+  // ceiling is burned on a lot he already wins.
+  const build = (pricing) => {
+    const pool = buildDraftPool("fictional", "ceiling-test", {
+      nomination: "manual", managerCount: 2, startingPitchers: 2
+    });
+    const draft = createDraft(
+      [{ name: "Alpha", cpu: true }, { name: "Beta", cpu: true }],
+      pool, 13, "ceiling-test",
+      { draftType: "auction", startingPitchers: 2, timer: false, auctionPricing: pricing }
+    );
+    for (const manager of draft.managers) manager.persona = "balanced";
+    completeAuctionReview(draft, 0);
+    draft.auction.budgets[draft.managers[1].id] = 40;
+    nominatePlayer(draft, pool.find((card) => card.kind === "hitter").id, 0);
+    return draft;
+  };
+  const first = build("first");
+  const vickrey = build("vickrey");
+  const ceiling = auctionMaxBid(first, first.managers[1]);
+  const vickreyBid = cpuSealedBid(vickrey, vickrey.managers[0]);
+  const firstBid = cpuSealedBid(first, first.managers[0]);
+
+  // The rule exactly: bid what you were going to, or one past the field,
+  // whichever is less.
+  assert.equal(firstBid, Math.min(vickreyBid, ceiling + 1));
+  assert.equal(firstBid, ceiling + 1, "it stops one dollar past the richest rival");
+  assert.ok(vickreyBid > ceiling + 1,
+    `the cap really bites: the house rule bids ${vickreyBid} for this card, where first price stops at ${firstBid}`);
+});
+
+test("a first-price computer pays the floor for a card nobody else can bid on", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), { auctionPricing: "first" });
+  const [alpha, beta, gamma] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id);
+  placeSealedBid(draft, beta.id, 0);
+  placeSealedBid(draft, gamma.id, 0);
+  // Nobody is left to answer, so the card is worth exactly the floor.
+  const sale = placeSealedBid(draft, alpha.id, cpuSealedBid(draft, alpha));
+  assert.equal(sale.sold, true);
+  assert.equal(sale.manager.id, alpha.id);
+  assert.equal(sale.price, AUCTION_MIN_BID, "an uncontested first-price lot costs the minimum");
+});
+
+test("the ceiling decides how much, never whether to bid", () => {
+  // A room where every rival is nearly broke caps the bid hard — but a computer
+  // that wants the card still enters one, and a rebid still clears its floor.
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), { auctionPricing: "first" });
+  const [alpha, beta, gamma] = draft.managers;
+  draft.auction.budgets[beta.id] = 60;
+  draft.auction.budgets[gamma.id] = 60;
+  nominatePlayer(draft, draft.pool[0].id);
+  const capped = cpuSealedBid(draft, alpha);
+  assert.ok(capped >= AUCTION_MIN_BID, "a willing computer still bids");
+  assert.ok(capped <= auctionMaxBid(draft, beta) + 1, "but no higher than the room can answer");
+
+  // Drive it to a rebid round and check the tied amount is still honoured.
+  placeSealedBid(draft, alpha.id, 20);
+  placeSealedBid(draft, beta.id, 20);
+  placeSealedBid(draft, gamma.id, 0);
+  assert.equal(draft.auction.lot.round, 2, "a tie opens a rebid");
+  assert.ok(cpuSealedBid(draft, alpha) >= draft.auction.lot.tie.amount,
+    "a capped rebid still meets the tied amount");
+});
+
 test("a lone bid sells at the minimum bid", () => {
   const draft = makeAuctionDraft();
   const [alpha] = draft.managers;

@@ -2278,11 +2278,39 @@ export function cpuSealedBid(draft, manager) {
   const player = auctionLotPlayer(draft);
   if (!lot || !player) return 0;
   const willingness = auctionWillingness(draft, manager, player);
+  // Under first price the winner pays his own number, so there is no reason
+  // ever to bid past what the room could answer with. Nobody can bid more than
+  // his own legal maximum, so one dollar over the richest rival's beats every
+  // bid anyone at the table is capable of making, and each dollar above that
+  // buys nothing at all. This is not a shade: the cap always clears the field,
+  // so it never costs a lot it would otherwise have won — it only stops the
+  // overpayment. Where the room has nothing left to answer with it collapses
+  // to the minimum, which is what an uncontested card is worth. (Under Vickrey
+  // it would be harmless and equally pointless, since you never pay your bid
+  // there, so it is not applied: a Vickrey bid stays a plain statement of
+  // willingness.)
+  const ceiling = isFirstPriceAuction(draft) ? richestRivalBid(draft, manager, lot) + 1 : Infinity;
+  const bid = Math.min(willingness, ceiling);
   if (lot.round === 2) {
-    return Math.min(auctionMaxBid(draft, manager), Math.max(lot.tie.amount, willingness));
+    return Math.min(auctionMaxBid(draft, manager), Math.max(lot.tie.amount, bid));
   }
-  if (manager.id === lot.nominatorId) return Math.max(AUCTION_MIN_BID, willingness);
-  return willingness >= AUCTION_MIN_BID ? willingness : 0;
+  // Whether to bid at all is still the willingness question; the cap only ever
+  // decides how much, so it can never turn a live bid into a pass.
+  if (manager.id === lot.nominatorId) return Math.max(AUCTION_MIN_BID, bid);
+  return willingness >= AUCTION_MIN_BID ? Math.max(AUCTION_MIN_BID, bid) : 0;
+}
+
+// The most any rival still live on this lot could legally put up, read off the
+// budgets and rosters the room can already see. Their sealed AMOUNTS are never
+// consulted — only WHO the lot is open to, which the board shows everyone.
+function richestRivalBid(draft, manager, lot) {
+  let most = 0;
+  for (const id of new Set([...lot.pending, ...Object.keys(lot.bids)])) {
+    if (id === manager.id) continue;
+    const rival = draft.managers.find((item) => item.id === id);
+    if (rival) most = Math.max(most, auctionMaxBid(draft, rival));
+  }
+  return most;
 }
 
 // Computer managers bid the moment their turn comes up, so a lot only ever
