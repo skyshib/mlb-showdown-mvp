@@ -3145,6 +3145,10 @@ function renderDraft() {
       ${historyTab
         ? renderDraftHistoryTable(draftHistory(draft), {
             hidePoints: pointsHidden(),
+            // The price in the history opens onto the same bid table the sold
+            // tag on the board does: every sealed bid on the lot beside the
+            // budget its manager held going in.
+            bidTipsByPlayerId: draftBidTips(draft),
             ...normalizeDraftHistorySort(state.draftHistorySort)
           })
         : boardTab
@@ -3340,6 +3344,16 @@ function ungettableIds(draft) {
   return ids;
 }
 
+// Every settled lot's sealed bids, keyed by player id, with each manager in
+// his standings-race color by seat as he is everywhere else. Nothing is leaked
+// by it — a lot's bids are revealed the moment it sells, and the one still on
+// the block has no history entry yet.
+function draftBidTips(draft) {
+  if (!isAuctionDraft(draft)) return {};
+  const seatColors = new Map(draft.managers.map((manager, index) => [manager.name, raceColor(index)]));
+  return buildBidTipMap(draft, (name) => seatColors.get(name) ?? "");
+}
+
 // The greyed-out rows on the draft board: who took each card, and the one
 // number that is the story of the pick. In an auction that number is money —
 // what the card sold for; in a snake draft it is the pick it went at. Keyed by
@@ -3361,13 +3375,9 @@ function draftSoldTags(draft) {
       title: `${player?.name ?? "This card"} went unsold \u2014 the whole room passed, and the queue does not put a card up twice`
     });
   }
-  // The sold tag opens onto the same bid table the post-draft tabs hang off a
-  // price: every sealed bid on the lot, beside the budget its manager held
-  // going in. Nothing is leaked by it — a lot's bids are revealed the moment it
-  // sells, and the one still on the block has no history entry yet. Managers
-  // wear their standings-race color by seat, as they do everywhere else.
-  const seatColors = new Map(draft.managers.map((manager, index) => [manager.name, raceColor(index)]));
-  const bidTips = auction ? buildBidTipMap(draft, (name) => seatColors.get(name) ?? "") : {};
+  // The sold tag opens onto the lot's bids, as the price in the draft history
+  // and the post-draft tabs do.
+  const bidTips = draftBidTips(draft);
   for (const pick of draftHistory(draft)) {
     const priced = Number.isFinite(pick.price);
     tags.set(pick.player.id, {
