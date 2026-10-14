@@ -75,6 +75,7 @@ import {
   availablePlayers,
   benchLedger,
   benchPlayers,
+  overbidLedger,
   pointMaximalAssignments,
   buildTeam,
   canCancelLot,
@@ -10147,6 +10148,13 @@ function recapText(draft) {
         lines.push(`  ${manager.name.padEnd(12)} ${money(ledger.spent).padStart(7)}  ${ledger.count} card${ledger.count === 1 ? "" : "s"}, ${ledger.points} pts`);
       }
     }
+    if (isFirstPriceAuction(draft)) {
+      lines.push("", "Overbid \u2014 paid above the runner-up's bid plus a dollar:");
+      for (const manager of draft.managers) {
+        const ledger = overbidLedger(draft, manager);
+        lines.push(`  ${manager.name.padEnd(12)} ${money(ledger.spent).padStart(7)}  ${ledger.count} lot${ledger.count === 1 ? "" : "s"}`);
+      }
+    }
     lines.push("", "Every lot:");
     for (const pick of recap.picks) {
       lines.push(`  ${pick.manager.name.padEnd(12)} ${money(pick.price).padStart(7)}  ${pick.player.name} (${pick.player.points} pts)`);
@@ -10222,6 +10230,28 @@ function renderDraftDone(draft) {
   </tr>`
     : "";
 
+  // First price only: in a Vickrey room the runner-up's bid plus a dollar wins
+  // the lot, so anything paid above that is money the rule took. It is the
+  // other half of the overpay argument — dead money is the wrong card, this is
+  // the right card at the wrong price.
+  const overbids = draft.managers.map((manager) => overbidLedger(draft, manager));
+  const sharpest = Math.min(...overbids.map((ledger) => ledger.spent));
+  const overbidRow = isFirstPriceAuction(draft)
+    ? `<tr class="comp-points comp-dead-money">
+    <th class="comp-label"><span class="comp-name">Overbid</span></th>
+    ${overbids
+      .map(
+        (ledger) => `<td class="comp-cell">
+          <span class="comp-dead">
+            <span class="comp-points-value${ledger.spent === sharpest ? " cheapest" : ""}">${money(ledger.spent)}</span>
+            <span class="comp-dead-detail">${ledger.count ? `over ${ledger.count} lot${ledger.count === 1 ? "" : "s"}` : "none"}</span>
+          </span>
+        </td>`
+      )
+      .join("")}
+  </tr>`
+    : "";
+
   const card = (label, pick, tone) => {
     const line = recap.auction
       ? `<p class="recap-line">
@@ -10263,11 +10293,11 @@ function renderDraftDone(draft) {
         <button class="small" data-action="export-save">Save the room</button>
       </div>
     </div>
-    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card the room drafted, benches included &mdash; cards nobody drafted are left out, so an average lineup grades around C however strong the board was. Active points adds up those same starters.${isAuctionDraft(draft) ? " Dead money is what each manager paid for the cards on the bench, and it moves when the lineup does." : ""}</p>
+    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card the room drafted, benches included &mdash; cards nobody drafted are left out, so an average lineup grades around C however strong the board was. Active points adds up those same starters.${isAuctionDraft(draft) ? " Dead money is what each manager paid for the cards on the bench, and it moves when the lineup does." : ""}${isFirstPriceAuction(draft) ? " Overbid is what their winning bids cost above the runner-up's bid plus a dollar — what the same lots would have gone for under second-bid pricing." : ""}</p>
     <div class="table-scroll">
       <table class="comp-table">
         <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
-        <tbody>${body}${pointsRow}${deadMoneyRow}</tbody>
+        <tbody>${body}${pointsRow}${deadMoneyRow}${overbidRow}</tbody>
       </table>
     </div>
     <div class="recap-cards">

@@ -3084,6 +3084,33 @@ export function benchLedger(draft, manager) {
   return { players, count: players.length, points, spent, total };
 }
 
+// OVERBID. First price only: what each manager's winning bids cost him above
+// what it would have taken to win them. The Vickrey room settles a lot at the
+// runner-up's bid plus a dollar, so that is the bar — a manager who wins at
+// $90 against a $40 runner-up left $49 on the table. A lot won on a tie-break
+// is paid at the tied amount under either rule and costs nothing extra, which
+// the floor at zero takes care of. Nothing is stored: it reads off the bids
+// each settled lot recorded, so it is the same number every time it is asked.
+export function overbidLedger(draft, manager) {
+  if (!isFirstPriceAuction(draft)) return { spent: 0, count: 0 };
+  let spent = 0;
+  let count = 0;
+  for (const entry of draft.auction?.history ?? []) {
+    if (entry.managerId !== manager.id) continue;
+    const price = Number(entry.price) || 0;
+    let second = 0;
+    for (const [managerId, amount] of Object.entries(entry.bids ?? {})) {
+      if (managerId === manager.id) continue;
+      second = Math.max(second, Number(amount) || 0);
+    }
+    const toWin = Math.max(AUCTION_MIN_BID, second + 1);
+    const over = Math.max(0, price - toWin);
+    spent += over;
+    if (over > 0) count += 1;
+  }
+  return { spent, count };
+}
+
 // The card's own points — the universal strength the board already ranks by —
 // so a manager fields the BEST nine and the best arms, not merely the first
 // drafted. Blind drafts still carry points on the card; only the display hides

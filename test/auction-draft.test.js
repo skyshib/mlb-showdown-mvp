@@ -27,6 +27,7 @@ import {
   completeAuctionReview,
   cpuSealedBid,
   createDraft,
+  overbidLedger,
   currentManager,
   draftHistory,
   drawManagerOrder,
@@ -396,6 +397,38 @@ test("a first-price tie still rebids, and the rebid winner pays his rebid", () =
   const sale = placeSealedBid(draft, beta.id, 110);
   assert.equal(sale.manager.id, alpha.id);
   assert.equal(sale.price, 130);
+});
+
+test("overbid is what a first-price winner paid above the Vickrey bill", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), { auctionPricing: "first" });
+  const [alpha, beta, gamma] = draft.managers;
+
+  // Beta wins at 150 against a 105 runner-up: Vickrey would have settled it at
+  // 106, so 44 of that bid bought nothing.
+  nominatePlayer(draft, draft.pool[0].id);
+  placeSealedBid(draft, alpha.id, 105);
+  placeSealedBid(draft, beta.id, 150);
+  placeSealedBid(draft, gamma.id, 0);
+
+  // A lot nobody else wanted costs the floor under either rule, so it adds
+  // nothing to the bill the nominator ran up on the first one.
+  nominatePlayer(draft, draft.pool[1].id);
+  placeSealedBid(draft, beta.id, AUCTION_MIN_BID);
+  placeSealedBid(draft, alpha.id, 0);
+  placeSealedBid(draft, gamma.id, 0);
+
+  assert.deepEqual(overbidLedger(draft, beta), { spent: 44, count: 1 });
+  assert.deepEqual(overbidLedger(draft, alpha), { spent: 0, count: 0 });
+  assert.deepEqual(overbidLedger(draft, gamma), { spent: 0, count: 0 });
+});
+
+test("a Vickrey room overbids nothing, by definition", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta"], makeDraftPool());
+  const [alpha, beta] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id);
+  placeSealedBid(draft, alpha.id, 400);
+  placeSealedBid(draft, beta.id, 20);
+  assert.deepEqual(overbidLedger(draft, alpha), { spent: 0, count: 0 });
 });
 
 test("a room reads its pricing rule off the room, and defaults to Vickrey", () => {
