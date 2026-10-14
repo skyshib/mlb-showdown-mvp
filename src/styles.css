@@ -2756,6 +2756,12 @@ tr:focus-within .row-tools {
   white-space: nowrap;
 }
 
+/* An auction tag opens onto the lot's bids, so it reads as something to hover
+   — the same cursor the explained prices and column headers carry. */
+.sold-tag[data-point] {
+  cursor: help;
+}
+
 /* A long manager name gives ground before the round and the price do — what a
    card cost is the part of the tag nobody can afford to lose. */
 .sold-tag .sold-owner {

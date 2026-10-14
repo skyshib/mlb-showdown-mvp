@@ -3360,12 +3360,20 @@ function draftSoldTags(draft) {
       title: `${player?.name ?? "This card"} went unsold \u2014 the whole room passed, and the queue does not put a card up twice`
     });
   }
+  // The sold tag opens onto the same bid table the post-draft tabs hang off a
+  // price: every sealed bid on the lot, beside the budget its manager held
+  // going in. Nothing is leaked by it — a lot's bids are revealed the moment it
+  // sells, and the one still on the block has no history entry yet. Managers
+  // wear their standings-race color by seat, as they do everywhere else.
+  const seatColors = new Map(draft.managers.map((manager, index) => [manager.name, raceColor(index)]));
+  const bidTips = auction ? buildBidTipMap(draft, (name) => seatColors.get(name) ?? "") : {};
   for (const pick of draftHistory(draft)) {
     const priced = Number.isFinite(pick.price);
     tags.set(pick.player.id, {
       label: pick.manager.name,
       round: auction ? pick.round : null,
       detail: auction ? (priced ? money(pick.price) : "") : `#${pick.pickNumber}`,
+      tip: bidTips[pick.player.id] ?? null,
       title: auction
         ? (priced
             ? `${pick.manager.name} bought ${pick.player.name} for ${money(pick.price)}`
@@ -6535,7 +6543,9 @@ function buildBidTipMap(draft, colorForManager) {
     if (entry.managerId && Number.isFinite(entry.price)) {
       budgets[entry.managerId] = (budgets[entry.managerId] ?? 0) + entry.price;
     }
-    if (entry.passed || !entry.managerId) continue;
+    // A card the closing sweep handed out was never bid on, so there is no
+    // table to open: it would read "sold for $0" with the whole room passing.
+    if (entry.passed || entry.swept || !entry.managerId) continue;
     const winner = draft.managers.find((manager) => manager.id === entry.managerId);
     const player = draft.pool.find((item) => item.id === entry.playerId);
     if (!winner || !player) continue;

@@ -300,6 +300,31 @@ test("replacement-level players are called out in the draft table, naming their 
   assert.match(html, /current free fallback if a roster finishes with a hole/);
 });
 
+test("a sold tag opens onto the lot's bids, and keeps its plain title without one", () => {
+  const tip = {
+    title: "Preview Hitter",
+    color: "#2f6f4f",
+    lines: ["Sold to Skylar for $40", "Skylar bid $40 (budget $500)", "Hal no bid (budget $500)"]
+  };
+  const sold = renderPlayerTable([hitter], {
+    mode: "hitter",
+    ownerOf: () => ({ label: "Skylar", round: 3, detail: "$40", title: "Skylar bought Preview Hitter for $40", tip })
+  });
+
+  assert.match(sold, /class="sold-tag" tabindex="0" data-point/);
+  assert.match(sold, /data-tip-lines="[^"]*Hal no bid \(budget \$500\)"/);
+  // The floating tip says everything the native tooltip did, so the tag does not
+  // carry both and show them stacked.
+  assert.equal(/class="sold-tag"[^>]*\stitle="/.test(sold), false);
+
+  const snake = renderPlayerTable([hitter], {
+    mode: "hitter",
+    ownerOf: () => ({ label: "Skylar", round: null, detail: "#7", title: "Skylar took Preview Hitter with pick 7" })
+  });
+  assert.match(snake, /class="sold-tag" title="Skylar took Preview Hitter with pick 7"/);
+  assert.equal(snake.includes("data-point"), false);
+});
+
 test("a standing replacement's Free badge names the slot he was dealt for", () => {
   // A position view lists every replacement whose printed position matches, so
   // a catcher dealt as the DH card sits beside the C card — the badge tells them apart.
