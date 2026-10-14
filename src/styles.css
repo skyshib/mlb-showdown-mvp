@@ -4025,63 +4025,6 @@ tr:focus-within .row-tools {
   color: var(--navy);
 }
 
-.recap-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.recap-card {
-  padding: 16px 18px 18px;
-  border: 2px solid var(--navy);
-  background: var(--panel);
-}
-
-.recap-card.steal {
-  border-color: var(--ok);
-}
-
-.recap-card.reach {
-  border-color: var(--accent);
-}
-
-.recap-card .eyebrow {
-  margin-bottom: 8px;
-}
-
-.recap-card.steal .eyebrow {
-  background: var(--ok);
-}
-
-.recap-card.reach .eyebrow {
-  background: var(--accent);
-}
-
-.recap-card h3 {
-  margin: 0 0 6px;
-  font-size: 19px;
-  color: var(--navy);
-}
-
-.recap-line,
-.recap-swing {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13.5px;
-  line-height: 1.5;
-}
-
-.recap-swing {
-  margin-top: 6px;
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.recap-line strong {
-  color: var(--ink);
-}
-
 /* ---- side by side ---- */
 .star-cell {
   white-space: nowrap;

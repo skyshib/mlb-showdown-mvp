@@ -10171,8 +10171,7 @@ function recapText(draft) {
 }
 
 function renderDraftDone(draft) {
-  const recap = draftRecap(draft);
-  if (!recap) return "";
+  if (!draft?.complete || !draftHistory(draft).length) return "";
 
   const { teams, rows } = compositionTable(draft);
   const head = draft.managers.map((manager) => `<th>${escapeHtml(manager.name)}</th>`).join("");
@@ -10252,39 +10251,6 @@ function renderDraftDone(draft) {
   </tr>`
     : "";
 
-  const card = (label, pick, tone) => {
-    const line = recap.auction
-      ? `<p class="recap-line">
-          to <strong>${escapeHtml(pick.manager.name)}</strong> for <strong>${money(pick.price)}</strong>.
-          They are worth <strong>${pick.player.points}</strong> points, and this room paid
-          ${money(Math.round(recap.rate * 100) / 100)} a point &mdash; so they ought to have gone for about
-          <strong>${money(Math.round(pick.worth))}</strong>.
-        </p>
-        <p class="recap-swing">${
-          pick.swing > 0
-            ? `Bought ${money(Math.round(pick.swing))} under the going rate.`
-            : pick.swing < 0
-              ? `Paid ${money(Math.round(-pick.swing))} over the going rate.`
-              : "Bought at exactly the going rate."
-        }</p>`
-      : `<p class="recap-line">
-          to <strong>${escapeHtml(pick.manager.name)}</strong> at pick ${pick.pickNumber},
-          and the set ranks them <strong>#${pick.rank}</strong> of ${draft.pool.length} by points.
-        </p>
-        <p class="recap-swing">${
-          pick.swing < 0
-            ? `They fell ${Math.abs(pick.swing)} picks further than their price says they should have.`
-            : pick.swing > 0
-              ? `Taken ${pick.swing} picks ahead of their price.`
-              : "Taken exactly where their price says."
-        }</p>`;
-    return `<div class="recap-card ${tone}">
-      <p class="eyebrow">${label}</p>
-      ${renderPlayerPreviewName(pick.player, pick.player.name, "h3", "recap-player-name")}
-      ${line}
-    </div>`;
-  };
-
   return `<section class="panel draft-done">
     <div class="section-head">
       <h2>How the starting lineups stack up</h2>
@@ -10299,10 +10265,6 @@ function renderDraftDone(draft) {
         <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
         <tbody>${body}${pointsRow}${deadMoneyRow}${overbidRow}</tbody>
       </table>
-    </div>
-    <div class="recap-cards">
-      ${card("Best value", recap.steal, "steal")}
-      ${card(recap.auction ? "Biggest overpay" : "Biggest reach", recap.reach, "reach")}
     </div>
   </section>`;
 }
