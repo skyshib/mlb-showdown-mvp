@@ -2078,6 +2078,24 @@ export function applyDraftAction(draft, action) {
   }
 }
 
+// The cards the room passed on. The hidden queue deals every card at most once,
+// so a lot nobody bid on is finished: it sits on the visible board for the rest
+// of the night, never comes up again, and only the closing sweep could ever
+// hand it to anybody. Manual nomination cannot pass a lot at all — the
+// nominator has to open the bidding — so this is empty there.
+export function unsoldPlayerIds(draft) {
+  const ids = new Set();
+  if (!isRandomNomination(draft)) return ids;
+  for (const entry of draft.auction.history) {
+    if (entry.passed) ids.add(entry.playerId);
+  }
+  // A passed card the sweep then handed out is owned now, not unsold.
+  for (const id of ids) {
+    if (draft.pickedIds.has(id)) ids.delete(id);
+  }
+  return ids;
+}
+
 export function draftHistory(draft) {
   if (isAuctionDraft(draft)) {
     const playersById = new Map(draft.pool.map((player) => [player.id, player]));

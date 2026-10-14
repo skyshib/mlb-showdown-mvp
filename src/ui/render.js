@@ -107,7 +107,7 @@ export function renderPlayerTable(players, options = {}) {
       const action = player.replacement
         ? `<span class="free-tag" title="Free at the close of the draft to anyone short at ${escapeHtml(player.slot ?? "this slot")} — never up for bid">Free${player.slot ? ` &middot; ${escapeHtml(player.slot)}` : ""}</span>`
         : owner
-        ? `<span class="sold-tag" title="${escapeHtml(owner.title ?? "")}"><span class="sold-owner">${escapeHtml(owner.label)}</span>${owner.round ? `<span class="sold-round">R${owner.round}</span>` : ""}${owner.detail ? `<span class="sold-detail">${escapeHtml(owner.detail)}</span>` : ""}</span>`
+        ? `<span class="sold-tag${owner.unsold ? " unsold-tag" : ""}" title="${escapeHtml(owner.title ?? "")}"><span class="sold-owner">${escapeHtml(owner.label)}</span>${owner.round ? `<span class="sold-round">R${owner.round}</span>` : ""}${owner.detail ? `<span class="sold-detail">${escapeHtml(owner.detail)}</span>` : ""}</span>`
         : options.action && (legality.ok || !options.hideBlocked)
           ? `<button class="small" data-action="${options.action}" data-player-id="${player.id}" ${legality.ok ? "" : "disabled"} title="${escapeHtml(legality.reason)}">${legality.ok ? (options.label ?? "Pick") : "Blocked"}</button>`
           : "";
@@ -189,7 +189,8 @@ export function renderPlayerTable(players, options = {}) {
         : "";
       const rowClass = [
         "draft-player-row",
-        owner ? "sold-row" : "",
+        owner && !owner.unsold ? "sold-row" : "",
+        owner?.unsold ? "unsold-row" : "",
         onBlock ? "on-block-row" : "",
         isStarred ? "starred-row" : "",
         isFlagged ? "flagged-row" : "",

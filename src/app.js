@@ -153,6 +153,7 @@ import {
   syncAuctionTimer,
   syncSnakeTimer,
   undoLastPick,
+  unsoldPlayerIds,
   upcomingNominators,
   validateRoster
 } from "./rules/draft.js?v=20260716-records";
@@ -3328,6 +3329,16 @@ function restoreTypingFocus(typing) {
   }
 }
 
+// What is out of reach on the board: the drafted cards, plus the ones the room
+// passed on. A passed card sits there all night and the queue never deals it
+// again, so counting it as gettable would overstate every count that asks what
+// is left.
+function ungettableIds(draft) {
+  const ids = new Set(draft?.pickedIds ?? []);
+  for (const id of unsoldPlayerIds(draft)) ids.add(id);
+  return ids;
+}
+
 // The greyed-out rows on the draft board: who took each card, and the one
 // number that is the story of the pick. In an auction that number is money —
 // what the card sold for; in a snake draft it is the pick it went at. Keyed by
@@ -3335,6 +3346,20 @@ function restoreTypingFocus(typing) {
 function draftSoldTags(draft) {
   const auction = isAuctionDraft(draft);
   const tags = new Map();
+  // A card the room passed on is as finished as a sold one — the queue never
+  // deals it again — but nobody owns it, so it is tagged before the sales and
+  // says what it is. (A passed card the sweep later handed out is owned, and
+  // unsoldPlayerIds has already dropped it.)
+  for (const id of unsoldPlayerIds(draft)) {
+    const player = draft.pool.find((item) => item.id === id);
+    tags.set(id, {
+      label: "Unsold",
+      unsold: true,
+      round: null,
+      detail: "",
+      title: `${player?.name ?? "This card"} went unsold \u2014 the whole room passed, and the queue does not put a card up twice`
+    });
+  }
   for (const pick of draftHistory(draft)) {
     const priced = Number.isFinite(pick.price);
     tags.set(pick.player.id, {
@@ -3814,12 +3839,12 @@ function renderLastSaleSummary(draft) {
       `<li><span>${escapeHtml(name)}</span>${bid > 0 ? `<strong>${money(bid)}</strong>` : "<em>pass</em>"}</li>`)
     .join("");
 
-  // A card the whole room passed on. It stays on the board, and the sweep may
-  // yet hand it to whoever ends the night short.
+  // A card the whole room passed on. It stays on the visible board, marked
+  // unsold, but the queue deals every card once — so that was its only turn.
   if (entry.passed) {
     return `<div class="auction-side-section auction-last-sale">
       <h3>Last lot</h3>
-      <p>${renderPlayerPreviewName(player, player.name, "strong")} went unsold — the whole room passed. He stays on the board.</p>
+      <p>${renderPlayerPreviewName(player, player.name, "strong")} went unsold — the whole room passed. He stays on the board marked unsold, and will not come up again.</p>
     </div>`;
   }
 
@@ -8682,10 +8707,11 @@ function deadMoneyNote(draft, manager) {
 }
 
 // A pill per manager so you can flip through everyone's roster from your own
-// seat; the owned seat is tagged "you". Hidden online, where the roster dock and
-// the seat you claimed already answer whose board you are looking at.
+// seat; the owned seat is tagged "you". Online too: the dock bars say what a
+// rival owns, but only this panel lays out how he is fielding it, and that is
+// public information every manager at the table should be able to read.
 function renderRosterManagerToggle(draft, shown) {
-  if (state.online || draft.managers.length < 2) return "";
+  if (draft.managers.length < 2) return "";
   const owner = viewerManager(draft);
   const pills = draft.managers
     .map((manager) => `<button type="button"
@@ -8701,15 +8727,20 @@ function renderRosterManagerToggle(draft, shown) {
 
 // Whose seat this is, and whether you can claim it:
 //   - your own seat: nothing to say.
+//   - someone else's online: read-only; the seat belongs to another browser.
 //   - someone else's, when you hold a seat at a table with humans: read-only.
 //   - a shared all-human hotseat: it is meant to run every seat, so stay quiet.
 //   - an all-computer table: there is no "you" at all, so offer to adopt the
 //     shown team. Owning a seat is what lets you field a lineup and run the sim
 //     as a manager rather than a spectator — and you can re-adopt to switch.
 function renderRosterAdoptNotice(draft, shown) {
-  if (state.online) return "";
   const owner = viewerManager(draft);
   if (owner && owner.id === shown.id) return "";
+  // Online there is no adopting anybody: seats belong to the browsers holding
+  // them, so a rival's board is there to read and nothing else.
+  if (state.online) {
+    return `<div class="roster-adopt roster-adopt-readonly"><span>Viewing ${escapeHtml(shown.name)}'s roster &mdash; read-only.</span></div>`;
+  }
   const allCpu = draft.managers.every((manager) => manager.cpu);
   if (owner && !allCpu) {
     return `<div class="roster-adopt roster-adopt-readonly"><span>Viewing ${escapeHtml(shown.name)}'s roster &mdash; read-only.</span></div>`;
@@ -9223,8 +9254,9 @@ function renderFilters() {
   // the manager's list — undo a pick and it comes back — but it is nothing he
   // can act on, so it does not pad the number on the button.
   const owner = watchlistOwner();
-  const gettable = (ids) => state.draft
-    ? ids.filter((id) => !state.draft.pickedIds.has(id)).length
+  const ungettable = state.draft ? ungettableIds(state.draft) : null;
+  const gettable = (ids) => ungettable
+    ? ids.filter((id) => !ungettable.has(id)).length
     : ids.length;
   const list = owner ? (state.starred[owner.id] ?? []) : [];
   const starCount = gettable(list);
@@ -9475,7 +9507,7 @@ function positionRankingFor(type, position) {
 // of its tier standing — the scarcity light the dividers exist to shine.
 function tierAccounting(ids, tiers) {
   if (!tiers.length) return { tierMeta: [], tierByRank: null, lastOfTierIds: null };
-  const picked = state.draft.pickedIds;
+  const picked = ungettableIds(state.draft);
   const tierByRank = new Map();
   const lastOfTierIds = new Set();
   const bounds = [0, ...tiers, ids.length];
@@ -9702,6 +9734,10 @@ function moveOnBoard(playerId, delta) {
 function bigBoard(manager, draft) {
   if (!manager || !draft) return [];
   const byId = new Map(draft.pool.map((player) => [player.id, player]));
+  // A card the room passed on is as far out of reach as a drafted one — the
+  // queue will not put it up again — so the board says so rather than leaving
+  // it looking like the next thing you might get.
+  const unsold = unsoldPlayerIds(draft);
   // An auction has no slot to be blocked out of. You do not take a card, you
   // BUY one, and what stops you is the money — so the badge that says a card
   // will not fit never lights, and saying nothing is exactly right.
@@ -9713,7 +9749,8 @@ function bigBoard(manager, draft) {
       const legality = slots ? canPickPlayer(draft, manager, player) : { ok: true, reason: "" };
       return {
         player,
-        gone: draft.pickedIds.has(player.id),
+        gone: draft.pickedIds.has(player.id) || unsold.has(player.id),
+        unsold: unsold.has(player.id),
         legal: legality.ok,
         // Keep the REASON, not just the verdict. "No slot" was a lie by
         // omission: a pick is refused for several different reasons — your
@@ -10325,7 +10362,7 @@ function renderBigBoard(manager, draft) {
       const rating = isCoach(player) ? player.title : player.kind === "pitcher" ? `CTRL ${player.control}` : `OB ${player.onBase}`;
       const spot = isCoach(player) ? "Coach" : player.kind === "pitcher" ? player.role : positionsLabel(player);
       const status = entry.gone
-        ? `<span class="board-status gone">Drafted</span>`
+        ? `<span class="board-status gone">${entry.unsold ? "Unsold" : "Drafted"}</span>`
         : !entry.legal
           ? `<span class="board-status blocked" title="${escapeHtml(entry.reason)}">${escapeHtml(entry.reason)}</span>`
           : player.id === nextUp?.id

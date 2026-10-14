@@ -2784,6 +2784,24 @@ tr:focus-within .row-tools {
   font-variant-numeric: tabular-nums;
 }
 
+/* A card the whole room passed on. It stays on the board but the queue never
+   puts it up again, so it is finished like a sold card — and because nobody
+   owns it, it keeps a mark of its own rather than fading into the sold grey. */
+.player-table tr.unsold-row,
+.player-table tr.unsold-row:hover {
+  background: #f6ece0;
+  box-shadow: inset 3px 0 0 #b4743a;
+}
+
+.player-table tr.unsold-row td {
+  color: #6f5b45;
+}
+
+.sold-tag.unsold-tag {
+  background: #f1dcc4;
+  color: #8a5520;
+}
+
 /* The card up for bid right now. */
 .player-table tr.on-block-row,
 .player-table tr.on-block-row:hover {
@@ -7328,14 +7346,15 @@ div.seat-option:not(:disabled):hover span {
   flex-wrap: wrap;
 }
 
+/* The "you" tag rides the .game-tab em badge, which already flips its own
+   colours between an active and an inactive pill. Setting a colour here only
+   painted the text the same shade as the badge it sits on. */
 .roster-you {
   font-style: normal;
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--accent);
-  margin-left: 4px;
 }
 
 .roster-cpu-tag {
@@ -7346,7 +7365,6 @@ div.seat-option:not(:disabled):hover span {
   margin-left: 4px;
 }
 
-.game-tab.active .roster-you,
 .game-tab.active .roster-cpu-tag {
   color: inherit;
   opacity: 0.85;
@@ -7474,6 +7492,10 @@ html.club .leader-bar-track,
 html.club .progress-track,
 html.club .sold-tag { background: var(--hairline); }
 html.club .player-table tr.sold-row { background: color-mix(in srgb, var(--sheet) 80%, #000000); }
+html.club .player-table tr.unsold-row,
+html.club .player-table tr.unsold-row:hover { background: color-mix(in srgb, var(--panel) 80%, #b4743a); }
+html.club .player-table tr.unsold-row td { color: var(--ink); }
+html.club .sold-tag.unsold-tag { background: color-mix(in srgb, var(--panel) 55%, #b4743a); color: var(--ink); }
 
 /* Icon buttons that borrowed the hairline for their glyph: on cream that was a
    soft grey mark, and on black it is a mark you cannot see. */

@@ -13,11 +13,15 @@ import {
   canNominatePlayer,
   cpuSealedBid,
   createDraft,
+  draftHistory,
   auctionLotPlayer,
   guaranteedNominationMinimums,
   isRandomNomination,
   nominationQueueRemaining,
   nextQueuedPlayer,
+  nominateNextQueued,
+  placeSealedBid,
+  unsoldPlayerIds,
   poolGroup,
   randomNominationCounts,
   randomNominationQuotas,
@@ -772,4 +776,43 @@ test("the best reliever on the board is priced far above a mediocre one", () => 
     bestBid >= middlingBid * 2,
     `best reliever drew ${bestBid}, middling one ${middlingBid} — the board is not spaced`
   );
+});
+
+// A lot nobody bids on stays on the visible board, and the board has to say so:
+// the queue deals every card once, so a passed card is finished even though
+// nobody owns it.
+test("a card the room passes on is marked unsold until the lot is undone", () => {
+  const { draft } = roomOf(3, "unsold-lot");
+  assert.equal(unsoldPlayerIds(draft).size, 0);
+
+  nominateNextQueued(draft);
+  const player = auctionLotPlayer(draft);
+  for (const manager of draft.managers) placeSealedBid(draft, manager.id, 0);
+
+  const unsold = unsoldPlayerIds(draft);
+  assert.deepEqual([...unsold], [player.id]);
+  // Nobody owns it, so it is not a pick and nobody's roster carries it.
+  assert.equal(draft.pickedIds.has(player.id), false);
+  assert.equal(draftHistory(draft).some((pick) => pick.player.id === player.id), false);
+  // And the queue is done with it.
+  assert.equal(nextQueuedPlayer(draft).id === player.id, false);
+
+  undoLastPick(draft);
+  assert.equal(unsoldPlayerIds(draft).size, 0, "undoing the lot puts the card back up for bid");
+  assert.equal(nextQueuedPlayer(draft).id, player.id);
+});
+
+// Only the random queue can pass a lot out: a manual nominator has to open the
+// bidding on his own nomination, so there is never an unsold card to mark.
+test("a manual-nomination auction has no unsold cards", () => {
+  const managers = ["A", "B", "C"].map((name) => ({ name, cpu: true }));
+  const pool = buildDraftPool(UNIVERSE, "manual-unsold", { nomination: "manual", managerCount: 3 });
+  const draft = createDraft(managers, pool, 13, "manual-unsold", {
+    draftType: "auction",
+    nomination: "manual",
+    budget: 5000,
+    timer: false
+  });
+  draft.auction.history.push({ playerId: pool[0].id, managerId: null, price: 0, passed: true });
+  assert.equal(unsoldPlayerIds(draft).size, 0);
 });
