@@ -4990,7 +4990,9 @@ function ceremonyAward(key, summary) {
   };
 }
 
-function rankBoard(lines, value, format, count) {
+// `stats` is the long form of `format`: a row that reads on more than one
+// number carries them as a list, and the board lays them out in columns.
+function rankBoard(lines, value, format, count, stats = null) {
   return [...lines]
     .filter((entry) => Number.isFinite(value(entry)))
     .sort((a, b) => value(b) - value(a))
@@ -5000,7 +5002,8 @@ function rankBoard(lines, value, format, count) {
       id: entry.id,
       name: entry.name,
       team: entry.team,
-      value: format(entry)
+      value: format(entry),
+      ...(stats ? { stats: stats(entry) } : {})
     }));
 }
 
@@ -5019,12 +5022,24 @@ function cyYoungBoards(summary) {
   const pitchers = summary.pitchers ?? [];
   const value = (entry) => -(entry.runsPerNine ?? 99);
   const format = (entry) => `${(entry.runsPerNine ?? 0).toFixed(2)} ERA`;
+  // An ERA on its own says nothing about how much of it there was. The innings
+  // and the WPA behind it are the two numbers that tell a short brilliant
+  // stretch from a season somebody leaned on, both per 162 games.
+  const signedWpa = (entry) => {
+    const wpa = entry.wpaPer162 ?? 0;
+    return `${wpa < 0 ? "\u2212" : "+"}${Math.abs(wpa).toFixed(1)}`;
+  };
+  const stats = (entry) => [
+    { value: (entry.runsPerNine ?? 0).toFixed(2), label: "ERA" },
+    { value: String(Math.round(entry.ipPer162 ?? 0)), label: "IP" },
+    { value: signedWpa(entry), label: "WPA" }
+  ];
   const worked = (entry, share) => (entry.outs ?? 0) >= Math.max(30, (entry.teamGames ?? 0) * share);
   const starters = pitchers.filter((entry) => entry.role === "SP" && worked(entry, 2));
   const relievers = pitchers.filter((entry) => entry.role === "RP" && worked(entry, 0.6));
   return [
-    { label: "Starters", entries: rankBoard(starters.length ? starters : pitchers.filter((entry) => entry.role === "SP"), value, format, 3) },
-    { label: "Relievers", entries: rankBoard(relievers.length ? relievers : pitchers.filter((entry) => entry.role === "RP"), value, format, 3) }
+    { label: "Starters", entries: rankBoard(starters.length ? starters : pitchers.filter((entry) => entry.role === "SP"), value, format, 3, stats) },
+    { label: "Relievers", entries: rankBoard(relievers.length ? relievers : pitchers.filter((entry) => entry.role === "RP"), value, format, 3, stats) }
   ].filter((board) => board.entries.length);
 }
 
@@ -5271,8 +5286,19 @@ function rememberCeremonySkip(skip) {
   }
 }
 
+// A ceremony on its own, for a season that has already been played: the show
+// is the only thing that runs. The summary, the seed and the race line come
+// off the finished run, so the champion is the champion that was and not a new
+// season that happens to look like it.
+function replayCeremony() {
+  if (!state.batch?.summary?.teams?.length) return;
+  rememberCeremonySkip(false);
+  startBatchRun(state.batch.runs, { replayOf: state.batch });
+}
+
 function startBatchRun(runs, options = {}) {
   if (!state.draft || !canSimulate(state.draft)) return;
+  const replayOf = options.replayOf ?? null;
   const count = normalizeBatchRuns(runs);
   // Each club carries the room's standing replacement cards, which is what turns
   // on wins above replacement in the sim (rooms dealt before them have none).
@@ -5283,12 +5309,14 @@ function startBatchRun(runs, options = {}) {
   }));
   const teamNames = teams.map((team) => team.name);
   const batchState = createBatchState(teams);
-  const seed = options.salt ? `${state.seed}-batch-${options.salt}` : `${state.seed}-batch`;
+  // A replay has to be the same season down to the game the championship is
+  // picked from, and that is a pure function of the seed.
+  const seed = replayOf?.seed ?? (options.salt ? `${state.seed}-batch-${options.salt}` : `${state.seed}-batch`);
   const token = ++batchRunToken;
   const gamesPerFrame = Math.max(2, Math.round(count / 90));
   const plotStart = Math.max(4, Math.round(count * 0.02));
-  const series = [];
-  let completed = 0;
+  const series = replayOf?.race?.series ? [...replayOf.race.series] : [];
+  let completed = replayOf ? count : 0;
   let skipRequested = Boolean(options.instant);
 
   resetAppHandlers();
@@ -5357,7 +5385,7 @@ function startBatchRun(runs, options = {}) {
   let beatOpenedAt = Date.now();
   let figuresAt = 0;
   let ceremonyTimer = null;
-  let finalSummary = null;
+  let finalSummary = replayOf?.summary ?? null;
   let replay = null;
   const opened = [];
   let snapshot = { beat: CEREMONY_BEATS[0].key, opened: [], completed: 0, total: count, teamNames };
@@ -5659,7 +5687,7 @@ function startBatchRun(runs, options = {}) {
     state.batch = {
       runs: count,
       seed,
-      summary: summarizeBatch(finishedState),
+      summary: replayOf ? replayOf.summary : summarizeBatch(finishedState),
       race: { teamNames, totalRuns: count, series: raceSeries() }
     };
     state.view = "batch";
@@ -5675,7 +5703,8 @@ function startBatchRun(runs, options = {}) {
       fileRoomSim(state.online.roomId, state.online.token, { salt: fileFor, runs: count }, { ...state.batch, salt: fileFor })
         .catch(() => {});
     }
-    if (!options.instant) {
+    // A replay is not a season: the book already has this one.
+    if (!options.instant && !replayOf) {
       track("sim", {
         roomId: state.online?.roomId ?? null,
         // Which draft these teams came out of, so the book can say how the
@@ -5793,19 +5822,25 @@ function startBatchRun(runs, options = {}) {
     searchChampionship();
   };
 
-  if (options.instant || skipRequested || ceremonySkipped()) {
+  if (!replayOf && (options.instant || skipRequested || ceremonySkipped())) {
     skipRequested = true;
     runSkip();
     return;
   }
 
-  openBeat(null);
+  openBeat(finalSummary);
   ceremonyTimer = setInterval(ceremonyTick, 160);
   // Say hello before playing a single game. The room is waiting on this browser
   // and has no other way to tell "starting" from "gone" — and a runner in a
   // background tab, where Chrome clamps timers to a second, can take longer to
   // produce its first frame than a watcher is willing to sit in silence.
   reportProgress(batchProgressSnapshot(batchState));
+  // Nothing left to play: every gate is already met, so the beats run on their
+  // own clock and the championship game is hunted for straight away.
+  if (replayOf) {
+    searchChampionship();
+    return;
+  }
   setTimeout(step, 180);
 }
 
@@ -6650,11 +6685,11 @@ function renderBatch() {
 
   app.innerHTML = `<section class="toolbar">
     <button data-action="batch-back">${backLabel}</button>
+    <button data-action="ceremony-replay">Watch the ceremony</button>
     <label class="batch-runs-label">Games
       <input data-batch-runs type="number" min="1" step="1" value="${runs}">
     </label>
     <button data-action="batch-run">Run again</button>
-    ${ceremonySkipped() ? `<button data-action="ceremony-on" class="small">Show the ceremony</button>` : ""}
     <button data-action="reset">New room</button>
   </section>
   ${renderBatchStatsTabs(activeBatchTab)}
@@ -7826,12 +7861,11 @@ function bindBatchActions() {
       const input = app.querySelector("[data-batch-runs]");
       requestBatchRun(input?.value ?? DEFAULT_BATCH_RUNS);
     }
-    // Turning the ceremony back on runs one there and then: nobody asks for it
-    // and then wants to press a second button.
-    if (action === "ceremony-on") {
-      rememberCeremonySkip(false);
-      const input = app.querySelector("[data-batch-runs]");
-      requestBatchRun(input?.value ?? DEFAULT_BATCH_RUNS);
+    // The show for the season on screen. Nothing is simulated again — and
+    // asking for it says the ceremony is wanted, so a skip from last time is
+    // forgotten.
+    if (action === "ceremony-replay") {
+      replayCeremony();
     }
     if (action === "reset") {
       if (state.online) {

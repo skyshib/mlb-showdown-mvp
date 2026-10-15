@@ -203,26 +203,48 @@ function plaqueInner(state, plaque) {
     <span class="plaque-val" data-val="${plaque.key}">${escapeHtml(plaque.value)}</span>`;
 }
 
-// Eight categories across the page, three deep each, with the card the man is
-// printed on beside his name. The manager sits at the right edge of every row
-// so the column of chips reads as "whose men these are".
+// Eight categories, each one built the way an award is: the leader's card at
+// a size worth looking at, his name beside it, and the two men who did not
+// lead listed underneath. A thumbnail the size of a postage stamp said
+// nothing about the card it was a picture of.
 function leadersHtml(state, options) {
   return `<div class="leader-board">${(state.leaders ?? []).map((category) => `
     <div class="leader-cat">
       <p class="leader-cat-head">${escapeHtml(category.label)}</p>
-      ${category.entries.map((entry) => `
-        <div class="leader-row" data-row="${category.key}${entry.rank}" data-id="${escapeHtml(entry.id)}">
-          <div data-swap>${leaderInner(state, category, entry, options)}</div>
-        </div>`).join("")}
+      <div class="leader-cat-body">
+        ${category.entries.filter((entry) => entry.rank === 1).map((entry) => `
+          <div class="leader-spot" data-row="${category.key}${entry.rank}" data-id="${escapeHtml(entry.id)}">
+            <div data-swap>${leaderInner(state, category, entry, options)}</div>
+          </div>`).join("")}
+        <div class="leader-rest">
+          ${category.entries.filter((entry) => entry.rank > 1).map((entry) => `
+            <div class="leader-row" data-row="${category.key}${entry.rank}" data-id="${escapeHtml(entry.id)}">
+              <div data-swap>${leaderInner(state, category, entry, options)}</div>
+            </div>`).join("")}
+        </div>
+      </div>
     </div>`).join("")}</div>`;
 }
 
+// One builder for both shapes, so a rank that changes hands is rebuilt by the
+// same patch whichever row it lands in.
 function leaderInner(state, category, entry, options) {
+  if (entry.rank === 1) return leaderSpotInner(state, category, entry, options);
   return `<span class="leader-rank">${entry.rank}</span>
-    <span class="cer-leader-card">${miniCard(entry.id, options)}</span>
     <span class="leader-who"><b>${escapeHtml(shortName(stripCardYear(entry.name)))}</b></span>
     <span class="leader-value" data-val="${category.key}${entry.rank}">${escapeHtml(entry.value)}</span>
     ${manager(state, entry.team)}`;
+}
+
+function leaderSpotInner(state, category, entry, options) {
+  return `<span class="leader-spot-card">${miniCard(entry.id, options)}</span>
+    <span class="leader-spot-copy">
+      <b class="leader-spot-name">${escapeHtml(stripCardYear(entry.name))}</b>
+      <span class="leader-spot-line">
+        <span class="leader-spot-value" data-val="${category.key}${entry.rank}">${escapeHtml(entry.value)}</span>
+        ${manager(state, entry.team)}
+      </span>
+    </span>`;
 }
 
 function awardHtml(award, state, options) {
@@ -251,7 +273,12 @@ function rankBoardHtml(state, board) {
       <div class="rank-row">
         <span class="rank-pos">${entry.rank}</span>
         <span class="rank-name">${escapeHtml(shortName(stripCardYear(entry.name)))}</span>
-        <span class="rank-value">${escapeHtml(entry.value)}</span>
+        ${entry.stats
+          // A pitcher is read on more than one number: the rate, the work he
+          // did at it, and what the work was worth.
+          ? `<span class="rank-stats">${entry.stats.map((stat) => `
+              <span class="rank-stat"><b>${escapeHtml(stat.value)}</b>${escapeHtml(stat.label)}</span>`).join("")}</span>`
+          : `<span class="rank-value">${escapeHtml(entry.value)}</span>`}
         ${manager(state, entry.team)}
       </div>`).join("")}
   </div>`;
