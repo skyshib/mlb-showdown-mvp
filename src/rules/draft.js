@@ -2919,6 +2919,40 @@ function auctionWillingness(draft, manager, player) {
     return total;
   };
   const nineNow = seatedValue(manager.roster);
+  // THE SAME ERROR ON THE OTHER SIDE OF THE STAFF. A reliever who fills no pen
+  // seat falls to the bucket floor below, which is a flat value difference with
+  // no innings rate at all — it drops both RELIEVER_TOP_RATE and
+  // RELIEVER_DEPTH_RATE, the whole reason a pen is priced the way it is. An
+  // UNCAPPED pen never reaches that branch (auctionNeeds wants AUCTION_PEN_DEPTH
+  // arms, and no computer in twelve live rooms ever held five), but two is the
+  // DEFAULT cap, and there the branch is live on 31% of reliever bids. The card
+  // it misprices worst is the one the top rate exists for: an arm who would
+  // become your best reads 62.3 where the pen gains 113.3. So price a redundant
+  // arm at what the pen that will actually PITCH gains by taking him.
+  //
+  // Where a pen seat is still open this is algebraically IDENTICAL to
+  // relieverWorth — adding an arm above your best gives
+  // TOP*(X-best) + DEPTH*(best-floor), below it DEPTH*(X-floor), which is what
+  // relieverWorth returns — so it changes nothing until the pen is full, and
+  // then it correctly drops the arm who loses his seat. Verified: identical on
+  // all 3036 computer bids across the twelve (uncapped) live rooms.
+  const penSlots = normalizeBullpenSlots(draft.bullpenSlots);
+  const penCap = penSlots === UNLIMITED_BULLPEN ? AUCTION_PEN_DEPTH : penSlots;
+  const penFloor = market.replacement.get("RP") ?? 0;
+  const penSp = normalizeStartingPitchers(draft.startingPitchers);
+  const penScale = penSp * spSlotFactor(penSp) / 4;
+  const penWorth = (roster) => {
+    const pitching = roster
+      .filter((card) => playerBucket(card) === "bullpen")
+      .map((card) => market.model.value(card))
+      .sort((a, b) => b - a)
+      .slice(0, penCap);
+    if (!pitching.length) return 0;
+    let total = RELIEVER_TOP_RATE * Math.max(0, pitching[0] - penFloor);
+    for (let i = 1; i < pitching.length; i += 1) total += RELIEVER_DEPTH_RATE * Math.max(0, pitching[i] - penFloor);
+    return penScale * total;
+  };
+  const penNow = penWorth(manager.roster);
   // This prices the card ON THE BLOCK only. The same function also builds the
   // budget-share denominator below, out of every card still expected, and there
   // it keeps the old basis on purpose: zeroing the redundant bats drops that
@@ -2943,6 +2977,9 @@ function auctionWillingness(draft, manager, player) {
     if (fills) return base;
     if (positionAware && playerBucket(card) === "hitter") {
       return Math.max(0, seatedValue([...manager.roster, card]) - nineNow);
+    }
+    if (positionAware && playerBucket(card) === "bullpen") {
+      return Math.max(0, penWorth([...manager.roster, card]) - penNow);
     }
     const ownFloor = fieldedFloor.get(playerBucket(card));
     if (ownFloor == null) return base * DEPTH_DAMP;
