@@ -15,7 +15,7 @@ import {
 } from "../src/data/universes.js";
 import { autopick, createDraft, maxPoolManagers, randomNominationShortfalls, validateRoster } from "../src/rules/draft.js";
 import { battlePhase, createBattle, fastForward } from "../src/rules/battle/controller.js";
-import { personConflict } from "../src/rules/cards.js";
+import { cardPerson, personConflict } from "../src/rules/cards.js";
 
 // The card sets a draft room can pick, one of each shape: the two fixed real
 // sets, the fictional league, a decade, a multi-decade union, and a franchise
@@ -302,23 +302,69 @@ test("every deck carries a standing replacement at every slot", () => {
 
   // The other sets have no 10-point rung to stand on, so their floor is read as
   // a shape instead: the cheapest 5% at the slot, one of them at random.
+  const fifthPercentile = (cards) => {
+    const points = cards.map((card) => card.points).sort((a, b) => a - b);
+    return points[Math.max(0, Math.ceil(points.length * 0.05) - 1)] ?? Infinity;
+  };
   for (const mode of ["fictional", "mlb-history", "decade-1990", "franchise-SEA"]) {
     const deck = buildDraftPool(mode, "standing-a", { nomination: "random", managerCount: 4 });
     const standing = deck.filter((card) => card.replacement);
     assert.deepEqual(standing.map((card) => card.slot), SLOTS, `${mode}: one per slot`);
+    const dealt = new Set(deck.filter((card) => !card.replacement).map((card) => cardPerson(card)));
     const pool = universePool();
     for (const card of standing) {
-      const atSlot = pool
-        .filter((other) => (card.kind === "pitcher"
-          ? other.role === card.role
-          : other.kind === "hitter" && (card.slot === "DH" || other.position === card.slot)))
-        .map((other) => other.points)
-        .sort((a, b) => a - b);
-      const cut = atSlot[Math.max(0, Math.ceil(atSlot.length * 0.05) - 1)];
+      // The slot's own cards GROUP there — the position printed on them first.
+      const grouped = pool.filter((other) => (card.kind === "pitcher"
+        ? other.role === card.role
+        : other.kind === "hitter" && (card.slot === "DH" || other.position === card.slot)));
+      // Anyone who can cover the slot, however his card groups.
+      const covers = pool.filter((other) => (card.kind === "pitcher"
+        ? other.role === card.role
+        : other.kind === "hitter"
+          && (card.slot === "DH" || (other.positions ?? []).some((spot) => spot.pos === card.slot))));
+      const cut = fifthPercentile(grouped);
+      // The floor is the slot's own cheapest 5% — unless every one of those is
+      // already up for bid, and the draw widens to whoever is left that can
+      // cover the slot. That is a rung up the market, and still the bottom of
+      // it: a dealt face handed out free is the one thing it must never be.
+      const spokenFor = grouped
+        .filter((other) => other.points <= cut)
+        .every((other) => dealt.has(cardPerson(other)));
+      const free = covers.filter((other) => !dealt.has(cardPerson(other)));
+      const reach = spokenFor ? Math.max(cut, fifthPercentile(free)) : cut;
       assert.ok(
-        card.points <= cut,
-        `${mode}: the standing ${card.slot} costs ${card.points}, above the slot's 5th percentile of ${cut}`
+        card.points <= reach,
+        `${mode}: the standing ${card.slot} costs ${card.points}, above the slot's floor of ${reach}`
       );
+      assert.ok(
+        !dealt.has(cardPerson(card)),
+        `${mode}: ${card.name} is also on the biddable board`
+      );
+    }
+  }
+});
+
+test("a slot whose floor is all on the board widens rather than dealing the same man twice", () => {
+  // Classic groups a card at the position printed on him FIRST, and its
+  // 10-point rung at first base is one man deep: Tony Clark '03. Deal him — or
+  // any other era of him — onto the board and the floor at first is spoken for,
+  // which used to hand the room his own card back as the free one. Room
+  // autumn-otter-victory auctioned him off a board that was also giving him
+  // away. Read over enough seeds to catch the collision, which classic hits in
+  // about a fifth of its rooms.
+  for (const nomination of ["manual", "random"]) {
+    for (let room = 0; room < 40; room += 1) {
+      const deck = buildDraftPool("classic", `floor-${room}`, { nomination, managerCount: 5 });
+      const ids = deck.map((card) => card.id);
+      assert.equal(new Set(ids).size, ids.length, `${nomination} room ${room}: a card is on the board twice`);
+      const dealt = new Set(deck.filter((card) => !card.replacement).map((card) => cardPerson(card)));
+      for (const card of deck.filter((item) => item.replacement)) {
+        assert.ok(
+          !dealt.has(cardPerson(card)),
+          `${nomination} room ${room}: ${card.name} stands free at ${card.slot} and is up for bid as well`
+        );
+        assert.equal(card.points, 10, `${nomination} room ${room}: the standing ${card.slot} is off the rung`);
+      }
     }
   }
 });

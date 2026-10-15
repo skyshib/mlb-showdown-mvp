@@ -4,7 +4,7 @@ import { decodeCardRows } from "./realCards.js";
 import { CLASSIC_CARD_ROWS } from "./classicCards.js";
 import { MLB_HISTORY_ROWS, MLB_DECADE_ROWS, MLB_FRANCHISE_ROWS, MLB_FRANCHISE_NAMES, MLB_DUAL_PERSONS } from "./mlbPools.js";
 import { cardPerson, playerIdentity } from "../rules/cards.js?v=20260716-records";
-import { ANY_HITTER, CORNER_OUTFIELD_POSITION, boardBullpenSlots, minimumSnakePicks, normalizeSnakePicks, poolGroup, poolGroupMatches, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
+import { ANY_HITTER, CORNER_OUTFIELD_POSITION, boardBullpenSlots, minimumSnakePicks, normalizeSnakePicks, poolGroup, poolGroupMatches, positionMatchesSlot, randomNominationQuotas } from "../rules/draft.js?v=20260716-records";
 import { COACHES, COACHES_PER_BOARD, COACH_GROUP, coachById } from "../rules/coaches.js?v=20260910-coaches";
 import { authenticPoints } from "../rules/pricing.js?v=20260716-records";
 import { PRICE_MODEL } from "./priceModel.js";
@@ -583,9 +583,10 @@ export function buildDraftPool(mode, seed, options = {}) {
 //
 // A person deals once across the whole board, so the roll skips anyone already
 // dealt into the biddable deck: no manager should be bidding on a man his
-// rivals are being handed. Only if a slot's whole floor is on the board does
-// that rule give way — a standing card at every slot is the promise, and a
-// duplicated face is a smaller price than a slot with no floor.
+// rivals are being handed. When a slot's whole floor IS on the board, the roll
+// widens down the market rather than dealing the same man twice — see the
+// ladder in dealReplacementCards. Only a slot with nothing left at all gives
+// the rule up, because a standing card everywhere is the bigger promise.
 const CLASSIC_REPLACEMENT_POINTS = 10;
 const REPLACEMENT_PERCENTILE = 0.05;
 
@@ -605,15 +606,26 @@ const REPLACEMENT_SLOTS = ["C", "1B", "2B", "3B", "SS", CORNER_OUTFIELD_POSITION
 //
 // The percentile is read per SLOT, not across the pool. A set's cheapest 5%
 // overall is whichever group the curve prices lowest — the relievers, usually —
-// and a floor read that way would have no catchers in it at all.
-function replacementCandidates(pool, group) {
-  const atSlot = pool.filter((card) => poolGroupMatches(card, group));
+// and a floor read that way would have no catchers in it at all. So the caller
+// passes the cards at one slot and gets that slot's floor back.
+function replacementFloor(cards) {
   if (universeKey() === "classic") {
-    const rung = atSlot.filter((card) => card.points === CLASSIC_REPLACEMENT_POINTS);
+    const rung = cards.filter((card) => card.points === CLASSIC_REPLACEMENT_POINTS);
     if (rung.length) return rung;
   }
-  const ranked = [...atSlot].sort((a, b) => a.points - b.points || a.id.localeCompare(b.id));
+  const ranked = [...cards].sort((a, b) => a.points - b.points || a.id.localeCompare(b.id));
   return ranked.slice(0, Math.max(1, Math.ceil(ranked.length * REPLACEMENT_PERCENTILE)));
+}
+
+// Who can stand at a slot at all. A card GROUPS at one position — the first one
+// printed on him — but he plays every position he lists, so the widened draw
+// reads the whole card. Arms are their group either way: a starter does not
+// relieve on this board, and the bat-shaped DH seat already draws on everyone.
+function slotEligible(pool, slot, group) {
+  if (group === ANY_HITTER || slot === "SP" || slot === "RP") {
+    return pool.filter((card) => poolGroupMatches(card, group));
+  }
+  return pool.filter((card) => card.kind === "hitter" && positionMatchesSlot(card, slot));
 }
 
 export function dealReplacementCards(deck, seed) {
@@ -627,9 +639,46 @@ export function dealReplacementCards(deck, seed) {
     // draws on every hitter in the set, exactly as the deal's own DH group
     // draws on whatever hitters the position groups left behind.
     const group = slot === "DH" ? ANY_HITTER : slot;
-    const eligible = replacementCandidates(pool, group).filter((card) => !taken.has(cardPerson(card)));
-    const fresh = eligible.filter((card) => !dealtPeople.has(cardPerson(card)));
-    const candidates = fresh.length ? fresh : eligible;
+    // Nobody who is already spoken for — dealt into the biddable deck, or
+    // standing at an earlier slot — whichever rung of the ladder we end on.
+    const free = (card) => !taken.has(cardPerson(card)) && !dealtPeople.has(cardPerson(card));
+    const grouped = pool.filter((card) => poolGroupMatches(card, group));
+    const groupFloor = replacementFloor(grouped);
+    // What the floor COSTS at this slot. Nothing further down the ladder may
+    // cost more: a free card dearer than the floor is a prize, not a penalty.
+    const ceiling = groupFloor.length ? Math.max(...groupFloor.map((card) => card.points)) : Infinity;
+    // Only read once, and only if the ladder gets that far: this is a pass over
+    // the whole set, and most slots never leave step 1.
+    let widened = null;
+    const covers = () => (widened ??= slotEligible(pool, slot, group).filter(free));
+    // The ladder, in order:
+    //
+    //   1. The floor of the slot's own group — the classic 10-point rung, or
+    //      the cheapest 5% of it.
+    //   2. Everyone else who can COVER the slot at the floor's own price, when
+    //      that floor is wholly spoken for. A group is read off a card's FIRST
+    //      printed position, and classic's 10-point rung at first base holds
+    //      exactly one man in the whole set (Tony Clark '03) — put him on the
+    //      board and step 1 comes back empty, which used to stand him there
+    //      twice: once for bid and once wearing the free badge. Widening the
+    //      position finds John McDonald, who also lists first and also costs
+    //      10. Widening the PRICE instead would have reached a 60-point bat.
+    //   3. The cheapest of whoever can cover the slot, when even that is empty.
+    //      A set this thin is one the setup screen refuses, so the floor gives
+    //      before the slot does.
+    //   4. The group floor again, duplicate and all — only when the slot has no
+    //      free card anywhere and would otherwise stand empty.
+    const ladder = [
+      () => groupFloor.filter(free),
+      () => covers().filter((card) => card.points <= ceiling),
+      () => replacementFloor(covers()),
+      () => groupFloor.filter((card) => !taken.has(cardPerson(card)))
+    ];
+    let candidates = [];
+    for (const rung of ladder) {
+      candidates = rung();
+      if (candidates.length) break;
+    }
     if (!candidates.length) continue;
     const card = candidates[rng.int(0, candidates.length - 1)];
     taken.add(cardPerson(card));
