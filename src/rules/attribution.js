@@ -16,7 +16,9 @@
 //                with the fielder's glove swapped for the replacement's at his
 //                position.
 //   pitching     the pitcher's control and chart, replayed with the same dice
-//                and the replacement SP's or RP's numbers (same fatigue).
+//                and the replacement SP's or RP's numbers. The replacement is
+//                replayed fresh: a tired arm is charged for his own fatigue,
+//                since the man who would have relieved him was rested.
 //
 // Hitting and pitching are replays of one plate appearance: nothing after the
 // plate appearance is re-simulated. For hitters that matches reality — swapping a

@@ -6668,7 +6668,7 @@ function renderBatch() {
           ? "This simulation predates fatigue splits. Run it again to compare fresh and tired work."
           : pitcherSplit === "fresh"
           ? "Only plate appearances that began before the pitcher was tired."
-          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? ` <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers. <strong>Pitch WPAA</strong> is the same figure read against the average rather than the floor: WPAR less the average WPAR of the league's rostered arms in his role.` : ""}</p>
+          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? ` <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. The replacement is replayed fresh, so an arm pitching tired is charged for his own fatigue. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers. <strong>Pitch WPAA</strong> is the same figure read against the average rather than the floor: WPAR less the average WPAR of the league's rostered arms in his role.` : ""}</p>
       </div>
       <div class="batch-stat-controls">
         ${renderBatchTeamFilter("pitchers", pitcherTeamFilter, teamNames)}

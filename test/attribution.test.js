@@ -29,23 +29,30 @@ test("measuring wins above replacement does not change a single game", () => {
   }
 });
 
-test("a player measured against himself is worth exactly nothing", () => {
+test("a player measured against himself is worth exactly nothing, bar his own fatigue", () => {
   // The replay is the real plate appearance, the same dice through the same
   // rules, so swapping a card for itself must reproduce every win to the bit.
+  // Pitching is the one bucket that does not: the replacement arm is replayed
+  // fresh, so a tired arm measured against himself is charged for the fatigue,
+  // and only work that began fresh has to come back to zero.
   const self = (side, kind, player) => {
     if (kind === "runner") return Number(player.speed) || 0;
     if (kind === "fielder") return Number(player.fielding) || 0;
     return player;
   };
+  let tiredCost = 0;
   for (let index = 0; index < 60; index += 1) {
     const [away, home] = [TEAMS[index % 4], TEAMS[(index + 2) % 4]];
     const game = simulateGame(away, home, `self-${index}`, { attribution: { resolveReplacement: self } });
     for (const line of game.attribution.lines) {
-      for (const bucket of ["hitting", "baserunning", "defense", "pitching", "pitchingFresh"]) {
+      for (const bucket of ["hitting", "baserunning", "defense", "pitchingFresh"]) {
         assert.equal(line[bucket], 0, `${line.name} ${bucket} in game ${index}`);
       }
+      tiredCost += line.pitching;
     }
   }
+  // Tiring is a cost, never a bonus, so the league's own fatigue bill is negative.
+  assert.ok(tiredCost < 0, `fatigue bill ${tiredCost}`);
 });
 
 test("the fielding curve is zero at the club's own defense and never rewards a worse glove", () => {

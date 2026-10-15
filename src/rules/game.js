@@ -2861,13 +2861,16 @@ function attributePlateAppearance(state, play) {
   if (!batter.battingAsPitcher) {
     const card = attribution.resolveReplacement(battingSide, "hitter", batter);
     if (card) {
-      const replayed = replayPlateAppearance(state, play, swappedCard(attribution, "hit", batter, card, ["onBase", "chart"]), pitcher);
+      const replayed = replayPlateAppearance(state, play, swappedCard(attribution, "hit", batter, card, ["onBase", "chart"]), pitcher, play.fatiguePenalty);
       attributionLine(attribution, battingSide, batter, state[battingSide].name).hitting += battingWpa - replayed;
     }
   }
   const card = attribution.resolveReplacement(pitchingSide, "pitcher", pitcher);
   if (card) {
-    const replayed = replayPlateAppearance(state, play, batter, swappedCard(attribution, "pitch", pitcher, card, ["control", "chart"]));
+    // The replacement arm comes in off the bench, so he is replayed fresh: the
+    // tired arm's own fatigue is a cost of the innings he took, not something the
+    // bullpen's next man would have carried into the same spot.
+    const replayed = replayPlateAppearance(state, play, batter, swappedCard(attribution, "pitch", pitcher, card, ["control", "chart"]), 0);
     const line = attributionLine(attribution, pitchingSide, pitcher, state[pitchingSide].name);
     line.pitching += replayed - battingWpa;
     if (play.fatiguePenalty === 0) line.pitchingFresh += replayed - battingWpa;
@@ -2877,8 +2880,10 @@ function attributePlateAppearance(state, play) {
 // The plate appearance again, from the state it started in, in a sandbox that
 // shares nothing the game keeps: its own bases, score and box score. The recorded
 // dice are used in order; a replay that needs more than the real play threw gets
-// fresh ones from the attribution's own stream. Returns the batting side's WPA.
-function replayPlateAppearance(state, play, batter, pitcher) {
+// fresh ones from the attribution's own stream. The caller names the control
+// penalty the replayed arm pitches under, since a swapped-in replacement is
+// fresh where the real arm may have been tired. Returns the batting side's WPA.
+function replayPlateAppearance(state, play, batter, pitcher, fatiguePenalty) {
   const attribution = state.attribution;
   const sandbox = {
     away: state.away,
@@ -2902,7 +2907,7 @@ function replayPlateAppearance(state, play, batter, pitcher) {
   let next = 0;
   const dice = { d20: () => (next < play.rolls.length ? play.rolls[next++] : attribution.rng.d20()) };
   const armAtThePlate = Boolean(batter.battingAsPitcher);
-  const controlTotal = armAtThePlate ? null : rollD20(sandbox, dice) + pitcher.control - play.fatiguePenalty;
+  const controlTotal = armAtThePlate ? null : rollD20(sandbox, dice) + pitcher.control - fatiguePenalty;
   const chartOwner = armAtThePlate || controlTotal > batter.onBase ? "pitcher" : "hitter";
   const result = resolveChart(chartOwner === "pitcher" ? pitcher.chart : batter.chart, rollD20(sandbox, dice));
   applyResult(sandbox, result, batter, play.battingSide, play.pitchingSide, dice, play.responsiblePitcher);
