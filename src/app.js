@@ -14,7 +14,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool, MAX_TEMPERATURE, normalizeTemperature } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml } from "./ui/cardFace.js?v=20260716-records";
+import { cardPanelHtml, shortName, stripCardYear } from "./ui/cardFace.js?v=20260716-records";
 import { eventLeverage } from "./rules/game.js?v=20260717-draft-wpa";
 import { canEnterAuctionBid, nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
@@ -195,7 +195,7 @@ import {
   traitLeaders,
   winProbabilitySeries
 } from "./rules/ceremony.js?v=20261015-ceremony";
-import { ceremonyHtml, duelHtml, patchCeremony, resultWord } from "./ui/ceremony.js?v=20261015-ceremony";
+import { ceremonyShellHtml, duelHtml, managerChip, resultWord, syncCeremony } from "./ui/ceremony.js?v=20261015-ceremony";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
@@ -4961,64 +4961,85 @@ function hydrateCeremony(snapshot, teams, seed) {
 // One frame of the replay, drawn from the wire and the local copy of the game.
 // Idempotent on purpose: a watcher repaints several times a second and the
 // runner repaints on every phase change, and both have to land in the same
-// place.
-function paintReplay(root, wire, cache, options) {
+// place. The board shows the state BEFORE the pitch until the play resolves,
+// which is the whole point of dwelling on a spot.
+function paintReplay(root, wire, cache, state, options) {
   if (!root || !wire || !cache) return;
-  const live = (key) => root.querySelector(`[data-live="${key}"]`);
+  const board = (key) => root.querySelector(`[data-board="${key}"]`);
+  const moment = cache.moments[wire.momentIndex] ?? null;
+  const event = moment?.event ?? null;
+  const resolved = wire.phase === "result" || wire.final;
+
   for (const side of ["away", "home"]) {
     (cache.line[side] ?? []).forEach((runs, index) => {
-      const cell = live(`ls-${side}-${index}`);
+      const cell = root.querySelector(`[data-ls="${side}-${index}"]`);
       if (!cell) return;
       const shown = index < wire.lineRevealed;
       cell.textContent = shown ? String(runs) : "";
       cell.classList.toggle("filled", shown);
       cell.classList.toggle("scored", shown && runs > 0);
     });
-    const total = live(`ls-${side}-r`);
-    const hits = live(`ls-${side}-h`);
-    if (total) total.textContent = wire.final ? String(runsIn(cache.line[side])) : "";
+    const hits = root.querySelector(`[data-ls="${side}-h"]`);
     if (hits) hits.textContent = wire.final ? String(hitsIn(cache.game.boxScore?.[side])) : "";
   }
 
-  const shown = cache.wp.filter((point) => point.index <= wire.wpRevealed);
-  if (shown.length) {
-    const span = Math.max(1, cache.wp.length - 1);
-    const path = shown
-      .map((point) => `${((point.index / span) * 400).toFixed(1)} ${(24 - ((point.wp - 50) / 50) * 22).toFixed(1)}`)
-      .join(" L");
-    live("wp-line")?.setAttribute("d", `M${path}`);
-    const now = live("wp-now");
-    if (now) now.textContent = `${shown[shown.length - 1].wp.toFixed(1)}%`;
+  // The score is live all the way through, in the board and in the R column,
+  // and it swells when it changes.
+  const score = event ? (resolved ? event.scoreAfter : event.scoreBefore) : { away: 0, home: 0 };
+  for (const side of ["away", "home"]) {
+    const runs = wire.final ? runsIn(cache.line[side]) : (score?.[side] ?? 0);
+    bumpNumber(board(`runs-${side}`), String(runs));
+    const total = root.querySelector(`[data-ls="${side}-r"]`);
+    if (total) total.textContent = wire.lineRevealed > 0 || wire.final ? String(runs) : "";
+  }
+
+  if (event) {
+    const half = event.half === "top" ? "Top" : "Bottom";
+    const outs = resolved ? event.outsAfter : event.outsBefore;
+    const text = board("inning");
+    if (text) text.textContent = `${half} ${ordinalInning(event.inning)}`;
+    paintBases(board("diamond"), resolved ? event.basesAfter : event.basesBefore, resolved && (event.runs ?? 0) > 0);
+    const outDots = board("outs");
+    if (outDots) {
+      [...outDots.children].forEach((dot, index) => dot.classList.toggle("out", index < Math.min(3, outs)));
+    }
+    const now = board("now");
+    if (now) {
+      now.innerHTML = `${managerChip(state, event.battingTeam, "big")}<span>batting</span><b>${escapeHtml(shortName(stripCardYear(event.batter ?? "")))}</b>`;
+    }
+    const wp = board("wp");
+    const point = cache.wp[resolved ? moment.index + 1 : moment.index];
+    if (wp && point) wp.textContent = `${wire.champion} ${point.wp.toFixed(0)}%`;
   }
 
   if (wire.final) stampReplay(root, wire, cache);
 
-  const host = live("duel");
-  if (!host) return;
-  const moment = cache.moments[wire.momentIndex] ?? null;
-  if (!moment) { host.innerHTML = ""; return; }
+  const host = board("duel");
+  if (!host || !moment) return;
   if (host.dataset.moment !== String(wire.momentIndex)) {
     host.dataset.moment = String(wire.momentIndex);
-    host.innerHTML = duelHtml({ ...wire, moment: { ...moment, phase: wire.phase } }, options);
+    host.innerHTML = duelHtml(state, { ...wire, moment }, options);
+    // The duel is the bottom of a tall module; the board above it is sticky,
+    // so following it down keeps both the spot and the score on screen.
+    host.scrollIntoView({ behavior: "smooth", block: "end" });
   }
   const duel = host.querySelector(".duel");
   if (!duel) return;
-  const reached = (phase) => ["spot", "pitch", "advantage", "swing", "result"].indexOf(wire.phase)
-    >= ["spot", "pitch", "advantage", "swing", "result"].indexOf(phase);
   duel.setAttribute("data-phase", wire.phase);
-  const event = moment.event;
+  const order = ["spot", "pitch", "advantage", "swing", "result"];
+  const reached = (phase) => order.indexOf(wire.phase) >= order.indexOf(phase);
   if (reached("pitch")) {
-    settleDie(host, "die-control", event.controlRoll);
+    settleDie(root, "die-control", event.controlRoll);
     const effective = event.effectiveControl ?? (event.controlTotal - event.controlRoll);
-    const math = live("math-control");
-    if (math) math.textContent = `+${effective} = ${event.controlTotal} vs OB ${event.onBase}`;
+    const math = board("math-control");
+    if (math) math.textContent = `+${effective} = ${event.controlTotal} vs on-base ${event.onBase}`;
   }
   if (reached("swing")) {
-    settleDie(host, "die-swing", event.resultRoll);
-    const math = live("math-swing");
+    settleDie(root, "die-swing", event.resultRoll);
+    const math = board("math-swing");
     if (math) {
       math.textContent = event.swingBonus
-        ? `${event.swingBonus > 0 ? "+" : "−"}${Math.abs(event.swingBonus)} = ${event.swingRoll}`
+        ? `${event.swingBonus > 0 ? "+" : "\u2212"}${Math.abs(event.swingBonus)} = ${event.swingRoll}`
         : "";
     }
   }
@@ -5026,41 +5047,60 @@ function paintReplay(root, wire, cache, options) {
     const before = cache.wp[moment.index]?.wp ?? 50;
     const after = cache.wp[moment.index + 1]?.wp ?? before;
     const delta = after - before;
-    const result = live("duel-result");
+    const result = board("result");
     if (result) {
-      result.textContent = `${resultWord(event.result)} · ${delta >= 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} win probability`;
+      const runs = event.runs ?? 0;
+      result.textContent = runs > 0
+        ? `${resultWord(event.result)} \u00b7 ${runs} in`
+        : resultWord(event.result);
     }
     duel.classList.toggle("duel-negative", delta < 0);
   }
 }
 
-// The final out. Part of the frame rather than a node appended to it: a
-// watcher's screen is redrawn by whatever arrives next, and a stamp that was
-// inserted afterwards goes with it.
-function stampReplay(root, wire, cache) {
-  const stamp = root.querySelector('[data-live="stamp"]');
-  if (!stamp || !stamp.hidden) return;
-  const winner = cache.game.winner;
-  const awayRuns = runsIn(cache.line.away);
-  const homeRuns = runsIn(cache.line.home);
-  const winnerRuns = winner === wire.away ? awayRuns : homeRuns;
-  const loserName = winner === wire.away ? wire.home : wire.away;
-  const loserRuns = winner === wire.away ? homeRuns : awayRuns;
-  const score = root.querySelector('[data-live="stamp-score"]');
-  const share = root.querySelector('[data-live="stamp-share"]');
-  if (score) score.textContent = `${winner} ${winnerRuns}, ${loserName} ${loserRuns}`;
-  if (share) {
-    share.textContent = Number.isFinite(wire.wonShare) ? `as they did ${wire.wonShare}% of the time` : "";
-  }
-  stamp.hidden = false;
-  requestAnimationFrame(() => stamp.classList.add("on"));
+function ordinalInning(n) {
+  const rest = n % 100;
+  if (rest >= 11 && rest <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+}
+
+// A number that changes swells rather than ticking over, so a run scoring is
+// something you see out of the corner of your eye.
+function bumpNumber(node, text) {
+  if (!node || node.textContent === text) return;
+  node.textContent = text;
+  node.classList.remove("bumped");
+  void node.offsetWidth;
+  node.classList.add("bumped");
+}
+
+// The bags, and the plate flaring when somebody touches it. Borrowed from the
+// adventure's battle board, where a run scoring is announced by the bag rather
+// than by a line of text.
+function paintBases(diamond, bases, scored) {
+  if (!diamond) return;
+  const occupied = (bases ?? []).map((runner) => Boolean(runner));
+  [...diamond.children].forEach((bag) => {
+    const base = bag.dataset.base;
+    if (base === "home") {
+      bag.classList.toggle("flare", Boolean(scored));
+      return;
+    }
+    const on = Boolean(occupied[Number(base) - 1]);
+    if (on && !bag.classList.contains("on")) {
+      bag.classList.remove("reached");
+      void bag.offsetWidth;
+      bag.classList.add("reached");
+    }
+    bag.classList.toggle("on", on);
+  });
 }
 
 // A die that has not been thrown on this screen yet tumbles before it settles,
 // wherever the screen is. A die that is already showing its number stays put,
 // so a repaint does not re-roll it.
 function settleDie(root, key, value) {
-  const node = root.querySelector(`[data-live="${key}"]`);
+  const node = root.querySelector(`[data-board="${key}"]`);
   if (!node || node.dataset.settled === String(value)) return;
   node.dataset.settled = String(value);
   node.classList.add("rolling");
@@ -5074,43 +5114,6 @@ function settleDie(root, key, value) {
     node.classList.add("settled");
     node.textContent = String(value);
   }, 58);
-}
-
-// The names and cards on screen. When they change, a rank has changed hands,
-// and the beat is drawn again rather than patched — which also replays its
-// entrance, so an overtake looks like one.
-function ceremonyCast(snapshot) {
-  return [
-    snapshot.beat,
-    ...(snapshot.traits ?? []).map((trait) => `${trait.key}:${trait.team}`),
-    ...(snapshot.leaders ?? []).map((leader) => `${leader.key}:${leader.id}`),
-    snapshot.award ? `award:${snapshot.award.id}` : "",
-    ...(snapshot.reckoning?.hitters ?? []).map((entry) => entry.id),
-    ...(snapshot.reckoning?.pitchers ?? []).map((entry) => entry.id),
-    ...(snapshot.counted ?? []).map((row) => row.team),
-    // The game beat opens before the search for a championship game has
-    // finished, so its first frame carries no game at all. Without this the
-    // beat looks unchanged when the real one arrives and the screen keeps
-    // drawing the empty one.
-    snapshot.beat === "game" ? `game:${snapshot.game?.index ?? "none"}` : ""
-  ].join("|");
-}
-
-// One frame, drawn the same way on the browser running the season and on every
-// browser watching it.
-function drawCeremony(snapshot, context, memory) {
-  const cast = ceremonyCast(snapshot);
-  if (memory.cast === cast) {
-    patchCeremony(app, snapshot);
-    return false;
-  }
-  const changed = memory.cast !== undefined && memory.beat === snapshot.beat;
-  memory.cast = cast;
-  memory.beat = snapshot.beat;
-  app.innerHTML = ceremonyHtml(snapshot, context);
-  patchCeremony(app, snapshot);
-  if (changed) app.querySelector(".ceremony-stage")?.classList.add("lead-change");
-  return true;
 }
 
 const CEREMONY_SKIP_KEY = "mlb-showdown-skip-ceremony";
@@ -5216,23 +5219,32 @@ function startBatchRun(runs, options = {}) {
   let beatOpenedAt = Date.now();
   let figuresAt = 0;
   let ceremonyTimer = null;
-  const ceremonyMemory = {};
   let finalSummary = null;
   let replay = null;
-  let snapshot = { beat: CEREMONY_BEATS[0].key, completed: 0, total: count, teamNames };
+  const opened = [];
+  let snapshot = { beat: CEREMONY_BEATS[0].key, opened: [], completed: 0, total: count, teamNames };
 
+  // Every module that has been opened is still on screen, so every one of them
+  // is rebuilt on each refresh — not just the beat that is landing. A plaque
+  // from the first few thousand games goes on moving until the last one.
   const buildSnapshot = (summary) => {
-    const key = CEREMONY_BEATS[beat].key;
-    const next = { beat: key, completed, total: count, teamNames };
+    const next = {
+      beat: CEREMONY_BEATS[beat].key,
+      opened: [...opened],
+      completed,
+      total: count,
+      teamNames
+    };
     if (!summary) return next;
-    if (key === "traits") next.traits = traitLeaders(summary);
-    if (key === "leaders") next.leaders = leagueLeaders(summary);
-    if (key === "mvp") next.award = ceremonyAward("mvp-hitter", summary);
-    if (key === "cy") next.award = ceremonyAward("cy-young", summary);
-    if (key === "reckoning") {
+    const has = (key) => opened.includes(key);
+    if (has("traits")) next.traits = traitLeaders(summary);
+    if (has("leaders")) next.leaders = leagueLeaders(summary);
+    if (has("mvp")) next.mvp = ceremonyAward("mvp-hitter", summary);
+    if (has("cy")) next.cy = ceremonyAward("cy-young", summary);
+    if (has("reckoning")) {
       next.reckoning = { ...reckoning(summary, costs, { byMoney: auction }), byWpar: Boolean(summary.attribution) };
     }
-    if (key === "countdown" || key === "finalists") {
+    if (has("countdown") || has("finalists")) {
       const rows = countdownRows(summary);
       next.counted = rows.counted.map((row, index) => ({
         place: rows.all.length - index,
@@ -5244,25 +5256,29 @@ function startBatchRun(runs, options = {}) {
       next.finalists = rows.finalists;
       next.meetings = replay?.meetings ?? 0;
     }
-    if (key === "game") next.game = replay?.wire ?? null;
+    if (has("game")) next.game = replay?.wire ?? null;
     return next;
   };
 
   const drawFrame = () => {
     const view = hydrateCeremony(snapshot, teams, seed);
-    const redrew = drawCeremony(view, ceremonyContext, ceremonyMemory);
-    if (redrew) app.onclick = ceremonyClick;
-    if (view.beat === "game" && replay?.cache) paintReplay(app, replay.wire, replay.cache, ceremonyContext);
+    if (!app.querySelector(".ceremony")) {
+      resetAppHandlers();
+      app.innerHTML = ceremonyShellHtml();
+      app.onclick = ceremonyClick;
+    }
+    syncCeremony(app, view, ceremonyContext);
+    if (view.game && replay?.cache) paintReplay(app, replay.wire, replay.cache, view, ceremonyContext);
     sendCeremony();
   };
 
   const openBeat = (summary) => {
-    snapshot = buildSnapshot(summary);
-    if (CEREMONY_BEATS[beat].key === "epilogue") {
+    const key = CEREMONY_BEATS[beat].key;
+    if (!opened.includes(key)) opened.push(key);
+    if (key === "epilogue") {
       ceremonyContext.raceChart = renderRaceChart({ teamNames, totalRuns: count, series: raceSeries() });
     }
-    resetAppHandlers();
-    ceremonyMemory.cast = undefined;
+    snapshot = buildSnapshot(summary);
     drawFrame();
     beatOpenedAt = Date.now();
   };
@@ -5386,7 +5402,9 @@ function startBatchRun(runs, options = {}) {
     const frame = (changes) => {
       Object.assign(replay.wire, changes);
       snapshot = buildSnapshot(finalSummary);
-      paintReplay(app, replay.wire, replay.cache, ceremonyContext);
+      const view = hydrateCeremony(snapshot, teams, seed);
+      syncCeremony(app, view, ceremonyContext);
+      paintReplay(app, replay.wire, replay.cache, view, ceremonyContext);
       sendCeremony(true);
     };
 
@@ -5799,7 +5817,7 @@ function applySharedSimProgress(payload) {
   if (payload.ceremony && !watch.optedOut) {
     // The epilogue's chart is this screen's own race, drawn from the tallies it
     // has been fed all along rather than shipped over with the beat.
-    if (payload.ceremony.beat === "epilogue" && !watch.context.raceChart) {
+    if ((payload.ceremony.opened ?? []).includes("epilogue") && !watch.context.raceChart) {
       watch.context.raceChart = renderRaceChart({
         teamNames: watch.teamNames,
         totalRuns: total,
@@ -5807,10 +5825,14 @@ function applySharedSimProgress(payload) {
       });
     }
     const view = hydrateCeremony(payload.ceremony, watch.teams, watch.seed);
-    const redrew = drawCeremony(view, watch.context, watch.memory);
-    if (redrew) app.onclick = watch.onClick;
-    if (view.beat === "game" && view.game) {
-      paintReplay(app, view.game, ceremonyReplay(view.game, watch.teams, watch.seed), watch.context);
+    if (!app.querySelector(".ceremony")) {
+      resetAppHandlers();
+      app.innerHTML = ceremonyShellHtml();
+      app.onclick = watch.onClick;
+    }
+    syncCeremony(app, view, watch.context);
+    if (view.game) {
+      paintReplay(app, view.game, ceremonyReplay(view.game, watch.teams, watch.seed), view, watch.context);
     }
     return;
   }

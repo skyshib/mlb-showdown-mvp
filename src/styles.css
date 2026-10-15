@@ -7800,18 +7800,21 @@ html.club .coach-flip.down,
 html.club .coach-flip.pending { color: #ff7a6b; }
 
 /* ---- the reveal ceremony ----------------------------------------------------
-   The screen a sim shows while it runs. Beats arrive one at a time and every
-   figure on them is still moving, so the entrances are staggered in CSS and the
-   numbers are patched in place — see ui/ceremony.js for why nothing here is
-   re-rendered mid-beat. */
+   The screen a sim shows while it runs. Beats STACK: each one is appended below
+   the last and keeps updating, so by the end the whole season is on one page.
+   Nothing is ever re-rendered while it is up — a row whose man changes turns
+   over on its own (see [data-swap]) and everything else is patched in place. */
 .ceremony {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 18px;
-  min-height: min(70vh, 640px);
+  gap: 16px;
+  min-height: 60vh;
 }
 
 .ceremony-rail {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -7830,293 +7833,112 @@ html.club .coach-flip.pending { color: #ff7a6b; }
   opacity: 0.82;
 }
 
-.ceremony-rail .rail-bar {
-  position: relative;
-  flex: 1;
-  height: 6px;
-  background: rgba(240, 231, 210, 0.22);
-  overflow: hidden;
-}
-
-.ceremony-rail .rail-bar i {
-  position: absolute;
-  inset: 0 auto 0 0;
-  display: block;
-  background: var(--accent-bright);
-  transition: width 0.3s linear;
-}
-
+.ceremony-rail .rail-bar { position: relative; flex: 1; height: 6px; background: rgba(240, 231, 210, 0.22); overflow: hidden; }
+.ceremony-rail .rail-bar i { position: absolute; inset: 0 auto 0 0; display: block; background: var(--accent-bright); transition: width 0.3s linear; }
 .ceremony-rail.complete .rail-bar i { background: var(--sheet); }
+.ceremony-rail .rail-count { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-variant-numeric: tabular-nums; }
 
-.ceremony-rail .rail-count {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+.ceremony-feed { display: grid; gap: clamp(20px, 4vw, 40px); align-content: start; }
+
+.ceremony-module {
+  display: grid;
+  gap: 14px;
+  padding-bottom: clamp(16px, 3vw, 28px);
+  border-bottom: 1px solid var(--hairline);
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 0.45s ease, transform 0.55s cubic-bezier(0.2, 0.8, 0.25, 1);
 }
 
-.ceremony-stage { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.ceremony-module.arrived { opacity: 1; transform: none; }
+.ceremony-module:last-child { border-bottom: 0; }
+.module-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.module-head h2 { margin: 0; font-size: clamp(24px, 4vw, 38px); }
 
-.ceremony-head { margin-bottom: 18px; display: flex; flex-direction: column; align-items: flex-start; }
-.ceremony-head h1 { margin: 2px 0 0; font-size: clamp(28px, 5vw, 46px); }
-
-.ceremony-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.ceremony-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; position: sticky; bottom: 0; background: var(--sheet); padding-top: 10px; }
 .ceremony-sample { margin: 0; margin-right: auto; font-size: 13px; color: var(--muted); }
 .ceremony-skip { background: transparent; color: var(--accent-text); }
 
-/* A rank changing hands redraws the beat, which replays its entrance. */
-.ceremony-stage.lead-change { animation: ceremony-flash 0.6s ease; }
-@keyframes ceremony-flash { 0% { background: color-mix(in srgb, var(--accent) 14%, transparent); } }
+/* A row whose man has changed turns over in place. */
+[data-swap] { display: contents; }
+.plaque [data-swap], .leader-row [data-swap], .reckon-row [data-swap], .placard [data-swap], .award-stage [data-swap] { display: contents; }
+.swap-out > * { animation: swap-out 0.22s ease forwards; }
+.swap-in > * { animation: swap-in 0.3s ease backwards; }
+@keyframes swap-out { to { opacity: 0; transform: translateY(-10px); } }
+@keyframes swap-in { from { opacity: 0; transform: translateY(12px); } }
 
-@keyframes ceremony-rise {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: none; }
-}
-
-@keyframes ceremony-stamp {
-  from { opacity: 0; transform: scale(0.86) rotate(-3deg); }
-  to { opacity: 1; transform: none; }
-}
-
-/* ---- team traits ---- */
-.plaque-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 14px;
-  max-width: 820px;
-}
-
-.plaque {
-  border: 3px solid var(--line);
-  background: var(--card);
-  padding: 14px 16px;
-  display: grid;
-  gap: 2px;
-  border-left-width: 10px;
-  border-left-color: var(--plaque-color, var(--accent));
-  animation: ceremony-stamp 0.4s cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
-}
-
-.plaque:nth-child(2) { animation-delay: 0.32s; }
-.plaque:nth-child(3) { animation-delay: 0.64s; }
-.plaque:nth-child(4) { animation-delay: 0.96s; }
-.plaque:nth-child(5) { animation-delay: 1.28s; }
-.plaque:nth-child(6) { animation-delay: 1.6s; }
-
-.plaque-cat {
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 12px;
-  color: var(--accent-text);
-}
-
-.plaque-who {
-  font-family: var(--display);
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: clamp(22px, 3vw, 30px);
-  line-height: 1.05;
-}
-
-.plaque-val {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---- league leaders ---- */
-.leader-list { display: grid; gap: 12px; }
-
-.leader-row {
-  display: grid;
-  grid-template-columns: 62px minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: center;
-  border-bottom: 1px solid var(--hairline);
-  padding-bottom: 10px;
-  animation: ceremony-rise 0.45s ease backwards;
-}
-
-.leader-row:nth-child(2) { animation-delay: 0.3s; }
-.leader-row:nth-child(3) { animation-delay: 0.6s; }
-.leader-row:nth-child(4) { animation-delay: 0.9s; }
-
-/* The card face is its own container, so the wrapper's width is the only
-   thing that decides how big it draws. Both wrappers are spans, so they have
-   to be told to take a width at all. */
-.mini-card { display: block; width: 100%; }
-.cer-leader-card { display: block; width: 62px; }
-
-.leader-who b {
-  display: block;
-  font-family: var(--display);
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: clamp(19px, 2.6vw, 26px);
-  line-height: 1.1;
-}
-
-.leader-who em {
-  font-style: normal;
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.leader-value {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: clamp(20px, 2.6vw, 26px);
-  color: var(--accent-text);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---- the award cards ---- */
-.award-stage {
-  display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(0, 1fr);
-  gap: clamp(18px, 4vw, 42px);
-  align-items: center;
-}
-
-.cer-award-card { animation: card-turn 0.6s cubic-bezier(0.2, 0.9, 0.3, 1) backwards; }
-
-@keyframes card-turn {
-  from { opacity: 0; transform: rotateY(84deg) scale(0.92); }
-  to { opacity: 1; transform: none; }
-}
-
-.award-copy > * { animation: ceremony-rise 0.42s ease backwards; animation-delay: 0.45s; }
-.award-copy > *:nth-child(2) { animation-delay: 0.55s; }
-.award-copy > *:nth-child(3) { animation-delay: 0.65s; }
-.award-copy > *:nth-child(4) { animation-delay: 0.75s; }
-.award-copy > *:nth-child(5) { animation-delay: 0.85s; }
-
-.award-name {
-  font-family: var(--display);
-  font-style: italic;
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: clamp(30px, 5.4vw, 56px);
-  line-height: 0.95;
-  margin: 0 0 8px;
-}
-
-.award-headline { font-size: clamp(16px, 2.2vw, 21px); margin: 0 0 4px; }
-.award-lines { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
-.award-foot { margin: 14px 0 0; }
-
-.chip-team {
+/* ---- the manager, said loudly ---- */
+.manager-chip {
   display: inline-block;
-  background: var(--navy);
-  color: var(--sheet);
+  background: var(--chip, var(--navy));
+  color: #fdfbf4;
   font-family: var(--display);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   font-size: 13px;
-  padding: 4px 14px;
+  padding: 3px 11px;
+  border: 2px solid var(--line);
+  white-space: nowrap;
 }
+
+.manager-chip.big { font-size: clamp(17px, 2.4vw, 24px); padding: 4px 14px; letter-spacing: 0.06em; }
+.manager-chip.huge { font-size: clamp(30px, 6vw, 60px); padding: 6px 22px; letter-spacing: 0.02em; font-style: italic; }
+
+/* ---- team traits ---- */
+.plaque-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; max-width: 860px; }
+.plaque {
+  border: 3px solid var(--line);
+  background: var(--card);
+  padding: 13px 15px;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.plaque-cat { font-family: var(--display); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--accent-text); }
+.plaque-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ---- league leaders ---- */
+.leader-list { display: grid; gap: 12px; max-width: 760px; }
+.leader-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto auto; gap: 14px; align-items: center; border-bottom: 1px solid var(--hairline); padding-bottom: 10px; }
+.mini-card { display: block; width: 100%; }
+.cer-leader-card { display: block; width: 62px; }
+.leader-who b { display: block; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: clamp(18px, 2.4vw, 25px); line-height: 1.1; }
+.leader-who em { font-style: normal; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.leader-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(19px, 2.4vw, 25px); color: var(--accent-text); font-variant-numeric: tabular-nums; }
+
+/* ---- the award cards ---- */
+.award-stage { display: grid; grid-template-columns: minmax(170px, 260px) minmax(0, 1fr); gap: clamp(18px, 4vw, 40px); align-items: center; }
+.cer-award-card { animation: card-turn 0.6s cubic-bezier(0.2, 0.9, 0.3, 1) backwards; }
+@keyframes card-turn { from { opacity: 0; transform: rotateY(84deg) scale(0.92); } to { opacity: 1; transform: none; } }
+.award-name { font-family: var(--display); font-style: italic; font-weight: 700; text-transform: uppercase; font-size: clamp(28px, 5vw, 52px); line-height: 0.95; margin: 0 0 10px; }
+.award-owner { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.award-owner span { font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.award-headline { font-size: clamp(16px, 2.2vw, 21px); margin: 0 0 4px; }
+.award-lines { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
 
 .wpar-split { display: grid; gap: 6px; margin-top: 12px; max-width: 420px; }
-
-.split-row {
-  display: grid;
-  grid-template-columns: 94px minmax(0, 1fr) 52px;
-  gap: 10px;
-  align-items: center;
-}
-
-.split-key {
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-size: 11px;
-  color: var(--muted);
-}
-
+.split-row { display: grid; grid-template-columns: 94px minmax(0, 1fr) 52px; gap: 10px; align-items: center; }
+.split-key { font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; font-size: 11px; color: var(--muted); }
 .split-track { position: relative; height: 12px; background: color-mix(in srgb, var(--navy) 10%, transparent); }
-.split-track::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: -2px;
-  bottom: -2px;
-  width: 1px;
-  background: color-mix(in srgb, var(--navy) 45%, transparent);
-}
+.split-track::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: color-mix(in srgb, var(--navy) 45%, transparent); }
 .split-track i { position: absolute; top: 0; bottom: 0; display: block; left: 50%; width: 0; transition: left 0.2s linear, width 0.2s linear; }
 .split-row[data-split="hitting"] i { background: var(--accent); }
 .split-row[data-split="baserunning"] i { background: #8a6a2f; }
 .split-row[data-split="defense"] i { background: var(--navy); }
 .split-row[data-split="pitching"] i { background: #3f7d5a; }
-
-.split-value {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
+.split-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---- the draft, judged ---- */
-.reckon-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: clamp(16px, 3vw, 32px); }
+.reckon-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: clamp(16px, 3vw, 32px); }
 .reckon-side { display: grid; gap: 10px; align-content: start; }
-
-.reckon-head {
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  font-size: 12px;
-  color: var(--accent-text);
-  border-bottom: 3px solid var(--line);
-  padding-bottom: 5px;
-  margin: 0;
-}
-
-.reckon-row {
-  display: grid;
-  grid-template-columns: 24px 46px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  background: var(--card);
-  border: 2px solid var(--line);
-  padding: 8px 12px;
-  animation: ceremony-rise 0.42s ease backwards;
-}
-
-.reckon-side .reckon-row:nth-of-type(1) { animation-delay: 0.6s; }
-.reckon-side .reckon-row:nth-of-type(2) { animation-delay: 0.3s; }
-.reckon-side .reckon-row:nth-of-type(3) { animation-delay: 0s; }
+.reckon-head { font-family: var(--display); font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; font-size: 12px; color: var(--accent-text); border-bottom: 3px solid var(--line); padding-bottom: 5px; margin: 0; }
+.reckon-row { display: grid; grid-template-columns: 22px 44px minmax(0, 1fr) auto auto; gap: 11px; align-items: center; background: var(--card); border: 2px solid var(--line); padding: 8px 11px; }
 .reckon-row.bargain { border-color: var(--accent); border-width: 3px; }
-
-.reckon-rank {
-  font-family: var(--display);
-  font-style: italic;
-  font-weight: 700;
-  font-size: 24px;
-  color: var(--accent-text);
-  line-height: 1;
-}
-
-.reckon-card { display: block; width: 46px; }
+.reckon-rank { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 23px; color: var(--accent-text); line-height: 1; }
+.reckon-card { display: block; width: 44px; }
 .reckon-who { min-width: 0; }
-
-.reckon-who b {
-  display: block;
-  font-family: var(--display);
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 17px;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+.reckon-who b { display: block; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 17px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .reckon-who em { font-style: normal; font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
 .reckon-cost { text-align: right; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
 .reckon-cost em { font-style: normal; display: block; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -8124,223 +7946,146 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .reckon-row.bargain .reckon-cost b { color: var(--accent-text); }
 
 /* ---- the countdown ---- */
-.placard-stack { display: grid; gap: 10px; }
-
-.placard {
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) auto auto;
-  gap: 18px;
-  align-items: center;
-  background: var(--card);
-  border: 3px solid var(--line);
-  padding: 10px 18px;
-  animation: placard-slide 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards;
-}
-
-@keyframes placard-slide {
-  from { opacity: 0; transform: translateX(-42px); }
-  to { opacity: 1; transform: none; }
-}
-
+.placard-stack { display: grid; gap: 10px; max-width: 720px; }
+.placard { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto auto; gap: 16px; align-items: center; background: var(--card); border: 3px solid var(--line); padding: 9px 16px; animation: placard-slide 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
+@keyframes placard-slide { from { opacity: 0; transform: translateX(-42px); } to { opacity: 1; transform: none; } }
 .placard:nth-child(2) { animation-delay: 0.7s; }
 .placard:nth-child(3) { animation-delay: 1.4s; }
 .placard:nth-child(4) { animation-delay: 2.1s; }
 .placard:nth-child(5) { animation-delay: 2.8s; }
-
-.placard-pos { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 34px; color: var(--accent-text); line-height: 1; }
-.placard-name { font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: clamp(22px, 3vw, 30px); }
-.placard-record, .placard-pct { font-family: ui-monospace, Menlo, monospace; font-size: 17px; font-variant-numeric: tabular-nums; }
+.placard-pos { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 32px; color: var(--accent-text); line-height: 1; }
+.placard-record, .placard-pct { font-family: ui-monospace, Menlo, monospace; font-size: 16px; font-variant-numeric: tabular-nums; }
 .placard-pct { color: var(--muted); }
 
 /* ---- the two left ---- */
-.finalists {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: center;
-  gap: clamp(16px, 4vw, 48px);
+.finalists { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: clamp(14px, 4vw, 40px); padding: clamp(14px, 3vw, 30px) 0; }
+.finalist-and { font-family: var(--display); font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; font-size: 14px; color: var(--muted); }
+.finalists-note { text-align: center; margin: 0; color: var(--muted); }
+
+/* ---- the championship game ----
+   The board is the thing: who is batting, what the score is, who is on and how
+   many are out, in type you can follow from across the room. */
+.replay { display: grid; gap: 14px; position: relative; }
+.replay-sub { font-size: 13px; color: var(--muted); margin: 0; }
+
+/* The board stays put while the at-bat plays out underneath it, so the score,
+   the bases and the outs are never the thing you have to scroll back for. */
+.scoreboard {
+  position: sticky;
+  top: 44px;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: clamp(14px, 3vw, 34px);
+  align-items: center;
   background: var(--navy);
   color: var(--sheet);
-  padding: clamp(20px, 4vw, 44px);
-  animation: ceremony-rise 0.5s ease;
+  padding: clamp(12px, 2.4vw, 22px) clamp(14px, 3vw, 28px);
 }
 
-.finalist {
+.sb-side { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.sb-side[data-side="away"] { align-items: flex-end; }
+.sb-side[data-side="home"] { align-items: flex-start; }
+.sb-runs {
   font-family: var(--display);
+  font-weight: 700;
   font-style: italic;
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: clamp(34px, 7vw, 68px);
-  line-height: 1;
-}
-
-.finalist-and { font-family: var(--display); font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; font-size: 14px; opacity: 0.75; }
-.finalists-note { text-align: center; margin: 14px 0 0; color: var(--muted); }
-
-/* ---- the championship game ---- */
-.replay { display: grid; gap: 12px; position: relative; }
-.replay-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
-
-.replay-flag {
-  background: var(--navy);
-  color: var(--sheet);
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 12px;
-  padding: 3px 10px;
-}
-
-.replay-sub { font-size: 13px; color: var(--muted); }
-
-.cer-wp-chart { position: relative; background: var(--card); border: 2px solid var(--line); padding: 6px 10px; }
-.cer-wp-chart svg { display: block; width: 100%; height: 54px; }
-.cer-wp-chart .wp-mid { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
-.cer-wp-chart .wp-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-
-.wp-side {
-  position: absolute;
-  left: 12px;
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.wp-side.top { top: 5px; }
-.wp-side.bottom { bottom: 5px; }
-
-.wp-now {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 16px;
-  color: var(--accent-text);
-  background: color-mix(in srgb, var(--card) 88%, transparent);
-  padding: 0 4px;
+  font-size: clamp(46px, 11vw, 104px);
+  line-height: 0.88;
   font-variant-numeric: tabular-nums;
 }
+.sb-runs.bumped { animation: run-bump 0.5s cubic-bezier(0.2, 1.6, 0.4, 1); }
+@keyframes run-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.35); color: var(--accent-bright); }
+  100% { transform: scale(1); }
+}
+
+.sb-middle { display: grid; justify-items: center; gap: 7px; }
+.sb-inning { font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: clamp(12px, 1.8vw, 15px); opacity: 0.85; white-space: nowrap; }
+
+.sb-diamond { position: relative; width: clamp(62px, 9vw, 92px); height: clamp(62px, 9vw, 92px); display: block; }
+.sb-diamond i {
+  position: absolute;
+  width: 26%;
+  height: 26%;
+  transform: rotate(45deg);
+  border: 2px solid var(--sheet);
+  background: transparent;
+}
+.sb-diamond i[data-base="1"] { right: 2%; top: 37%; }
+.sb-diamond i[data-base="2"] { left: 37%; top: 2%; }
+.sb-diamond i[data-base="3"] { left: 2%; top: 37%; }
+.sb-diamond i[data-base="home"] { left: 37%; bottom: 2%; }
+.sb-diamond i.on { background: var(--sheet); }
+/* A man reaching a bag swells it; touching the plate flares it in the sign's
+   red, because that one means a run. Borrowed from the adventure's board. */
+.sb-diamond i.reached { animation: bag-pulse 0.42s ease-out; }
+.sb-diamond i.flare { animation: bag-flare 0.7s ease-out; }
+@keyframes bag-pulse { 45% { transform: rotate(45deg) scale(1.8); } }
+@keyframes bag-flare {
+  30% { transform: rotate(45deg) scale(2.1); background: var(--accent-bright); border-color: var(--accent-bright); }
+  70% { transform: rotate(45deg) scale(1.7); background: var(--accent-bright); border-color: var(--accent-bright); }
+}
+
+.sb-outs { display: flex; gap: 6px; }
+.sb-outs i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--sheet); }
+.sb-outs i.out { background: var(--sheet); }
+.sb-wp { font-family: ui-monospace, Menlo, monospace; font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.now-batting { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; }
+.now-batting span { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.now-batting b { font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: clamp(18px, 2.6vw, 26px); }
 
 .line-score-wrap { overflow-x: auto; }
-.line-score { border-collapse: collapse; width: 100%; font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
-.line-score th, .line-score td { border: 1px solid var(--hairline); text-align: center; padding: 4px 0; font-size: 14px; min-width: 28px; }
+.line-score { border-collapse: collapse; font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.line-score th, .line-score td { border: 1px solid var(--hairline); text-align: center; padding: 4px 0; font-size: 14px; min-width: 30px; }
 .line-score th { background: var(--navy); color: var(--sheet); font-family: var(--display); font-size: 11px; letter-spacing: 0.06em; }
-.line-score th.ls-team, .line-score td.ls-team { text-align: left; padding-left: 10px; min-width: 96px; }
-.line-score td.ls-team { font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 16px; }
+.line-score th.ls-team, .line-score td.ls-team { text-align: left; padding-left: 10px; min-width: 104px; }
+.line-score td.ls-team { font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 15px; }
 .line-score td.ls-total { background: var(--sheet); font-weight: 700; }
 .line-score td.scored { color: var(--accent-text); font-weight: 700; }
 
 /* the duel */
-.duel { background: var(--card); border: 3px solid var(--line); padding: 12px 16px; }
-.duel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; }
-.duel-inning { font-family: var(--display); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 15px; }
-
-.duel-leverage {
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-size: 12px;
-  background: var(--navy);
-  color: var(--sheet);
-  padding: 2px 9px;
-}
-
+.duel { display: grid; grid-template-columns: minmax(120px, 210px) minmax(0, 1fr) minmax(120px, 210px); gap: clamp(14px, 3vw, 36px); align-items: center; background: var(--card); border: 3px solid var(--line); padding: clamp(12px, 2vw, 20px); }
+/* The face is its own container and has no width of its own, so centring the
+   column would shrink it to nothing. It takes the column's width; the text
+   around it is centred instead. */
+.duel-card { display: grid; gap: 7px; text-align: center; }
+.duel-card .gq-card { width: 100%; margin-bottom: 0; }
+.duel-role { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 0; }
+.duel-role span { font-family: var(--display); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; font-size: 11px; color: var(--muted); }
+.duel-name { margin: 0; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 16px; text-align: center; }
+.duel-middle { display: grid; justify-items: center; gap: 7px; min-width: 0; }
+.duel-leverage { font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; font-size: 12px; background: var(--navy); color: var(--sheet); padding: 2px 10px; }
 .duel-leverage.hot { background: var(--accent); }
-.duel-score { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--muted); }
-
-.duel-body {
-  display: grid;
-  grid-template-columns: minmax(96px, 150px) minmax(0, 1fr) minmax(96px, 150px);
-  gap: clamp(12px, 3vw, 30px);
-  align-items: center;
-}
-
-.duel-role { font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 10px; color: var(--muted); margin: 0 0 6px; }
-.duel-middle { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; min-width: 0; }
-.duel-rolls { display: grid; gap: 4px; justify-items: center; }
-.duel-roll { display: flex; align-items: center; gap: 8px; }
-.roll-label { font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 11px; color: var(--muted); width: 48px; text-align: right; }
-
-.die {
-  display: inline-grid;
-  place-content: center;
-  width: 34px;
-  height: 34px;
-  border: 2px solid var(--line);
-  background: var(--sheet);
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 19px;
-  font-variant-numeric: tabular-nums;
-}
-
+.duel-roll { display: flex; align-items: center; gap: 9px; }
+.roll-label { font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 11px; color: var(--muted); width: 46px; text-align: right; }
+.die { display: inline-grid; place-content: center; width: 42px; height: 42px; border: 2px solid var(--line); background: var(--sheet); font-family: var(--display); font-weight: 700; font-size: 23px; font-variant-numeric: tabular-nums; }
 .die.rolling { animation: die-shake 0.14s linear infinite; }
-.die.settled { background: var(--accent); color: var(--accent-ink); border-color: var(--line); }
+.die.settled { background: var(--accent); color: var(--accent-ink); }
 @keyframes die-shake {
   0% { transform: translate(0, 0) rotate(-3deg); }
   50% { transform: translate(1px, -2px) rotate(4deg); }
   100% { transform: translate(0, 0) rotate(-3deg); }
 }
-
 .roll-math { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--muted); }
-
-.duel-advantage {
-  margin: 2px 0;
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-size: 12px;
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
+.duel-advantage { margin: 0; font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 13px; opacity: 0; transition: opacity 0.3s ease; }
 .duel-advantage.pitcher-advantage { color: var(--navy); }
 .duel-advantage.hitter-advantage { color: var(--accent-text); }
-
-.duel-result {
-  margin: 6px 0 0;
-  text-align: center;
-  font-family: var(--display);
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: clamp(16px, 2.4vw, 22px);
-  color: var(--accent-text);
-  min-height: 1.2em;
-}
-
+.duel-result { margin: 2px 0 0; text-align: center; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: clamp(18px, 2.8vw, 27px); color: var(--accent-text); min-height: 1.2em; }
 .duel.duel-negative .duel-result { color: var(--navy); }
-
-/* What the panel shows depends on how far through the plate appearance it is:
-   the spot first, then the pitch, then the swing, then what happened. */
 .duel[data-phase="spot"] .duel-roll,
 .duel[data-phase="pitch"] [data-roll="swing"],
 .duel[data-phase="advantage"] [data-roll="swing"] { opacity: 0.25; }
 .duel[data-phase="advantage"] .duel-advantage,
 .duel[data-phase="swing"] .duel-advantage,
 .duel[data-phase="result"] .duel-advantage { opacity: 1; }
-.duel .base-state.after { opacity: 0; transition: opacity 0.35s ease; }
-.duel[data-phase="result"] .base-state.after { opacity: 1; }
-
-.base-state { display: grid; justify-items: center; gap: 3px; }
-.base-label { font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px; color: var(--muted); }
-.base-state svg { width: 52px; height: 52px; }
-.base-state rect { fill: var(--card-2); stroke: var(--navy); stroke-width: 5; }
-.base-state rect.on { fill: var(--accent); }
-.base-outs { display: flex; gap: 4px; }
-.base-outs i { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--navy); }
-.base-outs i.out { background: var(--navy); }
 
 .replay-stamp {
   position: absolute;
   left: 50%;
-  top: 46%;
+  top: 44%;
   transform: translate(-50%, -50%) scale(0.7) rotate(-7deg);
   background: var(--accent);
   color: var(--accent-ink);
@@ -8349,27 +8094,24 @@ html.club .coach-flip.pending { color: #ff7a6b; }
   box-shadow: 0 0 0 7px var(--sheet);
   opacity: 0;
   transition: opacity 0.3s ease, transform 0.45s cubic-bezier(0.2, 1.5, 0.4, 1);
+  z-index: 4;
 }
-
 .replay-stamp.on { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-7deg); }
 .replay-stamp b { display: block; font-family: var(--display); font-style: italic; font-weight: 700; text-transform: uppercase; font-size: clamp(26px, 5vw, 46px); }
 .replay-stamp em { font-style: normal; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.88; }
 
 .epilogue-chart { max-width: 920px; }
 
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   .award-stage { grid-template-columns: minmax(0, 1fr); }
-  .cer-award-card { max-width: 220px; }
-  .duel-body { grid-template-columns: minmax(0, 1fr); }
-  .duel-middle { grid-template-columns: minmax(0, 1fr); }
+  .cer-award-card { max-width: 210px; }
+  .duel { grid-template-columns: minmax(0, 1fr); }
+  .duel-card { max-width: 190px; margin: 0 auto; }
+  .scoreboard { grid-template-columns: 1fr auto 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .plaque, .leader-row, .reckon-row, .placard, .cer-award-card, .award-copy > *, .finalists { animation: none; }
-  .die.rolling { animation: none; }
-  .ceremony-stage.lead-change { animation: none; }
+  .ceremony-module, .placard, .cer-award-card { animation: none; transition: none; opacity: 1; transform: none; }
+  .die.rolling, .sb-runs.bumped, .sb-diamond i.reached, .sb-diamond i.flare { animation: none; }
+  .swap-out > *, .swap-in > * { animation: none; }
 }
-
-/* The duel reads before, the at-bat, after — three columns, so the rolls and
-   the call travel together as the middle one. */
-.duel-call { display: grid; justify-items: center; min-width: 0; }
