@@ -24,9 +24,12 @@ export const RESULTS = {
 // Both readings below are pure functions of a card's id (and, for the
 // Showdown sets, its name) — and they are asked a LOT: the NPC's climb runs
 // personConflict over every candidate in every slot's bucket on every pass,
-// which is tens of thousands of id parses per team. Parsing is regex work,
-// so the answers are memoized by id. Ids are stable strings within a pool;
-// the caches are bounded by the number of distinct cards ever seen.
+// which is tens of thousands of id parses per team. Parsing is regex work, so
+// the answers are memoized — each under the thing it was read FROM. An id
+// parses to the same identity for ever, so identityCache is keyed by id; a
+// person read off the printed name is keyed by that name, because a generated
+// league re-uses its ids from seed to seed and h-57 is a different man in
+// every room. Both caches are bounded by the distinct ids and names seen.
 const identityCache = new Map();
 const personCache = new Map();
 
@@ -75,32 +78,38 @@ const PERSON_ALIASES = new Map([
 // man. A deal uses this to put each person on the board once — and a board
 // that holds one Ken Griffey needs no roster rule about the other three.
 export function cardPerson(card) {
-  const key = card?.id ?? "";
-  if (key && personCache.has(key)) return personCache.get(key);
+  // An MLB id names the man outright, and playerIdentity already memoizes the
+  // parse. Everything else is read off the FACE, so that is what the answer is
+  // filed under — never the id. A generated league mints its cards as h-57,
+  // p-12 and so on and starts the numbering over for every seed, so one id
+  // belongs to a different person in every room dealt; a cache keyed by id
+  // answered the second room with the first room's names, and the deal, the
+  // roster rule and the standing replacements all read this.
   const identity = playerIdentity(card?.id);
-  const person = identity
-    ? identity.person
-    : (() => {
-        // The same man, however the card spells him. The Showdown sets print one
-        // player's name several ways — "A.J. Burnett" and "A. J. Burnett",
-        // "Jeff D'Amico" with either apostrophe, "hee seop choi" and
-        // "hee-seop choi" — and a deal that reads those as different people puts
-        // two of him on the board, which is what the roster rule exists to make
-        // impossible. So the key keeps the letters and digits and drops the
-        // rest: punctuation, spacing and accents. A suffix still counts, because
-        // Ken Griffey and Ken Griffey Jr. are two men — except for the men in
-        // PERSON_ALIASES above, whose cards print the suffix only some years.
-        const name = String(card?.name ?? "")
-          .replace(/\s+'\d{2,4}$/, "")
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "");
-        // A spelling the sets use for a man they also spell another way reads
-        // as the spelling he is filed under; everyone else is his own key.
-        return name ? `name:${PERSON_ALIASES.get(name) ?? name}` : null;
-      })();
-  if (key) personCache.set(key, person);
+  if (identity) return identity.person;
+  const printed = card?.name;
+  if (typeof printed !== "string" || !printed) return null;
+  const cached = personCache.get(printed);
+  if (cached !== undefined) return cached;
+  // The same man, however the card spells him. The Showdown sets print one
+  // player's name several ways — "A.J. Burnett" and "A. J. Burnett",
+  // "Jeff D'Amico" with either apostrophe, "hee seop choi" and
+  // "hee-seop choi" — and a deal that reads those as different people puts
+  // two of him on the board, which is what the roster rule exists to make
+  // impossible. So the key keeps the letters and digits and drops the
+  // rest: punctuation, spacing and accents. A suffix still counts, because
+  // Ken Griffey and Ken Griffey Jr. are two men — except for the men in
+  // PERSON_ALIASES above, whose cards print the suffix only some years.
+  const name = printed
+    .replace(/\s+'\d{2,4}$/, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  // A spelling the sets use for a man they also spell another way reads
+  // as the spelling he is filed under; everyone else is his own key.
+  const person = name ? `name:${PERSON_ALIASES.get(name) ?? name}` : null;
+  personCache.set(printed, person);
   return person;
 }
 

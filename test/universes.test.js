@@ -344,6 +344,29 @@ test("every deck carries a standing replacement at every slot", () => {
   }
 });
 
+test("a generated league's people are read off the face, not off a re-used id", () => {
+  // A fictional set mints its cards as h-57, p-12 and starts the numbering over
+  // for every seed, so one id belongs to a different man in every room dealt.
+  // cardPerson used to file its answer under the id, which meant the second
+  // room of a session got the first room's people — and the deal, the roster
+  // rule and the standing replacements all ask it who a card is.
+  setUniverse("person-cache-a", "fictional", { priceNoise: false });
+  const first = universePool().map((card) => ({ id: card.id, name: card.name, person: cardPerson(card) }));
+  setUniverse("person-cache-b", "fictional", { priceNoise: false });
+  const second = new Map(universePool().map((card) => [card.id, card]));
+  let shared = 0;
+  for (const card of first) {
+    const now = second.get(card.id);
+    if (!now) continue;
+    shared += 1;
+    assert.equal(cardPerson(now), cardPerson({ id: null, name: now.name }), `${card.id} reads as somebody else's card`);
+    if (now.name !== card.name) {
+      assert.notEqual(cardPerson(now), card.person, `${card.id} is still ${card.name} after re-seeding`);
+    }
+  }
+  assert.ok(shared > 100, "the two seeds should share ids to compare");
+});
+
 test("a slot whose floor is all on the board widens rather than dealing the same man twice", () => {
   // Classic groups a card at the position printed on him FIRST, and its
   // 10-point rung at first base is one man deep: Tony Clark '03. Deal him — or
