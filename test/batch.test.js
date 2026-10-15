@@ -179,6 +179,21 @@ test("single-game batch hitter totals match the source box score", () => {
   }
 });
 
+test("pitchers count the games they appeared in, not their team's", () => {
+  const teams = draftTeams("batch-games-pitched", 2);
+  const seed = "batch-games-pitched";
+  const summary = simulateBatch(teams, { seed, runs: 1 });
+  const game = simulateBatchGame(teams, seed, 1);
+  const boxPitchers = [...game.boxScore.away.pitchers, ...game.boxScore.home.pitchers].filter((line) => line.bf > 0);
+
+  assert.equal(summary.pitchers.reduce((sum, line) => sum + line.g, 0), boxPitchers.length);
+  for (const line of summary.pitchers) {
+    assert.ok(line.g <= line.teamGames, `${line.name} cannot pitch in more games than his team played`);
+    assert.equal(line.ipPerGame, line.g ? line.outs / 3 / line.g : 0);
+    assert.equal(line.g > 0, line.bf > 0, `${line.name}'s appearance count should track his batters faced`);
+  }
+});
+
 test("simulateBatchGame recreates a numbered batch game", () => {
   const teams = draftTeams("batch-game-log", 3);
   const seed = "batch-game-log";

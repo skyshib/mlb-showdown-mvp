@@ -460,6 +460,8 @@ function foldBoxScore(state, teamBox) {
     row.hr += line.hr;
     row.r += line.r;
     row.wpa += line.wpa ?? 0;
+    if (line.bf > 0) row.g += 1;
+    if ((line.fresh?.bf ?? 0) > 0) row.fresh.g += 1;
     for (const key of ["bf", "outs", "h", "d", "t", "bb", "so", "hr", "r", "wpa"]) {
       row.fresh[key] += line.fresh?.[key] ?? 0;
     }
@@ -505,6 +507,8 @@ function registerPitcher(state, teamName, player) {
     team: teamName,
     role: player.role === "SP" ? "SP" : "RP",
     teamGames: 0,
+    // Games he actually took the mound in, as against teamGames above.
+    g: 0,
     bf: 0,
     outs: 0,
     h: 0,
@@ -523,6 +527,7 @@ function registerPitcher(state, teamName, player) {
 
 function emptyPitcherTotals() {
   return {
+    g: 0,
     bf: 0,
     d: 0,
     t: 0,
@@ -551,6 +556,7 @@ function summarizePitcherTotals(line, teamGames, runs) {
   return {
     ...line,
     ipPer162: per162(line.outs / 3, teamGames),
+    ipPerGame: rate(line.outs, (line.g ?? 0) * 3),
     inningsPerSeason: rate(line.outs, runs * 3),
     runsPerNine: rate(line.r * 27, line.outs),
     strikeoutsPerNine: rate(line.so * 27, line.outs),

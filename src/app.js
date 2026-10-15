@@ -6278,6 +6278,7 @@ function renderBatch() {
         <td>${escapeHtml(line.team)}</td>
         <td>${escapeHtml(line.role)}</td>
         ${renderPaceCell(line, "ipPer162", "ip", teamGamesByName, "IP", (value) => formatDecimal(value, 1), line.outs / 3)}
+        ${renderPitcherIpPerGameCell(line)}
         <td class="num">${formatPerNine(line.so, line.outs)}</td>
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
@@ -6698,6 +6699,7 @@ function renderBatch() {
           ${renderBatchSortHeader("pitchers", "team", "Team")}
           ${renderBatchSortHeader("pitchers", "role", "Role")}
           ${renderBatchSortHeader("pitchers", "ip162", "IP", "num")}
+          ${renderBatchSortHeader("pitchers", "ipPerGame", "IP/G", "num")}
           ${renderBatchSortHeader("pitchers", "k9", "K/9", "num")}
           ${renderBatchSortHeader("pitchers", "bb9", "BB/9", "num")}
           ${renderBatchSortHeader("pitchers", "era", "ERA", "num")}
@@ -7608,6 +7610,7 @@ function batchPitcherSortValue(line, sort, teamGamesByName, wpaaOf = null) {
   if (sort === "team") return line.team;
   if (sort === "role") return line.role;
   if (sort === "ip162") return batchPace(line, "ipPer162", "ip", teamGamesByName, line.outs / 3);
+  if (sort === "ipPerGame") return pitcherIpPerGame(line) ?? 0;
   if (sort === "k9") return rateValue(line.so * 27, line.outs);
   if (sort === "bb9") return rateValue(line.bb * 27, line.outs);
   if (sort === "era") return rateValue(line.r * 27, line.outs);
@@ -7993,6 +7996,22 @@ function batchPace(line, paceKey, totalKey, teamGamesByName, totalOverride = nul
   const total = totalOverride ?? Number(line[totalKey] ?? 0);
   const games = Number(line.teamGames ?? teamGamesByName.get(line.team) ?? 0);
   return per162(total, games);
+}
+
+// Innings per appearance, counted over the games the arm actually pitched in
+// rather than his team's games, so a starter reads as a start's length and a
+// reliever as an outing's. Sims from before the count go blank.
+function pitcherIpPerGame(line) {
+  const games = Number(line?.g ?? 0);
+  if (!games) return null;
+  return Number(line?.outs ?? 0) / 3 / games;
+}
+
+function renderPitcherIpPerGameCell(line) {
+  const value = pitcherIpPerGame(line);
+  if (value === null) return `<td class="num">\u2014</td>`;
+  const title = `IP/G: ${formatAuditNumber(Number(line.outs) / 3)} raw IP / ${formatAuditNumber(line.g)} games pitched = ${formatAuditNumber(value)}`;
+  return `<td class="num stat-audit" title="${escapeHtml(title)}">${formatDecimal(value, 2)}</td>`;
 }
 
 function renderPaceCell(line, paceKey, totalKey, teamGamesByName, label, formatter = formatSeasonCount, totalOverride = null) {
