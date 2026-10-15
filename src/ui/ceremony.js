@@ -53,17 +53,13 @@ export function syncCeremony(root, state, options = {}) {
   paintRail(root, state);
   for (const key of state.opened ?? []) {
     let module = feed.querySelector(`[data-module="${key}"]`);
+    let arriving = false;
     if (!module) {
       feed.insertAdjacentHTML("beforeend", moduleHtml(key, state, options));
       module = feed.lastElementChild;
+      arriving = true;
       const landing = module;
-      requestAnimationFrame(() => {
-        landing.classList.add("arrived");
-        // The page follows the ceremony down: the newest beat is on screen and
-        // everything before it is still there, above, still moving. A rewatch
-        // puts every board up in one go, so it stays where the reader is.
-        if (!options.quiet) landing.scrollIntoView({ behavior: "smooth", block: "end" });
-      });
+      requestAnimationFrame(() => landing.classList.add("arrived"));
     }
     // A beat opens before its figures exist — the first one opens before a
     // single game has been summarised, and the championship game opens before
@@ -71,13 +67,36 @@ export function syncCeremony(root, state, options = {}) {
     // (no rows to six rows, no game to a game) its body is written again;
     // anything smaller than that is patched, never redrawn.
     const shape = moduleShape(key, state);
-    if (module.dataset.shape !== shape) {
+    const filling = module.dataset.shape !== shape;
+    if (filling) {
       module.dataset.shape = shape;
       const body = module.querySelector(".module-body");
       if (body) body.innerHTML = bodyHtml(key, state, options);
     }
+    // The page follows the ceremony down: the newest beat is on screen and
+    // everything before it is still there, above, still moving. A rewatch puts
+    // every board up in one go, so it stays where the reader is.
+    //
+    // It lands again when the figures arrive, because a beat opens empty and a
+    // scroll aimed at an empty box stops short of the board that fills it.
+    if (!options.quiet && (arriving || filling) && module === feed.lastElementChild) {
+      const landing = module;
+      requestAnimationFrame(() => landOn(landing));
+    }
     patchModule(module, key, state, options);
   }
+}
+
+// Put the beat where it can be read: centred in what is left of the window
+// once the foot is taken off it, or its top near the top when it is taller than
+// that. `scrollIntoView` with block:"end" aimed the bottom edge at the bottom of
+// the window, which the sticky foot sits on top of.
+function landOn(module) {
+  const rect = module.getBoundingClientRect();
+  const foot = module.closest(".ceremony")?.querySelector(".ceremony-foot");
+  const room = window.innerHeight - (foot?.getBoundingClientRect().height ?? 0);
+  const slack = rect.height <= room ? Math.max(16, (room - rect.height) / 2) : 16;
+  window.scrollTo({ top: Math.max(0, window.scrollY + rect.top - slack), behavior: "smooth" });
 }
 
 function paintRail(root, state) {
@@ -194,8 +213,8 @@ function chipInk(hex) {
 
 // ---- the beats ---------------------------------------------------------------
 
-// Two rows of the same seven categories: what the club does with the bat, and
-// what it does to the other club's. The board is read across and down.
+// Two rows of three: what the club does with the bat, and what it does to the
+// other club's. The board is read across and down.
 function traitsHtml(state) {
   const row = (side, label, plaques) => `<div class="stat-row" data-side="${side}">
     <span class="stat-row-label">${label}</span>
@@ -205,8 +224,8 @@ function traitsHtml(state) {
       </div>`).join("")}</div>
   </div>`;
   return `<div class="stat-board">
-    ${row("offense", "With the bat", state.traits?.offense ?? [])}
-    ${row("defense", "Against it", state.traits?.defense ?? [])}
+    ${row("offense", "Offense", state.traits?.offense ?? [])}
+    ${row("defense", "Defense", state.traits?.defense ?? [])}
   </div>`;
 }
 
@@ -271,12 +290,20 @@ function awardInner(award, state, options) {
   const card = options.cardFor?.(award.id) ?? null;
   return `<div class="cer-award-card">${card ? cardPanelHtml(card) : ""}</div>
     <div class="award-copy">
-      <p class="award-name">${escapeHtml(stripCardYear(award.name))}</p>
+      <p class="award-name">${escapeHtml(stripCardYear(award.name))}${awardPrice(award)}</p>
       <p class="award-owner">${manager(state, award.team, "big")}<em>drafted him</em></p>
       <p class="award-headline" data-val="headline">${escapeHtml(award.headline)}</p>
       ${award.split ? splitHtml(award.split, award.pitcher) : ""}
       ${(award.boards ?? []).map((board) => rankBoardHtml(state, board, options)).join("")}
     </div>`;
+}
+
+// What the room paid for him, beside the name it paid it for. An award is only
+// half a story without it: +13 WPAR off the first pick of the draft and +13 off
+// the forty-second are not the same season.
+function awardPrice(award) {
+  if (award.cost === null || award.cost === undefined) return "";
+  return `<span class="award-cost">${award.byMoney ? `$${num(award.cost)}` : `#${award.cost}`}</span>`;
 }
 
 function rankBoardHtml(state, board, options) {
@@ -331,8 +358,8 @@ function reckoningHtml(state, options) {
   </div>`;
   return `<div class="reckon-board">
     ${column("Best value, hitters", board.hitters?.best ?? [], "bh")}
-    ${column("Worst value, hitters", board.hitters?.worst ?? [], "wh")}
     ${column("Best value, pitchers", board.pitchers?.best ?? [], "bp")}
+    ${column("Worst value, hitters", board.hitters?.worst ?? [], "wh")}
     ${column("Worst value, pitchers", board.pitchers?.worst ?? [], "wp")}
   </div>`;
 }
@@ -444,7 +471,7 @@ export function duelHtml(state, game, options) {
   const side = (man) => `<div class="duel-card" data-role="${man.role}">
       <p class="duel-role">${manager(state, man.team)}<span class="duel-side">${man.role}</span></p>
       ${man.card ? cardPanelHtml(man.card) : ""}
-      <p class="duel-name">${escapeHtml(shortName(stripCardYear(man.name ?? "")))}</p>
+      <p class="duel-name">${escapeHtml(stripCardYear(man.name ?? ""))}</p>
     </div>`;
   return `<div class="duel" data-phase="${moment.phase}" data-lead="${left.role}">
     ${side(left)}

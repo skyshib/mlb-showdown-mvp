@@ -11,7 +11,8 @@ import {
   meetingIndices,
   pickRepresentative,
   readyForNextBeat,
-  TEAM_STAT_KEYS,
+  TEAM_OFFENSE_KEYS,
+  TEAM_DEFENSE_KEYS,
   valuePicks,
   teamStatBoard,
   winProbabilitySeries
@@ -53,11 +54,11 @@ test("a beat is never flashed past, and never stalls once its gate is met", () =
   assert.equal(readyForNextBeat(0, { progress: 0, heldMs: 0, skipping: true }), true);
 });
 
-test("the stat board runs the same seven categories down both sides", () => {
+test("the stat board runs three categories down each side", () => {
   const { summary } = season("ceremony-traits");
   const board = teamStatBoard(summary);
-  assert.deepEqual(board.offense.map((plaque) => plaque.stat), TEAM_STAT_KEYS);
-  assert.deepEqual(board.defense.map((plaque) => plaque.stat), TEAM_STAT_KEYS);
+  assert.deepEqual(board.offense.map((plaque) => plaque.stat), TEAM_OFFENSE_KEYS);
+  assert.deepEqual(board.defense.map((plaque) => plaque.stat), TEAM_DEFENSE_KEYS);
   const names = summary.teams.map((row) => row.team);
   for (const plaque of [...board.offense, ...board.defense]) {
     assert.ok(names.includes(plaque.team), `${plaque.key} named ${plaque.team}`);
@@ -72,30 +73,31 @@ test("the board picks the extreme on each side, not just somebody", () => {
   const { summary } = season("ceremony-runs");
   const board = teamStatBoard(summary);
   const totals = (team, lines) => lines.filter((line) => line.team === team);
-  // Offence takes the highest team average; defence takes the lowest allowed.
-  const avgFor = (team) => {
+  // Offence takes the highest team on-base; defence takes the lowest allowed.
+  const obpFor = (team) => {
     const bats = totals(team, summary.hitters);
     const h = bats.reduce((sum, line) => sum + line.h, 0);
+    const bb = bats.reduce((sum, line) => sum + line.bb, 0);
     const ab = bats.reduce((sum, line) => sum + line.ab, 0);
-    return ab ? h / ab : 0;
+    return ab + bb ? (h + bb) / (ab + bb) : 0;
   };
-  const avgAgainst = (team) => {
+  const obpAgainst = (team) => {
     const arms = totals(team, summary.pitchers);
     const h = arms.reduce((sum, line) => sum + line.h, 0);
     const bf = arms.reduce((sum, line) => sum + line.bf, 0);
     const bb = arms.reduce((sum, line) => sum + line.bb, 0);
-    return bf - bb ? h / (bf - bb) : 0;
+    return bf ? (h + bb) / bf : 0;
   };
-  const best = [...summary.teams].sort((a, b) => avgFor(b.team) - avgFor(a.team))[0];
-  const stingiest = [...summary.teams].sort((a, b) => avgAgainst(a.team) - avgAgainst(b.team))[0];
-  assert.equal(board.offense.find((plaque) => plaque.stat === "avg").team, best.team);
-  assert.equal(board.defense.find((plaque) => plaque.stat === "avg").team, stingiest.team);
+  const best = [...summary.teams].sort((a, b) => obpFor(b.team) - obpFor(a.team))[0];
+  const stingiest = [...summary.teams].sort((a, b) => obpAgainst(a.team) - obpAgainst(b.team))[0];
+  assert.equal(board.offense.find((plaque) => plaque.stat === "obp").team, best.team);
+  assert.equal(board.defense.find((plaque) => plaque.stat === "obp").team, stingiest.team);
 });
 
 test("league leaders run three deep in every category", () => {
   const { summary } = season("ceremony-leaders");
   const board = leagueLeaderBoard(summary);
-  assert.deepEqual(board.map((entry) => entry.key), ["avg", "obp", "ops", "hr", "sb", "adv", "gidp", "era"]);
+  assert.deepEqual(board.map((entry) => entry.key), ["ops", "obp", "hr", "sb", "era"]);
   const ids = new Set([...summary.hitters, ...summary.pitchers].map((line) => line.id));
   for (const category of board) {
     assert.equal(category.entries.length, 3);

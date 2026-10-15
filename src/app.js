@@ -4971,10 +4971,11 @@ function newBatchSalt() {
 // One award, dressed for the ceremony: the line computeAwards picked, plus the
 // WPAR split the card beat shows underneath it. A room dealt without standing
 // replacement cards has no WPAR to split, and gets the headline alone.
-function ceremonyAward(key, summary) {
+function ceremonyAward(key, summary, costs = null, byMoney = false) {
   const award = computeAwards(summary).find((entry) => entry.key === key);
   if (!award) return null;
   const line = [...summary.hitters, ...summary.pitchers].find((entry) => entry.id === award.id);
+  const cost = Number(costs?.[award.id]);
   return {
     key,
     label: award.label,
@@ -4982,6 +4983,9 @@ function ceremonyAward(key, summary) {
     name: award.name,
     team: award.team,
     headline: award.stat,
+    // What the room paid for him, so the name carries its price.
+    cost: Number.isFinite(cost) ? cost : null,
+    byMoney,
     split: summary.attribution && line?.warPer162 ? line.warPer162 : null,
     pitcher: key === "cy-young",
     // Who else was in it. An award is a rank like any other, and the names
@@ -5411,8 +5415,8 @@ function startBatchRun(runs, options = {}) {
     const has = (key) => opened.includes(key);
     if (has("traits")) next.traits = teamStatBoard(summary);
     if (has("leaders")) next.leaders = leagueLeaderBoard(summary);
-    if (has("mvp")) next.mvp = ceremonyAward("mvp-hitter", summary);
-    if (has("cy")) next.cy = ceremonyAward("cy-young", summary);
+    if (has("mvp")) next.mvp = ceremonyAward("mvp-hitter", summary, costs, auction);
+    if (has("cy")) next.cy = ceremonyAward("cy-young", summary, costs, auction);
     if (has("reckoning")) {
       next.reckoning = { ...valuePicks(summary, costs, { byMoney: auction }), byWpar: Boolean(summary.attribution) };
     }

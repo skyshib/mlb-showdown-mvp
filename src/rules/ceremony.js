@@ -97,15 +97,21 @@ function warTotals(lines, team, part) {
   return total;
 }
 
-// The room's two halves, same seven categories each. What a club does with
-// the bat on top, what it does to the other club's bat underneath — so the
-// board reads down a column as well as across a row, and a manager who leads
-// on-base and gives up the fewest home runs is visibly doing both.
+// The room's two halves, three categories each. What a club does with the bat
+// on top, what it does to the other club's bat underneath — so the board reads
+// down a column as well as across a row, and a manager who leads on-base and
+// gives up the fewest home runs is visibly doing both.
+//
+// Three a side rather than seven: average, OPS and extra bases all move with
+// on-base and home runs, so the long row was the same story told four more
+// times. The one that is not is the double play, which is why each side keeps
+// its own — staying out of it, and turning it.
 //
 // Everything here is a club total rather than a rate off one card: the hitters
 // are summed for the offence, and the arms for the defence. Slugging against
 // is why pitcher lines carry doubles and triples at all.
-export const TEAM_STAT_KEYS = ["avg", "obp", "ops", "hr", "sb", "adv", "gidp"];
+export const TEAM_OFFENSE_KEYS = ["obp", "hr", "sb"];
+export const TEAM_DEFENSE_KEYS = ["obp", "hr", "gidp"];
 
 function offenseTotals(summary, team) {
   const totals = { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, sb: 0, gidp: 0 };
@@ -166,27 +172,15 @@ export function teamStatBoard(summary) {
   const arm = (row) => defense.get(row.team) ?? {};
 
   const offenseRow = [
-    plaque("avg", "Average", "offense", (row) => rate(bat(row).h, bat(row).ab), three),
     plaque("obp", "On base", "offense", (row) => rate(bat(row).h + bat(row).bb, bat(row).ab + bat(row).bb), three),
-    plaque("ops", "OPS", "offense",
-      (row) => rate(bat(row).h + bat(row).bb, bat(row).ab + bat(row).bb) + rate(bases(bat(row)), bat(row).ab), three),
     plaque("hr", "Home runs", "offense", (row) => per162(bat(row).hr, row.games), (v) => `${Math.round(v)} per 162`),
-    plaque("sb", "Stolen bases", "offense", (row) => per162(row.steals ?? 0, row.games), (v) => `${Math.round(v)} per 162`),
-    plaque("adv", "Extra bases", "offense", (row) => per162(row.advances ?? 0, row.games), (v) => `${Math.round(v)} per 162`),
-    // The only one on this row where less is better: a club that stays out of
-    // the double play leads it.
-    plaque("gidp", "Into two", "offense", (row) => per162(bat(row).gidp, row.games), (v) => `${Math.round(v)} per 162`, true)
+    plaque("sb", "Stolen bases", "offense", (row) => per162(row.steals ?? 0, row.games), (v) => `${Math.round(v)} per 162`)
   ];
 
   const defenseRow = [
-    plaque("avg", "Average", "defense", (row) => rate(arm(row).h, arm(row).bf - arm(row).bb), three, true),
     plaque("obp", "On base", "defense", (row) => rate(arm(row).h + arm(row).bb, arm(row).bf), three, true),
-    plaque("ops", "OPS", "defense",
-      (row) => rate(arm(row).h + arm(row).bb, arm(row).bf) + rate(bases(arm(row)), arm(row).bf - arm(row).bb), three, true),
     plaque("hr", "Home runs", "defense", (row) => per162(arm(row).hr, row.games), (v) => `${Math.round(v)} per 162`, true),
-    plaque("sb", "Stolen bases", "defense", (row) => per162(row.stealsAllowed ?? 0, row.games), (v) => `${Math.round(v)} per 162`, true),
-    plaque("adv", "Extra bases", "defense", (row) => per162(row.advancesAllowed ?? 0, row.games), (v) => `${Math.round(v)} per 162`, true),
-    // And the mirror of it: the club that turns the most.
+    // The club that turns the most of them.
     plaque("gidp", "Turned two", "defense", (row) => per162(row.doublePlays ?? 0, row.games), (v) => `${Math.round(v)} per 162`)
   ];
 
@@ -231,16 +225,14 @@ export function leagueLeaderBoard(summary) {
   const three = (value) => value.toFixed(3).replace(/^0/, "");
   const whole = (value) => String(Math.round(value));
 
+  // Five, not eight: average is on-base without the walks, and extra bases and
+  // the double play are footnotes next to who got on and who went deep. What is
+  // left is the back of a baseball card.
   const categories = [
-    { key: "avg", label: "Average", lines: bats, value: (line) => line.avg, format: three },
-    { key: "obp", label: "On base", lines: bats, value: (line) => line.obp, format: three },
     { key: "ops", label: "OPS", lines: bats, value: (line) => line.ops, format: three },
+    { key: "obp", label: "On base", lines: bats, value: (line) => line.obp, format: three },
     { key: "hr", label: "Home runs", lines: bats, value: (line) => line.hrPer162, format: whole },
     { key: "sb", label: "Stolen bases", lines: bats, value: (line) => line.sbPer162, format: whole },
-    { key: "adv", label: "Extra bases", lines: bats, value: (line) => per162(line.adv ?? 0, line.teamGames), format: whole },
-    // The only hitting category where the leader is the man it happens to
-    // least: staying out of the double play.
-    { key: "gidp", label: "Into two", lines: bats, value: (line) => per162(line.gidp ?? 0, line.teamGames), format: whole, lowest: true },
     { key: "era", label: "Earned runs", lines: staff, value: (line) => line.runsPerNine, format: (value) => value.toFixed(2), lowest: true }
   ];
 
