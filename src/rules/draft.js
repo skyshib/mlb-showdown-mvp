@@ -2898,7 +2898,35 @@ function auctionWillingness(draft, manager, player) {
     ...manager.roster.filter((card) => playerBucket(card) === "bullpen").map((card) => market.model.value(card))
   );
   const fieldedFloor = fieldedBucketFloor(manager, market.model);
-  const effectiveWorth = (card) => {
+  // A BAT'S bucket floor is the wrong man to clear. The arms really are a pool
+  // — any starter can take any rotation seat, any reliever any pen seat — so
+  // what a fourth starter upgrades IS his margin over your own weakest starter.
+  // A bat cannot move like that: he can only displace someone who plays HIS
+  // position, or the util man behind him. Priced off the weakest bat anywhere
+  // in the nine, a fifth third baseman behind a star reads as a huge upgrade
+  // over the light-hitting shortstop he will never replace. Measured over
+  // twelve live rooms, the floor priced 281 such bats at a mean 66.7 when the
+  // nine gained 39.4, and 159 of them gained NOTHING — $4,522 of real money on
+  // bats that never reached their own best nine. Two rooms show where that
+  // ends: five third basemen and a $35 rotation (amber-jay-road), six second
+  // basemen, four catchers and a $70 rotation (autumn-otter-victory), both last
+  // place. So price a redundant bat at what the best nine GAINS by seating him,
+  // which is nothing when he cannot get in.
+  const seatedValue = (roster) => {
+    const { slots } = assignLineupSlots(roster, bestLineupAssignment(roster));
+    let total = 0;
+    for (const slot of slots) if (slot.player) total += market.model.value(slot.player);
+    return total;
+  };
+  const nineNow = seatedValue(manager.roster);
+  // This prices the card ON THE BLOCK only. The same function also builds the
+  // budget-share denominator below, out of every card still expected, and there
+  // it keeps the old basis on purpose: zeroing the redundant bats drops that
+  // plan from a hundred live entries to a dozen, almost all arms, and then a
+  // card's own worth cancels against the denominator it moves — two relievers
+  // worth 133 and 88 both came out at the same bid. The share term's
+  // calibration is a separate question from what a bench bat is worth.
+  const effectiveWorth = (card, positionAware = false) => {
     // A card fills a need only if it would take an OPEN slot — an empty lineup
     // spot for a bat (its own position, or the util slot behind it), an empty
     // staff seat for an arm. A redundant one — a fifth corner outfielder to a man
@@ -2913,11 +2941,14 @@ function auctionWillingness(draft, manager, player) {
       : auctionWorth(market, card);
     const base = surplus * (1 + URGENCY_WEIGHT * urgency);
     if (fills) return base;
+    if (positionAware && playerBucket(card) === "hitter") {
+      return Math.max(0, seatedValue([...manager.roster, card]) - nineNow);
+    }
     const ownFloor = fieldedFloor.get(playerBucket(card));
     if (ownFloor == null) return base * DEPTH_DAMP;
     return Math.max(0, market.model.value(card) - ownFloor);
   };
-  const worth = effectiveWorth(player);
+  const worth = effectiveWorth(player, true);
   if (worth <= 0) return 0;
 
   // BUDGET SHARE. A manager splits its bankroll over the best men still coming in
