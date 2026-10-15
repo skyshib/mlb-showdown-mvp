@@ -284,19 +284,25 @@ test("a coach costs a pick and no slot in a snake draft", () => {
   // A coach never asks the roster to reserve a slot: with twelve players and a
   // starter still owed, the rules would refuse a bat but take a coach.
   while (!draft.complete) autopick(draft);
-  assert.equal(draft.pickNumber, 3 * 13 + 2, "every roster slot plus the two picks spent on coaches");
+  // The rule, not the seed: the board owes 13 players a manager, and every
+  // pick beyond those went on a coach. Ana spent two on purpose, and the
+  // autopick spends more whenever her turn comes up with no legal player on
+  // the board — which is the same rule read from the other side.
+  const coachPicks = draft.managers.reduce((total, manager) => total + rosterCoaches(manager).length, 0);
+  assert.ok(coachPicks >= 2, "Ana's two coaches at the least");
+  assert.equal(draft.pickNumber, 3 * 13 + coachPicks, "every roster slot plus every pick spent on a coach");
   for (const manager of draft.managers) {
     assert.equal(rosterPlayerCount(manager), 13);
     assert.ok(rosterFull(draft, manager));
     assert.deepEqual(validateRoster(manager, draft), []);
   }
-  assert.equal(ana.roster.length, 15);
+  assert.equal(ana.roster.length, 13 + rosterCoaches(ana).length);
 
   // The extra turns fell to Ana, at the end, where the coaches' picks cost her.
   assert.equal(managerForPickNumber(draft, 39).id, ana.id);
   assert.equal(managerForPickNumber(draft, 40).id, ana.id);
   const history = draftHistory(draft);
-  assert.equal(history.length, 41);
+  assert.equal(history.length, draft.pickNumber);
   assert.deepEqual(history.slice(-2).map((pick) => pick.manager.id), [ana.id, ana.id]);
   // The ledger and the rosters agree, pick for pick.
   for (const pick of history) {

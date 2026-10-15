@@ -29,6 +29,45 @@ const MODES = [
   "franchise-ARI"
 ];
 
+// The names come off hand-typed scouting reports, and the typos have a shape:
+// a row left in caps lock, a dropped space ("Ken GriffeyJr."), a curly
+// apostrophe that splits a man from his other printings. The spelling itself
+// needs a human and a scan, but these three are catchable.
+test("no printed card name is caps-locked, run together, or curly-quoted", async () => {
+  const { CLASSIC_CARD_ROWS } = await import("../src/data/classicCards.js");
+  // The capital inside a name is real after these, and nowhere else.
+  const PARTICLE = /^(Mc|Mac|De|Di|La|Le|Da|Van|O')/;
+  for (const row of CLASSIC_CARD_ROWS) {
+    const name = row[1];
+    const letters = name.replace(/[^A-Za-z]/g, "");
+    assert.notEqual(letters, letters.toUpperCase(), `${name} is caps-locked`);
+    assert.ok(!name.includes("\u2019"), `${name} has a curly apostrophe`);
+    for (const token of name.split(/\s+/)) {
+      assert.ok(!/[a-z][A-Z]/.test(token.replace(PARTICLE, "")), `${name} is missing a space`);
+    }
+  }
+});
+
+// Every printed card's chart is a partition of the die: each face 1-20 reads
+// exactly one row. An overlap still resolves in play (the lookup takes the
+// first match) but prints two ranges over the same faces on the card face and
+// counts twice everywhere a chart is weighed, so a scouting-report typo has to
+// be caught here rather than on the card.
+test("every printed card's chart reads the die exactly once", async () => {
+  const { CLASSIC_CARD_ROWS } = await import("../src/data/classicCards.js");
+  const { decodeCardRows } = await import("../src/data/realCards.js");
+  for (const card of decodeCardRows(CLASSIC_CARD_ROWS)) {
+    const sorted = [...card.chart].sort((a, b) => a.from - b.from);
+    let cursor = 1;
+    for (const entry of sorted) {
+      assert.equal(entry.from, cursor, `${card.id} chart is contiguous`);
+      assert.ok(entry.to >= entry.from, `${card.id} chart ranges are ordered`);
+      cursor = entry.to + 1;
+    }
+    assert.ok(cursor > 20, `${card.id} chart covers the whole die`);
+  }
+});
+
 test("every card set the setup screen offers resolves to a universe", () => {
   for (const key of Object.keys(UNIVERSES)) {
     assert.equal(universeConfig(key)?.key, key);

@@ -39,6 +39,36 @@ export function playerIdentity(id) {
   return identity;
 }
 
+// One man, two names on the printed cards. Stripping punctuation and case is
+// not enough for these: the sets spell the same human differently from year to
+// year, and some of the spellings are the card's own mistake ("GARRETT
+// ANDERSON" in 2004, "VINCENTE PADILLA" in 2003, "KAZUHISHA ISHII"). The name
+// printed on the card is what the game shows — the data keeps it verbatim —
+// but the roster rule has to see one person, so the key is remapped here.
+//
+// Keys and values are names run through the same normalizer as cardPerson:
+// lowercase, no punctuation, no accents. A suffix still means a different man
+// by default (the general rule below); the entries here are the men the sets
+// printed both with and without one, each confirmed by team, position and year
+// to be a single career and not a father and son. Namesakes the sets separate
+// with a middle initial — Alex Gonzalez and Alex S. Gonzalez, Brian Hunter and
+// Brian L. Hunter — are genuinely two people and are not listed.
+const PERSON_ALIASES = new Map([
+  ["garrettanderson", "garretanderson"],   // Angels LF, 2000-05
+  ["ichiro", "ichirosuzuki"],              // Mariners RF, 2001-05
+  ["kazuhishaishii", "kazuhisaishii"],     // Dodgers LHP, 2002-05
+  ["vincentepadilla", "vicentepadilla"],   // Phillies RHP, 2001-05
+  ["ismaelvaldes", "ismaelvaldez"],        // RHP, Dodgers/Rangers/Marlins
+  ["daveweathers", "davidweathers"],       // RHP, Brewers/Mets/Reds
+  ["bobbyhowry", "bobhowry"],              // White Sox RHP
+  ["terrancelong", "terrencelong"],        // Athletics OF
+  ["markljohnson", "markjohnson"],         // White Sox C, 2000-02
+  ["bobbyjjones", "bobbyjones"],           // RHP, Mets then Padres
+  ["josecruz", "josecruzjr"],              // Blue Jays/Giants/Devil Rays OF
+  ["jerryhairston", "jerryhairstonjr"],    // Orioles 2B then Cubs OF
+  ["tonyarmas", "tonyarmasjr"]             // Expos/Nationals RHP
+]);
+
 // The human behind a card, however his league names him. MLB pools spell the
 // person out in the id; the Showdown sets don't, but they print the season on
 // the face ("Mike Piazza '93"), so the name with the season filed off is the
@@ -58,14 +88,17 @@ export function cardPerson(card) {
         // two of him on the board, which is what the roster rule exists to make
         // impossible. So the key keeps the letters and digits and drops the
         // rest: punctuation, spacing and accents. A suffix still counts, because
-        // Ken Griffey and Ken Griffey Jr. are two men.
+        // Ken Griffey and Ken Griffey Jr. are two men — except for the men in
+        // PERSON_ALIASES above, whose cards print the suffix only some years.
         const name = String(card?.name ?? "")
           .replace(/\s+'\d{2,4}$/, "")
           .normalize("NFD")
           .replace(/[\u0300-\u036f]/g, "")
           .toLowerCase()
           .replace(/[^a-z0-9]/g, "");
-        return name ? `name:${name}` : null;
+        // A spelling the sets use for a man they also spell another way reads
+        // as the spelling he is filed under; everyone else is his own key.
+        return name ? `name:${PERSON_ALIASES.get(name) ?? name}` : null;
       })();
   if (key) personCache.set(key, person);
   return person;

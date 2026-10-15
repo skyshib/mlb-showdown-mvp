@@ -2940,6 +2940,54 @@ test("the CPU never subs its way out of a legal defense", () => {
   assert.equal(state.away.lineup[4].id, "away-h-4", "the catcher stays in the game");
 });
 
+test("a man the sets spell two ways is still one man", async () => {
+  // The printed name is what the card shows, typos and dropped suffixes and
+  // all, so the roster rule carries an alias list. Checked against the cards
+  // themselves: each pair below is one career, and the pairs underneath are
+  // the namesakes the sets separate on purpose.
+  const { CLASSIC_CARD_ROWS } = await import("../src/data/classicCards.js");
+  const { decodeCardRows } = await import("../src/data/realCards.js");
+  const cards = decodeCardRows(CLASSIC_CARD_ROWS);
+  const find = (name) => {
+    const card = cards.find((item) => item.name.replace(/\s+'\d\d$/, "") === name);
+    assert.ok(card, `no card printed as ${name}`);
+    return card;
+  };
+  const sameMan = [
+    ["Garret Anderson", "Garrett Anderson"],
+    ["Ichiro Suzuki", "Ichiro"],
+    ["Kazuhisa Ishii", "Kazuhisha Ishii"],
+    ["Vicente Padilla", "Vincente Padilla"],
+    ["Ismael Valdez", "Ismael Valdes"],
+    ["David Weathers", "Dave Weathers"],
+    ["Bob Howry", "Bobby Howry"],
+    ["Terrence Long", "Terrance Long"],
+    ["Mark Johnson", "Mark L. Johnson"],
+    ["Bobby Jones", "Bobby J. Jones"],
+    ["Jose Cruz Jr.", "Jose Cruz"],
+    ["Jerry Hairston Jr.", "Jerry Hairston"],
+    ["Tony Armas Jr.", "Tony Armas"]
+  ];
+  for (const [a, b] of sameMan) {
+    assert.ok(personConflict([find(a)], find(b)), `${a} and ${b} are the same man`);
+  }
+  // Justice is the same case read from the other side: the 2001 cards were
+  // filed as "Dave Justice" but print DAVID JUSTICE, so the name is corrected
+  // in the data and no alias is needed.
+  const justice = cards.filter((card) => card.name.startsWith("David Justice"));
+  assert.equal(justice.length, 5, "every Justice printing reads David");
+  assert.ok(personConflict([justice[0]], justice[4]), "one Justice to a club");
+
+  const twoMen = [
+    ["Alex Gonzalez", "Alex S. Gonzalez"],
+    ["Brian Hunter", "Brian L. Hunter"],
+    ["Ken Griffey Jr.", "Cal Ripken Jr."]
+  ];
+  for (const [a, b] of twoMen) {
+    assert.equal(personConflict([find(a)], find(b)), null, `${a} and ${b} are two men`);
+  }
+});
+
 test("the person index answers exactly what a roster scan answers", () => {
   // personIndex/conflictsWithIndex exist only to make the era rule cheap for
   // the NPC's climb, which asks it thousands of times against one roster.
