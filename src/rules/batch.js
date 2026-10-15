@@ -105,6 +105,17 @@ function playScheduledGame(matchup, seed, index, { attribution = false } = {}) {
 // starter, which teamForGame picks from a seed derived from the game — so the
 // review log can page through every game of a finished run without storing any
 // of them, and without replaying the games before startIndex.
+// The round robin by name, one entry per slot in a cycle. A game's index maps
+// to `matchups[index % matchups.length]`, so the meetings between any two clubs
+// are a known arithmetic series rather than something to search for — which is
+// what lets the ceremony find a championship game without replaying a season.
+export function scheduleMatchups(teams, scheduleVersion = BATCH_SCHEDULE_VERSION) {
+  return createSchedule(teams, scheduleVersion).map((matchup) => ({
+    away: matchup.away.name,
+    home: matchup.home.name
+  }));
+}
+
 export function replayBatchGames(teams, seed, startIndex, count, options = {}) {
   const schedule = createSchedule(
     teams,

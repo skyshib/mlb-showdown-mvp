@@ -52,6 +52,55 @@ export async function sendRoomAction(roomId, token, action) {
   return request("POST", `/api/rooms/${encodeURIComponent(roomId)}/actions`, { token, action });
 }
 
+// ---- the shared sim ----------------------------------------------------------
+//
+// One browser plays the season and the room reads it off the server. These are
+// the three trips that takes: the runner's race as it unfolds, the finished
+// season on its way up, and the finished season on its way back down.
+
+// Fire and forget. A lost tick is a chart frame nobody draws; the season does
+// not depend on it, and the runner must not wait on the network to keep
+// simulating.
+export function sendSimProgress(roomId, token, payload) {
+  fetch(`/api/rooms/${encodeURIComponent(roomId)}/sim/progress`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, ...payload })
+  }).catch(() => {});
+}
+
+// A six-team season is 136KB of JSON and 23KB gzipped, so it goes up
+// compressed — which also keeps it under the server's body cap without the
+// server having to inflate anything on a 256MB machine. A browser too old for
+// CompressionStream files nothing, and the room falls back to simulating
+// locally the way it always did.
+export async function fileRoomSim(roomId, token, { salt, runs }, payload) {
+  if (typeof CompressionStream !== "function") return false;
+  const json = new Blob([JSON.stringify(payload)], { type: "application/json" });
+  const gzipped = await new Response(json.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+  const query = new URLSearchParams({ token, salt, runs: String(runs) });
+  const response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/sim?${query}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "Content-Encoding": "gzip" },
+    body: gzipped
+  });
+  return response.ok;
+}
+
+// Null when the room has no season on file under that salt — which is the
+// signal to wait for the runner, or to give up and play it here.
+export async function fetchRoomSim(roomId, salt) {
+  const query = salt ? `?salt=${encodeURIComponent(salt)}` : "";
+  let response;
+  try {
+    response = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/sim${query}`);
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  return response.json().catch(() => null);
+}
+
 // SSE stream of room events. On reconnect the browser re-requests the same
 // URL, so the server resends everything after `since`; callers dedupe by seq.
 // The server pulses every 20 seconds. Two missed beats and we call it: a
@@ -80,6 +129,10 @@ export function subscribeRoom(roomId, since, handlers, token = null) {
   // A live auction lot: who is up and who has bid, but never the amounts —
   // those only arrive as actions once the card sells.
   listen("lot", handlers.onLot);
+  // The browser running the room's sim, reporting its race as it goes and then
+  // saying that the finished season is on the server.
+  listen("sim-progress", handlers.onSimProgress);
+  listen("sim-ready", handlers.onSimReady);
   listen("ping", () => {});
 
   const watchdog = setInterval(() => {

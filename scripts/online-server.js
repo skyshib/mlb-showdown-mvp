@@ -63,6 +63,12 @@ import {
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_BODY_BYTES = 64 * 1024;
+// A finished season's summary, gzipped by the browser that ran it: 23KB for a
+// six-team room, 44KB for twelve, and it grows with the roster, not with the
+// number of games. The ceiling is generous because the server never parses the
+// thing — it stores the compressed bytes and hands them back verbatim — so the
+// cost of a big one is disk and nothing else.
+const MAX_SIM_BYTES = 1024 * 1024;
 const HEARTBEAT_MS = 20000;
 
 // Room codes are meant to be spoken or typed by friends, so use three plain
@@ -367,6 +373,10 @@ function reviveRoom(saved) {
     seats: new Map(Object.entries(saved.seats ?? {})),
     hostToken: saved.hostToken,
     streams: new Set(),
+    // The season itself lives in its own file; what the room remembers is which
+    // sim is on the volume. getRoomSim reads the bytes the first time anyone
+    // asks for them.
+    sim: saved.sim?.salt ? { ...saved.sim, bytes: null } : null,
     createdAt: saved.createdAt ?? Date.now()
   };
 }
@@ -417,6 +427,7 @@ function roomRecord(room) {
     waitingForPlayers: Boolean(room.waitingForPlayers),
     configuring: Boolean(room.configuring),
     drawOrder: Boolean(room.drawOrder),
+    sim: room.sim ? { salt: room.sim.salt, runs: room.sim.runs ?? null, at: room.sim.at } : null,
     createdAt: room.createdAt
   };
 }
@@ -1113,6 +1124,16 @@ async function handleApi(store, request, response, url) {
   if (subroute === "configure" && request.method === "POST") return configureRoom(store, room, request, response);
   if (subroute === "actions" && request.method === "POST") return postAction(store, room, request, response);
   if (subroute === "stream" && request.method === "GET") return openStream(store, room, request, response, url);
+  // One browser runs the season and the rest of the room reads it off here, so
+  // a sim costs the room one machine's work instead of everybody's. See
+  // putRoomSim for why the server only ever moves the bytes.
+  if (subroute === "sim" && segments[4] === "progress" && request.method === "POST") {
+    return postSimProgress(room, request, response);
+  }
+  if (subroute === "sim" && !segments[4]) {
+    if (request.method === "PUT") return putRoomSim(store, room, request, response, url);
+    if (request.method === "GET") return getRoomSim(store, room, response, url);
+  }
   return sendJson(response, 404, { error: "Unknown API route" });
 }
 
@@ -1425,6 +1446,12 @@ async function postAction(store, room, request, response) {
     return sendJson(response, 409, { error: error.message });
   }
 
+  // A fresh sim means the season on file is last season. Drop it rather than
+  // leave it to be read by somebody joining while the runner is still playing
+  // the new one — the salt would not match, but there is no reason to hold a
+  // dead season in a 256MB machine's memory either.
+  if (SIM_ACTION_TYPES.has(settled?.type)) room.sim = null;
+
   if (settled.type === "seal-bid") {
     recordSealedBid(store, room, settled);
   } else {
@@ -1561,6 +1588,139 @@ function appendAction(store, room, action) {
   persistRoom(store, room);
   broadcast(room, "action", entry);
   return entry;
+}
+
+// ---- The shared sim -----------------------------------------------------------
+//
+// A sim action in the log used to mean "every browser in the room now simulates
+// the same hundred thousand games", which it did: identically, on the main
+// thread, and at whatever speed the machine it was on could manage. The work is
+// ~17 seconds on a fast laptop and minutes on a phone, so the room finished in
+// a ragged line and a background tab (where setTimeout is clamped to a second)
+// crawled.
+//
+// Now the browser that pressed Sim runs it and the rest read the result off
+// here. The server is a relay, not a simulator: this machine is a shared-cpu-1x
+// with 256MB, which would be the slowest seat at the table and would stall every
+// room's stream while it ran. So the runner streams cheap progress (relayed, not
+// stored) and PUTs the finished season (stored, not parsed).
+//
+// None of this is load-bearing for correctness: the season is a pure function of
+// the room's seed and the action's salt, and the engine has no transcendental
+// math in it, so every machine still derives the identical games. A client that
+// never hears a result simply runs it locally, exactly as it always did.
+function latestSimSalt(room) {
+  for (let index = room.actions.length - 1; index >= 0; index -= 1) {
+    const action = room.actions[index]?.action;
+    if (SIM_ACTION_TYPES.has(action?.type)) return action.salt ?? null;
+  }
+  return null;
+}
+
+function simFilePath(store, room) {
+  // Deliberately not ".json": loadRooms reads every .json on the volume as a
+  // room, and a season full of box scores is not a room.
+  return store.dataDir ? join(store.dataDir, `${room.id}.sim`) : null;
+}
+
+function roomSeat(room, token) {
+  if (!token) return { seat: null, isHost: false };
+  const seat = [...room.seats.values()].find((item) => item.token === token);
+  return { seat, isHost: Boolean(seat?.isHost) || token === room.hostToken };
+}
+
+async function putRoomSim(store, room, request, response, url) {
+  const { seat, isHost } = roomSeat(room, url.searchParams.get("token"));
+  if (!seat && !isHost) return sendJson(response, 403, { error: "Join a seat before filing a sim" });
+  const salt = url.searchParams.get("salt");
+  // The room asked for exactly one season; a blob for any other is either a
+  // stale tab finishing a sim the room has moved on from, or a mistake.
+  if (!salt || salt !== latestSimSalt(room)) {
+    return sendJson(response, 409, { error: "That sim is not the one the room is running" });
+  }
+  let bytes;
+  try {
+    bytes = await readRawBody(request, MAX_SIM_BYTES);
+  } catch (error) {
+    return sendJson(response, 413, { error: error.message });
+  }
+  // Served straight back under Content-Encoding: gzip, so what goes in has to
+  // actually be gzip.
+  if (bytes.length < 18 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) {
+    return sendJson(response, 400, { error: "A sim is filed as gzipped JSON" });
+  }
+  room.sim = { salt, runs: Number(url.searchParams.get("runs")) || null, at: Date.now(), bytes };
+  const target = simFilePath(store, room);
+  if (target) {
+    // Chained on the room's own save chain, like persistRoom, so a sim and the
+    // room record it belongs to never interleave on the way to disk.
+    room.saveChain = (room.saveChain ?? Promise.resolve())
+      .then(() => writeFile(`${target}.tmp`, bytes))
+      .then(() => rename(`${target}.tmp`, target))
+      .catch((error) => console.error(`Failed to save sim for room ${room.id}: ${error.message}`));
+  }
+  // The metadata is small and rides along with the room; the season does not.
+  persistRoom(store, room);
+  broadcast(room, "sim-ready", { salt, runs: room.sim.runs });
+  return sendJson(response, 200, { salt });
+}
+
+async function getRoomSim(store, room, response, url) {
+  const wanted = url.searchParams.get("salt");
+  const sim = room.sim;
+  if (!sim || (wanted && wanted !== sim.salt)) {
+    return sendJson(response, 404, { error: "No sim on file for this room" });
+  }
+  if (!sim.bytes) {
+    // A machine that slept since the sim ran has the metadata (it saves with
+    // the room) but not the season, which waits on the volume until somebody
+    // asks for it.
+    const target = simFilePath(store, room);
+    try {
+      sim.bytes = target ? await readFile(target) : null;
+    } catch {
+      sim.bytes = null;
+    }
+    if (!sim.bytes) {
+      room.sim = null;
+      return sendJson(response, 404, { error: "No sim on file for this room" });
+    }
+  }
+  response.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Encoding": "gzip",
+    "Content-Length": sim.bytes.length,
+    "Cache-Control": "no-store"
+  });
+  response.end(sim.bytes);
+}
+
+// The race as it unfolds on the runner's screen, forwarded to everyone else's
+// so the room watches one season together. Ephemeral on purpose: it is never
+// applied, never logged and never saved — a dropped tick just means a chart
+// that skips a frame.
+async function postSimProgress(room, request, response) {
+  const body = await readJsonBody(request).catch(() => null);
+  if (!body) return sendJson(response, 400, { error: "Invalid JSON body" });
+  const { seat, isHost } = roomSeat(room, body.token);
+  if (!seat && !isHost) return sendJson(response, 403, { error: "Join a seat before filing a sim" });
+  if (!body.salt || body.salt !== latestSimSalt(room)) {
+    return sendJson(response, 409, { error: "That sim is not the one the room is running" });
+  }
+  // The ceremony rides along: the beat the runner is on, so every screen in the
+  // room draws the same frame. Passed through without being read — it is the
+  // runner's own view of its own season, and the server has no opinion on it.
+  // A beat is a kilobyte or two; anything wildly larger than that is not one.
+  const ceremony = body.ceremony && typeof body.ceremony === "object" ? body.ceremony : null;
+  broadcast(room, "sim-progress", {
+    salt: body.salt,
+    completed: Number(body.completed) || 0,
+    total: Number(body.total) || 0,
+    rows: Array.isArray(body.rows) ? body.rows : [],
+    ...(ceremony && JSON.stringify(ceremony).length <= 24000 ? { ceremony } : {})
+  });
+  response.writeHead(204);
+  response.end();
 }
 
 // A sealed bid is withheld from the room until the lot resolves. The server
@@ -2101,6 +2261,10 @@ function roomSnapshot(room, port = null, viewer = {}) {
     })),
     actions: room.actions,
     lot: lotView(room),
+    // Which season is on file, so a client rejoining a room that has already
+    // simmed can read it off the server instead of playing a hundred thousand
+    // games to arrive at the same table.
+    sim: room.sim ? { salt: room.sim.salt, runs: room.sim.runs ?? null } : null,
     complete: room.draft.complete,
     serverNow: Date.now()
   };
@@ -2151,6 +2315,27 @@ function readJsonBody(request) {
         rejectPromise(new Error("Invalid JSON body"));
       }
     });
+    request.on("error", rejectPromise);
+  });
+}
+
+// The sim blob arrives as opaque bytes rather than JSON: it is already gzipped
+// when it leaves the browser, and the server has no reason to spend a 256MB
+// machine's memory inflating a season it only has to store.
+function readRawBody(request, limit) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let size = 0;
+    const chunks = [];
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        rejectPromise(new Error("Request body too large"));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on("end", () => resolvePromise(Buffer.concat(chunks)));
     request.on("error", rejectPromise);
   });
 }

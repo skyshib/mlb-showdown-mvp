@@ -163,8 +163,11 @@ import { COACHES, coachTargetLabel, isCoach, needsCoachTarget } from "./rules/co
 import {
   createRoom,
   fetchRoom,
+  fetchRoomSim,
+  fileRoomSim,
   joinRoom,
   sendRoomAction,
+  sendSimProgress,
   configureRoom,
   subscribeRoom,
   loadOnlineSeat,
@@ -177,8 +180,22 @@ import {
   normalizeBatchRuns,
   replayBatchGames,
   runBatchChunk,
+  simulateBatchGame,
   summarizeBatch
 } from "./rules/batch.js?v=20260725-starter-matchups";
+import {
+  CEREMONY_BEATS,
+  countdownRows,
+  leagueLeaders,
+  leverageMoments,
+  meetingIndices,
+  pickRepresentative,
+  readyForNextBeat,
+  reckoning,
+  traitLeaders,
+  winProbabilitySeries
+} from "./rules/ceremony.js?v=20261015-ceremony";
+import { ceremonyHtml, duelHtml, patchCeremony, resultWord } from "./ui/ceremony.js?v=20261015-ceremony";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
@@ -1490,13 +1507,44 @@ function rebuildOnlineDraft(room) {
   driveOnlineCpuTurn();
 }
 
-// A sim action in the shared log means someone hit "Sim": every client runs
-// the same seeded simulation locally, so results match on all machines.
+// A sim action in the shared log means someone hit "Sim". Every client COULD
+// run it — the season is a pure function of the room's seed and the action's
+// salt — and for a long time every client did, which meant a hundred thousand
+// games on every machine in the room at whatever speed that machine managed:
+// seventeen seconds on a fast laptop, minutes on a phone, and a background tab
+// (setTimeout clamped to a second) slowest of all.
+//
+// So the seat that pressed Sim runs it and files the finished season on the
+// server, and everyone else watches its race and reads the result. The local
+// run remains the fallback for every case the shared path cannot cover: a
+// client that predates it, a browser that cannot gzip, a runner whose tab is
+// closed mid-season. Nobody is ever stuck waiting on somebody else's machine.
 function applySharedSim(action, options = {}) {
   if (!state.draft || !canSimulate(state.draft)) return;
-  if (action.type === "batch") {
-    startBatchRun(action.runs ?? DEFAULT_BATCH_RUNS, { ...options, salt: action.salt });
+  if (action.type !== "batch") return;
+  const runs = action.runs ?? DEFAULT_BATCH_RUNS;
+  const salt = action.salt;
+  const shared = Boolean(salt) && Boolean(action.managerId) && Boolean(state.online?.roomId);
+  if (shared) {
+    const mine = action.managerId === state.online.managerId;
+    // Every reconnect replays the room's last sim. That used to mean replaying
+    // a hundred thousand games on arrival; now it means asking the server for
+    // the season that was already played — which is just as true for the
+    // browser that played it.
+    if (!mine || options.instant) {
+      watchSharedBatch({
+        runs,
+        salt,
+        instant: Boolean(options.instant),
+        fileFor: mine ? salt : null,
+        runner: state.draft.managers.find((manager) => manager.id === action.managerId)?.name ?? null
+      });
+      return;
+    }
+    startBatchRun(runs, { ...options, salt, fileFor: salt });
+    return;
   }
+  startBatchRun(runs, { ...options, salt });
 }
 
 function subscribeOnline() {
@@ -1566,6 +1614,11 @@ function subscribeOnline() {
       state.online.lot = payload.lot;
       scheduleScreenRender();
     },
+    // The browser running the room's season, reporting in. Neither of these is
+    // an action: nothing is applied and nothing is logged, they only drive the
+    // race screen on the machines that are watching it.
+    onSimProgress: (payload) => applySharedSimProgress(payload),
+    onSimReady: (payload) => applySharedSimReady(payload),
     onError: () => {
       if (!state.online || state.online.status) return;
       state.online.status = "Reconnecting to room server…";
@@ -4812,7 +4865,16 @@ function renderLiveGame() {
 // the action from, so their sim runs on their own screen and nobody else's.
 function requestBatchRun(runs) {
   if (state.online?.token) {
-    sendOnlineAction({ type: "batch", runs: normalizeBatchRuns(runs), salt: newBatchSalt() });
+    // The seat that pressed Sim is the seat that runs it (see applySharedSim).
+    // It rides in the action so every client reads the same answer to "whose
+    // machine is this on" — including this one, which hears its own action back
+    // down two different roads.
+    sendOnlineAction({
+      type: "batch",
+      runs: normalizeBatchRuns(runs),
+      salt: newBatchSalt(),
+      managerId: state.online.managerId
+    });
     return;
   }
   startBatchRun(runs, { salt: newBatchSalt() });
@@ -4820,6 +4882,257 @@ function requestBatchRun(runs) {
 
 function newBatchSalt() {
   return Date.now().toString(36);
+}
+
+// One award, dressed for the ceremony: the line computeAwards picked, plus the
+// WPAR split the card beat shows underneath it. A room dealt without standing
+// replacement cards has no WPAR to split, and gets the headline alone.
+function ceremonyAward(key, summary) {
+  const award = computeAwards(summary).find((entry) => entry.key === key);
+  if (!award) return null;
+  const line = [...summary.hitters, ...summary.pitchers].find((entry) => entry.id === award.id);
+  return {
+    key,
+    label: award.label,
+    id: award.id,
+    name: award.name,
+    team: award.team,
+    headline: award.stat,
+    detail: award.note,
+    split: summary.attribution && line?.warPer162 ? line.warPer162 : null
+  };
+}
+
+// A line score is runs per inning; the R column is their sum and the H column
+// is counted off the box score's hitters.
+function runsIn(innings) {
+  return (innings ?? []).reduce((total, runs) => total + (Number(runs) || 0), 0);
+}
+
+function hitsIn(side) {
+  return (side?.hitters ?? []).reduce((total, line) => total + (Number(line.h) || 0), 0);
+}
+
+// ---- the ceremony, shared ----------------------------------------------------
+//
+// A room watches one ceremony. The browser running the season sends its beat
+// with the progress ticks it already files, and every other screen draws the
+// same frame from it — so the plaques land together, the same card turns over
+// at the same moment, and the championship game is played back in step.
+//
+// The replay never travels. It is deterministic from (teams, seed, game index),
+// so the runner sends WHICH game and how far through it is, and the watchers
+// play the same game locally to draw it. Sending seventy events several times a
+// second would be the only expensive thing in here.
+let ceremonyReplayCache = null;
+
+function ceremonyReplay(wire, teams, seed) {
+  if (!wire || !Number.isFinite(wire.index)) return null;
+  if (ceremonyReplayCache?.index !== wire.index || ceremonyReplayCache?.seed !== seed) {
+    const game = simulateBatchGame(teams, seed, wire.index + 1);
+    if (!game) return null;
+    const championSide = (game.home?.name ?? game.home) === wire.champion ? "home" : "away";
+    ceremonyReplayCache = {
+      index: wire.index,
+      seed,
+      game,
+      championSide,
+      moments: leverageMoments(game),
+      wp: winProbabilitySeries(game, championSide),
+      line: game.lineScore ?? { away: [], home: [] }
+    };
+  }
+  return ceremonyReplayCache;
+}
+
+// The wire carries ids and counters; this puts the cards and the plate
+// appearance back on it so the same renderer serves both sides.
+function hydrateCeremony(snapshot, teams, seed) {
+  if (snapshot?.beat !== "game" || !snapshot.game) return snapshot;
+  const cache = ceremonyReplay(snapshot.game, teams, seed);
+  if (!cache) return snapshot;
+  const moment = cache.moments[snapshot.game.momentIndex] ?? null;
+  return {
+    ...snapshot,
+    game: { ...snapshot.game, moment: moment ? { ...moment, phase: snapshot.game.phase } : null }
+  };
+}
+
+// One frame of the replay, drawn from the wire and the local copy of the game.
+// Idempotent on purpose: a watcher repaints several times a second and the
+// runner repaints on every phase change, and both have to land in the same
+// place.
+function paintReplay(root, wire, cache, options) {
+  if (!root || !wire || !cache) return;
+  const live = (key) => root.querySelector(`[data-live="${key}"]`);
+  for (const side of ["away", "home"]) {
+    (cache.line[side] ?? []).forEach((runs, index) => {
+      const cell = live(`ls-${side}-${index}`);
+      if (!cell) return;
+      const shown = index < wire.lineRevealed;
+      cell.textContent = shown ? String(runs) : "";
+      cell.classList.toggle("filled", shown);
+      cell.classList.toggle("scored", shown && runs > 0);
+    });
+    const total = live(`ls-${side}-r`);
+    const hits = live(`ls-${side}-h`);
+    if (total) total.textContent = wire.final ? String(runsIn(cache.line[side])) : "";
+    if (hits) hits.textContent = wire.final ? String(hitsIn(cache.game.boxScore?.[side])) : "";
+  }
+
+  const shown = cache.wp.filter((point) => point.index <= wire.wpRevealed);
+  if (shown.length) {
+    const span = Math.max(1, cache.wp.length - 1);
+    const path = shown
+      .map((point) => `${((point.index / span) * 400).toFixed(1)} ${(24 - ((point.wp - 50) / 50) * 22).toFixed(1)}`)
+      .join(" L");
+    live("wp-line")?.setAttribute("d", `M${path}`);
+    const now = live("wp-now");
+    if (now) now.textContent = `${shown[shown.length - 1].wp.toFixed(1)}%`;
+  }
+
+  if (wire.final) stampReplay(root, wire, cache);
+
+  const host = live("duel");
+  if (!host) return;
+  const moment = cache.moments[wire.momentIndex] ?? null;
+  if (!moment) { host.innerHTML = ""; return; }
+  if (host.dataset.moment !== String(wire.momentIndex)) {
+    host.dataset.moment = String(wire.momentIndex);
+    host.innerHTML = duelHtml({ ...wire, moment: { ...moment, phase: wire.phase } }, options);
+  }
+  const duel = host.querySelector(".duel");
+  if (!duel) return;
+  const reached = (phase) => ["spot", "pitch", "advantage", "swing", "result"].indexOf(wire.phase)
+    >= ["spot", "pitch", "advantage", "swing", "result"].indexOf(phase);
+  duel.setAttribute("data-phase", wire.phase);
+  const event = moment.event;
+  if (reached("pitch")) {
+    settleDie(host, "die-control", event.controlRoll);
+    const effective = event.effectiveControl ?? (event.controlTotal - event.controlRoll);
+    const math = live("math-control");
+    if (math) math.textContent = `+${effective} = ${event.controlTotal} vs OB ${event.onBase}`;
+  }
+  if (reached("swing")) {
+    settleDie(host, "die-swing", event.resultRoll);
+    const math = live("math-swing");
+    if (math) {
+      math.textContent = event.swingBonus
+        ? `${event.swingBonus > 0 ? "+" : "−"}${Math.abs(event.swingBonus)} = ${event.swingRoll}`
+        : "";
+    }
+  }
+  if (reached("result")) {
+    const before = cache.wp[moment.index]?.wp ?? 50;
+    const after = cache.wp[moment.index + 1]?.wp ?? before;
+    const delta = after - before;
+    const result = live("duel-result");
+    if (result) {
+      result.textContent = `${resultWord(event.result)} · ${delta >= 0 ? "+" : "−"}${Math.abs(delta).toFixed(1)} win probability`;
+    }
+    duel.classList.toggle("duel-negative", delta < 0);
+  }
+}
+
+// The final out. Part of the frame rather than a node appended to it: a
+// watcher's screen is redrawn by whatever arrives next, and a stamp that was
+// inserted afterwards goes with it.
+function stampReplay(root, wire, cache) {
+  const stamp = root.querySelector('[data-live="stamp"]');
+  if (!stamp || !stamp.hidden) return;
+  const winner = cache.game.winner;
+  const awayRuns = runsIn(cache.line.away);
+  const homeRuns = runsIn(cache.line.home);
+  const winnerRuns = winner === wire.away ? awayRuns : homeRuns;
+  const loserName = winner === wire.away ? wire.home : wire.away;
+  const loserRuns = winner === wire.away ? homeRuns : awayRuns;
+  const score = root.querySelector('[data-live="stamp-score"]');
+  const share = root.querySelector('[data-live="stamp-share"]');
+  if (score) score.textContent = `${winner} ${winnerRuns}, ${loserName} ${loserRuns}`;
+  if (share) {
+    share.textContent = Number.isFinite(wire.wonShare) ? `as they did ${wire.wonShare}% of the time` : "";
+  }
+  stamp.hidden = false;
+  requestAnimationFrame(() => stamp.classList.add("on"));
+}
+
+// A die that has not been thrown on this screen yet tumbles before it settles,
+// wherever the screen is. A die that is already showing its number stays put,
+// so a repaint does not re-roll it.
+function settleDie(root, key, value) {
+  const node = root.querySelector(`[data-live="${key}"]`);
+  if (!node || node.dataset.settled === String(value)) return;
+  node.dataset.settled = String(value);
+  node.classList.add("rolling");
+  let ticks = 0;
+  const tumble = setInterval(() => {
+    node.textContent = String(1 + Math.floor(Math.random() * 20));
+    ticks += 1;
+    if (ticks < 9) return;
+    clearInterval(tumble);
+    node.classList.remove("rolling");
+    node.classList.add("settled");
+    node.textContent = String(value);
+  }, 58);
+}
+
+// The names and cards on screen. When they change, a rank has changed hands,
+// and the beat is drawn again rather than patched — which also replays its
+// entrance, so an overtake looks like one.
+function ceremonyCast(snapshot) {
+  return [
+    snapshot.beat,
+    ...(snapshot.traits ?? []).map((trait) => `${trait.key}:${trait.team}`),
+    ...(snapshot.leaders ?? []).map((leader) => `${leader.key}:${leader.id}`),
+    snapshot.award ? `award:${snapshot.award.id}` : "",
+    ...(snapshot.reckoning?.hitters ?? []).map((entry) => entry.id),
+    ...(snapshot.reckoning?.pitchers ?? []).map((entry) => entry.id),
+    ...(snapshot.counted ?? []).map((row) => row.team),
+    // The game beat opens before the search for a championship game has
+    // finished, so its first frame carries no game at all. Without this the
+    // beat looks unchanged when the real one arrives and the screen keeps
+    // drawing the empty one.
+    snapshot.beat === "game" ? `game:${snapshot.game?.index ?? "none"}` : ""
+  ].join("|");
+}
+
+// One frame, drawn the same way on the browser running the season and on every
+// browser watching it.
+function drawCeremony(snapshot, context, memory) {
+  const cast = ceremonyCast(snapshot);
+  if (memory.cast === cast) {
+    patchCeremony(app, snapshot);
+    return false;
+  }
+  const changed = memory.cast !== undefined && memory.beat === snapshot.beat;
+  memory.cast = cast;
+  memory.beat = snapshot.beat;
+  app.innerHTML = ceremonyHtml(snapshot, context);
+  patchCeremony(app, snapshot);
+  if (changed) app.querySelector(".ceremony-stage")?.classList.add("lead-change");
+  return true;
+}
+
+const CEREMONY_SKIP_KEY = "mlb-showdown-skip-ceremony";
+
+// Somebody who skipped the ceremony once is usually re-simming, and does not
+// want to sit through it again — so the choice sticks, and the results screen
+// carries the way back.
+function ceremonySkipped() {
+  try {
+    return localStorage.getItem(CEREMONY_SKIP_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberCeremonySkip(skip) {
+  try {
+    if (skip) localStorage.setItem(CEREMONY_SKIP_KEY, "1");
+    else localStorage.removeItem(CEREMONY_SKIP_KEY);
+  } catch {
+    // A browser that will not keep the preference simply asks again.
+  }
 }
 
 function startBatchRun(runs, options = {}) {
@@ -4841,16 +5154,9 @@ function startBatchRun(runs, options = {}) {
   const series = [];
   let completed = 0;
   let skipRequested = Boolean(options.instant);
-  // The race has two speeds and an exit: watch it, fast forward through the
-  // dull middle innings of the season, or skip straight to the table.
-  let fastForwarding = false;
 
   resetAppHandlers();
   hideHoverCard();
-  app.onclick = (event) => {
-    if (event.target.closest("button[data-action=batch-skip]")) skipRequested = true;
-    if (event.target.closest("button[data-action=batch-fast-forward]")) fastForwarding = true;
-  };
 
   const pushFrame = () => {
     if (completed < plotStart) return null;
@@ -4858,6 +5164,319 @@ function startBatchRun(runs, options = {}) {
     const shareByTeam = new Map(snapshot.rows.map((row) => [row.team, row.share]));
     series.push({ n: completed, shares: teamNames.map((name) => shareByTeam.get(name) ?? 0) });
     return snapshot;
+  };
+
+  // This browser is running the season for the room, so the room gets to watch
+  // it: the tallies go up to the server, which forwards them to every other
+  // screen. Throttled to about the rate the race draws at — watchers cannot
+  // show frames faster than they arrive, and there is nothing to be gained by
+  // sending more than their chart can draw.
+  const fileFor = options.fileFor ?? null;
+  let reportedAt = 0;
+  const reportProgress = (progress, ceremony = null) => {
+    if (!fileFor || !progress || !state.online?.token) return;
+    const now = Date.now();
+    if (now - reportedAt < 350) return;
+    reportedAt = now;
+    const byTeam = new Map(progress.rows.map((row) => [row.team, row]));
+    sendSimProgress(state.online.roomId, state.online.token, {
+      salt: fileFor,
+      completed,
+      total: count,
+      rows: teamNames.map((name) => [byTeam.get(name)?.wins ?? 0, byTeam.get(name)?.losses ?? 0]),
+      ceremony
+    });
+  };
+
+  // The beat this browser is on, sent to the rest of the room so six screens
+  // light the same plaque at the same moment. A phase of the replay jumps the
+  // throttle: those are short and landing a third of a second late would put
+  // the dice out of step with the call.
+  const sendCeremony = (urgent = false) => {
+    if (!fileFor || !state.online?.token) return;
+    if (urgent) reportedAt = 0;
+    reportProgress(batchProgressSnapshot(batchState), snapshot);
+  };
+
+  // ---- the ceremony ----------------------------------------------------------
+  //
+  // The reveal runs WHILE the season does. Beats are gated on how much of the
+  // sim has finished (rules/ceremony.js has the ladder and the reasoning), the
+  // figures on them keep moving until their gate passes, and the standings wait
+  // for the hundred-thousandth game. The sim loop below no longer draws
+  // anything: it only counts games, and this timer draws.
+  const auction = isAuctionDraft(state.draft);
+  const costs = auction ? buildPricePaidMap(state.draft) : buildPickNumberMap(state.draft);
+  const cardsById = draftedPlayersById();
+  const ceremonyContext = {
+    cardFor: (id) => cardsById.get(id) ?? null,
+    raceChart: ""
+  };
+  let beat = 0;
+  let beatOpenedAt = Date.now();
+  let figuresAt = 0;
+  let ceremonyTimer = null;
+  const ceremonyMemory = {};
+  let finalSummary = null;
+  let replay = null;
+  let snapshot = { beat: CEREMONY_BEATS[0].key, completed: 0, total: count, teamNames };
+
+  const buildSnapshot = (summary) => {
+    const key = CEREMONY_BEATS[beat].key;
+    const next = { beat: key, completed, total: count, teamNames };
+    if (!summary) return next;
+    if (key === "traits") next.traits = traitLeaders(summary);
+    if (key === "leaders") next.leaders = leagueLeaders(summary);
+    if (key === "mvp") next.award = ceremonyAward("mvp-hitter", summary);
+    if (key === "cy") next.award = ceremonyAward("cy-young", summary);
+    if (key === "reckoning") {
+      next.reckoning = { ...reckoning(summary, costs, { byMoney: auction }), byWpar: Boolean(summary.attribution) };
+    }
+    if (key === "countdown" || key === "finalists") {
+      const rows = countdownRows(summary);
+      next.counted = rows.counted.map((row, index) => ({
+        place: rows.all.length - index,
+        team: row.team,
+        wins: Math.round((row.winPct ?? 0) * 162),
+        losses: 162 - Math.round((row.winPct ?? 0) * 162),
+        winPct: row.winPct
+      }));
+      next.finalists = rows.finalists;
+      next.meetings = replay?.meetings ?? 0;
+    }
+    if (key === "game") next.game = replay?.wire ?? null;
+    return next;
+  };
+
+  const drawFrame = () => {
+    const view = hydrateCeremony(snapshot, teams, seed);
+    const redrew = drawCeremony(view, ceremonyContext, ceremonyMemory);
+    if (redrew) app.onclick = ceremonyClick;
+    if (view.beat === "game" && replay?.cache) paintReplay(app, replay.wire, replay.cache, ceremonyContext);
+    sendCeremony();
+  };
+
+  const openBeat = (summary) => {
+    snapshot = buildSnapshot(summary);
+    if (CEREMONY_BEATS[beat].key === "epilogue") {
+      ceremonyContext.raceChart = renderRaceChart({ teamNames, totalRuns: count, series: raceSeries() });
+    }
+    resetAppHandlers();
+    ceremonyMemory.cast = undefined;
+    drawFrame();
+    beatOpenedAt = Date.now();
+  };
+
+  const refreshFigures = () => {
+    const now = Date.now();
+    if (now - figuresAt < 450) return;
+    figuresAt = now;
+    const summary = finalSummary ?? summarizeBatch(batchState);
+    const next = buildSnapshot(summary);
+    next.completed = completed;
+
+    snapshot = next;
+    drawFrame();
+  };
+
+  const ceremonyTick = () => {
+    if (token !== batchRunToken || !state.draft) { stopCeremony(); return; }
+    const key = CEREMONY_BEATS[beat].key;
+    // The replay runs itself and says when it is finished; everything else is
+    // on a gate and a clock.
+    if (key === "game") {
+      if (replay?.done) advanceBeat();
+      return;
+    }
+    // The last beat has nothing to be ready for: when its dwell is up, the
+    // ceremony is over and the table it was keeping back comes out.
+    if (beat === CEREMONY_BEATS.length - 1) {
+      if (Date.now() - beatOpenedAt >= CEREMONY_BEATS[beat].dwell) advanceBeat();
+      return;
+    }
+    if (readyForNextBeat(beat, { progress: completed / count, heldMs: Date.now() - beatOpenedAt })) {
+      advanceBeat();
+      return;
+    }
+    refreshFigures();
+  };
+
+  const advanceBeat = () => {
+    if (beat >= CEREMONY_BEATS.length - 1) {
+      stopCeremony();
+      finalize(batchState);
+      return;
+    }
+    beat += 1;
+    const key = CEREMONY_BEATS[beat].key;
+    openBeat(finalSummary ?? summarizeBatch(batchState));
+    if (key === "game") startReplay();
+  };
+
+  const stopCeremony = () => {
+    clearInterval(ceremonyTimer);
+    ceremonyTimer = null;
+    replay?.stop();
+  };
+
+  // ---- the championship game -------------------------------------------------
+  //
+  // Started the moment the last game lands, so the search is done by the time
+  // the countdown has finished naming places. The schedule is a fixed round
+  // robin, so the meetings between the top two are an arithmetic series; what
+  // costs anything is replaying them for their scores, which is why it walks in
+  // slices with the main thread given back between each one.
+  const searchChampionship = () => {
+    const rows = countdownRows(finalSummary);
+    const champion = rows.finalists[0]?.team;
+    const challenger = rows.finalists[1]?.team;
+    if (!champion || !challenger) return;
+    const indices = meetingIndices(teams, count, champion, challenger);
+    // A hundred thousand games is six thousand-odd meetings; past a few
+    // thousand the median stops moving, so walk an even sample of them.
+    const step = Math.max(1, Math.ceil(indices.length / 3000));
+    const walk = indices.filter((_, position) => position % step === 0);
+    const meetings = [];
+    replay = { meetings: indices.length, done: false, view: null, stop: () => {} };
+    let cursor = 0;
+    const slice = () => {
+      if (token !== batchRunToken) return;
+      const end = Math.min(walk.length, cursor + 150);
+      for (; cursor < end; cursor += 1) {
+        const game = simulateBatchGame(teams, seed, walk[cursor] + 1);
+        if (!game) continue;
+        meetings.push({
+          index: walk[cursor],
+          away: game.away.name ?? game.away,
+          home: game.home.name ?? game.home,
+          awayRuns: runsIn(game.lineScore?.away),
+          homeRuns: runsIn(game.lineScore?.home),
+          winner: game.winner
+        });
+      }
+      if (cursor < walk.length) {
+        setTimeout(slice, 0);
+        return;
+      }
+      replay.pick = pickRepresentative(meetings, champion) ?? null;
+      replay.champion = champion;
+      replay.challenger = challenger;
+      replay.searched = true;
+    };
+    slice();
+  };
+
+  // The replay itself. Slow on purpose: a plate appearance that the game
+  // thought was dangerous is held on its spot — the cards, the bases, the
+  // leverage — before a die is thrown, then the control battle is rolled, then
+  // the swing off whichever chart won it. The breakdown is the point; a line of
+  // play-by-play would be over before anybody read it.
+  const SPOT_MS = 1400;
+  const PITCH_MS = 2000;
+  const SWING_MS = 3200;
+  const RESULT_MS = 3900;
+  const MOMENT_MS = 5400;
+
+  const startReplay = () => {
+    if (!replay) { setTimeout(advanceBeat, 600); return; }
+    const timers = [];
+    replay.stop = () => { timers.forEach(clearTimeout); timers.length = 0; };
+    const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+
+    const frame = (changes) => {
+      Object.assign(replay.wire, changes);
+      snapshot = buildSnapshot(finalSummary);
+      paintReplay(app, replay.wire, replay.cache, ceremonyContext);
+      sendCeremony(true);
+    };
+
+    const waitForPick = () => {
+      if (!replay.searched) { at(140, waitForPick); return; }
+      play();
+    };
+
+    const play = () => {
+      const pick = replay.pick;
+      if (!pick) { replay.done = true; return; }
+      // The wire is what the room is sent: which game, and how far through it
+      // this screen should be. Everything else each browser works out itself.
+      replay.wire = {
+        index: pick.index,
+        champion: replay.champion,
+        challenger: replay.challenger,
+        meetings: replay.meetings,
+        momentIndex: 0,
+        phase: "spot",
+        lineRevealed: 0,
+        wpRevealed: 0,
+        final: false
+      };
+      const cache = ceremonyReplay(replay.wire, teams, seed);
+      if (!cache) { replay.done = true; return; }
+      replay.cache = cache;
+      const game = cache.game;
+      Object.assign(replay.wire, {
+        away: game.away?.name ?? String(game.away),
+        home: game.home?.name ?? String(game.home),
+        championName: replay.champion,
+        challengerName: replay.challenger,
+        innings: Math.max(cache.line.away.length, cache.line.home.length, 9)
+      });
+      openBeat(finalSummary);
+
+      const moments = cache.moments;
+      if (!moments.length) {
+        at(600, () => frame({ lineRevealed: replay.wire.innings, wpRevealed: cache.wp.length, final: true }));
+        at(2200, () => { replay.done = true; });
+        return;
+      }
+
+      moments.forEach((moment, order) => {
+        const start = 700 + order * MOMENT_MS;
+        const event = moment.event;
+        const half = event.half === "top" ? 1 : 0;
+        at(start, () => frame({
+          momentIndex: order,
+          phase: "spot",
+          lineRevealed: Math.max(replay.wire.lineRevealed, event.inning - half),
+          wpRevealed: moment.index
+        }));
+        at(start + SPOT_MS, () => frame({ phase: "pitch" }));
+        at(start + PITCH_MS, () => frame({ phase: "advantage" }));
+        at(start + SWING_MS - 600, () => frame({ phase: "swing" }));
+        at(start + RESULT_MS, () => frame({
+          phase: "result",
+          lineRevealed: Math.max(replay.wire.lineRevealed, event.inning),
+          wpRevealed: moment.index + 1
+        }));
+      });
+
+      const tail = 700 + moments.length * MOMENT_MS;
+      at(tail, () => frame({
+        lineRevealed: replay.wire.innings,
+        wpRevealed: cache.wp.length,
+        final: true,
+        wonShare: Math.round((replay.pick.won / Math.max(1, replay.pick.meetings)) * 100)
+      }));
+      at(tail + 2600, () => { replay.done = true; });
+    };
+
+    waitForPick();
+  };
+
+  const ceremonyClick = (event) => {
+    if (!event.target.closest("button[data-action=ceremony-skip]")) return;
+    skipRequested = true;
+    rememberCeremonySkip(true);
+    stopCeremony();
+    if (completed >= count) {
+      finalize(batchState);
+      return;
+    }
+    app.innerHTML = `<section class="panel sim-progress"><p class="eyebrow">Game simulator</p>
+      <h1>Finishing the season</h1>
+      <p class="lede" data-skip-count>${completed.toLocaleString("en-US")} of ${count.toLocaleString("en-US")} games played.</p></section>`;
+    runSkip();
   };
 
   // A run too short to ever clear plotStart (a handful of games) samples fewer
@@ -4878,6 +5497,7 @@ function startBatchRun(runs, options = {}) {
 
   const finalize = (finishedState) => {
     if (token !== batchRunToken || !state.draft) return;
+    stopCeremony();
     state.tournament = null;
     state.batch = {
       runs: count,
@@ -4891,6 +5511,13 @@ function startBatchRun(runs, options = {}) {
     state.batchGameIndex = null;
     saveState();
     renderBatch();
+    // File the season for the rest of the room. They are watching the race this
+    // browser just ran; this is the part where they get the box scores without
+    // playing the games.
+    if (fileFor && state.online?.token) {
+      fileRoomSim(state.online.roomId, state.online.token, { salt: fileFor, runs: count }, { ...state.batch, salt: fileFor })
+        .catch(() => {});
+    }
     if (!options.instant) {
       track("sim", {
         roomId: state.online?.roomId ?? null,
@@ -4948,8 +5575,10 @@ function startBatchRun(runs, options = {}) {
       // The instant path (online resync/join) wants results, not a show —
       // leave the "Simulating…" screen up rather than flashing a race by.
       if (!options.instant) {
-        renderBatchRace({ snapshot: snapshot ?? batchProgressSnapshot(batchState), series, completed, total: count, teamNames, fastForwarding: true });
+        const counter = app.querySelector("[data-skip-count]");
+        if (counter) counter.textContent = `${completed.toLocaleString("en-US")} of ${count.toLocaleString("en-US")} games played.`;
       }
+      reportProgress(snapshot ?? batchProgressSnapshot(batchState));
       if (completed >= count) {
         finalize(batchState);
         return;
@@ -4959,35 +5588,251 @@ function startBatchRun(runs, options = {}) {
     pump();
   };
 
+  // The sim no longer paces itself to a chart: the ceremony is the show, so the
+  // season runs as fast as it can in slices short enough to leave the main
+  // thread for drawing.
+  //
+  // The slice is a TIME budget rather than a fixed number of games, because a
+  // tab nobody is looking at gets its timers clamped to about a second — and a
+  // fixed slice small enough to keep the ceremony smooth in the foreground
+  // turns into six minutes of a hundred thousand games in the background. So
+  // when a frame arrives late, the next one does proportionally more work: the
+  // season takes about the same wall clock either way, and the ceremony only
+  // stutters on a screen nobody is watching.
+  const SIM_BUDGET_MS = 38;
+  const SIM_THROTTLED_BUDGET_MS = 600;
+  const simChunk = Math.max(20, Math.min(200, Math.round(count / 400)));
+  let lastStepAt = 0;
+
   const step = () => {
     if (token !== batchRunToken || !state.draft) return;
     if (skipRequested) {
       runSkip();
       return;
     }
-    // Fast forward runs the same race, just with a longer stride per frame —
-    // the chart still draws, it simply gets where it is going sooner.
-    const perFrame = fastForwarding ? gamesPerFrame * 8 : gamesPerFrame;
-    const size = Math.min(perFrame, count - completed);
-    runBatchChunk(batchState, teams, seed, completed, size);
-    completed += size;
-    const snapshot = pushFrame() ?? batchProgressSnapshot(batchState);
-    renderBatchRace({ snapshot, series, completed, total: count, teamNames, fastForwarding });
+    const now = Date.now();
+    const budget = lastStepAt && now - lastStepAt > 400 ? SIM_THROTTLED_BUDGET_MS : SIM_BUDGET_MS;
+    lastStepAt = now;
+    const started = performance.now();
+    do {
+      const size = Math.min(simChunk, count - completed);
+      runBatchChunk(batchState, teams, seed, completed, size);
+      completed += size;
+    } while (completed < count && performance.now() - started < budget);
+    pushFrame();
     if (completed >= count) {
-      setTimeout(() => finalize(batchState), fastForwarding ? 250 : 700);
+      finishSeason();
       return;
     }
-    setTimeout(step, fastForwarding ? 16 : raceFrameDelay(completed / count));
+    setTimeout(step, 12);
   };
 
-  renderBatchRace({ snapshot: null, series, completed: 0, total: count, teamNames, fastForwarding });
-  setTimeout(step, 250);
+  // The last game has landed. Summarise it once — everything after this reads
+  // the finished season rather than a running one — and start hunting for the
+  // championship game while the countdown is still naming places.
+  const finishSeason = () => {
+    if (token !== batchRunToken) return;
+    finalSummary = summarizeBatch(batchState);
+    searchChampionship();
+  };
+
+  if (options.instant || skipRequested || ceremonySkipped()) {
+    skipRequested = true;
+    runSkip();
+    return;
+  }
+
+  openBeat(null);
+  ceremonyTimer = setInterval(ceremonyTick, 160);
+  // Say hello before playing a single game. The room is waiting on this browser
+  // and has no other way to tell "starting" from "gone" — and a runner in a
+  // background tab, where Chrome clamps timers to a second, can take longer to
+  // produce its first frame than a watcher is willing to sit in silence.
+  reportProgress(batchProgressSnapshot(batchState));
+  setTimeout(step, 180);
 }
 
-function raceFrameDelay(progress) {
-  if (progress >= 0.85) return 230;
-  if (progress <= 0.12) return 170;
-  return 90;
+// ---- watching somebody else's sim --------------------------------------------
+//
+// The other side of options.fileFor: this browser did not press Sim, so it
+// plays nothing. The runner's race arrives as relayed tallies and its finished
+// season as a file on the server, which means a room of six plays one season
+// instead of six identical ones.
+//
+// The fallback is always the old behaviour — simulate it here. It fires when
+// the runner goes quiet (a closed tab, a browser that cannot gzip, a client
+// from before any of this existed), so nobody is left holding an empty screen
+// because of somebody else's machine.
+// Two clocks, because the first tick is the slow one: the runner has a browser
+// to set up and a chunk of games to play before it has anything to report, and
+// if it is in a background tab Chrome gives it a frame a second to do it in.
+// After the first tick the stream is chatty, so silence means something.
+const SHARED_SIM_FIRST_MS = 25000;
+// Generous on purpose. A runner whose tab has been hidden for a few minutes is
+// throttled hard by the browser — Chrome drops a backgrounded tab's timers to
+// about one a minute — and its beats arrive in bursts rather than steadily. A
+// tight window turned that into every watcher abandoning the room and playing
+// its own season, which is the one thing this is here to avoid. A runner that
+// is genuinely gone is still caught, twenty seconds later.
+const SHARED_SIM_SILENCE_MS = 20000;
+let sharedSimWatch = null;
+
+function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }) {
+  if (!state.draft) return;
+  const token = ++batchRunToken;
+  const teamNames = state.draft.managers.map((manager) => manager.name);
+  // Everything this screen needs to draw the runner's ceremony itself: the same
+  // clubs, the same seed, and its own copy of the cards. The relay carries ids
+  // and counters, never cards and never a game.
+  const replacements = standingReplacements(state.draft);
+  const cardsById = draftedPlayersById();
+  const watch = {
+    token,
+    salt,
+    runs,
+    instant,
+    fileFor,
+    runner,
+    teamNames,
+    series: [],
+    timer: null,
+    memory: {},
+    teams: state.draft.managers.map((manager) => ({
+      ...buildTeam(manager, { optimize: true }),
+      ...(replacements.length ? { replacements } : {})
+    })),
+    seed: salt ? `${state.seed}-batch-${salt}` : `${state.seed}-batch`,
+    context: { cardFor: (id) => cardsById.get(id) ?? null, raceChart: "" }
+  };
+  // A watcher cannot hurry the runner, so skipping here just steps out of the
+  // show: the result lands when the room's does.
+  watch.onClick = (event) => {
+    if (!event.target.closest("button[data-action=ceremony-skip]")) return;
+    watch.optedOut = true;
+    rememberCeremonySkip(true);
+    app.innerHTML = `<section class="panel sim-progress"><p class="eyebrow">Game simulator</p>
+      <h1>Waiting on the room</h1>
+      <p class="lede">${escapeHtml(runner ?? "Another manager")} is finishing the season. The table arrives when it does.</p></section>`;
+  };
+  sharedSimWatch = watch;
+
+  resetAppHandlers();
+  hideHoverCard();
+
+  const stale = () => watch.token !== batchRunToken || sharedSimWatch !== watch || !state.draft;
+
+  const playItHere = () => {
+    if (stale()) return;
+    clearTimeout(watch.timer);
+    sharedSimWatch = null;
+    startBatchRun(runs, { salt, instant, fileFor });
+  };
+
+  // Reset on every tick, so a slow runner is waited for and a silent one is not.
+  watch.wait = () => {
+    clearTimeout(watch.timer);
+    watch.timer = setTimeout(playItHere, watch.heard ? SHARED_SIM_SILENCE_MS : SHARED_SIM_FIRST_MS);
+  };
+
+  watch.apply = (blob) => {
+    if (stale() || !blob?.summary?.teams?.length) return false;
+    clearTimeout(watch.timer);
+    sharedSimWatch = null;
+    state.tournament = null;
+    state.batch = {
+      runs: blob.runs ?? runs,
+      seed: blob.seed ?? null,
+      summary: blob.summary,
+      race: blob.race ?? { teamNames, totalRuns: blob.runs ?? runs, series: watch.series }
+    };
+    state.view = "batch";
+    state.batchStatsTab = "overview";
+    state.batchGamePage = 0;
+    state.batchGameIndex = null;
+    saveState();
+    renderBatch();
+    return true;
+  };
+
+  // A race already in flight shows as the race; a reconnect long after the fact
+  // shows nothing at all until the season arrives a moment later, rather than
+  // flashing a progress screen on every reconnect.
+  if (!instant) {
+    renderBatchRace({ snapshot: null, series: watch.series, completed: 0, total: runs, teamNames, watching: runner });
+  }
+  watch.wait();
+
+  // Already on file: a reconnect, or a late join to a room that has simmed.
+  fetchRoomSim(state.online.roomId, salt).then((blob) => {
+    if (stale() || watch.apply(blob)) return;
+    // Nothing on file and this browser is the runner — waiting on yourself is
+    // not a plan, so play it.
+    if (fileFor) playItHere();
+  }).catch(() => {});
+}
+
+// The runner's race, a frame at a time. Relayed, so it is only ever a picture
+// of somebody else's progress: nothing here is applied to anything.
+function applySharedSimProgress(payload) {
+  const watch = sharedSimWatch;
+  if (!watch || watch.salt !== payload?.salt || watch.token !== batchRunToken) return;
+  watch.heard = true;
+  watch.wait();
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  // Keyed by seat order, which every client in the room shares: the draft is
+  // rebuilt from the room's manager list and the order draw is in the log.
+  const snapshot = {
+    runs: Number(payload.completed) || 0,
+    rows: watch.teamNames.map((team, index) => {
+      const wins = Number(rows[index]?.[0]) || 0;
+      const losses = Number(rows[index]?.[1]) || 0;
+      return { team, wins, losses, games: wins + losses, share: wins + losses ? wins / (wins + losses) : 0 };
+    })
+  };
+  const completed = Number(payload.completed) || 0;
+  const total = Number(payload.total) || watch.runs;
+  watch.series.push({ n: completed, shares: snapshot.rows.map((row) => row.share) });
+
+  // The room watches one ceremony. The runner sends the beat it is on and this
+  // screen draws the same frame — the cards come out of this browser's own copy
+  // of the draft, and the championship game is replayed here from its index.
+  if (payload.ceremony && !watch.optedOut) {
+    // The epilogue's chart is this screen's own race, drawn from the tallies it
+    // has been fed all along rather than shipped over with the beat.
+    if (payload.ceremony.beat === "epilogue" && !watch.context.raceChart) {
+      watch.context.raceChart = renderRaceChart({
+        teamNames: watch.teamNames,
+        totalRuns: total,
+        series: watch.series.length >= 2 ? downsampleSeries(watch.series) : watch.series
+      });
+    }
+    const view = hydrateCeremony(payload.ceremony, watch.teams, watch.seed);
+    const redrew = drawCeremony(view, watch.context, watch.memory);
+    if (redrew) app.onclick = watch.onClick;
+    if (view.beat === "game" && view.game) {
+      paintReplay(app, view.game, ceremonyReplay(view.game, watch.teams, watch.seed), watch.context);
+    }
+    return;
+  }
+  if (watch.optedOut) return;
+  renderBatchRace({
+    snapshot,
+    series: watch.series,
+    completed,
+    total,
+    teamNames: watch.teamNames,
+    watching: watch.runner
+  });
+}
+
+function applySharedSimReady(payload) {
+  const watch = sharedSimWatch;
+  if (!watch || watch.salt !== payload?.salt || watch.token !== batchRunToken) return;
+  watch.wait();
+  fetchRoomSim(state.online.roomId, watch.salt).then((blob) => {
+    if (!blob) return; // the watchdog plays it here if the season never lands
+    watch.apply(blob);
+  }).catch(() => {});
 }
 
 function downsampleSeries(series, maxPoints = 160) {
@@ -5001,7 +5846,7 @@ function downsampleSeries(series, maxPoints = 160) {
   return sampled;
 }
 
-function renderBatchRace({ snapshot, series, completed, total, teamNames, fastForwarding = false }) {
+function renderBatchRace({ snapshot, series, completed, total, teamNames, fastForwarding = false, watching = null }) {
   const percent = total ? Math.round((completed / total) * 100) : 0;
   const tallies = (snapshot?.rows ?? teamNames.map((name) => ({ team: name, wins: 0, losses: 0, share: 0 })))
     .slice()
@@ -5025,10 +5870,14 @@ function renderBatchRace({ snapshot, series, completed, total, teamNames, fastFo
     ${renderRaceChart({ teamNames, totalRuns: total, series })}
     <div class="race-chips">${chips}</div>
     <div class="race-controls">
-      <button data-action="batch-fast-forward" class="small race-fast-forward" ${fastForwarding ? "disabled" : ""}>
-        ${fastForwarding ? "⏩ Fast forwarding" : "⏩ Fast forward"}
-      </button>
-      <button data-action="batch-skip" class="small race-skip">Skip to results</button>
+      ${watching === null
+        ? `<button data-action="batch-fast-forward" class="small race-fast-forward" ${fastForwarding ? "disabled" : ""}>
+            ${fastForwarding ? "⏩ Fast forwarding" : "⏩ Fast forward"}
+          </button>
+          <button data-action="batch-skip" class="small race-skip">Skip to results</button>`
+        // A watcher is not simulating anything, so there is nothing here to
+        // hurry along: the pace is the runner's, and so are the controls.
+        : `<p class="race-watching">${escapeHtml(watching || "Another manager")} is simulating the season for the room.</p>`}
     </div>
   </section>`;
 }
@@ -5642,6 +6491,7 @@ function renderBatch() {
       <input data-batch-runs type="number" min="1" step="1" value="${runs}">
     </label>
     <button data-action="batch-run">Run again</button>
+    ${ceremonySkipped() ? `<button data-action="ceremony-on" class="small">Show the ceremony</button>` : ""}
     <button data-action="reset">New room</button>
   </section>
   ${renderBatchStatsTabs(activeBatchTab)}
@@ -6810,6 +7660,13 @@ function bindBatchActions() {
       return;
     }
     if (action === "batch-run") {
+      const input = app.querySelector("[data-batch-runs]");
+      requestBatchRun(input?.value ?? DEFAULT_BATCH_RUNS);
+    }
+    // Turning the ceremony back on runs one there and then: nobody asks for it
+    // and then wants to press a second button.
+    if (action === "ceremony-on") {
+      rememberCeremonySkip(false);
       const input = app.querySelector("[data-batch-runs]");
       requestBatchRun(input?.value ?? DEFAULT_BATCH_RUNS);
     }
