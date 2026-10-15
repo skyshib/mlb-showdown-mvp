@@ -5,9 +5,10 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer, flushSaves } from "../scripts/online-server.js";
-import { repairPen, sanitizeDraftRecord } from "../scripts/drafts.js";
+import { repairDeck, repairPen, sanitizeDraftRecord } from "../scripts/drafts.js";
 import { draftRecord } from "../src/rules/draftRecord.js";
-import { buildDraftPool } from "../src/data/universes.js";
+import { replayLots } from "../src/rules/draftReplay.js";
+import { buildDraftPool, deckFromIds } from "../src/data/universes.js";
 import { applyDraftAction, createDraft, isAuctionDraft } from "../src/rules/draft.js";
 
 const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -485,8 +486,52 @@ test("an auction record keeps the bidding, not just the prices", () => {
     const amounts = Object.values(entry.bids).sort((a, b) => b - a);
     assert.equal(typeof amounts[0], "number");
   }
-  // And the board it was all dealt from.
-  assert.equal(record.deck.length, draft.pool.length);
+  // And the board it was all dealt from — which is the pool less whatever the
+  // sweeps minted into it; this room swept nobody.
+  assert.equal(record.deck.length, draft.pool.filter((player) => !player.minted).length);
+});
+
+test("the board a record writes down is dealt cards only, and deals again", () => {
+  // A sweep mints a replacement into the pool under an id the room invented —
+  // `replacement-team-4-c-1` — and no card set holds it. Written down as part
+  // of the board, it threw on the way back in and took the whole rebuild with
+  // it: "Deck card replacement-team-4-c-1 is not in the classic set".
+  const pool = buildDraftPool("classic", "golden-diamond", { managerCount: 4, startingPitchers: 4 });
+  const draft = createDraft(
+    [{ name: "Skylar" }, { name: "A", cpu: true }, { name: "B", cpu: true }, { name: "C", cpu: true }],
+    pool, 15, "golden-diamond",
+    { draftType: "auction", nomination: "random", startingPitchers: 4, auctionBudget: 1500 }
+  );
+  applyDraftAction(draft, { type: "start-review" });
+  applyDraftAction(draft, { type: "complete-review" });
+  applyDraftAction(draft, { type: "finish" });
+  assert.ok(
+    draft.managers.some((manager) => manager.roster.some((card) => card.replacement)),
+    "this room ends on replacements, which is the whole point of it"
+  );
+
+  const record = draftRecord(draft, { source: "local", universe: "classic" });
+  assert.equal(record.deck.length, pool.length, "every dealt card, and nothing minted since");
+  assert.equal(record.deck.filter((entry) => String(entry?.id ?? entry).startsWith("replacement-")).length, 0);
+  // The standing replacements are dealt cards and stay: they carry real ids.
+  assert.ok(record.deck.some((entry) => entry?.replacement), "the standing cards are part of the board");
+  const rebuilt = deckFromIds("classic", record.seed, record.deck);
+  assert.equal(rebuilt.length, pool.length);
+  assert.deepEqual(rebuilt.map((card) => card.id), pool.map((card) => card.id));
+});
+
+test("a draft filed with its minted replacements still deals its board", () => {
+  // The records already on the shelf were filed pool and all, so the minted
+  // ids are dropped on the way out rather than left to throw.
+  const filed = { deck: ["ichiro-01", { id: "mcdonald-03", slot: "1B", replacement: true }, { id: "replacement-team-4-c-1", slot: "C", replacement: true }] };
+  assert.deepEqual(repairDeck(filed).deck, ["ichiro-01", { id: "mcdonald-03", slot: "1B", replacement: true }]);
+  // And a browser filing one now cannot put them back.
+  const sanitized = sanitizeDraftRecord({
+    seed: "s",
+    deck: ["ichiro-01", { id: "replacement-team-1-ss-1", slot: "SS", replacement: true }],
+    managers: [{ name: "A", roster: [] }]
+  });
+  assert.deepEqual(sanitized.deck, ["ichiro-01"]);
 });
 
 test("a recorded lot settles at the price it settled at the first time", () => {
@@ -519,6 +564,102 @@ test("a recorded lot settles at the price it settled at the first time", () => {
   const prices = (draft) => draft.auction.history.map((entry) => [entry.playerId, entry.managerId, entry.price]);
   assert.deepEqual(prices(replayed), prices(played), "at the same prices");
   assert.ok(isAuctionDraft(replayed));
+});
+
+// A room of four, 15 men each, four starters — and a board that runs out before
+// the last holes are filled, so the night ends on sweeps. Everything the stats
+// page's rebuild leans on is in here: the dealt board, the bidding, a tie that
+// went to a coin flip, and the replacements handed out at the end.
+function sweptClassicAuction() {
+  const options = { draftType: "auction", nomination: "random", startingPitchers: 4, auctionBudget: 1500 };
+  const names = [{ name: "Skylar" }, { name: "A", cpu: true }, { name: "B", cpu: true }, { name: "C", cpu: true }];
+  const pool = buildDraftPool("classic", "golden-diamond", { managerCount: 4, startingPitchers: 4 });
+  const draft = createDraft(names, pool, 15, "golden-diamond", options);
+  applyDraftAction(draft, { type: "start-review" });
+  applyDraftAction(draft, { type: "complete-review" });
+  applyDraftAction(draft, { type: "finish" });
+  return { draft, pool };
+}
+
+test("a draft that ended on sweeps is built again, card for card and price for price", async (t) => {
+  // The whole rebuild, over the same endpoints the stats page uses: deal the
+  // recorded board into a room, sit everyone down, and send the log back.
+  const { draft: played } = sweptClassicAuction();
+  const record = draftRecord(played, { source: "local", universe: "classic" });
+  const { base, store } = await startServer(t);
+
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: record.seed,
+    managers: record.managers.map((manager) => manager.name),
+    cpu: [],
+    universe: record.universe,
+    draftType: record.draftType,
+    nomination: record.nomination,
+    budget: record.auction.budget,
+    startingPitchers: record.startingPitchers,
+    rosterSize: record.rosterSize,
+    deck: record.deck,
+    deckToken: "sesame",
+    pickTimer: 0,
+    auctionTimer: { enabled: false }
+  });
+  assert.equal(created.status, 201, created.data.error ?? "");
+  const { roomId, hostToken } = created.data;
+  const seatId = new Map(record.managers.map((manager, index) => [manager.id, created.data.managers[index].id]));
+  for (const [index, manager] of record.managers.entries()) {
+    await api(base, "POST", `/api/rooms/${roomId}/join`, index === 0
+      ? { managerId: seatId.get(manager.id), hostToken }
+      : { managerId: seatId.get(manager.id) });
+  }
+  const act = async (action) => {
+    const sent = await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: hostToken, action });
+    assert.equal(sent.status, 200, `${action.type}: ${sent.data.error ?? ""}`);
+  };
+  // A room with no clock opens with its review already over; the page shrugs
+  // this one off the same way.
+  await api(base, "POST", `/api/rooms/${roomId}/actions`, { token: hostToken, action: { type: "complete-review" } });
+  for (const actions of replayLots(record)) {
+    for (const action of actions) {
+      await act(action.managerId ? { ...action, managerId: seatId.get(action.managerId) } : action);
+    }
+  }
+
+  await settle(store);
+  const read = await api(base, "GET", `/api/drafts/room-${roomId}?token=sesame`);
+  assert.equal(read.status, 200);
+  const shape = (filed) => filed.managers
+    .map((manager) => `${manager.name}:${manager.roster.map((card) => `${card.id}@${card.price ?? card.pick}`).join(",")}`)
+    .join("|");
+  assert.equal(shape(read.data.draft), shape(record), "the same teams, at the same prices");
+  assert.ok(
+    read.data.draft.managers.some((manager) => manager.roster.some((card) => card.replacement)),
+    "including the replacements the sweeps handed out"
+  );
+});
+
+test("a lot that tied is replayed with its rebid", () => {
+  // Each manager's LAST bid is what the record keeps, so a lot settled by a
+  // coin flip comes back as a tie — and a tie that is only entered once leaves
+  // the card on the block with the room waiting on a rebid.
+  const flipped = { playerId: "card-1", bids: { "team-1": 24, "team-2": 24, "team-3": 11 } };
+  const [actions] = replayLots({ nomination: "manual", auction: { log: [flipped] } });
+  assert.deepEqual(actions, [
+    { type: "nominate", playerId: "card-1" },
+    { type: "seal-bid", managerId: "team-1", amount: 24 },
+    { type: "seal-bid", managerId: "team-2", amount: 24 },
+    { type: "seal-bid", managerId: "team-3", amount: 11 },
+    { type: "seal-bid", managerId: "team-1", amount: 24 },
+    { type: "seal-bid", managerId: "team-2", amount: 24 }
+  ]);
+  // A rebid that was settled by an amount needs no second round, and the queue
+  // nominates for itself — there is nobody to send a nomination for.
+  const settled = { playerId: "card-2", bids: { "team-1": 24, "team-2": 30 } };
+  assert.deepEqual(replayLots({ nomination: "random", auction: { log: [settled] } }), [[
+    { type: "seal-bid", managerId: "team-1", amount: 24 },
+    { type: "seal-bid", managerId: "team-2", amount: 30 }
+  ]]);
+  // A sweep is not a lot: the replay reaches the same end and sweeps itself.
+  assert.deepEqual(replayLots({ auction: { log: [{ playerId: "card-3", swept: true, bids: {} }] } }), []);
 });
 
 test("an unlimited pen survives filing, and old records that lost it read as unlimited", () => {

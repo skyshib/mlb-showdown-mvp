@@ -80,7 +80,12 @@ export function draftRecord(draft, meta = {}) {
     // deal is code, and code changes; a room that wrote its deck down can be
     // rebuilt years later, and one that only wrote down its seed can only be
     // re-dealt by whatever the dealer has become since.
-    deck: draft.pool.map(deckEntry),
+    //
+    // The pool is not quite the board: a replacement handed out on a sweep is
+    // MINTED into it, under an id the room invented and no card set holds. The
+    // deal gets written down; the relief printings do not, and a room rebuilt
+    // from this mints its own again off the same sweeps.
+    deck: draft.pool.filter((player) => !player.minted).map(deckEntry),
     ...(auction ? { auction: { budget: draft.auction?.budget ?? null, log: auctionLog(draft) } } : {}),
     ...meta,
     managers: draft.managers.map((manager) => {

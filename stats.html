@@ -292,6 +292,9 @@
 
 <script type="module">
 import { groupSessions, namesIn } from "./src/ui/sessions.js";
+// A filed auction is replayed from its own log, and the log is not quite the
+// moves: see draftReplay for the two places they part company.
+import { replayLots } from "./src/rules/draftReplay.js";
 // The card scans the app already ships: 3,891 photographs of real printings,
 // filed by the id the card is drafted under. A classic draft's ids ARE those
 // printing ids, so a roster line can show the card it means without asking the
@@ -782,12 +785,12 @@ async function buildRoomFor(draft, button) {
   };
 
   const auction = draft.draftType === "auction";
-  const log = (draft.auction?.log ?? []).filter((entry) => !entry.swept);
+  const lots = replayLots(draft);
   const picks = draft.managers
     .flatMap((manager) => manager.roster)
     .filter((card) => card.pick)
     .sort((a, b) => a.pick - b.pick);
-  if (auction && !log.length) {
+  if (auction && !lots.length) {
     throw new Error("this auction's bidding was not written down, so it cannot be settled again");
   }
   if (!auction) {
@@ -851,11 +854,10 @@ async function buildRoomFor(draft, button) {
   if (auction) {
     // A room opens on a pool review; with no clock there is nothing to wait for.
     await act({ type: "complete-review" }).catch(() => {});
-    for (const [index, entry] of log.entries()) {
-      say(`replaying lot ${index + 1} of ${log.length}…`);
-      await act({ type: "nominate", playerId: entry.playerId });
-      for (const [managerId, amount] of Object.entries(entry.bids ?? {})) {
-        await act({ type: "seal-bid", managerId: seatId.get(managerId) ?? managerId, amount });
+    for (const [index, actions] of lots.entries()) {
+      say(`replaying lot ${index + 1} of ${lots.length}…`);
+      for (const action of actions) {
+        await act(action.managerId ? { ...action, managerId: seatId.get(action.managerId) ?? action.managerId } : action);
       }
     }
     // The seats that were the computer's are handed back, now that the bidding

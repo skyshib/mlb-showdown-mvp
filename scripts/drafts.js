@@ -165,11 +165,23 @@ export function repairPen(record) {
   return record;
 }
 
+// Drafts filed before the record knew the difference wrote the whole POOL down
+// as the board, and a pool holds the replacements a sweep minted into it —
+// cards under an id the room invented, which no card set can be asked for. A
+// board dealt from such a list throws on the first one and the record cannot be
+// rebuilt at all, so the minted ids are dropped on the way out. The real cards
+// a classic room stands at the slots are dealt cards with dealt ids and stay.
+export function repairDeck(record) {
+  if (!Array.isArray(record?.deck)) return record;
+  record.deck = record.deck.filter((entry) => !String(entry?.id ?? entry).startsWith("replacement-"));
+  return record;
+}
+
 export function readDraft(store, id) {
   const log = store.drafts;
   if (!log || !/^[a-z0-9-]{1,80}$/i.test(String(id))) return null;
   try {
-    const record = withPlaces(store, repairPen(JSON.parse(readFileSync(join(log.dir, `${id}.json`), "utf8"))));
+    const record = withPlaces(store, repairDeck(repairPen(JSON.parse(readFileSync(join(log.dir, `${id}.json`), "utf8")))));
     return withSessions(store, record, visitIndex(store));
   } catch {
     return null;
@@ -534,7 +546,8 @@ export function sanitizeDraftRecord(body) {
     picks: number(body?.picks, 10000),
     complete: Boolean(body?.complete),
     page: text(body?.page, 100),
-    deck: (Array.isArray(body?.deck) ? body.deck : []).slice(0, MAX_DECK).map(deckCard).filter(Boolean),
+    deck: (Array.isArray(body?.deck) ? body.deck : []).slice(0, MAX_DECK).map(deckCard).filter(Boolean)
+      .filter((entry) => !String(entry?.id ?? entry).startsWith("replacement-")),
     ...(body?.auction
       ? {
           auction: {

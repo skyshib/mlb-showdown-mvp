@@ -854,10 +854,13 @@ export function managerForPickNumber(draft, pickNumber) {
 // id later.
 // THE STANDING REPLACEMENTS: the unbiddable 10-point cards a classic room deals
 // alongside its board, one per slot. They are dealt cards, so they carry their
-// own real ids; a copy handed to a manager carries `sourceId` and a minted id,
-// which is how the two are told apart without another flag to persist.
+// own real ids; a copy handed to a manager carries `minted` and an id of the
+// room's own making, which is how the two are told apart. The flag matters
+// outside this filter too: a minted card is in no card set, so anything that
+// writes the BOARD down has to leave it out or the board cannot be dealt again.
+// Copies filed before the flag existed are still told apart by `sourceId`.
 export function standingReplacements(draft) {
-  return (draft?.pool ?? []).filter((player) => player.replacement && !player.sourceId);
+  return (draft?.pool ?? []).filter((player) => player.replacement && !player.minted && !player.sourceId);
 }
 
 export function standingReplacement(draft, slot) {
@@ -3982,7 +3985,7 @@ function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPos
     // is reading correctly: it is the same card twice. Numbering him would put
     // a "#2" where his surname goes, which is what the scoreboard and the photo
     // lookup both read off the name.
-    const copy = { ...standing, id, sourceId: standing.id };
+    const copy = { ...standing, id, sourceId: standing.id, minted: true };
     draft.pool.push(copy);
     return copy;
   }
@@ -3990,9 +3993,12 @@ function makeReplacementPlayer(draft, manager, neededKind, neededRole, neededPos
   // to tell two of them apart: "Replacement LF/RF", then "Replacement LF/RF #2".
   const name = priorAtSlot === 0 ? `Replacement ${slot}` : `Replacement ${slot} #${priorAtSlot + 1}`;
   const source = replacementSource(draft, neededKind, neededRole, neededPosition);
-  const replacement = source
-    ? copyAsReplacement(source, { id, name, slot, kind: neededKind })
-    : fabricateReplacement({ id, name, slot, kind: neededKind });
+  const replacement = {
+    ...(source
+      ? copyAsReplacement(source, { id, name, slot, kind: neededKind })
+      : fabricateReplacement({ id, name, slot, kind: neededKind })),
+    minted: true
+  };
   draft.pool.push(replacement);
   return replacement;
 }
