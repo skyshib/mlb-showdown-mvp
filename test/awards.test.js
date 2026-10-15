@@ -62,9 +62,12 @@ test("computeAwards crowns the right winners", () => {
   const byKey = Object.fromEntries(awards.map((item) => [item.key, item]));
 
   assert.equal(byKey["mvp-hitter"].name, "Homer Launch", "hitter MVP is the highest WPA hitter");
-  assert.equal(byKey["mvp-pitcher"].name, "Ace Steady", "pitcher MVP is the highest WPA pitcher");
   assert.equal(byKey.mvp, undefined, "there is no combined MVP");
-  assert.equal(byKey["cy-young"].name, "Ace Steady");
+  // The best arm in the room, whatever his role, and the pitcher MVP it would
+  // otherwise repeat under another name is left out.
+  assert.equal(byKey["cy-young"].name, "Ace Steady", "the Cy Young is the highest WPA pitcher");
+  assert.equal(byKey["mvp-pitcher"], undefined, "no pitcher MVP beside the same man's Cy Young");
+  assert.match(byKey["cy-young"].stat, /ERA · /, "the Cy Young reads on his rate and his worth");
   assert.equal(byKey.fireman.name, "Door Slammer");
   assert.equal(byKey.obp.name, "Obi Onbase");
   assert.equal(byKey.hr.name, "Homer Launch");
@@ -112,7 +115,8 @@ test("a sim that measured WPAR ranks MVP and value awards on it, not WPA", () =>
   assert.equal(byKey["mvp-hitter"].name, "Ronnie Rounds");
   assert.equal(byKey["mvp-hitter"].stat, "+6.2 WPAR per 162 games");
   assert.match(byKey["mvp-hitter"].note, /\+3\.24 WPA\.$/, "the MVP card still carries WPA");
-  assert.equal(byKey["mvp-pitcher"].name, "Ace Steady");
+  assert.equal(byKey["cy-young"].name, "Ace Steady");
+  assert.match(byKey["cy-young"].stat, /WPAR$/, "the Cy Young reads on WPAR when the sim measured it");
   assert.equal(byKey["steal-hitter"].name, "Ronnie Rounds");
   assert.equal(byKey["steal-hitter"].stat, "Paid 5, #1 of hitters in WPAR");
   assert.equal(byKey["bust-hitter"].name, "Dee Pee");
@@ -160,7 +164,7 @@ test("a real batch summary feeds the full awards show", () => {
 
   const awards = computeAwards(summary, picks);
   const keys = new Set(awards.map((item) => item.key));
-  for (const expected of ["mvp-hitter", "mvp-pitcher", "cy-young", "fireman", "obp", "hr", "runs"]) {
+  for (const expected of ["mvp-hitter", "cy-young", "fireman", "obp", "hr", "runs"]) {
     assert.ok(keys.has(expected), `award ${expected} present`);
   }
   for (const item of awards) {

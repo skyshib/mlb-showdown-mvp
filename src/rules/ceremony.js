@@ -22,6 +22,9 @@ import { scheduleMatchups } from "./batch.js?v=20260725-starter-matchups";
 // throw it away while keeping a three-run homer in a blowout.
 export const LEVERAGE_FLOOR = 2;
 export const LEVERAGE_MOMENT_CAP = 6;
+// Where the end of a game starts: the replay plays every plate appearance from
+// here on, however quiet.
+export const CLOSING_INNING = 9;
 
 // gate: the share of the sim that must be done before the beat may open.
 // min:   the shortest it may ever be on screen, so nothing flashes past.
@@ -373,15 +376,18 @@ export function pickRepresentative(meetings, champion) {
   return pick ? { ...pick, meanFor, meanAgainst, meetings: played.length, won: won.length } : null;
 }
 
-// Every plate appearance the game itself thought was dangerous, plus the whole
-// of the last inning. If more than the cap clear the floor, raise the floor
-// until the cap is met and keep them in the order they happened — the rule
-// stays honest and the replay stays inside half a minute.
+// Every plate appearance the game itself thought was dangerous, plus every one
+// from the ninth inning on. If more than the cap clear the floor, raise the
+// floor until the cap is met and keep them in the order they happened — the
+// rule stays honest and the replay stays inside half a minute.
 //
-// The closing inning is in whether it was dangerous or not: a championship ends
-// on its last out, and cutting away from a 1-2-3 ninth to a loud spot in the
-// fourth is the one edit nobody watching would make. It is also why the cap
-// bends — the inning is kept whole and the leverage picks take what is left.
+// The end of the game is in whether it was dangerous or not: a championship
+// ends on its last out, and cutting away from a 1-2-3 ninth to a loud spot in
+// the fourth is the one edit nobody watching would make. From the ninth rather
+// than from the last inning, because opening on the last inning says how many
+// there were — a replay that starts in the eleventh has told you the ninth and
+// the tenth settled nothing. It is also why the cap bends: the close is kept
+// whole and the leverage picks take what is left.
 export function leverageMoments(game, { floor = LEVERAGE_FLOOR, cap = LEVERAGE_MOMENT_CAP } = {}) {
   // A plate appearance, not a trot around on somebody else's hit: the duel is
   // what the breakdown is about.
@@ -389,8 +395,10 @@ export function leverageMoments(game, { floor = LEVERAGE_FLOOR, cap = LEVERAGE_M
     .map((event, index) => ({ event, index, leverage: eventLeverage(event) ?? 0 }))
     .filter((entry) => Number.isFinite(entry.event.controlRoll));
   const last = pitched.reduce((high, entry) => Math.max(high, Number(entry.event.inning) || 0), 0);
+  // A game called early has no ninth; its own last inning is the close.
+  const from = Math.min(CLOSING_INNING, last);
   const closing = new Set(
-    pitched.filter((entry) => (Number(entry.event.inning) || 0) === last).map((entry) => entry.index)
+    pitched.filter((entry) => (Number(entry.event.inning) || 0) >= from).map((entry) => entry.index)
   );
   const scored = pitched.filter((entry) => closing.has(entry.index) || entry.leverage >= floor);
   if (scored.length <= cap) return scored;

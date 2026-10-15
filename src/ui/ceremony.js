@@ -39,7 +39,6 @@ export function ceremonyShellHtml({ replay = false } = {}) {
     </div>
     <div class="ceremony-feed" data-feed></div>
     <div class="ceremony-foot">
-      <p class="ceremony-sample" data-rail="sample"></p>
       <button type="button" class="small ceremony-skip" data-action="ceremony-skip">${replay ? "Back to the results" : "Skip the ceremony"}</button>
     </div>
   </section>`;
@@ -110,9 +109,6 @@ function paintRail(root, state) {
   if (fill) fill.style.width = `${(share * 100).toFixed(1)}%`;
   set("tag", done ? "Season complete" : "Simulating");
   set("count", `${num(state.completed)} of ${num(state.total)}`);
-  set("sample", done
-    ? `All ${num(state.total)} games played.`
-    : `Everything here is still being simulated — ${num(state.completed)} games in.`);
   root.querySelector(".ceremony-rail")?.classList.toggle("complete", done);
 }
 
@@ -294,7 +290,7 @@ function awardInner(award, state, options) {
       <p class="award-owner">${manager(state, award.team, "big")}<em>drafted him</em></p>
       <p class="award-headline" data-val="headline">${escapeHtml(award.headline)}</p>
       ${award.split ? splitHtml(award.split, award.pitcher) : ""}
-      ${(award.boards ?? []).map((board) => rankBoardHtml(state, board, options)).join("")}
+      ${(award.boards ?? []).map((board) => rankBoardHtml(state, board, award, options)).join("")}
     </div>`;
 }
 
@@ -302,17 +298,24 @@ function awardInner(award, state, options) {
 // half a story without it: +13 WPAR off the first pick of the draft and +13 off
 // the forty-second are not the same season.
 function awardPrice(award) {
-  if (award.cost === null || award.cost === undefined) return "";
-  return `<span class="award-cost">${award.byMoney ? `$${num(award.cost)}` : `#${award.cost}`}</span>`;
+  const tag = priceTag(award.cost, award.byMoney);
+  return tag ? `<span class="award-cost">${tag}</span>` : "";
 }
 
-function rankBoardHtml(state, board, options) {
+// What the room paid, in the fewest characters that still say which it is.
+function priceTag(cost, byMoney) {
+  if (cost === null || cost === undefined) return "";
+  return byMoney ? `$${num(cost)}` : `#${cost}`;
+}
+
+function rankBoardHtml(state, board, award, options) {
   return `<div class="rank-board">
     <p class="rank-head">${escapeHtml(board.label)}</p>
     ${board.entries.map((entry) => `
       <div class="rank-row">
         <span class="rank-pos">${entry.rank}</span>
         ${playerName(options, entry, { tag: "span", className: "rank-name" })}
+        <span class="rank-cost">${priceTag(entry.cost, award.byMoney)}</span>
         ${entry.stats
           // A pitcher is read on more than one number: the rate, the work he
           // did at it, and what the work was worth.
@@ -349,12 +352,20 @@ function splitHtml(split, pitcher = false) {
 function reckoningHtml(state, options) {
   const board = state.reckoning;
   if (!board) return "";
-  const column = (title, rows, side) => `<div class="reckon-side">
+  const column = (title, rows, side) => `<div class="reckon-side${side.startsWith("b") ? " bargain" : ""}">
     <p class="reckon-head">${title}</p>
-    ${rows.map((entry) => `
-      <div class="reckon-row${side.startsWith("best") ? " bargain" : ""}" data-row="${side}${entry.rank}" data-id="${escapeHtml(entry.id)}">
-        <div data-swap>${reckonInner(state, entry, board, options)}</div>
-      </div>`).join("")}
+    <div class="reckon-body">
+      ${rows.filter((entry) => entry.rank === 1).map((entry) => `
+        <div class="reckon-spot" data-row="${side}${entry.rank}" data-id="${escapeHtml(entry.id)}">
+          <div data-swap>${reckonInner(state, entry, board, options)}</div>
+        </div>`).join("")}
+      <div class="reckon-rest">
+        ${rows.filter((entry) => entry.rank > 1).map((entry) => `
+          <div class="reckon-row" data-row="${side}${entry.rank}" data-id="${escapeHtml(entry.id)}">
+            <div data-swap>${reckonInner(state, entry, board, options)}</div>
+          </div>`).join("")}
+      </div>
+    </div>
   </div>`;
   return `<div class="reckon-board">
     ${column("Best value, hitters", board.hitters?.best ?? [], "bh")}
@@ -364,15 +375,30 @@ function reckoningHtml(state, options) {
   </div>`;
 }
 
+// One builder for both shapes, the way the leaders beat has one: the pick a
+// board is about gets the card and the type, and the two behind him are rows.
 function reckonInner(state, entry, board, options) {
+  if (entry.rank === 1) return reckonSpotInner(state, entry, board, options);
   return `<span class="reckon-rank">${entry.rank}</span>
-    <span class="reckon-card">${miniCard(entry.id, options)}</span>
     <span class="reckon-who">
       ${playerName(options, entry, { tag: "b" })}
       <em><span data-val="v-${escapeHtml(entry.id)}">${escapeHtml(entry.value)}</span> ${board.byWpar ? "WPAR" : "WPA"}</em>
     </span>
     <span class="reckon-cost">${costLabel(entry.cost, board.byMoney)}</span>
     ${manager(state, entry.team)}`;
+}
+
+function reckonSpotInner(state, entry, board, options) {
+  return `<span class="reckon-spot-card">${miniCard(entry.id, options)}</span>
+    <span class="reckon-spot-copy">
+      <b class="reckon-spot-name">${escapeHtml(stripCardYear(entry.name))}</b>
+      <span class="reckon-spot-line">
+        <span class="reckon-spot-value" data-val="v-${escapeHtml(entry.id)}">${escapeHtml(entry.value)}</span>
+        <em class="reckon-spot-unit">${board.byWpar ? "WPAR" : "WPA"}</em>
+        <span class="reckon-cost">${costLabel(entry.cost, board.byMoney)}</span>
+        ${manager(state, entry.team)}
+      </span>
+    </span>`;
 }
 
 function costLabel(cost, byMoney) {

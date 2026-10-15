@@ -4990,60 +4990,71 @@ function ceremonyAward(key, summary, costs = null, byMoney = false) {
     pitcher: key === "cy-young",
     // Who else was in it. An award is a rank like any other, and the names
     // behind the winner are what make it one.
-    boards: key === "cy-young" ? cyYoungBoards(summary) : mvpBoard(summary)
+    boards: key === "cy-young" ? cyYoungBoards(summary, costs) : mvpBoard(summary, costs)
   };
 }
 
 // `stats` is the long form of `format`: a row that reads on more than one
 // number carries them as a list, and the board lays them out in columns.
-function rankBoard(lines, value, format, count, stats = null) {
+//
+// `costs` prices the board the way it prices the winner: a list of the five
+// best bats is a different list once you can see that the fifth went forty
+// picks after the first.
+function rankBoard(lines, value, format, count, stats = null, costs = null) {
   return [...lines]
     .filter((entry) => Number.isFinite(value(entry)))
     .sort((a, b) => value(b) - value(a))
     .slice(0, count)
-    .map((entry, index) => ({
-      rank: index + 1,
-      id: entry.id,
-      name: entry.name,
-      team: entry.team,
-      value: format(entry),
-      ...(stats ? { stats: stats(entry) } : {})
-    }));
+    .map((entry, index) => {
+      const cost = Number(costs?.[entry.id]);
+      return {
+        rank: index + 1,
+        id: entry.id,
+        name: entry.name,
+        team: entry.team,
+        value: format(entry),
+        cost: Number.isFinite(cost) ? cost : null,
+        ...(stats ? { stats: stats(entry) } : {})
+      };
+    });
 }
 
-function mvpBoard(summary) {
+function mvpBoard(summary, costs = null) {
   const value = summary.attribution
     ? (entry) => entry.warPer162?.total
     : (entry) => entry.wpaPerSeason;
   const format = (entry) => `${value(entry) < 0 ? "\u2212" : "+"}${Math.abs(value(entry)).toFixed(1)}`;
-  return [{ label: "The five best bats", entries: rankBoard(summary.hitters ?? [], value, format, 5) }];
+  return [{ label: "The five best bats", entries: rankBoard(summary.hitters ?? [], value, format, 5, null, costs) }];
 }
 
 // The two jobs on a staff are not the same job, so they are not one list: an
 // ace throwing two hundred innings and a reliever throwing sixty are ranked
 // against their own kind.
-function cyYoungBoards(summary) {
+//
+// Ranked on what the award is given for. The Cy Young goes to the arm worth the
+// most over the room's replacement, so the boards behind him are ordered the
+// same way rather than on rate: a board that put a rate ahead of the man who
+// won it was arguing with the card above it.
+function cyYoungBoards(summary, costs = null) {
   const pitchers = summary.pitchers ?? [];
-  const value = (entry) => -(entry.runsPerNine ?? 99);
-  const format = (entry) => `${(entry.runsPerNine ?? 0).toFixed(2)} ERA`;
-  // An ERA on its own says nothing about how much of it there was. The innings
-  // and the WPA behind it are the two numbers that tell a short brilliant
-  // stretch from a season somebody leaned on, both per 162 games.
-  const signedWpa = (entry) => {
-    const wpa = entry.wpaPer162 ?? 0;
-    return `${wpa < 0 ? "\u2212" : "+"}${Math.abs(wpa).toFixed(1)}`;
-  };
+  const byWpar = Boolean(summary.attribution);
+  const worth = (entry) => (byWpar ? entry.warPer162?.total : entry.wpaPer162) ?? 0;
+  const signed = (figure) => `${figure < 0 ? "\u2212" : "+"}${Math.abs(figure).toFixed(1)}`;
+  const format = (entry) => signed(worth(entry));
+  // A rate on its own says nothing about how much of it there was. The innings
+  // and the worth behind it are what tell a short brilliant stretch from a
+  // season somebody leaned on, both per 162 games.
   const stats = (entry) => [
     { value: (entry.runsPerNine ?? 0).toFixed(2), label: "ERA" },
     { value: String(Math.round(entry.ipPer162 ?? 0)), label: "IP" },
-    { value: signedWpa(entry), label: "WPA" }
+    { value: signed(worth(entry)), label: byWpar ? "WPAR" : "WPA" }
   ];
   const worked = (entry, share) => (entry.outs ?? 0) >= Math.max(30, (entry.teamGames ?? 0) * share);
   const starters = pitchers.filter((entry) => entry.role === "SP" && worked(entry, 2));
   const relievers = pitchers.filter((entry) => entry.role === "RP" && worked(entry, 0.6));
   return [
-    { label: "Starters", entries: rankBoard(starters.length ? starters : pitchers.filter((entry) => entry.role === "SP"), value, format, 3, stats) },
-    { label: "Relievers", entries: rankBoard(relievers.length ? relievers : pitchers.filter((entry) => entry.role === "RP"), value, format, 3, stats) }
+    { label: "Starters", entries: rankBoard(starters.length ? starters : pitchers.filter((entry) => entry.role === "SP"), worth, format, 3, stats, costs) },
+    { label: "Relievers", entries: rankBoard(relievers.length ? relievers : pitchers.filter((entry) => entry.role === "RP"), worth, format, 3, stats, costs) }
   ].filter((board) => board.entries.length);
 }
 

@@ -23,9 +23,18 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
   const value = byWpar ? (line) => line.warPer162?.total : (line) => line.wpaPerSeason;
   const valueLabel = byWpar ? "WPAR" : "WPA";
 
+  // The Cy Young is the best arm in the room by the same measure the MVP is the
+  // best bat, which it was not while it was the lowest ERA among starters: a
+  // closer who swung more games than any starter could not win it, and a
+  // starter who won it on rate had never been measured against him. Named here
+  // so the pitcher MVP, which would now be the same man under another name, is
+  // left out.
+  const bestArm = maxBy(summary.pitchers, value);
+
   for (const group of VALUE_GROUPS) {
     const mvp = maxBy(group.lines(summary), value);
     if (!mvp) continue;
+    if (group.key === "pitcher" && bestArm && mvp.id === bestArm.id) continue;
     const mvpStat = byWpar
       ? `${formatWar(mvp.warPer162.total)} WPAR per 162 games`
       : Number.isFinite(mvp.wpaPer162)
@@ -37,11 +46,12 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
     awards.push(award(`mvp-${group.key}`, `Sim MVP (${group.label})`, mvp, mvpStat, mvpNote));
   }
 
-  const starters = summary.pitchers.filter((line) => line.role === "SP" && line.outs >= teamGameMinimum(line, 9));
-  const cyYoung = minBy(fallbackIfEmpty(starters, summary.pitchers.filter((line) => line.role === "SP" && line.outs > 0)), (line) => line.runsPerNine);
-  if (cyYoung) {
-    awards.push(award("cy-young", "Cy Young (SP)", cyYoung, `${cyYoung.runsPerNine.toFixed(2)} ERA`,
-      `${pitcherWorkload(cyYoung)} IP per 162 games, ${cyYoung.strikeoutsPerNine.toFixed(1)} K/9.`));
+  if (bestArm) {
+    const worth = byWpar
+      ? `${formatWar(bestArm.warPer162.total)} WPAR`
+      : `${formatWpa(bestArm.wpaPer162 ?? bestArm.wpaPerSeason)} WPA`;
+    awards.push(award("cy-young", "Cy Young", bestArm, `${bestArm.runsPerNine.toFixed(2)} ERA · ${worth}`,
+      `${pitcherWorkload(bestArm)} IP per 162 games, ${bestArm.strikeoutsPerNine.toFixed(1)} K/9.`));
   }
 
   const relievers = summary.pitchers.filter((line) => line.role === "RP" && line.outs >= teamGameMinimum(line, 3));

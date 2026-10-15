@@ -189,19 +189,20 @@ test("a champion who lost every meeting still gets a game", () => {
   assert.equal(pick.won, 0);
 });
 
-test("leverage moments are duels, in order, capped around the closing inning", () => {
+test("leverage moments are duels, in order, capped around the ninth on", () => {
   const { teams } = season("ceremony-moments", { games: 200 });
   const game = simulateBatchGame(teams, "ceremony-moments", 7);
   const pitched = game.events
     .map((event, index) => ({ event, index }))
     .filter((entry) => Number.isFinite(entry.event.controlRoll));
   const last = pitched.reduce((high, entry) => Math.max(high, entry.event.inning ?? 0), 0);
-  const closing = pitched.filter((entry) => entry.event.inning === last).map((entry) => entry.index);
+  const from = Math.min(9, last);
+  const closing = pitched.filter((entry) => (entry.event.inning ?? 0) >= from).map((entry) => entry.index);
   assert.ok(closing.length > 0, "the game ends on a plate appearance");
 
   const moments = leverageMoments(game, { floor: 0.1, cap: 4 });
   const kept = moments.map((moment) => moment.index);
-  assert.deepEqual(closing.filter((index) => kept.includes(index)), closing, "the last inning is kept whole");
+  assert.deepEqual(closing.filter((index) => kept.includes(index)), closing, "the ninth on is kept whole");
   for (let i = 1; i < moments.length; i += 1) {
     assert.ok(moments[i].index > moments[i - 1].index, "kept in the order they happened");
   }
@@ -211,7 +212,7 @@ test("leverage moments are duels, in order, capped around the closing inning", (
     assert.equal(typeof moment.event.controlRoll, "number", "every moment is a plate appearance");
   }
   for (const moment of earlier) assert.ok(moment.leverage >= 0.1);
-  // A floor nothing clears leaves the closing inning and invents nothing else.
+  // A floor nothing clears leaves the close and invents nothing else.
   assert.deepEqual(leverageMoments(game, { floor: 99 }).map((moment) => moment.index), closing);
 });
 
