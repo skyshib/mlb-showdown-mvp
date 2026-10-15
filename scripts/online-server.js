@@ -137,24 +137,28 @@ export function createOnlineServer(options = {}) {
   const dataDir = options.dataDir ?? process.env.ROOMS_DIR ?? join(root, "data", "rooms");
   const store = {
     dataDir,
-    rooms: loadRooms(dataDir),
+    rooms: new Map(),
+    // Which room files have been read already, whether or not they revived, so
+    // a room whose log no longer replays is not re-read by every request that
+    // asks for it.
+    roomsRead: new Set(),
     hallOfFame: loadHallOfFameFile(dataDir),
     records: loadRecordsFile(dataDir),
     traffic: loadTrafficFile(dataDir),
     visits: loadVisitLog(dataDir),
     drafts: loadDraftArchive(dataDir)
   };
-  for (const room of store.rooms.values()) {
-    scheduleRoomTimer(store, room);
-    // A room that finished before the book existed — or before this machine
-    // last came up — still belongs in it. Filing is keyed on the room, so a
-    // restart rewrites the same record rather than adding another.
-    fileRoomDraft(store, room);
-    if (room.unpinnedDeck) {
-      room.unpinnedDeck = false;
-      persistRoom(store, room);
-    }
-  }
+  mkdirSync(dataDir, { recursive: true });
+  // Reviving the rooms USED to happen right here, before the server took its
+  // first connection — and the machine stops whenever the last person leaves,
+  // so every visitor who knocked on a sleeping machine paid for it. 132 rooms
+  // read off a cold volume took SIX MINUTES on 2026-10-15, during which the
+  // proxy answered nothing at all ("instance refused connection" on a loop):
+  // not a slow page, an unreachable site. Warm them in the background instead
+  // and let the port open first. A request for a room that is not up yet reads
+  // that one room on the spot (getRoom), so nobody waits on the other 131 to
+  // be sure of their own.
+  store.warm = warmRooms(store);
 
   const server = createServer(async (request, response) => {
     try {
@@ -193,6 +197,9 @@ export function createOnlineServer(options = {}) {
 // applied and written to disk just after, and a machine killed between the two
 // comes back as a room that has forgotten a pick its clients still remember.
 export async function flushSaves(store) {
+  // Rooms still coming up own save chains that do not exist yet, and one that
+  // files a draft or unpins a deck writes as it arrives.
+  if (store?.warm) await store.warm.catch(() => {});
   await Promise.allSettled([
     ...[...store.rooms.values()].map((room) => room.saveChain ?? Promise.resolve()),
     store.hofSaveChain ?? Promise.resolve(),
@@ -225,23 +232,119 @@ async function settledGeo(store) {
 // Rooms are persisted as one JSON file each: metadata, seats, and the action
 // log. The draft itself is not stored — it is rebuilt on load by replaying the
 // log through the same deterministic rules the clients use.
-function loadRooms(dataDir) {
-  const rooms = new Map();
-  mkdirSync(dataDir, { recursive: true });
-  for (const file of readdirSync(dataDir)) {
-    // Every .json on the volume is a room, except the two that aren't: the hall
-    // of fame and the record book share the disk with them.
-    if (!file.endsWith(".json") || file === HOF_FILE || file === RECORDS_FILE) continue;
-    try {
-      const saved = JSON.parse(readFileSync(join(dataDir, file), "utf8"));
-      const room = reviveRoom(saved);
-      rooms.set(room.id, room);
-    } catch (error) {
-      console.error(`Skipping room file ${file}: ${error.message}`);
-    }
+// Every .json on the volume is a room, except the two that aren't: the hall of
+// fame and the record book share the disk with them.
+function isRoomFile(file) {
+  return file.endsWith(".json") && file !== HOF_FILE && file !== RECORDS_FILE;
+}
+
+// A room id arrives from the URL and is about to become a filename, so it is
+// held to the shape ids are actually minted in — no dots, no slashes.
+const ROOM_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+// Rooms come up one at a time now, so what a revived room owes the rest of the
+// server happens here rather than in a loop over all of them.
+function adoptRoom(store, room) {
+  store.rooms.set(room.id, room);
+  store.roomsRead.add(room.id);
+  scheduleRoomTimer(store, room);
+  // A room that finished before the book existed — or before this machine last
+  // came up — still belongs in it. Filing is keyed on the room, so a restart
+  // rewrites the same record rather than adding another.
+  fileRoomDraft(store, room);
+  if (room.unpinnedDeck) {
+    room.unpinnedDeck = false;
+    persistRoom(store, room);
   }
-  if (rooms.size) console.log(`Restored ${rooms.size} room${rooms.size === 1 ? "" : "s"} from ${dataDir}`);
-  return rooms;
+  return room;
+}
+
+// Replaying one saved room, with both callers' error reporting in one place.
+// Null means the file is there but its log no longer replays.
+function reviveSavedRoom(store, file, saved) {
+  store.roomsRead.add(file.slice(0, -".json".length));
+  try {
+    return adoptRoom(store, reviveRoom(saved));
+  } catch (error) {
+    console.error(`Skipping room file ${file}: ${error.message}`);
+    return null;
+  }
+}
+
+// The room this id names, revived off the volume if it is not up yet. Null when
+// there is no such file, or its log no longer replays — the caller's 404.
+//
+// This one read is synchronous on purpose: it sits in the middle of handling a
+// request that cannot be answered without it, and the request has nothing else
+// to do meanwhile. The warm-up below is the opposite case and reads async.
+function getRoom(store, roomId) {
+  const live = store.rooms.get(roomId);
+  if (live) return live;
+  if (!roomId || !ROOM_ID_PATTERN.test(roomId)) return null;
+  const file = `${roomId}.json`;
+  if (!isRoomFile(file) || store.roomsRead.has(roomId)) return null;
+  let saved;
+  try {
+    saved = JSON.parse(readFileSync(join(store.dataDir, file), "utf8"));
+  } catch (error) {
+    // A room that was never there is an ordinary 404, not a damaged file — and
+    // it is NOT remembered as read, so a file that shows up later is served
+    // rather than 404ing until the next restart. Only the expensive failures
+    // (a log that will not replay) are remembered, and those are remembered in
+    // reviveSavedRoom.
+    if (error.code !== "ENOENT") console.error(`Skipping room file ${file}: ${error.message}`);
+    return null;
+  }
+  return reviveSavedRoom(store, file, saved);
+}
+
+// Bringing every room up in the background. The reads are ASYNC, which is the
+// point: on a cold volume this is all disk wait, and a synchronous read holds
+// the loop for the whole of it — which is how the port came to be open while
+// the site still answered nothing. Awaiting each file hands the loop back for
+// every one of them, so requests are served THROUGH the warm-up rather than
+// between batches of it.
+//
+// Replaying a log is CPU, though, so the loop is also yielded every few rooms
+// to keep one long room from starving a request. The batch is small on purpose:
+// a test that boots a server over a one-room directory and then ticks the loop
+// expects that room to be up, and the first batch covers it.
+const WARM_BATCH = 8;
+
+async function warmRooms(store) {
+  let files;
+  try {
+    files = readdirSync(store.dataDir);
+  } catch (error) {
+    console.error(`Could not read ${store.dataDir}: ${error.message}`);
+    return;
+  }
+  let seen = 0;
+  for (const file of files) {
+    if (!isRoomFile(file)) continue;
+    const roomId = file.slice(0, -".json".length);
+    // Deliberately not marked as read before the await: a request arriving
+    // mid-read calls getRoom, which must still find the file rather than a
+    // half-finished claim on it. The worst case is this file being read twice.
+    if (store.roomsRead.has(roomId) || store.rooms.has(roomId)) continue;
+    let saved;
+    try {
+      saved = JSON.parse(await readFile(join(store.dataDir, file), "utf8"));
+    } catch (error) {
+      // Unreadable rather than absent — readdir just named it — so this one is
+      // remembered, and the warm-up does not come back to it.
+      console.error(`Skipping room file ${file}: ${error.message}`);
+      store.roomsRead.add(roomId);
+      continue;
+    }
+    // A request got there first while this file was being read.
+    if (store.roomsRead.has(roomId) || store.rooms.has(roomId)) continue;
+    reviveSavedRoom(store, file, saved);
+    seen += 1;
+    if (seen % WARM_BATCH === 0) await new Promise((resolve) => setImmediate(resolve));
+  }
+  const size = store.rooms.size;
+  if (size) console.log(`Restored ${size} room${size === 1 ? "" : "s"} from ${store.dataDir}`);
 }
 
 // The deck a room drafts from. Rooms opened before the card sets became
@@ -1109,7 +1212,7 @@ async function handleApi(store, request, response, url) {
 
   if (!roomId && request.method === "POST") return createRoom(store, request, response);
 
-  const room = store.rooms.get(roomId);
+  const room = getRoom(store, roomId);
   if (!room) return sendJson(response, 404, { error: `Room "${roomId ?? ""}" not found` });
 
   if (!subroute && request.method === "GET") {
@@ -1618,7 +1721,7 @@ function latestSimSalt(room) {
 }
 
 function simFilePath(store, room) {
-  // Deliberately not ".json": loadRooms reads every .json on the volume as a
+  // Deliberately not ".json": isRoomFile counts every .json on the volume as a
   // room, and a season full of box scores is not a room.
   return store.dataDir ? join(store.dataDir, `${room.id}.sim`) : null;
 }

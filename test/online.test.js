@@ -1507,3 +1507,33 @@ test("a lobby room is set up by its host after it opens, and starts on the host'
   assert.equal(revived.data.draftType, "auction");
   assert.deepEqual(revived.data.actions[0].action.order, draw.order);
 });
+
+test("a room is read off the volume on demand, not only at boot", async (t) => {
+  const firstDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, firstDir);
+  const created = await api(base, "POST", "/api/rooms", {
+    seed: "late-arrival", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
+  });
+  const roomId = created.data.roomId;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // The rooms are warmed in the BACKGROUND now, so that the port opens before
+  // the volume has been read — 132 rooms off a cold disk took six minutes, and
+  // the site answered nothing for all of it. The other half of that bargain is
+  // this: a room the warm-up has not reached yet has to be read when somebody
+  // asks for it, or opening a room link would race the warm-up.
+  const secondDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const other = await startServer(t, secondDir);
+  const missing = await api(other, "GET", `/api/rooms/${roomId}`);
+  assert.equal(missing.status, 404, "no such file on this volume yet");
+
+  await writeFile(join(secondDir, `${roomId}.json`), await readFile(join(firstDir, `${roomId}.json`), "utf8"));
+  const served = await api(other, "GET", `/api/rooms/${roomId}`);
+  assert.equal(served.status, 200, "the room is revived on the spot");
+  assert.deepEqual(served.data.managers.map((manager) => manager.name), ["Ana", "Bo"]);
+
+  // An id from a URL becomes a filename, so it may not name a path.
+  for (const bad of ["..", "../../etc/passwd", "hall-of-fame", "a/b"]) {
+    assert.equal((await api(other, "GET", `/api/rooms/${encodeURIComponent(bad)}`)).status, 404, bad);
+  }
+});
