@@ -16,10 +16,10 @@ import { storyAdvantage } from "./gameStory.js?v=20260725-throw-labels";
 
 const MODULE_TITLES = {
   traits: ["Who leads what", "The room so far"],
-  leaders: ["League leaders", "Nobody is safe yet"],
+  leaders: ["League leaders", null],
   mvp: ["And the award goes to", "Sim MVP"],
   cy: ["And the award goes to", "Cy Young"],
-  reckoning: ["The draft, judged", "What the room actually got"],
+  reckoning: ["The draft, judged", "Best and Worst Value Picks"],
   countdown: ["Final standings", "Counting down"],
   finalists: ["The last two", "Two left"],
   game: ["The championship game", "One meeting of the two"],
@@ -103,13 +103,19 @@ function num(value) {
 // does.
 function moduleShape(key, state) {
   switch (key) {
-    case "traits": return (state.traits ?? []).map((trait) => trait.key).join(",");
-    case "leaders": return (state.leaders ?? []).map((leader) => leader.key).join(",");
-    case "mvp": return state.mvp ? "award" : "";
-    case "cy": return state.cy ? "award" : "";
+    case "traits": return [
+      ...(state.traits?.offense ?? []).map((plaque) => plaque.key),
+      ...(state.traits?.defense ?? []).map((plaque) => plaque.key)
+    ].join(",");
+    case "leaders": return (state.leaders ?? [])
+      .map((category) => `${category.key}:${category.entries.length}`).join(",");
+    case "mvp": return awardShape(state.mvp);
+    case "cy": return awardShape(state.cy);
     case "reckoning": return [
-      (state.reckoning?.hitters ?? []).length,
-      (state.reckoning?.pitchers ?? []).length
+      (state.reckoning?.hitters?.best ?? []).length,
+      (state.reckoning?.hitters?.worst ?? []).length,
+      (state.reckoning?.pitchers?.best ?? []).length,
+      (state.reckoning?.pitchers?.worst ?? []).length
     ].join(",");
     case "countdown": return (state.counted ?? []).map((row) => row.place).join(",");
     case "finalists": return (state.finalists ?? []).length ? "pair" : "";
@@ -119,12 +125,17 @@ function moduleShape(key, state) {
   }
 }
 
+function awardShape(award) {
+  if (!award) return "";
+  return [award.id, ...(award.boards ?? []).map((board) => `${board.label}:${board.entries.length}`)].join("|");
+}
+
 function moduleHtml(key, state, options) {
   const [eyebrow, title] = MODULE_TITLES[key] ?? ["", ""];
   return `<section class="ceremony-module" data-module="${key}">
     <header class="module-head">
       <p class="eyebrow">${escapeHtml(eyebrow)}</p>
-      <h2>${escapeHtml(title)}</h2>
+      ${title ? `<h2>${escapeHtml(title)}</h2>` : ""}
     </header>
     <div class="module-body">${bodyHtml(key, state, options)}</div>
   </section>`;
@@ -153,39 +164,65 @@ function bodyHtml(key, state, options) {
 function manager(state, team, extra = "") {
   const index = (state.teamNames ?? []).indexOf(team);
   const color = raceColor(index >= 0 ? index : 0);
-  return `<span class="manager-chip${extra ? ` ${extra}` : ""}" style="--chip:${color}">${escapeHtml(team ?? "")}</span>`;
+  return `<span class="manager-chip${extra ? ` ${extra}` : ""}" style="--chip:${color};--chip-ink:${chipInk(color)}">${escapeHtml(team ?? "")}</span>`;
+}
+
+// Clubs pick their own colours and some of them are light, so the chip works
+// out what can be read on top of it rather than assuming cream. Rec. 601 luma
+// is more than enough for a flat fill with four letters on it.
+function chipInk(hex) {
+  const value = String(hex).replace("#", "");
+  if (value.length < 6) return "#fdfbf4";
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? "#171310" : "#fdfbf4";
 }
 
 // ---- the beats ---------------------------------------------------------------
 
+// Two rows of the same seven categories: what the club does with the bat, and
+// what it does to the other club's. The board is read across and down.
 function traitsHtml(state) {
-  return `<div class="plaque-grid">${(state.traits ?? []).map((trait) => `
-    <div class="plaque" data-row="${trait.key}" data-id="${escapeHtml(trait.team)}">
-      <div data-swap>${plaqueInner(state, trait)}</div>
-    </div>`).join("")}</div>`;
+  const row = (side, label, plaques) => `<div class="stat-row" data-side="${side}">
+    <span class="stat-row-label">${label}</span>
+    <div class="stat-row-plaques">${plaques.map((plaque) => `
+      <div class="plaque" data-row="${plaque.key}" data-id="${escapeHtml(plaque.team)}">
+        <div data-swap>${plaqueInner(state, plaque)}</div>
+      </div>`).join("")}</div>
+  </div>`;
+  return `<div class="stat-board">
+    ${row("offense", "With the bat", state.traits?.offense ?? [])}
+    ${row("defense", "Against it", state.traits?.defense ?? [])}
+  </div>`;
 }
 
-function plaqueInner(state, trait) {
-  return `<span class="plaque-cat">${escapeHtml(trait.label)}</span>
-    ${manager(state, trait.team, "big")}
-    <span class="plaque-val" data-val="${trait.key}">${escapeHtml(trait.value)}</span>`;
+function plaqueInner(state, plaque) {
+  return `<span class="plaque-cat">${escapeHtml(plaque.label)}</span>
+    ${manager(state, plaque.team, "big")}
+    <span class="plaque-val" data-val="${plaque.key}">${escapeHtml(plaque.value)}</span>`;
 }
 
+// Eight categories across the page, three deep each, with the card the man is
+// printed on beside his name. The manager sits at the right edge of every row
+// so the column of chips reads as "whose men these are".
 function leadersHtml(state, options) {
-  return `<div class="leader-list">${(state.leaders ?? []).map((leader) => `
-    <div class="leader-row" data-row="${leader.key}" data-id="${escapeHtml(leader.id)}">
-      <div data-swap>${leaderInner(state, leader, options)}</div>
+  return `<div class="leader-board">${(state.leaders ?? []).map((category) => `
+    <div class="leader-cat">
+      <p class="leader-cat-head">${escapeHtml(category.label)}</p>
+      ${category.entries.map((entry) => `
+        <div class="leader-row" data-row="${category.key}${entry.rank}" data-id="${escapeHtml(entry.id)}">
+          <div data-swap>${leaderInner(state, category, entry, options)}</div>
+        </div>`).join("")}
     </div>`).join("")}</div>`;
 }
 
-function leaderInner(state, leader, options) {
-  return `<span class="cer-leader-card">${miniCard(leader.id, options)}</span>
-    <span class="leader-who">
-      <b>${escapeHtml(shortName(stripCardYear(leader.name)))}</b>
-      <em>${escapeHtml(leader.label)}</em>
-    </span>
-    ${manager(state, leader.team)}
-    <span class="leader-value" data-val="${leader.key}">${escapeHtml(leader.value)}</span>`;
+function leaderInner(state, category, entry, options) {
+  return `<span class="leader-rank">${entry.rank}</span>
+    <span class="cer-leader-card">${miniCard(entry.id, options)}</span>
+    <span class="leader-who"><b>${escapeHtml(shortName(stripCardYear(entry.name)))}</b></span>
+    <span class="leader-value" data-val="${category.key}${entry.rank}">${escapeHtml(entry.value)}</span>
+    ${manager(state, entry.team)}`;
 }
 
 function awardHtml(award, state, options) {
@@ -200,19 +237,36 @@ function awardInner(award, state, options) {
   return `<div class="cer-award-card">${card ? cardPanelHtml(card) : ""}</div>
     <div class="award-copy">
       <p class="award-name">${escapeHtml(stripCardYear(award.name))}</p>
-      <p class="award-owner">${manager(state, award.team, "big")}<span>drafted him</span></p>
+      <p class="award-owner">${manager(state, award.team, "big")}<em>drafted him</em></p>
       <p class="award-headline" data-val="headline">${escapeHtml(award.headline)}</p>
-      ${award.split ? splitHtml(award.split) : ""}
-      <p class="award-lines" data-val="detail">${escapeHtml(award.detail ?? "")}</p>
+      ${award.split ? splitHtml(award.split, award.pitcher) : ""}
+      ${(award.boards ?? []).map((board) => rankBoardHtml(state, board)).join("")}
     </div>`;
+}
+
+function rankBoardHtml(state, board) {
+  return `<div class="rank-board">
+    <p class="rank-head">${escapeHtml(board.label)}</p>
+    ${board.entries.map((entry) => `
+      <div class="rank-row">
+        <span class="rank-pos">${entry.rank}</span>
+        <span class="rank-name">${escapeHtml(shortName(stripCardYear(entry.name)))}</span>
+        <span class="rank-value">${escapeHtml(entry.value)}</span>
+        ${manager(state, entry.team)}
+      </div>`).join("")}
+  </div>`;
 }
 
 // WPAR the way the engine stores it. Zero sits in the middle of each track,
 // because a component can be negative and a glove that costs you games should
 // look like it costs you.
-function splitHtml(split) {
+function splitHtml(split, pitcher = false) {
+  // A hitter is always read on all three: a glove worth nothing is a fact
+  // about him, and leaving the row out made it look like it had not been
+  // measured. A pitcher gets his arm, and the rest only if it did something.
+  const always = pitcher ? ["pitching"] : ["hitting", "baserunning", "defense"];
   const rows = [["hitting", "Hitting"], ["baserunning", "Baserunning"], ["defense", "Defense"], ["pitching", "Pitching"]]
-    .filter(([key]) => Number.isFinite(split[key]) && Math.abs(split[key]) >= 0.05);
+    .filter(([key]) => Number.isFinite(split[key]) && (always.includes(key) || Math.abs(split[key]) >= 0.05));
   if (!rows.length) return "";
   return `<div class="wpar-split">${rows.map(([key, label]) => `
     <div class="split-row" data-split="${key}">
@@ -222,19 +276,24 @@ function splitHtml(split) {
     </div>`).join("")}</div>`;
 }
 
+// Four boards: the three cards that most beat what the room paid for them and
+// the three that least did, for bats and for arms. Value is a rank against a
+// rank — where he finished among his own kind against where he was taken.
 function reckoningHtml(state, options) {
   const board = state.reckoning;
   if (!board) return "";
   const column = (title, rows, side) => `<div class="reckon-side">
     <p class="reckon-head">${title}</p>
     ${rows.map((entry) => `
-      <div class="reckon-row${entry.steal ? " bargain" : ""}" data-row="${side}${entry.rank}" data-id="${escapeHtml(entry.id)}">
+      <div class="reckon-row${side.startsWith("best") ? " bargain" : ""}" data-row="${side}${entry.rank}" data-id="${escapeHtml(entry.id)}">
         <div data-swap>${reckonInner(state, entry, board, options)}</div>
       </div>`).join("")}
   </div>`;
   return `<div class="reckon-board">
-    ${column("Top three hitters", board.hitters ?? [], "h")}
-    ${column("Top three pitchers", board.pitchers ?? [], "p")}
+    ${column("Best value, hitters", board.hitters?.best ?? [], "bh")}
+    ${column("Worst value, hitters", board.hitters?.worst ?? [], "wh")}
+    ${column("Best value, pitchers", board.pitchers?.best ?? [], "bp")}
+    ${column("Worst value, pitchers", board.pitchers?.worst ?? [], "wp")}
   </div>`;
 }
 
@@ -245,8 +304,8 @@ function reckonInner(state, entry, board, options) {
       <b>${escapeHtml(shortName(stripCardYear(entry.name)))}</b>
       <em><span data-val="v-${escapeHtml(entry.id)}">${escapeHtml(entry.value)}</span> ${board.byWpar ? "WPAR" : "WPA"}</em>
     </span>
-    ${manager(state, entry.team)}
-    <span class="reckon-cost">${costLabel(entry.cost, board.byMoney)}</span>`;
+    <span class="reckon-cost">${costLabel(entry.cost, board.byMoney)}</span>
+    ${manager(state, entry.team)}`;
 }
 
 function costLabel(cost, byMoney) {
@@ -305,36 +364,19 @@ function gameHtml(state, options) {
         </span>
         <span class="sb-outs" data-board="outs"><i></i><i></i><i></i></span>
         <span class="sb-wp" data-board="wp"></span>
+        <span class="sb-leverage" data-board="leverage"></span>
       </div>
       <div class="sb-side" data-side="home">
         ${manager(state, game.home, "big")}
         <span class="sb-runs" data-board="runs-home">0</span>
       </div>
     </div>
-    <p class="now-batting" data-board="now">&nbsp;</p>
-    <div class="line-score-wrap">${lineScoreHtml(game)}</div>
     <div class="replay-duel" data-board="duel"></div>
     <div class="replay-stamp" data-board="stamp" hidden>
       <b data-board="stamp-score"></b>
       <em data-board="stamp-share"></em>
     </div>
   </div>`;
-}
-
-function lineScoreHtml(game) {
-  const innings = game.innings ?? 9;
-  const header = Array.from({ length: innings }, (_, i) => `<th>${i + 1}</th>`).join("");
-  const row = (side) => {
-    const name = side === "away" ? game.away : game.home;
-    const cells = Array.from({ length: innings }, (_, i) => `<td data-ls="${side}-${i}"></td>`).join("");
-    return `<tr><td class="ls-team">${escapeHtml(name)}</td>${cells}
-      <td class="ls-total" data-ls="${side}-r"></td>
-      <td class="ls-total" data-ls="${side}-h"></td></tr>`;
-  };
-  return `<table class="line-score">
-    <thead><tr><th class="ls-team"></th>${header}<th>R</th><th>H</th></tr></thead>
-    <tbody>${row("away")}${row("home")}</tbody>
-  </table>`;
 }
 
 // The two men, their cards, and the dice between them.
@@ -352,17 +394,16 @@ export function duelHtml(state, game, options) {
       <p class="duel-name">${escapeHtml(shortName(stripCardYear(event.pitcher ?? "")))}</p>
     </div>
     <div class="duel-middle">
-      <span class="duel-leverage${moment.leverage >= 3 ? " hot" : ""}">Leverage ${moment.leverage.toFixed(1)}</span>
       <div class="duel-roll" data-roll="control">
         <span class="roll-label">Pitch</span>
-        <span class="die" data-board="die-control">&middot;</span>
-        <span class="roll-math" data-board="math-control"></span>
+        ${dieHtml("die-control")}
+        <span class="roll-note" data-board="note-control"></span>
       </div>
       <p class="duel-advantage ${advantage ? `${advantage.key}-advantage` : ""}">${advantage ? escapeHtml(advantage.label) : ""}</p>
       <div class="duel-roll" data-roll="swing">
         <span class="roll-label">Swing</span>
-        <span class="die" data-board="die-swing">&middot;</span>
-        <span class="roll-math" data-board="math-swing"></span>
+        ${dieHtml("die-swing")}
+        <span class="roll-note" data-board="note-swing"></span>
       </div>
       <p class="duel-result" data-board="result"></p>
     </div>
@@ -372,6 +413,19 @@ export function duelHtml(state, game, options) {
       <p class="duel-name">${escapeHtml(shortName(stripCardYear(event.batter ?? "")))}</p>
     </div>
   </div>`;
+}
+
+// The d20 the adventure's drama screen throws: an icosahedron head-on reads as
+// a hexagon, and the outline alone says so. The face is drawn once and the
+// number sits on top of it, because the tumble rewrites the number many times
+// a second and must not be rewriting the die.
+function dieHtml(key) {
+  return `<span class="die" data-board="${key}">
+    <svg class="die-face" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+      <polygon class="die-body" points="50,3 93,27 93,73 50,97 7,73 7,27"></polygon>
+    </svg>
+    <b class="die-roll">&middot;</b>
+  </span>`;
 }
 
 function miniCard(id, options) {
@@ -395,15 +449,18 @@ export function resultWord(result) {
 function patchModule(module, key, state, options) {
   switch (key) {
     case "traits":
-      for (const trait of state.traits ?? []) {
-        swapRow(module, trait.key, trait.team, () => plaqueInner(state, trait));
-        setVal(module, trait.key, trait.value);
+      for (const plaque of [...(state.traits?.offense ?? []), ...(state.traits?.defense ?? [])]) {
+        swapRow(module, plaque.key, plaque.team, () => plaqueInner(state, plaque));
+        setVal(module, plaque.key, plaque.value);
       }
       return;
     case "leaders":
-      for (const leader of state.leaders ?? []) {
-        swapRow(module, leader.key, leader.id, () => leaderInner(state, leader, options));
-        setVal(module, leader.key, leader.value);
+      for (const category of state.leaders ?? []) {
+        for (const entry of category.entries) {
+          const row = `${category.key}${entry.rank}`;
+          swapRow(module, row, entry.id, () => leaderInner(state, category, entry, options));
+          setVal(module, row, entry.value);
+        }
       }
       return;
     case "mvp":
@@ -412,7 +469,6 @@ function patchModule(module, key, state, options) {
       if (!award) return;
       swapRow(module, "award", award.id, () => awardInner(award, state, options));
       setVal(module, "headline", award.headline);
-      setVal(module, "detail", award.detail ?? "");
       patchSplit(module, award.split);
       return;
     }
@@ -420,8 +476,10 @@ function patchModule(module, key, state, options) {
       const board = state.reckoning;
       if (!board) return;
       const rows = [
-        ...(board.hitters ?? []).map((entry) => [`h${entry.rank}`, entry]),
-        ...(board.pitchers ?? []).map((entry) => [`p${entry.rank}`, entry])
+        ...(board.hitters?.best ?? []).map((entry) => [`bh${entry.rank}`, entry]),
+        ...(board.hitters?.worst ?? []).map((entry) => [`wh${entry.rank}`, entry]),
+        ...(board.pitchers?.best ?? []).map((entry) => [`bp${entry.rank}`, entry]),
+        ...(board.pitchers?.worst ?? []).map((entry) => [`wp${entry.rank}`, entry])
       ];
       for (const [rowKey, entry] of rows) {
         swapRow(module, rowKey, entry.id, () => reckonInner(state, entry, board, options));

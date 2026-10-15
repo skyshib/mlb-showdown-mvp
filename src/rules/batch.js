@@ -442,6 +442,7 @@ function foldBoxScore(state, teamBox) {
     row.hr += line.hr;
     row.sb += line.sb ?? 0;
     row.cs += line.cs ?? 0;
+    row.adv += line.adv ?? 0;
     row.rbi += line.rbi;
     row.gidp += line.gidp ?? 0;
     row.wpa += line.wpa ?? 0;
@@ -452,12 +453,14 @@ function foldBoxScore(state, teamBox) {
     row.bf += line.bf;
     row.outs += line.outs;
     row.h += line.h;
+    row.d += line.d ?? 0;
+    row.t += line.t ?? 0;
     row.bb += line.bb;
     row.so += line.so;
     row.hr += line.hr;
     row.r += line.r;
     row.wpa += line.wpa ?? 0;
-    for (const key of ["bf", "outs", "h", "bb", "so", "hr", "r", "wpa"]) {
+    for (const key of ["bf", "outs", "h", "d", "t", "bb", "so", "hr", "r", "wpa"]) {
       row.fresh[key] += line.fresh?.[key] ?? 0;
     }
   }
@@ -485,6 +488,7 @@ function registerHitter(state, teamName, player) {
     hr: 0,
     sb: 0,
     cs: 0,
+    adv: 0,
     rbi: 0,
     gidp: 0,
     wpa: 0,
@@ -504,6 +508,8 @@ function registerPitcher(state, teamName, player) {
     bf: 0,
     outs: 0,
     h: 0,
+    d: 0,
+    t: 0,
     bb: 0,
     so: 0,
     hr: 0,
@@ -518,6 +524,8 @@ function registerPitcher(state, teamName, player) {
 function emptyPitcherTotals() {
   return {
     bf: 0,
+    d: 0,
+    t: 0,
     outs: 0,
     h: 0,
     bb: 0,

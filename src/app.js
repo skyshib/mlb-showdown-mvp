@@ -186,13 +186,13 @@ import {
 import {
   CEREMONY_BEATS,
   countdownRows,
-  leagueLeaders,
+  leagueLeaderBoard,
   leverageMoments,
   meetingIndices,
   pickRepresentative,
   readyForNextBeat,
-  reckoning,
-  traitLeaders,
+  valuePicks,
+  teamStatBoard,
   winProbabilitySeries
 } from "./rules/ceremony.js?v=20261015-ceremony";
 import { ceremonyShellHtml, duelHtml, managerChip, resultWord, syncCeremony } from "./ui/ceremony.js?v=20261015-ceremony";
@@ -421,6 +421,12 @@ let editingNoteId = null;
 // save: it holds live engine state (the seeded rng included), so it lives in
 // memory only and a reload puts you back on the draft board.
 let liveGame = null;
+// Which two rosters the next game is between. Both sides are a choice, not an
+// identity: any manager can take any team against any other, so these hold the
+// toolbar's two selects rather than reading off whoever claimed a seat. Like
+// the game itself they are a sitting, not a save.
+let playAsManagerId = null;
+let playOpponentManagerId = null;
 let batchRunToken = 0;
 // Set while the simulator is drawing: see renderCurrentScreen.
 let simOwnsScreen = false;
@@ -4474,7 +4480,11 @@ function bindDraftActions() {
       return;
     }
     if (action === "play-game") {
-      startGame(app.querySelector("[data-play-opponent]")?.value);
+      // Read the selects here rather than trusting the change events: a select
+      // the mouse never touched still has to mean what it says on screen.
+      playAsManagerId = app.querySelector("[data-play-as]")?.value ?? playAsManagerId;
+      playOpponentManagerId = app.querySelector("[data-play-opponent]")?.value ?? playOpponentManagerId;
+      startGame();
     }
 
   };
@@ -4501,6 +4511,20 @@ function bindDraftActions() {
   };
 
   app.onchange = (event) => {
+    // Changing who you manage re-cuts the opponent list, so it has to repaint;
+    // the opponent select only has to be remembered.
+    const playAs = event.target.closest("[data-play-as]");
+    if (playAs) {
+      playAsManagerId = playAs.value;
+      if (playOpponentManagerId === playAsManagerId) playOpponentManagerId = null;
+      renderDraft();
+      return;
+    }
+    const playOpponent = event.target.closest("[data-play-opponent]");
+    if (playOpponent) {
+      playOpponentManagerId = playOpponent.value;
+      return;
+    }
     const rankingInput = event.target.closest("[data-ranking-input-id]");
     if (rankingInput) {
       setPlayerPositionRank(rankingInput.dataset.rankingInputId, rankingInput.value);
@@ -4834,20 +4858,41 @@ function managerDescriptors(names, cpuNames) {
   return names.map((name) => ({ name, cpu: cpuSet.has(name) }));
 }
 
-// Once every roster is legal, you can stop simulating and go play one. The
-// team you play is whichever roster the board is focused on; the select picks
-// who you play against.
+// Which two rosters a game is between. The defaults are the team the board is
+// focused on against the next one along, but either side can be any manager in
+// the room — the selects are the only thing that decides it.
+function playGameSides(draft) {
+  const managers = draft.managers;
+  const you = managers.find((manager) => manager.id === playAsManagerId)
+    ?? managers.find((manager) => manager.name === state.selectedTeamName)
+    ?? managers[0];
+  const them = managers.find((manager) => manager.id === playOpponentManagerId && manager.id !== you?.id)
+    ?? managers.find((manager) => manager.id !== you?.id);
+  return { you, them };
+}
+
+// Once every roster is legal, you can stop simulating and go play one. You pick
+// both dugouts: the team you manage and the one you play.
 function renderPlayGameControl(draft) {
   if (!canSimulate(draft)) {
     return `<button data-action="play-game" disabled>Play a game</button>`;
   }
-  const you = state.selectedTeamName ?? draft.managers[0].name;
-  const opponents = draft.managers.filter((manager) => manager.name !== you);
+  const { you, them } = playGameSides(draft);
+  const option = (manager, selectedId) =>
+    `<option value="${escapeHtml(manager.id)}"${manager.id === selectedId ? " selected" : ""}>${escapeHtml(manager.name)}</option>`;
   return `<span class="play-game-control">
-    <button data-action="play-game">Play a game as ${escapeHtml(you)}</button>
+    <button data-action="play-game">Play a game</button>
+    <label>as
+      <select data-play-as>
+        ${draft.managers.map((manager) => option(manager, you?.id)).join("")}
+      </select>
+    </label>
     <label>vs
       <select data-play-opponent>
-        ${opponents.map((manager) => `<option value="${escapeHtml(manager.name)}">${escapeHtml(manager.name)}</option>`).join("")}
+        ${draft.managers
+          .filter((manager) => manager.id !== you?.id)
+          .map((manager) => option(manager, them?.id))
+          .join("")}
       </select>
     </label>
   </span>`;
@@ -4869,13 +4914,11 @@ function dedupeManagerNames(names) {
 // (you're the one who travelled); the opponent's dugout is run by the
 // balanced AI profile, so its arms tire and its runners go under exactly the
 // rules yours do.
-function startGame(opponentName) {
+function startGame() {
   const draft = state.draft;
   if (!draft || !canSimulate(draft)) return;
-  const you = draft.managers.find((manager) => manager.name === state.selectedTeamName) ?? draft.managers[0];
-  const them = draft.managers.find((manager) => manager.name === opponentName)
-    ?? draft.managers.find((manager) => manager.id !== you.id);
-  if (!them) return;
+  const { you, them } = playGameSides(draft);
+  if (!you || !them) return;
   const battle = createBattle({
     playerManager: you,
     npcManager: them,
@@ -4936,9 +4979,50 @@ function ceremonyAward(key, summary) {
     name: award.name,
     team: award.team,
     headline: award.stat,
-    detail: award.note,
-    split: summary.attribution && line?.warPer162 ? line.warPer162 : null
+    split: summary.attribution && line?.warPer162 ? line.warPer162 : null,
+    pitcher: key === "cy-young",
+    // Who else was in it. An award is a rank like any other, and the names
+    // behind the winner are what make it one.
+    boards: key === "cy-young" ? cyYoungBoards(summary) : mvpBoard(summary)
   };
+}
+
+function rankBoard(lines, value, format, count) {
+  return [...lines]
+    .filter((entry) => Number.isFinite(value(entry)))
+    .sort((a, b) => value(b) - value(a))
+    .slice(0, count)
+    .map((entry, index) => ({
+      rank: index + 1,
+      id: entry.id,
+      name: entry.name,
+      team: entry.team,
+      value: format(entry)
+    }));
+}
+
+function mvpBoard(summary) {
+  const value = summary.attribution
+    ? (entry) => entry.warPer162?.total
+    : (entry) => entry.wpaPerSeason;
+  const format = (entry) => `${value(entry) < 0 ? "\u2212" : "+"}${Math.abs(value(entry)).toFixed(1)}`;
+  return [{ label: "The five best bats", entries: rankBoard(summary.hitters ?? [], value, format, 5) }];
+}
+
+// The two jobs on a staff are not the same job, so they are not one list: an
+// ace throwing two hundred innings and a reliever throwing sixty are ranked
+// against their own kind.
+function cyYoungBoards(summary) {
+  const pitchers = summary.pitchers ?? [];
+  const value = (entry) => -(entry.runsPerNine ?? 99);
+  const format = (entry) => `${(entry.runsPerNine ?? 0).toFixed(2)} ERA`;
+  const worked = (entry, share) => (entry.outs ?? 0) >= Math.max(30, (entry.teamGames ?? 0) * share);
+  const starters = pitchers.filter((entry) => entry.role === "SP" && worked(entry, 2));
+  const relievers = pitchers.filter((entry) => entry.role === "RP" && worked(entry, 0.6));
+  return [
+    { label: "Starters", entries: rankBoard(starters.length ? starters : pitchers.filter((entry) => entry.role === "SP"), value, format, 3) },
+    { label: "Relievers", entries: rankBoard(relievers.length ? relievers : pitchers.filter((entry) => entry.role === "RP"), value, format, 3) }
+  ].filter((board) => board.entries.length);
 }
 
 // A line score is runs per inning; the R column is their sum and the H column
@@ -4996,6 +5080,7 @@ function hydrateCeremony(snapshot, teams, seed) {
   };
 }
 
+
 // One frame of the replay, drawn from the wire and the local copy of the game.
 // Idempotent on purpose: a watcher repaints several times a second and the
 // runner repaints on every phase change, and both have to land in the same
@@ -5008,46 +5093,32 @@ function paintReplay(root, wire, cache, state, options) {
   const event = moment?.event ?? null;
   const resolved = wire.phase === "result" || wire.final;
 
-  for (const side of ["away", "home"]) {
-    (cache.line[side] ?? []).forEach((runs, index) => {
-      const cell = root.querySelector(`[data-ls="${side}-${index}"]`);
-      if (!cell) return;
-      const shown = index < wire.lineRevealed;
-      cell.textContent = shown ? String(runs) : "";
-      cell.classList.toggle("filled", shown);
-      cell.classList.toggle("scored", shown && runs > 0);
-    });
-    const hits = root.querySelector(`[data-ls="${side}-h"]`);
-    if (hits) hits.textContent = wire.final ? String(hitsIn(cache.game.boxScore?.[side])) : "";
-  }
-
-  // The score is live all the way through, in the board and in the R column,
-  // and it swells when it changes.
+  // The score is live all the way through, and it swells when it changes.
   const score = event ? (resolved ? event.scoreAfter : event.scoreBefore) : { away: 0, home: 0 };
   for (const side of ["away", "home"]) {
-    const runs = wire.final ? runsIn(cache.line[side]) : (score?.[side] ?? 0);
-    bumpNumber(board(`runs-${side}`), String(runs));
-    const total = root.querySelector(`[data-ls="${side}-r"]`);
-    if (total) total.textContent = wire.lineRevealed > 0 || wire.final ? String(runs) : "";
+    bumpNumber(board(`runs-${side}`), String(wire.final ? runsIn(cache.line[side]) : (score?.[side] ?? 0)));
   }
 
   if (event) {
     const half = event.half === "top" ? "Top" : "Bottom";
     const outs = resolved ? event.outsAfter : event.outsBefore;
-    const text = board("inning");
-    if (text) text.textContent = `${half} ${ordinalInning(event.inning)}`;
+    const inning = board("inning");
+    if (inning) inning.textContent = `${half} ${ordinalInning(event.inning)}`;
     paintBases(board("diamond"), resolved ? event.basesAfter : event.basesBefore, resolved && (event.runs ?? 0) > 0);
     const outDots = board("outs");
     if (outDots) {
       [...outDots.children].forEach((dot, index) => dot.classList.toggle("out", index < Math.min(3, outs)));
     }
-    const now = board("now");
-    if (now) {
-      now.innerHTML = `${managerChip(state, event.battingTeam, "big")}<span>batting</span><b>${escapeHtml(shortName(stripCardYear(event.batter ?? "")))}</b>`;
-    }
     const wp = board("wp");
     const point = cache.wp[resolved ? moment.index + 1 : moment.index];
     if (wp && point) wp.textContent = `${wire.champion} ${point.wp.toFixed(0)}%`;
+    // What the next pitch is worth sits in the corner of the board with the
+    // rest of the state, rather than floating over the at-bat.
+    const leverage = board("leverage");
+    if (leverage) {
+      leverage.textContent = `Leverage ${moment.leverage.toFixed(1)}`;
+      leverage.classList.toggle("hot", moment.leverage >= 3);
+    }
   }
 
   if (wire.final) stampReplay(root, wire, cache);
@@ -5068,31 +5139,27 @@ function paintReplay(root, wire, cache, state, options) {
   const reached = (phase) => order.indexOf(wire.phase) >= order.indexOf(phase);
   if (reached("pitch")) {
     settleDie(root, "die-control", event.controlRoll);
-    const effective = event.effectiveControl ?? (event.controlTotal - event.controlRoll);
-    const math = board("math-control");
-    if (math) math.textContent = `+${effective} = ${event.controlTotal} vs on-base ${event.onBase}`;
+    // The arithmetic is the game's, not the viewer's: all that needs saying is
+    // what came off the die, which is only ever a tired arm.
+    const note = board("note-control");
+    if (note) note.textContent = event.fatiguePenalty > 0 ? `−${event.fatiguePenalty} tired` : "";
   }
   if (reached("swing")) {
     settleDie(root, "die-swing", event.resultRoll);
-    const math = board("math-swing");
-    if (math) {
-      math.textContent = event.swingBonus
-        ? `${event.swingBonus > 0 ? "+" : "\u2212"}${Math.abs(event.swingBonus)} = ${event.swingRoll}`
+    const note = board("note-swing");
+    if (note) {
+      note.textContent = event.swingBonus
+        ? `${event.swingBonus > 0 ? "+" : "−"}${Math.abs(event.swingBonus)} coach`
         : "";
     }
   }
   if (reached("result")) {
     const before = cache.wp[moment.index]?.wp ?? 50;
     const after = cache.wp[moment.index + 1]?.wp ?? before;
-    const delta = after - before;
     const result = board("result");
-    if (result) {
-      const runs = event.runs ?? 0;
-      result.textContent = runs > 0
-        ? `${resultWord(event.result)} \u00b7 ${runs} in`
-        : resultWord(event.result);
-    }
-    duel.classList.toggle("duel-negative", delta < 0);
+    const runs = event.runs ?? 0;
+    if (result) result.textContent = runs > 0 ? `${resultWord(event.result)} · ${runs} in` : resultWord(event.result);
+    duel.classList.toggle("duel-negative", after < before);
   }
 }
 
@@ -5134,23 +5201,48 @@ function paintBases(diamond, bases, scored) {
   });
 }
 
+// The final out. Part of the frame rather than a node appended to it: a
+// watcher's screen is redrawn by whatever arrives next, and a stamp that was
+// inserted afterwards goes with it.
+function stampReplay(root, wire, cache) {
+  const stamp = root.querySelector('[data-board="stamp"]');
+  if (!stamp || !stamp.hidden) return;
+  const winner = cache.game.winner;
+  const awayRuns = runsIn(cache.line.away);
+  const homeRuns = runsIn(cache.line.home);
+  const winnerRuns = winner === wire.away ? awayRuns : homeRuns;
+  const loserName = winner === wire.away ? wire.home : wire.away;
+  const loserRuns = winner === wire.away ? homeRuns : awayRuns;
+  const score = root.querySelector('[data-board="stamp-score"]');
+  const share = root.querySelector('[data-board="stamp-share"]');
+  if (score) score.textContent = `${winner} ${winnerRuns}, ${loserName} ${loserRuns}`;
+  if (share) {
+    share.textContent = Number.isFinite(wire.wonShare) ? `as they did ${wire.wonShare}% of the time` : "";
+  }
+  stamp.hidden = false;
+  requestAnimationFrame(() => stamp.classList.add("on"));
+}
+
 // A die that has not been thrown on this screen yet tumbles before it settles,
-// wherever the screen is. A die that is already showing its number stays put,
-// so a repaint does not re-roll it.
+// wherever the screen is. One already showing its number stays put, so a
+// repaint does not re-roll it.
 function settleDie(root, key, value) {
   const node = root.querySelector(`[data-board="${key}"]`);
   if (!node || node.dataset.settled === String(value)) return;
   node.dataset.settled = String(value);
+  const face = node.querySelector(".die-roll");
+  if (!face) return;
   node.classList.add("rolling");
+  node.classList.remove("landed");
   let ticks = 0;
   const tumble = setInterval(() => {
-    node.textContent = String(1 + Math.floor(Math.random() * 20));
+    face.textContent = String(1 + Math.floor(Math.random() * 20));
     ticks += 1;
     if (ticks < 9) return;
     clearInterval(tumble);
     node.classList.remove("rolling");
-    node.classList.add("settled");
-    node.textContent = String(value);
+    node.classList.add("landed");
+    face.textContent = String(value);
   }, 58);
 }
 
@@ -5280,12 +5372,12 @@ function startBatchRun(runs, options = {}) {
     };
     if (!summary) return next;
     const has = (key) => opened.includes(key);
-    if (has("traits")) next.traits = traitLeaders(summary);
-    if (has("leaders")) next.leaders = leagueLeaders(summary);
+    if (has("traits")) next.traits = teamStatBoard(summary);
+    if (has("leaders")) next.leaders = leagueLeaderBoard(summary);
     if (has("mvp")) next.mvp = ceremonyAward("mvp-hitter", summary);
     if (has("cy")) next.cy = ceremonyAward("cy-young", summary);
     if (has("reckoning")) {
-      next.reckoning = { ...reckoning(summary, costs, { byMoney: auction }), byWpar: Boolean(summary.attribution) };
+      next.reckoning = { ...valuePicks(summary, costs, { byMoney: auction }), byWpar: Boolean(summary.attribution) };
     }
     if (has("countdown") || has("finalists")) {
       const rows = countdownRows(summary);

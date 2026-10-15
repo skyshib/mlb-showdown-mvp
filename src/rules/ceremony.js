@@ -97,78 +97,100 @@ function warTotals(lines, team, part) {
   return total;
 }
 
-// Six plaques, every manager named at least once if the room allows it. Runs
-// and home runs are always there; baserunning and defence come as WPAR when the
-// room was dealt standing replacement cards and as raw counting stats when it
-// was not, because a room without replacements has no WPAR to show.
-export function traitLeaders(summary) {
-  const teams = summary?.teams ?? [];
-  if (!teams.length) return [];
-  const hitters = summary.hitters ?? [];
-  const pitchers = summary.pitchers ?? [];
-  const byWpar = Boolean(summary.attribution);
+// The room's two halves, same seven categories each. What a club does with
+// the bat on top, what it does to the other club's bat underneath — so the
+// board reads down a column as well as across a row, and a manager who leads
+// on-base and gives up the fewest home runs is visibly doing both.
+//
+// Everything here is a club total rather than a rate off one card: the hitters
+// are summed for the offence, and the arms for the defence. Slugging against
+// is why pitcher lines carry doubles and triples at all.
+export const TEAM_STAT_KEYS = ["avg", "obp", "ops", "hr", "sb", "adv", "gidp"];
 
-  const plaques = [
-    {
-      key: "rs",
-      label: "Runs scored",
-      pick: best(teams, (row) => row.runsFor?.mean ?? 0),
-      format: (value) => `${value.toFixed(2)} per game`
-    },
-    {
-      key: "ra",
-      label: "Runs allowed",
-      pick: best(teams, (row) => row.runsAgainst?.mean ?? 99, { lowest: true }),
-      format: (value) => `${value.toFixed(2)} per game`
-    },
-    {
-      key: "hr",
-      label: "Home runs",
-      pick: best(teams, (row) => per162(teamTotals(hitters, row.team, "hr"), row.games)),
-      format: (value) => `${Math.round(value)} per 162`
-    },
-    {
-      key: "sb",
-      label: "Stolen bases",
-      pick: best(teams, (row) => per162(row.steals ?? 0, row.games)),
-      format: (value) => `${Math.round(value)} per 162`
-    },
-    byWpar
-      ? {
-        key: "bsr",
-        label: "Baserunning",
-        pick: best(teams, (row) => warTotals(hitters, row.team, "baserunning")),
-        format: (value) => `${signed(value, 1)} WPAR`
-      }
-      : {
-        key: "bsr",
-        label: "Baserunning",
-        pick: best(teams, (row) => row.baserunningWpa ?? 0),
-        format: (value) => `${signed(value, 2)} WPA`
-      },
-    byWpar
-      ? {
-        key: "def",
-        label: "Defense",
-        pick: best(teams, (row) => warTotals([...hitters, ...pitchers], row.team, "defense")),
-        format: (value) => `${signed(value, 1)} WPAR`
-      }
-      : {
-        key: "def",
-        label: "Double plays",
-        pick: best(teams, (row) => per162(row.doublePlays ?? 0, row.games)),
-        format: (value) => `${Math.round(value)} per 162`
-      }
+function offenseTotals(summary, team) {
+  const totals = { ab: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0, sb: 0, gidp: 0 };
+  for (const line of summary.hitters ?? []) {
+    if (line.team !== team) continue;
+    totals.ab += line.ab ?? 0;
+    totals.h += line.h ?? 0;
+    totals.d += line.d ?? 0;
+    totals.t += line.t ?? 0;
+    totals.hr += line.hr ?? 0;
+    totals.bb += line.bb ?? 0;
+    totals.sb += line.sb ?? 0;
+    totals.gidp += line.gidp ?? 0;
+  }
+  return totals;
+}
+
+function defenseTotals(summary, team) {
+  const totals = { bf: 0, h: 0, d: 0, t: 0, hr: 0, bb: 0 };
+  for (const line of summary.pitchers ?? []) {
+    if (line.team !== team) continue;
+    totals.bf += line.bf ?? 0;
+    totals.h += line.h ?? 0;
+    totals.d += line.d ?? 0;
+    totals.t += line.t ?? 0;
+    totals.hr += line.hr ?? 0;
+    totals.bb += line.bb ?? 0;
+  }
+  return totals;
+}
+
+function rate(top, bottom) {
+  return bottom > 0 ? top / bottom : 0;
+}
+
+function bases(totals) {
+  // Singles are what is left when the extra-base hits are taken out.
+  return totals.h + totals.d + (totals.t * 2) + (totals.hr * 3);
+}
+
+function three(value) {
+  return value.toFixed(3).replace(/^0/, "");
+}
+
+export function teamStatBoard(summary) {
+  const teams = summary?.teams ?? [];
+  if (!teams.length) return { offense: [], defense: [] };
+  const offense = new Map(teams.map((row) => [row.team, offenseTotals(summary, row.team)]));
+  const defense = new Map(teams.map((row) => [row.team, defenseTotals(summary, row.team)]));
+
+  const plaque = (key, label, side, value, format, lowest = false) => {
+    const pick = best(teams, value, { lowest });
+    if (!pick) return null;
+    return { key: `${side}-${key}`, stat: key, label, side, team: pick.row.team, value: format(pick.value) };
+  };
+
+  const bat = (row) => offense.get(row.team) ?? {};
+  const arm = (row) => defense.get(row.team) ?? {};
+
+  const offenseRow = [
+    plaque("avg", "Average", "offense", (row) => rate(bat(row).h, bat(row).ab), three),
+    plaque("obp", "On base", "offense", (row) => rate(bat(row).h + bat(row).bb, bat(row).ab + bat(row).bb), three),
+    plaque("ops", "OPS", "offense",
+      (row) => rate(bat(row).h + bat(row).bb, bat(row).ab + bat(row).bb) + rate(bases(bat(row)), bat(row).ab), three),
+    plaque("hr", "Home runs", "offense", (row) => per162(bat(row).hr, row.games), (v) => `${Math.round(v)} per 162`),
+    plaque("sb", "Stolen bases", "offense", (row) => per162(row.steals ?? 0, row.games), (v) => `${Math.round(v)} per 162`),
+    plaque("adv", "Extra bases", "offense", (row) => per162(row.advances ?? 0, row.games), (v) => `${Math.round(v)} per 162`),
+    // The only one on this row where less is better: a club that stays out of
+    // the double play leads it.
+    plaque("gidp", "Into two", "offense", (row) => per162(bat(row).gidp, row.games), (v) => `${Math.round(v)} per 162`, true)
   ];
 
-  return plaques
-    .filter((plaque) => plaque.pick)
-    .map((plaque) => ({
-      key: plaque.key,
-      label: plaque.label,
-      team: plaque.pick.row.team,
-      value: plaque.format(plaque.pick.value)
-    }));
+  const defenseRow = [
+    plaque("avg", "Average", "defense", (row) => rate(arm(row).h, arm(row).bf - arm(row).bb), three, true),
+    plaque("obp", "On base", "defense", (row) => rate(arm(row).h + arm(row).bb, arm(row).bf), three, true),
+    plaque("ops", "OPS", "defense",
+      (row) => rate(arm(row).h + arm(row).bb, arm(row).bf) + rate(bases(arm(row)), arm(row).bf - arm(row).bb), three, true),
+    plaque("hr", "Home runs", "defense", (row) => per162(arm(row).hr, row.games), (v) => `${Math.round(v)} per 162`, true),
+    plaque("sb", "Stolen bases", "defense", (row) => per162(row.stealsAllowed ?? 0, row.games), (v) => `${Math.round(v)} per 162`, true),
+    plaque("adv", "Extra bases", "defense", (row) => per162(row.advancesAllowed ?? 0, row.games), (v) => `${Math.round(v)} per 162`, true),
+    // And the mirror of it: the club that turns the most.
+    plaque("gidp", "Turned two", "defense", (row) => per162(row.doublePlays ?? 0, row.games), (v) => `${Math.round(v)} per 162`)
+  ];
+
+  return { offense: offenseRow.filter(Boolean), defense: defenseRow.filter(Boolean) };
 }
 
 function signed(value, places) {
@@ -176,67 +198,101 @@ function signed(value, places) {
   return `${value < 0 ? "−" : "+"}${text}`;
 }
 
-// Four counting-stat leaders with a card each. These settle early, which is why
-// they sit at the second gate — and when one changes hands the panel changes
-// with it, because a leader is a rank, not a name.
-export function leagueLeaders(summary) {
+// The same seven categories the club board runs, read one player at a time,
+// three deep — plus the one thing a pitcher is judged on. A leader is a rank,
+// so the board changes under you while the season is still being played.
+//
+// Qualifying is deliberately gentle: a tenth of the club's plate appearances
+// keeps a pinch hitter with four at-bats off the batting title without
+// throwing out a platoon bat who genuinely led it.
+function qualified(lines, teamGames, share = 2) {
+  const bar = Math.max(20, teamGames * share);
+  const kept = lines.filter((line) => (line.pa ?? 0) >= bar);
+  return kept.length >= 3 ? kept : lines;
+}
+
+function topThree(lines, value, { lowest = false } = {}) {
+  return [...lines]
+    .filter((line) => Number.isFinite(value(line)))
+    .sort((a, b) => (lowest ? value(a) - value(b) : value(b) - value(a)))
+    .slice(0, 3)
+    .map((line, index) => ({ rank: index + 1, id: line.id, name: line.name, team: line.team, raw: value(line) }));
+}
+
+export function leagueLeaderBoard(summary) {
   const hitters = summary?.hitters ?? [];
   const pitchers = summary?.pitchers ?? [];
   if (!hitters.length || !pitchers.length) return [];
-  const qualified = hitters.filter((line) => line.pa >= Math.max(20, line.teamGames * 2));
-  const bats = qualified.length ? qualified : hitters;
-  const arms = pitchers.filter((line) => line.outs >= Math.max(30, line.teamGames));
-  const staff = arms.length ? arms : pitchers;
+  const games = hitters[0]?.teamGames ?? 0;
+  const bats = qualified(hitters, games);
+  const arms = pitchers.filter((line) => (line.outs ?? 0) >= Math.max(30, games));
+  const staff = arms.length >= 3 ? arms : pitchers;
 
-  const picks = [
-    { key: "hr", label: "Home runs", pick: best(bats, (line) => line.hrPer162 ?? 0), format: (v) => `${Math.round(v)}` },
-    { key: "obp", label: "On base", pick: best(bats, (line) => line.obp ?? 0), format: (v) => v.toFixed(3).replace(/^0/, "") },
-    { key: "sb", label: "Stolen bases", pick: best(bats, (line) => line.sbPer162 ?? 0), format: (v) => `${Math.round(v)}` },
-    { key: "era", label: "Earned runs", pick: best(staff, (line) => line.runsPerNine ?? 99, { lowest: true }), format: (v) => v.toFixed(2) }
+  const three = (value) => value.toFixed(3).replace(/^0/, "");
+  const whole = (value) => String(Math.round(value));
+
+  const categories = [
+    { key: "avg", label: "Average", lines: bats, value: (line) => line.avg, format: three },
+    { key: "obp", label: "On base", lines: bats, value: (line) => line.obp, format: three },
+    { key: "ops", label: "OPS", lines: bats, value: (line) => line.ops, format: three },
+    { key: "hr", label: "Home runs", lines: bats, value: (line) => line.hrPer162, format: whole },
+    { key: "sb", label: "Stolen bases", lines: bats, value: (line) => line.sbPer162, format: whole },
+    { key: "adv", label: "Extra bases", lines: bats, value: (line) => per162(line.adv ?? 0, line.teamGames), format: whole },
+    // The only hitting category where the leader is the man it happens to
+    // least: staying out of the double play.
+    { key: "gidp", label: "Into two", lines: bats, value: (line) => per162(line.gidp ?? 0, line.teamGames), format: whole, lowest: true },
+    { key: "era", label: "Earned runs", lines: staff, value: (line) => line.runsPerNine, format: (value) => value.toFixed(2), lowest: true }
   ];
 
-  return picks
-    .filter((entry) => entry.pick)
-    .map((entry) => ({
-      key: entry.key,
-      label: entry.label,
-      id: entry.pick.row.id,
-      name: entry.pick.row.name,
-      team: entry.pick.row.team,
-      value: entry.format(entry.pick.value)
-    }));
+  return categories.map((category) => ({
+    key: category.key,
+    label: category.label,
+    entries: topThree(category.lines, category.value, { lowest: category.lowest })
+      .map((entry) => ({ ...entry, value: category.format(entry.raw) }))
+  })).filter((category) => category.entries.length);
 }
 
-// What a card was worth against what it cost, best three of each kind. The
-// first beat that is about the managers rather than the players.
-export function reckoning(summary, costs, { byMoney = false, count = 3 } = {}) {
+// What a card was worth against what it cost — the best three of each kind and
+// the worst three, which is the only beat in the ceremony that is about the
+// managers rather than the players.
+//
+// Value is a rank against a rank, not a number against a number: where a card
+// finished among its own kind, against where it was taken or what it cost. A
+// card that finished third among hitters having been the twentieth most
+// expensive is +17 and the steal of the draft; the other way round is the bust.
+export function valuePicks(summary, costs, { byMoney = false, count = 3 } = {}) {
   const value = valueReader(summary);
-  const rank = (lines) => [...lines]
-    .filter((line) => Number.isFinite(value(line)))
-    .sort((a, b) => value(b) - value(a))
-    .slice(0, count)
-    .map((line, index) => ({
-      rank: index + 1,
-      id: line.id,
-      name: line.name,
-      team: line.team,
-      value: signed(value(line), 1),
-      cost: costs ? costs[line.id] ?? null : null
+  const board = (lines) => {
+    const ranked = [...lines]
+      .filter((line) => Number.isFinite(value(line)) && Number.isFinite(Number(costs?.[line.id])))
+      .sort((a, b) => value(b) - value(a))
+      .map((line, index) => ({ line, production: index + 1 }));
+    if (!ranked.length) return { best: [], worst: [] };
+    // Dearest first in an auction, earliest pick first in a snake draft: both
+    // are "what the room spent on him", counted the same way.
+    const byCost = [...ranked].sort((a, b) => (byMoney
+      ? Number(costs[b.line.id]) - Number(costs[a.line.id])
+      : Number(costs[a.line.id]) - Number(costs[b.line.id])));
+    const costRank = new Map(byCost.map((entry, index) => [entry.line.id, index + 1]));
+    const scored = ranked.map((entry) => ({
+      id: entry.line.id,
+      name: entry.line.name,
+      team: entry.line.team,
+      value: signed(value(entry.line), 1),
+      cost: Number(costs[entry.line.id]),
+      production: entry.production,
+      surplus: costRank.get(entry.line.id) - entry.production
     }));
-
-  const hitters = rank(summary?.hitters ?? []);
-  const pitchers = rank(summary?.pitchers ?? []);
-  // A bargain is a card that finished in the top three having cost near the
-  // bottom: the cheapest third of what the room spent.
-  const spent = costs ? Object.values(costs).map(Number).filter(Number.isFinite).sort((a, b) => a - b) : [];
-  const cheap = spent.length ? spent[Math.floor(spent.length / 3)] : null;
-  const flag = (entry) => ({
-    ...entry,
-    steal: cheap !== null && Number.isFinite(Number(entry.cost))
-      && (byMoney ? Number(entry.cost) <= cheap : Number(entry.cost) >= spent[spent.length - 1 - Math.floor(spent.length / 3)])
-  });
-
-  return { hitters: hitters.map(flag), pitchers: pitchers.map(flag), byMoney };
+    const high = [...scored].sort((a, b) => b.surplus - a.surplus);
+    const low = [...scored].sort((a, b) => a.surplus - b.surplus);
+    const take = (rows) => rows.slice(0, count).map((row, index) => ({ ...row, rank: index + 1 }));
+    return { best: take(high), worst: take(low) };
+  };
+  return {
+    hitters: board(summary?.hitters ?? []),
+    pitchers: board(summary?.pitchers ?? []),
+    byMoney
+  };
 }
 
 function valueReader(summary) {

@@ -6,13 +6,14 @@ import { autopick, buildTeam, createDraft } from "../src/rules/draft.js";
 import {
   CEREMONY_BEATS,
   countdownRows,
-  leagueLeaders,
+  leagueLeaderBoard,
   leverageMoments,
   meetingIndices,
   pickRepresentative,
   readyForNextBeat,
-  reckoning,
-  traitLeaders,
+  TEAM_STAT_KEYS,
+  valuePicks,
+  teamStatBoard,
   winProbabilitySeries
 } from "../src/rules/ceremony.js";
 
@@ -52,62 +53,84 @@ test("a beat is never flashed past, and never stalls once its gate is met", () =
   assert.equal(readyForNextBeat(0, { progress: 0, heldMs: 0, skipping: true }), true);
 });
 
-test("trait plaques name a manager for every category", () => {
+test("the stat board runs the same seven categories down both sides", () => {
   const { summary } = season("ceremony-traits");
-  const traits = traitLeaders(summary);
-  assert.equal(traits.length, 6);
+  const board = teamStatBoard(summary);
+  assert.deepEqual(board.offense.map((plaque) => plaque.stat), TEAM_STAT_KEYS);
+  assert.deepEqual(board.defense.map((plaque) => plaque.stat), TEAM_STAT_KEYS);
   const names = summary.teams.map((row) => row.team);
-  for (const trait of traits) {
-    assert.ok(names.includes(trait.team), `${trait.key} named ${trait.team}`);
-    assert.match(trait.value, /\d/);
-    assert.ok(trait.label.length > 2);
+  for (const plaque of [...board.offense, ...board.defense]) {
+    assert.ok(names.includes(plaque.team), `${plaque.key} named ${plaque.team}`);
+    assert.match(plaque.value, /\d/);
   }
-  assert.deepEqual(traits.map((trait) => trait.key), ["rs", "ra", "hr", "sb", "bsr", "def"]);
+  // Every plaque has its own key, so a patch cannot write one into another.
+  const keys = [...board.offense, ...board.defense].map((plaque) => plaque.key);
+  assert.equal(new Set(keys).size, keys.length);
 });
 
-test("the runs plaques pick the extremes, not just somebody", () => {
+test("the board picks the extreme on each side, not just somebody", () => {
   const { summary } = season("ceremony-runs");
-  const traits = traitLeaders(summary);
-  const scored = traits.find((trait) => trait.key === "rs");
-  const allowed = traits.find((trait) => trait.key === "ra");
-  const most = [...summary.teams].sort((a, b) => b.runsFor.mean - a.runsFor.mean)[0];
-  const fewest = [...summary.teams].sort((a, b) => a.runsAgainst.mean - b.runsAgainst.mean)[0];
-  assert.equal(scored.team, most.team);
-  assert.equal(allowed.team, fewest.team);
+  const board = teamStatBoard(summary);
+  const totals = (team, lines) => lines.filter((line) => line.team === team);
+  // Offence takes the highest team average; defence takes the lowest allowed.
+  const avgFor = (team) => {
+    const bats = totals(team, summary.hitters);
+    const h = bats.reduce((sum, line) => sum + line.h, 0);
+    const ab = bats.reduce((sum, line) => sum + line.ab, 0);
+    return ab ? h / ab : 0;
+  };
+  const avgAgainst = (team) => {
+    const arms = totals(team, summary.pitchers);
+    const h = arms.reduce((sum, line) => sum + line.h, 0);
+    const bf = arms.reduce((sum, line) => sum + line.bf, 0);
+    const bb = arms.reduce((sum, line) => sum + line.bb, 0);
+    return bf - bb ? h / (bf - bb) : 0;
+  };
+  const best = [...summary.teams].sort((a, b) => avgFor(b.team) - avgFor(a.team))[0];
+  const stingiest = [...summary.teams].sort((a, b) => avgAgainst(a.team) - avgAgainst(b.team))[0];
+  assert.equal(board.offense.find((plaque) => plaque.stat === "avg").team, best.team);
+  assert.equal(board.defense.find((plaque) => plaque.stat === "avg").team, stingiest.team);
 });
 
-test("league leaders are real cards with real numbers", () => {
+test("league leaders run three deep in every category", () => {
   const { summary } = season("ceremony-leaders");
-  const leaders = leagueLeaders(summary);
-  assert.deepEqual(leaders.map((entry) => entry.key), ["hr", "obp", "sb", "era"]);
+  const board = leagueLeaderBoard(summary);
+  assert.deepEqual(board.map((entry) => entry.key), ["avg", "obp", "ops", "hr", "sb", "adv", "gidp", "era"]);
   const ids = new Set([...summary.hitters, ...summary.pitchers].map((line) => line.id));
-  for (const leader of leaders) {
-    assert.ok(ids.has(leader.id), `${leader.key} points at a drafted card`);
-    assert.ok(leader.name);
+  for (const category of board) {
+    assert.equal(category.entries.length, 3);
+    assert.deepEqual(category.entries.map((entry) => entry.rank), [1, 2, 3]);
+    for (const entry of category.entries) {
+      assert.ok(ids.has(entry.id), `${category.key} points at a drafted card`);
+      assert.ok(entry.name && entry.team);
+    }
   }
-  // The on-base leader really is the best on-base among those who qualified.
-  const obp = leaders.find((entry) => entry.key === "obp");
-  const topObp = Math.max(...summary.hitters.map((line) => line.obp ?? 0));
-  assert.ok(Math.abs(Number(`0${obp.value}`) - topObp) < 0.06);
+  // Ranked the right way round, including the two where less is better.
+  const ops = board.find((entry) => entry.key === "ops");
+  assert.ok(Number(`0${ops.entries[0].value}`) >= Number(`0${ops.entries[1].value}`));
+  const era = board.find((entry) => entry.key === "era");
+  assert.ok(Number(era.entries[0].value) <= Number(era.entries[1].value));
 });
 
-test("the reckoning ranks three of each and marks the bargains", () => {
+test("value picks run best and worst three of each kind", () => {
   const { summary } = season("ceremony-reckoning");
   const costs = {};
   [...summary.hitters, ...summary.pitchers].forEach((line, index) => { costs[line.id] = index + 1; });
-  const board = reckoning(summary, costs);
-  assert.equal(board.hitters.length, 3);
-  assert.equal(board.pitchers.length, 3);
-  assert.deepEqual(board.hitters.map((entry) => entry.rank), [1, 2, 3]);
-  for (const entry of [...board.hitters, ...board.pitchers]) {
-    assert.match(entry.value, /^[+−]\d/);
-    assert.ok(entry.cost !== null);
+  const board = valuePicks(summary, costs);
+  for (const side of ["hitters", "pitchers"]) {
+    assert.equal(board[side].best.length, 3);
+    assert.equal(board[side].worst.length, 3);
+    assert.deepEqual(board[side].best.map((entry) => entry.rank), [1, 2, 3]);
+    for (const entry of [...board[side].best, ...board[side].worst]) {
+      assert.match(entry.value, /^[+\u2212]\d/);
+      assert.ok(Number.isFinite(entry.cost));
+    }
+    // Best beat its price by more than worst did, and the two ends are sorted
+    // away from each other.
+    assert.ok(board[side].best[0].surplus >= board[side].best[2].surplus);
+    assert.ok(board[side].worst[0].surplus <= board[side].worst[2].surplus);
+    assert.ok(board[side].best[0].surplus > board[side].worst[0].surplus);
   }
-  // Ranked by value: each one is worth at least as much as the next.
-  const value = summary.attribution
-    ? (id) => summary.hitters.find((line) => line.id === id)?.warPer162.total
-    : (id) => summary.hitters.find((line) => line.id === id)?.wpaPerSeason;
-  assert.ok(value(board.hitters[0].id) >= value(board.hitters[1].id));
 });
 
 test("the countdown stops at third and holds the last two back", () => {

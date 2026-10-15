@@ -2651,9 +2651,13 @@ function recordStats(state, battingSide, pitchingSide, batter, pitcher, result, 
   }
   if (result === RESULTS.DOUBLE) {
     hitterLine.d += 1;
+    pitcherLine.d += 1;
+    if (freshLine) freshLine.d += 1;
   }
   if (result === RESULTS.TRIPLE) {
     hitterLine.t += 1;
+    pitcherLine.t += 1;
+    if (freshLine) freshLine.t += 1;
   }
   if (result === RESULTS.BB) {
     hitterLine.bb += 1;
@@ -2742,6 +2746,8 @@ function ensurePitcherLine(state, pitcher) {
       bf: 0,
       outs: 0,
       h: 0,
+      d: 0,
+      t: 0,
       bb: 0,
       so: 0,
       hr: 0,
@@ -2761,6 +2767,8 @@ function emptyPitcherTotals() {
     bf: 0,
     outs: 0,
     h: 0,
+    d: 0,
+    t: 0,
     bb: 0,
     so: 0,
     hr: 0,
