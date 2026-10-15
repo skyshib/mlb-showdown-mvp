@@ -381,19 +381,34 @@ export function pickRepresentative(meetings, champion) {
   return pick ? { ...pick, meanFor, meanAgainst, meetings: played.length, won: won.length } : null;
 }
 
-// Every plate appearance the game itself thought was dangerous. If more than
-// the cap clear the floor, raise the floor until the cap is met and keep them
-// in the order they happened — the rule stays honest and the replay stays
-// inside half a minute.
+// Every plate appearance the game itself thought was dangerous, plus the whole
+// of the last inning. If more than the cap clear the floor, raise the floor
+// until the cap is met and keep them in the order they happened — the rule
+// stays honest and the replay stays inside half a minute.
+//
+// The closing inning is in whether it was dangerous or not: a championship ends
+// on its last out, and cutting away from a 1-2-3 ninth to a loud spot in the
+// fourth is the one edit nobody watching would make. It is also why the cap
+// bends — the inning is kept whole and the leverage picks take what is left.
 export function leverageMoments(game, { floor = LEVERAGE_FLOOR, cap = LEVERAGE_MOMENT_CAP } = {}) {
-  const scored = (game?.events ?? [])
+  // A plate appearance, not a trot around on somebody else's hit: the duel is
+  // what the breakdown is about.
+  const pitched = (game?.events ?? [])
     .map((event, index) => ({ event, index, leverage: eventLeverage(event) ?? 0 }))
-    // A plate appearance, not a trot around on somebody else's hit: the duel is
-    // what the breakdown is about.
-    .filter((entry) => entry.leverage >= floor && Number.isFinite(entry.event.controlRoll));
+    .filter((entry) => Number.isFinite(entry.event.controlRoll));
+  const last = pitched.reduce((high, entry) => Math.max(high, Number(entry.event.inning) || 0), 0);
+  const closing = new Set(
+    pitched.filter((entry) => (Number(entry.event.inning) || 0) === last).map((entry) => entry.index)
+  );
+  const scored = pitched.filter((entry) => closing.has(entry.index) || entry.leverage >= floor);
   if (scored.length <= cap) return scored;
-  const cutoff = [...scored].sort((a, b) => b.leverage - a.leverage)[cap - 1].leverage;
-  return scored.filter((entry) => entry.leverage >= cutoff).slice(0, cap);
+  const earlier = scored.filter((entry) => !closing.has(entry.index));
+  const room = Math.max(0, cap - closing.size);
+  if (earlier.length <= room) return scored;
+  if (!room) return scored.filter((entry) => closing.has(entry.index));
+  const cutoff = [...earlier].sort((a, b) => b.leverage - a.leverage)[room - 1].leverage;
+  const kept = new Set(earlier.filter((entry) => entry.leverage >= cutoff).slice(0, room).map((entry) => entry.index));
+  return scored.filter((entry) => closing.has(entry.index) || kept.has(entry.index));
 }
 
 // The win probability line, one point per event, read from the champion's side

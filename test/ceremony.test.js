@@ -187,20 +187,30 @@ test("a champion who lost every meeting still gets a game", () => {
   assert.equal(pick.won, 0);
 });
 
-test("leverage moments are duels, in order, capped", () => {
+test("leverage moments are duels, in order, capped around the closing inning", () => {
   const { teams } = season("ceremony-moments", { games: 200 });
   const game = simulateBatchGame(teams, "ceremony-moments", 7);
+  const pitched = game.events
+    .map((event, index) => ({ event, index }))
+    .filter((entry) => Number.isFinite(entry.event.controlRoll));
+  const last = pitched.reduce((high, entry) => Math.max(high, entry.event.inning ?? 0), 0);
+  const closing = pitched.filter((entry) => entry.event.inning === last).map((entry) => entry.index);
+  assert.ok(closing.length > 0, "the game ends on a plate appearance");
+
   const moments = leverageMoments(game, { floor: 0.1, cap: 4 });
-  assert.ok(moments.length <= 4);
+  const kept = moments.map((moment) => moment.index);
+  assert.deepEqual(closing.filter((index) => kept.includes(index)), closing, "the last inning is kept whole");
   for (let i = 1; i < moments.length; i += 1) {
     assert.ok(moments[i].index > moments[i - 1].index, "kept in the order they happened");
   }
+  const earlier = moments.filter((moment) => !closing.includes(moment.index));
+  assert.ok(earlier.length <= 4, "the cap holds over everything before the last inning");
   for (const moment of moments) {
     assert.equal(typeof moment.event.controlRoll, "number", "every moment is a plate appearance");
-    assert.ok(moment.leverage >= 0.1);
   }
-  // A floor nothing clears shows nothing rather than inventing a moment.
-  assert.deepEqual(leverageMoments(game, { floor: 99 }), []);
+  for (const moment of earlier) assert.ok(moment.leverage >= 0.1);
+  // A floor nothing clears leaves the closing inning and invents nothing else.
+  assert.deepEqual(leverageMoments(game, { floor: 99 }).map((moment) => moment.index), closing);
 });
 
 test("the win probability line is read from the champion's side", () => {

@@ -425,6 +425,10 @@ function gameHtml(state, options) {
 // club on the left and the home club on the right, so the cards take the same
 // two sides and swap over when the innings turn. A card that crossed the board
 // every half inning made you read the chip to work out whose it was.
+//
+// Each die sits beside the man who throws it, so `data-lead` says which role
+// took the left-hand card and the stylesheet sends the pitch die and the swing
+// die to the matching edges.
 export function duelHtml(state, game, options) {
   const moment = game?.moment;
   if (!moment) return "";
@@ -438,11 +442,11 @@ export function duelHtml(state, game, options) {
   ];
   const [left, right] = men[1].team === game?.away ? [men[1], men[0]] : men;
   const side = (man) => `<div class="duel-card" data-role="${man.role}">
-      <p class="duel-role">${manager(state, man.team)}<span>${man.role}</span></p>
+      <p class="duel-role">${manager(state, man.team)}<span class="duel-side">${man.role}</span></p>
       ${man.card ? cardPanelHtml(man.card) : ""}
       <p class="duel-name">${escapeHtml(shortName(stripCardYear(man.name ?? "")))}</p>
     </div>`;
-  return `<div class="duel" data-phase="${moment.phase}">
+  return `<div class="duel" data-phase="${moment.phase}" data-lead="${left.role}">
     ${side(left)}
     <div class="duel-middle">
       <div class="duel-roll" data-roll="control">
@@ -450,13 +454,15 @@ export function duelHtml(state, game, options) {
         ${dieHtml("die-control")}
         <span class="roll-note" data-board="note-control"></span>
       </div>
-      <p class="duel-advantage ${advantage ? `${advantage.key}-advantage` : ""}">${advantage ? escapeHtml(advantage.label) : ""}</p>
+      <div class="duel-call">
+        <p class="duel-advantage ${advantage ? `${advantage.key}-advantage` : ""}">${advantage ? escapeHtml(advantage.label) : ""}</p>
+        <p class="duel-result" data-board="result"></p>
+      </div>
       <div class="duel-roll" data-roll="swing">
         <span class="roll-label">Swing</span>
         ${dieHtml("die-swing")}
         <span class="roll-note" data-board="note-swing"></span>
       </div>
-      <p class="duel-result" data-board="result"></p>
     </div>
     ${side(right)}
   </div>`;
@@ -468,10 +474,12 @@ export function duelHtml(state, game, options) {
 // a second and must not be rewriting the die.
 function dieHtml(key) {
   return `<span class="die" data-board="${key}">
-    <svg class="die-face" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-      <polygon class="die-body" points="50,3 93,27 93,73 50,97 7,73 7,27"></polygon>
-    </svg>
-    <b class="die-roll">&middot;</b>
+    <span class="die-spin">
+      <svg class="die-face" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+        <polygon class="die-body" points="50,3 93,27 93,73 50,97 7,73 7,27"></polygon>
+      </svg>
+      <b class="die-roll">&middot;</b>
+    </span>
   </span>`;
 }
 
