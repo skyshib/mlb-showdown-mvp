@@ -509,6 +509,41 @@ td span {
   font-size: 14px;
 }
 
+/* On a phone the hero's second column is 140px wide, which put three card
+   faces and their copy on top of one another. One column instead: the doors at
+   full width, then each set as a row — its card beside its name. */
+@media (max-width: 760px) {
+  .setup-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding-bottom: 24px;
+  }
+
+  .setup-features {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    gap: 16px;
+  }
+
+  .setup-feature {
+    grid-row: auto;
+    grid-template-rows: auto auto;
+    grid-template-columns: 92px minmax(0, 1fr);
+    align-items: center;
+    column-gap: 14px;
+    row-gap: 4px;
+  }
+
+  .setup-feature-card {
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .setup-feature-name {
+    align-self: end;
+  }
+}
+
 @media (max-width: 560px) {
   .setup-doors {
     grid-template-columns: minmax(0, 1fr);
@@ -4688,7 +4723,14 @@ tr:focus-within .row-tools {
   margin-top: 16px;
 }
 
+/* The standings and the awards show, side by side. This section asked for a
+   `.grid` class that was deleted with the old draft workspace, so it had been
+   quietly stacking: a three-row table stretched across 1300px with the awards
+   below the fold. */
 .batch-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(380px, 0.85fr) minmax(0, 1.15fr);
+  gap: 16px;
   align-items: start;
 }
 
@@ -5410,6 +5452,26 @@ button.interesting-game-card:focus-visible {
     justify-self: start;
   }
 
+  /* One line with an ellipsis is right in a rail that is one row tall. Stacked,
+     there is a whole column to wrap into, and "Inspect the cards befo…" is not
+     a sentence. */
+  .auction-lot-rail-player h2,
+  .auction-lot-rail-meta {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+  }
+
+  /* Three clock modes across a phone cut "Chess clock" down to "Chess cl…". */
+  .segmented span {
+    padding: 8px 5px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
   .section-head,
   .filters {
     grid-template-columns: 1fr;
@@ -5426,7 +5488,8 @@ button.interesting-game-card:focus-visible {
 
   .leader-grid,
   .stat-table-grid,
-  .team-skill-grid {
+  .team-skill-grid,
+  .batch-overview-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -5490,6 +5553,13 @@ button.interesting-game-card:focus-visible {
     overflow-x: auto;
   }
 
+  /* A table that already has a scrolling wrapper keeps it: two nested
+     scrollers on one table is a table nobody can aim at. */
+  .panel .table-scroll table {
+    display: table;
+    overflow: visible;
+  }
+
   .panel table::-webkit-scrollbar {
     height: 5px;
   }
@@ -5497,6 +5567,14 @@ button.interesting-game-card:focus-visible {
   .panel table::-webkit-scrollbar-thumb {
     border-radius: 3px;
     background: var(--line);
+  }
+
+  /* The draft board's name column is sized to hold a name and its badges on
+     one line, which on a phone is 322px of a 315px window — you read "Eddie
+     Mathew" and scroll for the rest. Let it wrap instead. */
+  .player-table td.player-cell {
+    min-width: 108px;
+    white-space: normal;
   }
 
   /* The game viewer: the score, then the way to the next game, then the game. */
@@ -8114,16 +8192,32 @@ html.club .coach-flip.pending { color: #ff7a6b; }
   .cer-award-card { max-width: 240px; margin: 0 auto; }
   .award-stage { text-align: center; }
   .award-owner { justify-content: center; }
-  .duel { grid-template-columns: minmax(0, 1fr); }
-  .duel-card { max-width: 190px; margin: 0 auto; }
-  .duel-middle { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 10px; }
-  .duel[data-lead="batting"] .duel-roll[data-roll="swing"],
-  .duel[data-lead="batting"] .duel-roll[data-roll="control"] { order: 0; }
-  /* Stacked, there is no side to roll in from. */
+  /* A phone keeps the two men side by side rather than stacking them: a column
+     of full-width cards put one player, one die and the call on a screen each,
+     and the duel is the one thing here you have to read all at once. The cards
+     shrink to half the width, each die sits under the man who throws it, and
+     the call runs across the foot of both. */
+  .duel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 10px; }
+  .duel-card { max-width: 190px; margin: 0 auto; gap: 5px; }
+  .duel-card:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .duel-card:nth-child(3) { grid-column: 2; grid-row: 1; }
+  .duel-role { gap: 5px; }
+  .duel-role .manager-chip { font-size: 12px; padding: 2px 8px; }
+  .duel-side { font-size: 10px; letter-spacing: 0.1em; }
+  .duel-name { font-size: 14px; overflow-wrap: anywhere; }
+  .duel-middle { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 8px; }
+  .duel-roll[data-roll="control"] { grid-column: 1; grid-row: 1; }
+  .duel-roll[data-roll="swing"] { grid-column: 2; grid-row: 1; }
+  .duel[data-lead="batting"] .duel-roll[data-roll="control"] { grid-column: 2; }
+  .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { grid-column: 1; }
+  .duel-call { grid-column: 1 / -1; grid-row: 2; }
+  /* Each die is already under its own man; there is nowhere to roll in from. */
   .duel-roll[data-roll="control"],
   .duel-roll[data-roll="swing"],
   .duel[data-lead="batting"] .duel-roll[data-roll="control"],
   .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { --die-run: 0px; }
+  .die { width: 46px; height: 46px; }
+  .die-roll { font-size: 21px; }
   .scoreboard { grid-template-columns: 1fr auto 1fr; }
 }
 
