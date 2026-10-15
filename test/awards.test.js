@@ -70,9 +70,6 @@ test("computeAwards crowns the right winners", () => {
   assert.equal(byKey.hr.name, "Homer Launch");
   assert.equal(byKey.sb.name, "Flash Speed");
   assert.equal(byKey.runs.name, "Ronnie Rounds");
-  assert.equal(byKey.gidp.name, "Dee Pee");
-  assert.equal(byKey.swing.name, "Homer Launch");
-  assert.match(byKey.swing.note, /Bottom 9th/);
 
   // Picks rank within each field: Mid Rotation was the third pitcher taken and
   // the second-best pitcher; Gas Can the second pitcher taken and the worst.
@@ -163,7 +160,7 @@ test("a real batch summary feeds the full awards show", () => {
 
   const awards = computeAwards(summary, picks);
   const keys = new Set(awards.map((item) => item.key));
-  for (const expected of ["mvp-hitter", "mvp-pitcher", "cy-young", "fireman", "obp", "hr", "runs", "swing"]) {
+  for (const expected of ["mvp-hitter", "mvp-pitcher", "cy-young", "fireman", "obp", "hr", "runs"]) {
     assert.ok(keys.has(expected), `award ${expected} present`);
   }
   for (const item of awards) {

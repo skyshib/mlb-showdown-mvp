@@ -85,15 +85,6 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
       `${speedDemon.sb} steals, caught ${speedDemon.cs ?? 0} times.`));
   }
 
-  const rallyKiller = maxBy(summary.hitters, (line) => line.gidp);
-  if (rallyKiller && rallyKiller.gidp > 0) {
-    const gidpStat = Number.isFinite(rallyKiller.gidpPer162)
-      ? `${Math.round(rallyKiller.gidpPer162)} GIDP per 162 games`
-      : `${rallyKiller.gidpPerSeason.toFixed(2)} GIDP/season`;
-    awards.push(award("gidp", "Rally killer", rallyKiller, gidpStat,
-      `Grounded into ${rallyKiller.gidp} double plays. Someone had to.`));
-  }
-
   // What a player was worth, against what he cost. In an auction the cost is
   // money, and money is the only thing a manager actually chose — the order the
   // cards happened to come up in was the queue's doing, not theirs. So an
@@ -128,20 +119,6 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
           byMoney ? "The room bid them up. The room was wrong." : "First three rounds. This is a safe space."));
       }
     }
-  }
-
-  if (summary.topSwing) {
-    const swing = summary.topSwing;
-    const swingNumber = swing.game ?? swing.season;
-    awards.push({
-      key: "swing",
-      label: "Swing of the sims",
-      id: swing.playerId,
-      name: swing.name,
-      team: teamOf(summary, swing.playerId) ?? "",
-      stat: `${swing.result} worth +${(swing.wpa * 100).toFixed(0)}% win probability`,
-      note: `${swing.half === "bottom" ? "Bottom" : "Top"} ${ordinal(swing.inning)}, ${swing.matchup}, game ${swingNumber}.`
-    });
   }
 
   return awards;
@@ -209,12 +186,6 @@ function pitcherWorkload(line) {
   return (Number(line.inningsPerSeason) || 0).toFixed(1);
 }
 
-function teamOf(summary, playerId) {
-  const hitter = summary.hitters.find((line) => line.id === playerId);
-  if (hitter) return hitter.team;
-  return summary.pitchers.find((line) => line.id === playerId)?.team ?? null;
-}
-
 function formatWpa(value) {
   const number = Number(value) || 0;
   return `${number >= 0 ? "+" : ""}${number.toFixed(2)}`;
@@ -229,12 +200,4 @@ function formatBattingStat(value) {
   const number = Number(value) || 0;
   const fixed = number.toFixed(3);
   return number < 1 ? fixed.replace(/^0/, "") : fixed;
-}
-
-function ordinal(value) {
-  const number = Number(value) || 0;
-  const tens = number % 100;
-  if (tens >= 11 && tens <= 13) return `${number}th`;
-  const suffix = { 1: "st", 2: "nd", 3: "rd" }[number % 10] ?? "th";
-  return `${number}${suffix}`;
 }

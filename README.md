@@ -53,7 +53,7 @@ npm run balance
    - `Sim 1000 games` runs the season instead.
 6. Watch the win-rate race unfold live: the sim is intentionally paced (about 15 seconds) with a line chart of each team's cumulative win percentage, a leader callout, and running tallies. It slows down near the finish for drama; `Fast forward` runs the same race at eight times the stride, and `Skip to results` jumps straight to the verdict. The final chart is saved with the results.
 7. Review aggregate team, player, baserunning, and defensive stats normalized to 162-game pace. The games dropdown on the results screen re-runs with 100-5000 simulated games.
-8. Stick around for the awards show: Sim MVP by win probability added, Cy Young and shutdown reliever by ERA, on-base machine, home run king, speed demon, run scorer, rally killer (most GIDP), steal and bust of the draft (pick number versus WPA finish), and the single biggest swing across the simulated games.
+8. Stick around for the awards show: Sim MVP by win probability added, Cy Young and shutdown reliever by ERA, on-base machine, home run king, speed demon, run scorer, and steal and bust of the draft (pick number versus WPA finish).
 
 Draft rooms are saved in browser `localStorage`, which means saves are local to the browser and exact origin. For example, `127.0.0.1:5177` and `127.0.0.1:5178` do not share saved drafts.
 
