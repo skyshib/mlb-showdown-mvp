@@ -87,6 +87,14 @@ import {
 // tier it was tuned to.
 const GAUNTLET_BEST_OF = 3;
 
+// Who is in the other dugout. In the campaign that is a trainer off the region
+// ladder, found by id; an exhibition game between two drafted rosters has no
+// ladder and no id, and carries its opponent on the battle it was dealt from.
+// Either way the screen asks one question and gets a name back.
+function trainerFor(app) {
+  return trainerById(app.screen.trainerId) ?? app.screen.battle?.trainer ?? { name: "" };
+}
+
 export function seriesLengthFor(save, trainer) {
   if (save?.mode === "gauntlet") return GAUNTLET_BEST_OF;
   return trainer.battleFormat.bestOf ?? 1;
@@ -1370,9 +1378,13 @@ function afterAction(app, events, presetLines = null) {
   app.screen.mode = "menu";
   app.screen.menuIndex = 0;
   // The book is written after every decision, so a closed tab costs the manager
-  // nothing: the game he comes back to is the one he left, mid-inning.
-  stashBattle(app.save, app.screen.trainerId, app.screen.battle, app.screen.lines);
-  persistSave(app.save);
+  // nothing: the game he comes back to is the one he left, mid-inning. An
+  // exhibition has no save and no campaign to come back to — it is a sitting,
+  // and it keeps nothing.
+  if (app.save) {
+    stashBattle(app.save, app.screen.trainerId, app.screen.battle, app.screen.lines);
+    persistSave(app.save);
+  }
   const phase = battlePhase(app.screen.battle);
   if (phase.type === "over") {
     // Land on the FINAL screen first: the last play and the outcome, stated
@@ -1390,7 +1402,7 @@ function afterAction(app, events, presetLines = null) {
 
 export const gameOverScreen = {
   render(app) {
-    const trainer = trainerById(app.screen.trainerId);
+    const trainer = trainerFor(app);
     const battle = app.screen.battle;
     const phase = app.screen.phase;
     const you = phase.score[battle.playerSide];
@@ -1630,7 +1642,7 @@ export const battleScreen = {
   render(app) {
     const battle = app.screen.battle;
     const state = battle.state;
-    const trainer = trainerById(app.screen.trainerId);
+    const trainer = trainerFor(app);
     if (app.screen.mode === "rosters") return renderRosters(app, battle, trainer);
     if (app.screen.mode === "log") return renderGameLog(app, battle, trainer);
     if (app.screen.mode === "drama") return renderDrama(app, trainer);
@@ -1638,7 +1650,8 @@ export const battleScreen = {
     if (app.screen.mode === "pen" && phase.type !== "over") return renderPen(app, battle, trainer, phase);
     if (app.screen.mode === "bench" && phase.type !== "over") return renderBench(app, battle, trainer, phase);
     if (app.screen.mode === "realign" && phase.type === "realign") return renderRealign(app, battle, trainer, phase);
-    const series = app.save.activeSeries;
+    // A one-off game is not a series, so the board's corner cell stays empty.
+    const series = app.save?.activeSeries ?? null;
     // The board, then the game, then the clubs. What you are DOING — the menu you
     // are choosing from and the call of the play you just made — sits in the
     // middle of the screen where your eyes already are, and the two lineups hold

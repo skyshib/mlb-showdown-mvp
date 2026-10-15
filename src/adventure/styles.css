@@ -89,7 +89,20 @@ html, body {
 .gq-corner {
   align-self: flex-start;
   display: flex;
+  gap: 0.5rem;
   margin: 0 0 0.9rem 1.6rem;
+}
+
+/* The club you are managing, standing on the shelf beside the way out. A label,
+   not a control: it takes none of the hover a button takes, and when there is
+   nothing to say (the campaign, where the club is the save's) it is not there. */
+.gq-seat {
+  cursor: default;
+  pointer-events: none;
+}
+
+.gq-seat:empty {
+  display: none;
 }
 .gq-exit {
   font-family: "Courier New", ui-monospace, monospace;

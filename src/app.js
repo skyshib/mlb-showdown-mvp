@@ -33,8 +33,6 @@ import {
   unlockSounds
 } from "./ui/sounds.js?v=20260716-auction-cues";
 import { hydratePhotos } from "./ui/photos.js?v=20260716-records";
-import { createBattle } from "./rules/battle/controller.js?v=20260716-records";
-import { createGame, renderGame } from "./ui/gameScreen.js?v=20260716-records";
 import {
   AUCTION_DEFAULT_BUDGET,
   defaultAuctionBudget,
@@ -417,16 +415,6 @@ let rankingDragScrollTimer = null;
 // The one note editor open on the board, if any: a player id. Transient UI
 // state like the drag above — it never serializes.
 let editingNoteId = null;
-// The open game, if one is being played. A game is a sitting rather than a
-// save: it holds live engine state (the seeded rng included), so it lives in
-// memory only and a reload puts you back on the draft board.
-let liveGame = null;
-// Which two rosters the next game is between. Both sides are a choice, not an
-// identity: any manager can take any team against any other, so these hold the
-// toolbar's two selects rather than reading off whoever claimed a seat. Like
-// the game itself they are a sitting, not a save.
-let playAsManagerId = null;
-let playOpponentManagerId = null;
 let batchRunToken = 0;
 // Set while the simulator is drawing: see renderCurrentScreen.
 let simOwnsScreen = false;
@@ -1240,6 +1228,13 @@ function defaultState() {
     view: null,
     selectedGameIndex: 0,
     selectedTeamName: null,
+    // Which two rosters the next exhibition game is between. Both sides are a
+    // choice, not an identity: any manager can take any team against any other,
+    // so these hold the toolbar's two selects rather than reading off whoever
+    // claimed a seat. They are kept because the game is played on another page
+    // — coming back to the board finds the same matchup still set up.
+    playAsManagerId: null,
+    playOpponentManagerId: null,
     // Each manager's watchlist, keyed by manager id: the cards they are keeping
     // an eye on. It belongs to your own seat when you have one; only an
     // anonymous hotseat lets it follow the clock around the table.
@@ -1316,8 +1311,6 @@ function renderCurrentScreen() {
     renderLobby();
   } else if (state.online && !state.online.managerId && !state.online.spectator) {
     renderSeatSelect();
-  } else if (liveGame) {
-    renderLiveGame();
   } else if (state.view === "batch" && state.batch && state.draft) {
     renderBatch();
   } else if (state.draft) {
@@ -1545,6 +1538,10 @@ function rebuildOnlineDraft(room) {
   // manager one's roster and staring at somebody else's cards.
   const mySeat = state.draft.managers.find((manager) => manager.id === state.online.managerId);
   state.selectedTeamName = mySeat?.name ?? state.managers[0];
+  // Seat ids repeat from room to room (team-1, team-2...), so a matchup left
+  // over from the last one would quietly name two strangers here.
+  state.playAsManagerId = null;
+  state.playOpponentManagerId = null;
   if (lastSim) applySharedSim(lastSim, { instant: true });
   driveOnlineCpuTurn();
 }
@@ -2543,6 +2540,8 @@ async function startOfflineDraft(setupForm) {
   state.view = null;
   state.selectedGameIndex = 0;
   state.selectedTeamName = state.managers[0];
+  state.playAsManagerId = null;
+  state.playOpponentManagerId = null;
   state.rosterManagerId = null;
   cpuPaused = false;
   // The name this draft will be filed under when it finishes. Minted with the
@@ -4482,8 +4481,8 @@ function bindDraftActions() {
     if (action === "play-game") {
       // Read the selects here rather than trusting the change events: a select
       // the mouse never touched still has to mean what it says on screen.
-      playAsManagerId = app.querySelector("[data-play-as]")?.value ?? playAsManagerId;
-      playOpponentManagerId = app.querySelector("[data-play-opponent]")?.value ?? playOpponentManagerId;
+      state.playAsManagerId = app.querySelector("[data-play-as]")?.value ?? state.playAsManagerId;
+      state.playOpponentManagerId = app.querySelector("[data-play-opponent]")?.value ?? state.playOpponentManagerId;
       startGame();
     }
 
@@ -4515,14 +4514,16 @@ function bindDraftActions() {
     // the opponent select only has to be remembered.
     const playAs = event.target.closest("[data-play-as]");
     if (playAs) {
-      playAsManagerId = playAs.value;
-      if (playOpponentManagerId === playAsManagerId) playOpponentManagerId = null;
+      state.playAsManagerId = playAs.value;
+      if (state.playOpponentManagerId === state.playAsManagerId) state.playOpponentManagerId = null;
+      saveState();
       renderDraft();
       return;
     }
     const playOpponent = event.target.closest("[data-play-opponent]");
     if (playOpponent) {
-      playOpponentManagerId = playOpponent.value;
+      state.playOpponentManagerId = playOpponent.value;
+      saveState();
       return;
     }
     const rankingInput = event.target.closest("[data-ranking-input-id]");
@@ -4863,10 +4864,10 @@ function managerDescriptors(names, cpuNames) {
 // the room — the selects are the only thing that decides it.
 function playGameSides(draft) {
   const managers = draft.managers;
-  const you = managers.find((manager) => manager.id === playAsManagerId)
+  const you = managers.find((manager) => manager.id === state.playAsManagerId)
     ?? managers.find((manager) => manager.name === state.selectedTeamName)
     ?? managers[0];
-  const them = managers.find((manager) => manager.id === playOpponentManagerId && manager.id !== you?.id)
+  const them = managers.find((manager) => manager.id === state.playOpponentManagerId && manager.id !== you?.id)
     ?? managers.find((manager) => manager.id !== you?.id);
   return { you, them };
 }
@@ -4909,35 +4910,37 @@ function dedupeManagerNames(names) {
 
 // ---- The interactive game ----------------------------------------------------
 //
-// One game between two drafted rosters, played a plate appearance at a time
-// on the same engine the adventure's battles run on. You are the away team
-// (you're the one who travelled); the opponent's dugout is run by the
+// One game between two drafted rosters, played a plate appearance at a time on
+// the same engine the adventure's battles run on. It is played on the
+// adventure's console too — the board, the menus, the dice — so there is one
+// interactive game on this site instead of two, and it is the good one. You are
+// the away team (you're the one who travelled); the other dugout is run by the
 // balanced AI profile, so its arms tire and its runners go under exactly the
 // rules yours do.
+//
+// The console is a page of its own (exhibition.html), so the matchup is handed
+// over rather than passed: both rosters, the seed, and the league's colors.
+// Nothing comes back — the game keeps nothing, and the draft room is where it
+// was left, read back off this browser the way a reload reads it.
 function startGame() {
   const draft = state.draft;
   if (!draft || !canSimulate(draft)) return;
   const { you, them } = playGameSides(draft);
   if (!you || !them) return;
-  const battle = createBattle({
-    playerManager: you,
-    npcManager: them,
-    trainer: { name: them.name, aiProfile: "balanced" },
-    seed: `${state.seed}:game:${you.id}-vs-${them.id}:${newBatchSalt()}`
-  });
-  liveGame = createGame({ battle, playerName: you.name, opponentName: them.name });
-  renderCurrentScreen();
-}
-
-function renderLiveGame() {
-  resetAppHandlers();
-  renderGame(app, liveGame, {
-    onExit: () => {
-      liveGame = null;
-      renderCurrentScreen();
-    },
-    onRerender: renderCurrentScreen
-  });
+  saveState();
+  try {
+    sessionStorage.setItem("showdown-exhibition", JSON.stringify({
+      you,
+      them,
+      seed: `${state.seed}:game:${you.id}-vs-${them.id}:${newBatchSalt()}`,
+      universe: state.universe,
+      returnTo: window.location.pathname + window.location.search
+    }));
+  } catch (error) {
+    console.error(`Could not hand the game over: ${error.message}`);
+    return;
+  }
+  window.location.href = "./exhibition.html";
 }
 
 // Every batch run gets a fresh salt so its seeded games differ from the

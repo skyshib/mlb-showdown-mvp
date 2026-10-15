@@ -6363,3 +6363,40 @@ test("a defense needing two men keeps asking until both are in", async () => {
   const { alignmentLegal } = await import("../src/rules/substitutions.js");
   assert.equal(alignmentLegal(state.home.lineup), true, "and a legal defense");
 });
+
+// The draft room plays its exhibition games on this console too (see
+// exhibition.html): two drafted rosters, no campaign behind them. The screen has
+// to run with no save to write into and no trainer on the ladder to look up.
+test("the battle screen plays a game with no save and no ladder behind it", async () => {
+  const { battleScreen } = await import("../src/adventure/ui/battleScreen.js");
+  const { player, npc } = hookTeams();
+  // What the draft room hands over: a nameplate for the other dugout, and
+  // nothing else.
+  const trainer = { id: null, name: "KASEY", aiProfile: "balanced" };
+  const battle = createBattle({ playerManager: player, npcManager: npc, trainer, seed: "exhibition" });
+  const app = {
+    save: null,
+    screen: { name: "battle", trainerId: null, battle, mode: "menu", menuIndex: 0, lines: [], playLog: [] },
+    go(name, data = {}) { this.screen = { name, ...data }; },
+    rerender() {}
+  };
+
+  const opening = battleScreen.render(app);
+  assert.ok(opening.includes("gq-battle-screen"), "the console draws");
+  assert.ok(!opening.includes("GAME 1 ("), "a one-off game is not a series");
+
+  // Play it out. Nothing along the way may reach for a save.
+  for (let i = 0; i < 400 && app.screen.name === "battle"; i += 1) {
+    if (app.screen.mode === "drama") {
+      battleScreen.key(app, "a");
+      continue;
+    }
+    if (battlePhase(app.screen.battle).type === "over") break;
+    battleScreen.key(app, "a");
+  }
+  assert.equal(app.screen.name, "gameOver", "and it ends on the FINAL screen");
+
+  const { gameOverScreen } = await import("../src/adventure/ui/battleScreen.js");
+  // The other club is named off the battle, since there is no trainer to find.
+  assert.ok(gameOverScreen.render(app).includes("KASEY"), "the opponent is named");
+});
