@@ -91,6 +91,17 @@ const ARMS = {
   // valuations really are.
   "rivals-half": (bid, { bidders }) => bid * (1 - 0.5 / bidders),
 
+  // Pay up for starting pitching. The bidder puts ~0.43-0.54 dollars behind an
+  // arm per unit of engine value against ~0.45-0.50 behind a bat, and across
+  // seven live rooms the teams that bought arms won. Either the discount is a
+  // real correction (pitcher value metrics are known to overstate) and a table
+  // that all paid up would gain nothing, or it is too deep. Only the ABSOLUTE
+  // duel can tell those apart — a mixed table rewards whoever is out of step
+  // with a field that is underpaying.
+  "sp-lift-13": spLift(1.3),
+  "sp-lift-16": spLift(1.6),
+  "sp-lift-20": spLift(2.0),
+
   // ---- differential shades: less on cards with a substitute coming, full
   // freight on the ones with none. A uniform shade is a disturbance the pacing
   // loop rejects (it regulates total spend and has no per-card term); only a
@@ -185,6 +196,13 @@ function estimatorArm(hedge) {
   };
 }
 
+function spLift(factor) {
+  return (bid, { draft }) => {
+    const card = D.auctionLotPlayer(draft);
+    return card?.kind === "pitcher" && card.role === "SP" ? bid * factor : bid;
+  };
+}
+
 function regretArm(theta) {
   return (bid, { draft, manager, lot }) => {
     const card = D.auctionLotPlayer(draft);
@@ -209,7 +227,7 @@ for (const key of ARM_KEYS) if (!ARMS[key]) throw new Error(`Unknown arm "${key}
 // One seat per arm in a mixed table. In --duel mode the arms are not seated
 // against each other at all (every seat runs one of them), so the table size is
 // free and must stay a realistic room rather than collapsing to two.
-const TEAMS = args.duel ? Number(args.teams ?? 4) : ARM_KEYS.length;
+const TEAMS = (args.duel || args.duelpersonas) ? Number(args.teams ?? 4) : ARM_KEYS.length;
 
 // An arm shapes the bid; it never breaks the room's rules. A pass stays a pass
 // (shading a 0 is still 0, and a shaded bid that rounds under the minimum is a
@@ -241,7 +259,8 @@ function driveLeague(seed, armForSeat, options = {}) {
   });
   // One persona across the table, so the ARM is the only thing that differs —
   // unless the cell asked for the real room's mixed deal.
-  if (!MIXED_PERSONAS) for (const m of draft.managers) m.persona = PERSONA;
+  const seatPersona = options.persona ?? (MIXED_PERSONAS ? null : PERSONA);
+  if (seatPersona) for (const m of draft.managers) m.persona = seatPersona;
   const armOf = new Map(draft.managers.map((m, i) => [m.id, armForSeat[i]]));
   D.completeAuctionReview(draft, 0);
 
@@ -284,6 +303,32 @@ function driveLeague(seed, armForSeat, options = {}) {
       cards: m.roster.length
     };
   });
+}
+
+// --duelpersonas A,B: the ABSOLUTE archetype test. Every seat plays archetype A,
+// then every seat plays archetype B off the same seed and deck, and each seat's
+// A roster meets its own B counterpart. A mixed table only shows STANDINGS,
+// which are field-dependent by construction — this asks the different question
+// of whether a table of A-drafters builds better TEAMS than a table of B.
+if (args.duelpersonas) {
+  const [PA, PB] = String(args.duelpersonas).split(",");
+  const wins = [];
+  for (let L = 0; L < LEAGUES; L++) {
+    const seed = `${TAG}-${L}`;
+    const a = driveLeague(seed, Array(TEAMS).fill(ARM_KEYS[0]), { teamsOnly: true, persona: PA });
+    const b = driveLeague(seed, Array(TEAMS).fill(ARM_KEYS[0]), { teamsOnly: true, persona: PB });
+    for (let seat = 0; seat < TEAMS; seat++) {
+      const summary = simulateBatch([{ ...a[seat], name: "A" }, { ...b[seat], name: "B" }],
+        { runs: RUNS, seed: `${seed}-pduel-${seat}` });
+      wins.push(summary.teams.find((t) => t.team === "A")?.winPct ?? 0.5);
+    }
+  }
+  const m = wins.reduce((x, y) => x + y, 0) / wins.length;
+  const sd = Math.sqrt(wins.reduce((x, y) => x + (y - m) ** 2, 0) / wins.length);
+  console.log(`Absolute archetype duel: a table of ${PA} vs a table of ${PB} — ${LEAGUES} leagues x ${TEAMS} seats, ${PRICING}, ${UNIVERSE}, $${BUDGET}, roster ${ROSTER} (${SP} SP), pen=${PEN.bullpenSlots ?? 2}/${PEN.bullpenMin ?? "-"}, ${RUNS} games/duel`);
+  console.log(`  ${PA} beats its own ${PB} counterpart: ${(m * 100).toFixed(2)}%  (n=${wins.length})`);
+  console.log(`  edge: ${((m - 0.5) * 100 >= 0 ? "+" : "")}${((m - 0.5) * 100).toFixed(2)} pts  (±${(1.96 * sd / Math.sqrt(wins.length) * 100).toFixed(2)} 95% CI)`);
+  process.exit(0);
 }
 
 if (args.duel) {
