@@ -965,6 +965,7 @@ export function pickPlayer(draft, playerId, now = Date.now()) {
   // being charged is the man whose turn it still is.
   chargeSnakeClock(draft, now);
   manager.roster.push(player);
+  resortCpuTeamChoices(manager);
   draft.pickedIds.add(playerId);
   draft.pickNumber += 1;
   finishSnakeIfFull(draft);
@@ -1000,6 +1001,27 @@ export function auctionMaxBid(draft, manager) {
   const openSlots = draft.rosterSize - rosterPlayerCount(manager);
   const slotsAfterThisPlayer = openSlots - (lot && isCoach(lot) ? 0 : 1);
   return auctionBudget(draft, manager) - Math.max(0, slotsAfterThisPlayer) * AUCTION_MIN_BID;
+}
+
+// What the All-in button loads into the box. Normally that is the whole stack.
+// Under first price the winner pays his own number, so shoving everything in
+// when you already outspend the room buys nothing: a dollar past the richest
+// rival on this lot wins it outright. That is the same cap a computer bids
+// under (see cpuSealedBid), off the same public budgets, so the button hands a
+// human the arithmetic the room was already doing. A Vickrey room bills the
+// runner-up anyway, so there the full stack costs nothing extra.
+export function auctionAllInAmount(draft, manager) {
+  const max = Math.max(0, auctionMaxBid(draft, manager));
+  const lot = draft.auction?.lot;
+  if (!isFirstPriceAuction(draft) || max <= 0 || !lot) return max;
+  // A rebid is only open to the managers who tied, so a bidder the first round
+  // already beat is no longer part of the field to clear.
+  const field = lot.round === 2
+    ? richestBudget(draft, lot.tie.managerIds, manager.id)
+    : richestRivalBid(draft, manager, lot);
+  if (field + 1 >= max) return max;
+  const floor = lot.round === 2 ? lot.tie.amount : AUCTION_MIN_BID;
+  return Math.max(floor, field + 1);
 }
 
 export function auctionLotPlayer(draft) {
@@ -1751,6 +1773,7 @@ function sellLotTo(draft, winnerId, price) {
   if (!winner || !player) throw new Error("Lot is invalid");
 
   winner.roster.push(player);
+  resortCpuTeamChoices(winner);
   draft.pickedIds.add(player.id);
   draft.auction.budgets[winner.id] -= price;
   draft.auction.history.push({
@@ -1893,6 +1916,7 @@ export function undoLastPick(draft) {
   draft.complete = false;
   draft.teamChoicesSeeded = false;
   forgetRosterPlayer(manager, player.id);
+  resortCpuTeamChoices(manager);
   return { manager, player };
 }
 
@@ -1960,6 +1984,7 @@ function undoAuctionAction(draft) {
   draft.teamChoicesSeeded = false;
   if (isRandomNomination(draft)) draft.auction.queueIndex -= 1;
   forgetRosterPlayer(manager, player.id);
+  resortCpuTeamChoices(manager);
   return { manager, player };
 }
 
@@ -2170,6 +2195,7 @@ export function pickReplacement(draft, now = Date.now()) {
   const replacement = makeReplacementPlayer(draft, manager, gap.kind, gap.role, gap.position);
   chargeSnakeClock(draft, now);
   manager.roster.push(replacement);
+  resortCpuTeamChoices(manager);
   draft.pickedIds.add(replacement.id);
   draft.pickNumber += 1;
   finishSnakeIfFull(draft);
@@ -2304,9 +2330,14 @@ export function cpuSealedBid(draft, manager) {
 // budgets and rosters the room can already see. Their sealed AMOUNTS are never
 // consulted — only WHO the lot is open to, which the board shows everyone.
 function richestRivalBid(draft, manager, lot) {
+  return richestBudget(draft, [...lot.pending, ...Object.keys(lot.bids)], manager.id);
+}
+
+// The fattest legal bid among a set of managers, leaving one of them out.
+function richestBudget(draft, managerIds, exceptId) {
   let most = 0;
-  for (const id of new Set([...lot.pending, ...Object.keys(lot.bids)])) {
-    if (id === manager.id) continue;
+  for (const id of new Set(managerIds)) {
+    if (id === exceptId) continue;
     const rival = draft.managers.find((item) => item.id === id);
     if (rival) most = Math.max(most, auctionMaxBid(draft, rival));
   }
@@ -3251,6 +3282,19 @@ export function syncCpuTeamChoices(draft) {
   }
   draft.teamChoicesSeeded = true;
   return draft;
+}
+
+// A computer hits Auto-sort the instant a card lands on his roster: the best
+// nine in their spots, the best staff slotted, the order batting by value.
+// Left alone he fields whatever his pick order produced until the draft
+// completes, so anyone opening his board mid-draft — or a mid-draft sim —
+// found a star riding the bench behind a lesser early buy. The seating it
+// writes is the same one the completion sync writes, so the finished team is
+// unchanged.
+export function resortCpuTeamChoices(manager) {
+  if (!manager?.cpu) return manager;
+  setBestTeamChoices(manager);
+  return manager;
 }
 
 function setBestTeamChoices(manager) {

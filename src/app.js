@@ -58,6 +58,7 @@ import {
   applyDraftAction,
   assignLineupSlots,
   assignStaffSlots,
+  auctionAllInAmount,
   auctionBidTimeRemainingMs,
   auctionBudget,
   auctionLotPlayer,
@@ -3567,10 +3568,17 @@ function renderAuctionBidEntry(draft) {
     const canPass = lot.round === 1 && !isNominator;
     const maxBid = Math.max(0, auctionMaxBid(draft, manager));
     // Down to the short strokes: when there is less than $200 of spendable budget
-    // left, the fine-grained raise stops mattering — one button shoves the whole
-    // stack (the most you can legally bid) into the box for you.
+    // left, the fine-grained raise stops mattering — one button loads the most
+    // this lot can need into the box for you. That is the whole stack, except in
+    // a first-price room where you are the richest man at the lot: there you pay
+    // your own bid, so it stops a dollar past the field and the rest of the
+    // stack stays in your pocket.
+    const allInAmount = auctionAllInAmount(draft, manager);
+    const shaded = allInAmount < maxBid;
     const allIn = maxBid > 0 && auctionBudget(draft, manager) < 200
-      ? `<button type="button" class="lot-all-in" data-action="seal-all-in" data-manager-id="${escapeHtml(manager.id)}" data-amount="${maxBid}" title="Load your whole remaining budget (${money(maxBid)}) into the box">All in &middot; ${money(maxBid)}</button>`
+      ? `<button type="button" class="lot-all-in" data-action="seal-all-in" data-manager-id="${escapeHtml(manager.id)}" data-amount="${allInAmount}" title="${shaded
+          ? `Load enough to outbid the field (${money(allInAmount)}) into the box — a dollar past the most anyone else can bid`
+          : `Load your whole remaining budget (${money(allInAmount)}) into the box`}">${shaded ? "Clinch" : "All in"} &middot; ${money(allInAmount)}</button>`
       : "";
     const error = lotEntryError?.managerId === manager.id ? lotEntryError.message : "";
     return `<div class="lot-entry auction-side-entry">

@@ -12,6 +12,7 @@ import {
   assignStaffSlots,
   auctionBidTimeRemainingMs,
   auctionBudget,
+  auctionAllInAmount,
   auctionLotPlayer,
   auctionMaxBid,
   auctionReviewComplete,
@@ -473,6 +474,44 @@ test("a first-price computer never bids past what the room could answer with", (
   assert.equal(firstBid, ceiling + 1, "it stops one dollar past the richest rival");
   assert.ok(vickreyBid > ceiling + 1,
     `the cap really bites: the house rule bids ${vickreyBid} for this card, where first price stops at ${firstBid}`);
+});
+
+test("all in stops a dollar past the field when a first-price room's richest man shoves", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), { auctionPricing: "first" });
+  const [alpha, beta, gamma] = draft.managers;
+  draft.auction.budgets[beta.id] = 90;
+  draft.auction.budgets[gamma.id] = 60;
+  nominatePlayer(draft, draft.pool[0].id);
+
+  const field = Math.max(auctionMaxBid(draft, beta), auctionMaxBid(draft, gamma));
+  assert.equal(auctionAllInAmount(draft, alpha), field + 1);
+  assert.ok(auctionAllInAmount(draft, alpha) < auctionMaxBid(draft, alpha),
+    "the richest man keeps the rest of his stack");
+  // A bid the field can still answer is not shaded: the whole stack is the
+  // most he can do, and it may not be enough.
+  assert.equal(auctionAllInAmount(draft, gamma), auctionMaxBid(draft, gamma));
+});
+
+test("all in is the whole stack under Vickrey, where the runner-up pays the bill", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta"], makeDraftPool(), { auctionPricing: "vickrey" });
+  const [alpha, beta] = draft.managers;
+  draft.auction.budgets[beta.id] = 50;
+  nominatePlayer(draft, draft.pool[0].id);
+  assert.equal(auctionAllInAmount(draft, alpha), auctionMaxBid(draft, alpha));
+});
+
+test("a shaded all in still clears the tie-break floor", () => {
+  const draft = makeAuctionDraft(["Alpha", "Beta", "Gamma"], makeDraftPool("trio", 32, 16), { auctionPricing: "first" });
+  const [alpha, beta, gamma] = draft.managers;
+  nominatePlayer(draft, draft.pool[0].id);
+  placeSealedBid(draft, alpha.id, 100);
+  placeSealedBid(draft, beta.id, 100);
+  placeSealedBid(draft, gamma.id, 80);
+  assert.equal(draft.auction.lot.round, 2);
+  // Beta cannot answer the rebid at all, so a dollar past him is below the
+  // tie-break floor — the box still has to open at the tied amount.
+  draft.auction.budgets[beta.id] = 20;
+  assert.equal(auctionAllInAmount(draft, alpha), draft.auction.lot.tie.amount);
 });
 
 test("a first-price computer pays the floor for a card nobody else can bid on", () => {

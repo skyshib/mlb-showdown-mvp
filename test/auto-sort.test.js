@@ -8,6 +8,8 @@ import {
   benchPlayers,
   canPlayerFillLineupSlot,
   createDraft,
+  currentManager,
+  pickPlayer,
   pointMaximalAssignments
 } from "../src/rules/draft.js";
 
@@ -52,4 +54,40 @@ test("auto-sort fields the most card points and no bench card can beat a starter
       }
     }
   }
+});
+
+// A computer used to field his picks in the order he made them until the
+// draft completed, so a star bought late sat behind a lesser early buy for the
+// whole night. Every pick now re-seats him.
+test("a computer re-seats his team on the pick, not at the buzzer", () => {
+  const pool = buildDraftPool("classic", "cpu-resort", { managerCount: 2 });
+  const draft = createDraft(
+    [{ name: "Alpha", cpu: true }, { name: "Beta" }],
+    pool, 13, "cpu-resort", { startingPitchers: 1, timer: false }
+  );
+  const [alpha, beta] = draft.managers;
+  const starters = pool.filter((card) => card.kind === "pitcher" && card.role === "SP" && !card.replacement)
+    .sort((a, b) => a.points - b.points);
+  const weak = starters[0];
+  const strong = starters[starters.length - 1];
+  assert.ok(strong.points > weak.points);
+
+  // Alpha buys the worse arm first, the better one later; Beta takes bats in
+  // between so the turn comes back around.
+  const bats = pool.filter((card) => card.kind === "hitter" && !card.replacement);
+  const alphaTargets = [weak, strong];
+  while (alphaTargets.length) {
+    const current = currentManager(draft);
+    pickPlayer(draft, current.id === alpha.id
+      ? alphaTargets.shift().id
+      : bats.find((card) => !draft.pickedIds.has(card.id)).id);
+  }
+
+  assert.equal(draft.complete, false, "this is mid-draft, nowhere near the sweep");
+  assert.equal(alpha.staffAssignments.SP1, strong.id, "the better arm starts");
+  assert.ok(activeRoster(alpha).some((card) => card.id === strong.id));
+  assert.ok(benchPlayers(alpha).some((card) => card.id === weak.id), "the worse arm is benched");
+  // A human's board is still his own until he touches it (or the draft ends).
+  assert.equal(beta.lineupAssignments, undefined);
+  assert.equal(beta.staffAssignments, undefined);
 });
