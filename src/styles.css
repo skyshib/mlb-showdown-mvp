@@ -7838,11 +7838,17 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .ceremony-rail.complete .rail-bar i { background: var(--sheet); }
 .ceremony-rail .rail-count { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; font-variant-numeric: tabular-nums; }
 
-.ceremony-feed { display: grid; gap: clamp(20px, 4vw, 40px); align-content: start; }
+/* The ceremony reads down the middle of the page: every module is a centred
+   column of its own, and the cards in it are big enough to actually look at. */
+.ceremony-feed { display: grid; gap: clamp(22px, 4vw, 44px); align-content: start; justify-items: center; }
 
 .ceremony-module {
   display: grid;
-  gap: 14px;
+  gap: 16px;
+  justify-items: center;
+  text-align: center;
+  width: 100%;
+  max-width: 1060px;
   padding-bottom: clamp(16px, 3vw, 28px);
   border-bottom: 1px solid var(--hairline);
   opacity: 0;
@@ -7852,7 +7858,7 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 
 .ceremony-module.arrived { opacity: 1; transform: none; }
 .ceremony-module:last-child { border-bottom: 0; }
-.module-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.module-head { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .module-head h2 { margin: 0; font-size: clamp(24px, 4vw, 38px); }
 
 .ceremony-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; position: sticky; bottom: 0; background: var(--sheet); padding-top: 10px; }
@@ -7886,33 +7892,33 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .manager-chip.huge { font-size: clamp(30px, 6vw, 60px); padding: 6px 22px; letter-spacing: 0.02em; font-style: italic; }
 
 /* ---- team traits ---- */
-.plaque-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; max-width: 860px; }
+.plaque-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(236px, 1fr)); gap: 14px; max-width: 860px; margin: 0 auto; }
 .plaque {
   border: 3px solid var(--line);
   background: var(--card);
   padding: 13px 15px;
   display: grid;
-  gap: 6px;
-  justify-items: start;
+  gap: 7px;
+  justify-items: center;
 }
 .plaque-cat { font-family: var(--display); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--accent-text); }
 .plaque-val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* ---- league leaders ---- */
-.leader-list { display: grid; gap: 12px; max-width: 760px; }
-.leader-row { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto auto; gap: 14px; align-items: center; border-bottom: 1px solid var(--hairline); padding-bottom: 10px; }
+.leader-list { display: grid; gap: 16px; max-width: 840px; margin: 0 auto; width: 100%; }
+.leader-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto auto; gap: 18px; align-items: center; text-align: left; border-bottom: 1px solid var(--hairline); padding-bottom: 14px; }
 .mini-card { display: block; width: 100%; }
-.cer-leader-card { display: block; width: 62px; }
+.cer-leader-card { display: block; width: 104px; }
 .leader-who b { display: block; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: clamp(18px, 2.4vw, 25px); line-height: 1.1; }
 .leader-who em { font-style: normal; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .leader-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: clamp(19px, 2.4vw, 25px); color: var(--accent-text); font-variant-numeric: tabular-nums; }
 
 /* ---- the award cards ---- */
-.award-stage { display: grid; grid-template-columns: minmax(170px, 260px) minmax(0, 1fr); gap: clamp(18px, 4vw, 40px); align-items: center; }
+.award-stage { display: grid; grid-template-columns: minmax(210px, 330px) minmax(0, 1fr); gap: clamp(20px, 4vw, 48px); align-items: center; text-align: left; max-width: 980px; margin: 0 auto; }
 .cer-award-card { animation: card-turn 0.6s cubic-bezier(0.2, 0.9, 0.3, 1) backwards; }
 @keyframes card-turn { from { opacity: 0; transform: rotateY(84deg) scale(0.92); } to { opacity: 1; transform: none; } }
 .award-name { font-family: var(--display); font-style: italic; font-weight: 700; text-transform: uppercase; font-size: clamp(28px, 5vw, 52px); line-height: 0.95; margin: 0 0 10px; }
-.award-owner { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.award-owner { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; flex-wrap: wrap; }
 .award-owner span { font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .award-headline { font-size: clamp(16px, 2.2vw, 21px); margin: 0 0 4px; }
 .award-lines { font-size: 14px; color: var(--muted); margin: 10px 0 0; }
@@ -7930,15 +7936,15 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .split-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---- the draft, judged ---- */
-.reckon-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: clamp(16px, 3vw, 32px); }
+.reckon-board { display: grid; grid-template-columns: repeat(auto-fit, minmax(376px, 1fr)); gap: clamp(16px, 3vw, 34px); width: 100%; max-width: 1060px; margin: 0 auto; text-align: left; }
 .reckon-side { display: grid; gap: 10px; align-content: start; }
 .reckon-head { font-family: var(--display); font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; font-size: 12px; color: var(--accent-text); border-bottom: 3px solid var(--line); padding-bottom: 5px; margin: 0; }
-.reckon-row { display: grid; grid-template-columns: 22px 44px minmax(0, 1fr) auto auto; gap: 11px; align-items: center; background: var(--card); border: 2px solid var(--line); padding: 8px 11px; }
+.reckon-row { display: grid; grid-template-columns: 24px 92px minmax(0, 1fr) auto auto; gap: 13px; align-items: center; background: var(--card); border: 2px solid var(--line); padding: 10px 13px; }
 .reckon-row.bargain { border-color: var(--accent); border-width: 3px; }
 .reckon-rank { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 23px; color: var(--accent-text); line-height: 1; }
-.reckon-card { display: block; width: 44px; }
+.reckon-card { display: block; width: 92px; }
 .reckon-who { min-width: 0; }
-.reckon-who b { display: block; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 17px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reckon-who b { display: block; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 19px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .reckon-who em { font-style: normal; font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
 .reckon-cost { text-align: right; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
 .reckon-cost em { font-style: normal; display: block; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -7946,7 +7952,7 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .reckon-row.bargain .reckon-cost b { color: var(--accent-text); }
 
 /* ---- the countdown ---- */
-.placard-stack { display: grid; gap: 10px; max-width: 720px; }
+.placard-stack { display: grid; gap: 10px; max-width: 760px; margin: 0 auto; width: 100%; text-align: left; }
 .placard { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto auto; gap: 16px; align-items: center; background: var(--card); border: 3px solid var(--line); padding: 9px 16px; animation: placard-slide 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
 @keyframes placard-slide { from { opacity: 0; transform: translateX(-42px); } to { opacity: 1; transform: none; } }
 .placard:nth-child(2) { animation-delay: 0.7s; }
@@ -7965,7 +7971,8 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 /* ---- the championship game ----
    The board is the thing: who is batting, what the score is, who is on and how
    many are out, in type you can follow from across the room. */
-.replay { display: grid; gap: 14px; position: relative; }
+.replay { display: grid; gap: 16px; position: relative; width: 100%; justify-items: center; }
+.replay > * { width: 100%; }
 .replay-sub { font-size: 13px; color: var(--muted); margin: 0; }
 
 /* The board stays put while the at-bat plays out underneath it, so the score,
@@ -8037,7 +8044,7 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .now-batting span { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .now-batting b { font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: clamp(18px, 2.6vw, 26px); }
 
-.line-score-wrap { overflow-x: auto; }
+.line-score-wrap { overflow-x: auto; display: flex; justify-content: center; width: 100%; }
 .line-score { border-collapse: collapse; font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .line-score th, .line-score td { border: 1px solid var(--hairline); text-align: center; padding: 4px 0; font-size: 14px; min-width: 30px; }
 .line-score th { background: var(--navy); color: var(--sheet); font-family: var(--display); font-size: 11px; letter-spacing: 0.06em; }
@@ -8047,7 +8054,7 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .line-score td.scored { color: var(--accent-text); font-weight: 700; }
 
 /* the duel */
-.duel { display: grid; grid-template-columns: minmax(120px, 210px) minmax(0, 1fr) minmax(120px, 210px); gap: clamp(14px, 3vw, 36px); align-items: center; background: var(--card); border: 3px solid var(--line); padding: clamp(12px, 2vw, 20px); }
+.duel { display: grid; grid-template-columns: minmax(150px, 280px) minmax(0, 1fr) minmax(150px, 280px); gap: clamp(16px, 3vw, 40px); align-items: center; background: var(--card); border: 3px solid var(--line); padding: clamp(12px, 2vw, 20px); }
 /* The face is its own container and has no width of its own, so centring the
    column would shrink it to nothing. It takes the column's width; the text
    around it is centred instead. */
@@ -8055,7 +8062,7 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .duel-card .gq-card { width: 100%; margin-bottom: 0; }
 .duel-role { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 0; }
 .duel-role span { font-family: var(--display); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; font-size: 11px; color: var(--muted); }
-.duel-name { margin: 0; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 16px; text-align: center; }
+.duel-name { margin: 0; font-family: var(--display); font-weight: 700; text-transform: uppercase; font-size: 19px; text-align: center; }
 .duel-middle { display: grid; justify-items: center; gap: 7px; min-width: 0; }
 .duel-leverage { font-family: var(--display); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; font-size: 12px; background: var(--navy); color: var(--sheet); padding: 2px 10px; }
 .duel-leverage.hot { background: var(--accent); }
@@ -8100,11 +8107,13 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .replay-stamp b { display: block; font-family: var(--display); font-style: italic; font-weight: 700; text-transform: uppercase; font-size: clamp(26px, 5vw, 46px); }
 .replay-stamp em { font-style: normal; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.88; }
 
-.epilogue-chart { max-width: 920px; }
+.epilogue-chart { max-width: 920px; margin: 0 auto; }
 
 @media (max-width: 760px) {
   .award-stage { grid-template-columns: minmax(0, 1fr); }
-  .cer-award-card { max-width: 210px; }
+  .cer-award-card { max-width: 240px; margin: 0 auto; }
+  .award-stage { text-align: center; }
+  .award-owner { justify-content: center; }
   .duel { grid-template-columns: minmax(0, 1fr); }
   .duel-card { max-width: 190px; margin: 0 auto; }
   .scoreboard { grid-template-columns: 1fr auto 1fr; }

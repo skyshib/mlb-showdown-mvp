@@ -14,7 +14,7 @@ import { CLASSIC_CARD_ROWS } from "./data/classicCards.js";
 import { MLB_HISTORY_ROWS } from "./data/mlbPools.js";
 import { buildFictionalDraftPool, MAX_TEMPERATURE, normalizeTemperature } from "./data/playerGeneration.js";
 import { decodeCardRows } from "./data/realCards.js";
-import { cardPanelHtml, shortName, stripCardYear } from "./ui/cardFace.js?v=20260716-records";
+import { cardPanelHtml, cardScanUrl, shortName, stripCardYear } from "./ui/cardFace.js?v=20260716-records";
 import { eventLeverage } from "./rules/game.js?v=20260717-draft-wpa";
 import { canEnterAuctionBid, nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
@@ -422,6 +422,8 @@ let editingNoteId = null;
 // memory only and a reload puts you back on the draft board.
 let liveGame = null;
 let batchRunToken = 0;
+// Set while the simulator is drawing: see renderCurrentScreen.
+let simOwnsScreen = false;
 let hoverPreviewController = null;
 let onlineStream = null;
 // The bid box that was rejected, and why — one manager's error, not the
@@ -810,6 +812,31 @@ let heardAuctionHistory = null;
 let heardTieLotKey = null;
 let filteredAuctionLotKey = null;
 
+// The printed scans, fetched the moment the board is full.
+//
+// A card face sits on a black ground, so a scan that has not arrived is not a
+// blank card — it is a BLACK one, and that is what the ceremony showed for two
+// of the six cards on its reckoning board. The cast is not known in advance
+// any more (a rank can change hands mid-beat), so rather than guess at a
+// shortlist, warm every card the room drafted: a roster is a dozen-odd cards,
+// the browser caches them, and the draft ending is the one moment when there
+// is nothing else competing for the connection.
+const warmedScans = new Set();
+
+function preloadDraftedCards(draft) {
+  if (!draft?.managers) return;
+  for (const manager of draft.managers) {
+    for (const player of manager.roster ?? []) {
+      const url = cardScanUrl(player);
+      if (!url || warmedScans.has(url)) continue;
+      warmedScans.add(url);
+      const image = new Image();
+      image.decoding = "async";
+      image.src = url;
+    }
+  }
+}
+
 function reactToDraftChange(draft, { spectator = false } = {}) {
   if (!draft) {
     heardPickNumber = null;
@@ -896,6 +923,9 @@ function reactToDraftChange(draft, { spectator = false } = {}) {
   }
 
   if (draft.complete && !heardComplete && !first) playDraftComplete();
+  // Every path a finished draft can arrive by comes through here, so this is
+  // where the scans start loading — long before anybody presses Sim.
+  if (draft.complete) preloadDraftedCards(draft);
 
   // A finished local draft goes in the book. Online rooms are filed by the
   // server — every browser in the room holds the same draft, and one record is
@@ -1262,6 +1292,12 @@ function renderCurrentScreen() {
     cancelAnimationFrame(queuedScreenFrame);
     queuedScreenFrame = null;
   }
+  // While a sim is on screen — the ceremony, or a watcher following one — the
+  // simulator owns the page. Room traffic does not stop for it: seats come and
+  // go, lots broadcast, the stream resyncs, and every one of those asks for a
+  // re-render. Without this the ceremony flashes back to the draft board
+  // between beats, which is exactly what it did in breezy-wren-cap.
+  if (simOwnsScreen) return;
   // The sheet is ruled in the club's ink once a franchise room is open. The
   // setup screen is not in a league yet, so it keeps the house colors — and
   // walking back out to it puts them back.
@@ -1699,6 +1735,7 @@ async function sendOnlineAction(action) {
 }
 
 function leaveOnlineRoom() {
+  simOwnsScreen = false;
   onlineStream?.close();
   onlineStream = null;
   location.href = location.pathname;
@@ -2307,6 +2344,7 @@ function drawOrder(entries) {
 let setupStage = "home";
 
 function renderSetup(setupError = "") {
+  simOwnsScreen = false;
   // Backing out of a club's room puts the house colors back on the way in, not
   // on the way out — nothing clears state.universe when a draft is abandoned.
   applyFranchisePalette(null);
@@ -5160,6 +5198,11 @@ function startBatchRun(runs, options = {}) {
 
   resetAppHandlers();
   hideHoverCard();
+  // The simulator owns the page from here until it hands it back at finalize.
+  // Room traffic does not stop for a sim — seats come and go, lots broadcast,
+  // the stream resyncs — and every one of those asks for a re-render, which
+  // put the draft board back over the ceremony between beats.
+  simOwnsScreen = true;
 
   const pushFrame = () => {
     if (completed < plotStart) return null;
@@ -5516,6 +5559,7 @@ function startBatchRun(runs, options = {}) {
   const finalize = (finishedState) => {
     if (token !== batchRunToken || !state.draft) return;
     stopCeremony();
+    simOwnsScreen = false;
     state.tournament = null;
     state.batch = {
       runs: count,
@@ -5736,6 +5780,7 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
 
   resetAppHandlers();
   hideHoverCard();
+  simOwnsScreen = true;
 
   const stale = () => watch.token !== batchRunToken || sharedSimWatch !== watch || !state.draft;
 
@@ -5756,6 +5801,7 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
     if (stale() || !blob?.summary?.teams?.length) return false;
     clearTimeout(watch.timer);
     sharedSimWatch = null;
+    simOwnsScreen = false;
     state.tournament = null;
     state.batch = {
       runs: blob.runs ?? runs,

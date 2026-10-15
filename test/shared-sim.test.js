@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { gzipSync } from "node:zlib";
 import { mkdtemp } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
@@ -142,8 +143,14 @@ test("a season survives the machine going to sleep", async (t) => {
   });
   const filed = await putSim(first, roomId, { token: ana, salt: "kept", runs: 200 }, simBlob("kept"));
   assert.equal(filed.status, 200);
-  // The write is chained behind the room's own saves; give the disk a moment.
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  // The write is chained behind the room's own saves, so wait for the file
+  // rather than for a fixed moment: a fixed one loses under a full suite.
+  const simFile = join(dataDir, `${roomId}.sim`);
+  for (let tries = 0; tries < 100; tries += 1) {
+    if (existsSync(simFile)) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.ok(existsSync(simFile), "the season reached the volume");
 
   const second = await startServer(t, dataDir);
   const read = await fetch(`${second}/api/rooms/${roomId}/sim?salt=kept`);
