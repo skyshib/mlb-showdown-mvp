@@ -5148,7 +5148,7 @@ function paintReplay(root, wire, cache, state, options) {
     host.innerHTML = duelHtml(state, { ...wire, moment }, options);
     // The duel is the bottom of a tall module; the board above it is sticky,
     // so following it down keeps both the spot and the score on screen.
-    host.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (!options.replay) host.scrollIntoView({ behavior: "smooth", block: "end" });
   }
   const duel = host.querySelector(".duel");
   if (!duel) return;
@@ -5379,6 +5379,12 @@ function startBatchRun(runs, options = {}) {
   const cardsById = draftedPlayersById();
   const ceremonyContext = {
     cardFor: (id) => cardsById.get(id) ?? null,
+    // Half the names on the ceremony have no card beside them. Hovering one
+    // brings up the same preview the draft board and the stat tables use.
+    nameHtml: (id, text, tag, className) => renderPlayerPreviewName(cardsById.get(id) ?? null, text, tag, className),
+    // A rewatch has every board up at once, so nothing on it is allowed to
+    // drag the page around under the reader.
+    replay: Boolean(replayOf),
     raceChart: ""
   };
   let beat = 0;
@@ -5430,8 +5436,11 @@ function startBatchRun(runs, options = {}) {
     const view = hydrateCeremony(snapshot, teams, seed);
     if (!app.querySelector(".ceremony")) {
       resetAppHandlers();
-      app.innerHTML = ceremonyShellHtml();
+      app.innerHTML = ceremonyShellHtml({ replay: Boolean(replayOf) });
       app.onclick = ceremonyClick;
+      // After the click handler: this binds the pointer and focus listeners the
+      // hoverable names need, and leaves onclick alone.
+      bindHoverCardPreviews();
     }
     syncCeremony(app, view, ceremonyContext);
     if (view.game && replay?.cache) paintReplay(app, replay.wire, replay.cache, view, ceremonyContext);
@@ -5486,13 +5495,39 @@ function startBatchRun(runs, options = {}) {
   const advanceBeat = () => {
     if (beat >= CEREMONY_BEATS.length - 1) {
       stopCeremony();
-      finalize(batchState);
+      // A rewatch has nothing to hand back: the results are already filed, and
+      // the page it has just finished building is the thing that was asked
+      // for. It stays up until the reader closes it.
+      if (!replayOf) finalize(batchState);
       return;
     }
     beat += 1;
     const key = CEREMONY_BEATS[beat].key;
     openBeat(finalSummary ?? summarizeBatch(batchState));
     if (key === "game") startReplay();
+  };
+
+  // A rewatch is not a reveal. The season is over, every gate is long past and
+  // nobody wants to sit through the ladder a second time, so every board is
+  // opened at once, fully figured, and the page lands at the top of itself.
+  // The championship game is the one thing with anything left to do.
+  const openEverything = () => {
+    for (let index = 0; index < CEREMONY_BEATS.length; index += 1) {
+      beat = index;
+      const key = CEREMONY_BEATS[index].key;
+      if (!opened.includes(key)) opened.push(key);
+      if (key === "epilogue") {
+        ceremonyContext.raceChart = renderRaceChart({ teamNames, totalRuns: count, series: raceSeries() });
+      }
+    }
+    beat = CEREMONY_BEATS.findIndex((entry) => entry.key === "game");
+    snapshot = buildSnapshot(finalSummary);
+    ceremonyContext.quiet = true;
+    drawFrame();
+    ceremonyContext.quiet = false;
+    beatOpenedAt = Date.now();
+    // After the modules have landed, so their own scrolling is overruled.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: 0 })));
   };
 
   const stopCeremony = () => {
@@ -5651,7 +5686,7 @@ function startBatchRun(runs, options = {}) {
   const ceremonyClick = (event) => {
     if (!event.target.closest("button[data-action=ceremony-skip]")) return;
     skipRequested = true;
-    rememberCeremonySkip(true);
+    if (!replayOf) rememberCeremonySkip(true);
     stopCeremony();
     if (completed >= count) {
       finalize(batchState);
@@ -5828,17 +5863,20 @@ function startBatchRun(runs, options = {}) {
     return;
   }
 
-  openBeat(finalSummary);
+  if (!replayOf) openBeat(finalSummary);
   ceremonyTimer = setInterval(ceremonyTick, 160);
   // Say hello before playing a single game. The room is waiting on this browser
   // and has no other way to tell "starting" from "gone" — and a runner in a
   // background tab, where Chrome clamps timers to a second, can take longer to
   // produce its first frame than a watcher is willing to sit in silence.
   reportProgress(batchProgressSnapshot(batchState));
-  // Nothing left to play: every gate is already met, so the beats run on their
-  // own clock and the championship game is hunted for straight away.
+  // Nothing left to simulate: the championship game is hunted for straight
+  // away, every board goes up at once, and the one thing with anything left to
+  // show plays underneath them.
   if (replayOf) {
     searchChampionship();
+    openEverything();
+    startReplay();
     return;
   }
   setTimeout(step, 180);
@@ -5894,7 +5932,11 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
       ...(replacements.length ? { replacements } : {})
     })),
     seed: salt ? `${state.seed}-batch-${salt}` : `${state.seed}-batch`,
-    context: { cardFor: (id) => cardsById.get(id) ?? null, raceChart: "" }
+    context: {
+      cardFor: (id) => cardsById.get(id) ?? null,
+      nameHtml: (id, text, tag, className) => renderPlayerPreviewName(cardsById.get(id) ?? null, text, tag, className),
+      raceChart: ""
+    }
   };
   // A watcher cannot hurry the runner, so skipping here just steps out of the
   // show: the result lands when the room's does.
@@ -8444,7 +8486,7 @@ function renderTournamentPlayerName(row, tagName = "span") {
 }
 
 function renderPlayerPreviewName(player, name, tagName = "span", className = "") {
-  if (!player) return `<${tagName}>${escapeHtml(name)}</${tagName}>`;
+  if (!player) return `<${tagName}${className ? ` class="${escapeHtml(className)}"` : ""}>${escapeHtml(name)}</${tagName}>`;
   const classes = ["player-name-preview", className].filter(Boolean).join(" ");
   return `<${tagName}
     class="${escapeHtml(classes)}"

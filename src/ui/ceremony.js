@@ -28,8 +28,10 @@ const MODULE_TITLES = {
 
 // ---- the shell ---------------------------------------------------------------
 
-export function ceremonyShellHtml() {
-  return `<section class="panel ceremony">
+// `replay` is a rewatch of a season already played: nothing is being waited
+// for, so the way out is a way back rather than a way past.
+export function ceremonyShellHtml({ replay = false } = {}) {
+  return `<section class="panel ceremony${replay ? " ceremony-replay" : ""}">
     <div class="ceremony-rail">
       <span class="rail-tag" data-rail="tag">Simulating</span>
       <span class="rail-bar"><i data-rail="fill"></i></span>
@@ -38,7 +40,7 @@ export function ceremonyShellHtml() {
     <div class="ceremony-feed" data-feed></div>
     <div class="ceremony-foot">
       <p class="ceremony-sample" data-rail="sample"></p>
-      <button type="button" class="small ceremony-skip" data-action="ceremony-skip">Skip the ceremony</button>
+      <button type="button" class="small ceremony-skip" data-action="ceremony-skip">${replay ? "Back to the results" : "Skip the ceremony"}</button>
     </div>
   </section>`;
 }
@@ -58,8 +60,9 @@ export function syncCeremony(root, state, options = {}) {
       requestAnimationFrame(() => {
         landing.classList.add("arrived");
         // The page follows the ceremony down: the newest beat is on screen and
-        // everything before it is still there, above, still moving.
-        landing.scrollIntoView({ behavior: "smooth", block: "end" });
+        // everything before it is still there, above, still moving. A rewatch
+        // puts every board up in one go, so it stays where the reader is.
+        if (!options.quiet) landing.scrollIntoView({ behavior: "smooth", block: "end" });
       });
     }
     // A beat opens before its figures exist — the first one opens before a
@@ -161,6 +164,16 @@ function bodyHtml(key, state, options) {
 // Every card on this screen belongs to somebody, and whose it is matters as
 // much as the card. The chip wears the manager's own colour from the race
 // chart, so a club reads the same here as it does everywhere else.
+// A name on this screen reads like a name on the stat tables: hover it, or tab
+// to it, and the card it belongs to comes up. The ceremony is built out of
+// names a manager has not seen in a while, and half of them have no card next
+// to them — the ones that do are left alone, since the card is already there.
+function playerName(options, entry, { tag = "span", className = "", short = true } = {}) {
+  const text = short ? shortName(stripCardYear(entry.name)) : stripCardYear(entry.name);
+  if (options?.nameHtml) return options.nameHtml(entry.id, text, tag, className);
+  return `<${tag}${className ? ` class="${className}"` : ""}>${escapeHtml(text)}</${tag}>`;
+}
+
 function manager(state, team, extra = "") {
   const index = (state.teamNames ?? []).indexOf(team);
   const color = raceColor(index >= 0 ? index : 0);
@@ -231,7 +244,7 @@ function leadersHtml(state, options) {
 function leaderInner(state, category, entry, options) {
   if (entry.rank === 1) return leaderSpotInner(state, category, entry, options);
   return `<span class="leader-rank">${entry.rank}</span>
-    <span class="leader-who"><b>${escapeHtml(shortName(stripCardYear(entry.name)))}</b></span>
+    <span class="leader-who">${playerName(options, entry, { tag: "b" })}</span>
     <span class="leader-value" data-val="${category.key}${entry.rank}">${escapeHtml(entry.value)}</span>
     ${manager(state, entry.team)}`;
 }
@@ -262,17 +275,17 @@ function awardInner(award, state, options) {
       <p class="award-owner">${manager(state, award.team, "big")}<em>drafted him</em></p>
       <p class="award-headline" data-val="headline">${escapeHtml(award.headline)}</p>
       ${award.split ? splitHtml(award.split, award.pitcher) : ""}
-      ${(award.boards ?? []).map((board) => rankBoardHtml(state, board)).join("")}
+      ${(award.boards ?? []).map((board) => rankBoardHtml(state, board, options)).join("")}
     </div>`;
 }
 
-function rankBoardHtml(state, board) {
+function rankBoardHtml(state, board, options) {
   return `<div class="rank-board">
     <p class="rank-head">${escapeHtml(board.label)}</p>
     ${board.entries.map((entry) => `
       <div class="rank-row">
         <span class="rank-pos">${entry.rank}</span>
-        <span class="rank-name">${escapeHtml(shortName(stripCardYear(entry.name)))}</span>
+        ${playerName(options, entry, { tag: "span", className: "rank-name" })}
         ${entry.stats
           // A pitcher is read on more than one number: the rate, the work he
           // did at it, and what the work was worth.
@@ -328,7 +341,7 @@ function reckonInner(state, entry, board, options) {
   return `<span class="reckon-rank">${entry.rank}</span>
     <span class="reckon-card">${miniCard(entry.id, options)}</span>
     <span class="reckon-who">
-      <b>${escapeHtml(shortName(stripCardYear(entry.name)))}</b>
+      ${playerName(options, entry, { tag: "b" })}
       <em><span data-val="v-${escapeHtml(entry.id)}">${escapeHtml(entry.value)}</span> ${board.byWpar ? "WPAR" : "WPA"}</em>
     </span>
     <span class="reckon-cost">${costLabel(entry.cost, board.byMoney)}</span>
@@ -407,6 +420,11 @@ function gameHtml(state, options) {
 }
 
 // The two men, their cards, and the dice between them.
+//
+// Each man stands under his own manager: the scoreboard above puts the away
+// club on the left and the home club on the right, so the cards take the same
+// two sides and swap over when the innings turn. A card that crossed the board
+// every half inning made you read the chip to work out whose it was.
 export function duelHtml(state, game, options) {
   const moment = game?.moment;
   if (!moment) return "";
@@ -414,12 +432,18 @@ export function duelHtml(state, game, options) {
   const batter = options.cardFor?.(event.batterId) ?? null;
   const pitcher = options.cardFor?.(event.pitcherId) ?? null;
   const advantage = storyAdvantage(event);
+  const men = [
+    { role: "pitching", team: event.pitchingTeam, card: pitcher, name: event.pitcher },
+    { role: "batting", team: event.battingTeam, card: batter, name: event.batter }
+  ];
+  const [left, right] = men[1].team === game?.away ? [men[1], men[0]] : men;
+  const side = (man) => `<div class="duel-card" data-role="${man.role}">
+      <p class="duel-role">${manager(state, man.team)}<span>${man.role}</span></p>
+      ${man.card ? cardPanelHtml(man.card) : ""}
+      <p class="duel-name">${escapeHtml(shortName(stripCardYear(man.name ?? "")))}</p>
+    </div>`;
   return `<div class="duel" data-phase="${moment.phase}">
-    <div class="duel-card">
-      <p class="duel-role">${manager(state, event.pitchingTeam)}<span>pitching</span></p>
-      ${pitcher ? cardPanelHtml(pitcher) : ""}
-      <p class="duel-name">${escapeHtml(shortName(stripCardYear(event.pitcher ?? "")))}</p>
-    </div>
+    ${side(left)}
     <div class="duel-middle">
       <div class="duel-roll" data-roll="control">
         <span class="roll-label">Pitch</span>
@@ -434,11 +458,7 @@ export function duelHtml(state, game, options) {
       </div>
       <p class="duel-result" data-board="result"></p>
     </div>
-    <div class="duel-card">
-      <p class="duel-role">${manager(state, event.battingTeam)}<span>batting</span></p>
-      ${batter ? cardPanelHtml(batter) : ""}
-      <p class="duel-name">${escapeHtml(shortName(stripCardYear(event.batter ?? "")))}</p>
-    </div>
+    ${side(right)}
   </div>`;
 }
 
