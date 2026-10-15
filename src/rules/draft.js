@@ -353,7 +353,7 @@ function normalizeTimerMs(ms, seconds, fallbackSeconds) {
   return Math.max(0, Math.round(value));
 }
 
-export const SNAKE_DEFAULT_CLOCK_BANK_SECONDS = 5 * 60;
+export const SNAKE_DEFAULT_CLOCK_BANK_SECONDS = 6 * 60;
 export const SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS = 20;
 export const SNAKE_DEFAULT_REVIEW_SECONDS = 5 * 60;
 const MAX_REVIEW_MS = 3600 * MS_PER_SECOND;
