@@ -452,6 +452,16 @@ function finalistsHtml(state) {
     <p class="finalists-note">One of them won the room. They met ${num(state.meetings)} times. Here is one of them.</p>`;
 }
 
+// How the two split their meetings, bigger share first so it says how close
+// the series was without saying which of them won it — the replay reveals that
+// itself, on the last out.
+function seriesSplit(share) {
+  const value = Number(share);
+  if (!Number.isFinite(value) || value <= 0 || value >= 1) return "";
+  const high = Math.max(value, 1 - value) * 100;
+  return `, split ${high.toFixed(1)}&ndash;${(100 - high).toFixed(1)}`;
+}
+
 function formatPct(value) {
   return Number(value ?? 0).toFixed(3).replace(/^0/, "");
 }
@@ -464,10 +474,10 @@ function formatPct(value) {
 function gameHtml(state, options) {
   const game = state.game;
   if (!game) {
-    return `<p class="lede">Looking through every meeting of the top two for the one that says what usually happened.</p>`;
+    return `<p class="lede">Looking through every meeting of the top two for the one that went the way their season against each other went.</p>`;
   }
   return `<div class="replay" data-row="game" data-id="${game.index}">
-    <p class="replay-sub">Game ${num(game.index + 1)} &middot; one of their ${num(game.meetings)} meetings</p>
+    <p class="replay-sub">Game ${num(game.index + 1)} &middot; one of their ${num(game.meetings)} meetings${seriesSplit(game.share)}</p>
     <div class="scoreboard">
       <div class="sb-side" data-side="away">
         ${manager(state, game.away, "big")}

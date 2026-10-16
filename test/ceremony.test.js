@@ -6,9 +6,12 @@ import { autopick, buildTeam, createDraft } from "../src/rules/draft.js";
 import {
   CEREMONY_BEATS,
   countdownRows,
+  dramaTarget,
+  gameDrama,
   leagueLeaderBoard,
   leverageMoments,
   meetingIndices,
+  meetingShape,
   pickRepresentative,
   readyForNextBeat,
   TEAM_OFFENSE_KEYS,
@@ -164,16 +167,78 @@ test("meeting indices are exactly the games the two clubs played", () => {
   assert.ok(!(otherPair.includes(a) && otherPair.includes(b)));
 });
 
+test("a game's shape is read off its line score", () => {
+  // Away leads 1-0 after the first and never gives it back: nothing was ever
+  // in doubt, and the lead never changed hands.
+  assert.deepEqual(
+    meetingShape({ away: [1, 0, 0, 0, 0, 0, 0, 0, 2], home: [] }),
+    { inDoubtThrough: 0, leadChanges: 0 }
+  );
+  // Tied after eight, home wins it in the ninth.
+  assert.deepEqual(
+    meetingShape({ away: [3, 0, 0, 0, 0, 0, 0, 0], home: [0, 0, 3, 0, 0, 0, 0, 0, 1] }),
+    { inDoubtThrough: 8, leadChanges: 1 }
+  );
+  // Back and forth into the eleventh — tied after nine and after ten, as extra
+  // innings have to be — with the lead changing hands three times.
+  assert.deepEqual(
+    meetingShape({
+      away: [2, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0],
+      home: [0, 3, 0, 0, 0, 0, 0, 1, 0, 1, 2]
+    }),
+    { inDoubtThrough: 10, leadChanges: 3 }
+  );
+});
+
+test("drama ranks a thriller over a laugher, and the series says which to aim at", () => {
+  const thriller = { awayRuns: 4, homeRuns: 5, inDoubtThrough: 10, leadChanges: 3 };
+  const late = { awayRuns: 4, homeRuns: 5, inDoubtThrough: 8, leadChanges: 1 };
+  const laugher = { awayRuns: 1, homeRuns: 9, inDoubtThrough: 0, leadChanges: 0 };
+  assert.ok(gameDrama(thriller) > gameDrama(late));
+  assert.ok(gameDrama(late) > gameDrama(laugher));
+  // A series split down the middle aims at the top of the ladder; one taken
+  // 60-40 aims low; and the map between them never leaves those bounds.
+  assert.ok(dramaTarget(0.501) > 0.85);
+  assert.ok(dramaTarget(0.6) <= 0.3 + 1e-9);
+  assert.ok(Math.abs(dramaTarget(0.75) - dramaTarget(0.6)) < 1e-9, "past 60-40 it is already as calm as it gets");
+  assert.ok(dramaTarget(0.55) < dramaTarget(0.52));
+});
+
+test("an even series is replayed through its late games, a lopsided one through a comfortable win", () => {
+  // Three kinds of win, in a series the champion also lost often enough for the
+  // share to be the only thing that differs between the two cases below.
+  const wins = [
+    { index: 1, away: "Ana", home: "Bo", awayRuns: 9, homeRuns: 1, winner: "Ana", inDoubtThrough: 0, leadChanges: 0 },
+    { index: 2, away: "Ana", home: "Bo", awayRuns: 5, homeRuns: 4, winner: "Ana", inDoubtThrough: 10, leadChanges: 3 },
+    { index: 3, away: "Bo", home: "Ana", awayRuns: 2, homeRuns: 6, winner: "Ana", inDoubtThrough: 2, leadChanges: 1 }
+  ];
+  const loss = (index) => ({ index, away: "Ana", home: "Bo", awayRuns: 1, homeRuns: 4, winner: "Bo", inDoubtThrough: 0, leadChanges: 0 });
+
+  // Split three and three: the extra-inning game.
+  const even = pickRepresentative([...wins, loss(4), loss(5), loss(6)], "Ana");
+  assert.equal(even.index, 2);
+  assert.equal(even.share, 0.5);
+
+  // The same three wins against one loss — three in four — and the room sees a
+  // win that was never in doubt instead.
+  const clear = pickRepresentative([...wins, loss(4)], "Ana");
+  assert.equal(clear.share, 0.75);
+  assert.notEqual(clear.index, 2);
+  assert.ok(gameDrama(clear) < gameDrama(even));
+});
+
 test("the representative game is one the champion won, near their average score", () => {
+  // Every win the same shape and the same margin, so drama cannot separate
+  // them and typicality decides: Ana averages 4.5 for and 4.75 against across
+  // all four, and game 2 is nearest.
   const meetings = [
-    { index: 1, away: "Ana", home: "Bo", awayRuns: 9, homeRuns: 1, winner: "Ana" },
-    { index: 2, away: "Ana", home: "Bo", awayRuns: 5, homeRuns: 3, winner: "Ana" },
-    { index: 3, away: "Bo", home: "Ana", awayRuns: 2, homeRuns: 6, winner: "Ana" },
-    { index: 4, away: "Ana", home: "Bo", awayRuns: 0, homeRuns: 7, winner: "Bo" }
+    { index: 1, away: "Ana", home: "Bo", awayRuns: 9, homeRuns: 7, winner: "Ana", inDoubtThrough: 4, leadChanges: 1 },
+    { index: 2, away: "Ana", home: "Bo", awayRuns: 5, homeRuns: 3, winner: "Ana", inDoubtThrough: 4, leadChanges: 1 },
+    { index: 3, away: "Bo", home: "Ana", awayRuns: 2, homeRuns: 4, winner: "Ana", inDoubtThrough: 4, leadChanges: 1 },
+    { index: 4, away: "Ana", home: "Bo", awayRuns: 0, homeRuns: 7, winner: "Bo", inDoubtThrough: 4, leadChanges: 1 }
   ];
   const pick = pickRepresentative(meetings, "Ana");
   assert.equal(pick.winner, "Ana");
-  // Ana averages 5 for and 3.25 against across all four; game 2 is nearest.
   assert.equal(pick.index, 2);
   assert.equal(pick.meetings, 4);
   assert.equal(pick.won, 3);

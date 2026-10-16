@@ -187,6 +187,7 @@ import {
   leagueLeaderBoard,
   leverageMoments,
   meetingIndices,
+  meetingShape,
   pickRepresentative,
   readyForNextBeat,
   valuePicks,
@@ -5569,7 +5570,10 @@ function startBatchRun(runs, options = {}) {
           home: game.home.name ?? game.home,
           awayRuns: runsIn(game.lineScore?.away),
           homeRuns: runsIn(game.lineScore?.home),
-          winner: game.winner
+          winner: game.winner,
+          // How late it stayed in doubt, so the pick can match the game's
+          // shape to how close the series was.
+          ...meetingShape(game.lineScore)
         });
       }
       if (cursor < walk.length) {
@@ -5625,6 +5629,7 @@ function startBatchRun(runs, options = {}) {
         champion: replay.champion,
         challenger: replay.challenger,
         meetings: replay.meetings,
+        share: pick.share,
         momentIndex: 0,
         phase: "spot",
         lineRevealed: 0,

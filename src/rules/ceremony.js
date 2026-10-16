@@ -335,11 +335,95 @@ export function meetingIndices(teams, totalGames, away, home, scheduleVersion) {
   return indices.sort((a, b) => a - b);
 }
 
-// The game to play back: of the meetings the champion won, the one whose final
-// score sits closest to the average of all of them. No other filter — a game
-// that was never close is still what usually happened, and screening for lead
-// changes would quietly turn "typical" into "exciting", which is a different
-// claim. The leverage floor decides what is worth dwelling on inside it.
+// How the game went, read off the board: the last inning that ended with the
+// eventual winner level or behind, and how many times the lead changed hands.
+// Trailing scoreless innings can move neither, so a line score is all this
+// needs — no walk back through the events.
+export function meetingShape(lineScore) {
+  const away = lineScore?.away ?? [];
+  const home = lineScore?.home ?? [];
+  const frames = Math.max(away.length, home.length);
+  let awayRuns = 0;
+  let homeRuns = 0;
+  for (let inning = 0; inning < frames; inning += 1) {
+    awayRuns += Number(away[inning]) || 0;
+    homeRuns += Number(home[inning]) || 0;
+  }
+  const winner = Math.sign(homeRuns - awayRuns);
+  let homeThrough = 0;
+  let awayThrough = 0;
+  let inDoubtThrough = 0;
+  let leadChanges = 0;
+  let lead = 0;
+  for (let inning = 1; inning <= frames; inning += 1) {
+    homeThrough += Number(home[inning - 1]) || 0;
+    awayThrough += Number(away[inning - 1]) || 0;
+    const side = Math.sign(homeThrough - awayThrough);
+    if (side && lead && side !== lead) leadChanges += 1;
+    if (side) lead = side;
+    // Tied, or the side that would win still trailing: nothing settled yet.
+    if (side !== winner) inDoubtThrough = inning;
+  }
+  return { inDoubtThrough, leadChanges };
+}
+
+// How late a game stayed dangerous, in innings and a bit: the inning it was
+// still in doubt through, plus a little for a lead that changed hands and a
+// little less for every run of the final margin. A game led from the first
+// pitch to the last scores zero or below; one tied going to the eleventh
+// scores above one. Only the ORDER it puts the pool in matters, which is why
+// the weights are round numbers rather than fitted ones.
+const DOUBT_INNINGS = 9;
+const FLIP_CAP = 4;
+const FLIP_CREDIT = 0.5;
+// Uncapped on purpose: a game tied through five and lost by ten was not a
+// close game, and capping the debit let those rank alongside one-run games.
+const MARGIN_RUNS = 6;
+const MARGIN_DEBIT = 0.5;
+
+export function gameDrama(meeting) {
+  const doubt = Math.max(0, Number(meeting?.inDoubtThrough) || 0);
+  const flips = Math.min(FLIP_CAP, Math.max(0, Number(meeting?.leadChanges) || 0));
+  const margin = Math.abs((Number(meeting?.homeRuns) || 0) - (Number(meeting?.awayRuns) || 0));
+  return doubt / DOUBT_INNINGS
+    + (flips / FLIP_CAP) * FLIP_CREDIT
+    - (margin / MARGIN_RUNS) * MARGIN_DEBIT;
+}
+
+// Where on that ladder to aim, from how close the series itself was. Two clubs
+// who split their meetings down the middle were never apart, and a championship
+// game between them should not be either; a champion who took three in five
+// usually pulled away, and showing a thriller would be telling the room
+// something about the matchup that is not true. So the head-to-head share picks
+// a QUANTILE of the pool's drama rather than a game, and the pool decides what
+// that quantile actually looks like.
+const EVEN_SERIES_AIM = 0.9;
+const CLEAR_SERIES_AIM = 0.3;
+const CLEAR_SERIES_EDGE = 0.1;
+
+export function dramaTarget(share) {
+  const value = Number(share);
+  const edge = Number.isFinite(value) ? Math.min(CLEAR_SERIES_EDGE, Math.abs(value - 0.5)) : 0;
+  return EVEN_SERIES_AIM + (CLEAR_SERIES_AIM - EVEN_SERIES_AIM) * (edge / CLEAR_SERIES_EDGE);
+}
+
+function closer(key, best) {
+  for (let rank = 0; rank < key.length; rank += 1) {
+    if (key[rank] < best[rank] - 1e-9) return true;
+    if (key[rank] > best[rank] + 1e-9) return false;
+  }
+  return false;
+}
+
+// The game to play back: of the meetings the champion won, the one whose shape
+// matches how close the series was, and of those the one whose score is nearest
+// the average of all of them. Three keys in order — the drama the head-to-head
+// earned, then typicality, then the middle of the season — because dozens of
+// meetings tie on each of the first two. 4-2 is 4-2 whenever it happened, and
+// breaking those ties by whichever came first would always hand us a game from
+// the opening cycle and make every room's championship game look like game
+// eight. The leverage floor decides what is worth dwelling on inside the game
+// once it is chosen.
 export function pickRepresentative(meetings, champion) {
   const played = meetings.filter((meeting) => meeting.winner);
   if (!played.length) return null;
@@ -354,30 +438,39 @@ export function pickRepresentative(meetings, champion) {
   const meanAgainst = opponentRuns / played.length;
   const won = played.filter((meeting) => meeting.winner === champion);
   const pool = won.length ? won : played;
-  // Dozens of meetings tie on distance — 4-2 is 4-2 whenever it happened — so
-  // the tie goes to the one nearest the middle of the season rather than to
-  // whichever came first, which would always hand us a game from the opening
-  // cycle and make every room's championship game look like game eight.
-  let bestDistance = Infinity;
-  let tied = [];
+  const share = won.length / played.length;
+  const target = dramaTarget(share);
+  const ladder = pool.map((meeting) => gameDrama(meeting)).sort((a, b) => a - b);
+  const aim = ladder[Math.round(target * (ladder.length - 1))];
+  const middle = pool[Math.floor(pool.length / 2)]?.index ?? 0;
+  let pick = null;
+  let best = null;
   for (const meeting of pool) {
     const home = meeting.home === champion;
     const scored = home ? meeting.homeRuns : meeting.awayRuns;
     const allowed = home ? meeting.awayRuns : meeting.homeRuns;
-    const distance = Math.abs(scored - meanFor) + Math.abs(allowed - meanAgainst);
-    if (distance < bestDistance - 1e-9) {
-      bestDistance = distance;
-      tied = [meeting];
-    } else if (Math.abs(distance - bestDistance) <= 1e-9) {
-      tied.push(meeting);
+    const key = [
+      Math.abs(gameDrama(meeting) - aim),
+      Math.abs(scored - meanFor) + Math.abs(allowed - meanAgainst),
+      Math.abs(meeting.index - middle)
+    ];
+    if (!best || closer(key, best)) {
+      best = key;
+      pick = meeting;
     }
   }
-  const middle = pool[Math.floor(pool.length / 2)]?.index ?? 0;
-  let pick = null;
-  for (const meeting of tied) {
-    if (!pick || Math.abs(meeting.index - middle) < Math.abs(pick.index - middle)) pick = meeting;
-  }
-  return pick ? { ...pick, meanFor, meanAgainst, meetings: played.length, won: won.length } : null;
+  return pick
+    ? {
+      ...pick,
+      meanFor,
+      meanAgainst,
+      meetings: played.length,
+      won: won.length,
+      share,
+      drama: gameDrama(pick),
+      dramaAim: aim
+    }
+    : null;
 }
 
 // Every plate appearance the game itself thought was dangerous, plus every one
