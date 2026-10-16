@@ -5237,11 +5237,7 @@ function stampReplay(root, wire, cache) {
   const loserName = winner === wire.away ? wire.home : wire.away;
   const loserRuns = winner === wire.away ? homeRuns : awayRuns;
   const score = root.querySelector('[data-board="stamp-score"]');
-  const share = root.querySelector('[data-board="stamp-share"]');
   if (score) score.textContent = `${winner} ${winnerRuns}, ${loserName} ${loserRuns}`;
-  if (share) {
-    share.textContent = Number.isFinite(wire.wonShare) ? `as they did ${wire.wonShare}% of the time` : "";
-  }
   stamp.hidden = false;
   requestAnimationFrame(() => stamp.classList.add("on"));
 }
@@ -5679,8 +5675,7 @@ function startBatchRun(runs, options = {}) {
       at(tail, () => frame({
         lineRevealed: replay.wire.innings,
         wpRevealed: cache.wp.length,
-        final: true,
-        wonShare: Math.round((replay.pick.won / Math.max(1, replay.pick.meetings)) * 100)
+        final: true
       }));
       at(tail + 2600, () => { replay.done = true; });
     };

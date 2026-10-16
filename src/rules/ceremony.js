@@ -175,16 +175,17 @@ export function teamStatBoard(summary) {
   const arm = (row) => defense.get(row.team) ?? {};
 
   const offenseRow = [
-    plaque("obp", "On base", "offense", (row) => rate(bat(row).h + bat(row).bb, bat(row).ab + bat(row).bb), three),
-    plaque("hr", "Home runs", "offense", (row) => per162(bat(row).hr, row.games), (v) => `${Math.round(v)} per 162`),
-    plaque("sb", "Stolen bases", "offense", (row) => per162(row.steals ?? 0, row.games), (v) => `${Math.round(v)} per 162`)
+    plaque("obp", "OBP", "offense", (row) => rate(bat(row).h + bat(row).bb, bat(row).ab + bat(row).bb), three),
+    plaque("hr", "HR", "offense", (row) => per162(bat(row).hr, row.games), (v) => `${Math.round(v)} per 162`),
+    plaque("sb", "SB", "offense", (row) => per162(row.steals ?? 0, row.games), (v) => `${Math.round(v)} per 162`)
   ];
 
+  // Said from the defence's side, since "on base" under "Defense" reads as a
+  // club that gets on base rather than one that stops you.
   const defenseRow = [
-    plaque("obp", "On base", "defense", (row) => rate(arm(row).h + arm(row).bb, arm(row).bf), three, true),
-    plaque("hr", "Home runs", "defense", (row) => per162(arm(row).hr, row.games), (v) => `${Math.round(v)} per 162`, true),
-    // The club that turns the most of them.
-    plaque("gidp", "Turned two", "defense", (row) => per162(row.doublePlays ?? 0, row.games), (v) => `${Math.round(v)} per 162`)
+    plaque("obp", "OBP allowed", "defense", (row) => rate(arm(row).h + arm(row).bb, arm(row).bf), three, true),
+    plaque("hr", "HR allowed", "defense", (row) => per162(arm(row).hr, row.games), (v) => `${Math.round(v)} per 162`, true),
+    plaque("gidp", "DP turned", "defense", (row) => per162(row.doublePlays ?? 0, row.games), (v) => `${Math.round(v)} per 162`)
   ];
 
   return { offense: offenseRow.filter(Boolean), defense: defenseRow.filter(Boolean) };
@@ -232,16 +233,19 @@ export function leagueLeaderBoard(summary) {
   // the double play are footnotes next to who got on and who went deep. What is
   // left is the back of a baseball card.
   const categories = [
-    { key: "ops", label: "OPS", lines: bats, value: (line) => line.ops, format: three },
-    { key: "obp", label: "On base", lines: bats, value: (line) => line.obp, format: three },
-    { key: "hr", label: "Home runs", lines: bats, value: (line) => line.hrPer162, format: whole },
-    { key: "sb", label: "Stolen bases", lines: bats, value: (line) => line.sbPer162, format: whole },
-    { key: "era", label: "Earned runs", lines: staff, value: (line) => line.runsPerNine, format: (value) => value.toFixed(2), lowest: true }
+    { key: "ops", label: "OPS", unit: "OPS", lines: bats, value: (line) => line.ops, format: three },
+    { key: "obp", label: "On base", unit: "OBP", lines: bats, value: (line) => line.obp, format: three },
+    { key: "hr", label: "Home runs", unit: "HR", lines: bats, value: (line) => line.hrPer162, format: whole },
+    { key: "sb", label: "Stolen bases", unit: "SB", lines: bats, value: (line) => line.sbPer162, format: whole },
+    { key: "era", label: "Earned runs", unit: "ERA", lines: staff, value: (line) => line.runsPerNine, format: (value) => value.toFixed(2), lowest: true }
   ];
 
   return categories.map((category) => ({
     key: category.key,
     label: category.label,
+    // What the number is, said beside it: a leader board reads as a line from
+    // the back of a card rather than a figure under a heading.
+    unit: category.unit,
     entries: topThree(category.lines, category.value, { lowest: category.lowest })
       .map((entry) => ({ ...entry, value: category.format(entry.raw) }))
   })).filter((category) => category.entries.length);

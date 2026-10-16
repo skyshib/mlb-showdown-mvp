@@ -14,6 +14,11 @@ import { cardPanelHtml, escapeHtml, shortName, stripCardYear } from "./cardFace.
 import { raceColor } from "./render.js?v=20260725-prep-tiers";
 import { storyAdvantage } from "./gameStory.js?v=20260725-throw-labels";
 
+// The beats that read "and the award goes to" say it UNDER the award's name,
+// the way an announcer does: the name is the thing on screen, and the line is
+// what is being said about it.
+const EYEBROW_UNDER = new Set(["mvp", "cy"]);
+
 const MODULE_TITLES = {
   traits: ["Who leads what", "The room so far"],
   leaders: ["League leaders", null],
@@ -150,10 +155,14 @@ function awardShape(award) {
 
 function moduleHtml(key, state, options) {
   const [eyebrow, title] = MODULE_TITLES[key] ?? ["", ""];
+  const under = EYEBROW_UNDER.has(key);
+  const head = [
+    `<p class="eyebrow">${escapeHtml(eyebrow)}</p>`,
+    title ? `<h2>${escapeHtml(title)}</h2>` : ""
+  ];
   return `<section class="ceremony-module" data-module="${key}">
-    <header class="module-head">
-      <p class="eyebrow">${escapeHtml(eyebrow)}</p>
-      ${title ? `<h2>${escapeHtml(title)}</h2>` : ""}
+    <header class="module-head${under ? " head-under" : ""}">
+      ${(under ? [head[1], head[0]] : head).join("\n      ")}
     </header>
     <div class="module-body">${bodyHtml(key, state, options)}</div>
   </section>`;
@@ -270,6 +279,7 @@ function leaderSpotInner(state, category, entry, options) {
       <b class="leader-spot-name">${escapeHtml(stripCardYear(entry.name))}</b>
       <span class="leader-spot-line">
         <span class="leader-spot-value" data-val="${category.key}${entry.rank}">${escapeHtml(entry.value)}</span>
+        ${category.unit ? `<span class="leader-spot-unit">${escapeHtml(category.unit)}</span>` : ""}
         ${manager(state, entry.team)}
       </span>
     </span>`;
@@ -290,7 +300,7 @@ function awardInner(award, state, options) {
       <p class="award-owner">${manager(state, award.team, "big")}<em>drafted him</em></p>
       <p class="award-headline" data-val="headline">${escapeHtml(award.headline)}</p>
       ${award.split ? splitHtml(award.split, award.pitcher) : ""}
-      ${(award.boards ?? []).map((board) => rankBoardHtml(state, board, award, options)).join("")}
+      ${(award.boards ?? []).map((board, index) => rankBoardHtml(state, board, award, options, index)).join("")}
     </div>`;
 }
 
@@ -308,23 +318,36 @@ function priceTag(cost, byMoney) {
   return byMoney ? `$${num(cost)}` : `#${cost}`;
 }
 
-function rankBoardHtml(state, board, award, options) {
+function rankBoardHtml(state, board, award, options, index) {
   return `<div class="rank-board">
     <p class="rank-head">${escapeHtml(board.label)}</p>
     ${board.entries.map((entry) => `
-      <div class="rank-row">
-        <span class="rank-pos">${entry.rank}</span>
-        ${playerName(options, entry, { tag: "span", className: "rank-name" })}
-        <span class="rank-cost">${priceTag(entry.cost, award.byMoney)}</span>
-        ${entry.stats
-          // A pitcher is read on more than one number: the rate, the work he
-          // did at it, and what the work was worth.
-          ? `<span class="rank-stats">${entry.stats.map((stat) => `
-              <span class="rank-stat"><b>${escapeHtml(stat.value)}</b>${escapeHtml(stat.label)}</span>`).join("")}</span>`
-          : `<span class="rank-value">${escapeHtml(entry.value)}</span>`}
-        ${manager(state, entry.team)}
+      <div class="rank-row" data-row="${rankKey(index, entry.rank)}" data-id="${escapeHtml(entry.id)}">
+        <div data-swap>${rankRowInner(state, entry, award, options, index)}</div>
       </div>`).join("")}
   </div>`;
+}
+
+// The board's rows go on moving with the sim like everything else on the beat,
+// so each number is a patch target. Without them the headline climbed while the
+// board under it still read the figures from ten thousand games ago, and the
+// winner's own row disagreed with his name.
+function rankKey(board, rank) {
+  return `b${board}r${rank}`;
+}
+
+function rankRowInner(state, entry, award, options, index) {
+  const key = rankKey(index, entry.rank);
+  return `<span class="rank-pos">${entry.rank}</span>
+    ${playerName(options, entry, { tag: "span", className: "rank-name" })}
+    <span class="rank-cost">${priceTag(entry.cost, award.byMoney)}</span>
+    ${entry.stats
+      // A pitcher is read on more than one number: the rate, the work he did at
+      // it, and what the work was worth.
+      ? `<span class="rank-stats">${entry.stats.map((stat, order) => `
+          <span class="rank-stat"><b data-val="${key}s${order}">${escapeHtml(stat.value)}</b>${escapeHtml(stat.label)}</span>`).join("")}</span>`
+      : `<span class="rank-value" data-val="${key}v">${escapeHtml(entry.value)}</span>`}
+    ${manager(state, entry.team)}`;
 }
 
 // WPAR the way the engine stores it. Zero sits in the middle of each track,
@@ -465,7 +488,6 @@ function gameHtml(state, options) {
     <div class="replay-duel" data-board="duel"></div>
     <div class="replay-stamp" data-board="stamp" hidden>
       <b data-board="stamp-score"></b>
-      <em data-board="stamp-share"></em>
     </div>
   </div>`;
 }
@@ -576,6 +598,14 @@ function patchModule(module, key, state, options) {
       swapRow(module, "award", award.id, () => awardInner(award, state, options));
       setVal(module, "headline", award.headline);
       patchSplit(module, award.split);
+      (award.boards ?? []).forEach((board, index) => {
+        for (const entry of board.entries) {
+          const row = rankKey(index, entry.rank);
+          swapRow(module, row, entry.id, () => rankRowInner(state, entry, award, options, index));
+          if (entry.stats) entry.stats.forEach((stat, order) => setVal(module, `${row}s${order}`, stat.value));
+          else setVal(module, `${row}v`, entry.value);
+        }
+      });
       return;
     }
     case "reckoning": {
