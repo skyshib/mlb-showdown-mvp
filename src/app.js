@@ -5142,16 +5142,6 @@ function paintReplay(root, wire, cache, state, options) {
     if (outDots) {
       [...outDots.children].forEach((dot, index) => dot.classList.toggle("out", index < Math.min(3, outs)));
     }
-    const wp = board("wp");
-    const point = cache.wp[resolved ? moment.index + 1 : moment.index];
-    if (wp && point) wp.textContent = `${wire.champion} ${point.wp.toFixed(0)}%`;
-    // What the next pitch is worth sits in the corner of the board with the
-    // rest of the state, rather than floating over the at-bat.
-    const leverage = board("leverage");
-    if (leverage) {
-      leverage.textContent = `Leverage ${moment.leverage.toFixed(1)}`;
-      leverage.classList.toggle("hot", moment.leverage >= 3);
-    }
   }
 
   if (wire.final) stampReplay(root, wire, cache);

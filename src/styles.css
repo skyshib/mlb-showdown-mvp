@@ -8019,16 +8019,33 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 /* ---- the championship game ----
    The board is the thing: who is batting, what the score is, who is on and how
    many are out, in type you can follow from across the room. */
-.replay { display: grid; gap: 16px; position: relative; width: 100%; justify-items: center; }
-.replay > * { width: 100%; }
-.replay-sub { font-size: 13px; color: var(--muted); margin: 0; }
+/* The board between the two men rather than above them: the pitcher down one
+   side, the hitter down the other, and the score with the dice under it in the
+   middle, so the whole at-bat is one thing to look at. The duel and its wrapper
+   are display:contents, which makes the two cards and the dice items of this
+   grid alongside the board. */
+.replay {
+  display: grid;
+  grid-template-columns: minmax(150px, 280px) minmax(0, 1fr) minmax(150px, 280px);
+  gap: clamp(12px, 1.4vw, 22px);
+  align-items: center;
+  position: relative;
+  width: 100%;
+  background: var(--card);
+  border: 3px solid var(--line);
+  padding: clamp(12px, 2vw, 20px);
+}
+.replay-sub { grid-column: 1 / -1; grid-row: 1; text-align: center; font-size: 13px; color: var(--muted); margin: 0; }
+.replay-duel { display: contents; }
+.duel-card:nth-child(1) { grid-column: 1; grid-row: 2 / span 2; }
+.duel-card:nth-child(3) { grid-column: 3; grid-row: 2 / span 2; }
 
-/* The board stays put while the at-bat plays out underneath it, so the score,
-   the bases and the outs are never the thing you have to scroll back for. */
+/* The score, the bases and the outs, over the dice that are about to change
+   them. */
 .scoreboard {
-  position: sticky;
-  top: 44px;
-  z-index: 2;
+  grid-column: 2;
+  grid-row: 2;
+  align-self: end;
   display: grid;
   /* The board is as wide as the board, not as wide as the page. With 1fr a
      side the score was thrown out to the edges of a blue band that was mostly
@@ -8093,22 +8110,11 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .sb-outs { display: flex; gap: 6px; }
 .sb-outs i { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--sheet); }
 .sb-outs i.out { background: var(--sheet); }
-.sb-wp { font-family: ui-monospace, Menlo, monospace; font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* What the next pitch is worth, in the corner of the board with the rest of
    the state rather than floating over the at-bat. */
-.sb-leverage {
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-size: 10px;
-  opacity: 0.75;
-  white-space: nowrap;
-}
-.sb-leverage.hot { opacity: 1; color: var(--accent-bright); }
 
 /* the duel */
-.duel { display: grid; grid-template-columns: minmax(150px, 280px) minmax(0, 1fr) minmax(150px, 280px); gap: clamp(12px, 1.4vw, 22px); align-items: center; background: var(--card); border: 3px solid var(--line); padding: clamp(12px, 2vw, 20px); }
+.duel { display: contents; }
 /* The face is its own container and has no width of its own, so centring the
    column would shrink it to nothing. It takes the column's width; the text
    around it is centred instead. */
@@ -8123,7 +8129,9 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 /* A die belongs to the man throwing it, so the pitch and the swing sit against
    their own cards with the call between them; `data-lead` says which role holds
    the left-hand card and the two swap over with it. */
-.duel-middle { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: clamp(10px, 1.6vw, 26px); min-width: 0; }
+/* The dice sit under the board, not out at the edges of the column it is
+   centred in, so the two read as one stack. */
+.duel-middle { grid-column: 2; grid-row: 3; align-self: start; justify-self: center; width: min(100%, 460px); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: clamp(10px, 1.6vw, 26px); min-width: 0; }
 .duel-call { display: grid; justify-items: center; gap: 7px; min-width: 0; }
 .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { order: -1; }
 .duel[data-lead="batting"] .duel-roll[data-roll="control"] { order: 1; }
@@ -8222,15 +8230,16 @@ html.club .coach-flip.pending { color: #ff7a6b; }
      and the duel is the one thing here you have to read all at once. The cards
      shrink to half the width, each die sits under the man who throws it, and
      the call runs across the foot of both. */
-  .duel { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 10px; }
+  .replay { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 10px; }
   .duel-card { max-width: 190px; margin: 0 auto; gap: 5px; }
-  .duel-card:nth-child(1) { grid-column: 1; grid-row: 1; }
-  .duel-card:nth-child(3) { grid-column: 2; grid-row: 1; }
+  .duel-card:nth-child(1) { grid-column: 1; grid-row: 3; }
+  .duel-card:nth-child(3) { grid-column: 2; grid-row: 3; }
+  .scoreboard { grid-column: 1 / -1; grid-row: 2; align-self: auto; }
   .duel-role { gap: 5px; }
   .duel-role .manager-chip { font-size: 12px; padding: 2px 8px; }
   .duel-side { font-size: 10px; letter-spacing: 0.1em; }
   .duel-name { font-size: 14px; overflow-wrap: anywhere; }
-  .duel-middle { grid-column: 1 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 8px; }
+  .duel-middle { grid-column: 1 / -1; grid-row: 4; width: 100%; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 8px; }
   .duel-roll[data-roll="control"] { grid-column: 1; grid-row: 1; }
   .duel-roll[data-roll="swing"] { grid-column: 2; grid-row: 1; }
   .duel[data-lead="batting"] .duel-roll[data-roll="control"] { grid-column: 2; }

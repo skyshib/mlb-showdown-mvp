@@ -456,8 +456,6 @@ function gameHtml(state, options) {
           <i data-base="1"></i><i data-base="2"></i><i data-base="3"></i><i data-base="home"></i>
         </span>
         <span class="sb-outs" data-board="outs"><i></i><i></i><i></i></span>
-        <span class="sb-wp" data-board="wp"></span>
-        <span class="sb-leverage" data-board="leverage"></span>
       </div>
       <div class="sb-side" data-side="home">
         ${manager(state, game.home, "big")}
