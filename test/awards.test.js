@@ -69,6 +69,7 @@ test("computeAwards crowns the right winners", () => {
   assert.equal(byKey["mvp-pitcher"], undefined, "no pitcher MVP beside the same man's Cy Young");
   assert.match(byKey["cy-young"].stat, /ERA · /, "the Cy Young reads on his rate and his worth");
   assert.equal(byKey.fireman.name, "Door Slammer");
+  assert.match(byKey.fireman.stat, /ERA · /, "the reliever reads on his rate and his worth too");
   assert.equal(byKey.obp.name, "Obi Onbase");
   assert.equal(byKey.hr.name, "Homer Launch");
   assert.equal(byKey.sb.name, "Flash Speed");
@@ -117,6 +118,7 @@ test("a sim that measured WPAR ranks MVP and value awards on it, not WPA", () =>
   assert.match(byKey["mvp-hitter"].note, /\+3\.24 WPA\.$/, "the MVP card still carries WPA");
   assert.equal(byKey["cy-young"].name, "Ace Steady");
   assert.match(byKey["cy-young"].stat, /WPAR$/, "the Cy Young reads on WPAR when the sim measured it");
+  assert.equal(byKey.fireman.stat, "1.90 ERA · +0.5 WPAR", "the reliever is stated the same way as the Cy Young");
   assert.equal(byKey["steal-hitter"].name, "Ronnie Rounds");
   assert.equal(byKey["steal-hitter"].stat, "Paid 5, #1 of hitters in WPAR");
   assert.equal(byKey["bust-hitter"].name, "Dee Pee");

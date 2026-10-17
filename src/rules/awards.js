@@ -22,6 +22,10 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
   const byWpar = Boolean(summary.attribution);
   const value = byWpar ? (line) => line.warPer162?.total : (line) => line.wpaPerSeason;
   const valueLabel = byWpar ? "WPAR" : "WPA";
+  // What an arm was worth, in the same words for every pitching award.
+  const worth = byWpar
+    ? (line) => `${formatWar(line.warPer162?.total)} WPAR`
+    : (line) => `${formatWpa(line.wpaPer162 ?? line.wpaPerSeason)} WPA`;
 
   // The Cy Young is the best arm in the room by the same measure the MVP is the
   // best bat, which it was not while it was the lowest ERA among starters: a
@@ -47,17 +51,14 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
   }
 
   if (bestArm) {
-    const worth = byWpar
-      ? `${formatWar(bestArm.warPer162.total)} WPAR`
-      : `${formatWpa(bestArm.wpaPer162 ?? bestArm.wpaPerSeason)} WPA`;
-    awards.push(award("cy-young", "Cy Young", bestArm, `${bestArm.runsPerNine.toFixed(2)} ERA · ${worth}`,
+    awards.push(award("cy-young", "Cy Young", bestArm, `${bestArm.runsPerNine.toFixed(2)} ERA · ${worth(bestArm)}`,
       `${pitcherWorkload(bestArm)} IP per 162 games, ${bestArm.strikeoutsPerNine.toFixed(1)} K/9.`));
   }
 
   const relievers = summary.pitchers.filter((line) => line.role === "RP" && line.outs >= teamGameMinimum(line, 3));
   const fireman = minBy(fallbackIfEmpty(relievers, summary.pitchers.filter((line) => line.role === "RP" && line.outs > 0)), (line) => line.runsPerNine);
   if (fireman) {
-    awards.push(award("fireman", "Shutdown reliever (RP)", fireman, `${fireman.runsPerNine.toFixed(2)} ERA`,
+    awards.push(award("fireman", "Shutdown reliever (RP)", fireman, `${fireman.runsPerNine.toFixed(2)} ERA · ${worth(fireman)}`,
       `${fireman.strikeoutsPerNine.toFixed(1)} K/9 out of the bullpen.`));
   }
 
