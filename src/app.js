@@ -5629,7 +5629,6 @@ function startBatchRun(runs, options = {}) {
         champion: replay.champion,
         challenger: replay.challenger,
         meetings: replay.meetings,
-        share: pick.share,
         momentIndex: 0,
         phase: "spot",
         lineRevealed: 0,
