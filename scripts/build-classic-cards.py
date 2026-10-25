@@ -137,6 +137,20 @@ NAME_FIX = {
     "Willie Mcgee": "Willie McGee",
 }
 
+# The search table's edition column files every Pennant Run and Trading
+# Deadline card under its year's base-set code; the store slug names the set
+# the card actually came in. The id keeps the column's code — it is what the
+# card-image map is keyed by — and only the displayed edition is corrected.
+# Subset codes (SS, CC, RS, promos) are already more specific than the slug
+# and stand as they are.
+def display_edition(card):
+    if card["edition"] in ("1st", "UL"):
+        if "pennant-run" in card["slug"]:
+            return "PR"
+        if "trading-deadline" in card["slug"]:
+            return "TD"
+    return card["edition"]
+
 def fixed_chart(card):
     """The card's chart with any known transcription typo corrected."""
     chart = dict(card["chart"])
@@ -207,7 +221,7 @@ for card in cards:
     foil = 1 if card.get("foil") else 0
     if card["pitcher"]:
         role = "SP" if card["positions"].split("|")[0].strip().startswith("Starter") else "RP"
-        out.append([card_id, display, card["team"], card["year"], card["edition"], 1, card["points"], obc, min(max(spd, 1), 9), role, 0, card["hand"], chart_str, foil, NAME_MLBAM.get(name)])
+        out.append([card_id, display, card["team"], card["year"], display_edition(card), 1, card["points"], obc, min(max(spd, 1), 9), role, 0, card["hand"], chart_str, foil, NAME_MLBAM.get(name)])
     else:
         plist = parse_positions(card["positions"])
         fix = FIELDING_FIX.get(card["slug"])
@@ -215,7 +229,7 @@ for card in cards:
             plist = [(p, fix.get(p, f)) for p, f in plist]
         pos = [p for p, _ in plist] if len(plist) > 1 else plist[0][0]
         fielding = [f for _, f in plist] if len(plist) > 1 else plist[0][1]
-        out.append([card_id, display, card["team"], card["year"], card["edition"], 0, card["points"], obc, min(max(spd, 5), 28), pos, fielding, card["hand"], chart_str, foil, NAME_MLBAM.get(name)])
+        out.append([card_id, display, card["team"], card["year"], display_edition(card), 0, card["points"], obc, min(max(spd, 5), 28), pos, fielding, card["hand"], chart_str, foil, NAME_MLBAM.get(name)])
 
 # A chart is a partition of the die: every face 1..20 reads exactly one row.
 # A row that overlaps its neighbour still resolves (the lookup takes the first
