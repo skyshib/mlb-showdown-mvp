@@ -75,6 +75,14 @@ CHART_FIX = {
     "384-kirk-rueter-mlb-showdown-2000-1st-edition": {"PU": [4, 5]},
 }
 
+# The positions column is hand-typed too, and can drop a fielding modifier.
+# Each fix below was re-read off the card scan in assets/cards/ and maps a
+# printed position to the fielding the card actually shows.
+FIELDING_FIX = {
+    # the card prints LF/RF +1; the report dropped the +1
+    "355-shannon-stewart-mlb-showdown-2002-base-set": {"LF/RF": 1},
+}
+
 # Names come off the same hand-typed reports, and a few are plainly wrong: a
 # row left in caps lock, a dropped space, a misspelling the card itself does not
 # make. Each fix below was checked against the card scan in card-images-raw/ or
@@ -202,6 +210,9 @@ for card in cards:
         out.append([card_id, display, card["team"], card["year"], card["edition"], 1, card["points"], obc, min(max(spd, 1), 9), role, 0, card["hand"], chart_str, foil, NAME_MLBAM.get(name)])
     else:
         plist = parse_positions(card["positions"])
+        fix = FIELDING_FIX.get(card["slug"])
+        if fix:
+            plist = [(p, fix.get(p, f)) for p, f in plist]
         pos = [p for p, _ in plist] if len(plist) > 1 else plist[0][0]
         fielding = [f for _, f in plist] if len(plist) > 1 else plist[0][1]
         out.append([card_id, display, card["team"], card["year"], card["edition"], 0, card["points"], obc, min(max(spd, 5), 28), pos, fielding, card["hand"], chart_str, foil, NAME_MLBAM.get(name)])

@@ -3647,7 +3647,7 @@ export const CLASSIC_CARD_ROWS = [
 ["sd-02-ul-354-paul-quantrill","Paul Quantrill '02","Blue Jays","2002","UL",1,110,5,1,"RP",0,"R","P1-2|K3-6|G7-14|F15-16|S17-19|D20-26|H27+",0,120824],
 ["sd-00-1st-355-mike-williams","Mike Williams '00","Pirates","2000","1st",1,90,0,1,"RP",0,"R","K1-9|P10-12|G13-15|F16-18|W19-19|S20-20",0,124328],
 ["sd-01-1st-355-matt-clement","Matt Clement '01","Padres","2001","1st",1,300,2,6,"SP",0,"R","P1-2|K3-7|G8-14|F15-16|W17-19|S20-20",0,136725],
-["sd-02-ul-355-shannon-stewart","Shannon Stewart '02","Blue Jays","2002","UL",0,240,11,19,"LF/RF",0,"R","G1-4|F5-6|W7-9|S10-16|+17-17|D18-19|T20-21|H22+",0,122784],
+["sd-02-ul-355-shannon-stewart","Shannon Stewart '02","Blue Jays","2002","UL",0,240,11,19,"LF/RF",1,"R","G1-4|F5-6|W7-9|S10-16|+17-17|D18-19|T20-21|H22+",0,122784],
 ["sd-00-1st-356-kevin-young","Kevin Young '00","Pirates","2000","1st",0,440,9,20,"1B",1,"R","K1-2|F3-4|W5-9|S10-13|+14-14|D15-17|T18-18|H19-20",0,124704],
 ["sd-01-1st-356-adam-eaton","Adam Eaton '01","Padres","2001","1st",1,350,5,6,"SP",0,"R","P1-2|K3-5|G6-11|F12-14|W15-16|S17-19|D20-20",0,null],
 ["sd-01-ap-356-adam-eaton","Adam Eaton '01","Padres","2001","AP",1,350,5,6,"SP",0,"R","P1-2|K3-5|G6-11|F12-14|W15-16|S17-19|D20-20",0,null],
