@@ -493,13 +493,13 @@ function performStealAttempt(state, stealAttempt, rng) {
   const scoreBefore = { ...state.score };
   const wpBefore = winProbabilityHome(state);
   const runner = { id: stealAttempt.runner.id, name: stealAttempt.runner.name };
+  const catcher = catcherOf(pitchingTeam);
   const attemptResult = resolveStealAttempt(state, stealAttempt, rng);
   if (!attemptResult.safe) {
     state.pitching[pitchingSide].outsRecorded += 1;
     ensurePitcherLine(state, pitcher).outs += 1;
     // The runner is charged the caught-stealing on his own line (see
     // resolveStealAttempt); the man who threw him out gets the credit on his.
-    const catcher = catcherOf(pitchingTeam);
     if (catcher?.id) ensureHitterLine(state, catcher, pitchingSide).csCaught += 1;
   }
   const wpAfter = winProbabilityHome(state);
@@ -519,6 +519,10 @@ function performStealAttempt(state, stealAttempt, rng) {
     // was hovering the man standing at the plate — who had nothing to do with it.
     runner: runner.name,
     runnerId: runner.id ?? null,
+    // The other half of this duel. The throw is the catcher's, not the
+    // pitcher's, and a replay showing the contest shows the man who made it.
+    catcher: catcher?.name ?? null,
+    catcherId: catcher?.id ?? null,
     pitcher: pitcher.name,
     pitcherId: pitcher.id ?? null,
     controlRoll: null,

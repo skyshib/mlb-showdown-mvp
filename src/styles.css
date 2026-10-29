@@ -8244,6 +8244,9 @@ html.club .coach-flip.pending { color: #ff7a6b; }
   .duel-roll[data-roll="swing"] { grid-column: 2; grid-row: 1; }
   .duel[data-lead="batting"] .duel-roll[data-roll="control"] { grid-column: 2; }
   .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { grid-column: 1; }
+  /* A steal has one die — the throw, first in the middle because there is no
+     pitch before it — and it sits centred rather than in the swing corner. */
+  .duel-roll[data-roll="swing"]:first-child { grid-column: 1 / -1; justify-self: center; }
   .duel-call { grid-column: 1 / -1; grid-row: 2; }
   /* Each die is already under its own man; there is nowhere to roll in from. */
   .duel-roll[data-roll="control"],

@@ -5161,7 +5161,10 @@ function paintReplay(root, wire, cache, state, options) {
   duel.setAttribute("data-phase", wire.phase);
   const order = ["spot", "pitch", "advantage", "swing", "result"];
   const reached = (phase) => order.indexOf(wire.phase) >= order.indexOf(phase);
-  if (reached("pitch")) {
+  // A steal has no pitch and no swing: its one die is the throw, settled in
+  // the swing slot, and a base taken uncontested never rolled at all.
+  const stealAttempt = event.playDetails?.kind === "steal" ? (event.playDetails.stealAttempt ?? {}) : null;
+  if (reached("pitch") && Number.isFinite(event.controlRoll)) {
     settleDie(root, "die-control", event.controlRoll);
     // The arithmetic is the game's, not the viewer's: all that needs saying is
     // what came off the die, which is only ever a tired arm.
@@ -5169,12 +5172,20 @@ function paintReplay(root, wire, cache, state, options) {
     if (note) note.textContent = event.fatiguePenalty > 0 ? `−${event.fatiguePenalty} tired` : "";
   }
   if (reached("swing")) {
-    settleDie(root, "die-swing", event.resultRoll);
+    const swingRoll = stealAttempt ? stealAttempt.roll : event.resultRoll;
+    if (Number.isFinite(swingRoll)) settleDie(root, "die-swing", swingRoll);
     const note = board("note-swing");
     if (note) {
-      note.textContent = event.swingBonus
-        ? `${event.swingBonus > 0 ? "+" : "−"}${Math.abs(event.swingBonus)} coach`
-        : "";
+      if (stealAttempt) {
+        const arm = Number(stealAttempt.fielding) || 0;
+        note.textContent = !stealAttempt.thrown
+          ? "no throw"
+          : arm ? `${arm > 0 ? "+" : "−"}${Math.abs(arm)} arm` : "";
+      } else {
+        note.textContent = event.swingBonus
+          ? `${event.swingBonus > 0 ? "+" : "−"}${Math.abs(event.swingBonus)} coach`
+          : "";
+      }
     }
   }
   if (reached("result")) {
@@ -5182,7 +5193,8 @@ function paintReplay(root, wire, cache, state, options) {
     const after = cache.wp[moment.index + 1]?.wp ?? before;
     const result = board("result");
     const runs = event.runs ?? 0;
-    if (result) result.textContent = runs > 0 ? `${resultWord(event.result)} · ${runs} in` : resultWord(event.result);
+    const call = resultWord(event.result, event.playDetails);
+    if (result) result.textContent = runs > 0 ? `${call} · ${runs} in` : call;
     duel.classList.toggle("duel-negative", after < before);
   }
 }
