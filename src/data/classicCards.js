@@ -2263,7 +2263,6 @@ export const CLASSIC_CARD_ROWS = [
 ["sd-02-ul-140-eric-owens","Eric Owens '02","Marlins","2002","UL",0,40,8,15,"LF/RF",1,"R","G1-5|W6-8|S9-18|+19-19|D20-23|H24+",0,120140],
 ["sd-02-ul-140-tim-spooneybarger","Tim Spooneybarger '02","Braves","2002","TD",1,160,5,1,"RP",0,"R","P1-3|K4-7|G8-12|F13-16|W17-17|S18-28|H29+",0,407486],
 ["sd-03-ul-140-craig-biggio","Craig Biggio '03","Astros","2003","UL",0,200,10,14,"2B",2,"R","K1-2|G3-5|F6-7|W8-10|S11-15|+16-17|D18-19|H20+",0,110987],
-["sd-03-rs-140-kerry-wood-98","Kerry Wood '98","Cubs","2003","RS",1,420,4,6,"SP",0,"R","P1-2|K3-10|G11-14|F15-15|W16-17|S18-19|D20-20|H21+",1,null],
 ["sd-04-ul-140-juan-pierre","Juan Pierre '04","Marlins","2004","UL",0,280,11,24,"CF",1,"L","G1-4|F5-5|W6-8|S9-14|+15-18|D19-20|H21+",0,334393],
 ["sd-05-ul-140-carlos-beltran","Carlos Beltran '05","Astros","2005","UL",0,420,11,22,"CF",2,"S","K1-1|G2-3|F4-6|W7-11|S12-12|+13-16|D17-18|H19+",1,136860],
 ["sd-05-ul-140-frank-francisco","Frank Francisco '05","Rangers","2005","TD",1,170,3,1,"RP",0,"R","P1-5|K6-11|G12-14|F15-16|W17-18|S19-22|D23-25|H26+",0,407911],
