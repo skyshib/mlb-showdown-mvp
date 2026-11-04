@@ -2253,7 +2253,10 @@ export function bestAutopickTarget(draft, manager) {
   // slice with no deal behind it — the pool the archetype test used to use, and
   // one no room drafts from. On a dealt board it does not happen.)
   const model = pitcherRanking(draft, managerValuation(draft, manager));
-  const values = new Map(players.map((player) => [player.id, model.value(asRostered(manager.roster, player))]));
+  // Relievers are then re-read against the pen this manager already owns, which
+  // the card's own value cannot see. See penPricedValue.
+  const priced = penPricedValue(draft, manager, model);
+  const values = new Map(players.map((player) => [player.id, priced.value(asRostered(manager.roster, player))]));
   const dropoffs = positionDropoffs(players, values);
   const best = players
     .map((player) => ({
@@ -2678,6 +2681,86 @@ function auctionWorth(market, player) {
 // K · spSlotFactor(K) / 4: 0.75 at two or three starters, 1 at four or five.
 const RELIEVER_TOP_RATE = 2.5;
 const RELIEVER_DEPTH_RATE = 0.7;
+
+// The same pen arithmetic, for a DRAFTING computer rather than a bidding one.
+//
+// A snake score compares every card on one value scale, so a reliever was
+// scored at what his card is worth in the abstract — and that number carries
+// almost no information about what a pen arm is actually worth. Measured over
+// 44 relievers across four live rooms (each swapped for the worst free arm on
+// his board and the season replayed), the value the drafting computer scores a
+// TOP reliever on tracks his real win-point worth at a correlation of 0.025.
+// It is not a weak signal, it is no signal: the board's best arm and an arm
+// who will never leave the pen are priced within a few points of each other.
+//
+// So price him the way the auction has priced him since the reliever rates were
+// measured: the part of him that beats the manager's OWN best arm at
+// RELIEVER_TOP_RATE, the part below it at RELIEVER_DEPTH_RATE, anchored on the
+// board's replacement reliever so the worst arm out there still scores what he
+// scored. This is penWorth's delta — the same function the bidder prices an
+// arm with — on the one value scale a snake score can use.
+//
+// Measured on snake leagues drafted twice off one seed, every seat NEW against
+// every seat OLD, each NEW roster then playing its OWN old counterpart — the
+// ABSOLUTE read, where a change that only DENIES a rival a card comes out zero
+// (see league-duels-measure-denial, which is why the 1.3x flat lift above was
+// taken back). This clears it on every cell tried: classic +1.43 (+-0.31, 40
+// leagues), fictional +1.93, mlb-history +0.43, a capped two-man pen +1.26,
+// four teams +0.80, a two-man rotation +1.79, a five-man +0.92, a 20-pick
+// roster +1.84. At the same table as the old computer it reads +1.23 to +1.91.
+// The rate is the auction's own: sweeping the top rate reads +0.37 at 1x, +1.05
+// at 1.5x, +1.47 at 2x, +2.00 at 2.5x and +1.99 at 3.5x, so 2.5 is the plateau.
+//
+// Rosters come out the same shape — nine bats, the rotation, the pen the room
+// asks for — and the archetypes keep their order (the ace still opens on an arm
+// in round 1.1, the slugger still waits until 8.2). What moves is WHEN: the
+// first reliever off a classic board goes in round 6 rather than round 11, and
+// 31% of computers now take one in the first two rounds, which no computer ever
+// did. Replaying the four rooms a human swept with an early closer — his own
+// picks kept, in his own order — his margin over the computers falls from
+// +9.2/+12.6/+17.9/+5.8 to -7.1/-0.8/+13.6/+0.2.
+//
+// bestAutopickTarget also chooses a MANUAL auction's nominations, so this
+// reaches an auction room too; measured there it is a null to a small gain
+// (+0.20 +-1.30 classic, +1.63 +-1.12 fictional, 93 of 120 nominations moved).
+function penPricedValue(draft, manager, model) {
+  const relievers = draft.pool.filter((card) =>
+    card?.kind === "pitcher" && pitcherRole(card) === "RP" && !card.replacement && !isCoach(card));
+  if (!relievers.length) return model;
+  // The same floor the bidder clears: the worst arm on the board, or the
+  // STANDING replacement reliever where a room deals one better than him.
+  const standing = standingReplacements(draft)
+    .filter((card) => card?.kind === "pitcher" && pitcherRole(card) === "RP")
+    .map((card) => model.value(card));
+  const floor = Math.max(
+    Math.min(...relievers.map((card) => model.value(card))),
+    ...(standing.length ? standing : [-Infinity])
+  );
+  const slots = normalizeBullpenSlots(draft.bullpenSlots);
+  const cap = slots === UNLIMITED_BULLPEN ? AUCTION_PEN_DEPTH : slots;
+  const sp = normalizeStartingPitchers(draft.startingPitchers);
+  const scale = sp * spSlotFactor(sp) / 4;
+  const penWorth = (roster) => {
+    const arms = roster
+      .filter((card) => card?.kind === "pitcher" && pitcherRole(card) === "RP")
+      .map((card) => model.value(card))
+      .sort((a, b) => b - a)
+      .slice(0, cap);
+    if (!arms.length) return 0;
+    let total = RELIEVER_TOP_RATE * Math.max(0, arms[0] - floor);
+    for (let i = 1; i < arms.length; i += 1) total += RELIEVER_DEPTH_RATE * Math.max(0, arms[i] - floor);
+    return scale * total;
+  };
+  const owned = manager.roster.filter((card) => card?.kind === "pitcher" && pitcherRole(card) === "RP");
+  const penNow = penWorth(manager.roster);
+  return {
+    ...model,
+    value: (player) => {
+      if (player?.kind !== "pitcher" || pitcherRole(player) !== "RP") return model.value(player);
+      return floor + penWorth([...owned, player]) - penNow;
+    }
+  };
+}
 
 function relieverWorth(market, player, bestReliever, startingPitchers) {
   const value = market.model.value(player);

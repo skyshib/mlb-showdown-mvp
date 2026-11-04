@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { compactChart, conflictsWithIndex, personConflict, personIndex, RESULTS, resolveChart } from "../src/rules/cards.js";
-import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, maxSeriesStarts, nominationQueueRemaining, normalizeCardPosition, pauseSnake, pickPlayer, pickRandomStarter, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, staffSlotLabels, standingReplacement, standingReplacements, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
+import { applyDraftAction, assignLineupSlots, autopick, availablePlayers, bestAutopickTarget, buildTeam, canPickPlayer, createDraft, currentManager, currentManagerMustReplace, draftHistory, getRosterNeeds, managerValuation, maxSeriesStarts, nominationQueueRemaining, normalizeCardPosition, pauseSnake, pickPlayer, pickRandomStarter, repairDraftRosters, resumeSnake, snakeClockBankMs, snakeClockEnabled, snakeClockFlagged, snakeTimeRemainingMs, staffSlotLabels, standingReplacement, standingReplacements, startSnakeClock, sweepRosters, undoLastPick, validateRoster } from "../src/rules/draft.js";
 import { buildDraftPool } from "../src/data/universes.js";
 import { createValuationModel, VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "../src/rules/valuation.js";
 import {
@@ -2047,6 +2047,72 @@ test("autopick weighs positional dropoff instead of only top overall value", () 
   autopick(draft);
 
   assert.equal(draft.managers[0].roster[0].id, "scarce-c-1");
+});
+
+// A pen arm is only worth the innings he will actually throw, and the engine
+// rides its BEST arm — so what the board's one dominant reliever is worth
+// depends on whether this manager already owns one. Before penPricedValue the
+// drafting computer scored him flat, at what his card is worth in the abstract,
+// and let him sit while it took bats; see the comment on penPricedValue.
+test("the drafting computer reaches for a lights-out arm, then stops at one", () => {
+  const outsThrough = (through) => [
+    { from: 1, to: 1, result: RESULTS.PU },
+    { from: 2, to: through, result: RESULTS.SO },
+    { from: through + 1, to: 25, result: RESULTS.SINGLE },
+    { from: 26, to: null, result: RESULTS.HR }
+  ];
+  const bigBat = (index) => makeHitter({
+    id: `pen-bat-${index}`,
+    name: `Pen Bat ${index}`,
+    position: positions[index % positions.length],
+    positions: [{ pos: positions[index % positions.length], fielding: 2 }],
+    onBase: 12,
+    speed: 14,
+    points: 520 - index,
+    chart: [
+      { from: 1, to: 2, result: RESULTS.SO },
+      { from: 3, to: 4, result: RESULTS.GB },
+      { from: 5, to: 8, result: RESULTS.BB },
+      { from: 9, to: 12, result: RESULTS.SINGLE },
+      { from: 13, to: 15, result: RESULTS.DOUBLE },
+      { from: 16, to: null, result: RESULTS.HR }
+    ]
+  });
+  const pool = [
+    ...Array.from({ length: 40 }, (_, index) => bigBat(index)),
+    ...Array.from({ length: 12 }, (_, index) => makePitcher({
+      id: `pen-sp-${index}`, name: `Pen Starter ${index}`, role: "SP", ip: 6,
+      control: 4, points: 300 - index * 5, chart: outsThrough(14 - (index % 3))
+    })),
+    makePitcher({
+      id: "pen-ace", name: "Lights Out", role: "RP", ip: 1,
+      control: 6, points: 320, chart: outsThrough(20)
+    }),
+    ...Array.from({ length: 6 }, (_, index) => makePitcher({
+      id: `pen-mid-${index}`, name: `Pen Middle ${index}`, role: "RP", ip: 1,
+      control: 3, points: 180 - index * 5, chart: outsThrough(11 - (index % 2))
+    }))
+  ];
+  const options = {
+    draftType: "snake", nomination: "manual", startingPitchers: 4, snakePicks: 15,
+    timer: false, snakeTimer: false, snakeReview: 0, bullpenSlots: "all", bullpenMin: 2
+  };
+  // A named archetype, so the reach is the pen pricing and not a persona's.
+  const seat = (draft) => {
+    draft.managers.forEach((manager) => { manager.persona = "balanced"; });
+    return draft.managers[0];
+  };
+  const empty = createDraft([{ name: "A", cpu: true }, { name: "B", cpu: true }], pool, 15, "pen-room", options);
+  assert.equal(bestAutopickTarget(empty, seat(empty)).id, "pen-ace");
+
+  // With that arm in hand the next one only pitches what is left over, so the
+  // board's second reliever loses to a bat the first one beat.
+  const owning = createDraft([{ name: "A", cpu: true }, { name: "B", cpu: true }], pool, 15, "pen-room", options);
+  const held = seat(owning);
+  held.roster = [pool.find((card) => card.id === "pen-ace")];
+  owning.pickedIds.add("pen-ace");
+  const next = bestAutopickTarget(owning, held);
+  assert.equal(next.kind, "hitter");
 });
 
 test("draftHistory lists picks in snake order with the picking manager", () => {
