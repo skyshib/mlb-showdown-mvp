@@ -2269,8 +2269,20 @@ export function bestAutopickTarget(draft, manager) {
   // forcedNeed means no redundant card can be taken at all and the only thing
   // that could have changed was somebody else's scarcity — and it measured
   // -0.60 (+-0.37) and -0.23 (+-0.34) absolute on two independent sets of 30.
+  //
+  // That is why this reads `model`, not `priced`. penPricedValue is the same
+  // class of roster-fit adjustment as the slot pricing above — what MY pen
+  // gains, not what the card is on the board — so feeding it in here charged
+  // the reliever top rate a second time: a dropoff of 43 raw points arrived as
+  // 107, exactly x2.5. The bidder cannot make that mistake (it has no
+  // positional scarcity at all, and auctionPoolPremium reads the raw value), so
+  // this was the one place the premium compounded. Switching the basis moves
+  // 1.7-2.3% of picks across 4/8 teams and 15/20 rounds, 22-28 of every ~30 of
+  // them a reliever the raw basis would not take, and measures -0.04 (+-0.35)
+  // absolute: the picks it moves are near-ties. Corrected for the invariant,
+  // not for points.
   const dropoffs = positionDropoffs(players, new Map(players.map((player) =>
-    [player.id, priced.value(asRostered(manager.roster, player))])));
+    [player.id, model.value(asRostered(manager.roster, player))])));
   const best = players
     .map((player) => ({
       player,
