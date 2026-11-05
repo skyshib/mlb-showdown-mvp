@@ -557,6 +557,14 @@ test("a recorded lot settles at the price it settled at the first time", () => {
     for (const [managerId, amount] of Object.entries(entry.bids)) {
       applyDraftAction(replayed, { type: "seal-bid", managerId, amount });
     }
+    // A tie reopens the lot for a rebid round, and what the stored map holds
+    // for a tied manager IS his rebid — the second round overwrites the first
+    // in the same bid map. So entering it again is what closes the lot, and
+    // the coin flip keys off the seed and the pick number, which the replay
+    // shares, so it falls to the same manager at the same price.
+    for (const managerId of replayed.auction.lot?.tie?.managerIds ?? []) {
+      applyDraftAction(replayed, { type: "seal-bid", managerId, amount: entry.bids[managerId] });
+    }
   }
   assert.equal(replayed.complete, played.complete, "the replay ends where the night ended");
   const rosters = (draft) => draft.managers.map((manager) => manager.roster.map((card) => card.id));

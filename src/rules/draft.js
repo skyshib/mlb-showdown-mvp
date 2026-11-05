@@ -2671,11 +2671,32 @@ function auctionMarket(draft, manager) {
 // free); every card above him is worth exactly how far he clears that floor, so
 // a star towers and a filler barely counts, and the same value is worth more at
 // a thin spot (a low floor) than a deep one (a high floor).
-function auctionWorth(market, player) {
+// `roster` is the manager the card is being priced for, and it is what makes a
+// BAT'S glove the one he would really field: the rating at the slot he takes,
+// the improvement on a worse card at that slot, and about nothing for a third
+// man where two already stand. Priced off the printed rating instead — which
+// is all the bidder ever read — 29% of its views of a bat on a classic board
+// paid for a glove the card never fields, a mean 2.1 fielding points too much
+// and as much as 11 on a surplus catcher. (32% and 2.2 on fictional, 29% and
+// 1.8 on mlb-history.) The drafting computer has seated the glove since
+// 74f1f2d; this is the same reading for the bidder.
+//
+// It is a redistribution, not a markdown: 10.7% of the bids on a bat move on a
+// classic manual board, 51.8% on fictional and 17.3% under random nomination,
+// at a median ratio of 1.00 and tails from -272 to +252 dollars.
+//
+// Each roster against its OWN counterpart from a room bid twice off one seed,
+// 3000 games a team: +1.29 (+-0.53, 60 leagues) classic, +1.18 (+-0.48) classic
+// under random nomination, +1.22 (+-0.50) mlb-history, +0.82 (+-0.79)
+// fictional. At the same table it reads +0.08 (+-0.78) classic and +2.26
+// (+-1.42) fictional, against a matched null of +0.10 (+-0.32) — the null the
+// bidder-duel harness owes before any of this counts (see
+// bidder-ab-needs-paired-duel).
+function auctionWorth(market, player, roster = null) {
   // One coach is no substitute for another, so there is no floor to clear: a
   // coach is worth what he is worth.
   if (isCoach(player)) return Math.max(0, market.model.value(player));
-  const value = market.model.value(player);
+  const value = market.model.value(roster && player?.kind === "hitter" ? asRostered(roster, player) : player);
   const replacement = market.replacement.get(poolGroup(player)) ?? 0;
   return Math.max(0, value - replacement);
 }
@@ -2823,20 +2844,7 @@ function penPricedValue(draft, manager, model) {
 const SLOT_TIEBREAK = 0.05;
 
 function slotPricedValue(draft, manager, priced, model) {
-  // Each seated card valued on the glove he fields AT THE SLOT HE STANDS IN,
-  // which is what asRostered does for a card that fills one. Summing the
-  // printed ratings instead — the way the auction's own seatedValue still does
-  // — hands a surplus catcher his +11 back in full, the very error 74f1f2d
-  // took off the drafting computer.
-  const seatedValue = (roster) => {
-    const { slots } = assignLineupSlots(roster, bestLineupAssignment(roster));
-    let total = 0;
-    for (const slot of slots) {
-      if (!slot.player) continue;
-      total += model.value({ ...slot.player, fielding: gloveAtLineupSlot(slot.player, slot.label) });
-    }
-    return total;
-  };
+  const seatedValue = (roster) => seatedModelValue(model, roster);
   const nineNow = seatedValue(manager.roster);
   const starters = staffStatus(manager.roster).starters.map((card) => model.value(card));
   const needs = getRosterNeeds(manager.roster, draft);
@@ -3111,12 +3119,7 @@ function auctionWillingness(draft, manager, player) {
   // basemen, four catchers and a $70 rotation (autumn-otter-victory), both last
   // place. So price a redundant bat at what the best nine GAINS by seating him,
   // which is nothing when he cannot get in.
-  const seatedValue = (roster) => {
-    const { slots } = assignLineupSlots(roster, bestLineupAssignment(roster));
-    let total = 0;
-    for (const slot of slots) if (slot.player) total += market.model.value(slot.player);
-    return total;
-  };
+  const seatedValue = (roster) => seatedModelValue(market.model, roster);
   const nineNow = seatedValue(manager.roster);
   // THE SAME ERROR ON THE OTHER SIDE OF THE STAFF. A reliever who fills no pen
   // seat falls to the bucket floor below, which is a flat value difference with
@@ -3171,7 +3174,7 @@ function auctionWillingness(draft, manager, player) {
     const urgency = fills ? auctionUrgency(needs, card, forthcoming) : 0;
     const surplus = playerBucket(card) === "bullpen"
       ? relieverWorth(market, card, bestReliever, draft.startingPitchers)
-      : auctionWorth(market, card);
+      : auctionWorth(market, card, manager.roster);
     const base = surplus * (1 + URGENCY_WEIGHT * urgency);
     if (fills) return base;
     if (positionAware && playerBucket(card) === "hitter") {
@@ -4447,6 +4450,22 @@ function hitterPositionBonus(roster, player) {
 function asRostered(roster, player) {
   if (player?.kind !== "hitter") return player;
   return { ...player, fielding: seatedGloveTotal([...roster, player]) - seatedGloveTotal(roster) };
+}
+
+// What the best nine this roster can field is WORTH, each card valued on the
+// glove he fields at the slot he actually stands in. Both computers price a
+// card that takes nobody's slot by what this number gains, and both have to
+// read the glove the same way asRostered does: summing the printed ratings
+// hands a surplus catcher his +11 back in full, which is the error 74f1f2d
+// took off the drafting computer and never took off the bidder.
+function seatedModelValue(model, roster) {
+  const { slots } = assignLineupSlots(roster, bestLineupAssignment(roster));
+  let total = 0;
+  for (const slot of slots) {
+    if (!slot.player) continue;
+    total += model.value({ ...slot.player, fielding: gloveAtLineupSlot(slot.player, slot.label) });
+  }
+  return total;
 }
 
 // The gloves of the best nine this roster can field, each counted at the slot it
