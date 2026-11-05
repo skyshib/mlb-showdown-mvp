@@ -259,7 +259,7 @@ test("leverage moments are duels, in order, capped around the ninth on", () => {
   const game = simulateBatchGame(teams, "ceremony-moments", 7);
   const pitched = game.events
     .map((event, index) => ({ event, index }))
-    .filter((entry) => Number.isFinite(entry.event.controlRoll));
+    .filter((entry) => Number.isFinite(entry.event.controlRoll) || entry.event.type === "steal");
   const last = pitched.reduce((high, entry) => Math.max(high, entry.event.inning ?? 0), 0);
   const from = Math.min(9, last);
   const closing = pitched.filter((entry) => (entry.event.inning ?? 0) >= from).map((entry) => entry.index);
@@ -274,7 +274,10 @@ test("leverage moments are duels, in order, capped around the ninth on", () => {
   const earlier = moments.filter((moment) => !closing.includes(moment.index));
   assert.ok(earlier.length <= 4, "the cap holds over everything before the last inning");
   for (const moment of moments) {
-    assert.equal(typeof moment.event.controlRoll, "number", "every moment is a plate appearance");
+    assert.ok(
+      typeof moment.event.controlRoll === "number" || moment.event.type === "steal",
+      "every moment is a plate appearance or a steal"
+    );
   }
   for (const moment of earlier) assert.ok(moment.leverage >= 0.1);
   // A floor nothing clears leaves the close and invents nothing else.

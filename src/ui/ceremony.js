@@ -506,36 +506,41 @@ export function duelHtml(state, game, options) {
   const moment = game?.moment;
   if (!moment) return "";
   const event = moment.event;
-  const batter = options.cardFor?.(event.batterId) ?? null;
-  const pitcher = options.cardFor?.(event.pitcherId) ?? null;
   const advantage = storyAdvantage(event);
-  const men = [
-    { role: "pitching", team: event.pitchingTeam, card: pitcher, name: event.pitcher },
-    { role: "batting", team: event.battingTeam, card: batter, name: event.batter }
-  ];
+  // A steal is a duel too, between two different men: the batter and the
+  // pitcher step out of the frame, and the runner and the catcher whose arm he
+  // is testing step in. Nobody pitched and nobody swung, so the middle holds
+  // one die — the throw — where the plate appearance holds two.
+  const steal = event.playDetails?.kind === "steal";
+  const men = steal
+    ? [
+      { role: "catching", team: event.pitchingTeam, card: options.cardFor?.(event.catcherId) ?? null, name: event.catcher },
+      { role: "running", team: event.battingTeam, card: options.cardFor?.(event.runnerId) ?? null, name: event.runner }
+    ]
+    : [
+      { role: "pitching", team: event.pitchingTeam, card: options.cardFor?.(event.pitcherId) ?? null, name: event.pitcher },
+      { role: "batting", team: event.battingTeam, card: options.cardFor?.(event.batterId) ?? null, name: event.batter }
+    ];
   const [left, right] = men[1].team === game?.away ? [men[1], men[0]] : men;
   const side = (man) => `<div class="duel-card" data-role="${man.role}">
       <p class="duel-role">${manager(state, man.team)}<span class="duel-side">${man.role}</span></p>
       ${man.card ? cardPanelHtml(man.card) : ""}
       <p class="duel-name">${escapeHtml(stripCardYear(man.name ?? ""))}</p>
     </div>`;
+  const roll = (key, label) => `<div class="duel-roll" data-roll="${key === "die-control" ? "control" : "swing"}">
+        <span class="roll-label">${label}</span>
+        ${dieHtml(key)}
+        <span class="roll-note" data-board="note-${key === "die-control" ? "control" : "swing"}"></span>
+      </div>`;
   return `<div class="duel" data-phase="${moment.phase}" data-lead="${left.role}">
     ${side(left)}
     <div class="duel-middle">
-      <div class="duel-roll" data-roll="control">
-        <span class="roll-label">Pitch</span>
-        ${dieHtml("die-control")}
-        <span class="roll-note" data-board="note-control"></span>
-      </div>
+      ${steal ? roll("die-swing", "Throw") : roll("die-control", "Pitch")}
       <div class="duel-call">
         <p class="duel-advantage ${advantage ? `${advantage.key}-advantage` : ""}">${advantage ? escapeHtml(advantage.label) : ""}</p>
         <p class="duel-result" data-board="result"></p>
       </div>
-      <div class="duel-roll" data-roll="swing">
-        <span class="roll-label">Swing</span>
-        ${dieHtml("die-swing")}
-        <span class="roll-note" data-board="note-swing"></span>
-      </div>
+      ${steal ? "" : roll("die-swing", "Swing")}
     </div>
     ${side(right)}
   </div>`;
@@ -565,10 +570,14 @@ function miniCard(id, options) {
 const RESULT_WORDS = {
   SO: "Strikeout", PU: "Pop out", GB: "Groundout", FB: "Flyout",
   BB: "Walk", HBP: "Hit by pitch", "1B": "Single", "1B+": "Single",
-  "2B": "Double", "3B": "Triple", HR: "Home run"
+  "2B": "Double", "3B": "Triple", HR: "Home run",
+  SB: "Stolen base", CS: "Caught stealing"
 };
 
-export function resultWord(result) {
+// The code is not always the whole call: a groundout that turned two is a
+// double play, and "Groundout" over a board that just lost two men reads wrong.
+export function resultWord(result, details = null) {
+  if (result === "GB" && details?.doublePlayAttempt?.batterOut) return "Double play";
   return RESULT_WORDS[result] ?? String(result ?? "");
 }
 

@@ -486,11 +486,13 @@ export function pickRepresentative(meetings, champion) {
 // the tenth settled nothing. It is also why the cap bends: the close is kept
 // whole and the leverage picks take what is left.
 export function leverageMoments(game, { floor = LEVERAGE_FLOOR, cap = LEVERAGE_MOMENT_CAP } = {}) {
-  // A plate appearance, not a trot around on somebody else's hit: the duel is
-  // what the breakdown is about.
+  // A contest, not a trot around on somebody else's hit: the duel is what the
+  // breakdown is about. A plate appearance is one (the pitch against the
+  // swing), and so is a steal (the runner against the catcher's arm) — what
+  // stays out is bookkeeping nobody contested, like a pitching change.
   const pitched = (game?.events ?? [])
     .map((event, index) => ({ event, index, leverage: eventLeverage(event) ?? 0 }))
-    .filter((entry) => Number.isFinite(entry.event.controlRoll));
+    .filter((entry) => Number.isFinite(entry.event.controlRoll) || entry.event.type === "steal");
   const last = pitched.reduce((high, entry) => Math.max(high, Number(entry.event.inning) || 0), 0);
   // A game called early has no ninth; its own last inning is the close.
   const from = Math.min(CLOSING_INNING, last);
