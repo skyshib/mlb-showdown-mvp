@@ -202,3 +202,33 @@ test("the runner's race is relayed to the room as it unfolds", async (t) => {
   await readUntil("event: sim-ready");
   await readUntil('"salt":"running"');
 });
+
+// How a client tells a season that is RUNNING from one that is over. A resync
+// replays the room's last sim, and it has to know which: the finished table
+// for a reconnect or a late join, the ceremony for a sim that was pressed a
+// moment ago. The log alone cannot say — the batch action is in it either way
+// — so the room's own "sim" field is the answer, and it stays null until the
+// season is actually on file.
+test("a sim in the log is not a season on file until the runner files it", async (t) => {
+  const base = await startServer(t);
+  const { roomId, ana } = await simmableRoom(base, "shared-sim-inflight");
+
+  const posted = await api(base, "POST", `/api/rooms/${roomId}/actions`, {
+    token: ana,
+    action: { type: "batch", runs: 200, salt: "in-flight" }
+  });
+  assert.equal(posted.status, 200);
+
+  // The season is being played right now, on somebody's machine.
+  const running = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.equal(running.data.sim, null);
+  assert.equal(running.data.actions.at(-1).action.type, "batch");
+  assert.equal(running.data.actions.at(-1).action.salt, "in-flight");
+
+  assert.equal((await putSim(base, roomId, { token: ana, salt: "in-flight", runs: 200 }, simBlob("in-flight"))).status, 200);
+
+  // And now it is history.
+  const done = await api(base, "GET", `/api/rooms/${roomId}`);
+  assert.deepEqual(done.data.sim, { salt: "in-flight", runs: 200 });
+  assert.equal(done.data.actions.at(-1).action.salt, "in-flight");
+});

@@ -419,6 +419,11 @@ let editingNoteId = null;
 let batchRunToken = 0;
 // Set while the simulator is drawing: see renderCurrentScreen.
 let simOwnsScreen = false;
+// The salt of the season this browser is already playing or watching. A
+// resync asks for the room's last sim all over again — the stream dies and
+// comes back, a seat changes, the lobby refreshes — and without this the
+// season would start again from the first beat every time one does.
+let runningSimSalt = null;
 let hoverPreviewController = null;
 let onlineStream = null;
 // The bid box that was rejected, and why — one manager's error, not the
@@ -1543,7 +1548,22 @@ function rebuildOnlineDraft(room) {
   // over from the last one would quietly name two strangers here.
   state.playAsManagerId = null;
   state.playOpponentManagerId = null;
-  if (lastSim) applySharedSim(lastSim, { instant: true });
+  // A resync replays the room's last sim, and whether that should be a show
+  // or a table depends on whether the season is over. The ROOM says which: a
+  // season already on file is history — a reconnect, or a late join to a room
+  // that simmed while we were away — and the table it has is the thing that
+  // was wanted. A sim with nothing on file is one that is running right now.
+  //
+  // Replaying that one instantly played the whole season in silence and
+  // dropped the finished standings on the page, which is the ceremony
+  // skipping for the one person who just asked for it. The way to land here
+  // is to press Sim with your own stream a beat behind: the reply carries a
+  // seq further ahead than the last one we applied, and sendOnlineAction
+  // resyncs rather than running it. Room peachy-marlin-field did it with four
+  // batting-order actions and then the batch.
+  if (lastSim && runningSimSalt !== lastSim.salt) {
+    applySharedSim(lastSim, { instant: room.sim?.salt === lastSim.salt });
+  }
   driveOnlineCpuTurn();
 }
 
@@ -1740,6 +1760,7 @@ async function sendOnlineAction(action) {
 
 function leaveOnlineRoom() {
   simOwnsScreen = false;
+  runningSimSalt = null;
   onlineStream?.close();
   onlineStream = null;
   location.href = location.pathname;
@@ -2349,6 +2370,7 @@ let setupStage = "home";
 
 function renderSetup(setupError = "") {
   simOwnsScreen = false;
+  runningSimSalt = null;
   // Backing out of a club's room puts the house colors back on the way in, not
   // on the way out — nothing clears state.universe when a draft is abandoned.
   applyFranchisePalette(null);
@@ -5335,6 +5357,7 @@ function startBatchRun(runs, options = {}) {
 
   resetAppHandlers();
   hideHoverCard();
+  runningSimSalt = options.salt ?? null;
   // The simulator owns the page from here until it hands it back at finalize.
   // Room traffic does not stop for a sim — seats come and go, lots broadcast,
   // the stream resyncs — and every one of those asks for a re-render, which
@@ -5734,6 +5757,7 @@ function startBatchRun(runs, options = {}) {
     if (token !== batchRunToken || !state.draft) return;
     stopCeremony();
     simOwnsScreen = false;
+    runningSimSalt = null;
     state.tournament = null;
     state.batch = {
       runs: count,
@@ -5969,6 +5993,7 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
   resetAppHandlers();
   hideHoverCard();
   simOwnsScreen = true;
+  runningSimSalt = salt ?? null;
 
   const stale = () => watch.token !== batchRunToken || sharedSimWatch !== watch || !state.draft;
 
@@ -5990,6 +6015,7 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
     clearTimeout(watch.timer);
     sharedSimWatch = null;
     simOwnsScreen = false;
+    runningSimSalt = null;
     state.tournament = null;
     state.batch = {
       runs: blob.runs ?? runs,
