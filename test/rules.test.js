@@ -2115,6 +2115,54 @@ test("the drafting computer reaches for a lights-out arm, then stops at one", ()
   assert.equal(next.kind, "hitter");
 });
 
+test("a bench pick is priced at what it upgrades, not at what the card is worth", () => {
+  const outsThrough = (through) => [
+    { from: 1, to: 1, result: RESULTS.PU },
+    { from: 2, to: through, result: RESULTS.SO },
+    { from: through + 1, to: 25, result: RESULTS.SINGLE },
+    { from: 26, to: null, result: RESULTS.HR }
+  ];
+  const bat = (id, position, onBase, power, points) => makeHitter({
+    id, name: id, position, positions: [{ pos: position, fielding: 0 }], fielding: 0,
+    onBase, speed: 12, points,
+    chart: [
+      { from: 1, to: 3, result: RESULTS.SO },
+      { from: 4, to: 20 - power, result: RESULTS.GB },
+      { from: 21 - power, to: null, result: RESULTS.HR }
+    ]
+  });
+  const arm = (id, role, control, through, points) => makePitcher({
+    id, name: id, role, ip: role === "SP" ? 6 : 1, control, points, chart: outsThrough(through)
+  });
+  // A roster with nothing left to fill: nine good bats, four starters, a pen,
+  // and three turns still to spend. One of the four starters is a disaster.
+  const seated = [
+    ...positions.map((position) => bat(`own-${position}`, position, 13, 11, 380)),
+    bat("own-dh", "1B", 13, 11, 380),
+    arm("own-sp1", "SP", 5, 16, 300), arm("own-sp2", "SP", 5, 16, 300),
+    arm("own-sp3", "SP", 5, 16, 300), arm("own-sp4", "SP", 1, 6, 60),
+    arm("own-rp1", "RP", 4, 14, 150), arm("own-rp2", "RP", 4, 14, 150)
+  ];
+  // The board: the best bat in the room, and a starter who would take the
+  // disaster's turn. The bat is worth half again as much as the starter in the
+  // abstract — but he can only beat a man already in the lineup by a little,
+  // and the starter replaces a man worth almost nothing.
+  const board = [bat("free-bat", "LF", 14, 12, 420), arm("free-sp", "SP", 5, 17, 320)];
+  const pool = [...seated, ...board];
+  // A capped pen, so no reliever can confuse the question with pen depth.
+  const options = {
+    draftType: "snake", nomination: "manual", startingPitchers: 4, snakePicks: 18,
+    timer: false, snakeTimer: false, snakeReview: 0, bullpenSlots: 2, bullpenMin: 2
+  };
+  const draft = createDraft([{ name: "A", cpu: true }, { name: "B", cpu: true }], pool, 18, "bench-room", options);
+  const manager = draft.managers[0];
+  draft.managers.forEach((item) => { item.persona = "balanced"; });
+  manager.roster = seated.map((card) => pool.find((item) => item.id === card.id));
+  for (const card of manager.roster) draft.pickedIds.add(card.id);
+
+  assert.equal(bestAutopickTarget(draft, manager).id, "free-sp");
+});
+
 test("draftHistory lists picks in snake order with the picking manager", () => {
   const draft = createDraft(["One", "Two"], makeDraftPool("hist"), 13, "history-room");
 

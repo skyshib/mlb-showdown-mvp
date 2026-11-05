@@ -2256,8 +2256,21 @@ export function bestAutopickTarget(draft, manager) {
   // Relievers are then re-read against the pen this manager already owns, which
   // the card's own value cannot see. See penPricedValue.
   const priced = penPricedValue(draft, manager, model);
-  const values = new Map(players.map((player) => [player.id, priced.value(asRostered(manager.roster, player))]));
-  const dropoffs = positionDropoffs(players, values);
+  // And the bats and the rotation are re-read against the roster they join, the
+  // same way. See slotPricedValue.
+  const slotPrice = slotPricedValue(draft, manager, priced, model);
+  const values = new Map(players.map((player) => [player.id, slotPrice(player)]));
+  // SCARCITY IS READ OFF THE UNPRICED BOARD. The dropoff asks how far the best
+  // card at a spot stands above the next one, which is a fact about the board
+  // and the rivals reading it, not about this roster: a bat priced down to
+  // nothing because this manager cannot seat him is still the best man at his
+  // position and still the one a rival will take. Feeding the roster-priced
+  // numbers in here instead moved 7% of the picks in a FIFTEEN-pick room, where
+  // forcedNeed means no redundant card can be taken at all and the only thing
+  // that could have changed was somebody else's scarcity — and it measured
+  // -0.60 (+-0.37) and -0.23 (+-0.34) absolute on two independent sets of 30.
+  const dropoffs = positionDropoffs(players, new Map(players.map((player) =>
+    [player.id, priced.value(asRostered(manager.roster, player))])));
   const best = players
     .map((player) => ({
       player,
@@ -2755,10 +2768,110 @@ function penPricedValue(draft, manager, model) {
   const penNow = penWorth(manager.roster);
   return {
     ...model,
+    // The anchor, for slotPricedValue: an arm the pen has no seat for has to be
+    // told apart from the worst arm it would still take.
+    penFloor: floor,
     value: (player) => {
       if (player?.kind !== "pitcher" || pitcherRole(player) !== "RP") return model.value(player);
       return floor + penWorth([...owned, player]) - penNow;
     }
+  };
+}
+
+// The bats and the rotation, on the same principle, and from the same two
+// auction fixes: a bat who cannot reach the best nine is worth what the NINE
+// gains by seating him (f0bb9e2), and an arm behind a full rotation is worth
+// what he clears the manager's OWN weakest starter by (af0c410).
+//
+// A snake board is open — createDraft sets unlimitedRoster on EVERY snake room
+// — so nothing stops a computer taking a tenth bat or a fifth starter, and a
+// room that deals more picks than a roster needs hands it the turns to do it
+// with. What it took with them was the best card left in the abstract. Measured
+// over eight leagues a size, every bench pick in a room with bench picks scored
+// 175-199 on the snake's scale and was worth exactly NOTHING on the auction's:
+// 99 of 99 redundant bats and 93 of 93 redundant starters at eighteen picks,
+// 175/175 and 145/145 at twenty, 249/249 and 198/198 at twenty-two, which is
+// 9% to 18% of every pick in those rooms. A fifteen-pick room never reaches it
+// — nine bats, the rotation and the pen fill it exactly, and forcedNeed holds
+// the shape from the first pick — so this is a bench-pick room's fix.
+//
+// Measured the way league-duels-measure-denial asks: the league drafted twice
+// off one seed, every seat NEW against every seat OLD, each NEW roster then
+// playing its OWN old counterpart, so a change that merely denies a rival a
+// card reads zero. Thirty leagues a cell, 3000 games a team. Twenty picks reads
+// +1.00 (+-0.48) on classic, +3.00 (+-0.91) on fictional, +1.88 (+-0.41) on
+// mlb-history, +0.92 (+-0.55) with the pen capped at two and +3.35 (+-0.76) at
+// a four-team table; eighteen picks +1.00 (+-0.28) and twenty-two +1.44
+// (+-0.46). The fifteen-pick room is the null and reads -0.03 (+-0.25), which
+// it must: not one of 720 picks differs there.
+//
+// Rosters keep their shape — the nine, the rotation, the pen the room asks for
+// — and what changes is where the spare turns go: at twenty picks the bench
+// stops being 13 bats and 5 starters and becomes 12 bats, 5.4 starters and 2.4
+// relievers, because an arm who will pitch now outscores a bat who cannot get
+// into the game. (That is most of the way to the five arms auctionNeeds wants
+// in an uncapped pen, and it got there without being told to.)
+//
+// A turn costs the same whatever it buys, so a card that upgrades NOTHING is
+// not worth zero here the way it is at an auction: taking the best bench man is
+// free, and he is the man a rival does not get. So a card worth nothing is
+// ordered by SLOT_TIEBREAK of his raw value and nothing else — on a 0-400 scale
+// at most 20, well under the 80 that the least needBonus pays a card which
+// closes a hole. It applies ONLY where the gain is zero: added on top of a real
+// gain it was worth 21 points to a 430-point designated hitter and put him in
+// front of the right fielder a four-bat roster was missing.
+const SLOT_TIEBREAK = 0.05;
+
+function slotPricedValue(draft, manager, priced, model) {
+  // Each seated card valued on the glove he fields AT THE SLOT HE STANDS IN,
+  // which is what asRostered does for a card that fills one. Summing the
+  // printed ratings instead — the way the auction's own seatedValue still does
+  // — hands a surplus catcher his +11 back in full, the very error 74f1f2d
+  // took off the drafting computer.
+  const seatedValue = (roster) => {
+    const { slots } = assignLineupSlots(roster, bestLineupAssignment(roster));
+    let total = 0;
+    for (const slot of slots) {
+      if (!slot.player) continue;
+      total += model.value({ ...slot.player, fielding: gloveAtLineupSlot(slot.player, slot.label) });
+    }
+    return total;
+  };
+  const nineNow = seatedValue(manager.roster);
+  const starters = staffStatus(manager.roster).starters.map((card) => model.value(card));
+  const needs = getRosterNeeds(manager.roster, draft);
+  return (player) => {
+    if (player?.kind === "pitcher") {
+      const raw = model.value(player);
+      if (pitcherRole(player) === "RP") {
+        // The pen has its own arithmetic, and while the room is still owed arms
+        // it is the price. Past that the anchor has to come off with everyone
+        // else's: penPricedValue adds the board's worst arm to EVERY reliever,
+        // and left in place that constant put a third arm a full pen had no
+        // seat for ahead of a shortstop who would have replaced a .250 hitter.
+        if (needs.bullpen > 0) return priced.value(player);
+        const gain = priced.value(player) - (priced.penFloor ?? 0);
+        return gain > 0 ? gain : SLOT_TIEBREAK * raw;
+      }
+      if (needs.starter > 0 || !starters.length) return priced.value(player);
+      const over = Math.max(0, raw - Math.min(...starters));
+      return over > 0 ? over : SLOT_TIEBREAK * raw;
+    }
+    if (player?.kind !== "hitter") return priced.value(player);
+    // A bat who takes an open field slot — or the util slot behind a full field
+    // — is priced as he always was, on the glove he fields at the slot he fills.
+    if (hitterTakesOpenSlot(manager.roster, player)) {
+      return priced.value(asRostered(manager.roster, player));
+    }
+    // Everyone else is worth what the best nine GAINS by seating him, which is
+    // his whole value when the nine still has a seat for him and nothing at all
+    // when it does not. No floor is added: the gain is already on the same scale
+    // as the value a card that fills a slot is priced at, and anchoring it on
+    // the board's worst bat put the floor ON TOP of a real gain — a 430-point
+    // DH went ahead of the right fielder a four-bat roster was missing.
+    const raw = model.value(player);
+    const gain = Math.max(0, seatedValue([...manager.roster, player]) - nineNow);
+    return gain > 0 ? gain : SLOT_TIEBREAK * raw;
   };
 }
 
