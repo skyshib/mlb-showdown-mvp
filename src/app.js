@@ -5897,8 +5897,24 @@ function startBatchRun(runs, options = {}) {
     searchChampionship();
   };
 
+  // Skipping is sticky, so a run can be skipped before it starts. runSkip only
+  // fills in a counter somebody else rendered, so arriving here with the draft
+  // board still up played the whole season in silence and dropped the standings
+  // twenty seconds later, which reads as a hang rather than as a skip. Say what
+  // is happening, and say where the switch is: the preference is invisible
+  // otherwise, and somebody who skipped one ceremony weeks ago has no reason to
+  // connect that click to a season that never puts on a show.
+  //
+  // options.instant stays silent on purpose. That is the online reconnect, and
+  // it wants the table it already had, not a flash of progress on the way.
   if (!replayOf && (options.instant || skipRequested || ceremonySkipped())) {
     skipRequested = true;
+    if (!options.instant) {
+      app.innerHTML = `<section class="panel sim-progress"><p class="eyebrow">Game simulator</p>
+        <h1>Playing the season</h1>
+        <p class="lede" data-skip-count>0 of ${count.toLocaleString("en-US")} games played.</p>
+        <p class="lede">The ceremony is off because you skipped one. &ldquo;Watch the ceremony&rdquo; on the results screen turns it back on.</p></section>`;
+    }
     runSkip();
     return;
   }
@@ -5979,11 +5995,15 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
     }
   };
   // A watcher cannot hurry the runner, so skipping here just steps out of the
-  // show: the result lands when the room's does.
+  // show: the result lands when the room's does. That is the whole reason this
+  // does NOT remember the skip the way the runner's button does. Writing the
+  // sticky preference from here turned "I am not watching the rest of this
+  // one" into "never play a ceremony again, in any room" — and because the
+  // flag is read before the first beat, the next season simulated in silence
+  // behind the draft board for twenty seconds and then dropped the table.
   watch.onClick = (event) => {
     if (!event.target.closest("button[data-action=ceremony-skip]")) return;
     watch.optedOut = true;
-    rememberCeremonySkip(true);
     app.innerHTML = `<section class="panel sim-progress"><p class="eyebrow">Game simulator</p>
       <h1>Waiting on the room</h1>
       <p class="lede">${escapeHtml(runner ?? "Another manager")} is finishing the season. The table arrives when it does.</p></section>`;
