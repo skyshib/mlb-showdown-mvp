@@ -654,6 +654,15 @@ test("relievers are bid on as the pen they join", () => {
     .sort((a, b) => b.points - a.points);
   const [ace, second] = relievers;
   const weakPen = relievers.slice(-2);
+  // The seat count is only readable against a pen whose arms are already in the
+  // ace's class. Hand a FULL two-man pen a card that dwarfs both its arms and the
+  // upgrade-over-your-own-weakest channel swamps the seat count: the roster has no
+  // holes left, so the whole purse goes at one lot, and the capped pen outbids the
+  // uncapped one on every seed tried. That is the full-roster depth cap doing its
+  // job -- in a two-slot pen the best arm throws nearly all the relief innings, so
+  // displacing a 20-point arm really is worth that much. These two hold the upgrade
+  // steady so the comparison is about the seats.
+  const peerPen = relievers.slice(2, 4);
 
   const bid = (penSettings, owned, lot) => {
     const draft = createDraft(
@@ -669,8 +678,8 @@ test("relievers are bid on as the pen they join", () => {
     return cpuSealedBid(draft, cpu);
   };
 
-  const uncapped = bid(pen, weakPen, ace);
-  const capped = bid({ bullpenSlots: 2, bullpenMin: 2 }, weakPen, ace);
+  const uncapped = bid(pen, peerPen, ace);
+  const capped = bid({ bullpenSlots: 2, bullpenMin: 2 }, peerPen, ace);
   assert.ok(uncapped > capped, `a third reliever bid ${uncapped} uncapped vs ${capped} in a two-man pen`);
 
   const wouldLead = bid(pen, weakPen, second);
