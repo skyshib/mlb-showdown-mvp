@@ -1761,6 +1761,7 @@ async function sendOnlineAction(action) {
 function leaveOnlineRoom() {
   simOwnsScreen = false;
   runningSimSalt = null;
+  sharedSimFallback = null;
   onlineStream?.close();
   onlineStream = null;
   location.href = location.pathname;
@@ -2371,6 +2372,7 @@ let setupStage = "home";
 function renderSetup(setupError = "") {
   simOwnsScreen = false;
   runningSimSalt = null;
+  sharedSimFallback = null;
   // Backing out of a club's room puts the house colors back on the way in, not
   // on the way out — nothing clears state.universe when a draft is abandoned.
   applyFranchisePalette(null);
@@ -5513,7 +5515,16 @@ function startBatchRun(runs, options = {}) {
     // The replay runs itself and says when it is finished; everything else is
     // on a gate and a clock.
     if (key === "game") {
-      if (replay?.done) advanceBeat();
+      if (replay?.done) { advanceBeat(); return; }
+      // This is the one beat that draws nothing on a tick, so it is the one
+      // beat that can go quiet. The replay sends its own frames, but the gap
+      // before the first one — the championship search still walking its
+      // meetings — and the gaps between moments are both long, and a runner
+      // whose tab is in the background has every one of those timers clamped.
+      // A watcher reads silence as a dead runner and starts the season over
+      // for itself, which is wrong here: nothing is broken, the show is just
+      // between pitches. Keep saying so.
+      if (fileFor && Date.now() - reportedAt >= CEREMONY_PULSE_MS) sendCeremony();
       return;
     }
     // The last beat has nothing to be ready for: when its dwell is up, the
@@ -5961,7 +5972,16 @@ const SHARED_SIM_FIRST_MS = 25000;
 // its own season, which is the one thing this is here to avoid. A runner that
 // is genuinely gone is still caught, twenty seconds later.
 const SHARED_SIM_SILENCE_MS = 20000;
+// How often the championship beat says it is still there. Comfortably inside
+// SHARED_SIM_SILENCE_MS, so a watcher has to miss five of these in a row
+// before it concludes the runner is gone.
+const CEREMONY_PULSE_MS = 4000;
 let sharedSimWatch = null;
+// A watcher that gave up on the runner and started the season itself. The
+// watch is gone by then, so sim-ready has nothing to key off and the season
+// the room actually played would be dropped on the floor in favour of a
+// private copy of it that is still most of a minute from finishing.
+let sharedSimFallback = null;
 
 function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }) {
   if (!state.draft) return;
@@ -6014,6 +6034,7 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
   hideHoverCard();
   simOwnsScreen = true;
   runningSimSalt = salt ?? null;
+  sharedSimFallback = null;
 
   const stale = () => watch.token !== batchRunToken || sharedSimWatch !== watch || !state.draft;
 
@@ -6021,6 +6042,13 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
     if (stale()) return;
     clearTimeout(watch.timer);
     sharedSimWatch = null;
+    sharedSimFallback = fileFor ? null : { salt, runs, teamNames, series: watch.series };
+    // The relayed ceremony is still on the page, and beats STACK: a run
+    // starting again at its first beat patches modules that are already open
+    // and adds nothing, so the screen sits frozen on whatever the runner last
+    // sent — the championship game, usually — while a whole season is played
+    // again underneath it. Clear it and let the new run draw its own.
+    if (!instant) app.innerHTML = "";
     startBatchRun(runs, { salt, instant, fileFor });
   };
 
@@ -6034,6 +6062,7 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
     if (stale() || !blob?.summary?.teams?.length) return false;
     clearTimeout(watch.timer);
     sharedSimWatch = null;
+    sharedSimFallback = null;
     simOwnsScreen = false;
     runningSimSalt = null;
     state.tournament = null;
@@ -6129,11 +6158,51 @@ function applySharedSimProgress(payload) {
 
 function applySharedSimReady(payload) {
   const watch = sharedSimWatch;
-  if (!watch || watch.salt !== payload?.salt || watch.token !== batchRunToken) return;
+  if (!watch || watch.salt !== payload?.salt || watch.token !== batchRunToken) {
+    adoptFiledSeason(payload);
+    return;
+  }
   watch.wait();
   fetchRoomSim(state.online.roomId, watch.salt).then((blob) => {
     if (!blob) return; // the watchdog plays it here if the season never lands
     watch.apply(blob);
+  }).catch(() => {});
+}
+
+// The watchdog gave up on the runner, this browser started the season for
+// itself — and then the runner finished after all and filed it. They are the
+// same season, down to the game: same salt, same seed, same teams. But the
+// filed one is done NOW and the private one has most of a minute left to run,
+// and the room should be looking at one table rather than waiting on five
+// copies of it. So take the room's and stop playing.
+function adoptFiledSeason(payload) {
+  const fallback = sharedSimFallback;
+  if (!fallback || !state.online?.roomId || fallback.salt !== payload?.salt) return;
+  // Only while the private run is still going. Once it has landed, the reader
+  // is already reading the table, and it is the same table.
+  if (runningSimSalt !== fallback.salt) return;
+  fetchRoomSim(state.online.roomId, fallback.salt).then((blob) => {
+    if (!blob?.summary?.teams?.length) return;
+    if (sharedSimFallback !== fallback || runningSimSalt !== fallback.salt) return;
+    sharedSimFallback = null;
+    // Every loop in a run checks this against the token it started with, so
+    // bumping it is how the season in progress is called off.
+    batchRunToken += 1;
+    simOwnsScreen = false;
+    runningSimSalt = null;
+    state.tournament = null;
+    state.batch = {
+      runs: blob.runs ?? fallback.runs,
+      seed: blob.seed ?? null,
+      summary: blob.summary,
+      race: blob.race ?? { teamNames: fallback.teamNames, totalRuns: blob.runs ?? fallback.runs, series: fallback.series }
+    };
+    state.view = "batch";
+    state.batchStatsTab = "overview";
+    state.batchGamePage = 0;
+    state.batchGameIndex = null;
+    saveState();
+    renderBatch();
   }).catch(() => {});
 }
 
