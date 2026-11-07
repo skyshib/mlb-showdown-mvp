@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card Valuation Chain</title>
+<style>
+  /* Layout: one reading column, formulas and tables breaking out to full width.
+     Palette reads off a scoreboard — graphite ground, phosphor-green accent,
+     amber for anything the reader should argue with. */
+  :root {
+    --bg: #f7f8f7;
+    --panel: #ffffff;
+    --ink: #16201b;
+    --ink-soft: #5a6660;
+    --rule: #dfe4e0;
+    --accent: #0f6b43;
+    --accent-soft: #e6f2eb;
+    --warn: #8a5a00;
+    --warn-soft: #fdf3e0;
+    --bad: #a02b1f;
+    --bad-soft: #fbeae8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111512;
+      --panel: #19201c;
+      --ink: #e6ece8;
+      --ink-soft: #9aa8a0;
+      --rule: #2a332d;
+      --accent: #5fd39b;
+      --accent-soft: #16291f;
+      --warn: #e0ae5c;
+      --warn-soft: #2b2316;
+      --bad: #f08b7d;
+      --bad-soft: #2e1a17;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111512;
+    --panel: #19201c;
+    --ink: #e6ece8;
+    --ink-soft: #9aa8a0;
+    --rule: #2a332d;
+    --accent: #5fd39b;
+    --accent-soft: #16291f;
+    --warn: #e0ae5c;
+    --warn-soft: #2b2316;
+    --bad: #f08b7d;
+    --bad-soft: #2e1a17;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 var(--sans);
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 2.5rem 5rem;
+  }
+  p, li { max-width: 68ch; }
+  h1 { font-size: clamp(1.7rem, 4.5vw, 2.4rem); line-height: 1.15; margin: 0 0 .4rem; letter-spacing: -.02em; text-wrap: balance; }
+  h2 {
+    font-size: 1.3rem; margin: 3.5rem 0 .2rem; letter-spacing: -.01em; text-wrap: balance;
+    padding-top: 1.2rem; border-top: 2px solid var(--ink);
+  }
+  h3 { font-size: 1rem; margin: 2rem 0 .3rem; }
+  .eyebrow {
+    font: 600 .7rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 .5rem;
+  }
+  .lede { color: var(--ink-soft); font-size: 1.05rem; }
+  .micro { font: .78rem/1.5 var(--mono); color: var(--ink-soft); }
+  code, .mono { font-family: var(--mono); font-size: .86em; }
+
+  .banner {
+    margin: 1.5rem 0 0; padding: 1rem 1.1rem; border-radius: 3px;
+    border-left: 4px solid var(--accent); background: var(--accent-soft);
+  }
+  .banner.stale { border-left-color: var(--bad); background: var(--bad-soft); }
+  .banner h2 { all: unset; display: block; font: 600 1rem/1.3 var(--sans); }
+  .banner p { margin: .35rem 0 0; font-size: .9rem; }
+
+  .formula {
+    font-family: var(--mono); font-size: .84rem; line-height: 1.75;
+    white-space: pre; overflow-x: auto;
+    background: var(--panel); border: 1px solid var(--rule); border-left: 3px solid var(--accent);
+    padding: 1rem 1.1rem; margin: 1rem 0; border-radius: 2px;
+  }
+  .scroll { overflow-x: auto; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: .42rem .7rem; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font: 600 .7rem/1.3 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink-soft); border-bottom: 1.5px solid var(--ink-soft);
+  }
+  tbody tr:hover { background: var(--accent-soft); }
+  td.em { font-weight: 700; color: var(--accent); }
+  td.na { color: var(--ink-soft); opacity: .55; }
+  .total td { border-top: 1.5px solid var(--ink); border-bottom: none; font-weight: 700; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 1.1rem 1.2rem; margin: 1.2rem 0;
+  }
+  .card > h3 { margin-top: 0; }
+  .stats { display: flex; flex-wrap: wrap; gap: .4rem 1.8rem; margin: 0 0 .9rem; }
+  .stat { min-width: 0; }
+  .stat dt { font: 600 .66rem/1.4 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+  .stat dd { margin: 0; font: 600 1.15rem/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+  .chartstrip { display: flex; gap: 2px; margin: .2rem 0 .3rem; min-width: 0; }
+  .chartstrip .slot {
+    min-width: 0; overflow: hidden; text-align: center; padding: .3rem .1rem;
+    background: var(--accent-soft); border-radius: 2px;
+    font: 600 .62rem/1.2 var(--mono); color: var(--ink);
+  }
+  .chartstrip .slot small { display: block; font-weight: 400; color: var(--ink-soft); }
+
+  .note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: .85rem 1rem; margin: 1.2rem 0; border-radius: 2px; }
+  .note p { margin: 0; font-size: .9rem; }
+  .note p + p { margin-top: .5rem; }
+  .note strong { color: var(--warn); }
+
+  .toc { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+  .toc li { margin: 0; }
+  .toc a {
+    display: block; padding: .3rem .7rem; border: 1px solid var(--rule); border-radius: 100px;
+    font: 600 .74rem/1.4 var(--mono); color: var(--ink-soft); text-decoration: none; background: var(--panel);
+  }
+  .toc a:hover, .toc a:focus-visible { border-color: var(--accent); color: var(--accent); }
+  a { color: var(--accent); }
+  a:focus-visible, .toc a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .foot { margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <p class="eyebrow">Generated from source</p>
+  <h1>How a card gets a number put on it</h1>
+  <p class="lede">
+    Five layers turn a printed card into a dollar bid. Each one reshapes the number the
+    previous one produced, which is why three different quantities all end up being called
+    &ldquo;value&rdquo;. Every constant and every figure below is read out of the engine at
+    generation time.
+  </p>
+
+  <ul class="toc">
+    <li><a href="#check">Self-check</a></li>
+    <li><a href="#l1">1 · Card model</a></li>
+    <li><a href="#l2">2 · Board re-deal</a></li>
+    <li><a href="#l3">3 · Context</a></li>
+    <li><a href="#l4">4 · Worth</a></li>
+    <li><a href="#l5">5 · Dollars</a></li>
+    <li><a href="#pet">Worked examples</a></li>
+    <li><a href="#argue">Open questions</a></li>
+  </ul>
+
+  <div class="banner" id="check">
+    <h2>This document matches the engine.</h2>
+    <p>
+      The formulas printed below were re-implemented from the extracted constants and run
+      against all <strong>154</strong> cards on a <code>classic</code> board.
+      Every card reproduced exactly (worst disagreement 0.0e+0).
+    </p>
+    <p class="micro">
+      741b015
+      · 2026-11-07 20:58
+      · board classic/valuation-doc-v1 · 4 SP slots · 4 seats · $1500
+      · persona held at balanced
+    </p>
+  </div>
+
+  <!-- ============================ LAYER 1 ============================ -->
+  <h2 id="l1">1 · The card model — raw card to value points</h2>
+  <p class="micro">src/rules/valuation.js</p>
+  <p>
+    The only layer that looks at a card on its own, with no board and no roster around it.
+    Hitters and pitchers do not share a formula and do not even read their charts the same
+    way: a hitter's chart counts as a <strong>per-slot rate</strong>, a pitcher's as a
+    <strong>total</strong>. So chart size matters for an arm and not for a bat.
+  </p>
+
+  <h3>Hitters</h3>
+  <div class="formula">hitterValue = onBaseUsage(onBase) × lean × edge × 130
+              + fielding × 7
+              + max(0, speed − 1) × 1.5
+
+onBaseUsage(ob) = mean over the reference staff [3, 4, 4, 5, 5, 6, 7]
+                  of clamp(ob − control, 0, 20) / 20
+edge            = chartRate × w_chart − (-1.35)
+lean            = w_onBase / 20      (1 when persona-neutral)</div>
+  <p>
+    On-base <strong>multiplies</strong> chart quality instead of adding to it, because on-base
+    literally is the share of plate appearances settled on the batter's own card. And
+    <code>edge</code> is measured against <code>-1.35</code> — what a typical
+    pitcher's chart is worth when his card is the one read — so a bat whose chart rates below
+    that line gets <em>negative</em> benefit from reaching base more often. He would rather the
+    pitcher's card were consulted.
+  </p>
+  <div class="scroll"><table>
+    <thead><tr><th>on-base</th><th>5</th><th>7</th><th>9</th><th>11</th><th>13</th><th>15</th><th>17</th></tr></thead>
+    <tbody><tr><td>share of PAs on his own chart</td><td>0.029</td><td>0.107</td><td>0.207</td><td>0.307</td><td>0.407</td><td>0.507</td><td>0.607</td></tr></tbody>
+  </table></div>
+
+  <h3>Pitchers</h3>
+  <div class="formula">pitcherValue = (control × 35 + chartTotal × 1) × (ip + 4)/10
+             + ip × 8
+starters only:  × spSlotFactor(rotation size)</div>
+  <div class="scroll"><table>
+    <thead><tr><th>rotation size</th><th>1 SP</th><th>2 SP</th><th>3 SP</th><th>4 SP</th><th>5 SP</th><th>6 SP</th></tr></thead>
+    <tbody><tr><td>spSlotFactor</td><td>2.00</td><td>1.50</td><td>1.00</td><td>1.00</td><td>0.80</td><td>0.67</td></tr></tbody>
+  </table></div>
+  <p class="micro">
+    anchor 3 · discount anchor 4 · cap 2 —
+    a starter opens 1/rotation of the games, so his season scales with how often he takes the
+    ball. Relievers never take this factor.
+  </p>
+
+  <h3>Weights and chart tables</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>hitter weight</th><th>onBase</th><th>fielding</th><th>speed</th><th>chart</th></tr></thead>
+    <tbody><tr><td>neutral base</td><td>20</td><td>7</td><td>1.5</td><td>1</td></tr></tbody>
+  </table></div>
+  <div class="scroll"><table>
+    <thead><tr><th>pitcher weight</th><th>control</th><th>ip</th><th>chart</th></tr></thead>
+    <tbody><tr><td>neutral base</td><td>35</td><td>8</td><td>1</td></tr></tbody>
+  </table></div>
+  <div class="scroll"><table>
+    <thead><tr><th>chart slot is worth</th><th>SO</th><th>GB</th><th>FB</th><th>PU</th><th>BB</th><th>1B</th><th>1B+</th><th>2B</th><th>3B</th><th>HR</th></tr></thead>
+    <tbody>
+      <tr><td>to a hitter (per slot, averaged)</td><td>-4</td><td>-3</td><td>-2</td><td class="na">—</td><td>+4</td><td>+5</td><td>+5</td><td>+9</td><td>+11</td><td>+14</td></tr>
+      <tr><td>to a pitcher (summed over slots)</td><td>+10</td><td>+8</td><td>+6</td><td>+8</td><td>-5</td><td>-7</td><td class="na">—</td><td>-11</td><td>-16</td><td>-24</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note">
+    <p>
+      <strong>Every weight is then multiplied by seeded noise of ±25%</strong>,
+      keyed on <code>seed:valuation:managerId:persona</code>. This happens whatever the persona,
+      so there is no such thing as &ldquo;the&rdquo; value of a card — only some manager's value
+      of it. Two seats on the same board can be 1.67×
+      apart on the same card before persona enters at all.
+    </p>
+  </div>
+
+  <!-- ============================ LAYER 2 ============================ -->
+  <h2 id="l2">2 · The board re-deals every arm</h2>
+  <p class="micro">pitcherRanking() · src/rules/draft.js</p>
+  <p>
+    This is the layer that surprises people. It <strong>throws away layer 1's ordering of
+    pitchers and keeps only its spacing.</strong> Bats pass through untouched.
+  </p>
+  <div class="formula">batters   = mean on-base and mean chart run value of the top 36 bats on the board
+advantage = share of d20 faces where d20 + control ≥ batters.onBase
+runsPerPa = advantage × chartRunValue(his chart) + (1 − advantage) × batters.runValue
+
+1. sort the role's arms by runsPerPa, best first
+2. sort their layer-1 values, highest first
+3. hand the sorted values to the rate order</div>
+  <p>
+    So the <em>order</em> comes from the engine's own hook rule — the real control × chart
+    interaction the game plays — and the <em>spacing</em> comes from the card model. This is why
+    an additive control-plus-chart valuation ranked arms worse than chart alone, and why
+    re-pricing out types was a null: <code>runsPerPa</code> cannot tell a groundball from a
+    flyball.
+  </p>
+  <p>On this board: <code>batters.onBase 10.92</code>, <code>batters.runValue 0.346</code>.</p>
+
+  <h3>Starter tilt</h3>
+  <div class="formula">spread  = sd of the board's starter runsPerPa
+tilt    = 0.65 at spread ≤ 0.04, 1.00 at spread ≥ 0.05, linear between
+
+this board: spread 0.0347  →  tilt 0.650</div>
+  <p>
+    A board whose starters sit in a narrow band has no real ace, so money buys more on a bat or
+    a reliever. A board with a genuine cliff pays full price. This board is on the narrow side, so every starter below is marked down 35%.
+  </p>
+
+  <h3>Reliever spacing</h3>
+  <div class="formula">share   = relievers who beat the fielded rotation's rate by > 0.02 runs/PA
+spacing = clamp(share / 0.3, 0, 1)
+          then blend the rank values toward (runs saved × innings he would really throw)
+
+this board: 5 of 19 relievers (26.32%)  →  spacing 0.88</div>
+  <p class="micro">
+    Printed points barely separate a 647-inning arm from a 29-inning one, which is how a
+    computer once bid $119 on the best card in a room and $182 on a replacement-level one.
+  </p>
+
+  <h3>The re-deal, on this board's starters</h3>
+  <p class="micro">
+    Identity holds: the best arm by rate comes out holding the highest tilted value.
+  </p>
+  <div class="scroll"><table>
+    <thead><tr><th>#</th><th>arm</th><th>points</th><th>runs/PA</th><th>layer 1</th><th>layer 2</th></tr></thead>
+    <tbody><tr class="total">
+      <td>1</td><td>Randy Johnson '05</td><td>600</td>
+      <td>-0.0124</td><td>383</td><td class="em">249</td></tr><tr>
+      <td>2</td><td>Ben Sheets '05</td><td>510</td>
+      <td>0.0012</td><td>351</td><td class="em">241</td></tr><tr>
+      <td>3</td><td>Jose Rijo '02</td><td>290</td>
+      <td>0.0109</td><td>283</td><td class="em">228</td></tr><tr>
+      <td>4</td><td>Greg Maddux '03</td><td>580</td>
+      <td>0.0223</td><td>371</td><td class="em">222</td></tr><tr>
+      <td>5</td><td>Kerry Wood '04</td><td>490</td>
+      <td>0.0223</td><td>342</td><td class="em">218</td></tr><tr>
+      <td>6</td><td>Curt Schilling '05</td><td>480</td>
+      <td>0.0223</td><td>335</td><td class="em">218</td></tr><tr>
+      <td>7</td><td>Orlando Hernandez '03</td><td>430</td>
+      <td>0.0223</td><td>303</td><td class="em">205</td></tr><tr>
+      <td>8</td><td>Tom Glavine '04</td><td>430</td>
+      <td>0.0223</td><td>303</td><td class="em">197</td></tr><tr>
+      <td>9</td><td>Livan Hernandez '04</td><td>400</td>
+      <td>0.0223</td><td>335</td><td class="em">197</td></tr><tr>
+      <td>10</td><td>Mark Buehrle '02</td><td>490</td>
+      <td>0.0249</td><td>257</td><td class="em">193</td></tr></tbody>
+  </table></div>
+
+  <!-- ============================ LAYER 3 ============================ -->
+  <h2 id="l3">3 · Context — who is already standing there</h2>
+  <p>Three readings sit on top of layer 2, all of them about the card's surroundings rather than the card.</p>
+  <h3>The replacement floor</h3>
+  <p>
+    Per <code>poolGroup</code> — a bat's <em>position</em>, <code>SP</code>/<code>RP</code> for an
+    arm. It is the lowest value at that group anywhere in the deck, then <strong>raised</strong>
+    to the standing replacement's value where the room deals them. Pass on every catcher and you
+    are handed that free card, not the worst catcher on the board, so he is the man a real
+    catcher has to beat.
+  </p>
+  <div class="scroll"><table>
+    <thead><tr><th>slot</th><th>free card dealt there</th><th>its value</th><th>poolGroup it sets the floor for</th></tr></thead>
+    <tbody><tr><td>C</td><td>Dan Wilson '05</td><td>174</td><td><code>C</code></td></tr><tr><td>1B</td><td>Tony Clark '03</td><td>93</td><td><code>1B</code></td></tr><tr><td>2B</td><td>Joe McEwing '05</td><td>159</td><td><code>2B</code></td></tr><tr><td>3B</td><td>Wes Helms '05</td><td>144</td><td><code>3B</code></td></tr><tr><td>SS</td><td>Jose Vizcaino '05</td><td>131</td><td><code>SS</code></td></tr><tr><td>LF/RF</td><td>Quinton McCracken '04</td><td>107</td><td><code>LF/RF</code></td></tr><tr><td>CF</td><td>Andres Torres '04</td><td>123</td><td><code>CF</code></td></tr><tr><td>DH</td><td>Tim Salmon '05</td><td>123</td><td><code>DH</code></td></tr><tr><td>SP</td><td>Nate Cornejo '02</td><td>82</td><td><code>SP</code></td></tr><tr><td>RP</td><td>Shawn Chacon '05</td><td>51</td><td><code>RP</code></td></tr></tbody>
+  </table></div>
+  
+
+  <h3>The glove he is actually credited with</h3>
+  <div class="formula">asRostered(roster, bat).fielding = seatedGlove(roster + him) − seatedGlove(roster)
+
+DH seat = 0 glove · a non-first-baseman at first = −1</div>
+  <p>
+    A bat is credited with the <em>marginal</em> glove he adds to the best nine, not his printed
+    rating. Priced off the printed number instead, 29% of the bids on a bat paid for a glove the
+    card never fields — a mean 2.1 fielding points too much, and as much as 11 on a surplus
+    catcher.
+  </p>
+  <p class="micro">
+    <code>seatedModelValue</code> then totals the best nine with each bat valued at the glove of
+    the slot he stands in, and <code>pricingLineup</code> pads any unfilled seat with the free man
+    who would end up standing there before that total is taken.
+  </p>
+
+  <!-- ============================ LAYER 4 ============================ -->
+  <h2 id="l4">4 · Worth — what it is worth <em>to buy</em></h2>
+  <div class="formula">fills   = cardFillsNeed(manager, draft, card)
+surplus = bullpen ? relieverWorth(…) : auctionWorth(…)
+base    = surplus × (1 + 1 × urgency)
+
+worth = fills                 → base
+      | hitter, redundant     → max(0, seated(pricingNine + card) − seated(pricingNine))
+      | bullpen, redundant    → max(0, penWorth(roster + card) − penWorth(roster))
+      | nothing fielded there → base × 0.7
+      | otherwise             → max(0, value − weakest FIELDED card at that bucket)
+
+auctionWorth   = max(0, value(asRostered) − floor[group])
+relieverWorth  = scale × (2.5 × max(0, v − yourBest)
+                        + 0.7 × max(0, min(v, yourBest) − floor))
+urgency        = clamp((need/supply − 0.5) / (1 − 0.5), 0, 1)</div>
+  <div class="scroll"><table>
+    <thead><tr><th>constant</th><th>value</th><th>what it does</th></tr></thead>
+    <tbody>
+      <tr><td>RELIEVER_TOP_RATE</td><td>2.5</td><td>the engine rides the best arm ~2 innings a game</td></tr>
+      <tr><td>RELIEVER_DEPTH_RATE</td><td>0.7</td><td>the next arm throws well under one</td></tr>
+      <tr><td>AUCTION_PEN_DEPTH</td><td>5</td><td>arms counted as a pen when the cap is unlimited</td></tr>
+      <tr><td>URGENCY_PATIENT</td><td>0.5</td><td>holes per man remaining below this: no hurry</td></tr>
+      <tr><td>URGENCY_DESPERATE</td><td>1</td><td>at or above this: all in</td></tr>
+      <tr><td>URGENCY_WEIGHT</td><td>1</td><td>full desperation doubles a card's worth</td></tr>
+      <tr><td>DEPTH_DAMP</td><td>0.7</td><td>markdown once the roster's needs are met</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note">
+    <p>
+      <strong>The two branches are not interchangeable.</strong> The <code>fills</code> branch
+      carries the urgency premium and prices through <code>asRostered</code>; the redundant
+      branches price the marginal gain over the man who would otherwise play. Collapsing them
+      into one — treating the nine as manned from the first lot, so no bat ever fills a hole —
+      measured <strong>−0.30, −0.25, −1.31, −1.05</strong> win points across four absolute cells
+      against a clean null. The hole-filling premium is load-bearing.
+    </p>
+  </div>
+
+  <!-- ============================ LAYER 5 ============================ -->
+  <h2 id="l5">5 · Dollars</h2>
+  <div class="formula">share   = worth^1.1 / planned
+planned = Σ over the best cards still expected, down to openSlots, of chance × worth^1.1
+
+bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × depthDamp),
+            1, maxBid)</div>
+  <div class="scroll"><table>
+    <thead><tr><th>factor</th><th>value or range</th><th>note</th></tr></thead>
+    <tbody>
+      <tr><td>SHARE_EXPONENT</td><td>1.1</td><td>near-linear; squared over-concentrates ruinously in big fields</td></tr>
+      <tr><td>aggression</td><td>0.86 – 1.14</td><td>seeded per manager per card, so two seats never tie</td></tr>
+      <tr><td>spendDown · random nomination</td><td>0.7 – 2.2</td><td>off the real remaining queue length</td></tr>
+      <tr><td>spendDown · manual nomination</td><td>0.75 – 1.8</td><td>budget per open slot against par</td></tr>
+      <tr><td>poolPremium</td><td>1.00 – 1.70</td><td>lifts cards past the 80th percentile of the whole deck</td></tr>
+      <tr><td>depthDamp</td><td>0.7</td><td>with openSlots forced to 3, once needs are met</td></tr>
+      <tr><td>maxBid</td><td>budget − $1/slot</td><td>the whole budget on an unlimited roster</td></tr>
+      <tr><td>first price only</td><td>richest rival + 1</td><td>a capacity cap, inert while the room is flush</td></tr>
+    </tbody>
+  </table></div>
+  <p class="micro">
+    <code>planned</code> calls <code>effectiveWorth</code> with <code>positionAware = false</code>,
+    so the denominator deliberately keeps the older basis. Anything that changes what a bench bat
+    is worth therefore also moves the denominator, and bids every other card up.
+  </p>
+
+  <!-- ============================ EXAMPLES ============================ -->
+  <h2 id="pet">Worked examples</h2>
+  <p>
+    Both cards are real cards off the board named in the banner, and every figure is the engine's
+    own. Change the players with
+    <code>--bat "name"</code> and <code>--arm "name"</code>.
+  </p>
+
+  <div class="card">
+    <p class="eyebrow">Pet example · bat</p>
+    <h3>Willie McCovey '04</h3>
+    <p class="micro">Asked for <code>Larry Walker</code>, who this board did not deal — showing its best bat instead. Name a card this board holds with <code>--bat "…"</code>.</p>
+    <div class="stats"><div class="stat"><dt>position</dt><dd>1B</dd></div><div class="stat"><dt>on-base</dt><dd>13</dd></div><div class="stat"><dt>fielding</dt><dd>1</dd></div><div class="stat"><dt>speed</dt><dd>11</dd></div><div class="stat"><dt>points</dt><dd>700</dd></div></div>
+    <div class="chartstrip"><span class="slot" style="flex:2" title="SO × 2">SO<small>2</small></span><span class="slot" style="flex:1" title="GB × 1">GB<small>1</small></span><span class="slot" style="flex:3" title="FB × 3">FB<small>3</small></span><span class="slot" style="flex:6" title="BB × 6">BB<small>6</small></span><span class="slot" style="flex:2" title="1B × 2">1B<small>2</small></span><span class="slot" style="flex:2" title="2B × 2">2B<small>2</small></span><span class="slot" style="flex:4" title="HR × 4">HR<small>4</small></span></div><p class="micro">20 chart slots</p>
+    <div class="scroll"><table>
+      <thead><tr><th>term</th><th>arithmetic</th><th>contributes</th></tr></thead>
+      <tbody>
+        <tr><td>on-base usage</td><td class="mono">onBaseUsage(13) = 0.407</td><td>—</td></tr>
+        <tr><td>chart rate</td><td class="mono">4.550 per slot over 20 slots</td><td>—</td></tr>
+        <tr><td>edge over a typical arm</td><td class="mono">4.550 − (-1.35) = 5.113</td><td>—</td></tr>
+        <tr><td>on-base × chart</td><td class="mono">0.407 × 1.231 × 5.113 × 130</td><td>333.00</td></tr>
+        <tr><td>glove</td><td class="mono">1 × 7.72</td><td>7.72</td></tr>
+        <tr><td>legs</td><td class="mono">max(0, 11 − 1) × 1.19</td><td>11.89</td></tr>
+        <tr class="total"><td>layer 1 value</td><td class="mono">engine returns 352.61</td><td>352.61</td></tr>
+      </tbody>
+    </table></div>
+    <p class="micro">
+      Layer 2 leaves bats alone, so layer 2 value is also 353.
+      Layer 3: his <code>poolGroup</code> is <code>1B</code>, whose floor is
+      93 — set by the free Tony Clark '03, not by the board's worst card (93).
+      Seated alone he is credited 1 of glove against a printed
+      1.
+      So his <code>auctionWorth</code> to an empty roster is about
+      <strong>260</strong>, not 353.
+    </p>
+    <p class="micro">Layer 5, this card nominated at the opening bell:</p>
+    
+<div class="scroll"><table>
+  <thead><tr><th>seat</th><th>budget</th><th>max bid</th><th>its own value of Willie McCovey '04</th><th>sealed bid</th></tr></thead>
+  <tbody><tr><td>Seat 1</td><td>$1500</td><td>$1486</td><td>353</td><td class="em">$213</td></tr><tr><td>Seat 2</td><td>$1500</td><td>$1486</td><td>255</td><td class="em">$163</td></tr><tr><td>Seat 3</td><td>$1500</td><td>$1486</td><td>296</td><td class="em">$204</td></tr><tr><td>Seat 4</td><td>$1500</td><td>$1486</td><td>280</td><td class="em">$196</td></tr></tbody>
+</table></div>
+    
+  </div>
+
+  <div class="card">
+    <p class="eyebrow">Pet example · arm</p>
+    <h3>Randy Johnson '05</h3>
+    <p class="micro">Asked for <code>Pedro Martinez</code>, who this board did not deal — showing its best arm instead. Name a card this board holds with <code>--arm "…"</code>.</p>
+    <div class="stats"><div class="stat"><dt>role</dt><dd>SP</dd></div><div class="stat"><dt>control</dt><dd>6</dd></div><div class="stat"><dt>IP</dt><dd>7</dd></div><div class="stat"><dt>points</dt><dd>600</dd></div></div>
+    <div class="chartstrip"><span class="slot" style="flex:2" title="PU × 2">PU<small>2</small></span><span class="slot" style="flex:7" title="SO × 7">SO<small>7</small></span><span class="slot" style="flex:4" title="GB × 4">GB<small>4</small></span><span class="slot" style="flex:3" title="FB × 3">FB<small>3</small></span><span class="slot" style="flex:1" title="BB × 1">BB<small>1</small></span><span class="slot" style="flex:3" title="1B × 3">1B<small>3</small></span><span class="slot" style="flex:0" title="2B × 0">2B<small>0</small></span><span class="slot" style="flex:0" title="HR × 0">HR<small>0</small></span></div><p class="micro">20 chart slots</p>
+    <div class="scroll"><table>
+      <thead><tr><th>term</th><th>arithmetic</th><th>contributes</th></tr></thead>
+      <tbody>
+        <tr><td>control</td><td class="mono">6 × 34.54</td><td>207.25</td></tr>
+        <tr><td>chart, summed</td><td class="mono">110.00 × 0.75</td><td>82.63</td></tr>
+        <tr><td>workload weight</td><td class="mono">(7 + 4) / 10 = 1.10</td><td>× applied to both</td></tr>
+        <tr><td>innings</td><td class="mono">7 × 9.19</td><td>64.32</td></tr>
+        <tr><td>rotation factor</td><td class="mono">spSlotFactor(4) = 1.00</td><td>× applied to the whole</td></tr>
+        <tr class="total"><td>layer 1 value</td><td class="mono">engine returns 383.18</td><td>383.18</td></tr>
+      </tbody>
+    </table></div>
+    <p class="micro">
+      Then layer 2 takes that number away from him. His engine rate is
+      <code>-0.0124</code> runs per plate appearance, which is
+      <strong>#1 of 41</strong> starters on this board — so he is
+      handed the 1st-highest tilted value instead
+      of his own: <strong>249</strong> rather than 383.
+      A 134-point move, from the re-deal and the 0.650 tilt together.
+    </p>
+    <p class="micro">Layer 5, this card nominated at the opening bell:</p>
+    
+<div class="scroll"><table>
+  <thead><tr><th>seat</th><th>budget</th><th>max bid</th><th>its own value of Randy Johnson '05</th><th>sealed bid</th></tr></thead>
+  <tbody><tr><td>Seat 1</td><td>$1500</td><td>$1486</td><td>249</td><td class="em">$109</td></tr><tr><td>Seat 2</td><td>$1500</td><td>$1486</td><td>281</td><td class="em">$157</td></tr><tr><td>Seat 3</td><td>$1500</td><td>$1486</td><td>270</td><td class="em">$176</td></tr><tr><td>Seat 4</td><td>$1500</td><td>$1486</td><td>286</td><td class="em">$167</td></tr></tbody>
+</table></div>
+  </div>
+
+  <h3>Where points and value disagree most on this board</h3>
+  <p class="micro">
+    Printed points are what a human reads; value is what the computers read. These are the
+    cards where the two part company, which is where arguments about the model usually start.
+  </p>
+  <div class="scroll"><table>
+    <thead><tr><th>card</th><th>points</th><th>value</th><th>value per point</th></tr></thead>
+    <tbody>
+      <tr><td>Brad Ausmus '05</td><td>10</td><td class="em">178</td><td>17.847</td></tr><tr><td>Dan Wilson '05</td><td>10</td><td class="em">174</td><td>17.422</td></tr><tr><td>Joe McEwing '05</td><td>10</td><td class="em">159</td><td>15.893</td></tr><tr><td>Neifi Perez '05</td><td>10</td><td class="em">150</td><td>15.034</td></tr><tr><td>Wes Helms '05</td><td>10</td><td class="em">144</td><td>14.436</td></tr>
+      <tr class="total"><td colspan="4" style="text-align:left;font-weight:600">— and the other end —</td></tr>
+      <tr><td>Greg Maddux '03</td><td>580</td><td class="em">222</td><td>0.383</td></tr><tr><td>Mark Buehrle '02</td><td>490</td><td class="em">193</td><td>0.394</td></tr><tr><td>Jeff Weaver '01</td><td>350</td><td class="em">140</td><td>0.399</td></tr><tr><td>Darren Oliver '00</td><td>380</td><td class="em">152</td><td>0.400</td></tr><tr><td>Brad Radke '01</td><td>350</td><td class="em">142</td><td>0.405</td></tr>
+    </tbody>
+  </table></div>
+
+  <!-- ============================ ARGUE ============================ -->
+  <h2 id="argue">Open questions</h2>
+  <p>Known soft spots, with what is measured and what is not. This is the part to argue with.</p>
+
+  <h3>The floor map keeps the wrong man</h3>
+  <p>
+    <code>auctionWorth</code> looks the floor up by <code>poolGroup</code> and the map keeps the
+    <strong>highest</strong> standing replacement per key. Where two seats share a key — a DH
+    replacement printed at a position — the floor is set by a card standing somewhere else, and
+    every real card at that position is priced against him. Not measured.
+  </p>
+
+  <h3>The rotation is slotted by card points, not by value</h3>
+  <p>
+    <code>lineupRankValue</code> returns <code>player.points</code>, so a manager holding surplus
+    starters can field a worse one. Re-slotting one live room by engine value read
+    <strong>+1.0 / +1.5 / +1.1 / +1.0</strong> across four seeds. One room only, and the
+    equivalent change for the <em>lineup</em> previously lost to points, so it needs the harness
+    before it means anything.
+  </p>
+
+  <h3>The gate and the price seat the roster differently</h3>
+  <p>
+    <code>hitterTakesOpenSlot</code> seats the roster in roster order; the price seats it
+    point-maximally. The gate can therefore say a bat has no seat while the price seats him at DH
+    anyway. Narrowed but not removed by <code>pricingLineup</code>. Not separately measured.
+  </p>
+
+  <h3>Nobody charges for the man being displaced</h3>
+  <p>
+    A redundant starter is priced as the margin over the manager's own weakest fielded arm, which
+    is correct going forward and ignores the money already sunk in the arm he displaces. A
+    computer can buy a rotation at need prices and then buy it again as upgrades. One live room
+    put <strong>$305 of $1500 into three starters who never threw a pitch</strong>; trading them
+    for two bats at the same board's rates was worth <strong>+8.3</strong> win points.
+  </p>
+
+  <div class="foot">
+    <p class="micro">
+      Regenerate with <code>npm run valuation-doc</code>. Flags:
+      <code>--bat</code>, <code>--arm</code>, <code>--universe</code>, <code>--seed</code>, <code>--sp</code>.
+      Sources: <code>src/rules/valuation.js</code>, <code>src/rules/draft.js</code>,
+      <code>src/rules/pitching.js</code>.
+    </p>
+  </div>
+</main>
+</body>
+</html>
