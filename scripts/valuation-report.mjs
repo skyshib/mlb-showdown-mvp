@@ -289,6 +289,125 @@ const penBeating = relievers.length > 1
 const penShare = relievers.length ? penBeating / relievers.length : 0;
 const penSpacing = Math.max(0, Math.min(1, penShare / K.relieverSpacingShare));
 
+// ---------------------------------------------------------------------------
+// 3b. The dial lab's payload.
+//
+// The page lets the reader move the weights and watch every card move. For that
+// the browser needs its own copy of the model, which raises the obvious question
+// of whether that copy still says what the engine says. Two checks chain to
+// answer it:
+//
+//   Node   : the stated formula reproduces the engine, on the PERTURBED weights
+//            a real manager carries (the self-check above), and the re-deal
+//            below reproduces pitcherRanking's output card for card.
+//   Browser: the ported model reproduces the values baked into the page, at the
+//            default dial positions.
+//
+// The baked values are computed on the BASE weights with no perturbation, so the
+// lab is noise-free and reproducible; a live draft adds the +-PERTURBATION
+// wobble on top and the page says so.
+// ---------------------------------------------------------------------------
+
+const rotationFielded = Math.floor(TEAMS * SP_SLOTS / 2);
+const rotationRpa = spRates.length ? spRates[Math.min(spRates.length - 1, rotationFielded)] : 0;
+const relieverSeasonInnings = (gap, ip) => Math.max(20, Math.min(550, 70 + 2200 * gap + 50 * (Number(ip) || 1)));
+const rpaOf = (c) => runsPerPa(c, 0, batters);
+const seasonOf = (c) => (batters.runValue - rpaOf(c)) * relieverSeasonInnings(rotationRpa - rpaOf(c), c.ip);
+
+// A re-implementation of pitcherRanking's re-deal that takes the layer-1 values
+// as an argument, so it can be run on the perturbed values (to prove it matches
+// the engine) and then on the base ones (to bake the lab's numbers).
+function redeal(valueOf, tilt) {
+  const out = new Map();
+  for (const role of ["SP", "RP"]) {
+    const arms = cards.filter((c) => c.kind === "pitcher" && (c.role ?? "RP") === role);
+    if (!arms.length) continue;
+    const t = role === "SP" ? tilt : 1;
+    const values = arms.map((c) => valueOf(c) * t).sort((a, b) => b - a);
+    const byRate = [...arms].sort((a, b) => rpaOf(a) - rpaOf(b));
+    const byRank = new Map();
+    byRate.forEach((c, i) => byRank.set(c.id, values[i]));
+    const share = role === "RP" && arms.length > 1
+      ? arms.filter((c) => rotationRpa - rpaOf(c) > 0.02).length / arms.length
+      : 0;
+    const spacing = Math.max(0, Math.min(1, share / K.relieverSpacingShare));
+    if (!spacing) { arms.forEach((c) => out.set(c.id, byRank.get(c.id))); continue; }
+    const seasons = arms.map(seasonOf);
+    const low = Math.min(...seasons);
+    const high = Math.max(...seasons);
+    const bottom = values[values.length - 1];
+    const slope = high > low ? (values[0] - bottom) / (high - low) : 0;
+    arms.forEach((c, i) => {
+      const spaced = bottom + slope * (seasons[i] - low);
+      out.set(c.id, spacing * spaced + (1 - spacing) * byRank.get(c.id));
+    });
+  }
+  return out;
+}
+
+const redealCheck = redeal((c) => rawModel.value(c), starterTilt);
+let redealWorst = 0;
+for (const c of cards) {
+  if (c.kind !== "pitcher") continue;
+  redealWorst = Math.max(redealWorst, Math.abs((redealCheck.get(c.id) ?? 0) - model.value(c)));
+}
+const redealMatches = redealWorst < 1e-9;
+
+const baseValue = (c) => (c.kind === "pitcher"
+  ? statedPitcherValue(c, K.pitcherWeights, SP_SLOTS).total
+  : statedHitterValue(c, K.hitterWeights).total);
+const baseRanked = redeal(baseValue, starterTilt);
+
+const labCards = cards
+  .filter((c) => !(c.kind === "coach" || c.coach))
+  .map((c) => {
+    const arm = c.kind === "pitcher";
+    const row = {
+      id: c.id,
+      name: c.name,
+      kind: arm ? (c.role ?? "RP") : "bat",
+      pos: arm ? (c.role ?? "RP") : (Array.isArray(c.position) ? c.position.join("/") : String(c.position ?? "")),
+      pts: Number(c.points) || 0,
+      free: Boolean(c.replacement),
+      chart: (c.chart ?? []).map((e) => [RESULT_NAME[e.result] ?? "?", chartSpan(e)]),
+      v1: baseValue(c),
+      v2: baseRanked.has(c.id) ? baseRanked.get(c.id) : baseValue(c)
+    };
+    if (arm) {
+      row.ctl = Number(c.control) || 0;
+      row.ip = Number(c.ip) || 0;
+      row.rpa = rpaOf(c);
+      row.season = seasonOf(c);
+    } else {
+      row.ob = Number(c.onBase) || 0;
+      row.fld = Number(c.fielding) || 0;
+      row.spd = Number(c.speed) || 0;
+    }
+    return row;
+  })
+  .sort((a, b) => b.v2 - a.v2);
+
+const labPayload = {
+  cards: labCards,
+  board: {
+    universe: UNIVERSE, seed: SEED, spSlots: SP_SLOTS, teams: TEAMS,
+    starterSpread, rotationRpa, battersRunValue: batters.runValue, battersOnBase: batters.onBase
+  },
+  defaults: {
+    hOnBase: K.hitterWeights.onBase, hField: K.hitterWeights.fielding,
+    hSpeed: K.hitterWeights.speed, hChart: K.hitterWeights.chart,
+    scale: K.interactionScale, armRate: K.armRate,
+    pControl: K.pitcherWeights.control, pIp: K.pitcherWeights.ip, pChart: K.pitcherWeights.chart,
+    spSlots: SP_SLOTS,
+    starterDiscount: K.starterDiscount, narrowSpread: K.narrowSpread, wideSpread: K.wideSpread,
+    hitterChart: { ...K.hitterChart }, pitcherChart: { ...K.pitcherChart }
+  },
+  staff: K.staff,
+  spacingShare: K.relieverSpacingShare,
+  spAnchor: K.spAnchor, spDiscountAnchor: K.spDiscountAnchor, spCap: K.spCap,
+  perturbation: K.perturbation
+};
+
 // --- layer 3 numbers ------------------------------------------------------
 const groupFloor = (group) => {
   let floor;
@@ -456,6 +575,12 @@ const html = `<!doctype html>
     --warn-soft: #fdf3e0;
     --bad: #a02b1f;
     --bad-soft: #fbeae8;
+    /* Diverging pair for the dial lab's shift meters: blue rises, red falls.
+       Validated against this page's own surfaces in both modes — adjacent CVD
+       deltaE 21.6 light / 19.2 dark, normal-vision 32.3 / 29.0, all checks pass. */
+    --up: #2a78d6;
+    --down: #e34948;
+    --mid: #e9ebe9;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     color-scheme: light;
@@ -472,6 +597,9 @@ const html = `<!doctype html>
       --warn: #e0ae5c;
       --warn-soft: #2b2316;
       --bad: #f08b7d;
+      --up: #3987e5;
+      --down: #e66767;
+      --mid: #26302a;
       --bad-soft: #2e1a17;
       color-scheme: dark;
     }
@@ -487,6 +615,9 @@ const html = `<!doctype html>
     --warn: #e0ae5c;
     --warn-soft: #2b2316;
     --bad: #f08b7d;
+    --up: #3987e5;
+    --down: #e66767;
+    --mid: #26302a;
     --bad-soft: #2e1a17;
     color-scheme: dark;
   }
@@ -570,6 +701,54 @@ const html = `<!doctype html>
   .note p + p { margin-top: .5rem; }
   .note strong { color: var(--warn); }
 
+  /* --- dial lab ------------------------------------------------------ */
+  .lab { background: var(--panel); border: 1px solid var(--rule); border-radius: 3px; padding: 1.1rem 1.2rem; margin: 1.5rem 0; }
+  .labhead { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: baseline; justify-content: space-between; }
+  .labhead h3 { margin: 0; }
+  .btn {
+    font: 600 .76rem/1 var(--mono); padding: .45rem .8rem; cursor: pointer;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--rule); border-radius: 3px;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .dialgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .1rem 2rem; margin: 1rem 0 0; }
+  .dial { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .1rem .6rem; padding: .35rem 0; border-bottom: 1px solid var(--rule); min-width: 0; }
+  .dial label { font: 600 .74rem/1.3 var(--mono); min-width: 0; }
+  .dial .def { display: block; font-weight: 400; color: var(--ink-soft); font-size: .68rem; }
+  .dial input[type="number"] { width: 5.2rem; font: 600 .8rem var(--mono); padding: .22rem .35rem; text-align: right; background: var(--bg); color: var(--ink); border: 1px solid var(--rule); border-radius: 2px; font-variant-numeric: tabular-nums; }
+  .dial input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+  .dial.changed label { color: var(--accent); }
+  .dial.changed input[type="number"] { border-color: var(--accent); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .8rem; margin: 1.2rem 0 0; }
+  .tile { border: 1px solid var(--rule); border-radius: 3px; padding: .6rem .75rem; min-width: 0; }
+  .tile dt { font: 600 .64rem/1.4 var(--mono); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-soft); }
+  .tile dd { margin: .15rem 0 0; font: 700 1.25rem/1.15 var(--mono); font-variant-numeric: tabular-nums; }
+  .tile dd small { display: block; font: 400 .7rem/1.3 var(--sans); color: var(--ink-soft); white-space: normal; }
+
+  .labbar { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 1.3rem 0 .2rem; }
+  .labbar input[type="search"] { flex: 1 1 9rem; min-width: 0; font: .8rem var(--mono); padding: .4rem .55rem; background: var(--bg); color: var(--ink); border: 1px solid var(--rule); border-radius: 3px; }
+
+  .meter { display: block; width: 100%; min-width: 7rem; height: 14px; }
+  .meter .mid { fill: var(--ink-soft); opacity: .35; }
+  .meter .up { fill: var(--up); }
+  .meter .down { fill: var(--down); }
+  td.shift { width: 34%; padding-right: .3rem; }
+  td.delta { font-weight: 700; font-variant-numeric: tabular-nums; }
+  td.delta.up { color: var(--up); }
+  td.delta.down { color: var(--down); }
+  .rank { font: .72rem var(--mono); color: var(--ink-soft); }
+  .rank.up { color: var(--up); }
+  .rank.down { color: var(--down); }
+  .freeflag { font: 600 .6rem/1 var(--mono); letter-spacing: .06em; padding: .13rem .3rem; border-radius: 2px; background: var(--warn-soft); color: var(--warn); margin-left: .35rem; }
+  .labcheck { font: .76rem/1.5 var(--mono); margin: .9rem 0 0; padding: .5rem .7rem; border-radius: 2px; background: var(--accent-soft); color: var(--ink); }
+  .labcheck.bad { background: var(--bad-soft); color: var(--bad); font-weight: 700; }
+  details.more { margin: 1rem 0 0; }
+  details.more > summary { cursor: pointer; font: 600 .78rem var(--mono); color: var(--accent); padding: .3rem 0; }
+  @media (max-width: 560px) { td.shift { display: none; } }
+
   .toc { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
   .toc li { margin: 0; }
   .toc a {
@@ -597,6 +776,7 @@ const html = `<!doctype html>
 
   <ul class="toc">
     <li><a href="#check">Self-check</a></li>
+    <li><a href="#lab"><strong>Turn the dials</strong></a></li>
     <li><a href="#l1">1 · Card model</a></li>
     <li><a href="#l2">2 · Board re-deal</a></li>
     <li><a href="#l3">3 · Context</a></li>
@@ -621,11 +801,65 @@ const html = `<!doctype html>
            stated formula matches the code again.`}
     </p>
     <p class="micro">
+      ${redealMatches
+        ? `The board re-deal reproduces <code>pitcherRanking</code> card for card.`
+        : `<strong>The board re-deal does NOT reproduce pitcherRanking</strong> (worst ${n2(redealWorst)}), so layer 2 on this page is wrong.`}
+    </p>
+    <p class="micro">
       ${esc(commit)}${dirty ? " + uncommitted edits to valuation.js/draft.js" : ""}
       · ${new Date().toISOString().replace("T", " ").slice(0, 16)}
       · board ${esc(UNIVERSE)}/${esc(SEED)} · ${SP_SLOTS} SP slots · ${TEAMS} seats · $${BUDGET}
       · persona held at balanced
     </p>
+  </div>
+
+  <!-- ============================ DIAL LAB ============================ -->
+  <h2 id="lab">Turn the dials</h2>
+  <p>
+    Every number in the card model, live. Move one and watch all
+    ${labCards.length} cards on this board re-rank underneath. The layers below
+    explain what each dial does; this is where you find out whether it matters.
+  </p>
+
+  <div class="lab">
+    <div class="labhead">
+      <h3>Dials</h3>
+      <button type="button" class="btn" id="reset">Reset to the code's values</button>
+    </div>
+
+    <div class="dialgrid" id="dials-main"></div>
+
+    <details class="more">
+      <summary>Chart tables — what one slot of each result is worth</summary>
+      <p class="micro">
+        A hitter's chart counts as a per-slot average, a pitcher's as a sum, so the
+        two tables are on different scales and are not comparable term by term.
+      </p>
+      <div class="dialgrid" id="dials-hchart"></div>
+      <div class="dialgrid" id="dials-pchart"></div>
+    </details>
+
+    <dl class="tiles" id="tiles"></dl>
+    <p class="labcheck" id="labcheck"></p>
+
+    <div class="labbar">
+      <button type="button" class="btn" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="btn" data-filter="bat" aria-pressed="false">Bats</button>
+      <button type="button" class="btn" data-filter="SP" aria-pressed="false">Starters</button>
+      <button type="button" class="btn" data-filter="RP" aria-pressed="false">Relievers</button>
+      <input type="search" id="find" placeholder="find a card…" aria-label="Filter cards by name">
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>card</th><th>points</th><th>baseline</th><th>now</th>
+          <th class="shift">shift</th><th>change</th><th>rank</th>
+        </tr></thead>
+        <tbody id="labrows"></tbody>
+      </table>
+    </div>
+    <p class="micro" id="labcount"></p>
   </div>
 
   <!-- ============================ LAYER 1 ============================ -->
@@ -1011,6 +1245,285 @@ bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × d
     </p>
   </div>
 </main>
+
+<script id="lab-data" type="application/json">${JSON.stringify(labPayload)}</script>
+<script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("lab-data").textContent);
+  var CARDS = DATA.cards, DEF = DATA.defaults, BOARD = DATA.board;
+
+  // ---- the model, ported ------------------------------------------------
+  // Layer 1 is the card alone. Layer 2 re-deals the arms: the ORDER comes from
+  // each arm's runs-per-plate-appearance, which is the engine's own hook rule
+  // and does not move with these dials, so it is baked per card. Only the
+  // spacing moves.
+  function obUsage(ob) {
+    var t = 0, staff = DATA.staff;
+    for (var i = 0; i < staff.length; i++) t += Math.max(0, Math.min(20, ob - staff[i])) / 20;
+    return t / staff.length;
+  }
+  function chartSum(chart, table) {
+    var t = 0;
+    for (var i = 0; i < chart.length; i++) t += chart[i][1] * (table[chart[i][0]] || 0);
+    return t;
+  }
+  function chartSlots(chart) {
+    var t = 0;
+    for (var i = 0; i < chart.length; i++) t += chart[i][1];
+    return t;
+  }
+  function spFactor(slots, d) {
+    var discount = Math.min(1, DATA.spDiscountAnchor / slots);
+    return Math.min(DATA.spCap, Math.max(discount, DATA.spAnchor / slots));
+  }
+  function starterTilt(d) {
+    var span = d.wideSpread - d.narrowSpread;
+    var widening = span === 0
+      ? (BOARD.starterSpread >= d.wideSpread ? 1 : 0)
+      : Math.max(0, Math.min(1, (BOARD.starterSpread - d.narrowSpread) / span));
+    return d.starterDiscount + (1 - d.starterDiscount) * widening;
+  }
+  function layer1(c, d) {
+    if (c.kind === "bat") {
+      var slots = chartSlots(c.chart);
+      var rate = slots ? chartSum(c.chart, d.hitterChart) / slots : 0;
+      var edge = rate * d.hChart - d.armRate;
+      return obUsage(c.ob) * (d.hOnBase / DEF.hOnBase) * edge * d.scale
+        + c.fld * d.hField + Math.max(0, c.spd - 1) * d.hSpeed;
+    }
+    var quality = c.ctl * d.pControl + chartSum(c.chart, d.pitcherChart) * d.pChart;
+    var base = quality * ((c.ip + 4) / 10) + c.ip * d.pIp;
+    return c.kind === "SP" ? base * spFactor(d.spSlots, d) : base;
+  }
+  function valuesFor(d) {
+    var out = {}, i;
+    for (i = 0; i < CARDS.length; i++) out[CARDS[i].id] = layer1(CARDS[i], d);
+    var tilt = starterTilt(d);
+    ["SP", "RP"].forEach(function (role) {
+      var arms = CARDS.filter(function (c) { return c.kind === role; });
+      if (!arms.length) return;
+      var t = role === "SP" ? tilt : 1;
+      var vals = arms.map(function (c) { return out[c.id] * t; }).sort(function (a, b) { return b - a; });
+      var byRate = arms.slice().sort(function (a, b) { return a.rpa - b.rpa; });
+      var byRank = {};
+      byRate.forEach(function (c, i) { byRank[c.id] = vals[i]; });
+      var share = 0;
+      if (role === "RP" && arms.length > 1) {
+        share = arms.filter(function (c) { return BOARD.rotationRpa - c.rpa > 0.02; }).length / arms.length;
+      }
+      var spacing = Math.max(0, Math.min(1, share / DATA.spacingShare));
+      if (!spacing) { arms.forEach(function (c) { out[c.id] = byRank[c.id]; }); return; }
+      var seasons = arms.map(function (c) { return c.season; });
+      var low = Math.min.apply(null, seasons), high = Math.max.apply(null, seasons);
+      var bottom = vals[vals.length - 1];
+      var slope = high > low ? (vals[0] - bottom) / (high - low) : 0;
+      arms.forEach(function (c, i) {
+        out[c.id] = spacing * (bottom + slope * (seasons[i] - low)) + (1 - spacing) * byRank[c.id];
+      });
+    });
+    return out;
+  }
+
+  // ---- dials ------------------------------------------------------------
+  var SPECS = [
+    { key: "hOnBase", label: "hitter · on-base weight", min: 0, max: 40, step: 0.5 },
+    { key: "hChart", label: "hitter · chart weight", min: 0, max: 3, step: 0.05 },
+    { key: "scale", label: "hitter · interaction scale", min: 0, max: 300, step: 5 },
+    { key: "armRate", label: "hitter · replacement arm rate", min: -4, max: 1, step: 0.05 },
+    { key: "hField", label: "hitter · fielding weight", min: 0, max: 30, step: 0.5 },
+    { key: "hSpeed", label: "hitter · speed weight", min: 0, max: 10, step: 0.1 },
+    { key: "pControl", label: "pitcher · control weight", min: 0, max: 80, step: 1 },
+    { key: "pChart", label: "pitcher · chart weight", min: 0, max: 3, step: 0.05 },
+    { key: "pIp", label: "pitcher · innings weight", min: 0, max: 30, step: 0.5 },
+    { key: "spSlots", label: "board · rotation size", min: 1, max: 6, step: 1 },
+    { key: "starterDiscount", label: "board · narrow-board starter tilt", min: 0.2, max: 1, step: 0.01 },
+    { key: "narrowSpread", label: "board · full-discount spread", min: 0, max: 0.12, step: 0.002 },
+    { key: "wideSpread", label: "board · no-discount spread", min: 0, max: 0.2, step: 0.002 }
+  ];
+  var dials = JSON.parse(JSON.stringify(DEF));
+
+  function fmt(v) {
+    return Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 1 ? v.toFixed(2) : v.toFixed(3);
+  }
+  function makeDial(host, spec, get, set) {
+    var wrap = document.createElement("div");
+    wrap.className = "dial";
+    var id = "dial-" + spec.key.replace(/[^a-z0-9]/gi, "-");
+    wrap.innerHTML = '<label for="' + id + '">' + spec.label
+      + '<span class="def">code says ' + fmt(spec.base) + '</span></label>'
+      + '<input type="number" id="' + id + '" step="' + spec.step + '">'
+      + '<input type="range" min="' + spec.min + '" max="' + spec.max + '" step="' + spec.step
+      + '" aria-labelledby="' + id + '">';
+    var num = wrap.querySelector('input[type="number"]');
+    var rng = wrap.querySelector('input[type="range"]');
+    function paint() {
+      var v = get();
+      num.value = v;
+      rng.value = v;
+      wrap.classList.toggle("changed", Math.abs(v - spec.base) > 1e-9);
+    }
+    function onInput(e) {
+      var v = parseFloat(e.target.value);
+      if (!isFinite(v)) return;
+      set(v); paint(); render();
+    }
+    num.addEventListener("input", onInput);
+    rng.addEventListener("input", onInput);
+    host.appendChild(wrap);
+    return paint;
+  }
+
+  var painters = [];
+  var mainHost = document.getElementById("dials-main");
+  SPECS.forEach(function (spec) {
+    spec.base = DEF[spec.key];
+    painters.push(makeDial(mainHost, spec, function () { return dials[spec.key]; },
+      function (v) { dials[spec.key] = v; }));
+  });
+  [["hitterChart", "dials-hchart", "hitter"], ["pitcherChart", "dials-pchart", "pitcher"]].forEach(function (pair) {
+    var host = document.getElementById(pair[1]);
+    Object.keys(DEF[pair[0]]).forEach(function (res) {
+      var spec = {
+        key: pair[0] + "-" + res, label: pair[2] + " chart · " + res.replace("SINGLE_PLUS", "1B+")
+          .replace("SINGLE", "1B").replace("DOUBLE", "2B").replace("TRIPLE", "3B"),
+        min: -30, max: 30, step: 1, base: DEF[pair[0]][res]
+      };
+      painters.push(makeDial(host, spec, function () { return dials[pair[0]][res]; },
+        function (v) { dials[pair[0]][res] = v; }));
+    });
+  });
+
+  // ---- render -----------------------------------------------------------
+  var BASE = {};
+  CARDS.forEach(function (c) { BASE[c.id] = c.v2; });
+  var baseOrder = CARDS.slice().sort(function (a, b) { return b.v2 - a.v2; });
+  var baseRank = {};
+  baseOrder.forEach(function (c, i) { baseRank[c.id] = i + 1; });
+
+  var filter = "all", query = "";
+  var rowsHost = document.getElementById("labrows");
+  var tilesHost = document.getElementById("tiles");
+  var checkHost = document.getElementById("labcheck");
+  var countHost = document.getElementById("labcount");
+
+  function meter(delta, scale) {
+    var w = 100, half = w / 2;
+    var mag = scale ? Math.min(1, Math.abs(delta) / scale) : 0;
+    var len = mag * half;
+    var x = delta >= 0 ? half : half - len;
+    var cls = delta >= 0 ? "up" : "down";
+    return '<svg class="meter" viewBox="0 0 ' + w + ' 14" preserveAspectRatio="none" aria-hidden="true">'
+      + '<rect class="mid" x="' + (half - 0.5) + '" y="0" width="1" height="14"></rect>'
+      + (len > 0.4 ? '<rect class="' + cls + '" x="' + x + '" y="3.5" width="' + len + '" height="7" rx="2"></rect>' : '')
+      + '</svg>';
+  }
+
+  function render() {
+    var live = valuesFor(dials);
+    var order = CARDS.slice().sort(function (a, b) { return live[b.id] - live[a.id]; });
+    var nowRank = {};
+    order.forEach(function (c, i) { nowRank[c.id] = i + 1; });
+
+    var moved = 0, churn = 0, biggestUp = null, biggestDown = null, scale = 0;
+    CARDS.forEach(function (c) {
+      var d = live[c.id] - BASE[c.id];
+      if (Math.abs(d) > 0.5) moved += 1;
+      if (nowRank[c.id] !== baseRank[c.id]) churn += 1;
+      if (!biggestUp || d > biggestUp.d) biggestUp = { c: c, d: d };
+      if (!biggestDown || d < biggestDown.d) biggestDown = { c: c, d: d };
+      scale = Math.max(scale, Math.abs(d));
+    });
+
+    tilesHost.innerHTML = ""
+      + tile("cards that moved", moved + " / " + CARDS.length, "by more than half a value point")
+      + tile("rank changes", churn, "cards no longer in their old place")
+      + tile("biggest riser", biggestUp && biggestUp.d > 0 ? biggestUp.c.name : "—",
+        biggestUp && biggestUp.d > 0 ? "+" + biggestUp.d.toFixed(0) + " points" : "nothing rose")
+      + tile("biggest faller", biggestDown && biggestDown.d < 0 ? biggestDown.c.name : "—",
+        biggestDown && biggestDown.d < 0 ? biggestDown.d.toFixed(0) + " points" : "nothing fell");
+
+    var shown = order.filter(function (c) {
+      if (filter !== "all" && c.kind !== filter) return false;
+      if (query && c.name.toLowerCase().indexOf(query) < 0) return false;
+      return true;
+    });
+    var html = "";
+    shown.forEach(function (c) {
+      var d = live[c.id] - BASE[c.id];
+      var rd = baseRank[c.id] - nowRank[c.id];
+      var cls = d >= 0 ? "up" : "down";
+      html += '<tr><td>' + escapeHtml(c.name)
+        + '<span class="rank"> · ' + escapeHtml(c.pos) + '</span>'
+        + (c.free ? '<span class="freeflag">FREE</span>' : '')
+        + '</td>'
+        + '<td>' + c.pts + '</td>'
+        + '<td>' + BASE[c.id].toFixed(0) + '</td>'
+        + '<td class="em">' + live[c.id].toFixed(0) + '</td>'
+        + '<td class="shift">' + meter(d, scale) + '</td>'
+        + '<td class="delta ' + cls + '">' + (d >= 0 ? "+" : "") + d.toFixed(0) + '</td>'
+        + '<td class="rank ' + (rd > 0 ? "up" : rd < 0 ? "down" : "") + '">'
+        + nowRank[c.id] + (rd === 0 ? "" : (rd > 0 ? " ▲" + rd : " ▼" + (-rd))) + '</td></tr>';
+    });
+    rowsHost.innerHTML = html || '<tr><td colspan="7">No card matches that filter.</td></tr>';
+    countHost.textContent = "Showing " + shown.length + " of " + CARDS.length
+      + " cards. Baseline is this board with the code's own values and no persona, no "
+      + Math.round(DATA.perturbation * 100) + "% weight noise.";
+  }
+
+  function tile(label, value, sub) {
+    return '<div class="tile"><dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(String(value))
+      + '<small>' + escapeHtml(sub) + '</small></dd></div>';
+  }
+  function escapeHtml(x) {
+    return String(x).replace(/[&<>"]/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch];
+    });
+  }
+
+  // ---- the browser half of the self-check -------------------------------
+  // At the default dial positions the ported model must reproduce the values
+  // baked into this page by the engine. If it does not, every number in the lab
+  // is suspect and says so.
+  (function () {
+    var live = valuesFor(JSON.parse(JSON.stringify(DEF)));
+    var worst = 0, who = null;
+    CARDS.forEach(function (c) {
+      var e = Math.abs(live[c.id] - c.v2);
+      if (e > worst) { worst = e; who = c.name; }
+    });
+    var ok = worst < 1e-6;
+    checkHost.className = "labcheck" + (ok ? "" : " bad");
+    checkHost.textContent = ok
+      ? "Port verified: at the code's own values this page reproduces all " + CARDS.length
+        + " engine values exactly (worst difference " + worst.toExponential(1) + ")."
+      : "PORT BROKEN: the model on this page disagrees with the engine by " + worst.toFixed(2)
+        + " on " + who + " at the default dials. Every number below is suspect.";
+  })();
+
+  document.getElementById("reset").addEventListener("click", function () {
+    dials = JSON.parse(JSON.stringify(DEF));
+    painters.forEach(function (p) { p(); });
+    render();
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-filter]"), function (b) {
+    b.addEventListener("click", function () {
+      filter = b.getAttribute("data-filter");
+      Array.prototype.forEach.call(document.querySelectorAll("[data-filter]"), function (o) {
+        o.setAttribute("aria-pressed", String(o === b));
+      });
+      render();
+    });
+  });
+  document.getElementById("find").addEventListener("input", function (e) {
+    query = e.target.value.trim().toLowerCase();
+    render();
+  });
+
+  painters.forEach(function (p) { p(); });
+  render();
+})();
+</script>
 </body>
 </html>
 `;
@@ -1020,7 +1533,9 @@ fs.writeFileSync(OUT, html);
 
 console.log(`valuation-report: wrote ${path.relative(ROOT, OUT)}`);
 console.log(`  formula self-check: ${checked} cards, worst disagreement ${worstErr.toExponential(2)} ${inSync ? "(in sync)" : "*** STALE ***"}`);
+console.log(`  re-deal self-check:  worst disagreement ${redealWorst.toExponential(2)} ${redealMatches ? "(matches pitcherRanking)" : "*** MISMATCH ***"}`);
+console.log(`  dial lab: ${labCards.length} cards embedded`);
 console.log(`  board: ${UNIVERSE}/${SEED}, ${SP_SLOTS} SP slots, starter tilt ${n3(starterTilt)}`);
 console.log(`  pet bat: ${petBat.name} (layer 1 ${n0(rawModel.value(petBat))}, layer 2 ${n0(model.value(petBat))})`);
 console.log(`  pet arm: ${petArm.name} (layer 1 ${n0(rawModel.value(petArm))}, layer 2 ${n0(model.value(petArm))}, rate rank ${armRank + 1}/${armRows.length})`);
-if (!inSync) process.exitCode = 2;
+if (!inSync || !redealMatches) process.exitCode = 2;
