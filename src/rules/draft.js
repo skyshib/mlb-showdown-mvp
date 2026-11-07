@@ -3132,7 +3132,12 @@ function auctionWillingness(draft, manager, player) {
   // place. So price a redundant bat at what the best nine GAINS by seating him,
   // which is nothing when he cannot get in.
   const seatedValue = (roster) => seatedModelValue(market.model, roster);
-  const nineNow = seatedValue(manager.roster);
+  // The seats he has not filled are padded with the free man who would end up
+  // standing there, so the redundant-bat branch below prices on the same scale
+  // auctionWorth does instead of a whole replacement level above it. See
+  // pricingLineup.
+  const pricingNine = pricingLineup(draft, manager.roster);
+  const nineNow = seatedValue(pricingNine);
   // THE SAME ERROR ON THE OTHER SIDE OF THE STAFF. A reliever who fills no pen
   // seat falls to the bucket floor below, which is a flat value difference with
   // no innings rate at all — it drops both RELIEVER_TOP_RATE and
@@ -3190,7 +3195,7 @@ function auctionWillingness(draft, manager, player) {
     const base = surplus * (1 + URGENCY_WEIGHT * urgency);
     if (fills) return base;
     if (positionAware && playerBucket(card) === "hitter") {
-      return Math.max(0, seatedValue([...manager.roster, card]) - nineNow);
+      return Math.max(0, seatedValue([...pricingNine, card]) - nineNow);
     }
     if (positionAware && playerBucket(card) === "bullpen") {
       return Math.max(0, penWorth([...manager.roster, card]) - penNow);
@@ -4478,6 +4483,43 @@ function seatedModelValue(model, roster) {
     total += model.value({ ...slot.player, fielding: gloveAtLineupSlot(slot.player, slot.label) });
   }
   return total;
+}
+
+// THE NINE A MANAGER WILL ACTUALLY FIELD, for pricing only: every lineup seat
+// he has not filled yet is handed the free man who would end up standing there.
+//
+// seatedModelValue counts an empty seat as nothing, so without this a bat who
+// merely OCCUPIES one is credited his whole value — while the same bat at a
+// spot the manager has open goes through cardFillsNeed to auctionWorth and is
+// priced at his surplus over that spot's replacement. The two branches of
+// effectiveWorth then differ by a whole replacement level, and the gap runs
+// BACKWARDS: a card is worth more to a manager who already has the position
+// covered. Mark Grudzielanek '01, the eighth-best second baseman still on the
+// board, drew $113 from a computer holding two BETTER second basemen and $3
+// from the same computer with that spot open — room festive-goose-homer, lot
+// 22, first price, so it paid the whole $113 against a $4 runner-up and the
+// card never took the field. Padding the empty seats makes both branches
+// measure the one thing that matters: what the card gains over the man who
+// would otherwise stand there. A full nine has nothing to pad and reads
+// exactly as before.
+//
+// The snake's slotPricedValue has the same shape and deliberately does NOT do
+// this. A turn there is free, so both of its branches price off priced.value
+// with no floor taken off, and they already agree with each other.
+function pricingLineup(draft, roster) {
+  const { slots } = assignLineupSlots(roster, bestLineupAssignment(roster));
+  const empty = slots.filter((slot) => !slot.player);
+  if (!empty.length) return roster;
+  const standing = new Map(standingReplacements(draft).map((card) => [card.slot, card]));
+  const fillers = [];
+  for (const slot of empty) {
+    const key = replacementSlot("hitter", null, slot.label);
+    const free = standing.get(key) ?? replacementSource(draft, "hitter", null, key);
+    // One clone per seat: assignLineupSlots seats each id once, so a single
+    // shared corner-outfield card would leave the other corner empty again.
+    if (free) fillers.push({ ...free, id: `pricing-${free.id}-${slot.label}` });
+  }
+  return fillers.length ? [...roster, ...fillers] : roster;
 }
 
 // The gloves of the best nine this roster can field, each counted at the slot it
