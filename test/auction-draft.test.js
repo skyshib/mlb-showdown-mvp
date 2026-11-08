@@ -1281,11 +1281,14 @@ test("positional scarcity: the same value is worth more at a thin spot than a de
   // pool) and one at a deep position (first base, a strong pool). The scarce-spot
   // bat clears his position's replacement and is worth real money; the deep-spot
   // one is below his and is worth nothing — you take the next first baseman.
+  // Gloves are zeroed throughout: fielding is priced per position now (a point
+  // at catcher is not a point at first), so leaving them on would make the two
+  // bats differ on paper for a reason this test is not about.
   const cards = [];
-  [7, 8, 9, 10].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-C-${i}`, position: "C", onBase })));
-  [10, 11, 12, 13, 14, 15, 16, 17].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-1B-${i}`, position: "1B", onBase })));
+  [7, 8, 9, 10].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-C-${i}`, position: "C", onBase, fielding: 0 })));
+  [10, 11, 12, 13, 14, 15, 16, 17].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-1B-${i}`, position: "1B", onBase, fielding: 0 })));
   for (const pos of ["2B", "3B", "SS", "LF", "CF", "RF"]) {
-    [11, 12, 13, 14].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-${pos}-${i}`, position: pos, onBase })));
+    [11, 12, 13, 14].forEach((onBase, i) => cards.push(makeHitter({ id: `wk-${pos}-${i}`, position: pos, onBase, fielding: 0 })));
   }
   for (let i = 0; i < 8; i += 1) cards.push(makePitcher({ id: `wk-SP-${i}`, role: "SP", control: 4 + (i % 3) }));
   for (let i = 0; i < 8; i += 1) cards.push(makePitcher({ id: `wk-RP-${i}`, role: "RP", control: 4 + (i % 3), ip: 1 }));

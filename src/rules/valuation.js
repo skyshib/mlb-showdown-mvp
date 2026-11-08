@@ -31,6 +31,13 @@ const HITTER_CHART_VALUES = {
   [RESULTS.HR]: 14
 };
 
+// PU AND SO ARE THE SAME OUT. applyResult in game.js runs them through one
+// branch — `case RESULTS.PU: case RESULTS.SO: state.outs += 1; return 0` — with
+// no advancement, no double play and no sacrifice; the only thing that tells
+// them apart is that SO also ticks a box-score line. So they must carry the same
+// chart value, and a popup scoring 8 against a strikeout's 10 was simply an
+// error. They are both 10.
+//
 // The out rewards (PU/SO/GB/FB) are left as a strong chart-quality signal —
 // head-to-head testing showed that damping them makes the valuation discriminate
 // WORSE between arms, so they stay. The correction is at the extra-base end,
@@ -39,7 +46,7 @@ const HITTER_CHART_VALUES = {
 // is −24 and the triple (+1.01) is −16. The triple was previously missing
 // entirely (scored 0). So an HR-prone arm is no longer flattered by its outs.
 const PITCHER_CHART_VALUES = {
-  [RESULTS.PU]: 8,
+  [RESULTS.PU]: 10,
   [RESULTS.SO]: 10,
   [RESULTS.GB]: 8,
   [RESULTS.FB]: 6,
@@ -205,6 +212,119 @@ const REPLACEMENT_ARM_RATE = -1.35;
 // bidder actually prices, not on mean value.
 const HITTER_INTERACTION_SCALE = 130;
 
+// ---- what a glove is worth, by where he stands ----------------------------
+//
+// A flat rate per fielding point said a catcher's tenth point was worth his
+// first, and that a point at short was worth a point in left. The WPA-per-162
+// sweep (every unit's fielding total moved up and down across every chance the
+// sim threw, runners re-deciding at each level) says otherwise, and says it the
+// same way in all five clubs measured:
+//
+//   CATCHER is steep below what clubs field and almost FLAT above it. Dropping
+//     ten points off a fielded +6 costs ~14.6 wins a season; adding ten gains
+//     ~1.4. The glove you must have is enormously valuable and the glove past
+//     it is nearly free.
+//   INFIELD bends the same way, less sharply: ~0.63 wins a point below, ~0.31
+//     above.
+//   OUTFIELD is LINEAR over the whole range, ~0.95 wins a point either way, and
+//     is the only unit that keeps paying above what clubs field.
+//
+// The charts move a UNIT total (the catcher is one man; the infield sums four
+// gloves, the outfield three), so a card's own points sit on that curve on top
+// of whatever his teammates already provide. With teammates at their positions'
+// usual ratings, the bend lands at the card's OWN position's usual rating —
+// which is what FIELDING_REFERENCE holds.
+//
+// The curve fitted to all three is ONE smooth family, never a kink:
+//
+//     unit(x) = rate * bend * (1 - e^(-x / bend))
+//
+// unit(0) = 0, unit'(x) = rate * e^(-x/bend), which is positive and strictly
+// falling — so the concavity never stops and there is no corner anywhere to
+// land on. A missing `bend` is the bend -> infinity case, which is exactly a
+// straight line, so the outfield is the same curve rather than a special rule.
+// Fitted against the measured points at 0.32 WPA rms for the catcher and 0.12
+// for the infield.
+//
+// Rates are in EFFECTIVE RATING POINTS per unit point, so weights.fielding stays
+// the master dial a persona leans on, and they are rescaled to hold the deck's
+// TOTAL glove value where the flat rate had it: this redistributes fielding by
+// position rather than re-weighting fielding against on-base and chart.
+const FIELDING_GROUP = {
+  C: "catcher",
+  "1B": "infield", "2B": "infield", "3B": "infield", SS: "infield",
+  LF: "outfield", RF: "outfield", "LF/RF": "outfield", CF: "outfield",
+  DH: null
+};
+const FIELDING_CURVE = {
+  catcher: { rate: 2.3189, bend: 5.46 },
+  infield: { rate: 0.9583, bend: 15.33 },
+  outfield: { rate: 1.1434 }
+};
+// What the REST of a man's unit typically puts on the field. His own points sit
+// on the unit curve ON TOP of that, which is the whole reason a catcher's glove
+// bends so much harder than a shortstop's: the catcher IS his unit and starts at
+// zero, where the curve is steepest, while an infielder's three team-mates have
+// already carried the unit up into the flat part before he arrives.
+const FIELDING_UNIT_BASE = {
+  C: 0, "1B": 6.55, "2B": 4.18, "3B": 5.55, SS: 5.0,
+  LF: 0, RF: 0, "LF/RF": 0, CF: 0, DH: 0
+};
+
+// Where the card actually stands, when the caller knows it (the seated readings
+// in draft.js pass the slot), else the position printed on the card.
+function fieldingSlotOf(player) {
+  const slot = player?.fieldingSlot;
+  if (slot && FIELDING_GROUP[slot] !== undefined) return slot;
+  const printed = Array.isArray(player?.position) ? player.position.join("/") : player?.position;
+  return typeof printed === "string" ? printed : "";
+}
+
+function fieldingShape(player) {
+  const rating = Number(player?.fielding) || 0;
+  const slot = fieldingSlotOf(player);
+  const group = FIELDING_GROUP[slot];
+  // A bat at a spot with no group (the DH, or a position this set does not
+  // know) is carrying no glove worth pricing.
+  if (!group) return 0;
+  const curve = FIELDING_CURVE[group];
+  // No bend is the straight line the outfield asked for -- the M -> infinity
+  // case of the same curve, not a different rule.
+  if (!curve.bend) return curve.rate * rating;
+  const base = FIELDING_UNIT_BASE[slot] ?? 0;
+  const unit = (x) => curve.rate * curve.bend * (1 - Math.exp(-x / curve.bend));
+  return unit(base + rating) - unit(base);
+}
+
+// ---- what legs are worth --------------------------------------------------
+//
+// Speed pays twice, and the two halves have different shapes. Taking the extra
+// base on a hit is available to everyone and scales smoothly, so it stays
+// linear. STEALING does not: the sim prices a steal at (speed − the catcher's
+// fielding) / 20, and a runner only gets the green light once that clears the
+// break-even, so against an ordinary catcher nothing below about Speed A ever
+// runs at all. That makes the top of the range worth far more than the middle —
+// the gap from 18 to 28 is three times the gap from 8 to 18, where a flat rate
+// called them equal.
+//
+// The knee sits at SPEED_A_MINIMUM, which is the line the engine itself draws
+// (it is also what the first base coach's green light keys on). Rates are in
+// effective speed points so weights.speed stays the persona's dial, and they
+// hold the deck's total speed value where the flat rate had it, so this buys
+// the elite runner his premium out of the middle of the range rather than
+// adding weight to legs overall.
+const SPEED_STEAL_KNEE = 18;
+const SPEED_STEAL_POWER = 2;
+const SPEED_LEGS_RATE = 0.977;
+const SPEED_STEAL_RATE = 0.195;
+
+function speedShape(player) {
+  const speed = Number(player?.speed) || 0;
+  const legs = Math.max(0, speed - 1) * SPEED_LEGS_RATE;
+  const steal = Math.max(0, speed - SPEED_STEAL_KNEE) ** SPEED_STEAL_POWER * SPEED_STEAL_RATE;
+  return legs + steal;
+}
+
 function onBaseUsage(onBase) {
   const ob = Number(onBase) || 0;
   let total = 0;
@@ -215,7 +335,6 @@ function onBaseUsage(onBase) {
 }
 
 function hitterValue(player, weights) {
-  const speedComponent = Math.max(0, (Number(player.speed) || 0) - 1);
   // The on-base weight is now the persona's read on how much reaching base is
   // worth, applied as a lean on the usage curve — it must not scale the
   // replacement line, or a bat-minded archetype gets a flat bonus on every bat.
@@ -223,8 +342,8 @@ function hitterValue(player, weights) {
   const edge = chartRate(player.chart, HITTER_CHART_VALUES) * weights.chart - REPLACEMENT_ARM_RATE;
   return (
     onBaseUsage(player.onBase) * lean * edge * HITTER_INTERACTION_SCALE +
-    (Number(player.fielding) || 0) * weights.fielding +
-    speedComponent * weights.speed
+    fieldingShape(player) * weights.fielding +
+    speedShape(player) * weights.speed
   );
 }
 

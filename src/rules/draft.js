@@ -4466,7 +4466,16 @@ function hitterPositionBonus(roster, player) {
 // are returned untouched.
 function asRostered(roster, player) {
   if (player?.kind !== "hitter") return player;
-  return { ...player, fielding: seatedGloveTotal([...roster, player]) - seatedGloveTotal(roster) };
+  const seated = assignLineupSlots([...roster, player], bestLineupAssignment([...roster, player])).slots;
+  // The spot he would actually take, so his glove is priced on THAT position's
+  // curve. A bat who gets in nowhere keeps his printed position, which costs
+  // nothing: his seated glove is zero either way.
+  const mine = seated.find((slot) => slot.player?.id === player.id);
+  return {
+    ...player,
+    fielding: seatedGloveTotal([...roster, player]) - seatedGloveTotal(roster),
+    ...(mine ? { fieldingSlot: mine.label } : {})
+  };
 }
 
 // What the best nine this roster can field is WORTH, each card valued on the
@@ -4480,7 +4489,13 @@ function seatedModelValue(model, roster) {
   let total = 0;
   for (const slot of slots) {
     if (!slot.player) continue;
-    total += model.value({ ...slot.player, fielding: gloveAtLineupSlot(slot.player, slot.label) });
+    // fieldingSlot tells the valuation WHERE he is standing, so the glove is
+    // priced on that position's curve rather than on his printed position's.
+    total += model.value({
+      ...slot.player,
+      fielding: gloveAtLineupSlot(slot.player, slot.label),
+      fieldingSlot: slot.label
+    });
   }
   return total;
 }

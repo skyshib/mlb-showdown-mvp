@@ -103,6 +103,45 @@ function plainWeights(file, name) {
   return out;
 }
 
+// Keys may be bare (C, SS) or quoted ("1B", "LF/RF").
+const KEYED = /(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))\s*:\s*/g;
+
+// { C: 6, "1B": 0.5, ... }
+function numberMap(file, name) {
+  const body = constObjectText(file, name);
+  const out = {};
+  for (const m of body.matchAll(/(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))\s*:\s*(-?[0-9.]+)/g)) {
+    out[m[1] ?? m[2] ?? m[3]] = Number(m[4]);
+  }
+  if (!Object.keys(out).length && body) missing.push(`${name} — no "key: number" pairs found in ${file}`);
+  return out;
+}
+
+// { C: "catcher", DH: null, ... }
+function stringMap(file, name) {
+  const body = constObjectText(file, name);
+  const out = {};
+  const re = /(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))\s*:\s*(?:"([^"]*)"|'([^']*)'|(null))/g;
+  for (const m of body.matchAll(re)) {
+    out[m[1] ?? m[2] ?? m[3]] = m[6] ? null : (m[4] ?? m[5]);
+  }
+  if (!Object.keys(out).length && body) missing.push(`${name} — no "key: string|null" pairs found in ${file}`);
+  return out;
+}
+
+// { catcher: { below: n, above: n }, ... }
+function curveMap(file, name) {
+  const body = constObjectText(file, name);
+  const out = {};
+  for (const m of body.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*\{([^}]*)\}/g)) {
+    const inner = {};
+    for (const n of m[2].matchAll(/([A-Za-z_$][\w$]*)\s*:\s*(-?[0-9.]+)/g)) inner[n[1]] = Number(n[2]);
+    out[m[1]] = inner;
+  }
+  if (!Object.keys(out).length && body) missing.push(`${name} — no "group: { … }" entries found in ${file}`);
+  return out;
+}
+
 // { [RESULTS.SO]: -4, ... } keyed by the RESULTS member name.
 function chartTable(file, name) {
   const body = constObjectText(file, name);
@@ -124,6 +163,13 @@ const K = {
   spAnchor: constNum("valuation.js", "SP_SLOT_ANCHOR"),
   spDiscountAnchor: constNum("valuation.js", "SP_SLOT_DISCOUNT_ANCHOR"),
   spCap: constNum("valuation.js", "SP_SLOT_FACTOR_CAP"),
+  fieldingGroup: stringMap("valuation.js", "FIELDING_GROUP"),
+  fieldingCurve: curveMap("valuation.js", "FIELDING_CURVE"),
+  fieldingBase: numberMap("valuation.js", "FIELDING_UNIT_BASE"),
+  speedKnee: constNum("valuation.js", "SPEED_STEAL_KNEE"),
+  speedPower: constNum("valuation.js", "SPEED_STEAL_POWER"),
+  speedLegs: constNum("valuation.js", "SPEED_LEGS_RATE"),
+  speedSteal: constNum("valuation.js", "SPEED_STEAL_RATE"),
 
   hitterTarget: constNum("draft.js", "HITTER_TARGET"),
   relieverSpacingShare: constNum("draft.js", "RELIEVER_SPACING_SHARE"),
@@ -171,15 +217,40 @@ const onBaseUsage = (ob) => K.staff.reduce(
   (t, control) => t + Math.max(0, Math.min(20, (Number(ob) || 0) - control)) / 20, 0
 ) / K.staff.length;
 
+function fieldingSlotOf(card) {
+  const slot = card?.fieldingSlot;
+  if (slot && K.fieldingGroup[slot] !== undefined) return slot;
+  const printed = Array.isArray(card?.position) ? card.position.join("/") : card?.position;
+  return typeof printed === "string" ? printed : "";
+}
+function statedFieldingShape(card) {
+  const rating = Number(card?.fielding) || 0;
+  const slot = fieldingSlotOf(card);
+  const group = K.fieldingGroup[slot];
+  if (!group) return 0;
+  const curve = K.fieldingCurve[group];
+  if (!curve.bend) return curve.rate * rating;
+  const base = K.fieldingBase[slot] ?? 0;
+  const unit = (x) => curve.rate * curve.bend * (1 - Math.exp(-x / curve.bend));
+  return unit(base + rating) - unit(base);
+}
+function statedSpeedShape(card) {
+  const speed = Number(card?.speed) || 0;
+  return Math.max(0, speed - 1) * K.speedLegs
+    + Math.max(0, speed - K.speedKnee) ** K.speedPower * K.speedSteal;
+}
 function statedHitterValue(card, w) {
   const usage = onBaseUsage(card.onBase);
   const lean = w.onBase / K.hitterWeights.onBase;
   const edge = chartRate(card.chart, HV) * w.chart - K.armRate;
+  const gloveShape = statedFieldingShape(card);
+  const legShape = statedSpeedShape(card);
   return {
-    usage, lean, edge,
+    usage, lean, edge, gloveShape, legShape,
+    slot: fieldingSlotOf(card),
     interaction: usage * lean * edge * K.interactionScale,
-    glove: (Number(card.fielding) || 0) * w.fielding,
-    legs: Math.max(0, (Number(card.speed) || 0) - 1) * w.speed,
+    glove: gloveShape * w.fielding,
+    legs: legShape * w.speed,
     get total() { return this.interaction + this.glove + this.legs; }
   };
 }
@@ -397,12 +468,19 @@ const labPayload = {
     hOnBase: K.hitterWeights.onBase, hField: K.hitterWeights.fielding,
     hSpeed: K.hitterWeights.speed, hChart: K.hitterWeights.chart,
     scale: K.interactionScale, armRate: K.armRate,
+    catcherRate: K.fieldingCurve.catcher.rate, catcherBend: K.fieldingCurve.catcher.bend,
+    infieldRate: K.fieldingCurve.infield.rate, infieldBend: K.fieldingCurve.infield.bend,
+    outfieldRate: K.fieldingCurve.outfield.rate,
+    speedLegs: K.speedLegs, speedSteal: K.speedSteal,
+    speedKnee: K.speedKnee, speedPower: K.speedPower,
     pControl: K.pitcherWeights.control, pIp: K.pitcherWeights.ip, pChart: K.pitcherWeights.chart,
     spSlots: SP_SLOTS,
     starterDiscount: K.starterDiscount, narrowSpread: K.narrowSpread, wideSpread: K.wideSpread,
     hitterChart: { ...K.hitterChart }, pitcherChart: { ...K.pitcherChart }
   },
   staff: K.staff,
+  fieldingGroup: K.fieldingGroup,
+  fieldingBase: K.fieldingBase,
   spacingShare: K.relieverSpacingShare,
   spAnchor: K.spAnchor, spDiscountAnchor: K.spDiscountAnchor, spCap: K.spCap,
   perturbation: K.perturbation
@@ -497,6 +575,7 @@ const traps = [...perPoint].sort((a, b) => a.ratio - b.ratio).slice(0, 5);
 // ---------------------------------------------------------------------------
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const n1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
 const n2 = (x) => (Number.isFinite(x) ? x.toFixed(2) : "—");
 const n3 = (x) => (Number.isFinite(x) ? x.toFixed(3) : "—");
 const n4 = (x) => (Number.isFinite(x) ? x.toFixed(4) : "—");
@@ -874,8 +953,8 @@ const html = `<!doctype html>
 
   <h3>Hitters</h3>
   <div class="formula">hitterValue = onBaseUsage(onBase) × lean × edge × ${K.interactionScale}
-              + fielding × ${K.hitterWeights.fielding}
-              + max(0, speed − 1) × ${K.hitterWeights.speed}
+              + glove(fielding, position) × ${K.hitterWeights.fielding}
+              + legs(speed) × ${K.hitterWeights.speed}
 
 onBaseUsage(ob) = mean over the reference staff [${K.staff.join(", ")}]
                   of clamp(ob − control, 0, 20) / 20
@@ -893,6 +972,88 @@ lean            = w_onBase / ${K.hitterWeights.onBase}      (1 when persona-neut
     <thead><tr><th>on-base</th>${[5, 7, 9, 11, 13, 15, 17].map((o) => `<th>${o}</th>`).join("")}</tr></thead>
     <tbody><tr><td>share of PAs on his own chart</td>${[5, 7, 9, 11, 13, 15, 17].map((o) => `<td>${n3(onBaseUsage(o))}</td>`).join("")}</tr></tbody>
   </table></div>
+
+  <h3>The glove, by where he stands</h3>
+  <div class="formula">unit(x)       = rate × bend × (1 − e^(−x / bend))      unit'(x) = rate × e^(−x / bend)
+glove(r, pos) = unit(base[pos] + r) − unit(base[pos])
+
+no bend  →  glove(r) = rate × r        (the bend → ∞ case: a straight line)</div>
+  <p>
+    A flat rate said a catcher's tenth point was worth his first, and that a point
+    at short was worth a point in left. The WPA-per-162 sweep says otherwise, and
+    says it the same way in all five clubs measured: the catcher's curve is steep
+    below what clubs field and nearly flat above it, the infield bends the same way
+    less sharply, and the outfield is the one unit that keeps paying all the way up.
+  </p>
+  <div class="scroll"><table>
+    <thead><tr><th>group</th><th>rate (first unit point)</th><th>bend</th><th>shape</th></tr></thead>
+    <tbody>
+      <tr><td>catcher</td><td>${n3(K.fieldingCurve.catcher.rate)}</td><td>${n2(K.fieldingCurve.catcher.bend)}</td><td>strongly concave, and he is his own whole unit</td></tr>
+      <tr><td>infield</td><td>${n3(K.fieldingCurve.infield.rate)}</td><td>${n2(K.fieldingCurve.infield.bend)}</td><td>concave, gently</td></tr>
+      <tr><td>outfield</td><td>${n3(K.fieldingCurve.outfield.rate)}</td><td>—</td><td>no bend: linear</td></tr>
+    </tbody>
+  </table></div>
+  <div class="scroll"><table>
+    <thead><tr><th>position</th>${Object.keys(K.fieldingBase).map((k) => `<th>${esc(k)}</th>`).join("")}</tr></thead>
+    <tbody>
+      <tr><td>rest of his unit supplies</td>${Object.values(K.fieldingBase).map((v) => `<td>${v}</td>`).join("")}</tr>
+      <tr><td>group</td>${Object.keys(K.fieldingBase).map((k) => `<td>${esc(K.fieldingGroup[k] ?? "—")}</td>`).join("")}</tr>
+    </tbody>
+  </table></div>
+  <div class="scroll"><table>
+    <thead><tr><th>what a glove is worth</th><th>rating 0</th><th>1</th><th>2</th><th>4</th><th>6</th><th>8</th><th>10</th></tr></thead>
+    <tbody>${["C", "SS", "CF"].map((pos) => `<tr><td>${esc(pos)}</td>${[0, 1, 2, 4, 6, 8, 10]
+      .map((r) => `<td>${n0(statedFieldingShape({ fielding: r, position: pos }) * K.hitterWeights.fielding)}</td>`).join("")}</tr>`).join("")}
+      <tr class="total"><td>a flat rate would say</td>${[0, 1, 2, 4, 6, 8, 10].map((r) => `<td>${r * K.hitterWeights.fielding}</td>`).join("")}</tr>
+    </tbody>
+  </table></div>
+  <div class="scroll"><table>
+    <thead><tr><th>and the NEXT point is worth</th>${[0, 1, 2, 3, 4, 5, 6, 8].map((r) => `<th>${r}→${r + 1}</th>`).join("")}</tr></thead>
+    <tbody>${["C", "SS", "CF"].map((pos) => `<tr><td>${esc(pos)}</td>${[0, 1, 2, 3, 4, 5, 6, 8]
+      .map((r) => `<td>${n1((statedFieldingShape({ fielding: r + 1, position: pos }) - statedFieldingShape({ fielding: r, position: pos })) * K.hitterWeights.fielding)}</td>`).join("")}</tr>`).join("")}
+    </tbody>
+  </table></div>
+  <p class="micro">
+    Every next point is worth strictly less than the one before it, with no step
+    and no corner: one smooth family covers all three, and the outfield is its
+    bend → ∞ case rather than a separate rule. The catcher bends hardest because
+    he IS his whole unit and so starts at the steep end of the curve, while an
+    infielder's three team-mates have already carried the unit into the flat part
+    before he arrives. The rates are the measured win curves rescaled to hold the
+    deck's TOTAL glove value where the flat rate had it, so this redistributes
+    fielding by position rather than re-weighting it against on-base and chart. Where the caller knows the seat a bat takes it passes it, so the glove
+    is priced at the spot he stands in rather than the one printed on his card.
+  </p>
+
+  <h3>The legs, and the steal</h3>
+  <div class="formula">legs(s) = max(0, s − 1) × ${K.speedLegs}
+          + max(0, s − ${K.speedKnee})^${K.speedPower} × ${K.speedSteal}</div>
+  <p>
+    Speed pays twice and the halves have different shapes. Taking the extra base on
+    a hit is open to everyone and scales smoothly, so it stays linear. Stealing does
+    not: the sim prices a steal at <code>(speed − the catcher's fielding) / 20</code>
+    and a runner only gets the green light once that clears break-even, so against an
+    ordinary catcher nothing much below Speed A ever runs. That makes the top of the
+    range worth far more than the middle. The knee sits at ${K.speedKnee}, the line
+    the engine itself draws.
+  </p>
+  <div class="scroll"><table>
+    <thead><tr><th>speed</th>${[8, 13, 18, 20, 24, 28].map((v) => `<th>${v}</th>`).join("")}</tr></thead>
+    <tbody>
+      <tr><td>worth (value points)</td>${[8, 13, 18, 20, 24, 28].map((v) => `<td>${n0(statedSpeedShape({ speed: v }) * K.hitterWeights.speed)}</td>`).join("")}</tr>
+      <tr class="total"><td>a flat rate would say</td>${[8, 13, 18, 20, 24, 28].map((v) => `<td>${n0((v - 1) * K.hitterWeights.speed)}</td>`).join("")}</tr>
+    </tbody>
+  </table></div>
+  <p class="micro">
+    ${(() => {
+      const at = (v) => statedSpeedShape({ speed: v }) * K.hitterWeights.speed;
+      const lo = at(18) - at(8), hi = at(28) - at(18);
+      return `8 to 18 is worth ${n0(lo)}; 18 to 28 is worth ${n0(hi)}, ${(hi / lo).toFixed(1)}× as much. A flat rate called them equal.`;
+    })()}
+    These rates hold the deck's total speed value where the flat rate had it, so the
+    elite runner's premium comes out of the middle of the range rather than being
+    added on top.
+  </p>
 
   <h3>Pitchers</h3>
   <div class="formula">pitcherValue = (control × ${K.pitcherWeights.control} + chartTotal × ${K.pitcherWeights.chart}) × (ip + 4)/10
@@ -1124,8 +1285,8 @@ bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × d
         <tr><td>chart rate</td><td class="mono">${n3(chartRate(petBat.chart, HV))} per slot over ${chartSlots(petBat.chart)} slots</td><td>—</td></tr>
         <tr><td>edge over a typical arm</td><td class="mono">${n3(chartRate(petBat.chart, HV))} − (${K.armRate}) = ${n3(batMath.edge)}</td><td>—</td></tr>
         <tr><td>on-base × chart</td><td class="mono">${n3(batMath.usage)} × ${n3(batMath.lean)} × ${n3(batMath.edge)} × ${K.interactionScale}</td><td>${n2(batMath.interaction)}</td></tr>
-        <tr><td>glove</td><td class="mono">${esc(petBat.fielding ?? 0)} × ${n2(rawModel.weights.hitter.fielding)}</td><td>${n2(batMath.glove)}</td></tr>
-        <tr><td>legs</td><td class="mono">max(0, ${esc(petBat.speed ?? 0)} − 1) × ${n2(rawModel.weights.hitter.speed)}</td><td>${n2(batMath.legs)}</td></tr>
+        <tr><td>glove</td><td class="mono">${esc(batMath.slot)} rating ${esc(petBat.fielding ?? 0)} on top of the ${n2(K.fieldingBase[batMath.slot] ?? 0)} his unit already has → ${n2(batMath.gloveShape)} × ${n2(rawModel.weights.hitter.fielding)}</td><td>${n2(batMath.glove)}</td></tr>
+        <tr><td>legs</td><td class="mono">speed ${esc(petBat.speed ?? 0)}${(Number(petBat.speed) || 0) > K.speedKnee ? ` (${(Number(petBat.speed) || 0) - K.speedKnee} past the steal knee)` : " (below the steal knee)"} → ${n2(batMath.legShape)} × ${n2(rawModel.weights.hitter.speed)}</td><td>${n2(batMath.legs)}</td></tr>
         <tr class="total"><td>layer 1 value</td><td class="mono">engine returns ${n2(rawModel.value(petBat))}</td><td>${n2(batMath.total)}</td></tr>
       </tbody>
     </table></div>
@@ -1273,6 +1434,24 @@ bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × d
     for (var i = 0; i < chart.length; i++) t += chart[i][1];
     return t;
   }
+  // A glove is priced on the curve for the spot he is printed at: steep up to
+  // what that position usually brings, then flat (or linear, in the outfield).
+  function fieldShape(c, d) {
+    var group = DATA.fieldingGroup[c.pos];
+    if (!group) return 0;
+    if (group === "outfield") return d.outfieldRate * c.fld;
+    var rate = group === "catcher" ? d.catcherRate : d.infieldRate;
+    var bend = group === "catcher" ? d.catcherBend : d.infieldBend;
+    if (!bend) return rate * c.fld;
+    var base = DATA.fieldingBase[c.pos] || 0;
+    var unit = function (x) { return rate * bend * (1 - Math.exp(-x / bend)); };
+    return unit(base + c.fld) - unit(base);
+  }
+  // Legs are linear; the steal premium switches on at the knee and accelerates.
+  function legShape(c, d) {
+    return Math.max(0, c.spd - 1) * d.speedLegs
+      + Math.pow(Math.max(0, c.spd - d.speedKnee), d.speedPower) * d.speedSteal;
+  }
   function spFactor(slots, d) {
     var discount = Math.min(1, DATA.spDiscountAnchor / slots);
     return Math.min(DATA.spCap, Math.max(discount, DATA.spAnchor / slots));
@@ -1290,7 +1469,7 @@ bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × d
       var rate = slots ? chartSum(c.chart, d.hitterChart) / slots : 0;
       var edge = rate * d.hChart - d.armRate;
       return obUsage(c.ob) * (d.hOnBase / DEF.hOnBase) * edge * d.scale
-        + c.fld * d.hField + Math.max(0, c.spd - 1) * d.hSpeed;
+        + fieldShape(c, d) * d.hField + legShape(c, d) * d.hSpeed;
     }
     var quality = c.ctl * d.pControl + chartSum(c.chart, d.pitcherChart) * d.pChart;
     var base = quality * ((c.ip + 4) / 10) + c.ip * d.pIp;
@@ -1333,6 +1512,15 @@ bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × d
     { key: "armRate", label: "hitter · replacement arm rate", min: -4, max: 1, step: 0.05 },
     { key: "hField", label: "hitter · fielding weight", min: 0, max: 30, step: 0.5 },
     { key: "hSpeed", label: "hitter · speed weight", min: 0, max: 10, step: 0.1 },
+    { key: "catcherRate", label: "glove · catcher, first point", min: 0, max: 6, step: 0.05 },
+    { key: "catcherBend", label: "glove · catcher, bend (lower = more concave)", min: 1, max: 60, step: 0.5 },
+    { key: "infieldRate", label: "glove · infield, first point", min: 0, max: 6, step: 0.05 },
+    { key: "infieldBend", label: "glove · infield, bend", min: 1, max: 60, step: 0.5 },
+    { key: "outfieldRate", label: "glove · outfield (linear)", min: 0, max: 4, step: 0.05 },
+    { key: "speedLegs", label: "legs · extra-base rate", min: 0, max: 3, step: 0.02 },
+    { key: "speedSteal", label: "legs · steal premium", min: 0, max: 2, step: 0.005 },
+    { key: "speedKnee", label: "legs · steal knee (speed)", min: 5, max: 28, step: 1 },
+    { key: "speedPower", label: "legs · steal curvature", min: 1, max: 3, step: 0.1 },
     { key: "pControl", label: "pitcher · control weight", min: 0, max: 80, step: 1 },
     { key: "pChart", label: "pitcher · chart weight", min: 0, max: 3, step: 0.05 },
     { key: "pIp", label: "pitcher · innings weight", min: 0, max: 30, step: 0.5 },

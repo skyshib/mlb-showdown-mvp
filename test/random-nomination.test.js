@@ -468,8 +468,10 @@ test("undo after the final lot rolls the sweep back off the rosters", () => {
   // A seed whose board runs out before the last holes are filled, so the night
   // ends on sweeps and there is something to roll back. Which seeds do that
   // moves with the bidding, so this one is checked against both sides of any
-  // bidder change rather than taken on faith.
-  const { draft } = roomOf(3, "undo-sweep-2");
+  // bidder change rather than taken on faith. (undo-sweep-2 stopped sweeping
+  // when fielding went position-specific; -3 sweeps both before and after, and
+  // so do -5 through -7 and -9 through -14 if this one ever stops.)
+  const { draft } = roomOf(3, "undo-sweep-3");
   let guard = 0;
   while (!draft.complete && guard < 5000) {
     guard += 1;
