@@ -1,4 +1,4 @@
-import { chartSpan, formatRange, positionsLabel, fieldingLabel } from "../rules/cards.js?v=20260716-records";
+import { chartSpan, formatRange, positionsLabel, fieldingLabel, MAX_ROLL } from "../rules/cards.js?v=20260716-records";
 // Same query string batch.js uses, so the browser keeps one copy of the engine.
 import { eventLeverage } from "../rules/game.js?v=20260717-draft-wpa";
 import { cardPanelHtml } from "./cardFace.js?v=20260725-golden-serial";
@@ -7,6 +7,9 @@ import { isCoach } from "../rules/coaches.js?v=20260910-coaches";
 
 const HITTER_OUTCOMES = ["BB", "1B", "1B+", "2B", "3B", "HR"];
 const PITCHER_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "2B", "HR"];
+// The four results on a pitcher's chart that retire the batter. Everything
+// above FB is a man on base.
+const PITCHER_OUT_RESULTS = new Set(["PU", "SO", "GB", "FB"]);
 const HISTORY_OUTCOMES = ["PU", "SO", "GB", "FB", "BB", "1B", "1B+", "2B", "3B", "HR"];
 
 export function playerPosition(player) {
@@ -17,6 +20,27 @@ export function playerPosition(player) {
 export function playerPrimary(player) {
   if (isCoach(player)) return 0;
   return player.kind === "hitter" ? player.onBase : player.control;
+}
+
+// The top of a pitcher's out rows: the highest roll his chart still retires.
+// An open-ended top row can only land on the faces the d20 has, so it stops at
+// MAX_ROLL like every other chart reading.
+export function pitcherOutCeiling(player) {
+  return (player.chart ?? []).reduce((top, entry) => {
+    if (!PITCHER_OUT_RESULTS.has(entry.result)) return top;
+    const to = Number.isFinite(entry.to) ? Number(entry.to) : MAX_ROLL;
+    return Math.max(top, Math.min(MAX_ROLL, to));
+  }, 0);
+}
+
+// Control plus that out ceiling, which is the one number a pitcher's two halves
+// make together: control decides whose chart the swing reads, and the out rows
+// decide what it says when it is his. 4 control over outs to 17 reads 21 — the
+// same arm with 2 control reads 19, and the gap is what the batter gets to
+// swing at.
+export function pitcherControlPlusOuts(player) {
+  if (player.kind !== "pitcher") return 0;
+  return (Number(player.control) || 0) + pitcherOutCeiling(player);
 }
 
 export function playerPower(player) {
@@ -60,8 +84,9 @@ export function renderPlayerTable(players, options = {}) {
         { label: "" },
         { label: "Player", sort: "name" },
         { label: "Role", sort: "position" },
-        { label: "CTRL", sort: "primary" },
-        { label: "IP", sort: "ip" },
+        { label: "C+O", sort: "controlOuts", num: true, title: "Control plus the highest roll his chart still gets out — what a swing has to beat before the chart is the batter's" },
+        { label: "CTRL", sort: "primary", num: true },
+        { label: "IP", sort: "ip", num: true },
         ...pointsHeader,
         ...outcomes.map((outcome) => ({ label: outcome, sort: `chart:${outcome}` }))
       ]
@@ -116,6 +141,7 @@ export function renderPlayerTable(players, options = {}) {
         <td class="coach-blurb-cell">${escapeHtml(player.blurb ?? "")}</td>`
         : player.kind === "pitcher"
         ? `<td class="card-stat">${escapeHtml(player.role)}</td>
+        <td class="card-stat num">${pitcherControlPlusOuts(player)}</td>
         <td class="card-stat num">${player.control}</td>
         <td class="card-stat num">${player.ip}</td>`
         : `<td class="card-stat">${escapeHtml(positionsLabel(player))}</td>
@@ -359,14 +385,18 @@ export function renderDraftHistoryTable(picks, options = {}) {
 }
 
 function renderHeaderCell(header, mode, index, options) {
+  // A header that says for itself that it holds a number is taken at its word;
+  // the rest fall back to the column's place in the row.
+  const numClass = header.num === true ? "num" : tableHeaderClass(mode, index);
   const className = mode === "coach"
     ? (header.label === "Pts" ? "num" : "")
-    : `${tableHeaderClass(mode, index)}${outcomeBoundaryClass(header.label)}`.trim();
-  if (!header.sort) return `<th class="${className}">${escapeHtml(header.label)}</th>`;
+    : `${numClass}${outcomeBoundaryClass(header.label)}`.trim();
+  const titleAttr = header.title ? ` title="${escapeHtml(header.title)}"` : "";
+  if (!header.sort) return `<th class="${className}"${titleAttr}>${escapeHtml(header.label)}</th>`;
   const active = options.sort === header.sort;
   const direction = active ? options.sortDirection ?? "desc" : null;
   const arrow = direction === "asc" ? "^" : direction === "desc" ? "v" : "";
-  return `<th class="${className}" aria-sort="${active ? (direction === "asc" ? "ascending" : "descending") : "none"}">
+  return `<th class="${className}"${titleAttr} aria-sort="${active ? (direction === "asc" ? "ascending" : "descending") : "none"}">
     <button type="button" class="column-sort ${active ? "active" : ""}" data-sort="${escapeHtml(header.sort)}">
       <span>${escapeHtml(header.label)}</span>${arrow ? `<span class="sort-arrow">${arrow}</span>` : ""}
     </button>

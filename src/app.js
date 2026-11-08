@@ -210,6 +210,7 @@ import {
 import {
   cardRarity,
   escapeHtml,
+  pitcherControlPlusOuts,
   playerPosition,
   playerPower,
   playerPrimary,
@@ -345,7 +346,7 @@ function lastUsedSeed() {
 // it out in the settings each format's draft is built from.
 const DEFAULT_CLOCK = {
   mode: "chess",
-  reviewSeconds: 300,
+  reviewSeconds: 10,
   pickSeconds: 60,
   bankSeconds: SNAKE_DEFAULT_CLOCK_BANK_SECONDS,
   incrementSeconds: SNAKE_DEFAULT_CLOCK_INCREMENT_SECONDS
@@ -1270,11 +1271,11 @@ function defaultState() {
       starredOnly: false,
       flaggedOnly: false,
       hideTaken: false,
-      // Ranking mode is the board's default layer: a position board opens in
-      // your own hand ranking. Turned off, the ranking column goes away and the
-      // column headers get the board back — which is the only way to sort a
-      // position by chart, speed, or points.
-      rankingMode: true
+      // Ranking mode is the board's optional layer: turned on, a position
+      // board reads in your own hand ranking. Off — which is how a board opens
+      // — the ranking column goes away and the column headers sort, which is
+      // the only way to read a position by chart, speed, or points.
+      rankingMode: false
     }
   };
 }
@@ -5302,27 +5303,9 @@ function settleDie(root, key, value) {
   }, 58);
 }
 
-const CEREMONY_SKIP_KEY = "mlb-showdown-skip-ceremony";
-
-// Somebody who skipped the ceremony once is usually re-simming, and does not
-// want to sit through it again — so the choice sticks, and the results screen
-// carries the way back.
-function ceremonySkipped() {
-  try {
-    return localStorage.getItem(CEREMONY_SKIP_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function rememberCeremonySkip(skip) {
-  try {
-    if (skip) localStorage.setItem(CEREMONY_SKIP_KEY, "1");
-    else localStorage.removeItem(CEREMONY_SKIP_KEY);
-  } catch {
-    // A browser that will not keep the preference simply asks again.
-  }
-}
+// Skipping a ceremony used to stick: one skip and every later season played
+// in silence until somebody found the way back on the results screen. Pressing
+// Sim is a request for the show, so the skip now lasts exactly one run.
 
 // A ceremony on its own, for a season that has already been played: the show
 // is the only thing that runs. The summary, the seed and the race line come
@@ -5330,7 +5313,6 @@ function rememberCeremonySkip(skip) {
 // season that happens to look like it.
 function replayCeremony() {
   if (!state.batch?.summary?.teams?.length) return;
-  rememberCeremonySkip(false);
   startBatchRun(state.batch.runs, { replayOf: state.batch });
 }
 
@@ -5736,7 +5718,6 @@ function startBatchRun(runs, options = {}) {
   const ceremonyClick = (event) => {
     if (!event.target.closest("button[data-action=ceremony-skip]")) return;
     skipRequested = true;
-    if (!replayOf) rememberCeremonySkip(true);
     stopCeremony();
     if (completed >= count) {
       finalize(batchState);
@@ -5908,24 +5889,11 @@ function startBatchRun(runs, options = {}) {
     searchChampionship();
   };
 
-  // Skipping is sticky, so a run can be skipped before it starts. runSkip only
-  // fills in a counter somebody else rendered, so arriving here with the draft
-  // board still up played the whole season in silence and dropped the standings
-  // twenty seconds later, which reads as a hang rather than as a skip. Say what
-  // is happening, and say where the switch is: the preference is invisible
-  // otherwise, and somebody who skipped one ceremony weeks ago has no reason to
-  // connect that click to a season that never puts on a show.
-  //
-  // options.instant stays silent on purpose. That is the online reconnect, and
-  // it wants the table it already had, not a flash of progress on the way.
-  if (!replayOf && (options.instant || skipRequested || ceremonySkipped())) {
+  // The only run that starts already skipped is the online reconnect, which
+  // wants the table it already had rather than a flash of progress on the way.
+  // A run somebody pressed Sim for always opens the show.
+  if (!replayOf && options.instant) {
     skipRequested = true;
-    if (!options.instant) {
-      app.innerHTML = `<section class="panel sim-progress"><p class="eyebrow">Game simulator</p>
-        <h1>Playing the season</h1>
-        <p class="lede" data-skip-count>0 of ${count.toLocaleString("en-US")} games played.</p>
-        <p class="lede">The ceremony is off because you skipped one. &ldquo;Watch the ceremony&rdquo; on the results screen turns it back on.</p></section>`;
-    }
     runSkip();
     return;
   }
@@ -8037,9 +8005,7 @@ function bindBatchActions() {
       const input = app.querySelector("[data-batch-runs]");
       requestBatchRun(input?.value ?? DEFAULT_BATCH_RUNS);
     }
-    // The show for the season on screen. Nothing is simulated again — and
-    // asking for it says the ceremony is wanted, so a skip from last time is
-    // forgotten.
+    // The show for the season on screen. Nothing is simulated again.
     if (action === "ceremony-replay") {
       replayCeremony();
     }
@@ -10664,6 +10630,7 @@ function renderFilters() {
 function columnSortLabel(sort) {
   if (sort?.startsWith("chart:")) return `Column: ${sort.slice("chart:".length)}`;
   const labels = {
+    controlOuts: "Column: C+O",
     fielding: "Column: Field",
     ip: "Column: IP",
     speed: "Column: Speed",
@@ -11799,6 +11766,9 @@ function comparePlayersBySort(a, b, sort) {
   }
   if (sort === "ip") {
     return (a.ip ?? 0) - (b.ip ?? 0) || pointsTiebreak(a, b);
+  }
+  if (sort === "controlOuts") {
+    return pitcherControlPlusOuts(a) - pitcherControlPlusOuts(b) || pointsTiebreak(a, b);
   }
   if (sort?.startsWith("chart:")) {
     const result = sort.slice("chart:".length);
