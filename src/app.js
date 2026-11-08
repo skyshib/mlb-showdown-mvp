@@ -399,6 +399,10 @@ function clockFromRoom(room) {
   };
 }
 
+// Bumped when a board default changes in a way a stored choice should give way
+// to once. See reviveState.
+const FILTERS_VERSION = 1;
+
 let state = loadState() ?? defaultState();
 // A restored draft carries its own dealt cards, so it never re-deals — but
 // the card faces still look the rest of the universe up (a two-way player's
@@ -1265,7 +1269,10 @@ function defaultState() {
     filters: {
       type: "hitter",
       position: "all",
-      sort: "points",
+      // A board opens on the stat the cards are read by, not on their price:
+      // OB for the bats, C+O for the arms. See defaultSortForType.
+      sort: "primary",
+      filtersVersion: FILTERS_VERSION,
       sortDirection: "desc",
       search: "",
       starredOnly: false,
@@ -3188,18 +3195,17 @@ function renderDraft() {
   // so a palette hung off the dispatcher alone never runs for the screen that
   // most needs it.
   applyFranchisePalette(state.universe);
-  // A blind draft has no points column to sort by, so the default "best points"
-  // ordering — and any points sort a manager left set from an earlier draft —
-  // falls back to the closest neutral one.
+  // A blind draft has no points column to sort by, so a points sort a manager
+  // left set from an earlier draft falls back to the shelf's own stat.
   if (pointsHidden() && state.filters.sort === "points") {
-    state.filters.sort = "primary";
-    state.filters.sortDirection = "desc";
+    state.filters.sort = defaultSortForType(state.filters.type);
+    state.filters.sortDirection = defaultSortDirection(state.filters.sort);
   }
   // Old saves used "manual" as a standalone sort. Rankings are now always the
   // primary layer, with this dropdown controlling only the unranked players.
   if (state.filters.sort === "manual") {
-    state.filters.sort = "primary";
-    state.filters.sortDirection = "desc";
+    state.filters.sort = defaultSortForType(state.filters.type);
+    state.filters.sortDirection = defaultSortDirection(state.filters.sort);
   }
   // Typing into the card search re-renders the draft on every keystroke, and a
   // re-render replaces every node on the page — so the input the letter had just
@@ -4185,8 +4191,8 @@ function bindDraftActions() {
       state.filters[filterButton.dataset.filter] = filterButton.dataset.filterValue;
       if (filterButton.dataset.filter === "type") {
         state.filters.position = "all";
-        state.filters.sort = pointsHidden() ? "primary" : "points";
-        state.filters.sortDirection = "desc";
+        state.filters.sort = defaultSortForType(filterButton.dataset.filterValue);
+        state.filters.sortDirection = defaultSortDirection(state.filters.sort);
       }
       saveState();
       renderDraft();
@@ -10524,6 +10530,9 @@ function renderFilters() {
   const sortOptions = [
     // A blind draft drops "best points": there is no points column to sort on.
     ...(pointsHidden() ? [] : [["points", "Best points"]]),
+    // C+O is the pitcher board's own default, so it belongs in the dropdown
+    // rather than arriving as an unnamed "column sort".
+    ...(state.filters.type === "pitcher" ? [["controlOuts", "Best C+O"]] : []),
     ["primary", "Best OB/CTRL"],
     ["power", "Best chart"],
     ["position", "Position"],
@@ -10777,7 +10786,9 @@ function positionRankingFor(type, position) {
     .sort((a, b) => {
       const sink = (positionFloorIds.has(a.id) ? 1 : 0) - (positionFloorIds.has(b.id) ? 1 : 0);
       if (sink) return sink;
-      const result = comparePlayersBySort(a, b, "primary");
+      // Seeded in the same order the shelf opens in: OB for the bats, C+O for
+      // the arms.
+      const result = comparePlayersBySort(a, b, defaultSortForType(type));
       return result ? result * -1 : a.name.localeCompare(b.name);
     })
     .map((player) => player.id);
@@ -11745,38 +11756,62 @@ function pointsTiebreak(a, b) {
   return pointsHidden() ? 0 : a.points - b.points;
 }
 
+// The one number a card is read by first: on-base for a bat, control plus the
+// out ceiling for an arm. It is what a board opens sorted by, and what breaks
+// the ties under every other column.
+function playerHeadlineStat(player) {
+  if (isCoach(player)) return 0;
+  return player.kind === "pitcher" ? pitcherControlPlusOuts(player) : playerPrimary(player);
+}
+
+// Under the headline stat an arm reads by control alone — two pitchers at the
+// same C+O are not the same card, and the one who gets to his own chart more
+// often is the better of them. A bat's headline stat IS his OB, so this second
+// step is a no-op for hitters.
+function headlineTiebreak(a, b) {
+  return playerHeadlineStat(a) - playerHeadlineStat(b) || playerPrimary(a) - playerPrimary(b);
+}
+
+// Every column falls through the same chain: the column itself, then the
+// headline stat (OB, or C+O then control), then points.
 function comparePlayersBySort(a, b, sort) {
+  return comparePlayersByColumn(a, b, sort) || headlineTiebreak(a, b) || pointsTiebreak(a, b);
+}
+
+function comparePlayersByColumn(a, b, sort) {
   if (sort === "primary") {
-    return playerPrimary(a) - playerPrimary(b) || pointsTiebreak(a, b);
+    return playerPrimary(a) - playerPrimary(b);
   }
   if (sort === "power") {
-    return playerPower(a) - playerPower(b) || pointsTiebreak(a, b);
+    return playerPower(a) - playerPower(b);
   }
   if (sort === "position") {
-    return playerPosition(a).localeCompare(playerPosition(b)) || pointsTiebreak(a, b);
+    return playerPosition(a).localeCompare(playerPosition(b));
   }
   if (sort === "name") {
     return a.name.localeCompare(b.name);
   }
   if (sort === "speed") {
-    return speedValue(a.speed) - speedValue(b.speed) || pointsTiebreak(a, b);
+    return speedValue(a.speed) - speedValue(b.speed);
   }
   if (sort === "fielding") {
-    return (a.fielding ?? 0) - (b.fielding ?? 0) || pointsTiebreak(a, b);
+    return (a.fielding ?? 0) - (b.fielding ?? 0);
   }
   if (sort === "ip") {
-    return (a.ip ?? 0) - (b.ip ?? 0) || pointsTiebreak(a, b);
+    return (a.ip ?? 0) - (b.ip ?? 0);
   }
   if (sort === "controlOuts") {
-    return pitcherControlPlusOuts(a) - pitcherControlPlusOuts(b) || pointsTiebreak(a, b);
+    return pitcherControlPlusOuts(a) - pitcherControlPlusOuts(b);
+  }
+  if (sort === "points") {
+    return pointsTiebreak(a, b);
   }
   if (sort?.startsWith("chart:")) {
     const result = sort.slice("chart:".length);
-    return chartMinimum(a, result) - chartMinimum(b, result) || pointsTiebreak(a, b);
+    return chartMinimum(a, result) - chartMinimum(b, result);
   }
-  // Unknown sort: points lead only when they are on the table; blind, it is the
-  // primary stat that orders the board.
-  return pointsTiebreak(a, b) || playerPrimary(a) - playerPrimary(b);
+  // Unknown sort: the headline stat orders the board on its own.
+  return 0;
 }
 
 function updateSort(sort) {
@@ -11786,6 +11821,17 @@ function updateSort(sort) {
   }
   state.filters.sort = sort;
   state.filters.sortDirection = defaultSortDirection(sort);
+}
+
+// Each shelf opens on its own headline stat: OB on the hitter board, control
+// plus outs on the pitcher board. Coaches have neither, so their shelf still
+// opens on points — and on the name when a blind draft hides those.
+// hidePoints is a parameter because a save is revived before `state` exists,
+// so the migration there cannot ask the live draft.
+function defaultSortForType(type, hidePoints = pointsHidden()) {
+  if (type === "pitcher") return "controlOuts";
+  if (type === "coach") return hidePoints ? "name" : "points";
+  return "primary";
 }
 
 function defaultSortDirection(sort) {
@@ -11962,7 +12008,19 @@ function reviveState(value) {
   const filters = { ...defaultState().filters, ...(value.filters ?? {}) };
   const batchSorts = normalizeBatchSorts(value.batchSorts);
   if (filters.type === "all") filters.type = "hitter";
-  if (filters.sort === "manual") filters.sort = "primary";
+  const savedHidePoints = Boolean(value.draft?.hidePoints);
+  if (filters.sort === "manual") filters.sort = defaultSortForType(filters.type, savedHidePoints);
+  // Boards used to open on points, so a save from then carries that sort as a
+  // default nobody chose: move it to the shelf's stat ONCE. After the version
+  // is stamped, a manager who picks "Best points" keeps it through reloads.
+  if (
+    value.filters?.filtersVersion !== FILTERS_VERSION
+    && filters.sort === "points"
+    && filters.type !== "coach"
+  ) {
+    filters.sort = defaultSortForType(filters.type, savedHidePoints);
+  }
+  filters.filtersVersion = FILTERS_VERSION;
   filters.sortDirection = filters.sortDirection ?? defaultSortDirection(filters.sort);
   const savedStartingPitchers = normalizeStartingPitchers(
     value.draft?.startingPitchers ?? value.startingPitchers ?? Number(value.draft?.rosterSize) - 11
