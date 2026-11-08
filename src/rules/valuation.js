@@ -307,22 +307,32 @@ function fieldingShape(player) {
 // the gap from 18 to 28 is three times the gap from 8 to 18, where a flat rate
 // called them equal.
 //
-// The knee sits at SPEED_A_MINIMUM, which is the line the engine itself draws
-// (it is also what the first base coach's green light keys on). Rates are in
-// effective speed points so weights.speed stays the persona's dial, and they
-// hold the deck's total speed value where the flat rate had it, so this buys
-// the elite runner his premium out of the middle of the range rather than
-// adding weight to legs overall.
+// The curve is CONVEX EVERYWHERE, not straight-then-bent:
+//
+//     legs(s) = rate * max(0, s - 1) + lift * (e^((s - knee)/bend) - e^((1 - knee)/bend))
+//
+// max(0, s-1) is convex and the exponential is strictly convex, so the slope
+// rises at EVERY speed — there is no flat stretch below the knee and no corner
+// at it. The bend is tuned so the low range is effectively straight (the slope
+// runs 0.98 at speed 8, 0.99 at 12, 1.05 at 16) and the climb is all in the top
+// (1.13 at 18, 1.74 at 22, 4.77 at 26). The knee sits at SPEED_A_MINIMUM, the
+// line the engine itself draws (and what the first base coach's green light
+// keys on). The subtracted lift(1) keeps a speed-1 card at zero.
+//
+// Rates are in effective speed points so weights.speed stays the persona's
+// dial, and they hold the deck's total speed value where the flat rate had it,
+// so this buys the elite runner his premium out of the middle of the range
+// rather than adding weight to legs overall.
 const SPEED_STEAL_KNEE = 18;
-const SPEED_STEAL_POWER = 2;
-const SPEED_LEGS_RATE = 0.977;
-const SPEED_STEAL_RATE = 0.195;
+const SPEED_STEAL_BEND = 2.5;
+const SPEED_LEGS_RATE = 0.9779;
+const SPEED_STEAL_LIFT = 0.38611;
 
 function speedShape(player) {
   const speed = Number(player?.speed) || 0;
-  const legs = Math.max(0, speed - 1) * SPEED_LEGS_RATE;
-  const steal = Math.max(0, speed - SPEED_STEAL_KNEE) ** SPEED_STEAL_POWER * SPEED_STEAL_RATE;
-  return legs + steal;
+  const lift = (s) => Math.exp((s - SPEED_STEAL_KNEE) / SPEED_STEAL_BEND);
+  return Math.max(0, speed - 1) * SPEED_LEGS_RATE
+    + SPEED_STEAL_LIFT * (lift(speed) - lift(1));
 }
 
 function onBaseUsage(onBase) {

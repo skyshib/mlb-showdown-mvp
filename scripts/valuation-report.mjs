@@ -167,9 +167,9 @@ const K = {
   fieldingCurve: curveMap("valuation.js", "FIELDING_CURVE"),
   fieldingBase: numberMap("valuation.js", "FIELDING_UNIT_BASE"),
   speedKnee: constNum("valuation.js", "SPEED_STEAL_KNEE"),
-  speedPower: constNum("valuation.js", "SPEED_STEAL_POWER"),
+  speedBend: constNum("valuation.js", "SPEED_STEAL_BEND"),
   speedLegs: constNum("valuation.js", "SPEED_LEGS_RATE"),
-  speedSteal: constNum("valuation.js", "SPEED_STEAL_RATE"),
+  speedLift: constNum("valuation.js", "SPEED_STEAL_LIFT"),
 
   hitterTarget: constNum("draft.js", "HITTER_TARGET"),
   relieverSpacingShare: constNum("draft.js", "RELIEVER_SPACING_SHARE"),
@@ -236,8 +236,8 @@ function statedFieldingShape(card) {
 }
 function statedSpeedShape(card) {
   const speed = Number(card?.speed) || 0;
-  return Math.max(0, speed - 1) * K.speedLegs
-    + Math.max(0, speed - K.speedKnee) ** K.speedPower * K.speedSteal;
+  const lift = (x) => Math.exp((x - K.speedKnee) / K.speedBend);
+  return Math.max(0, speed - 1) * K.speedLegs + K.speedLift * (lift(speed) - lift(1));
 }
 function statedHitterValue(card, w) {
   const usage = onBaseUsage(card.onBase);
@@ -471,8 +471,8 @@ const labPayload = {
     catcherRate: K.fieldingCurve.catcher.rate, catcherBend: K.fieldingCurve.catcher.bend,
     infieldRate: K.fieldingCurve.infield.rate, infieldBend: K.fieldingCurve.infield.bend,
     outfieldRate: K.fieldingCurve.outfield.rate,
-    speedLegs: K.speedLegs, speedSteal: K.speedSteal,
-    speedKnee: K.speedKnee, speedPower: K.speedPower,
+    speedLegs: K.speedLegs, speedLift: K.speedLift,
+    speedKnee: K.speedKnee, speedBend: K.speedBend,
     pControl: K.pitcherWeights.control, pIp: K.pitcherWeights.ip, pChart: K.pitcherWeights.chart,
     spSlots: SP_SLOTS,
     starterDiscount: K.starterDiscount, narrowSpread: K.narrowSpread, wideSpread: K.wideSpread,
@@ -1026,8 +1026,8 @@ no bend  →  glove(r) = rate × r        (the bend → ∞ case: a straight lin
   </p>
 
   <h3>The legs, and the steal</h3>
-  <div class="formula">legs(s) = max(0, s − 1) × ${K.speedLegs}
-          + max(0, s − ${K.speedKnee})^${K.speedPower} × ${K.speedSteal}</div>
+  <div class="formula">legs(s) = ${K.speedLegs} × max(0, s − 1)
+          + ${K.speedLift} × (e^((s − ${K.speedKnee}) / ${K.speedBend}) − e^((1 − ${K.speedKnee}) / ${K.speedBend}))</div>
   <p>
     Speed pays twice and the halves have different shapes. Taking the extra base on
     a hit is open to everyone and scales smoothly, so it stays linear. Stealing does
@@ -1035,24 +1035,30 @@ no bend  →  glove(r) = rate × r        (the bend → ∞ case: a straight lin
     and a runner only gets the green light once that clears break-even, so against an
     ordinary catcher nothing much below Speed A ever runs. That makes the top of the
     range worth far more than the middle. The knee sits at ${K.speedKnee}, the line
-    the engine itself draws.
+    the engine itself draws, and the exponential makes the curve convex at every
+    speed rather than straight to the knee and bent after it.
   </p>
   <div class="scroll"><table>
-    <thead><tr><th>speed</th>${[8, 13, 18, 20, 24, 28].map((v) => `<th>${v}</th>`).join("")}</tr></thead>
+    <thead><tr><th>speed</th>${[8, 12, 16, 18, 20, 22, 24, 28].map((v) => `<th>${v}</th>`).join("")}</tr></thead>
     <tbody>
-      <tr><td>worth (value points)</td>${[8, 13, 18, 20, 24, 28].map((v) => `<td>${n0(statedSpeedShape({ speed: v }) * K.hitterWeights.speed)}</td>`).join("")}</tr>
-      <tr class="total"><td>a flat rate would say</td>${[8, 13, 18, 20, 24, 28].map((v) => `<td>${n0((v - 1) * K.hitterWeights.speed)}</td>`).join("")}</tr>
+      <tr><td>worth (value points)</td>${[8, 12, 16, 18, 20, 22, 24, 28].map((v) => `<td>${n1(statedSpeedShape({ speed: v }) * K.hitterWeights.speed)}</td>`).join("")}</tr>
+      <tr><td>a flat rate would say</td>${[8, 12, 16, 18, 20, 22, 24, 28].map((v) => `<td>${n1((v - 1) * K.hitterWeights.speed)}</td>`).join("")}</tr>
+      <tr class="total"><td>and the NEXT point is worth</td>${[8, 12, 16, 18, 20, 22, 24, 28]
+        .map((v) => `<td>${n2((statedSpeedShape({ speed: v + 1 }) - statedSpeedShape({ speed: v })) * K.hitterWeights.speed)}</td>`).join("")}</tr>
     </tbody>
   </table></div>
   <p class="micro">
     ${(() => {
       const at = (v) => statedSpeedShape({ speed: v }) * K.hitterWeights.speed;
       const lo = at(18) - at(8), hi = at(28) - at(18);
-      return `8 to 18 is worth ${n0(lo)}; 18 to 28 is worth ${n0(hi)}, ${(hi / lo).toFixed(1)}× as much. A flat rate called them equal.`;
+      return `8 to 18 is worth ${n1(lo)}; 18 to 28 is worth ${n1(hi)}, ${(hi / lo).toFixed(1)}× as much. A flat rate called them equal.`;
     })()}
-    These rates hold the deck's total speed value where the flat rate had it, so the
-    elite runner's premium comes out of the middle of the range rather than being
-    added on top.
+    The next point is worth strictly MORE than the one before it at every speed —
+    no flat stretch below the knee, no corner at it. The low range is effectively
+    straight (the slope moves only 0.98 → 1.05 across speeds 8 to 16) and the whole
+    climb is in the top. These rates hold the deck's total speed value where the flat
+    rate had it, so the elite runner's premium comes out of the middle of the range
+    rather than being added on top.
   </p>
 
   <h3>Pitchers</h3>
@@ -1449,8 +1455,8 @@ bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × d
   }
   // Legs are linear; the steal premium switches on at the knee and accelerates.
   function legShape(c, d) {
-    return Math.max(0, c.spd - 1) * d.speedLegs
-      + Math.pow(Math.max(0, c.spd - d.speedKnee), d.speedPower) * d.speedSteal;
+    var lift = function (x) { return Math.exp((x - d.speedKnee) / d.speedBend); };
+    return Math.max(0, c.spd - 1) * d.speedLegs + d.speedLift * (lift(c.spd) - lift(1));
   }
   function spFactor(slots, d) {
     var discount = Math.min(1, DATA.spDiscountAnchor / slots);
@@ -1518,9 +1524,9 @@ bid = clamp(round(maxBid × share × aggression × spendDown × poolPremium × d
     { key: "infieldBend", label: "glove · infield, bend", min: 1, max: 60, step: 0.5 },
     { key: "outfieldRate", label: "glove · outfield (linear)", min: 0, max: 4, step: 0.05 },
     { key: "speedLegs", label: "legs · extra-base rate", min: 0, max: 3, step: 0.02 },
-    { key: "speedSteal", label: "legs · steal premium", min: 0, max: 2, step: 0.005 },
+    { key: "speedLift", label: "legs · steal premium", min: 0, max: 3, step: 0.01 },
     { key: "speedKnee", label: "legs · steal knee (speed)", min: 5, max: 28, step: 1 },
-    { key: "speedPower", label: "legs · steal curvature", min: 1, max: 3, step: 0.1 },
+    { key: "speedBend", label: "legs · bend (lower = flatter then sharper)", min: 1, max: 10, step: 0.1 },
     { key: "pControl", label: "pitcher · control weight", min: 0, max: 80, step: 1 },
     { key: "pChart", label: "pitcher · chart weight", min: 0, max: 3, step: 0.05 },
     { key: "pIp", label: "pitcher · innings weight", min: 0, max: 30, step: 0.5 },
