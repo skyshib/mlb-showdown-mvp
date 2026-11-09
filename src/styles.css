@@ -8264,3 +8264,17 @@ html.club .coach-flip.pending { color: #ff7a6b; }
   .die, .roll-note { transition: none; }
   .swap-out > *, .swap-in > * { animation: none; }
 }
+
+/* A pick the recap found was beaten on the board: a marker beside the name in
+   the draft ledger, with the whole claim in its tooltip. */
+.pick-flag {
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  background: rgba(220, 120, 60, 0.18);
+  color: #c2600f;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: help;
+}

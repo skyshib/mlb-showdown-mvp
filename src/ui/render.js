@@ -285,6 +285,15 @@ export function renderDraftHistoryTable(picks, options = {}) {
   // than against the replacement floor, and rides along on the same sims.
   const wpaaByPlayerId = options.wpaaByPlayerId ?? null;
   const showWpaa = Boolean(wpaaByPlayerId);
+  // Picks the recap found were beaten on the board, keyed by player id. A marker
+  // rides beside the name rather than taking a column of its own, and carries
+  // the whole claim in its tooltip. The live board passes none.
+  const flagsByPlayerId = options.flagsByPlayerId ?? null;
+  const flagFor = (player) => {
+    const flag = flagsByPlayerId?.get?.(player.id) ?? flagsByPlayerId?.[player.id];
+    if (!flag) return "";
+    return ` <abbr class="pick-flag" title="${escapeHtml(flag.title)}">${escapeHtml(flag.label)}</abbr>`;
+  };
   // An auction's history is a ledger: what a card cost is the whole story of the
   // pick, so it gets a column of its own the moment any pick was bought.
   const auction = picks.some((pick) => Number.isFinite(pick.price));
@@ -351,7 +360,7 @@ export function renderDraftHistoryTable(picks, options = {}) {
         <td class="num">${pickNumber}</td>
         <td class="num">${round}</td>
         <td>${escapeHtml(manager.name)}</td>
-        <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong></td>
+        <td><strong class="player-name-preview" tabindex="0" data-preview-id="${escapeHtml(player.id)}" data-preview-card="${escapeHtml(renderPlayerCard(player, { hidePoints }))}">${escapeHtml(player.name)}</strong>${flagFor(player)}</td>
         <td>${escapeHtml(playerPosition(player))}</td>
         ${auction ? `<td class="num paid-cell">${Number.isFinite(price) ? renderTipTarget(`$${price.toLocaleString()}`, bidTipsByPlayerId?.[player.id]) : "&mdash;"}</td>` : ""}
         <td class="num">${isCoach(player) ? "&mdash;" : playerPrimary(player)}</td>

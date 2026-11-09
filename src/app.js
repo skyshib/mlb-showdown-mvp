@@ -196,6 +196,7 @@ import {
 } from "./rules/ceremony.js?v=20261015-ceremony";
 import { ceremonyShellHtml, duelHtml, managerChip, resultWord, syncCeremony } from "./ui/ceremony.js?v=20261015-ceremony";
 import { computeAwards } from "./rules/awards.js?v=20260716-records";
+import { dominatedPicks } from "./rules/pickDominance.js?v=20261108-dominated";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260716-records";
@@ -6800,9 +6801,22 @@ function renderBatch() {
       </table>
     </div>
   </section>`;
+  // Picks that were beaten on the board: the one post-draft read that needs no
+  // valuation model at all. It only means anything where the sim measured WPAR,
+  // and only the draft tab shows it, so it is computed there and nowhere else.
+  const dominance = hasWar && activeBatchTab === "draft"
+    ? dominatedPicks(draftHistory(state.draft), {
+        auction: auctionDraft,
+        wparById: batchWparByPlayerId(summary),
+        // The slot the card FILLED, which is the same shelf WPAA measures him
+        // against: a catcher stationed at first is a first baseman here.
+        slotOf: (player) => wpaaIndex?.positionOf(player) ?? null
+      })
+    : null;
   // The report card the draft screen opens on rides along here, so the grades
   // can be read against the season without leaving it.
   const draftRecapSection = `${activeBatchTab === "draft" ? `${renderDraftDone(state.draft)}${renderAuctionBudgetSection(state.draft)}` : ""}
+  ${renderDominatedPicks(dominance)}
   <section class="panel wide draft-recap-panel">
     <div class="section-title-row">
       <div>
@@ -6812,6 +6826,7 @@ function renderBatch() {
       <span>${state.draft.pickNumber} picks</span>
     </div>
     ${renderDraftHistoryTable(draftHistory(state.draft), {
+      flagsByPlayerId: dominanceFlags(dominance),
       wpaByPlayerId: batchWpaByPlayerId(summary),
       wparByPlayerId: hasWar ? batchWparByPlayerId(summary) : null,
       wpaaByPlayerId: wpaaIndex?.wpaaByPlayerId ?? null,
@@ -6846,6 +6861,112 @@ function renderBatch() {
 
   if (activeBatchTab === "allStars") hydratePhotos(app);
   bindBatchActions();
+}
+
+// The same finding, small enough to sit in the pick ledger: a marker on the
+// row and the whole claim in its tooltip.
+function dominanceFlags(result) {
+  if (!result?.rows?.length) return null;
+  const flags = new Map();
+  for (const row of result.rows) {
+    const where = result.auction
+      ? `sold ${row.waited} lot${row.waited === 1 ? "" : "s"} later for ${money(row.best.price)}`
+      : `went at pick ${row.best.order}`;
+    flags.set(row.id, {
+      label: result.auction ? "$" : "!",
+      title: `${row.best.name} was still there and ${where}, and finished ${formatWar(row.gap)} WPAR/162 better`
+    });
+  }
+  return flags;
+}
+
+// The dominance flag, laid out as a panel on the draft tab.
+//
+// Two tables: a line per manager saying how much of his draft was beaten on the
+// board, then the flagged picks themselves worst first. The note says out loud
+// what the test does and does not claim, because a pick can be dominated by
+// hindsight and still have been the right call on the night.
+function renderDominatedPicks(result) {
+  if (!result) return "";
+  const { auction, rows, byManager, considered } = result;
+  const title = auction ? "Cards that were there for less" : "Cards that were there later";
+  const test = auction
+    ? "a card at the same slot, still unsold when this one was bought, who finished the season at least as good for no more money"
+    : "a card at the same slot, still on the board when this pick was made, who finished the season at least as good and went later";
+  const note = `<p class="batch-note">Every pick here was beaten by ${test}. The whole test is recorded fact &mdash; who was still available is the pick order, what each cost is the ledger, and how each turned out is the sim&rsquo;s own WPAR &mdash; so nothing is counterfactual and nothing depends on what another manager would have done. Cards are only compared inside the slot they actually filled, which is also what keeps pitching&rsquo;s inflated per-batter WPAR out of it: both sides of an arm-to-arm comparison carry the same inflation and it cancels. Starters are never read against relievers, whose inflation is a different size. It is hindsight, not a verdict: the cheaper card may have been cheaper for reasons that looked good at the time. What it does say is that the money or the turn bought nothing at that spot.</p>`;
+  if (!rows.length) {
+    return `<section class="panel wide">
+      <div class="section-title-row">
+        <div><p class="eyebrow">Pick quality</p><h2>${title}</h2></div>
+        <span>${considered} picks tested</span>
+      </div>
+      ${note}
+      <p class="batch-note"><strong>Nothing flagged.</strong> No pick in this room was beaten at its own slot by a card that was still there for less.</p>
+    </section>`;
+  }
+  const managerRows = byManager
+    .map((row) => `<tr>
+      <td>${escapeHtml(row.name)}</td>
+      <td class="num">${row.dominated} of ${row.picks}</td>
+      <td class="num">${formatWar(row.wparLeftBehind)}</td>
+      ${auction ? `<td class="num">${money(Math.round(row.savings))}</td>` : ""}
+    </tr>`)
+    .join("");
+  const pickRows = rows
+    .map((row) => {
+      const extra = row.alternatives.length - 1;
+      const waited = auction
+        ? `${row.waited} lot${row.waited === 1 ? "" : "s"} later`
+        : `pick ${row.best.order}${row.stillThereNextTurn ? " &mdash; still there after his next turn" : ""}`;
+      return `<tr>
+        <td class="num">${row.order}</td>
+        <td>${escapeHtml(row.managerName)}</td>
+        <td><strong>${escapeHtml(row.name)}</strong></td>
+        <td>${escapeHtml(row.slot)}</td>
+        ${auction ? `<td class="num">${money(row.price)}</td>` : ""}
+        <td class="num">${formatWar(row.wpar)}</td>
+        <td>${escapeHtml(row.best.name)} <small>(${escapeHtml(row.best.managerName)})</small>${extra > 0 ? ` <small>+${extra} more</small>` : ""}</td>
+        <td>${waited}</td>
+        ${auction ? `<td class="num">${money(row.best.price)}</td>` : ""}
+        <td class="num">${formatWar(row.best.wpar)}</td>
+        <td class="num"><strong>${formatWar(row.gap)}</strong></td>
+        ${auction ? `<td class="num">${money(row.cheapest?.saved ?? 0)}</td>` : ""}
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel wide">
+    <div class="section-title-row">
+      <div><p class="eyebrow">Pick quality</p><h2>${title}</h2></div>
+      <span>${rows.length} of ${considered} picks</span>
+    </div>
+    ${note}
+    <div class="table-scroll"><table class="player-table">
+      <thead><tr>
+        <th>Manager</th>
+        <th class="num">Beaten on the board</th>
+        <th class="num">WPAR/162 left behind</th>
+        ${auction ? `<th class="num">Could have saved</th>` : ""}
+      </tr></thead>
+      <tbody>${managerRows}</tbody>
+    </table></div>
+    <div class="table-scroll"><table class="player-table">
+      <thead><tr>
+        <th class="num">${auction ? "Lot" : "#"}</th>
+        <th>Manager</th>
+        <th>The pick</th>
+        <th>Slot</th>
+        ${auction ? `<th class="num">Paid</th>` : ""}
+        <th class="num">WPAR/162</th>
+        <th>Was still there</th>
+        <th>${auction ? "Sold" : "Went"}</th>
+        ${auction ? `<th class="num">For</th>` : ""}
+        <th class="num">WPAR/162</th>
+        <th class="num">&Delta;</th>
+        ${auction ? `<th class="num">Saving</th>` : ""}
+      </tr></thead>
+      <tbody>${pickRows}</tbody>
+    </table></div>
+  </section>`;
 }
 
 function renderBatchStatsTabs(activeTab) {
