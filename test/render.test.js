@@ -444,3 +444,31 @@ test("an arrow between two points at the same spot is dropped rather than drawn 
   });
   assert.ok(!html.includes("scatter-arrow-line"));
 });
+
+test("a fit handed in from the whole board survives narrowing the chart to a slice of it", () => {
+  const board = [
+    { x: 10, y: 1, color: "#123456", cardId: "a", tipTitle: "One", tipLines: ["One"] },
+    { x: 20, y: 2, color: "#123456", cardId: "b", tipTitle: "Two", tipLines: ["Two"] },
+    { x: 30, y: 3, color: "#123456", cardId: "c", tipTitle: "Three", tipLines: ["Three"] }
+  ];
+  const line = scatterBestFit(board);
+  // A filter leaves two cards on screen whose own trend runs the other way. The
+  // chart draws the line it was handed, not a refit of what is left.
+  const slice = [
+    { x: 10, y: 3, color: "#123456", cardId: "a", tipTitle: "One", tipLines: ["One"] },
+    { x: 30, y: 1, color: "#123456", cardId: "c", tipTitle: "Three", tipLines: ["Three"] },
+    { x: 20, y: 2.5, color: "#123456", cardId: "b", tipTitle: "Two", tipLines: ["Two"] }
+  ];
+  const fit = { step: 100, unit: "$100", yUnit: "WPAR/162", note: ["Fitted over the whole board, not just what is showing."] };
+  const narrowed = renderDraftScatter({ points: slice, xLabel: "Price paid ($)", yLabel: "WPAR / 162 games", fit: { ...fit, line } });
+  assert.ok(narrowed.includes("+10.0 WPAR/162 per $100"));
+  assert.ok(narrowed.includes("over 3 points"));
+  assert.ok(narrowed.includes("Fitted over the whole board"));
+  // Without the handed-in line the same slice fits itself, and the slope flips.
+  const refit = renderDraftScatter({ points: slice, xLabel: "Price paid ($)", yLabel: "WPAR / 162 games", fit });
+  assert.ok(refit.includes("-10.0 WPAR/162 per $100"));
+  // A board with nothing to fit draws no line, and does not quietly fit the slice.
+  const unfittable = renderDraftScatter({ points: slice, xLabel: "Price paid ($)", yLabel: "WPAR / 162 games", fit: { ...fit, line: null } });
+  assert.ok(!unfittable.includes("scatter-fit-line"));
+  assert.ok(unfittable.includes("scatter-dot-card"));
+});

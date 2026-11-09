@@ -834,8 +834,13 @@ export function renderDraftScatter({ points = [], connectors = [], arrows = [], 
   // y-units per step — and the line carries it on hover like any other mark.
   // The crosses stay out of it: a card that never played says nothing about what
   // a dollar buys on the field, and a row of them at zero only flattens the line.
+  // A caller that owns a wider set of points than it draws can hand the fitted
+  // line in as `fit.line`, so narrowing the chart clips the same line rather
+  // than fitting a new one; `fit.line` of null means there is nothing to fit.
   const trend = (() => {
-    const line = fit ? scatterBestFit(points.filter((point) => point.shape !== "x")) : null;
+    const line = !fit ? null
+      : fit.line !== undefined ? fit.line
+      : scatterBestFit(points.filter((point) => point.shape !== "x"));
     if (!line) return "";
     const { slope, intercept, r2, n } = line;
     const yAt = (x) => intercept + slope * x;
@@ -859,7 +864,7 @@ export function renderDraftScatter({ points = [], connectors = [], arrows = [], 
       lines: [
         `${perStep >= 0 ? "+" : ""}${shown} ${fit.yUnit ?? yLabel} per ${fit.unit ?? "unit"}`,
         `R\u00b2 ${r2.toFixed(2)} over ${n} point${n === 1 ? "" : "s"}`,
-        fit.note ?? ""
+        ...(Array.isArray(fit.note) ? fit.note : [fit.note ?? ""])
       ].filter(Boolean)
     });
     const coords = `x1="${xFor(x1).toFixed(1)}" y1="${yFor(yAt(x1)).toFixed(1)}" x2="${xFor(x2).toFixed(1)}" y2="${yFor(yAt(x2)).toFixed(1)}"`;

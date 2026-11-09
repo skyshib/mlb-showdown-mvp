@@ -226,6 +226,7 @@ import {
   renderFieldingCurves,
   renderTipTarget,
   renderWinProbabilityChart,
+  scatterBestFit,
   topSwingRanks,
   HIGH_LEVERAGE
 } from "./ui/render.js?v=20260725-prep-tiers";
@@ -6739,12 +6740,48 @@ function renderBatch() {
   // The best-fit line's slope needs units to mean anything. A step of one dollar
   // is too small to read, so money is quoted per $100 and points and picks per
   // ten; the y-unit is whatever is plotted.
+  //
+  // The line itself belongs to the whole board, not to whatever is on screen: it
+  // answers what a dollar bought in this room, and that answer must not move when
+  // the chart is narrowed to one position, one manager or the spotlight. So it is
+  // fitted once over every card and handed to the chart, which only clips it to
+  // the visible window. The axes are not filters — they change the units — so a
+  // different x or y does re-fit, as does the manager whose bids are on x, since
+  // that choice is what puts a number on x at all. Crosses sit out of it here for
+  // the same reason they do in the chart.
+  const fitLine = (() => {
+    const pairs = [];
+    for (const rec of cardRecords) {
+      if (rec.unplayed) continue;
+      const yv = yValue(rec);
+      if (!Number.isFinite(yv)) continue;
+      if (xMode === "allbids") {
+        for (const amount of Object.values(bidsByCard[rec.cardId] ?? {})) {
+          if (Number.isFinite(amount)) pairs.push({ x: amount, y: yv });
+        }
+        continue;
+      }
+      const xv = xMode === "manager"
+        ? (chartManager ? bidsByCard[rec.cardId]?.[chartManager] : maxBidByCard[rec.cardId])
+        : xMode === "points" ? rec.points
+          : xMode === "max" ? maxBidByCard[rec.cardId]
+            : auctionDraft ? rec.price
+              : rec.pickNumber;
+      if (Number.isFinite(xv)) pairs.push({ x: xv, y: yv });
+    }
+    return scatterBestFit(pairs);
+  })();
+  const fitNarrowed = chartPosition !== "all" || (xMode !== "manager" && chartManager) || spotlight;
   const fitUnits = {
     ...(xMode === "points" ? { step: 10, unit: "10 points" }
       : xMode === "pick" ? { step: 10, unit: "10 picks" }
       : { step: 100, unit: "$100" }),
     yUnit: { wpar: "WPAR/162", wpaa: "WPAA/162", wpa: "WPA/162", points: "card points" }[yMode],
-    note: scatterPoints.some((point) => point.shape === "x") ? "The cards that never played sit out of it." : ""
+    line: fitLine,
+    note: [
+      cardRecords.some((rec) => rec.unplayed) ? "The cards that never played sit out of it." : "",
+      fitNarrowed ? "Fitted over the whole board, not just what is showing." : ""
+    ].filter(Boolean)
   };
   const draftValueSection = cardRecords.length ? `<section class="panel wide draft-chart-panel">
     <div class="section-title-row">
