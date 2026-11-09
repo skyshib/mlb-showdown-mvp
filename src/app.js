@@ -4755,7 +4755,37 @@ function bindHoverCardPreviews(onEscape = null) {
   app.onfocusout = null;
   app.onkeydown = null;
 
+  // Hovering a manager in the legend or a position in the picker lights the dots
+  // that filter would keep — they swell and pulse while the rest of the cloud
+  // falls back — so the shape of the filter reads before anybody clicks it. The
+  // key is tracked so a pointer drifting across a button does no DOM work per
+  // mousemove, and the lit marks are found by comparing attribute values rather
+  // than building a selector out of a manager's name.
+  let chartPreviewKey = null;
+  const previewChartFilter = (target) => {
+    const button = target?.closest?.("[data-batch-chart-position], [data-batch-chart-manager]");
+    const panel = button?.closest?.(".draft-chart-panel") ?? null;
+    const value = button?.dataset.batchChartPosition !== undefined
+      ? (button.dataset.batchChartPosition === "all" ? "" : button.dataset.batchChartPosition)
+      : (button?.dataset.batchChartManager ?? "");
+    const attribute = button?.dataset.batchChartPosition !== undefined ? "data-pos" : "data-manager";
+    const key = panel && value ? `${attribute}=${value}` : null;
+    if (key === chartPreviewKey) return;
+    chartPreviewKey = key;
+    for (const mark of app.querySelectorAll(".scatter-preview")) mark.classList.remove("scatter-preview");
+    for (const lit of app.querySelectorAll(".scatter-previewing")) lit.classList.remove("scatter-previewing");
+    if (!key) return;
+    let any = false;
+    for (const mark of panel.querySelectorAll(`[${attribute}]`)) {
+      if (mark.getAttribute(attribute) !== value) continue;
+      mark.classList.add("scatter-preview");
+      any = true;
+    }
+    if (any) panel.classList.add("scatter-previewing");
+  };
+
   const handlePointerOver = (event) => {
+    previewChartFilter(event.target);
     const previewTarget = event.target.closest("[data-preview-card]");
     if (!previewTarget) return;
     if (!(event.relatedTarget instanceof Node && previewTarget.contains(event.relatedTarget))) {
@@ -4779,6 +4809,7 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handlePointerOut = (event) => {
+    previewChartFilter(event.relatedTarget instanceof Element ? event.relatedTarget : null);
     if (event.target.closest?.("[data-wp-value]") && !(event.relatedTarget instanceof Element && event.relatedTarget.closest("[data-wp-value]"))) {
       hideChartTip();
     }
@@ -4796,6 +4827,7 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handleFocusIn = (event) => {
+    previewChartFilter(event.target);
     const chartPoint = event.target.closest?.("[data-point]");
     if (chartPoint) {
       const rect = chartPoint.getBoundingClientRect();
@@ -4809,6 +4841,7 @@ function bindHoverCardPreviews(onEscape = null) {
   };
 
   const handleFocusOut = (event) => {
+    previewChartFilter(event.relatedTarget instanceof Element ? event.relatedTarget : null);
     if (!event.relatedTarget?.closest?.("[data-point]")) hidePointTip();
     if (event.relatedTarget?.closest?.("[data-preview-card]")) return;
     resetDockPreview(event.target.closest?.(".dock-carousel-slot"));
@@ -6587,6 +6620,8 @@ function renderBatch() {
           x: amount,
           y: yv,
           color,
+          manager: managerName,
+          slot: rec.slot,
           shape: rec.unplayed ? "x" : null,
           cardId: rec.cardId,
           tipTitle: rec.name,
@@ -6614,6 +6649,8 @@ function renderBatch() {
         x: bid,
         y: yv,
         color: rec.color,
+        manager: rec.team,
+        slot: rec.slot,
         shape: rec.unplayed ? "x" : null,
         cardId: rec.cardId,
         tipTitle: rec.name,
@@ -6675,6 +6712,8 @@ function renderBatch() {
         x: xv,
         y: yv,
         color: rec.color,
+        manager: rec.team,
+        slot: rec.slot,
         muted: spotlight && !litIds.has(rec.cardId),
         shape: rec.unplayed ? "x" : null,
         cardId: rec.cardId,

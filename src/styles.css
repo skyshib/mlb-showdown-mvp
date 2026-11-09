@@ -6173,6 +6173,42 @@ button.interesting-game-card:focus-visible {
   stroke-width: 2.4;
 }
 
+/* Previewing a filter: hovering a manager in the legend or a position in the
+   picker swells and pulses the dots that filter would keep, and pushes the rest
+   of the cloud back, so you can see where they sit before you commit to the
+   click. The mark is scaled about its own box rather than by re-writing r, so a
+   cross animates the same way a dot does. */
+.draft-chart-panel.scatter-previewing .scatter-chart .scatter-dot:not(.scatter-preview),
+.draft-chart-panel.scatter-previewing .scatter-chart .scatter-cross:not(.scatter-preview) {
+  opacity: 0.2;
+}
+
+.scatter-chart .scatter-dot.scatter-preview,
+.scatter-chart .scatter-cross.scatter-preview {
+  opacity: 1;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: scatter-preview-pulse 1.1s ease-in-out infinite;
+}
+
+.draft-chart-panel.scatter-previewing .scatter-chart .scatter-dot.scatter-preview {
+  stroke: var(--ink, #1c2521);
+  stroke-width: 2;
+}
+
+@keyframes scatter-preview-pulse {
+  0%, 100% { transform: scale(1.15); }
+  50% { transform: scale(1.6); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scatter-chart .scatter-dot.scatter-preview,
+  .scatter-chart .scatter-cross.scatter-preview {
+    animation: none;
+    transform: scale(1.4);
+  }
+}
+
 .chart-legend {
   display: flex;
   flex-wrap: wrap;

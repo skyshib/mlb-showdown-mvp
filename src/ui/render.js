@@ -927,7 +927,11 @@ export function renderDraftScatter({ points = [], connectors = [], arrows = [], 
       // place in the cloud so the shape of the draft is still there to read, but
       // gives up its manager color.
       const color = point.muted ? "#b9b3a4" : escapeHtml(point.color ?? "#365f91");
-      const handles = `${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}"`;
+      // Whose dot this is and what it plays, carried on the mark itself so that
+      // hovering a manager in the legend or a position in the picker can light
+      // the dots that filter would keep, before anybody commits to the click.
+      const filterKeys = `${point.manager ? ` data-manager="${escapeHtml(point.manager)}"` : ""}${point.slot ? ` data-pos="${escapeHtml(point.slot)}"` : ""}`;
+      const handles = `${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""}${filterKeys} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}"`;
       if (point.shape === "x") {
         const arm = 3.5;
         const d = `M${(cx - arm).toFixed(1)} ${(cy - arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy + arm).toFixed(1)}M${(cx - arm).toFixed(1)} ${(cy + arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy - arm).toFixed(1)}`;
