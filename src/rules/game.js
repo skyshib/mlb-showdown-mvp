@@ -5,7 +5,9 @@ import { createRng } from "./rng.js?v=20260716-records";
 import { winExpectancy } from "../data/winExpectancy.js";
 import { leverageIndex } from "../data/leverage.js";
 import { advanceBreakeven, battingWp } from "./breakeven.js?v=20260716-records";
-import { UNIT_POSITIONS, attributeOpportunity, attributionLine, createAttribution, replacementSlotFor, summarizeGameAttribution } from "./attribution.js?v=20260914-war";
+import { UNIT_POSITIONS, attributeOpportunity, attributionLine, createAttribution, replacementSlotFor, summarizeGameAttribution,
+  recordFatigueTier
+} from "./attribution.js?v=20260914-war";
 import { SUB_MIN_INNING, benchSlotFielding, defenseEligible, pinchHitDecision, pinchRunDecision, defensiveSubDecision, coverageAssignment, coverageAssignmentWith, canCoverField, alignmentLegal, roughBatValue } from "./substitutions.js?v=20260716-records";
 
 export { SUB_MIN_INNING };
@@ -2878,6 +2880,7 @@ function attributePlateAppearance(state, play) {
     const line = attributionLine(attribution, pitchingSide, pitcher, state[pitchingSide].name);
     line.pitching += replayed - battingWpa;
     if (play.fatiguePenalty === 0) line.pitchingFresh += replayed - battingWpa;
+    recordFatigueTier(line, play.fatiguePenalty);
   }
 }
 

@@ -16,6 +16,7 @@ import { buildFictionalDraftPool, MAX_TEMPERATURE, normalizeTemperature } from "
 import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml, cardScanUrl, shortName, stripCardYear } from "./ui/cardFace.js?v=20260716-records";
 import { eventLeverage } from "./rules/game.js?v=20260717-draft-wpa";
+import { lineupProfile, runsPerPa } from "./rules/pitching.js?v=20261108-fatigue-profile";
 import { canEnterAuctionBid, nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
   isMuted,
@@ -196,7 +197,7 @@ import {
 } from "./rules/ceremony.js?v=20261015-ceremony";
 import { ceremonyShellHtml, duelHtml, managerChip, resultWord, syncCeremony } from "./ui/ceremony.js?v=20261015-ceremony";
 import { computeAwards, reachAwards } from "./rules/awards.js?v=20261108-reach";
-import { dominatedPicks } from "./rules/pickDominance.js?v=20261108-dominated";
+import { buildEqualWorkGap, dominatedPicks } from "./rules/pickDominance.js?v=20261108-equal-work";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
 import { VALUATION_BASE_WEIGHTS, VALUATION_PERTURBATION } from "./rules/valuation.js?v=20260716-records";
@@ -6301,6 +6302,8 @@ function renderBatch() {
     ? dominatedPicks(draftHistory(state.draft), {
         auction: auctionDraft,
         wparById: batchWparByPlayerId(summary),
+        volumeById: batchWorkloadByPlayerId(summary),
+        equalWorkGap: buildEqualWorkGap(summary),
         // The slot the card FILLED, which is the same shelf WPAA measures him
         // against: a catcher stationed at first is a first baseman here.
         slotOf: (player) => wpaaIndex?.positionOf(player) ?? null
@@ -6702,7 +6705,8 @@ function renderBatch() {
           auctionDraft
             ? `${row.best.name} was unsold, and went ${row.waited} lot${row.waited === 1 ? "" : "s"} later for ${money(row.best.price)}`
             : `${row.best.name} was still on the board, and went at pick ${row.best.order}`,
-          `${formatWar(row.gap)} WPAR/162 better`,
+          `${formatWar(row.gap)} WPAR/162 better over the same workload`,
+          `${formatWar(row.rawGap)} as played, of which ${formatWar(row.fromVolume)} is the difference in work`,
           ...(auctionDraft && Number.isFinite(row.cheapest?.saved) && row.cheapest.saved > 0
             ? [`Up to ${money(row.cheapest.saved)} cheaper at the same slot`]
             : [])
@@ -6923,7 +6927,7 @@ function renderBatch() {
   // The report card the draft screen opens on rides along here, so the grades
   // can be read against the season without leaving it.
   const draftRecapSection = `${activeBatchTab === "draft" ? `${renderDraftDone(state.draft, { dominance })}${renderAuctionBudgetSection(state.draft)}` : ""}
-  ${renderDominatedPicks(dominance)}
+  ${renderDominatedPicks(dominance, { fatigueRunsSaved: buildFatigueRunsSaved(analysisTeams(), summary) })}
   <section class="panel wide draft-recap-panel">
     <div class="section-title-row">
       <div>
@@ -6970,6 +6974,21 @@ function renderBatch() {
   bindBatchActions();
 }
 
+// A modelled second opinion behind the raw gap: what the other card would have
+// saved over the pick's own fatigue profile. Arms only, and only where the sim
+// recorded one.
+function fatigueTip(row, fatigueRunsSaved) {
+  const runs = fatigueRunsSaved(row);
+  if (!Number.isFinite(runs)) return null;
+  return {
+    title: `${row.best.name} over ${row.name}'s own workload`,
+    lines: [
+      `${runs >= 0 ? "" : "+"}${Math.abs(runs).toFixed(1)} runs/162 ${runs >= 0 ? "saved" : "allowed"} facing the same batters at the same tiredness`,
+      "Modelled from both cards, not measured — it informs this row, it did not decide it."
+    ]
+  };
+}
+
 // The same finding, small enough to sit in the pick ledger: a marker on the
 // row and the whole claim in its tooltip.
 function dominanceFlags(result) {
@@ -6981,7 +7000,7 @@ function dominanceFlags(result) {
       : `went at pick ${row.best.order}`;
     flags.set(row.id, {
       label: result.auction ? "$" : "!",
-      title: `${row.best.name} was still there and ${where}, and finished ${formatWar(row.gap)} WPAR/162 better`
+      title: `${row.best.name} was still there and ${where}, and was ${formatWar(row.gap)} WPAR/162 better over the same workload`
     });
   }
   return flags;
@@ -6993,14 +7012,17 @@ function dominanceFlags(result) {
 // board, then the flagged picks themselves worst first. The note says out loud
 // what the test does and does not claim, because a pick can be dominated by
 // hindsight and still have been the right call on the night.
-function renderDominatedPicks(result) {
+function renderDominatedPicks(result, { fatigueRunsSaved = () => null } = {}) {
   if (!result) return "";
-  const { auction, rows, byManager, considered } = result;
+  const { auction, rows, considered } = result;
   const title = auction ? "Cards that were there for less" : "Cards that were there later";
   const test = auction
-    ? "a card at the same slot, still unsold when this one was bought, who finished the season at least as good for no more money"
-    : "a card at the same slot, still on the board when this pick was made, who finished the season at least as good and went later";
-  const note = `<p class="batch-note">Every pick here was beaten by ${test}. The whole test is recorded fact &mdash; who was still available is the pick order, what each cost is the ledger, and how each turned out is the sim&rsquo;s own WPAR &mdash; so nothing is counterfactual and nothing depends on what another manager would have done. Cards are only compared inside the slot they actually filled, which is also what keeps pitching&rsquo;s inflated per-batter WPAR out of it: both sides of an arm-to-arm comparison carry the same inflation and it cancels. Starters are never read against relievers, whose inflation is a different size. It is hindsight, not a verdict: the cheaper card may have been cheaper for reasons that looked good at the time. What it does say is that the money or the turn bought nothing at that spot.</p>`;
+    ? "a card at the same slot, still unsold when this one was bought, who beat him both on the season and per batter faced, for no more money"
+    : "a card at the same slot, still on the board when this pick was made, who went later and beat him both on the season and per batter faced";
+  const note = `<p class="batch-note">Every pick here was beaten by ${test}. The whole test is recorded fact &mdash; who was still available is the pick order, what each cost is the ledger, and how each turned out is the sim&rsquo;s own WPAR &mdash; so nothing is counterfactual and nothing depends on what another manager would have done. Cards are only compared inside the slot they actually filled, and starters are never read against relievers.</p>
+    <p class="batch-note"><strong>An alternative has to clear the pick twice.</strong> WPAR is a counting stat, and for an arm the count is largely set by the staff around him: depth per outing hardly varies across a rotation, but appearances run from 41 to 93 for starters and 49 to 162 for relievers, because the engine rides whoever his staff left him. So beating the pick on the season alone is not a swap: the card has to be the better card over <em>the same job</em> as well. That keeps a workhorse&rsquo;s credit, since an arm who threw far fewer innings cannot take his place on a pretty rate, and it refuses to pay a bulk arm for facing more hitters while being worse at facing them.</p>
+    <p class="batch-note"><strong>Arms are read twice more.</strong> Judging them on the as-pitched rate alone would dock the workhorse a second time, because fatigue sits on a pitcher&rsquo;s control and the heavily-worked arms lose about 12% of their rate to it while the lightly-worked lose none. So an arm has to clear the pick both as he actually pitched and over the work each of them took before tiring, and the figure below is the stingier of the two readings &mdash; it never claims more than the meaner measurement supports. Hover a raw gap for a modelled second opinion: what the other card would have saved over the pick&rsquo;s own fatigue profile, rung by rung, facing the same batters. That one informs a row; it does not decide one.</p>
+    <p class="batch-note">Two readings, not a range. <strong>&Delta; at equal work</strong> holds the job fixed: the other card&rsquo;s edge over the work that was actually there at that roster spot. A bat&rsquo;s job is two clocks &mdash; trips to the plate for his bat and his legs, fielding chances for his glove &mdash; so a lineup slot never moves a glove, and reaching base more often is credited to the legs rather than divided back out of them. It is the same quantity that gated the row, so the headline and the test can never disagree. <strong>As played</strong> is what the season actually showed, the plain difference in totals, with the part that is only a difference in workload noted beneath it. That part cuts both ways &mdash; a card who was given <em>less</em> work than the pick shows a bigger edge at equal work than he ever managed on the field. It is hindsight, not a verdict: the cheaper card may have been cheaper for reasons that looked good at the time. What it does say is that the money or the turn bought nothing at that spot.</p>`;
   if (!rows.length) {
     return `<section class="panel wide">
       <div class="section-title-row">
@@ -7011,14 +7033,6 @@ function renderDominatedPicks(result) {
       <p class="batch-note"><strong>Nothing flagged.</strong> No pick in this room was beaten at its own slot by a card that was still there for less.</p>
     </section>`;
   }
-  const managerRows = byManager
-    .map((row) => `<tr>
-      <td>${escapeHtml(row.name)}</td>
-      <td class="num">${row.dominated} of ${row.picks}</td>
-      <td class="num">${formatWar(row.wparLeftBehind)}</td>
-      ${auction ? `<td class="num">${money(Math.round(row.savings))}</td>` : ""}
-    </tr>`)
-    .join("");
   const pickRows = rows
     .map((row) => {
       const extra = row.alternatives.length - 1;
@@ -7037,6 +7051,7 @@ function renderDominatedPicks(result) {
         ${auction ? `<td class="num">${money(row.best.price)}</td>` : ""}
         <td class="num">${formatWar(row.best.wpar)}</td>
         <td class="num"><strong>${formatWar(row.gap)}</strong></td>
+        <td class="num pick-quality-raw">${renderTipTarget(formatWar(row.rawGap), fatigueTip(row, fatigueRunsSaved))}<small>${formatWar(row.fromVolume)} from work</small></td>
         ${auction ? `<td class="num">${money(row.cheapest?.saved ?? 0)}</td>` : ""}
       </tr>`;
     })
@@ -7049,15 +7064,6 @@ function renderDominatedPicks(result) {
     ${note}
     <div class="table-scroll"><table class="player-table">
       <thead><tr>
-        <th>Manager</th>
-        <th class="num">Beaten on the board</th>
-        <th class="num">WPAR/162 left behind</th>
-        ${auction ? `<th class="num">Could have saved</th>` : ""}
-      </tr></thead>
-      <tbody>${managerRows}</tbody>
-    </table></div>
-    <div class="table-scroll"><table class="player-table">
-      <thead><tr>
         <th class="num">${auction ? "Lot" : "#"}</th>
         <th>Manager</th>
         <th>The pick</th>
@@ -7068,7 +7074,8 @@ function renderDominatedPicks(result) {
         <th>${auction ? "Sold" : "Went"}</th>
         ${auction ? `<th class="num">For</th>` : ""}
         <th class="num">WPAR/162</th>
-        <th class="num">&Delta;</th>
+        <th class="num"><abbr title="Both cards scored over the work the pick himself was given">&Delta; at equal work</abbr></th>
+        <th class="num"><abbr title="The raw difference in WPAR/162, and how much of it is simply the two cards having been given different amounts of work">As played</abbr></th>
         ${auction ? `<th class="num">Saving</th>` : ""}
       </tr></thead>
       <tbody>${pickRows}</tbody>
@@ -7319,6 +7326,69 @@ function batchWpaByPlayerId(summary) {
   const map = new Map();
   for (const line of [...(summary.hitters ?? []), ...(summary.pitchers ?? [])]) {
     if (line?.id != null && Number.isFinite(line.wpaPer162)) map.set(line.id, line.wpaPer162);
+  }
+  return map;
+}
+
+// Two cards, scored over the SAME job.
+//
+// A bat is read per plate appearance and that is the end of it. An arm is not:
+// the as-pitched rate is bent by the workload itself, because fatigue sits on
+// his control and the engine rides whoever his staff left him. Measured over a
+// classic room, that costs the heavily-worked arms about 12% of their rate and
+// the lightly-worked ones nothing — so judging arms on it would dock the very
+// workhorse the season totals are meant to credit.
+//
+
+// The hover line's modelled second opinion: runs per 162 the other card would
+// have saved over exactly the job the pick was handed — his batters faced fresh,
+// a point tired, two points tired and so on, every rung read for both cards
+// against the same league lineup. It gates nothing. Its value is that a card can
+// be read at a rung it never pitched at, since fatigue is just a subtraction
+// from control, so a lightly-used arm with no innings at four-tired is still
+// answerable for what his card would have done there.
+function buildFatigueRunsSaved(teams, summary) {
+  const bats = [];
+  for (const team of teams ?? []) for (const bat of team.lineup ?? []) bats.push(bat);
+  const facing = lineupProfile(bats);
+  const profiles = new Map();
+  for (const line of summary.pitchers ?? []) {
+    if (line?.id != null && Array.isArray(line.fatigueBf) && line.fatigueBf.some((count) => count > 0)) {
+      profiles.set(line.id, line.fatigueBf);
+    }
+  }
+  return (row) => {
+    const profile = profiles.get(row?.id);
+    if (!profile || row.player?.kind !== "pitcher" || row.best?.player?.kind !== "pitcher") return null;
+    let runs = 0;
+    for (let tier = 0; tier < profile.length; tier += 1) {
+      const batters = profile[tier];
+      // runsPerPa is runs ALLOWED, so the pick's figure less the other card's is
+      // what that card saves.
+      if (batters) runs += batters * (runsPerPa(row.player, tier, facing) - runsPerPa(row.best.player, tier, facing));
+    }
+    return runs;
+  };
+}
+
+// Player id -> how much work the card was given per 162 team games, in the units
+// its WPAR was summed over: batters faced for an arm, plate appearances for a
+// bat. This is what lets two cards at one slot be compared at the same workload
+// rather than on totals that mostly reflect the staff around them. A sim run
+// before the fields existed yields nothing for that card, and the dominance test
+// leaves it out rather than guessing.
+function batchWorkloadByPlayerId(summary) {
+  const map = new Map();
+  const per162 = (total, teamGames) => (teamGames > 0 ? (total / teamGames) * 162 : null);
+  for (const line of summary.hitters ?? []) {
+    if (line?.id == null) continue;
+    const pa = Number.isFinite(line.paPer162) ? line.paPer162 : per162(line.pa, line.teamGames);
+    if (Number.isFinite(pa) && pa > 0) map.set(line.id, pa);
+  }
+  for (const line of summary.pitchers ?? []) {
+    if (line?.id == null) continue;
+    const bf = per162(line.bf, line.teamGames);
+    if (Number.isFinite(bf) && bf > 0) map.set(line.id, bf);
   }
   return map;
 }

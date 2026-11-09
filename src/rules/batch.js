@@ -268,6 +268,9 @@ function foldAttribution(state, game) {
     if (pitcher) {
       pitcher.war.pitching += line.pitching;
       pitcher.freshWar.pitching += line.pitchingFresh;
+      (line.fatigueBf ?? []).forEach((count, tier) => {
+        if (count) pitcher.fatigueBf[tier] = (pitcher.fatigueBf[tier] ?? 0) + count;
+      });
     }
   }
   for (const side of ["away", "home"]) {
@@ -521,6 +524,8 @@ function registerPitcher(state, teamName, player) {
     wpa: 0,
     war: emptyWar(),
     freshWar: emptyWar(),
+    // Batters faced at each fatigue penalty, summed over the whole run.
+    fatigueBf: [],
     fresh: emptyPitcherTotals()
   });
 }
@@ -544,6 +549,9 @@ function emptyPitcherTotals() {
 function summarizePitcherLine(line, runs) {
   return {
     ...summarizePitcherTotals(line, line.teamGames, runs),
+    // Normalized to one team season, so two arms' workload shapes are on the
+    // same footing however many runs the batch played.
+    fatigueBf: (line.fatigueBf ?? []).map((count) => per162(count ?? 0, line.teamGames)),
     warPer162: summarizeWar(line.war, line.teamGames),
     fresh: {
       ...summarizePitcherTotals(line.fresh ?? emptyPitcherTotals(), line.teamGames, runs),

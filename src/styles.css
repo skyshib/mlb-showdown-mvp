@@ -8303,3 +8303,11 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .scatter-muted {
   opacity: 0.55;
 }
+
+/* The "as played" cell in the Pick quality table: the raw gap with the part
+   that is only extra workload tucked under it. */
+.pick-quality-raw small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}

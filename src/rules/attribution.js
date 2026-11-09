@@ -69,6 +69,15 @@ export function createAttribution({ resolveReplacement, rng }) {
   };
 }
 
+// Deep fatigue is a long thin tail, and a line that kept every rung of it would
+// be mostly zeroes. Everything past the cap is counted on the cap.
+export const MAX_FATIGUE_TIER = 12;
+
+export function recordFatigueTier(line, penalty) {
+  const tier = Math.max(0, Math.min(MAX_FATIGUE_TIER, Math.round(Number(penalty) || 0)));
+  line.fatigueBf[tier] = (line.fatigueBf[tier] ?? 0) + 1;
+}
+
 export function attributionLine(attribution, side, player, team) {
   const lines = attribution.lines[side];
   let line = lines.get(player.id);
@@ -77,6 +86,12 @@ export function attributionLine(attribution, side, player, team) {
       id: player.id, name: player.name, side, team, hitting: 0, baserunning: 0, defense: 0, pitching: 0,
       // The part of `pitching` from plate appearances that began before he tired.
       pitchingFresh: 0,
+      // How many batters he faced at each fatigue penalty: index 0 is fresh,
+      // index k is k points off his control. A season of these is the shape of
+      // the job he was actually given, which is what lets another card be
+      // scored over the SAME job — 36 batters fresh, 4 at one tired, and so on
+      // — instead of over the one his own staff happened to hand him.
+      fatigueBf: [],
       // What defense and baserunning were measured against, summed per chance:
       // the player's glove and legs and the replacement's.
       inputs: { fieldChances: 0, glove: 0, replacementGlove: 0, runChances: 0, speed: 0, replacementSpeed: 0 }
