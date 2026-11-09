@@ -408,3 +408,39 @@ test("the draft scatter crosses the cards that never played and fits a line thro
   assert.equal(scatterBestFit(points.slice(0, 2)), null);
   assert.equal(scatterBestFit([{ x: 5, y: 1 }, { x: 5, y: 2 }, { x: 5, y: 3 }]), null);
 });
+
+test("the spotlight greys the cloud and points an arrow from the pick to the card left on the board", () => {
+  const points = [
+    { x: 4, y: 1, color: "#aa0000", cardId: "took", tipTitle: "Took", tipLines: ["Took"] },
+    { x: 30, y: 6, color: "#00aa00", cardId: "left", tipTitle: "Left", tipLines: ["Left"] },
+    { x: 18, y: 2, color: "#0000aa", cardId: "other", muted: true, tipTitle: "Other", tipLines: ["Other"] }
+  ];
+  const arrows = [
+    { x1: 4, y1: 1, x2: 30, y2: 6, color: "#aa0000", tipTitle: "Took to Left", tipLines: ["+5.0 WPAR/162 better"] }
+  ];
+  const html = renderDraftScatter({ points, arrows, xLabel: "Pick number", yLabel: "WPAR / 162 games" });
+
+  // The arrow is one group with a line and a head, and it carries a tip like
+  // every other mark on the chart.
+  assert.equal((html.match(/class="scatter-arrow"/g) ?? []).length, 1);
+  assert.ok(html.includes("scatter-arrow-line"));
+  assert.ok(html.includes("scatter-arrow-head"));
+  assert.ok(html.includes("+5.0 WPAR/162 better"));
+
+  // Only the muted dot gives up its colour; the two lit ones keep theirs.
+  assert.equal((html.match(/scatter-muted/g) ?? []).length, 1);
+  assert.ok(html.includes('fill="#aa0000"'));
+  assert.ok(html.includes('fill="#00aa00"'));
+  assert.ok(!html.includes('fill="#0000aa"'), "the muted dot is grey, not its manager colour");
+});
+
+test("an arrow between two points at the same spot is dropped rather than drawn with no direction", () => {
+  const points = [{ x: 5, y: 2, color: "#aa0000", cardId: "a", tipTitle: "A", tipLines: ["A"] }];
+  const html = renderDraftScatter({
+    points,
+    arrows: [{ x1: 5, y1: 2, x2: 5, y2: 2, color: "#aa0000", tipTitle: "Nowhere", tipLines: [] }],
+    xLabel: "Pick number",
+    yLabel: "WPAR / 162 games"
+  });
+  assert.ok(!html.includes("scatter-arrow-line"));
+});

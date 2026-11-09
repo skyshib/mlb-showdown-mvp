@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dominatedPicks } from "../src/rules/pickDominance.js";
+import { reachAwards } from "../src/rules/awards.js";
 
 const ALPHA = { id: "m-alpha", name: "Alpha" };
 const BETA = { id: "m-beta", name: "Beta" };
@@ -142,4 +143,44 @@ test("every manager gets a line, dominated or not", () => {
     [["Alpha", 1, 1], ["Beta", 1, 0]]
   );
   assert.equal(result.byManager[0].wparLeftBehind, 3);
+});
+
+// The reach award reads straight off the dominance rows, so it is tested beside
+// them rather than with the awards that are computed from a batch summary.
+function reachRow(slot, gap, { name = "Taken", bestName = "Left", order = 9, price = 20, waited = 4 } = {}) {
+  return {
+    id: name,
+    name,
+    managerName: "Alpha",
+    slot,
+    gap,
+    waited,
+    best: { name: bestName, order, price }
+  };
+}
+
+test("the reach award names the best bat and the best arm left on the board", () => {
+  const rows = [
+    reachRow("SS", 1.2, { name: "Small Miss", bestName: "Better SS" }),
+    reachRow("1B", 4.5, { name: "Big Miss", bestName: "Better 1B", order: 31 }),
+    reachRow("SP", 9.9, { name: "Arm Miss", bestName: "Better SP", order: 44 })
+  ];
+  const awards = reachAwards(rows);
+  assert.deepEqual(awards.map((item) => item.key), ["reach-hitter", "reach-pitcher"]);
+  assert.equal(awards[0].name, "Big Miss", "the biggest bat gap wins the hitter award");
+  assert.match(awards[0].stat, /\+4\.5 WPAR\/162 left at 1B/);
+  assert.match(awards[0].note, /Better 1B was still on the board, and went at pick 31/);
+  assert.equal(awards[1].name, "Arm Miss", "arms are ranked among themselves");
+});
+
+test("an auction reach is worded in lots and dollars", () => {
+  const awards = reachAwards([reachRow("CF", 3, { name: "Overpaid", bestName: "Cheaper CF", price: 45, waited: 1 })], { byMoney: true });
+  assert.equal(awards.length, 1);
+  assert.equal(awards[0].label, "Reach of the auction (hitter)");
+  assert.match(awards[0].note, /Cheaper CF went 1 lot later for \$45/);
+});
+
+test("no reach award is given where nothing was beaten", () => {
+  assert.deepEqual(reachAwards([]), []);
+  assert.deepEqual(reachAwards([reachRow("SS", 0)]), [], "a zero gap is not a reach");
 });

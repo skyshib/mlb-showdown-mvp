@@ -782,7 +782,7 @@ export function scatterBestFit(points = []) {
   return { slope, intercept: meanY - slope * meanX, r2: syy ? (sxy * sxy) / (sxx * syy) : 1, n };
 }
 
-export function renderDraftScatter({ points = [], connectors = [], xLabel = "", yLabel = "", legend = [], activeManager = null, fit = null } = {}) {
+export function renderDraftScatter({ points = [], connectors = [], arrows = [], xLabel = "", yLabel = "", legend = [], activeManager = null, fit = null } = {}) {
   if (points.length < 1) {
     return `<div class="draft-chart">
       <div class="race-chart-placeholder">No players to plot for this filter.</div>
@@ -869,6 +869,46 @@ export function renderDraftScatter({ points = [], connectors = [], xLabel = "", 
     </g>`;
   })();
 
+  // Spotlight arrows: one per flagged pick, running from the card that was taken
+  // to the card that was still sitting there. They are drawn in data coordinates
+  // and under the dots, so a dot is never hidden by the line pointing at it. The
+  // head is shortened off both ends by a dot's radius so it touches neither
+  // circle, and a pair of points at the same spot draws nothing rather than a
+  // zero-length arrow with an undefined direction.
+  const arrowMarks = arrows
+    .filter((arrow) => [arrow.x1, arrow.y1, arrow.x2, arrow.y2].every(Number.isFinite))
+    .map((arrow, index) => {
+      const x1 = xFor(arrow.x1);
+      const y1 = yFor(arrow.y1);
+      const x2 = xFor(arrow.x2);
+      const y2 = yFor(arrow.y2);
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const length = Math.hypot(dx, dy);
+      if (length < 12) return "";
+      const ux = dx / length;
+      const uy = dy / length;
+      const gap = 7;
+      const sx = x1 + ux * gap;
+      const sy = y1 + uy * gap;
+      const ex = x2 - ux * gap;
+      const ey = y2 - uy * gap;
+      // The head, drawn as a filled triangle rather than a marker so it takes
+      // the arrow's own color without an <defs> entry per color.
+      const head = 5;
+      const spread = 2.8;
+      const hx = ex - ux * head;
+      const hy = ey - uy * head;
+      const points2 = `${ex.toFixed(1)},${ey.toFixed(1)} ${(hx - uy * spread).toFixed(1)},${(hy + ux * spread).toFixed(1)} ${(hx + uy * spread).toFixed(1)},${(hy - ux * spread).toFixed(1)}`;
+      const color = escapeHtml(arrow.color ?? "#8a5a2b");
+      const tip = pointTipAttrs({ title: arrow.tipTitle, color: arrow.tipColor ?? arrow.color, lines: arrow.tipLines });
+      return `<g class="scatter-arrow" ${tip} tabindex="0" role="img" aria-label="${escapeHtml(arrow.tipTitle ?? "Pick that was beaten on the board")}" data-arrow="${index}">
+        <line class="scatter-arrow-line" x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" stroke="${color}" />
+        <polygon class="scatter-arrow-head" points="${points2}" fill="${color}" />
+      </g>`;
+    })
+    .join("");
+
   // A point is a dot unless it asks to be a cross — the mark a card that never
   // played wears, so the money it cost reads at a glance against the players who
   // earned something. The cross carries the same handles as a dot: an invisible
@@ -878,17 +918,20 @@ export function renderDraftScatter({ points = [], connectors = [], xLabel = "", 
     .map((point) => {
       const cx = xFor(point.x);
       const cy = yFor(point.y);
-      const color = escapeHtml(point.color ?? "#365f91");
+      // A muted point is one the spotlight is not interested in: it keeps its
+      // place in the cloud so the shape of the draft is still there to read, but
+      // gives up its manager color.
+      const color = point.muted ? "#b9b3a4" : escapeHtml(point.color ?? "#365f91");
       const handles = `${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}"`;
       if (point.shape === "x") {
         const arm = 3.5;
         const d = `M${(cx - arm).toFixed(1)} ${(cy - arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy + arm).toFixed(1)}M${(cx - arm).toFixed(1)} ${(cy + arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy - arm).toFixed(1)}`;
-        return `<g class="scatter-cross${point.cardId ? " scatter-dot-card" : ""}" ${handles}>
+        return `<g class="scatter-cross${point.muted ? " scatter-muted" : ""}${point.cardId ? " scatter-dot-card" : ""}" ${handles}>
           <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="7" fill="transparent" />
           <path d="${d}" stroke="${color}" />
         </g>`;
       }
-      return `<circle class="scatter-dot${point.cardId ? " scatter-dot-card" : ""}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${color}" ${handles} />`;
+      return `<circle class="scatter-dot${point.muted ? " scatter-muted" : ""}${point.cardId ? " scatter-dot-card" : ""}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${point.muted ? 4 : 5}" fill="${color}" ${handles} />`;
     })
     .join("");
 
@@ -902,6 +945,7 @@ export function renderDraftScatter({ points = [], connectors = [], xLabel = "", 
       ${axisTitles}
       ${connectorLines}
       ${trend}
+      ${arrowMarks}
       ${dots}
     </svg>
     ${renderChartLegend(legend, activeManager)}

@@ -135,6 +135,42 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
   return awards;
 }
 
+// The reaches: the picks the board beat worst. Where the steal and the bust are
+// read against the whole field — a card's production rank against its cost rank
+// — a reach is read against ONE card: the best man at his own slot who was still
+// sitting there when this one was taken. That makes it the only award here that
+// names a specific alternative, so it carries both names.
+//
+// Split into bats and arms for the same reason the value awards are. Pitching
+// WPAR assumes the replacement faced every batter the real arm did, so arm-to-arm
+// gaps dwarf bat-to-bat ones and a single field would always go to a pitcher.
+const PITCHER_SLOTS = new Set(["SP", "RP"]);
+
+export function reachAwards(rows = [], { byMoney = false } = {}) {
+  const groups = [
+    { key: "hitter", label: "hitter", mine: (row) => !PITCHER_SLOTS.has(row.slot) },
+    { key: "pitcher", label: "pitcher", mine: (row) => PITCHER_SLOTS.has(row.slot) }
+  ];
+  const awards = [];
+  for (const group of groups) {
+    const reach = maxBy(rows.filter(group.mine), (row) => row.gap);
+    if (!reach || !(reach.gap > 0)) continue;
+    const where = byMoney
+      ? `${reach.best.name} went ${reach.waited} lot${reach.waited === 1 ? "" : "s"} later for $${Number(reach.best.price ?? 0).toLocaleString()}`
+      : `${reach.best.name} was still on the board, and went at pick ${reach.best.order}`;
+    awards.push({
+      key: `reach-${group.key}`,
+      label: `Reach of the ${byMoney ? "auction" : "draft"} (${group.label})`,
+      id: reach.id,
+      name: reach.name,
+      team: reach.managerName,
+      stat: `${formatWar(reach.gap)} WPAR/162 left at ${reach.slot}`,
+      note: where
+    });
+  }
+  return awards;
+}
+
 function award(key, label, line, stat, note) {
   return { key, label, id: line.id, name: line.name, team: line.team, stat, note };
 }

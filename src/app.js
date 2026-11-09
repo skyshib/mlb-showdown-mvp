@@ -195,7 +195,7 @@ import {
   winProbabilitySeries
 } from "./rules/ceremony.js?v=20261015-ceremony";
 import { ceremonyShellHtml, duelHtml, managerChip, resultWord, syncCeremony } from "./ui/ceremony.js?v=20261015-ceremony";
-import { computeAwards } from "./rules/awards.js?v=20260716-records";
+import { computeAwards, reachAwards } from "./rules/awards.js?v=20261108-reach";
 import { dominatedPicks } from "./rules/pickDominance.js?v=20261108-dominated";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
@@ -1235,6 +1235,7 @@ function defaultState() {
     // re-pointable — see renderBatch's axis pickers.
     batchChartXAxis: null,
     batchChartY: "wpar",
+    batchChartSpotlight: false,
     batchGamePage: 0,
     batchGameIndex: null,
     view: null,
@@ -6239,7 +6240,7 @@ function renderBatch() {
   const top = summary.teams[0];
   const pickNumberMap = buildPickNumberMap(state.draft);
   const pricePaidMap = buildPricePaidMap(state.draft);
-  const awards = computeAwards(summary, pickNumberMap, pricePaidMap);
+  const baseAwards = computeAwards(summary, pickNumberMap, pricePaidMap);
   const backLabel = "Back to draft";
   const playersById = draftedPlayersById();
   const auctionDraft = isAuctionDraft(state.draft);
@@ -6291,6 +6292,20 @@ function renderBatch() {
     : wpaaIndex;
   const hitterWpaa = (line) => wpaaIndex?.wpaaFor(line) ?? null;
   const pitcherWpaa = (line) => pitcherWpaaIndex?.wpaaFor(line) ?? null;
+  // Picks that were beaten on the board: the one post-draft read that needs no
+  // valuation model at all. It only means anything where the sim measured WPAR.
+  // Three screens want it — the value chart's spotlight, the awards grid's
+  // reaches, and the draft tab's own panel — so it is computed once here.
+  const dominance = hasWar
+    ? dominatedPicks(draftHistory(state.draft), {
+        auction: auctionDraft,
+        wparById: batchWparByPlayerId(summary),
+        // The slot the card FILLED, which is the same shelf WPAA measures him
+        // against: a catcher stationed at first is a first baseman here.
+        slotOf: (player) => wpaaIndex?.positionOf(player) ?? null
+      })
+    : null;
+  const dominatedById = new Map((dominance?.rows ?? []).map((row) => [row.id, row]));
   const teamNames = summary.teams.map((row) => row.team);
   const hitterTeamFilter = normalizeBatchTeamFilter(state.batchTeamFilters?.hitters, teamNames);
   const pitcherTeamFilter = normalizeBatchTeamFilter(state.batchTeamFilters?.pitchers, teamNames);
@@ -6384,6 +6399,10 @@ function renderBatch() {
     <h2>How the race unfolded</h2>
     ${renderRaceChart(state.batch.race)}
   </section>` : "";
+  // The reaches ride alongside the steals and busts, but they are measured
+  // against one named card rather than against the whole field, so they are
+  // built from the dominance result rather than inside computeAwards.
+  const awards = [...baseAwards, ...reachAwards(dominance?.rows ?? [], { byMoney: auctionDraft })];
   const awardsSection = awards.length ? `<div class="panel awards-panel">
     <h2>The awards show</h2>
     <div class="award-grid">${awards.map((item) => renderAwardCard(item, playersById)).join("")}</div>
@@ -6534,8 +6553,16 @@ function renderBatch() {
   const X_TITLES = { price: "Dollars spent", max: "Top bid", manager: "Manager's bid", allbids: "Every bid", points: "Points", pick: "Draft slot" };
   const yTitle = { wpar: "WPAR per 162", wpaa: "WPAA per 162", wpa: "WPA per 162", points: "Points" }[yMode];
 
+  // The spotlight: dim the cloud down to the picks that were beaten on the board
+  // and draw an arrow from each to the card that was still sitting there. It only
+  // has a geometry on the single-value x-axes — the bid views put one card on
+  // several x positions, so there is no one dot to point away from.
+  const spotlightAvailable = Boolean(dominance?.rows?.length) && xMode !== "allbids" && xMode !== "manager";
+  const spotlight = spotlightAvailable && Boolean(state.batchChartSpotlight);
+
   const scatterPoints = [];
   const connectors = [];
+  const arrows = [];
   let xAxisLabel;
 
   if (xMode === "allbids") {
@@ -6611,7 +6638,31 @@ function renderBatch() {
       if (auctionDraft) return `Price: ${money(value)}`;
       return `Pick #${value}`;
     };
-    const shown = chartManager ? chartRecords.filter((rec) => rec.team === chartManager) : chartRecords;
+    const recordById = new Map(cardRecords.map((rec) => [rec.cardId, rec]));
+    const plottable = (rec) => rec && Number.isFinite(xValueFor(rec)) && Number.isFinite(yValue(rec));
+    // The flagged picks this view can actually draw: both ends have to be on the
+    // chart, inside the position filter, and the pick itself has to belong to
+    // whichever manager the legend is narrowed to.
+    const spotlightRows = spotlight
+      ? (dominance?.rows ?? []).filter((row) => {
+          const taken = recordById.get(row.id);
+          const left = recordById.get(row.best.id);
+          if (!plottable(taken) || !plottable(left)) return false;
+          if (chartPosition !== "all" && taken.slot !== chartPosition) return false;
+          return !chartManager || taken.team === chartManager;
+        })
+      : [];
+    // Both ends of every arrow stay lit, which is why a manager filter cannot
+    // simply drop the other manager's cards: the card left on the board is
+    // almost always somebody else's, and an arrow needs something to point at.
+    const litIds = new Set();
+    for (const row of spotlightRows) {
+      litIds.add(row.id);
+      litIds.add(row.best.id);
+    }
+    const shown = chartManager
+      ? chartRecords.filter((rec) => rec.team === chartManager || litIds.has(rec.cardId))
+      : chartRecords;
     for (const rec of shown) {
       const xv = xValueFor(rec);
       const yv = yValue(rec);
@@ -6620,6 +6671,7 @@ function renderBatch() {
         x: xv,
         y: yv,
         color: rec.color,
+        muted: spotlight && !litIds.has(rec.cardId),
         shape: rec.unplayed ? "x" : null,
         cardId: rec.cardId,
         tipTitle: rec.name,
@@ -6633,6 +6685,29 @@ function renderBatch() {
         ].filter(Boolean)
       });
     }
+    for (const row of spotlightRows) {
+      const taken = recordById.get(row.id);
+      const left = recordById.get(row.best.id);
+      arrows.push({
+        x1: xValueFor(taken),
+        y1: yValue(taken),
+        x2: xValueFor(left),
+        y2: yValue(left),
+        color: taken.color,
+        tipTitle: `${row.name} \u2192 ${row.best.name}`,
+        tipColor: taken.color,
+        tipLines: [
+          `${row.managerName} took ${row.name} at ${row.slot}`,
+          auctionDraft
+            ? `${row.best.name} was unsold, and went ${row.waited} lot${row.waited === 1 ? "" : "s"} later for ${money(row.best.price)}`
+            : `${row.best.name} was still on the board, and went at pick ${row.best.order}`,
+          `${formatWar(row.gap)} WPAR/162 better`,
+          ...(auctionDraft && Number.isFinite(row.cheapest?.saved) && row.cheapest.saved > 0
+            ? [`Up to ${money(row.cheapest.saved)} cheaper at the same slot`]
+            : [])
+        ]
+      });
+    }
   }
 
   const xOptions = auctionDraft
@@ -6644,16 +6719,22 @@ function renderBatch() {
   const positionRow = chartPositions.length > 1
     ? `<div class="chart-axis-row"><span class="chart-axis-label">Pos</span>${positionOptions.map(([value, label]) => axisOption("position", value, label, chartPosition === value)).join("")}</div>`
     : "";
+  const spotlightRow = spotlightAvailable
+    ? `<div class="chart-axis-row"><span class="chart-axis-label">Show</span><button type="button" class="chart-axis-option${spotlight ? " active" : ""}" data-batch-chart-spotlight="${spotlight ? "off" : "on"}" aria-pressed="${spotlight}">Spotlight ${dominance.rows.length}</button></div>`
+    : "";
   const axisPicker = `<div class="chart-axis-pickers">
     <div class="chart-axis-row"><span class="chart-axis-label">X</span>${xOptions.map(([value, label]) => axisOption("xaxis", value, label, xMode === value)).join("")}</div>
     <div class="chart-axis-row"><span class="chart-axis-label">Y</span>${yOptions.map(([value, label]) => axisOption("yaxis", value, label, yMode === value)).join("")}</div>
     ${positionRow}
+    ${spotlightRow}
   </div>`;
   const chartNote = xMode === "allbids"
     ? `Each card is a thin line at its ${yTitle}; a dot on it is one manager's sealed bid. Hover a dot for who bid what.`
     : xMode === "manager"
       ? (chartManager ? `Every card ${chartManager} bid on, at what they bid — dots in another manager's colour are ones they lost.` : "Pick a manager in the legend to see only their bids; showing each card's top bid until then.")
-      : `Each dot is a drafted player who logged a stat, colored by manager.${chartRecords.some((rec) => rec.unplayed) ? ` A cross is a card that never made the lineup${yMode === "points" ? "" : ", sitting at zero for what it cost"}.` : ""} Hover for the line, click for the card, or filter by manager in the legend.`;
+      : spotlight
+        ? `Only the picks that were beaten on the board keep their colour. Each arrow runs from the card a manager took to the card at the same slot that was still ${auctionDraft ? "unsold, and went for no more money" : "sitting there, and went later"} and finished at least as good. Everything else is grey. Hover an arrow for the comparison, or a dot for the line.`
+        : `Each dot is a drafted player who logged a stat, colored by manager.${chartRecords.some((rec) => rec.unplayed) ? ` A cross is a card that never made the lineup${yMode === "points" ? "" : ", sitting at zero for what it cost"}.` : ""} Hover for the line, click for the card, or filter by manager in the legend.`;
   const positionNote = chartPosition === "all" ? "" : ` Showing ${escapeHtml(chartPosition)} only.`;
   // The best-fit line's slope needs units to mean anything. A step of one dollar
   // is too small to read, so money is quoted per $100 and points and picks per
@@ -6677,6 +6758,7 @@ function renderBatch() {
     ${renderDraftScatter({
       points: scatterPoints,
       connectors,
+      arrows,
       xLabel: xAxisLabel,
       yLabel: yAxisLabel,
       legend: chartLegend,
@@ -6801,21 +6883,9 @@ function renderBatch() {
       </table>
     </div>
   </section>`;
-  // Picks that were beaten on the board: the one post-draft read that needs no
-  // valuation model at all. It only means anything where the sim measured WPAR,
-  // and only the draft tab shows it, so it is computed there and nowhere else.
-  const dominance = hasWar && activeBatchTab === "draft"
-    ? dominatedPicks(draftHistory(state.draft), {
-        auction: auctionDraft,
-        wparById: batchWparByPlayerId(summary),
-        // The slot the card FILLED, which is the same shelf WPAA measures him
-        // against: a catcher stationed at first is a first baseman here.
-        slotOf: (player) => wpaaIndex?.positionOf(player) ?? null
-      })
-    : null;
   // The report card the draft screen opens on rides along here, so the grades
   // can be read against the season without leaving it.
-  const draftRecapSection = `${activeBatchTab === "draft" ? `${renderDraftDone(state.draft)}${renderAuctionBudgetSection(state.draft)}` : ""}
+  const draftRecapSection = `${activeBatchTab === "draft" ? `${renderDraftDone(state.draft, { dominance })}${renderAuctionBudgetSection(state.draft)}` : ""}
   ${renderDominatedPicks(dominance)}
   <section class="panel wide draft-recap-panel">
     <div class="section-title-row">
@@ -6921,11 +6991,11 @@ function renderDominatedPicks(result) {
       return `<tr>
         <td class="num">${row.order}</td>
         <td>${escapeHtml(row.managerName)}</td>
-        <td><strong>${escapeHtml(row.name)}</strong></td>
+        <td>${renderPlayerPreviewName(row.player, row.name, "strong", "batch-player-name")}</td>
         <td>${escapeHtml(row.slot)}</td>
         ${auction ? `<td class="num">${money(row.price)}</td>` : ""}
         <td class="num">${formatWar(row.wpar)}</td>
-        <td>${escapeHtml(row.best.name)} <small>(${escapeHtml(row.best.managerName)})</small>${extra > 0 ? ` <small>+${extra} more</small>` : ""}</td>
+        <td>${renderPlayerPreviewName(row.best.player, row.best.name, "span", "batch-player-name")} <small>(${escapeHtml(row.best.managerName)})</small>${extra > 0 ? ` <small>+${extra} more</small>` : ""}</td>
         <td>${waited}</td>
         ${auction ? `<td class="num">${money(row.best.price)}</td>` : ""}
         <td class="num">${formatWar(row.best.wpar)}</td>
@@ -8029,6 +8099,14 @@ function bindBatchActions() {
     const chartXAxisButton = event.target.closest("button[data-batch-chart-xaxis]");
     if (chartXAxisButton) {
       state.batchChartXAxis = chartXAxisButton.dataset.batchChartXaxis || null;
+      saveState();
+      renderBatch();
+      return;
+    }
+
+    const chartSpotlightButton = event.target.closest("button[data-batch-chart-spotlight]");
+    if (chartSpotlightButton) {
+      state.batchChartSpotlight = chartSpotlightButton.dataset.batchChartSpotlight === "on";
       saveState();
       renderBatch();
       return;
@@ -11541,7 +11619,7 @@ function recapText(draft) {
   return lines.join("\n");
 }
 
-function renderDraftDone(draft) {
+function renderDraftDone(draft, { dominance = null } = {}) {
   if (!draft?.complete || !draftHistory(draft).length) return "";
 
   const { teams, rows } = compositionTable(draft);
@@ -11578,6 +11656,34 @@ function renderDraftDone(draft) {
       )
       .join("")}
   </tr>`;
+
+  // What the board beat each manager by: the WPAR/162 he gave up across every
+  // pick that a card at the same slot, still available, finished ahead of. It is
+  // hindsight rather than a grade, which is why it sits below the line with the
+  // money rather than among the letters. Only a simulated room has it.
+  const leftBehind = dominance?.byManager?.length
+    ? new Map(dominance.byManager.map((row) => [row.managerId, row]))
+    : null;
+  const tightest = leftBehind
+    ? Math.min(...draft.managers.map((manager) => leftBehind.get(manager.id)?.wparLeftBehind ?? 0))
+    : 0;
+  const leftBehindRow = leftBehind
+    ? `<tr class="comp-points comp-dead-money">
+    <th class="comp-label"><span class="comp-name">WPAR/162 left behind</span></th>
+    ${draft.managers
+      .map((manager) => {
+        const row = leftBehind.get(manager.id);
+        const value = row?.wparLeftBehind ?? 0;
+        return `<td class="comp-cell">
+          <span class="comp-dead">
+            <span class="comp-points-value${value === tightest ? " cheapest" : ""}">${formatWar(value)}</span>
+            <span class="comp-dead-detail">${row?.dominated ? `over ${row.dominated} of ${row.picks} picks` : "nothing beaten"}</span>
+          </span>
+        </td>`;
+      })
+      .join("")}
+  </tr>`
+    : "";
 
   // The other half of the money, for an auction: what each manager paid for
   // the cards that are NOT on the field. It reads off the bench as it stands,
@@ -11630,11 +11736,11 @@ function renderDraftDone(draft) {
         <button class="small" data-action="export-save">Save the room</button>
       </div>
     </div>
-    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card the room drafted, benches included &mdash; cards nobody drafted are left out, so an average lineup grades around C however strong the board was. Active points adds up those same starters.${isAuctionDraft(draft) ? " Dead money is what each manager paid for the cards on the bench, and it moves when the lineup does." : ""}${isFirstPriceAuction(draft) ? " Overbid is what their winning bids cost above the runner-up's bid plus a dollar — what the same lots would have gone for under second-bid pricing." : ""}</p>
+    <p class="batch-note">Grades read each manager's starting nine and assigned pitching staff against every card the room drafted, benches included &mdash; cards nobody drafted are left out, so an average lineup grades around C however strong the board was. Active points adds up those same starters.${leftBehindRow ? " WPAR/162 left behind totals what each manager gave up on picks a still-available card at the same slot finished ahead of — hindsight, not a grade." : ""}${isAuctionDraft(draft) ? " Dead money is what each manager paid for the cards on the bench, and it moves when the lineup does." : ""}${isFirstPriceAuction(draft) ? " Overbid is what their winning bids cost above the runner-up's bid plus a dollar — what the same lots would have gone for under second-bid pricing." : ""}</p>
     <div class="table-scroll">
       <table class="comp-table">
         <thead><tr><th class="comp-corner"></th>${head}</tr></thead>
-        <tbody>${body}${pointsRow}${deadMoneyRow}${overbidRow}</tbody>
+        <tbody>${body}${pointsRow}${deadMoneyRow}${overbidRow}${leftBehindRow}</tbody>
       </table>
     </div>
   </section>`;
