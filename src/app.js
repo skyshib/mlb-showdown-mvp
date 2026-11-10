@@ -1217,11 +1217,12 @@ function defaultState() {
     online: null,
     tournament: null,
     batch: null,
+    // The two player tables are deliberately absent: they open on whichever
+    // value stat leads the room, which needs a draft to know, so they are
+    // resolved at render by resolvedBatchSorts instead of frozen here.
     batchSorts: {
       teams: { sort: "winPct", direction: "desc" },
-      starters: { sort: "team", direction: "asc" },
-      hitters: { sort: "war", direction: "desc" },
-      pitchers: { sort: "war", direction: "desc" }
+      starters: { sort: "team", direction: "asc" }
     },
     batchStatsTab: "overview",
     batchPitcherSplit: "overall",
@@ -1238,7 +1239,9 @@ function defaultState() {
     // pick number in a snake); y to the WPA it went on to earn. Both are
     // re-pointable — see renderBatch's axis pickers.
     batchChartXAxis: null,
-    batchChartY: "wpar",
+    // Left unset so the chart can open on whichever value stat leads the room,
+    // which is not known until a draft exists (see leadsWithWpaa).
+    batchChartY: null,
     batchChartSpotlight: false,
     batchGamePage: 0,
     batchGameIndex: null,
@@ -5039,11 +5042,46 @@ function newBatchSalt() {
   return Date.now().toString(36);
 }
 
+// WHICH VALUE STAT LEADS A ROOM.
+//
+// An auction's zero is a card a manager could have had for nothing: the free
+// standing replacement is unbiddable and printed into any roster that needs one,
+// so WPAR answers the question his money actually posed — what did buying this
+// man beat? A snake drafter never had that option. He cannot decline a pick to
+// bank the resource and every seat is filled either way, so the floor is the one
+// alternative he never faces, and measured against it every roster in the room
+// banks a large, near-identical credit just for turning up. His zero is the
+// average man at the position instead (WPAA, see buildWpaaIndex in allStars.js).
+//
+// Both figures are computed for every room and both are on the tables. This only
+// picks which one leads: the sorts, the bolded column, the All-Star shelves and
+// the awards.
+function leadsWithWpaa(draft = state.draft) {
+  return !isAuctionDraft(draft);
+}
+
+// What to hand computeAwards and the All-Star shelves so they rank on the room's
+// own stat. Empty when the room reads WPAR, which is what both default to.
+function awardMeasure(summary, wpaaIndex) {
+  if (!summary?.attribution || !wpaaIndex || !leadsWithWpaa()) return {};
+  return {
+    value: (line) => wpaaIndex.wpaaFor(line),
+    valueLabel: "WPAA",
+    baseline: "the average man at his position"
+  };
+}
+
 // One award, dressed for the ceremony: the line computeAwards picked, plus the
 // WPAR split the card beat shows underneath it. A room dealt without standing
 // replacement cards has no WPAR to split, and gets the headline alone.
 function ceremonyAward(key, summary, costs = null, byMoney = false) {
-  const award = computeAwards(summary).find((entry) => entry.key === key);
+  // The ceremony hands out the same award the stats screen does, so it has to
+  // rank it the same way — which on a snake means building the positional
+  // averages here too.
+  const ceremonyWpaa = summary?.attribution && leadsWithWpaa()
+    ? buildWpaaIndex(state.draft.managers.map((manager) => buildTeam(manager, { optimize: true })), summary)
+    : null;
+  const award = computeAwards(summary, null, null, awardMeasure(summary, ceremonyWpaa)).find((entry) => entry.key === key);
   if (!award) return null;
   const line = [...summary.hitters, ...summary.pitchers].find((entry) => entry.id === award.id);
   const cost = Number(costs?.[award.id]);
@@ -5061,7 +5099,7 @@ function ceremonyAward(key, summary, costs = null, byMoney = false) {
     pitcher: key === "cy-young",
     // Who else was in it. An award is a rank like any other, and the names
     // behind the winner are what make it one.
-    boards: key === "cy-young" ? cyYoungBoards(summary, costs) : mvpBoard(summary, costs)
+    boards: key === "cy-young" ? cyYoungBoards(summary, costs, ceremonyWpaa) : mvpBoard(summary, costs, ceremonyWpaa)
   };
 }
 
@@ -5090,9 +5128,9 @@ function rankBoard(lines, value, format, count, stats = null, costs = null) {
     });
 }
 
-function mvpBoard(summary, costs = null) {
+function mvpBoard(summary, costs = null, wpaaIndex = null) {
   const value = summary.attribution
-    ? (entry) => entry.warPer162?.total
+    ? (wpaaIndex && leadsWithWpaa() ? (entry) => wpaaIndex.wpaaFor(entry) : (entry) => entry.warPer162?.total)
     : (entry) => entry.wpaPerSeason;
   const format = (entry) => `${value(entry) < 0 ? "\u2212" : "+"}${Math.abs(value(entry)).toFixed(1)}`;
   return [{ label: "The five best bats", entries: rankBoard(summary.hitters ?? [], value, format, 5, null, costs) }];
@@ -5106,10 +5144,11 @@ function mvpBoard(summary, costs = null) {
 // most over the room's replacement, so the boards behind him are ordered the
 // same way rather than on rate: a board that put a rate ahead of the man who
 // won it was arguing with the card above it.
-function cyYoungBoards(summary, costs = null) {
+function cyYoungBoards(summary, costs = null, wpaaIndex = null) {
   const pitchers = summary.pitchers ?? [];
   const byWpar = Boolean(summary.attribution);
-  const worth = (entry) => (byWpar ? entry.warPer162?.total : entry.wpaPer162) ?? 0;
+  const byWpaa = byWpar && wpaaIndex && leadsWithWpaa();
+  const worth = (entry) => (byWpaa ? wpaaIndex.wpaaFor(entry) : byWpar ? entry.warPer162?.total : entry.wpaPer162) ?? 0;
   const signed = (figure) => `${figure < 0 ? "\u2212" : "+"}${Math.abs(figure).toFixed(1)}`;
   const format = (entry) => signed(worth(entry));
   // A rate on its own says nothing about how much of it there was. The innings
@@ -5118,7 +5157,7 @@ function cyYoungBoards(summary, costs = null) {
   const stats = (entry) => [
     { value: (entry.runsPerNine ?? 0).toFixed(2), label: "ERA" },
     { value: String(Math.round(entry.ipPer162 ?? 0)), label: "IP" },
-    { value: signed(worth(entry)), label: byWpar ? "WPAR" : "WPA" }
+    { value: signed(worth(entry)), label: byWpaa ? "WPAA" : byWpar ? "WPAR" : "WPA" }
   ];
   const worked = (entry, share) => (entry.outs ?? 0) >= Math.max(30, (entry.teamGames ?? 0) * share);
   const starters = pitchers.filter((entry) => entry.role === "SP" && worked(entry, 2));
@@ -6280,7 +6319,6 @@ function renderBatch() {
   const top = summary.teams[0];
   const pickNumberMap = buildPickNumberMap(state.draft);
   const pricePaidMap = buildPricePaidMap(state.draft);
-  const baseAwards = computeAwards(summary, pickNumberMap, pricePaidMap);
   const backLabel = "Back to draft";
   const playersById = draftedPlayersById();
   const auctionDraft = isAuctionDraft(state.draft);
@@ -6332,6 +6370,14 @@ function renderBatch() {
     : wpaaIndex;
   const hitterWpaa = (line) => wpaaIndex?.wpaaFor(line) ?? null;
   const pitcherWpaa = (line) => pitcherWpaaIndex?.wpaaFor(line) ?? null;
+  // Which of the two leads this room, and so what the awards are given for. The
+  // averages have to exist before the awards can be handed out, which is why
+  // this sits below them rather than at the top of the screen.
+  const byWpaa = hasWar && leadsWithWpaa();
+  const leadLabel = byWpaa ? "WPAA" : "WPAR";
+  // The room's own stat is the bold one; the other stays on the row beside it.
+  const lead = (text, isLead) => (isLead ? `<strong>${text}</strong>` : text);
+  const baseAwards = computeAwards(summary, pickNumberMap, pricePaidMap, awardMeasure(summary, wpaaIndex));
   // Picks that were beaten on the board: the one post-draft read that needs no
   // valuation model at all. It only means anything where the sim measured WPAR.
   // Three screens want it — the value chart's spotlight, the awards grid's
@@ -6412,7 +6458,7 @@ function renderBatch() {
         <td class="num">${formatAverage(wobaNumerator(line), line.pa)}</td>
         <td class="num">${wrcPlus(line, leagueWoba)}</td>
         ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
-        ${hasWar ? `<td class="num">${formatWar(line.warPer162?.hitting)}</td><td class="num">${formatWar(line.warPer162?.defense)}</td><td class="num">${formatWar(line.warPer162?.baserunning)}</td><td class="num"><strong>${formatWar(hitterWar(line))}</strong></td><td class="num">${formatWpaa(hitterWpaa(line))}</td>` : ""}
+        ${hasWar ? `<td class="num">${formatWar(line.warPer162?.hitting)}</td><td class="num">${formatWar(line.warPer162?.defense)}</td><td class="num">${formatWar(line.warPer162?.baserunning)}</td><td class="num">${lead(formatWar(hitterWar(line)), !byWpaa)}</td><td class="num">${lead(formatWpaa(hitterWpaa(line)), byWpaa)}</td>` : ""}
       </tr>`
     )
     .join("");
@@ -6431,7 +6477,7 @@ function renderBatch() {
         <td class="num">${formatPerNine(line.bb, line.outs)}</td>
         <td class="num">${formatPerNine(line.r, line.outs)}</td>
         ${renderPaceCell(line, "wpaPer162", "wpa", teamGamesByName, "WPA", formatWpaStat)}
-        ${hasWar ? `<td class="num">${line.warPer162 ? formatWar(line.warPer162.pitching) : "—"}</td><td class="num">${line.warPer162 ? formatWpaa(pitcherWpaa(line)) : "—"}</td>` : ""}
+        ${hasWar ? `<td class="num">${line.warPer162 ? lead(formatWar(line.warPer162.pitching), !byWpaa) : "—"}</td><td class="num">${line.warPer162 ? lead(formatWpaa(pitcherWpaa(line)), byWpaa) : "—"}</td>` : ""}
       </tr>`
     )
     .join("");
@@ -6444,7 +6490,7 @@ function renderBatch() {
   // The reaches ride alongside the steals and busts, but they are measured
   // against one named card rather than against the whole field, so they are
   // built from the dominance result rather than inside computeAwards.
-  const awards = [...baseAwards, ...reachAwards(dominance?.rows ?? [], { byMoney: auctionDraft })];
+  const awards = [...baseAwards, ...reachAwards(dominance?.rows ?? [], { byMoney: auctionDraft, valueLabel: leadLabel })];
   const awardsSection = awards.length ? `<div class="panel awards-panel">
     <h2>The awards show</h2>
     <div class="award-grid">${awards.map((item) => renderAwardCard(item, playersById)).join("")}</div>
@@ -6576,8 +6622,14 @@ function renderBatch() {
   const xMode = auctionDraft
     ? (state.batchChartXAxis ?? "price")
     : (state.batchChartXAxis === "points" ? "points" : "pick");
-  // WPAR leads when the sim measured it; a sim that predates it opens on WPA.
-  const yOptions = [...(hasWar ? [["wpar", "WPAR/162"], ["wpaa", "WPAA/162"]] : []), ["wpa", "WPA/162"], ["points", "Points"]];
+  // The room's own value stat leads; a sim that predates them opens on WPA.
+  const yOptions = [
+    ...(hasWar
+      ? (byWpaa ? [["wpaa", "WPAA/162"], ["wpar", "WPAR/162"]] : [["wpar", "WPAR/162"], ["wpaa", "WPAA/162"]])
+      : []),
+    ["wpa", "WPA/162"],
+    ["points", "Points"]
+  ];
   const yMode = yOptions.some(([value]) => value === state.batchChartY) ? state.batchChartY : yOptions[0][0];
   const yValue = (rec) => (yMode === "points" ? rec.points
     : yMode === "wpar" ? rec.wpar162
@@ -6898,7 +6950,9 @@ function renderBatch() {
       <h2>Hitters, 162-game pace</h2>
       ${renderBatchTeamFilter("hitters", hitterTeamFilter, teamNames)}
     </div>
-    ${hasWar ? `<p class="batch-note"><strong>WPAR</strong> is WPA over replacement: win probability added over the room's replacement card at the hitter's position, per 162 games. It is <strong>Hit WPAR</strong> (on-base and chart, every plate appearance replayed with the same dice and the replacement's numbers) plus <strong>Def WPAR</strong> and <strong>BsR WPAR</strong> (glove and speed against the replacement's), whose inputs are on the Baserunning &amp; defense tab. <strong>WPAA</strong> is the same value read against the average instead of the floor: WPAR less the average WPAR of the league's rostered players at his position, so a catcher is measured against catchers. Left and right field count as one position.</p>` : ""}
+    ${hasWar ? `<p class="batch-note">${byWpaa
+      ? "This room ranks on <strong>WPAA</strong>: a pick cannot be declined, so the free replacement card is an alternative its managers never faced. "
+      : "This room ranks on <strong>WPAR</strong>: the free replacement card was there for the taking, so it is what a manager's money had to beat. "}<strong>WPAR</strong> is WPA over replacement: win probability added over the room's replacement card at the hitter's position, per 162 games. It is <strong>Hit WPAR</strong> (on-base and chart, every plate appearance replayed with the same dice and the replacement's numbers) plus <strong>Def WPAR</strong> and <strong>BsR WPAR</strong> (glove and speed against the replacement's), whose inputs are on the Baserunning &amp; defense tab. <strong>WPAA</strong> is the same value read against the average instead of the floor: WPAR less the average WPAR of the league's rostered players at his position, so a catcher is measured against catchers. Left and right field count as one position.</p>` : ""}
     <div class="table-scroll">
       <table class="batch-stat-table">
         <thead><tr>
@@ -6938,7 +6992,9 @@ function renderBatch() {
           ? "This simulation predates fatigue splits. Run it again to compare fresh and tired work."
           : pitcherSplit === "fresh"
           ? "Only plate appearances that began before the pitcher was tired."
-          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? ` <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. The replacement is replayed fresh, so an arm pitching tired is charged for his own fatigue. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers. <strong>Pitch WPAA</strong> is the same figure read against the average rather than the floor: WPAR less the average WPAR of the league's rostered arms in his role.` : ""}</p>
+          : "All plate appearances, including work after the pitcher became tired."}${hasWar ? `${byWpaa
+            ? " This room ranks on <strong>Pitch WPAA</strong>, the figure read against the average arm in his role."
+            : " This room ranks on <strong>Pitch WPAR</strong>, the figure read against the room's free replacement arm."} <strong>Pitch WPAR</strong> is WPA over replacement: control and chart against the room's replacement SP or RP, per 162 games, replayed with the same dice. The replacement is replayed fresh, so an arm pitching tired is charged for his own fatigue. It is per-batter value: it assumes the replacement faces every batter this arm faced, but a manager would pull or skip a bad arm, so it reads higher than the wins a team would actually lose, most of all for relievers. <strong>Pitch WPAA</strong> is the same figure read against the average rather than the floor: WPAR less the average WPAR of the league's rostered arms in his role.` : ""}</p>
       </div>
       <div class="batch-stat-controls">
         ${renderBatchTeamFilter("pitchers", pitcherTeamFilter, teamNames)}
@@ -7162,9 +7218,17 @@ function normalizeBatchPitcherSplit(value) {
 }
 
 function renderBatchAllStars(summary, playersById, bidTips = {}, teams = null, wpaaIndex = null) {
-  const slots = buildAllStarDepthChart(teams ?? state.draft.managers.map((manager) => buildTeam(manager, { optimize: true })), summary);
-  const pricePaidMap = buildPricePaidMap(state.draft);
   const byWpar = Boolean(summary.attribution);
+  // Only the figure on the card follows the room: a shelf is one position, and
+  // WPAA takes one average off that whole position, so it cannot reorder a shelf
+  // (see buildAllStarDepthChart).
+  const byWpaa = byWpar && leadsWithWpaa() && Boolean(wpaaIndex);
+  const wpaaOf = (candidate) => wpaaIndex?.wpaaByPlayerId.get(candidate?.id) ?? 0;
+  const slots = buildAllStarDepthChart(
+    teams ?? state.draft.managers.map((manager) => buildTeam(manager, { optimize: true })),
+    summary
+  ).map((slot) => dressAllStarSlot(slot, byWpaa, wpaaOf));
+  const pricePaidMap = buildPricePaidMap(state.draft);
   const filled = slots.filter((slot) => slot.leader);
   if (!filled.length) {
     return `<section class="panel wide">
@@ -7178,16 +7242,18 @@ function renderBatchAllStars(summary, playersById, bidTips = {}, teams = null, w
         <p class="eyebrow">Best at every position</p>
         <h2>Simulation All-Stars</h2>
         <p class="batch-note">${byWpar
-          ? "Each card shows the leader in WPAR (WPA over replacement) per 162 games and the closest competition, with WPAA, WPA and draft prices alongside. Larger fields also include a full depth chart. Left and right field are one shelf: an LF/RF card plays either corner at the same glove."
+          ? `Each card shows the leader in ${byWpaa
+            ? "WPAA (WPA over the average man at the position)"
+            : "WPAR (WPA over replacement)"} per 162 games and the closest competition, with ${byWpaa ? "WPAR" : "WPAA"}, WPA and draft prices alongside. Larger fields also include a full depth chart. Left and right field are one shelf: an LF/RF card plays either corner at the same glove.`
           : "Each card shows the WPA/162 leader and closest competition with their draft prices. Larger fields also include a full depth chart. Left and right field are one shelf: an LF/RF card plays either corner at the same glove."}</p>
       </div>
       <span>${filled.length} roster spots</span>
     </div>
-    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap, byWpar, bidTips, wpaaIndex)).join("")}</div>
+    <div class="all-star-grid">${slots.map((slot) => renderAllStarSlot(slot, playersById, pricePaidMap, byWpar, bidTips)).join("")}</div>
   </section>`;
 }
 
-function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidTips = {}, wpaaIndex = null) {
+function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidTips = {}) {
   if (!slot.leader) {
     return `<article class="all-star-slot all-star-slot-empty">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
@@ -7196,8 +7262,8 @@ function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidT
   }
   const leader = slot.leader;
   const pricePaid = pricePaidMap[leader.id];
-  // How far clear of the position's league average the leader finished.
-  const leaderWpaa = wpaaIndex?.wpaaByPlayerId.get(leader.id);
+  // The other figure, whichever one the shelf is not ranked on.
+  const leaderAlt = leader.altPer162;
   const closestCompetition = allStarComparisonCandidates(slot.depth);
   const comparisonRows = closestCompetition.map((candidate) => renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar, bidTips)).join("");
   const showFullDepth = shouldShowFullAllStarDepth(slot.depth);
@@ -7212,12 +7278,12 @@ function renderAllStarSlot(slot, playersById, pricePaidMap, byWpar = false, bidT
   return `<article class="all-star-slot">
     <header class="all-star-slot-header">
       <span class="all-star-position">${escapeHtml(allStarPositionLabel(slot.position))}</span>
-      <strong>${byWpar ? `${formatWar(leader.wparPer162)} <small>WPAR/162</small>` : `${formatWpaStat(leader.wpaPer162)} <small>WPA/162</small>`}</strong>
+      <strong>${byWpar ? `${formatWar(leader.leadPer162)} <small>${leader.leadLabel}/162</small>` : `${formatWpaStat(leader.wpaPer162)} <small>WPA/162</small>`}</strong>
     </header>
     <div class="all-star-card-face">${renderPlayerCard(leader.player)}</div>
     <div class="all-star-identity">
       <strong>${escapeHtml(leader.name)}</strong>
-      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; ${renderTipTarget(`Paid ${money(pricePaid)}`, bidTips[leader.id])}` : ""}${byWpar && Number.isFinite(leaderWpaa) ? ` &middot; ${formatWar(leaderWpaa)} WPAA` : ""}${byWpar ? ` &middot; ${formatWpaStat(leader.wpaPer162)} WPA` : ""}</span>
+      <span>${escapeHtml(leader.team)}${Number.isFinite(pricePaid) ? ` &middot; ${renderTipTarget(`Paid ${money(pricePaid)}`, bidTips[leader.id])}` : ""}${byWpar && Number.isFinite(leaderAlt) ? ` &middot; ${formatWar(leaderAlt)} ${leader.altLabel}` : ""}${byWpar ? ` &middot; ${formatWpaStat(leader.wpaPer162)} WPA` : ""}</span>
     </div>
     ${comparisonRows ? `<section class="all-star-comparison" aria-label="Closest competition at ${escapeHtml(allStarPositionLabel(slot.position))}">
       <div class="all-star-comparison-heading">
@@ -7244,10 +7310,26 @@ function renderAllStarComparisonRow(candidate, playersById, pricePaidMap, byWpar
   </li>`;
 }
 
-// WPAR ranks the field, so it leads; WPA sits under it for comparison.
+// Whichever stat ranked the field leads; WPA sits under it for comparison.
 function renderAllStarValue(candidate, byWpar) {
   if (!byWpar) return `<strong>${formatWpaStat(candidate.wpaPer162)}</strong>`;
-  return `<strong class="all-star-value">${formatWar(candidate.wparPer162)}<small>${formatWpaStat(candidate.wpaPer162)} WPA</small></strong>`;
+  return `<strong class="all-star-value">${formatWar(candidate.leadPer162)}<small>${formatWpaStat(candidate.wpaPer162)} WPA</small></strong>`;
+}
+
+// Each candidate carries the room's own stat as `leadPer162` and the other as
+// `altPer162`, so the shelves print them in the room's order without every
+// renderer below having to know which room it is.
+function dressAllStarSlot(slot, byWpaa, wpaaOf) {
+  const dress = (candidate) => (candidate
+    ? {
+      ...candidate,
+      leadPer162: byWpaa ? wpaaOf(candidate) : candidate.wparPer162,
+      altPer162: byWpaa ? candidate.wparPer162 : wpaaOf(candidate),
+      leadLabel: byWpaa ? "WPAA" : "WPAR",
+      altLabel: byWpaa ? "WPAR" : "WPAA"
+    }
+    : candidate);
+  return { ...slot, leader: dress(slot.leader), depth: (slot.depth ?? []).map(dress) };
 }
 
 function renderAllStarPrice(candidate, pricePaidMap, bidTips = {}) {
@@ -8056,14 +8138,20 @@ function rateValue(numerator, denominator) {
   return denominator ? numerator / denominator : 0;
 }
 
+// The defaults as this room reads them: the player tables open on whichever
+// value stat leads it.
+function resolvedBatchSorts() {
+  return defaultBatchSorts({ lead: leadsWithWpaa() ? "wpaa" : "war" });
+}
+
 function batchSortConfig(table) {
-  return state.batchSorts?.[table] ?? defaultBatchSorts()[table] ?? { sort: "name", direction: "asc" };
+  return state.batchSorts?.[table] ?? resolvedBatchSorts()[table] ?? { sort: "name", direction: "asc" };
 }
 
 function updateBatchSort(table, sort) {
   if (!table || !sort) return;
-  state.batchSorts = { ...defaultBatchSorts(), ...(state.batchSorts ?? {}) };
-  const current = state.batchSorts[table] ?? defaultBatchSorts()[table] ?? { sort: "name", direction: "asc" };
+  state.batchSorts = { ...resolvedBatchSorts(), ...(state.batchSorts ?? {}) };
+  const current = state.batchSorts[table] ?? resolvedBatchSorts()[table] ?? { sort: "name", direction: "asc" };
   state.batchSorts[table] = current.sort === sort
     ? { sort, direction: current.direction === "asc" ? "desc" : "asc" }
     : { sort, direction: defaultBatchSortDirection(table, sort) };
@@ -8090,12 +8178,15 @@ function normalizeDraftHistorySort(value, legacyPaidSort = null) {
   return { sort: "pick", direction: "asc" };
 }
 
-function defaultBatchSorts() {
+// `lead` is the value stat the room ranks on. It is left at WPAR for the
+// persistence path, which runs before the draft is necessarily known; the render
+// path resolves it per room through resolvedBatchSorts.
+function defaultBatchSorts({ lead = "war" } = {}) {
   return {
     teams: { sort: "winPct", direction: "desc" },
     starters: { sort: "team", direction: "asc" },
-    hitters: { sort: "war", direction: "desc" },
-    pitchers: { sort: "war", direction: "desc" },
+    hitters: { sort: lead, direction: "desc" },
+    pitchers: { sort: lead, direction: "desc" },
     skillPlayers: { sort: "total", direction: "desc" },
     baserunning: { sort: "war", direction: "desc" },
     defense: { sort: "war", direction: "desc" }
@@ -8118,6 +8209,13 @@ function normalizeBatchSorts(value) {
   // FIP left the pitcher table; a save still sorted on it opens on the ERA
   // column next door, sorted the way FIP was.
   if (sorts.pitchers?.sort === "fip") sorts.pitchers = { sort: "era", direction: sorts.pitchers.direction ?? "asc" };
+  // A player table still sitting on the stable default is left UNSET, so the
+  // render path can open it on whichever value stat leads the room — which is
+  // not knowable here, because a save is restored before the draft is. An
+  // explicit choice of any other column survives untouched.
+  for (const table of ["hitters", "pitchers"]) {
+    if (sorts[table]?.sort === "war" && sorts[table]?.direction === "desc") delete sorts[table];
+  }
   return sorts;
 }
 
@@ -12461,6 +12559,11 @@ function reviveState(value) {
     // The chart's y-axis setting moved keys when WPAR became the default. The old
     // key's "wpa" was just the old default, so only a Points choice carries over.
     ...(value.batchChartY === undefined && value.batchChartYAxis === "points" ? { batchChartY: "points" } : {}),
+    // "wpar" used to be baked in as the opening axis for every room, so a save
+    // holding it cannot be told from a deliberate choice of it. Treat it as
+    // unset: the chart then opens on the room's own value stat, and one click
+    // puts WPAR back for anyone who did mean it.
+    ...(value.batchChartY === "wpar" ? { batchChartY: null } : {}),
     startingPitchers: draft?.startingPitchers ?? normalizeStartingPitchers(value.startingPitchers),
     ...(value.bullpenSlots === undefined
       ? { bullpenSlots: UNLIMITED_BULLPEN, bullpenMin: 2 }

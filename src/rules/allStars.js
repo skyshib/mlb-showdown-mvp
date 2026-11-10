@@ -15,6 +15,13 @@ export function analysisPosition(position) {
 
 // Ranks each position on WPA over replacement (WPAR) when the sim measured it,
 // and on WPA for sims that predate it. Every candidate carries both.
+//
+// A shelf is NOT ranked on the room's own value stat, and does not need to be:
+// WPAA is WPAR less one average per position, a shelf holds one position, and
+// subtracting the same constant from every candidate on it cannot reorder them.
+// So the order here is the order either way, and only the figure the card prints
+// follows the room. (Awards are different — the MVP is ranked across positions,
+// where the constants differ and the two measures really do disagree.)
 export function buildAllStarDepthChart(teams, summary) {
   const byWpar = Boolean(summary?.attribution);
   const value = byWpar ? (candidate) => candidate.wparPer162 : (candidate) => candidate.wpaPer162;

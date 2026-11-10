@@ -7,24 +7,40 @@
 // steal, bust) are given once to hitters and once to pitchers: pitching WPAR
 // assumes the replacement faces every batter the real arm did, so it reads well
 // above hitting WPAR and a single field would always go to a pitcher.
+//
+// A room may hand over its own `measure` (see computeAwards): a snake draft is
+// read against the average man at the position rather than the floor, because a
+// pick cannot be declined and the free card is an option its managers never
+// had. Worth knowing if the split above is ever revisited — recentering per
+// position cancels each slot's own level bias, the pitching inflation included,
+// so under WPAA a single MVP field would no longer always go to an arm.
 
 const VALUE_GROUPS = [
   { key: "hitter", label: "hitter", plural: "hitters", lines: (summary) => summary.hitters },
   { key: "pitcher", label: "pitcher", plural: "pitchers", lines: (summary) => summary.pitchers }
 ];
 
-export function computeAwards(summary, pickNumbers = null, prices = null) {
+// `measure` names what the value awards are given for. A room whose zero is the
+// average man at the position hands over its own selector, label and the phrase
+// that describes the baseline; left out, the awards go on WPAR as they always
+// have. Nothing else about an award changes: the MVP is still the best bat in
+// the room, it is just read against a different zero.
+export function computeAwards(summary, pickNumbers = null, prices = null, measure = {}) {
   if (!summary?.hitters?.length || !summary?.pitchers?.length) return [];
   if (summary.hitters[0].wpaPerSeason === undefined) return [];
 
   const teamCount = summary.teams?.length ?? 0;
   const awards = [];
   const byWpar = Boolean(summary.attribution);
-  const value = byWpar ? (line) => line.warPer162?.total : (line) => line.wpaPerSeason;
-  const valueLabel = byWpar ? "WPAR" : "WPA";
+  const measured = byWpar && typeof measure.value === "function" ? measure.value : null;
+  const value = measured ?? (byWpar ? (line) => line.warPer162?.total : (line) => line.wpaPerSeason);
+  const valueLabel = byWpar ? (measured ? measure.valueLabel ?? "WPAA" : "WPAR") : "WPA";
+  const baselinePhrase = measured
+    ? measure.baseline ?? "the average man at his position"
+    : "the room's replacement card";
   // What an arm was worth, in the same words for every pitching award.
   const worth = byWpar
-    ? (line) => `${formatWar(line.warPer162?.total)} WPAR`
+    ? (line) => `${formatWar(value(line))} ${valueLabel}`
     : (line) => `${formatWpa(line.wpaPer162 ?? line.wpaPerSeason)} WPA`;
 
   // The Cy Young is the best arm in the room by the same measure the MVP is the
@@ -40,12 +56,12 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
     if (!mvp) continue;
     if (group.key === "pitcher" && bestArm && mvp.id === bestArm.id) continue;
     const mvpStat = byWpar
-      ? `${formatWar(mvp.warPer162.total)} WPAR per 162 games`
+      ? `${formatWar(value(mvp))} ${valueLabel} per 162 games`
       : Number.isFinite(mvp.wpaPer162)
         ? `${formatWpa(mvp.wpaPer162)} WPA per 162 games`
         : `${formatWpa(mvp.wpaPerSeason)} WP added/season`;
     const mvpNote = byWpar
-      ? `Win probability added over the room's replacement card, per 162 games. ${formatWpa(mvp.wpaPer162)} WPA.`
+      ? `Win probability added over ${baselinePhrase}, per 162 games. ${formatWpa(mvp.wpaPer162)} WPA.`
       : "Win probability added: every swing weighted by how much it moved the game.";
     awards.push(award(`mvp-${group.key}`, `Sim MVP (${group.label})`, mvp, mvpStat, mvpNote));
   }
@@ -146,7 +162,11 @@ export function computeAwards(summary, pickNumbers = null, prices = null) {
 // gaps dwarf bat-to-bat ones and a single field would always go to a pitcher.
 const PITCHER_SLOTS = new Set(["SP", "RP"]);
 
-export function reachAwards(rows = [], { byMoney = false } = {}) {
+// `valueLabel` only names the unit. A reach's gap is the distance between two
+// cards at the SAME slot, and the slot's average cancels out of a difference, so
+// the number is identical whether the room reads WPAR or WPAA — only the word
+// printed after it changes.
+export function reachAwards(rows = [], { byMoney = false, valueLabel = "WPAR" } = {}) {
   const groups = [
     { key: "hitter", label: "hitter", mine: (row) => !PITCHER_SLOTS.has(row.slot) },
     { key: "pitcher", label: "pitcher", mine: (row) => PITCHER_SLOTS.has(row.slot) }
@@ -164,7 +184,7 @@ export function reachAwards(rows = [], { byMoney = false } = {}) {
       id: reach.id,
       name: reach.name,
       team: reach.managerName,
-      stat: `${formatWar(reach.gap)} WPAR/162 left at ${reach.slot}`,
+      stat: `${formatWar(reach.gap)} ${valueLabel}/162 left at ${reach.slot}`,
       note: where
     });
   }
