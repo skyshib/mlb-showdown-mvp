@@ -241,35 +241,45 @@ function plaqueInner(state, plaque) {
 }
 
 // Eight categories, each one built the way an award is: the leader's card at
-// a size worth looking at, his name beside it, and the two men who did not
-// lead listed underneath. A thumbnail the size of a postage stamp said
-// nothing about the card it was a picture of.
+// a size worth looking at, his name beside it, and the table of three
+// underneath. A thumbnail the size of a postage stamp said nothing about the
+// card it was a picture of.
+//
+// The leader is on the board twice — in the spotlight and at the top of his own
+// table — because a table that opens at second place reads as though the man
+// who led it had been disqualified. The two copies are separate rows as far as
+// the patch is concerned, so they carry separate keys.
 function leadersHtml(state, options) {
   return `<div class="leader-board">${(state.leaders ?? []).map((category) => `
     <div class="leader-cat">
       <p class="leader-cat-head">${escapeHtml(category.label)}</p>
       <div class="leader-cat-body">
         ${category.entries.filter((entry) => entry.rank === 1).map((entry) => `
-          <div class="leader-spot" data-row="${category.key}${entry.rank}" data-id="${escapeHtml(entry.id)}">
-            <div data-swap>${leaderInner(state, category, entry, options)}</div>
+          <div class="leader-spot" data-row="${leaderSpotKey(category)}" data-id="${escapeHtml(entry.id)}">
+            <div data-swap>${leaderSpotInner(state, category, entry, options)}</div>
           </div>`).join("")}
         <div class="leader-rest">
-          ${category.entries.filter((entry) => entry.rank > 1).map((entry) => `
-            <div class="leader-row" data-row="${category.key}${entry.rank}" data-id="${escapeHtml(entry.id)}">
-              <div data-swap>${leaderInner(state, category, entry, options)}</div>
+          ${category.entries.map((entry) => `
+            <div class="leader-row" data-row="${leaderRowKey(category, entry)}" data-id="${escapeHtml(entry.id)}">
+              <div data-swap>${leaderRowInner(state, category, entry, options)}</div>
             </div>`).join("")}
         </div>
       </div>
     </div>`).join("")}</div>`;
 }
 
-// One builder for both shapes, so a rank that changes hands is rebuilt by the
-// same patch whichever row it lands in.
-function leaderInner(state, category, entry, options) {
-  if (entry.rank === 1) return leaderSpotInner(state, category, entry, options);
+function leaderSpotKey(category) {
+  return `${category.key}s`;
+}
+
+function leaderRowKey(category, entry) {
+  return `${category.key}r${entry.rank}`;
+}
+
+function leaderRowInner(state, category, entry, options) {
   return `<span class="leader-rank">${entry.rank}</span>
     <span class="leader-who">${playerName(options, entry, { tag: "b" })}</span>
-    <span class="leader-value" data-val="${category.key}${entry.rank}">${escapeHtml(entry.value)}</span>
+    <span class="leader-value" data-val="${leaderRowKey(category, entry)}">${escapeHtml(entry.value)}</span>
     ${manager(state, entry.team)}`;
 }
 
@@ -278,7 +288,7 @@ function leaderSpotInner(state, category, entry, options) {
     <span class="leader-spot-copy">
       <b class="leader-spot-name">${escapeHtml(stripCardYear(entry.name))}</b>
       <span class="leader-spot-line">
-        <span class="leader-spot-value" data-val="${category.key}${entry.rank}">${escapeHtml(entry.value)}</span>
+        <span class="leader-spot-value" data-val="${leaderSpotKey(category)}">${escapeHtml(entry.value)}</span>
         ${category.unit ? `<span class="leader-spot-unit">${escapeHtml(category.unit)}</span>` : ""}
         ${manager(state, entry.team)}
       </span>
@@ -594,9 +604,15 @@ function patchModule(module, key, state, options) {
     case "leaders":
       for (const category of state.leaders ?? []) {
         for (const entry of category.entries) {
-          const row = `${category.key}${entry.rank}`;
-          swapRow(module, row, entry.id, () => leaderInner(state, category, entry, options));
+          const row = leaderRowKey(category, entry);
+          swapRow(module, row, entry.id, () => leaderRowInner(state, category, entry, options));
           setVal(module, row, entry.value);
+          // The leader's spotlight is a second copy of the same entry, patched
+          // on its own key so neither copy is left showing the old man.
+          if (entry.rank !== 1) continue;
+          const spot = leaderSpotKey(category);
+          swapRow(module, spot, entry.id, () => leaderSpotInner(state, category, entry, options));
+          setVal(module, spot, entry.value);
         }
       }
       return;
