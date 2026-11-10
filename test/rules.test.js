@@ -1028,7 +1028,9 @@ test("undoLastPick reopens a completed draft and clears undone lineup assignment
   while (!draft.complete) autopick(draft);
   const manager = draft.managers[1];
   const lastPlayer = manager.roster[manager.roster.length - 1];
-  manager.lineupAssignments = { DH: lastPlayer.id };
+  // A board this manager arranged himself, so nothing re-sorts it and the
+  // undone card has to be taken out of it by name.
+  applyDraftAction(draft, { type: "lineup", managerId: manager.id, assignments: { DH: lastPlayer.id } });
 
   const undone = undoLastPick(draft);
 
@@ -1037,6 +1039,14 @@ test("undoLastPick reopens a completed draft and clears undone lineup assignment
   assert.equal(undone.player.id, lastPlayer.id);
   assert.equal(draft.pickedIds.has(lastPlayer.id), false);
   assert.deepEqual(manager.lineupAssignments, {});
+
+  // A manager who never arranged his own board is simply re-seated out of what
+  // he still owns, which is the undone card's other way out of the lineup.
+  const other = draft.managers[0];
+  const lastOfHis = other.roster[other.roster.length - 1];
+  undoLastPick(draft);
+  assert.equal(Object.values(other.lineupAssignments).includes(lastOfHis.id), false);
+  assert.ok(Object.keys(other.lineupAssignments).length > 0);
 });
 
 test("a completed draft hands every manager an optimized lineup, staff, and order", () => {

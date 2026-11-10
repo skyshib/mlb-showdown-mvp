@@ -106,6 +106,7 @@ import {
   positionMatchesSlot,
   managerForPickNumber,
   managerValuation,
+  markTeamChoicesByHand,
   maxPoolManagers,
   nominateBestTarget,
   nominatePlayer,
@@ -10445,20 +10446,25 @@ function moveBattingOrder(managerId, playerId, toIndex) {
   order.splice(from, 1);
   order.splice(toIndex, 0, playerId);
   if (state.online) {
-    sendOnlineAction({ type: "batting-order", managerId, order });
+    sendOnlineAction({ type: "batting-order", managerId, order, byHand: true });
     return true;
   }
   manager.battingOrder = order;
+  markTeamChoicesByHand(manager);
   return true;
 }
 
 // One click to the lineup and staff with the most card points on the field.
+// It also hands the board back to the auto-sort that runs on every pick: this
+// is not the manager arranging his own team, it is him asking for the
+// arrangement the draft makes for him, so a manager who tinkered and thought
+// better of it gets his picks seated for him again.
 function autoSortRoster(managerId) {
   const manager = findDraftManager(managerId);
   if (!manager || !canManageRoster(managerId)) return;
   const { lineupAssignments, staffAssignments } = pointMaximalAssignments(manager, state.draft);
-  commitRosterAssignments(manager, "lineup", lineupAssignments);
-  commitRosterAssignments(manager, "staff", staffAssignments);
+  commitRosterAssignments(manager, "lineup", lineupAssignments, { byHand: false });
+  commitRosterAssignments(manager, "staff", staffAssignments, { byHand: false });
   selectedLineupMove = null;
   invalidateBatch();
   saveState();
@@ -10829,13 +10835,15 @@ function rosterAssignmentsFromSlots(slots, previous = {}) {
   return withBenchIds(assignments, assignmentBenchIds(previous));
 }
 
-function commitRosterAssignments(manager, actionType, assignments) {
+function commitRosterAssignments(manager, actionType, assignments, options = {}) {
+  const byHand = options.byHand !== false;
   if (state.online) {
-    sendOnlineAction({ type: actionType, managerId: manager.id, assignments });
+    sendOnlineAction({ type: actionType, managerId: manager.id, assignments, byHand });
     return true;
   }
   if (actionType === "staff") manager.staffAssignments = assignments;
   else manager.lineupAssignments = assignments;
+  markTeamChoicesByHand(manager, byHand);
   return true;
 }
 

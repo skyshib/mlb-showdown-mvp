@@ -968,7 +968,7 @@ export function pickPlayer(draft, playerId, now = Date.now()) {
   // being charged is the man whose turn it still is.
   chargeSnakeClock(draft, now);
   manager.roster.push(player);
-  resortCpuTeamChoices(manager);
+  resortTeamChoices(manager);
   draft.pickedIds.add(playerId);
   draft.pickNumber += 1;
   finishSnakeIfFull(draft);
@@ -1776,7 +1776,7 @@ function sellLotTo(draft, winnerId, price) {
   if (!winner || !player) throw new Error("Lot is invalid");
 
   winner.roster.push(player);
-  resortCpuTeamChoices(winner);
+  resortTeamChoices(winner);
   draft.pickedIds.add(player.id);
   draft.auction.budgets[winner.id] -= price;
   draft.auction.history.push({
@@ -1919,7 +1919,7 @@ export function undoLastPick(draft) {
   draft.complete = false;
   draft.teamChoicesSeeded = false;
   forgetRosterPlayer(manager, player.id);
-  resortCpuTeamChoices(manager);
+  resortTeamChoices(manager);
   return { manager, player };
 }
 
@@ -1987,7 +1987,7 @@ function undoAuctionAction(draft) {
   draft.teamChoicesSeeded = false;
   if (isRandomNomination(draft)) draft.auction.queueIndex -= 1;
   forgetRosterPlayer(manager, player.id);
-  resortCpuTeamChoices(manager);
+  resortTeamChoices(manager);
   return { manager, player };
 }
 
@@ -2084,18 +2084,21 @@ export function applyDraftAction(draft, action) {
       const manager = draft.managers.find((item) => item.id === action.managerId);
       if (!manager) throw new Error("Unknown manager for lineup action");
       manager.lineupAssignments = { ...(action.assignments ?? {}) };
+      markTeamChoicesByHand(manager, action.byHand !== false);
       return;
     }
     case "staff": {
       const manager = draft.managers.find((item) => item.id === action.managerId);
       if (!manager) throw new Error("Unknown manager for staff action");
       manager.staffAssignments = { ...(action.assignments ?? {}) };
+      markTeamChoicesByHand(manager, action.byHand !== false);
       return;
     }
     case "batting-order": {
       const manager = draft.managers.find((item) => item.id === action.managerId);
       if (!manager) throw new Error("Unknown manager for batting order action");
       manager.battingOrder = [...(action.order ?? [])];
+      markTeamChoicesByHand(manager, action.byHand !== false);
       return;
     }
     case "coach-target":
@@ -2198,7 +2201,7 @@ export function pickReplacement(draft, now = Date.now()) {
   const replacement = makeReplacementPlayer(draft, manager, gap.kind, gap.role, gap.position);
   chargeSnakeClock(draft, now);
   manager.roster.push(replacement);
-  resortCpuTeamChoices(manager);
+  resortTeamChoices(manager);
   draft.pickedIds.add(replacement.id);
   draft.pickNumber += 1;
   finishSnakeIfFull(draft);
@@ -3546,15 +3549,16 @@ function bestStaffAssignment(roster, options = {}) {
 // card, and the dock all see the same team. Deterministic, so online clients
 // replaying the same actions agree.
 //
-// Humans get the same starting point, but once per completion: they open the
-// lineup screen to a team already set by points and adjust from there, and a
-// later sync (a repair, a replayed log) never throws their edits away. An undo
+// Humans are seeded the same way, once per completion — though every pick has
+// already been seating them as it landed, so this only catches what the
+// closing sweep handed out. A manager who arranged his own board is left
+// alone: not here, and not by a later sync (a repair, a replayed log). An undo
 // reopens the draft and clears the mark, so the next completion seeds again.
 export function syncCpuTeamChoices(draft) {
   if (!draft.complete) return draft;
   const seedHumans = !draft.teamChoicesSeeded;
   for (const manager of draft.managers) {
-    if (manager.cpu || seedHumans) setBestTeamChoices(manager);
+    if (manager.cpu || (seedHumans && !manager.teamChoicesByHand)) setBestTeamChoices(manager);
     // The Wild Card asks the manager a question; a computer answers it with his
     // best bat and lives with the flip like anyone else. A human answers it
     // himself, so his coaches wait for him.
@@ -3571,16 +3575,33 @@ export function syncCpuTeamChoices(draft) {
   return draft;
 }
 
-// A computer hits Auto-sort the instant a card lands on his roster: the best
-// nine in their spots, the best staff slotted, the order batting by value.
-// Left alone he fields whatever his pick order produced until the draft
-// completes, so anyone opening his board mid-draft — or a mid-draft sim —
-// found a star riding the bench behind a lesser early buy. The seating it
+// Auto-sort, hit for the manager the instant a card lands on his roster: the
+// best nine in their spots, the best staff slotted, the order batting by
+// value. Left alone a roster fields whatever its pick order produced until the
+// draft completes, so anyone opening the board mid-draft — or a mid-draft sim
+// — found a star riding the bench behind a lesser early buy. The seating it
 // writes is the same one the completion sync writes, so the finished team is
 // unchanged.
-export function resortCpuTeamChoices(manager) {
-  if (!manager?.cpu) return manager;
+//
+// A computer always gets it: he never opens the lineup screen. A human gets it
+// too, right up until he arranges something himself — from that moment the
+// board is his and nothing re-sorts it (see markTeamChoicesByHand).
+export function resortTeamChoices(manager) {
+  if (!manager) return manager;
+  if (!manager.cpu && manager.teamChoicesByHand) return manager;
   setBestTeamChoices(manager);
+  return manager;
+}
+
+// A manager's own hand on his roster: he moved a bat, slotted an arm, or
+// reordered the lineup. From there the auto-sort leaves him alone for the rest
+// of the draft and through the completion sync — his arrangement is his, and
+// no later pick, repair, or replayed log overwrites it. Hitting Auto-sort is
+// the way back: that is not an arrangement of his own, it is asking for the
+// one the auto-sort makes, so it hands the board back to it.
+export function markTeamChoicesByHand(manager, byHand = true) {
+  if (!manager) return manager;
+  manager.teamChoicesByHand = Boolean(byHand);
   return manager;
 }
 

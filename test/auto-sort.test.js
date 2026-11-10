@@ -5,7 +5,9 @@ import {
   activeRoster,
   applyDraftAction,
   assignLineupSlots,
+  availablePlayers,
   benchPlayers,
+  canPickPlayer,
   canPlayerFillLineupSlot,
   createDraft,
   currentManager,
@@ -87,7 +89,66 @@ test("a computer re-seats his team on the pick, not at the buzzer", () => {
   assert.equal(alpha.staffAssignments.SP1, strong.id, "the better arm starts");
   assert.ok(activeRoster(alpha).some((card) => card.id === strong.id));
   assert.ok(benchPlayers(alpha).some((card) => card.id === weak.id), "the worse arm is benched");
-  // A human's board is still his own until he touches it (or the draft ends).
-  assert.equal(beta.lineupAssignments, undefined);
-  assert.equal(beta.staffAssignments, undefined);
+  // The human in the room is seated by the same pick, for the same reason: he
+  // has never arranged anything himself, so the draft arranges it for him.
+  assert.ok(Object.keys(beta.lineupAssignments ?? {}).length > 0, "the human is seated too");
+});
+
+// A human manager who never opens his roster board gets Auto-sort on every
+// pick — and the moment he arranges something himself, every later pick (and
+// the completion sync) leaves his board exactly as he left it.
+test("a human is auto-sorted on the pick until he arranges his own board", () => {
+  // Everyone takes bats until the named manager has taken one, so the turn
+  // comes back around to him without the room drafting anything exotic.
+  const pickBatsUntil = (draft, who) => {
+    while (!draft.complete) {
+      const current = currentManager(draft);
+      const card = availablePlayers(draft).find((item) => item.kind === "hitter" && !item.replacement);
+      pickPlayer(draft, card.id);
+      if (current.id === who.id) return card;
+    }
+    return null;
+  };
+
+  const pool = buildDraftPool("classic", "human-resort", { managerCount: 2 });
+  const draft = createDraft(
+    [{ name: "Hand" }, { name: "Alpha", cpu: true }],
+    pool, 13, "human-resort", { startingPitchers: 1, timer: false }
+  );
+  const [human] = draft.managers;
+
+  pickBatsUntil(draft, human);
+  assert.ok(Object.keys(human.lineupAssignments ?? {}).length > 0, "his first bat is seated for him");
+
+  // He arranges his own board: one bat moved to a spot he picked.
+  const seated = assignLineupSlots(human.roster, human.lineupAssignments).slots.find((slot) => slot.player);
+  const open = assignLineupSlots(human.roster, human.lineupAssignments).slots
+    .find((slot) => !slot.player && canPlayerFillLineupSlot(seated.player, slot.label));
+  applyDraftAction(draft, {
+    type: "lineup",
+    managerId: human.id,
+    assignments: { [open.label]: seated.player.id }
+  });
+  assert.equal(human.teamChoicesByHand, true);
+
+  const arranged = { ...human.lineupAssignments };
+  assert.ok(pickBatsUntil(draft, human), "he picked again");
+  assert.deepEqual(human.lineupAssignments, arranged, "his arrangement survives the next pick");
+
+  // Through to the end of the draft, and through the completion sync.
+  while (!draft.complete) {
+    pickPlayer(draft, availablePlayers(draft).find((card) => canPickPlayer(draft, currentManager(draft), card).ok).id);
+  }
+  assert.equal(draft.complete, true);
+  assert.deepEqual(human.lineupAssignments, arranged, "the buzzer does not re-seat a board he set himself");
+  assert.equal(
+    assignLineupSlots(human.roster, human.lineupAssignments).slots.find((slot) => slot.label === open.label).player.id,
+    seated.player.id,
+    "the bat he moved is still where he put him"
+  );
+
+  // Auto-sort hands it back: it is not an arrangement of his own.
+  const { lineupAssignments } = pointMaximalAssignments(human, draft);
+  applyDraftAction(draft, { type: "lineup", managerId: human.id, assignments: lineupAssignments, byHand: false });
+  assert.equal(human.teamChoicesByHand, false);
 });
