@@ -25,7 +25,11 @@ const VALUE_GROUPS = [
 // that describes the baseline; left out, the awards go on WPAR as they always
 // have. Nothing else about an award changes: the MVP is still the best bat in
 // the room, it is just read against a different zero.
-export function computeAwards(summary, pickNumbers = null, prices = null, measure = {}) {
+// `shoves` names the picks the worst-value end is not allowed to judge: an
+// auction's closing shoves, where a full purse had nowhere left to go (see
+// rules/endgameShoves.js). They keep their place in the cost ranks — the room
+// really did spend that — they just cannot win the bust.
+export function computeAwards(summary, pickNumbers = null, prices = null, measure = {}, { shoves = null } = {}) {
   if (!summary?.hitters?.length || !summary?.pitchers?.length) return [];
   if (summary.hitters[0].wpaPerSeason === undefined) return [];
 
@@ -138,7 +142,8 @@ export function computeAwards(summary, pickNumbers = null, prices = null, measur
           byMoney ? "Nobody else wanted them. Nobody else got them." : "Late-round pick, front-of-the-draft production."));
       }
 
-      const premium = ranked.filter((entry) => roomCostRanks.get(entry.line.id) <= premiumCount);
+      const premium = ranked.filter((entry) => roomCostRanks.get(entry.line.id) <= premiumCount
+        && !shoves?.has(entry.line.id));
       const bust = maxBy(premium, (entry) => entry.productionRank - entry.costRank);
       if (bust && bust.productionRank - bust.costRank > 0) {
         awards.push(award(`bust-${group.key}`, `${byMoney ? "Bust of the auction" : "Bust of the draft"} (${group.label})`, bust.line,

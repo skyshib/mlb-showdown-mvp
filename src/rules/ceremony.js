@@ -259,7 +259,10 @@ export function leagueLeaderBoard(summary) {
 // finished among its own kind, against where it was taken or what it cost. A
 // card that finished third among hitters having been the twentieth most
 // expensive is +17 and the steal of the draft; the other way round is the bust.
-export function valuePicks(summary, costs, { byMoney = false, count = 3 } = {}) {
+// `shoves`: the closing-lot shoves an auction's worst end has no business
+// judging (see rules/endgameShoves.js). They stay on the best board, where a
+// late buy that produced was a good buy however the money came to be spent.
+export function valuePicks(summary, costs, { byMoney = false, count = 3, shoves = null } = {}) {
   const value = valueReader(summary);
   const board = (lines) => {
     const ranked = [...lines]
@@ -283,7 +286,7 @@ export function valuePicks(summary, costs, { byMoney = false, count = 3 } = {}) 
       surplus: costRank.get(entry.line.id) - entry.production
     }));
     const high = [...scored].sort((a, b) => b.surplus - a.surplus);
-    const low = [...scored].sort((a, b) => a.surplus - b.surplus);
+    const low = scored.filter((row) => !shoves?.has(row.id)).sort((a, b) => a.surplus - b.surplus);
     const take = (rows) => rows.slice(0, count).map((row, index) => ({ ...row, rank: index + 1 }));
     return { best: take(high), worst: take(low) };
   };

@@ -199,6 +199,7 @@ import {
 } from "./rules/ceremony.js?v=20261015-ceremony";
 import { ceremonyShellHtml, duelHtml, managerChip, resultWord, syncCeremony } from "./ui/ceremony.js?v=20261015-ceremony";
 import { computeAwards, reachAwards } from "./rules/awards.js?v=20261108-reach";
+import { endgameShoves } from "./rules/endgameShoves.js?v=20261110-endgame-shoves";
 import { buildEqualWorkGap, dominatedPicks } from "./rules/pickDominance.js?v=20261108-equal-work";
 import { MAX_ROLL, chartSpan, hitterPositions, playsPosition, positionsLabel } from "./rules/cards.js?v=20260716-records";
 import { CPU_PERSONALITIES, cpuPersonality } from "./rules/valuation.js?v=20260716-records";
@@ -5075,6 +5076,20 @@ function awardMeasure(summary, wpaaIndex) {
   };
 }
 
+// The closing lots of an auction, where a purse that is still full has nowhere
+// left to go: the shoves rules/endgameShoves.js keeps off the worst-value end.
+// `value` is whatever the board being filtered ranks on, so the trend line the
+// pick is read against is the one the room's own stat draws.
+function endgameShoveIds(summary, { auction, order, prices, value = null } = {}) {
+  if (!auction || !order || !prices) return null;
+  return endgameShoves(summary, {
+    prices,
+    order,
+    perRound: state.draft.managers?.length ?? 0,
+    value
+  });
+}
+
 // One award, dressed for the ceremony: the line computeAwards picked, plus the
 // WPAR split the card beat shows underneath it. A room dealt without standing
 // replacement cards has no WPAR to split, and gets the headline alone.
@@ -5488,6 +5503,12 @@ function startBatchRun(runs, options = {}) {
   // anything: it only counts games, and this timer draws.
   const auction = isAuctionDraft(state.draft);
   const costs = auction ? buildPricePaidMap(state.draft) : buildPickNumberMap(state.draft);
+  // Which lot each card was bought in, which is what says a buy was one of the
+  // closing ones. The auction's own order, not the roster order buildPickNumberMap
+  // lays over it.
+  const lotOrder = auction
+    ? Object.fromEntries(draftHistory(state.draft).map((pick) => [pick.player.id, pick.pickNumber]))
+    : null;
   const cardsById = draftedPlayersById();
   const ceremonyContext = {
     cardFor: (id) => cardsById.get(id) ?? null,
@@ -5526,7 +5547,8 @@ function startBatchRun(runs, options = {}) {
     if (has("mvp")) next.mvp = ceremonyAward("mvp-hitter", summary, costs, auction);
     if (has("cy")) next.cy = ceremonyAward("cy-young", summary, costs, auction);
     if (has("reckoning")) {
-      next.reckoning = { ...valuePicks(summary, costs, { byMoney: auction }), byWpar: Boolean(summary.attribution) };
+      const shoves = endgameShoveIds(summary, { auction, order: lotOrder, prices: costs });
+      next.reckoning = { ...valuePicks(summary, costs, { byMoney: auction, shoves }), byWpar: Boolean(summary.attribution) };
     }
     if (has("countdown") || has("finalists")) {
       const rows = countdownRows(summary);
@@ -6381,7 +6403,14 @@ function renderBatch() {
   const leadLabel = byWpaa ? "WPAA" : "WPAR";
   // The room's own stat is the bold one; the other stays on the row beside it.
   const lead = (text, isLead) => (isLead ? `<strong>${text}</strong>` : text);
-  const baseAwards = computeAwards(summary, pickNumberMap, pricePaidMap, awardMeasure(summary, wpaaIndex));
+  const awardMeasured = awardMeasure(summary, wpaaIndex);
+  const shoves = endgameShoveIds(summary, {
+    auction: auctionDraft,
+    order: acquisitionPickMap,
+    prices: pricePaidMap,
+    value: awardMeasured.value ?? null
+  });
+  const baseAwards = computeAwards(summary, pickNumberMap, pricePaidMap, awardMeasured, { shoves });
   // Picks that were beaten on the board: the one post-draft read that needs no
   // valuation model at all. It only means anything where the sim measured WPAR.
   // Three screens want it — the value chart's spotlight, the awards grid's
