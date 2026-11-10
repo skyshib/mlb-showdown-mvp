@@ -899,12 +899,29 @@ async function differenceFromRecord(original, roomId) {
 
 // How the season came out, when somebody ran one. The sim is logged against the
 // draft it was run on, so the book can say who won without being told twice.
+//
+// The whole beaten field is named rather than the runner-up alone, and each
+// side of it is said to be a person or a computer, because that is the part
+// that says what a .565 was worth: five CPUs is a different afternoon from two
+// friends and three CPUs. The other people are named; the computers are only
+// counted, since their names are the room's.
 function wonLine(draft) {
   const sim = draft.sims?.[0];
   if (!sim) return '<div class="draft-result session-meta"><span>never simmed</span></div>';
-  const [first, second] = sim.standings;
-  const margin = second ? ` over ${esc(second.team)} (${pct(second.winPct)})` : "";
-  return `<div class="draft-result"><b>${esc(first.team)}</b> won it at ${pct(first.winPct)}${margin}
+  const [first, ...beaten] = sim.standings;
+  const cpuByName = new Map((draft.managers ?? []).map((manager) => [manager.name, Boolean(manager.cpu)]));
+  // A team the record cannot place is left out of the human count rather than
+  // guessed at, so it falls in with the computers and the total still adds up.
+  const seat = cpuByName.get(first.team);
+  const label = seat == null ? "" : ` (${seat ? "CPU" : "human"})`;
+  const humans = beaten.filter((row) => cpuByName.get(row.team) === false).map((row) => row.team);
+  const cpus = beaten.length - humans.length;
+  const field = [
+    humans.length ? `${humans.length} human${humans.length === 1 ? "" : "s"} (${humans.join(", ")})` : "",
+    cpus ? `${cpus} CPU${cpus === 1 ? "" : "s"}` : ""
+  ].filter(Boolean);
+  const over = field.length ? ` over ${field.join(" and ")}` : "";
+  return `<div class="draft-result"><b>${esc(first.team)}</b>${label} won it at ${pct(first.winPct)}${esc(over)}
     <span class="session-meta"><span>${sim.runs.toLocaleString()} games</span></span></div>`;
 }
 
