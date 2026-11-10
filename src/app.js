@@ -3207,14 +3207,12 @@ function renderDraft() {
   // A blind draft has no points column to sort by, so a points sort a manager
   // left set from an earlier draft falls back to the shelf's own stat.
   if (pointsHidden() && state.filters.sort === "points") {
-    state.filters.sort = defaultSortForType(state.filters.type);
-    state.filters.sortDirection = defaultSortDirection(state.filters.sort);
+    applyDefaultSortForType(state.filters.type);
   }
   // Old saves used "manual" as a standalone sort. Rankings are now always the
   // primary layer, with this dropdown controlling only the unranked players.
   if (state.filters.sort === "manual") {
-    state.filters.sort = defaultSortForType(state.filters.type);
-    state.filters.sortDirection = defaultSortDirection(state.filters.sort);
+    applyDefaultSortForType(state.filters.type);
   }
   // Typing into the card search re-renders the draft on every keystroke, and a
   // re-render replaces every node on the page — so the input the letter had just
@@ -3437,6 +3435,9 @@ function syncAuctionPositionFilter(draft) {
 
   const filter = nominatedPlayerFilter(player);
   const moved = state.filters.type !== filter.type || state.filters.position !== filter.position;
+  // The lot drags the board onto the nominee's type, so it must drag the sort
+  // with it — otherwise an arm goes up and the board ranks the pen by control.
+  if (state.filters.type !== filter.type) applyDefaultSortForType(filter.type);
   state.filters.type = filter.type;
   state.filters.position = filter.position;
   filteredAuctionLotKey = lotKey;
@@ -4157,6 +4158,10 @@ function bindDraftActions() {
     if (needChip) {
       const { needType, needPosition } = needChip.dataset;
       const alreadyThere = state.filters.type === needType && state.filters.position === needPosition;
+      // A chip that crosses from the bats to the arms opens the new shelf on
+      // its own stat. Staying on the same type leaves the sort alone: that one
+      // is the manager's.
+      if (state.filters.type !== needType) applyDefaultSortForType(needType);
       state.filters.type = needType;
       state.filters.position = alreadyThere ? "all" : needPosition;
       saveState();
@@ -4200,8 +4205,7 @@ function bindDraftActions() {
       state.filters[filterButton.dataset.filter] = filterButton.dataset.filterValue;
       if (filterButton.dataset.filter === "type") {
         state.filters.position = "all";
-        state.filters.sort = defaultSortForType(filterButton.dataset.filterValue);
-        state.filters.sortDirection = defaultSortDirection(state.filters.sort);
+        applyDefaultSortForType(filterButton.dataset.filterValue);
       }
       saveState();
       renderDraft();
@@ -12319,6 +12323,16 @@ function defaultSortForType(type, hidePoints = pointsHidden()) {
 
 function defaultSortDirection(sort) {
   return sort === "name" || sort === "position" ? "asc" : "desc";
+}
+
+// Putting the board on a type is putting it on that type's own stat: a sort
+// carried over from the shelf you just left reads as the wrong column. OB and
+// C+O share the "primary" key, so a hitter board left on OB silently becomes a
+// pitcher board sorted by control alone — which is why every path that moves
+// the type goes through here, not just the type pills.
+function applyDefaultSortForType(type) {
+  state.filters.sort = defaultSortForType(type);
+  state.filters.sortDirection = defaultSortDirection(state.filters.sort);
 }
 
 function speedValue(speed) {
