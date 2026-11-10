@@ -17,6 +17,7 @@ import { decodeCardRows } from "./data/realCards.js";
 import { cardPanelHtml, cardScanUrl, shortName, stripCardYear } from "./ui/cardFace.js?v=20260716-records";
 import { eventLeverage } from "./rules/game.js?v=20260717-draft-wpa";
 import { lineupProfile, runsPerPa } from "./rules/pitching.js?v=20261108-fatigue-profile";
+import { replacementBaseline } from "./rules/replacementLevel.js?v=20261109-ranked-floor";
 import { canEnterAuctionBid, nominatedPlayerFilter } from "./ui/auctionPresentation.js?v=20260716-auction-cues";
 import {
   isMuted,
@@ -5364,9 +5365,12 @@ function startBatchRun(runs, options = {}) {
   if (!state.draft || !canSimulate(state.draft)) return;
   const replayOf = options.replayOf ?? null;
   const count = normalizeBatchRuns(runs);
-  // Each club carries the room's standing replacement cards, which is what turns
-  // on wins above replacement in the sim (rooms dealt before them have none).
-  const replacements = standingReplacements(state.draft);
+  // Each club carries the cards the sim measures its players against, which is
+  // what turns wins over replacement on. Which cards those are follows the
+  // FORMAT (see replacementLevel.js): an auction's floor is the free standing
+  // card, because banking the money is a real option there; a snake's is the
+  // Nth-best card at the position, because declining a pick is not.
+  const replacements = replacementBaseline(state.draft);
   const teams = state.draft.managers.map((manager) => ({
     ...buildTeam(manager, { optimize: true }),
     ...(replacements.length ? { replacements } : {})
@@ -6002,7 +6006,7 @@ function watchSharedBatch({ runs, salt, instant, fileFor = null, runner = null }
   // Everything this screen needs to draw the runner's ceremony itself: the same
   // clubs, the same seed, and its own copy of the cards. The relay carries ids
   // and counters, never cards and never a game.
-  const replacements = standingReplacements(state.draft);
+  const replacements = replacementBaseline(state.draft);
   const cardsById = draftedPlayersById();
   const watch = {
     token,
