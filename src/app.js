@@ -6764,7 +6764,7 @@ function renderBatch() {
     ? `<div class="chart-axis-row"><span class="chart-axis-label">Pos</span>${positionOptions.map(([value, label]) => axisOption("position", value, label, chartPosition === value)).join("")}</div>`
     : "";
   const spotlightRow = spotlightAvailable
-    ? `<div class="chart-axis-row"><span class="chart-axis-label">Show</span><button type="button" class="chart-axis-option${spotlight ? " active" : ""}" data-batch-chart-spotlight="${spotlight ? "off" : "on"}" aria-pressed="${spotlight}">Spotlight ${dominance.rows.length}</button></div>`
+    ? `<div class="chart-axis-row"><span class="chart-axis-label">Show</span><button type="button" class="chart-axis-option${spotlight ? " active" : ""}" data-batch-chart-spotlight="${spotlight ? "off" : "on"}" aria-pressed="${spotlight}">${dominance.rows.length} swaps</button></div>`
     : "";
   const axisPicker = `<div class="chart-axis-pickers">
     <div class="chart-axis-row"><span class="chart-axis-label">X</span>${xOptions.map(([value, label]) => axisOption("xaxis", value, label, xMode === value)).join("")}</div>
