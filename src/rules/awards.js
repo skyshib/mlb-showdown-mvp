@@ -180,6 +180,14 @@ export function reachAwards(rows = [], { byMoney = false, valueLabel = "WPAR" } 
   for (const group of groups) {
     const reach = maxBy(rows.filter(group.mine), (row) => row.gap);
     if (!reach || !(reach.gap > 0)) continue;
+    // What the reach itself cost comes first: the gap only reads as a reach once
+    // you know what was spent to open it. An auction pays in dollars, a snake in
+    // a turn, so each is quoted in its own currency before the card it passed on.
+    const spent = byMoney
+      ? `Paid $${Number(reach.price ?? 0).toLocaleString()}`
+      : Number.isFinite(reach.round)
+        ? `Round ${reach.round}, pick #${reach.order}`
+        : `Pick #${reach.order}`;
     const where = byMoney
       ? `${reach.best.name} went ${reach.waited} lot${reach.waited === 1 ? "" : "s"} later for $${Number(reach.best.price ?? 0).toLocaleString()}`
       : `${reach.best.name} was still on the board, and went at pick ${reach.best.order}`;
@@ -190,7 +198,7 @@ export function reachAwards(rows = [], { byMoney = false, valueLabel = "WPAR" } 
       name: reach.name,
       team: reach.managerName,
       stat: `${formatWar(reach.gap)} ${valueLabel}/162 left at ${reach.slot}`,
-      note: where
+      note: `${spent} — ${where}`
     });
   }
   return awards;

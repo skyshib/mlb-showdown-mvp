@@ -151,7 +151,8 @@ test("every manager gets a line, dominated or not", () => {
 
 // The reach award reads straight off the dominance rows, so it is tested beside
 // them rather than with the awards that are computed from a batch summary.
-function reachRow(slot, gap, { name = "Taken", bestName = "Left", order = 9, price = 20, waited = 4 } = {}) {
+function reachRow(slot, gap, { name = "Taken", bestName = "Left", order = 9, price = 20, waited = 4,
+  ownOrder = 5, ownRound = 1, ownPrice = 100 } = {}) {
   return {
     id: name,
     name,
@@ -159,6 +160,9 @@ function reachRow(slot, gap, { name = "Taken", bestName = "Left", order = 9, pri
     slot,
     gap,
     waited,
+    order: ownOrder,
+    round: ownRound,
+    price: ownPrice,
     best: { name: bestName, order, price }
   };
 }
@@ -174,14 +178,22 @@ test("the reach award names the best bat and the best arm left on the board", ()
   assert.equal(awards[0].name, "Big Miss", "the biggest bat gap wins the hitter award");
   assert.match(awards[0].stat, /\+4\.5 WPAR\/162 left at 1B/);
   assert.match(awards[0].note, /Better 1B was still on the board, and went at pick 31/);
+  assert.match(awards[0].note, /^Round 1, pick #5 —/, "the reach quotes the turn it spent before the card it passed on");
   assert.equal(awards[1].name, "Arm Miss", "arms are ranked among themselves");
 });
 
 test("an auction reach is worded in lots and dollars", () => {
-  const awards = reachAwards([reachRow("CF", 3, { name: "Overpaid", bestName: "Cheaper CF", price: 45, waited: 1 })], { byMoney: true });
+  const awards = reachAwards([reachRow("CF", 3, { name: "Overpaid", bestName: "Cheaper CF", price: 45, waited: 1, ownPrice: 1250 })], { byMoney: true });
   assert.equal(awards.length, 1);
   assert.equal(awards[0].label, "Reach of the auction (hitter)");
   assert.match(awards[0].note, /Cheaper CF went 1 lot later for \$45/);
+  assert.match(awards[0].note, /^Paid \$1,250 —/, "an auction reach quotes what the reach itself cost");
+});
+
+test("a snake reach with no round on the pick still says which pick it was", () => {
+  const row = reachRow("2B", 2, { ownRound: null });
+  const [award] = reachAwards([row]);
+  assert.match(award.note, /^Pick #5 —/);
 });
 
 test("no reach award is given where nothing was beaten", () => {
