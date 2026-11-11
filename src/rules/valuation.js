@@ -108,7 +108,28 @@ export const CPU_PERSONALITIES = {
     name: "Slugger",
     blurb: "Buys the chart. Wants the ball to leave the yard and will not ask who is catching.",
     weights: {
-      hitter: { onBase: 17, fielding: 2, speed: 0.6, chart: 1.8 },
+      // The chart weight was 1.8, and on the SNAKE that cost this archetype
+      // about five win points absolutely — not the field effect
+      // persona-winrate-is-field-dependent found in the auction, but a real
+      // worse roster. Hitter value is a PRODUCT of on-base and chart (see
+      // hitterValue below), so a chart multiplier does not merely tilt a
+      // preference: it double-counts power the model has already priced, and
+      // the ranking it hands the autopicker is wrong rather than opinionated.
+      // Seat-paired absolute, one seat on the variant against its own balanced
+      // counterpart, perturbation 0, nulls 49.93/50.11/49.98 — classic 5 seats
+      // (8 boards), classic 6 seats (6), fictional 5 seats (6):
+      //   1.8  44.79 / 44.36 / 44.18
+      //   1.2  47.95 / 47.35 / 48.93
+      //   1.0  48.97 / 49.32 / 51.97
+      // and the ladder is monotone on the classic 5-seat cell (1.6 −4.8,
+      // 1.4 −3.9, 1.2 −2.0, 1.0 −1.0 against the null). 1.5 is the setting
+      // Skylar chose: it buys back less than a point of the five, and it is
+      // deliberate — the archetype's LOOK rides on this weight, and the
+      // cheaper leans below do not carry it on their own. The other three are
+      // honest preferences and stay: at any chart weight this manager still
+      // fields the worst defence in the room (12-13 glove points against
+      // balanced's 17-18), which is the half of the identity that costs little.
+      hitter: { onBase: 17, fielding: 2, speed: 0.6, chart: 1.5 },
       pitcher: {}
     },
     bias: { pitcher: 0.85, scarcity: 0.8 }
