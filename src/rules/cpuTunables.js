@@ -69,6 +69,13 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
   poolPremiumThreshold: 0.8, // the percentile the lift starts at
   aggressionFloor: 0.86, // the seeded per-card wobble: floor and width
   aggressionSpan: 0.28,
+  // The salt on that wobble's seed. It is the one knob here that is NOT a
+  // question about how to draft: it re-draws the same wobble from the same
+  // distribution, so a manager carrying a salt is the shipped bidder in every
+  // respect except which close lots he happens to win. That makes it the only
+  // honest PLACEBO this bench can run — see `jiggle` in cpu-lab-tweaks.mjs.
+  // Empty is the shipped seed.
+  wobbleSalt: "",
   paceFloor: 0.75, // manual nomination: the spend-down clamp
   paceCeiling: 1.8,
   roundsFloor: 0.7, // random nomination: the same, read off the queue
@@ -113,6 +120,7 @@ export const CPU_TUNABLE_NOTES = Object.freeze({
   poolPremiumThreshold: "the deck percentile the top-of-deck lift starts at",
   aggressionFloor: "the floor of the seeded per-card bid wobble",
   aggressionSpan: "how wide that per-card bid wobble runs",
+  wobbleSalt: "re-draws the same bid wobble from the same distribution: a different auction, an identical bidder",
   paceFloor: "under manual nomination, the least the spend-down may scale a bid",
   paceCeiling: "under manual nomination, the most the spend-down may scale a bid",
   roundsFloor: "under random nomination, the least the spend-down may scale a bid",
@@ -186,6 +194,7 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
       poolPremiumStrength: 0.7,
       poolPremiumThreshold: 0.8,
       aggressionFloor: 0.86,
+      wobbleSalt: "",
       aggressionSpan: 0.28,
       paceFloor: 0.75,
       paceCeiling: 1.8,

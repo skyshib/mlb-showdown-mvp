@@ -21,10 +21,24 @@
 //           count you chose, and no number in that column from any candidate
 //           means anything until it clears it.
 //
-//   jiggle  moves every bid by a hundredth of a percent, which cannot make a
-//           roster better but does reshuffle who wins a close lot. It is the
+//   jiggle  re-draws the per-card bid wobble from the SAME distribution off a
+//           different seed. The bidder is unchanged in every respect a study
+//           could care about — same floor, same width, same mean bid — and all
+//           that moves is which close lots he happens to win. It is the
 //           PLACEBO: whatever it reads is what this harness scores a change
 //           worth nothing, and no real candidate should be believed inside it.
+//
+//           It was `aggressionFloor: 0.8601` until 2026-11-11, a hundredth of a
+//           percent on every bid, and `check` showed why that was useless: it
+//           moved 0 of 8 rosters at a4-classic and 0 of 8 on the snake, so on
+//           most of the grid the placebo was simply a second null and printed
+//           the null's numbers to two decimals. A placebo that does not fire
+//           tells you nothing about what noise looks like.
+//
+//           THE SNAKE STILL HAS NO PLACEBO. Its chooser takes the highest score
+//           with no random term anywhere, so there is no neutral perturbation to
+//           make — nothing to re-seed. On snake cells the fixtures are `null`
+//           and the positive control, and that is the honest set.
 //
 // Keep both at the top of every run. The lab does it for you unless told not
 // to.
@@ -40,9 +54,10 @@ const QUEUED = [
   },
   {
     id: "jiggle",
-    note: "placebo: every bid moved 0.01%, reshuffles close lots and nothing else",
+    note: "placebo: the same bid wobble re-drawn off a different seed — an identical "
+      + "bidder in a different auction, so whatever this reads is the harness's own noise",
     fixture: true,
-    params: { aggressionFloor: 0.8601 }
+    params: { wobbleSalt: "placebo" }
   },
   {
     id: "no-starter-discount",
@@ -59,11 +74,29 @@ const QUEUED = [
   {
     id: "share-flat",
     note: "split the bankroll by worth exactly, with no tilt toward the studs",
+    // ANSWERED 2026-11-11, four batches a dose, and the answer is denial. The
+    // adoption curve decays monotonically on every wide board and ends at
+    // nothing: a8 +2.80 -> -0.04 over seven doses, a6 +1.60 -> -0.09, and on
+    // the narrow boards it is flat or negative throughout (a4-first -1.84,
+    // a3 -0.94 at the lone adopter). Pooled over the screen cells at the far
+    // dose it reads -0.08 +-0.15. A flat split wins lots cheaply while rivals
+    // are still tilting toward the studs and wins nothing once they are not,
+    // which is the one shape this bench exists to refuse (league-duels-
+    // measure-denial). Do not deepen it again; the +2.72 that made it look
+    // alive was the k=1 column, the noisiest in the table.
+    settled: "denial only — the gain decays to zero as rivals adopt it",
     params: { shareExponent: 1 }
   },
   {
     id: "share-steep",
     note: "concentrate harder on the best men left",
+    // ANSWERED 2026-11-11, and it is the clearest non-control result the bench
+    // has: -0.63 +-0.25 at the last holdout on a8, -0.79 +-0.44 on a6, -0.33
+    // +-0.28 pooled over the screen cells. Concentrating harder on the studs
+    // costs real win points at a table that all does it. Taken with share-flat
+    // settling at zero, the shipped 1.1 is not a number anybody needs to keep
+    // re-asking about: the curve is flat to its left and downhill to its right.
+    settled: "REJECTED — costs win points once the table concentrates too",
     params: { shareExponent: 1.3 }
   },
   {

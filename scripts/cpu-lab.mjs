@@ -79,6 +79,11 @@ export { CELLS };
 
 const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
 
+  THE TWO STAGES — screen wide and cheap, then spend on what survives:
+  node scripts/cpu-lab.mjs run --stage screen                every candidate, 15 cheap cells, far dose, 1 batch
+  node scripts/cpu-lab.mjs screen                            what that bought, ranked, with the cut applied
+  node scripts/cpu-lab.mjs run --stage confirm --tweak ID    a survivor: all 17 cells, whole curve, 4 batches
+
   node scripts/cpu-lab.mjs list
   node scripts/cpu-lab.mjs run    [--tweak id,id|all] [--cells tag,tag|all] [--mode mixed|identical|both|dose|all]
                                   [--leagues N] [--runs N] [--batches N] [--minutes N]
@@ -143,13 +148,41 @@ function rawFlag(name) {
   return words.join(" ");
 }
 
+// ---- THE TWO STAGES ---------------------------------------------------------
+// The bench's budget problem is arithmetic, not method. One pass of the queue
+// over the whole grid costs ~21 hours and lands a SINGLE batch on each pair,
+// and a single batch is ±1.1 win points at the lone-adopter end — wider than
+// any effect worth shipping. Spreading the budget evenly over 27 candidates
+// buys 27 unreadable numbers.
+//
+//   --stage screen    every candidate, the 15 cheap cells, the FAR DOSE ONLY,
+//                     one batch. ~7 minutes a candidate instead of ~48.
+//   --stage confirm   the survivors, all 17 cells, the whole adoption curve,
+//                     four batches. Expensive, and spent on something.
+//
+// WHY THE FAR DOSE IS THE SCREEN. At k = N-1 every league hands back the
+// average of N-1 tweaked chairs instead of one chair's result, so it is the
+// precise end of the curve (±0.34 against ±1.11 pooled over 123 pairs) — and
+// it is the end that answers the shipping question, since a change that helps
+// only while rivals lack it is denial and does not ship. The k=1 end is both
+// the noisiest column and the one that flatters a candidate; screening there
+// is how you end up confirming noise. The confirm stage measures the whole
+// curve, so nothing is lost — it is just not bought first.
+const STAGE = args.stage ?? null;
+if (STAGE && !["screen", "confirm"].includes(STAGE)) {
+  console.error(`cpu-lab: --stage is screen or confirm, not "${STAGE}"`);
+  process.exit(1);
+}
+const STAGE_MODE = { screen: "far", confirm: "dose" };
+const STAGE_BATCHES = { screen: 1, confirm: 4 };
+
 const LEAGUES = Number(args.leagues ?? 24);
 const RUNS = Number(args.runs ?? 1500);
-const BATCHES = Number(args.batches ?? 1);
+const BATCHES = Number(args.batches ?? STAGE_BATCHES[STAGE] ?? 1);
 const MINUTES = args.minutes == null ? Infinity : Number(args.minutes);
 const PERSONA = args.persona ?? "balanced";
 const PERTURB = args.perturb == null ? null : Number(args.perturb);
-const MODE = args.mode ?? "dose";
+const MODE = args.mode ?? STAGE_MODE[STAGE] ?? "dose";
 const OUT = path.resolve(args.out ?? path.join(path.dirname(new URL(import.meta.url).pathname), "..", "data", "cpu-lab", "results.jsonl"));
 // Every seat shares this, tweaked side and shipped side alike, so it is a
 // property of the ROOM and never of the thing being measured.
@@ -713,7 +746,12 @@ function verdict(mixed, abs, id, dose = { lone: { n: 0 }, crowd: { n: 0 } }) {
 const allTweakIds = TWEAKS.map((tweak) => tweak.id);
 const wanted = (value, every) => (value == null || value === "all" ? every : value.split(","));
 const tweakIds = wanted(args.tweak, allTweakIds);
-const cellTags = wanted(args.cells, CELLS.map((cell) => cell.tag));
+// --stage screen leaves out the two cells that cost more than the other
+// fifteen put together. Naming --cells overrides it: the stage picks a default,
+// it does not take the grid away.
+const screenCells = CELLS.filter((cell) => cell.screen !== false);
+const cellTags = wanted(args.cells,
+  (STAGE === "screen" ? screenCells : CELLS).map((cell) => cell.tag));
 // `dose` is a family rather than a mode: one measurement per k, and how many
 // there are depends on how many chairs the room has.
 const doseModes = (cell) => Array.from({ length: cell.teams - 1 }, (unused, i) => `dose-${i + 1}`);
@@ -725,6 +763,8 @@ const modesFor = (cell, tweak) => {
   // read the sampling noise of the rotation instead of a flat zero.
   const plumbing = tweak?.id === "null" ? ["mixed"] : [];
   if (MODE === "both") return [...new Set([...plumbing, "mixed", "identical"])];
+  // The screen's mode: the last holdout alone, the precise end of the curve.
+  if (MODE === "far") return [...new Set([...plumbing, `dose-${cell.teams - 1}`])];
   if (MODE === "dose") return [...new Set([...plumbing, ...doseModes(cell)])];
   if (MODE === "all") return [...new Set([...plumbing, "mixed", "identical", ...doseModes(cell)])];
   return [...new Set([...plumbing, MODE])];
@@ -739,11 +779,19 @@ if (command === "list") {
     const cells = new Set(mine.map((row) => row.cell));
     const leagues = mine.reduce((sum, row) => sum + row.edges.length, 0);
     const mark = tweak.fixture ? `${tweak.id} *` : (tweak.idea ? `${tweak.id} +` : tweak.id);
+    if (tweak.settled) {
+      console.log(`  ${mark.padEnd(26)}${"ANSWERED".padStart(16)}${String(leagues).padStart(10)}  ${tweak.settled}`);
+      continue;
+    }
     console.log(`  ${mark.padEnd(26)}`
       + `${`${cells.size}/${CELLS.length}`.padStart(16)}${String(leagues).padStart(10)}  `
       + `${Object.entries(tweak.params).map(([k, v]) => `${k}=${v}`).join(" ") || "(none)"}`);
   }
   console.log(`\n  * fixture: null must read 0.00, jiggle is the placebo, no-starter-discount is the positive control`);
+  const answered = TWEAKS.filter((tweak) => tweak.settled);
+  if (answered.length) {
+    console.log(`  ${answered.length} candidate(s) ANSWERED — a sweep leaves them alone; --tweak ${answered[0].id} re-opens one`);
+  }
   const ideas = TWEAKS.filter((tweak) => tweak.idea);
   if (ideas.length) {
     console.log(`  + proposed in ${ideasFile()}`);
@@ -893,6 +941,12 @@ if (command === "list") {
     for (const [id, tag] of plan) {
       const tweak = tweakById(id);
       if (args["no-fixtures"] != null && tweak.fixture) continue;
+      // A candidate that has been ANSWERED is not measured again by a sweep.
+      // Naming it with --tweak still runs it — settling a question is a
+      // judgement, and a judgement has to stay re-openable — but a bench whose
+      // queue only grows spends its nights re-measuring things it already
+      // knows. The answer lives on the tweak in cpu-lab-tweaks.mjs.
+      if (tweak.settled && args.tweak == null) continue;
       const cell = cellByTag(tag);
       const owed = modesFor(cell, tweak).filter((mode) =>
         rows.filter((row) => rowMatches(row, tweak, cell, mode)).length < BATCHES);
@@ -945,7 +999,87 @@ if (command === "list") {
       : tweakIds;
     reportFor(asked.filter((id) => recorded.includes(id)), cellTags, rows);
   }
+} else if (command === "screen") {
+  screenReport(readRows());
 } else {
   console.log(USAGE);
   process.exit(command === "help" || args.help ? 0 : 1);
+}
+
+// THE CUT. What the screen stage bought, ranked, with the rule applied rather
+// than described — the whole point of writing it here is that the decision
+// stops depending on which number catches somebody's eye on the page.
+//
+// THE RULE, and why it is set where it is:
+//
+//   promote if the POOLED far-dose reading over the screen cells clears |z| 2,
+//   or if ANY single cell clears |z| 3.
+//
+// The pooled test is the sharp one — fifteen cells of 24 leagues is ~±0.15 —
+// and it is the right default because a knob that helps everywhere is what the
+// bidder wants. The per-cell escape hatch exists because pooling has one real
+// failure mode: a knob that is +2 on narrow boards and -2 on wide ones pools to
+// nothing, and that knob is interesting. Hence both, and hence z 3 on the
+// per-cell arm, which is roughly a Bonferroni bar over fifteen cells.
+//
+// THIS BAR IS DELIBERATELY LOOSE, and the count below says how loose. A screen
+// is a filter, not a verdict: its job is to spend the expensive stage on the
+// right few, and the cost of wrongly promoting is some hours, while the cost of
+// wrongly dropping is never finding the thing at all. Nothing SHIPS off this
+// table. A candidate ships by clearing the confirm stage — the whole adoption
+// curve, four batches, both wide boards — and then reading the same way on
+// --holdout seeds that had no hand in choosing it.
+function screenReport(rows) {
+  const tags = new Set(screenCells.map((cell) => cell.tag));
+  const far = rows.filter((row) => (row.versus ?? "defaults") === VERSUS
+    && (row.holdout ?? "") === HOLDOUT && row.persona === PERSONA
+    && tags.has(row.cell) && row.mode === `dose-${cellByTag(row.cell).teams - 1}`);
+  if (!far.length) {
+    console.log(`cpu-lab screen — nothing screened yet (${OUT}).\n  node scripts/cpu-lab.mjs run --stage screen`);
+    return;
+  }
+  const ids = [...new Set(far.map((row) => row.tweak))];
+  const scored = ids.map((id) => {
+    const mine = far.filter((row) => row.tweak === id);
+    const all = pooled(mine);
+    const cells = [...new Set(mine.map((row) => row.cell))].map((tag) => {
+      const stat = pooled(mine.filter((row) => row.cell === tag));
+      return { tag, ...stat, z: stat.ci ? Math.abs(stat.mean) / (stat.ci / 1.96) : 0 };
+    }).sort((a, b) => b.z - a.z);
+    const z = all.ci ? Math.abs(all.mean) / (all.ci / 1.96) : 0;
+    const tweak = TWEAKS.find((t) => t.id === id);
+    return { id, fixture: !!tweak?.fixture, note: tweak?.note ?? "", all, z, cells, top: cells[0] };
+  }).sort((a, b) => Math.max(b.z, b.top.z) - Math.max(a.z, a.top.z));
+
+  const verdict = (s) => {
+    if (s.fixture) return "fixture";
+    const answered = TWEAKS.find((t) => t.id === s.id)?.settled;
+    if (answered) return `settled — ${answered}`;
+    if (s.z >= 2 && s.all.mean > 0) return "PROMOTE — helps with all but one chair on it, pooled";
+    if (s.z >= 2) return "REJECT — costs win points pooled across the grid";
+    if (s.top.z >= 3) return `PROMOTE — ${s.top.tag} alone, ${signed(s.top.mean)}; check the width story`;
+    return "park — nothing at the far dose anywhere";
+  };
+
+  console.log(`cpu-lab screen — the far dose (last holdout) over ${tags.size} cheap cells, ${VERSUS} controls`);
+  console.log(`  what a candidate is worth once all but one chair has it. Promote on pooled |z|>=2 or any cell |z|>=3.\n`);
+  console.log(`  ${"candidate".padEnd(24)} ${"pooled".padStart(14)}   ${"z".padStart(4)}  cells  ${"best cell".padStart(22)}   verdict`);
+  for (const s of scored) {
+    console.log(`  ${s.id.padEnd(24)} ${(signed(s.all.mean) + " ±" + s.all.ci.toFixed(2)).padStart(14)}   `
+      + `${s.z.toFixed(1).padStart(4)}  ${String(s.cells.length).padStart(5)}  `
+      + `${(s.top.tag + " " + signed(s.top.mean) + " z" + s.top.z.toFixed(1)).padStart(22)}   ${verdict(s)}`);
+  }
+  const live = scored.filter((s) => !s.fixture);
+  const promoted = live.filter((s) => verdict(s).startsWith("PROMOTE"));
+  const expected = (live.length * 0.0455 + live.length * tags.size * 0.0027).toFixed(1);
+  console.log(`\n  ${promoted.length} of ${live.length} candidates promoted. At this bar, ~${expected} would promote `
+    + `from noise alone,\n  so the confirm stage is where a promotion is earned, not here.`);
+  const missing = live.filter((s) => s.cells.length < tags.size);
+  if (missing.length) {
+    console.log(`\n  thinner than the full screen (inert in a cell, or not yet run):`);
+    for (const s of missing.slice(0, 8)) console.log(`    ${s.id.padEnd(24)} ${s.cells.length}/${tags.size} cells`);
+  }
+  if (promoted.length) {
+    console.log(`\n  node scripts/cpu-lab.mjs run --stage confirm --tweak ${promoted.map((s) => s.id).join(",")}`);
+  }
 }

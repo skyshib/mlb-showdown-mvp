@@ -12,6 +12,54 @@ node scripts/cpu-lab.mjs bench           the live bidder against a frozen genera
 node scripts/cpu-lab.mjs report          the table, pooled over every batch ever run
 ```
 
+## Screen first, then spend
+
+The bench's binding constraint is arithmetic. One pass of the queue over the
+whole grid costs about **21 hours** and lands a *single batch* on each pair —
+and a single batch is ±1.1 win points at the lone-adopter end, wider than any
+effect worth shipping. Spread evenly, a night buys twenty-seven unreadable
+numbers. Worse, cost is steeply superlinear in table size (measured over 11
+hours of this bench: 3 seats 15s a measurement, 4 seats 29s, 6 seats 81s, 8
+seats 182s) and a wide room has more doses to measure, so `a8-classic` and
+`a6-classic` alone are ~14 of those 21 hours.
+
+So the work runs in two stages:
+
+```sh
+node scripts/cpu-lab.mjs run --stage screen       # every candidate, cheap, wide
+node scripts/cpu-lab.mjs screen                   # what that bought, ranked, cut applied
+node scripts/cpu-lab.mjs run --stage confirm --tweak ID   # the survivors, properly
+```
+
+| | screen | confirm |
+| --- | --- | --- |
+| cells | the 15 cheap ones | all 17 |
+| doses | the far dose only (k = N−1) | the whole adoption curve |
+| batches | 1 | 4 |
+| cost a candidate | ~7 minutes | ~45 minutes and up |
+
+**Why the far dose is the screen.** At k = N−1 every league hands back the
+average of N−1 tweaked chairs rather than one chair's result, so it is the
+precise end of the curve — ±0.34 against ±1.11, pooled over 123 tweak×cell
+pairs — and it is the end that answers the shipping question, because a change
+that helps only while rivals lack it is denial and does not ship. The k = 1 end
+is both the noisiest column in the table and the one that flatters a candidate;
+screening there is how you spend a week confirming noise.
+
+**The cut**, applied by `screen` rather than left to whoever reads the page:
+promote on a pooled |z| ≥ 2 across the screen cells, *or* any single cell at
+|z| ≥ 3. The pooled arm is the sharp one (15 cells × 24 leagues is about
+±0.15). The per-cell arm exists because pooling has one real failure mode — a
+knob that is +2 on narrow boards and −2 on wide ones pools to nothing, and that
+knob is interesting. The bar is deliberately loose and the report prints how
+many promotions to expect from noise alone, because **nothing ships off the
+screen**: a candidate ships by clearing confirm and then reading the same way
+on `--holdout` seeds that had no hand in choosing it.
+
+**Settled candidates.** A tweak carrying `settled:` in the queue is one the
+bench has answered. A sweep leaves it alone; naming it with `--tweak` re-opens
+it. A bench whose queue only grows spends its nights re-measuring what it knows.
+
 ## Watching it
 
 `cpu-lab.html`, served by the project's own dev server, is the live view:
@@ -67,6 +115,8 @@ the commit that produced it.
 | `scripts/cpu-lab-ideas.jsonl` | the ideas inbox: proposals filed from outside the bench, read into the queue ([how](cpu-lab-ideas.md)) |
 | `scripts/cpu-lab-cells.mjs` | the grid of rooms every tweak is measured in |
 | `scripts/cpu-lab.mjs` | the bench: the two measurements, the verdicts, the record |
+| `scripts/cpu-fingerprint.mjs` | every bid and pick in nine fixed rooms, hashed |
+| `test/cpu-fingerprint.test.js` | the guard: the shipped bidder must match `test/fixtures/cpu-fingerprint.txt` |
 | `cpu-lab.html` | the live view, fed by `/api/cpu-lab` (`scripts/cpuLab.js`) |
 
 ## Generations, and the way back
@@ -267,9 +317,23 @@ They run first, every time, and both earn their keep.
   paired study says that discount is worth +1.5 to +6.4 win points, so this must
   read clearly **negative** — it is the positive control, and a bench that
   cannot reproduce a known result cannot be trusted with an unknown one.
-- **`jiggle`** moves every bid by a hundredth of a percent. It cannot make a
-  roster better, but it does reshuffle who wins a close lot, so whatever it
-  reads is what this bench pays for a change worth nothing.
+- **`jiggle`** re-draws the per-card bid wobble from the **same distribution**
+  off a different seed. Same floor, same width, same mean bid: an identical
+  bidder in a different auction, so all that moves is which close lots he
+  happens to win, and whatever it reads is what this bench pays for a change
+  worth nothing.
+
+  It was `aggressionFloor: 0.8601` — a hundredth of a percent on every bid —
+  until 2026-11-11, and `check` showed why that was useless: it moved **0 of 8
+  rosters** at `a4-classic` and 0 of 8 on the snake. On most of the grid the
+  placebo was a second null, and printed the null's numbers to two decimals. A
+  placebo that does not fire tells you nothing about what noise looks like.
+  Under the salt it moves every roster in every auction cell.
+
+  **The snake has no placebo**, and cannot have one: its chooser takes the
+  highest score with no random term anywhere, so there is nothing to re-seed and
+  no neutral perturbation to make. On snake cells the fixtures are `null` and
+  the positive control, which is the honest set.
 
 ### `check` before you spend a night
 

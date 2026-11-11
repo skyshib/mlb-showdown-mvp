@@ -2997,7 +2997,8 @@ function auctionUrgency(needs, player, forthcoming, tune) {
 // same number. A seeded wobble breaks the tie, so the room is an auction rather
 // than a coin toss.
 function auctionAggression(draft, manager, player, tune) {
-  const rng = createRng(`${draft.seed ?? "showdown"}:bid:${manager.id}:${player.id}`);
+  const salt = tune.wobbleSalt ? `:${tune.wobbleSalt}` : "";
+  const rng = createRng(`${draft.seed ?? "showdown"}:bid:${manager.id}:${player.id}${salt}`);
   return tune.aggressionFloor + rng.next() * tune.aggressionSpan;
 }
 

@@ -8,11 +8,23 @@
 // `teams` is the pool size: the deck is dealt to the room. Rosters and budgets
 // are the room defaults for the shape being tested, not variations of their own
 // — a cell should differ from its neighbours in ONE thing wherever it can.
+// TWO STAGES. A cell costs what its table size costs, and the cost is steeply
+// superlinear — measured over 11 hours of this bench: 3 seats 15s a
+// measurement, 4 seats 29s, 6 seats 81s, 8 seats 182s. Worse, a wider room has
+// more doses to measure (k runs 1..N-1), so one tweak across a8-classic is
+// seven measurements at 189s = 22 minutes, against 34 seconds at a3-classic.
+// a8 and a6 alone are ~14 of the ~21 hours a full pass of the queue costs.
+//
+// So they are marked `screen: false` and held back for the SECOND stage. The
+// screen runs every candidate over the cheap cells and only the far dose; what
+// survives it buys the wide boards and the whole adoption curve. Nothing is
+// dropped from the grid — a confirm run measures all 17 — the expensive cells
+// are simply not spent on candidates that have shown nothing anywhere.
 export const CELLS = [
   { tag: "a3-classic", type: "auction", teams: 3, universe: "classic", nomination: "random", pen: "all", penMin: 2, sp: 4, roster: 15, budget: 1500 },
   { tag: "a4-classic", type: "auction", teams: 4, universe: "classic", nomination: "random", pen: "all", penMin: 2, sp: 4, roster: 15, budget: 1500 },
-  { tag: "a6-classic", type: "auction", teams: 6, universe: "classic", nomination: "random", pen: "all", penMin: 2, sp: 4, roster: 15, budget: 1500 },
-  { tag: "a8-classic", type: "auction", teams: 8, universe: "classic", nomination: "random", pen: 3, penMin: 2, sp: 4, roster: 15, budget: 1500 },
+  { tag: "a6-classic", type: "auction", teams: 6, universe: "classic", nomination: "random", pen: "all", penMin: 2, sp: 4, roster: 15, budget: 1500, screen: false },
+  { tag: "a8-classic", type: "auction", teams: 8, universe: "classic", nomination: "random", pen: 3, penMin: 2, sp: 4, roster: 15, budget: 1500, screen: false },
   { tag: "a4-manual", type: "auction", teams: 4, universe: "classic", nomination: "manual", pen: 2, penMin: 2, sp: 4, roster: 15, budget: 1500 },
   { tag: "a4-first", type: "auction", teams: 4, universe: "classic", nomination: "random", pen: "all", penMin: 2, sp: 4, roster: 15, budget: 1500, pricing: "first" },
   { tag: "a4-fiction", type: "auction", teams: 4, universe: "fictional", nomination: "random", pen: "all", penMin: 2, sp: 4, roster: 15, budget: 1500 },
