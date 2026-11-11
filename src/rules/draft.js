@@ -147,11 +147,42 @@ export function bullpenRequirement(pen = {}) {
   return normalizeBullpenMin(pen?.bullpenMin, pen?.bullpenSlots);
 }
 
-// Relievers a board deals per team: enough for the floor every roster is
-// filled to. It grows past two but never shrinks below it: a smaller pen does
-// not need a thinner board.
+// The pen a manager should carry, which is NOT the room's minimum. The engine
+// goes to the pen as soon as it holds a better arm and the innings to finish,
+// so a deep pen takes innings off the rotation: the reliever after the second
+// is not bench. Head to head in uncapped rooms, a target of five beat four and
+// six (+6 win points over the room minimum on classic and fictional). A capped
+// pen stops at its cap, since arms past it never pitch.
+const PEN_DEPTH_TARGET = 5;
+
+// The relievers a roster will actually CARRY: the depth target, held under the
+// pen's cap and over the floor it owes.
+export function penDepthTarget(pen = {}) {
+  const slots = normalizeBullpenSlots(pen?.bullpenSlots);
+  const capped = slots === UNLIMITED_BULLPEN ? PEN_DEPTH_TARGET : Math.min(PEN_DEPTH_TARGET, slots);
+  return Math.max(bullpenRequirement(pen), capped);
+}
+
+// Relievers a board deals per team: enough for the pen a roster will actually
+// carry. It grows past two but never shrinks below it: a smaller pen does not
+// need a thinner board.
+//
+// This used to read the room's FLOOR, so an uncapped room dealt and queued
+// relievers two per roster while every drafter — auction bidder and snake
+// scorer alike — planned for PEN_DEPTH_TARGET of them. Twelve live rooms
+// finished with every computer holding exactly two arms, not because the
+// bidder declined the third but because the board never offered it: classic
+// dealt twelve relievers and put eight on the block for three managers, and
+// each deck's best arm (Gagne both times) was among the four never nominated.
+// Sizing the board to the pen reads +1.4 / +3.7 / +5.4 win points at board
+// pens of 3 / 4 / 5 against a 50.0 null, paired absolute (each variant roster
+// against its own base counterpart off one seed, 40 leagues x 1500 games), and
+// holds at six managers (+4.2) and on the fictional deck (+5.3). Of the +5.4,
+// about +1.1 is the longer draft the wider board brings and +4.3 the pen
+// itself: capping both sides at two FIELDED relievers off the same wide board
+// reads 51.20% +-0.94 against a 50.07% null.
 export function boardBullpenSlots(pen = {}) {
-  return Math.max(BULLPEN_TARGET, bullpenRequirement(pen));
+  return Math.max(BULLPEN_TARGET, penDepthTarget(pen));
 }
 
 // The pen slots this roster shows. An unlimited pen seats every reliever not
@@ -2786,7 +2817,7 @@ function penPricedValue(draft, manager, model) {
     ...(standing.length ? standing : [-Infinity])
   );
   const slots = normalizeBullpenSlots(draft.bullpenSlots);
-  const cap = slots === UNLIMITED_BULLPEN ? AUCTION_PEN_DEPTH : slots;
+  const cap = slots === UNLIMITED_BULLPEN ? PEN_DEPTH_TARGET : slots;
   const sp = normalizeStartingPitchers(draft.startingPitchers);
   const scale = sp * spSlotFactor(sp) / 4;
   const penWorth = (roster) => {
@@ -3048,17 +3079,12 @@ function hitterTakesOpenSlot(roster, card) {
 // open, and a card bought for that hole has to be a hole the budget knows about.
 //
 // Relievers are counted up to the pen a manager should carry, not the room's
-// minimum. The engine goes to the pen as soon as it holds a better arm and the
-// innings to finish, so a deep pen takes innings off the rotation: the reliever
-// after the second is not bench. Head to head in uncapped rooms, a target of
-// five beat four and six (+6 win points over the room minimum on classic and
-// fictional). A capped pen stops at its cap, since arms past it never pitch.
-const AUCTION_PEN_DEPTH = 5;
+// minimum: PEN_DEPTH_TARGET, the same count the board is dealt to.
 
 function auctionNeeds(draft, manager) {
   const needs = getRosterNeeds(manager.roster, draft);
   const slots = normalizeBullpenSlots(draft.bullpenSlots);
-  const penTarget = slots === UNLIMITED_BULLPEN ? AUCTION_PEN_DEPTH : Math.min(AUCTION_PEN_DEPTH, slots);
+  const penTarget = slots === UNLIMITED_BULLPEN ? PEN_DEPTH_TARGET : Math.min(PEN_DEPTH_TARGET, slots);
   needs.bullpen = Math.max(needs.bullpen, penTarget - staffStatus(manager.roster).bullpen.length);
   needs.pitcher = needs.starter + needs.bullpen;
   const openLineup = assignLineupSlots(manager.roster).slots.filter((slot) => !slot.player).length;
@@ -3145,7 +3171,7 @@ function auctionWillingness(draft, manager, player) {
   // seat falls to the bucket floor below, which is a flat value difference with
   // no innings rate at all — it drops both RELIEVER_TOP_RATE and
   // RELIEVER_DEPTH_RATE, the whole reason a pen is priced the way it is. An
-  // UNCAPPED pen never reaches that branch (auctionNeeds wants AUCTION_PEN_DEPTH
+  // UNCAPPED pen never reaches that branch (auctionNeeds wants PEN_DEPTH_TARGET
   // arms, and no computer in twelve live rooms ever held five), but two is the
   // DEFAULT cap, and there the branch is live on 31% of reliever bids. The card
   // it misprices worst is the one the top rate exists for: an arm who would
@@ -3159,7 +3185,7 @@ function auctionWillingness(draft, manager, player) {
   // then it correctly drops the arm who loses his seat. Verified: identical on
   // all 3036 computer bids across the twelve (uncapped) live rooms.
   const penSlots = normalizeBullpenSlots(draft.bullpenSlots);
-  const penCap = penSlots === UNLIMITED_BULLPEN ? AUCTION_PEN_DEPTH : penSlots;
+  const penCap = penSlots === UNLIMITED_BULLPEN ? PEN_DEPTH_TARGET : penSlots;
   const penFloor = market.replacement.get("RP") ?? 0;
   const penSp = normalizeStartingPitchers(draft.startingPitchers);
   const penScale = penSp * spSlotFactor(penSp) / 4;

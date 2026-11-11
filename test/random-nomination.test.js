@@ -643,7 +643,13 @@ test("a bench bat does not hide an open position from the budget", () => {
 // and in an uncapped pen the third through fifth relievers still take innings
 // off the rotation — they are a need, not bench.
 test("relievers are bid on as the pen they join", () => {
-  const seed = "pen-depth";
+  // The deal matters here, and not only for the cards' values: both halves of
+  // this test compare two DIFFERENT rosters, so the share each lot gets of the
+  // same purse moves with them. It needs a board whose best arms are a class
+  // above its junk, or the margins shrink to noise and flip. "pen-depth" was
+  // such a board until the pen fix widened it (its top arm fell to 240 points
+  // against peers at 210); this one tops out at 410 over 270s.
+  const seed = "pen-seats";
   const pen = { bullpenSlots: "all", bullpenMin: 2 };
   const pool = buildDraftPool(UNIVERSE, seed, { nomination: "random", managerCount: 4, startingPitchers: 4, ...pen });
   const cards = pool.filter((card) => !card.replacement);

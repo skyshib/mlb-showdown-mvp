@@ -1031,14 +1031,23 @@ test("a capped draft drafts exactly the set number of relievers", () => {
   }
 });
 
+// The board deals for the pen a roster will CARRY, not the pen it owes. An
+// uncapped room owes two relievers and carries five (PEN_DEPTH_TARGET), so it
+// deals two and a half times the standard supply; it used to deal for the
+// floor, which left every computer stuck on two arms for want of a third to
+// bid on.
 test("the dealt board carries enough relievers for a deeper pen", () => {
   const relieversDealt = (options) => buildDraftPool("classic", "pen-deal", { managerCount: 4, ...options })
     .filter((card) => !card.replacement && card.slot === "RP").length;
   const standard = relieversDealt({});
   assert.equal(relieversDealt({ bullpenSlots: 0 }), standard, "a smaller pen keeps the usual supply");
-  assert.equal(relieversDealt({ bullpenSlots: UNLIMITED_BULLPEN, nomination: "random" }), relieversDealt({ nomination: "random" }));
   assert.equal(relieversDealt({ bullpenSlots: 4 }), standard * 2);
   assert.equal(relieversDealt({ bullpenSlots: 4, nomination: "random" }), relieversDealt({ nomination: "random" }) * 2);
+  assert.equal(relieversDealt({ bullpenSlots: UNLIMITED_BULLPEN }), standard * 2.5, "an uncapped pen is dealt for five");
+  assert.equal(
+    relieversDealt({ bullpenSlots: UNLIMITED_BULLPEN, nomination: "random" }),
+    relieversDealt({ nomination: "random" }) * 2.5
+  );
 });
 
 test("a manager can bench an active hitter or pitcher and hold the vacated slot open", () => {
