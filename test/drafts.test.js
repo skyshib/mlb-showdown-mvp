@@ -256,11 +256,16 @@ test("a room finished before the book existed is filed when the server comes up"
   // from before any of this was written.
   await rm(join(dataDir, "drafts"), { recursive: true, force: true });
 
-  const { server } = createOnlineServer({ dataDir });
+  // The backfill is this server's work, so it is this server's store that has
+  // to catch up with the disk. Settling the first one instead left the
+  // assertion racing the write, and it lost often enough to be seen: readdir
+  // caught the file still under its .tmp name, mid-rename.
+  const { server, store: revived } = createOnlineServer({ dataDir });
   server.listen(0);
   await once(server, "listening");
   t.after(() => server.close());
-  await settle(store);
+  await revived.warm;
+  await settle(revived);
 
   const files = await readdir(join(dataDir, "drafts"));
   assert.deepEqual(files, [`room-${roomId}.json`]);

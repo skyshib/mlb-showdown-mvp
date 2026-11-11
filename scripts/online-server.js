@@ -305,11 +305,33 @@ function getRoom(store, roomId) {
 // every one of them, so requests are served THROUGH the warm-up rather than
 // between batches of it.
 //
-// Replaying a log is CPU, though, so the loop is also yielded every few rooms
-// to keep one long room from starving a request. The batch is small on purpose:
-// a test that boots a server over a one-room directory and then ticks the loop
-// expects that room to be up, and the first batch covers it.
-const WARM_BATCH = 8;
+// Replaying a log is CPU, though, so the loop is yielded after every room: one
+// room's replay is the longest a request can be made to wait. It used to yield
+// once per eight, and on the production volume a room averaged 1.6 SECONDS to
+// rebuild, so the loop went dark for thirteen seconds at a stretch.
+const WARM_BATCH = 1;
+
+// And most of those rooms had no business being rebuilt at boot. Replaying a
+// log is not a read — it is the whole draft played again, pick by pick, CPU
+// bids and all. On 2026-11-11 the volume held 181 rooms and the warm-up took
+// FIVE MINUTES of flat-out CPU (00:39:05 to 00:44:10 in fly logs). The machine
+// stops whenever the last person leaves, so that bill came due on a cold start
+// and every visitor who knocked paid it: a 566-byte index.html answered in 4-7
+// seconds on a shared vCPU that the replay had pinned.
+//
+// Nearly all of it was discarded the moment it finished. A finished room
+// replays only for fileRoomDraft to find the draft book already holds it, and
+// two dozen old rooms no longer replay at all ("Skipping room file …") — they
+// burn the CPU and then throw the error away, on every boot, forever.
+//
+// So only rooms with recent activity come up at boot. A room nobody has
+// touched in days has no clock anyone is waiting on: nextRoomTimerDeadline is
+// null for a complete draft, and a deadline that expired last week would fire
+// into a room with no streams open to hear it. The rest stay on the disk until
+// somebody asks, which costs that one caller a single room's replay — getRoom
+// is the gateway for every room route there is (snapshot, join, configure,
+// actions, stream, sim), so there is no path that can miss a cold room.
+const WARM_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
 async function warmRooms(store) {
   let files;
@@ -319,9 +341,28 @@ async function warmRooms(store) {
     console.error(`Could not read ${store.dataDir}: ${error.message}`);
     return;
   }
-  let seen = 0;
+  // Stat first, replay second. A stat is disk and no CPU, so sorting the whole
+  // volume by mtime is cheap next to reviving one room — and it buys the order
+  // below: whoever is mid-draft right now gets their room back first, instead
+  // of waiting behind every room that merely saw action yesterday.
+  const cutoff = Date.now() - WARM_WINDOW_MS;
+  const fresh = [];
+  let cold = 0;
   for (const file of files) {
     if (!isRoomFile(file)) continue;
+    try {
+      const { mtimeMs } = await stat(join(store.dataDir, file));
+      if (mtimeMs < cutoff) cold += 1;
+      else fresh.push({ file, mtimeMs });
+    } catch {
+      // Named by readdir and gone by the stat. Not remembered as read: getRoom
+      // can 404 it on its own, and a file that reappears should still serve.
+    }
+  }
+  fresh.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  let seen = 0;
+  for (const { file } of fresh) {
     const roomId = file.slice(0, -".json".length);
     // Deliberately not marked as read before the await: a request arriving
     // mid-read calls getRoom, which must still find the file rather than a
@@ -345,6 +386,7 @@ async function warmRooms(store) {
   }
   const size = store.rooms.size;
   if (size) console.log(`Restored ${size} room${size === 1 ? "" : "s"} from ${store.dataDir}`);
+  if (cold) console.log(`${cold} idle room${cold === 1 ? "" : "s"} left on disk until asked for`);
 }
 
 // The deck a room drafts from. Rooms opened before the card sets became

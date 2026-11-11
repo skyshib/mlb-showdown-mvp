@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createOnlineServer } from "../scripts/online-server.js";
@@ -1536,4 +1536,38 @@ test("a room is read off the volume on demand, not only at boot", async (t) => {
   for (const bad of ["..", "../../etc/passwd", "hall-of-fame", "a/b"]) {
     assert.equal((await api(other, "GET", `/api/rooms/${encodeURIComponent(bad)}`)).status, 404, bad);
   }
+});
+
+test("a room nobody has touched in days is left on the disk until it is asked for", async (t) => {
+  const dataDir = await mkdtemp(join(tmpdir(), "showdown-rooms-"));
+  const base = await startServer(t, dataDir);
+  const idle = (await api(base, "POST", "/api/rooms", {
+    seed: "long-ago", managers: ["Ana", "Bo"], startingPitchers: 2, bullpenSlots: 2
+  })).data.roomId;
+  const active = (await api(base, "POST", "/api/rooms", {
+    seed: "right-now", managers: ["Cy", "Di"], startingPitchers: 2, bullpenSlots: 2
+  })).data.roomId;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // Replaying a log is the whole draft played again, not a read, and the
+  // machine stops whenever the last person leaves — so 181 rooms on the volume
+  // meant five minutes of pinned CPU on every cold start, and a visitor who
+  // knocked waited seconds for a page. A room this old has no clock anyone is
+  // waiting on, so it does not get rebuilt until somebody comes back for it.
+  await utimes(join(dataDir, `${idle}.json`), new Date(), new Date(Date.now() - 7 * 86400_000));
+
+  const { server, store } = createOnlineServer({ dataDir });
+  t.after(() => server.close());
+  server.listen(0);
+  await once(server, "listening");
+  const next = `http://127.0.0.1:${server.address().port}`;
+  await store.warm;
+
+  assert.ok(store.rooms.has(active), "the room with recent activity is up at boot");
+  assert.equal(store.rooms.has(idle), false, "the idle one was not replayed");
+
+  const served = await api(next, "GET", `/api/rooms/${idle}`);
+  assert.equal(served.status, 200, "and is revived on the spot when asked for");
+  assert.deepEqual(served.data.managers.map((manager) => manager.name), ["Ana", "Bo"]);
+  assert.ok(store.rooms.has(idle), "it stays up once it is read");
 });
