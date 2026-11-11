@@ -86,6 +86,10 @@ export function readCpuLab(root) {
       // only place that evidence survives — the measurement itself cannot say
       // why anyone thought to take it.
       idea: Boolean(tweak.idea),
+      // A candidate the bench has finished with, and the answer in one line.
+      // Served so the page can say a question is CLOSED rather than showing it
+      // as a row that stopped filling up for no visible reason.
+      settled: tweak.settled ?? null,
       room: tweak.room ?? null,
       why: tweak.why ?? null,
       by: tweak.by ?? null

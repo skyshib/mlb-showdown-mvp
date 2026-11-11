@@ -163,6 +163,12 @@
   .params { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; }
   .from-room { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; border-left: 2px solid var(--line); padding-left: 8px; margin-top: 4px; }
   .refused { color: var(--neg); }
+  /* A question the bench has closed. Dimmed rather than removed: the answer is
+     the most useful thing on the row, and a candidate that quietly vanished
+     once somebody decided about it is how a queue loses its own history. */
+  .answered { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+  .answered b { color: var(--text); font-variant-caps: all-small-caps; letter-spacing: 0.04em; }
+  tr.settled td { opacity: 0.55; }
 
   /* The matrix is a real table: the fill is the quick read and the number in
      the cell is the actual one, so nothing here is colour-only. */
@@ -922,6 +928,14 @@ function provenance(tweak) {
     + `${tweak.why ? `<br>${escape(tweak.why)}` : ""}</div>`;
 }
 
+// What the bench decided, where a candidate has been decided about. A sweep
+// stops measuring these, so without this line the row would simply stop
+// growing and look like something had gone wrong.
+function answer(tweak) {
+  if (!tweak.settled) return "";
+  return `<div class="answered"><b>answered</b> — ${escape(tweak.settled)}</div>`;
+}
+
 function renderQueue(rows) {
   const measured = new Map();
   for (const row of rows) {
@@ -931,10 +945,10 @@ function renderQueue(rows) {
     const changes = knobChanges(tweak.params);
     const leagues = measured.get(tweak.id) ?? 0;
     const rowsFor = changes.length ? changes : [{ knob: "—", from: "", to: "", note: "changes nothing — a fixture" }];
-    return rowsFor.map((change, index) => `<tr>
+    return rowsFor.map((change, index) => `<tr${tweak.settled ? ' class="settled"' : ""}>
       ${index === 0
         ? `<td rowspan="${rowsFor.length}">${escape(tweak.id)}${tweak.fixture ? ' <span class="muted">*</span>' : ""}
-             <div class="params">${escape(tweak.note)}</div>${provenance(tweak)}</td>`
+             <div class="params">${escape(tweak.note)}</div>${provenance(tweak)}${answer(tweak)}</td>`
         : ""}
       <td class="knob">${escape(change.knob)}</td>
       <td>${change.from ? `<span class="muted">${escape(change.from)}</span> → <b>${escape(change.to)}</b>` : ""}</td>
