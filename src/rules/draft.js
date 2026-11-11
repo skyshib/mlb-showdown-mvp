@@ -3,6 +3,7 @@ import { CPU_PERSONALITIES, CPU_PERSONALITY_KEYS, createValuationModel, cpuPerso
 import { playerIdentity, hitterPositions, playsPosition, fieldingAt } from "./cards.js?v=20260716-records";
 import { lineupProfile, runsPerPa } from "./pitching.js?v=20260716-records";
 import { COACH_GROUP, coachFlip, isCoach, needsCoachTarget } from "./coaches.js?v=20260910-coaches";
+import { CPU_TUNABLES, tunablesFor } from "./cpuTunables.js?v=20261110-cpu-lab";
 
 const FIELD_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
 const LINEUP_SLOT_LABELS = [...FIELD_POSITIONS, "DH"];
@@ -169,7 +170,7 @@ export function penDepthTarget(pen = {}) {
 //
 // This used to read the room's FLOOR, so an uncapped room dealt and queued
 // relievers two per roster while every drafter — auction bidder and snake
-// scorer alike — planned for PEN_DEPTH_TARGET of them. Twelve live rooms
+// scorer alike — planned for the full depth above. Twelve live rooms
 // finished with every computer holding exactly two arms, not because the
 // bidder declined the third but because the board never offered it: classic
 // dealt twelve relievers and put eight on the block for three managers, and
@@ -2286,7 +2287,7 @@ export function bestAutopickTarget(draft, manager) {
   // the discount cost the ace his identity. That was read off a 900-card raw
   // slice with no deal behind it — the pool the archetype test used to use, and
   // one no room drafts from. On a dealt board it does not happen.)
-  const model = pitcherRanking(draft, managerValuation(draft, manager));
+  const model = pitcherRanking(draft, managerValuation(draft, manager), ["SP", "RP"], tunablesFor(manager));
   // Relievers are then re-read against the pen this manager already owns, which
   // the card's own value cannot see. See penPricedValue.
   const priced = penPricedValue(draft, manager, model);
@@ -2582,7 +2583,7 @@ function roomBatters(draft, model) {
 // classic, 10-20% on fictional and 0% on mlb-history, and spacing measured +1 to
 // +2 win points where the share is high and −1 where it is zero, because there
 // the spread is noise about arms that will never pitch. So the deck decides.
-const RELIEVER_SPACING_SHARE = 0.3;
+// (the knob is relieverSpacingShare in cpuTunables.js)
 
 // A drafting computer was given a 1.3x lift on reliever prices here and it has
 // been TAKEN BACK. It read +1.5 to +4.9 in a mirrored league duel and nothing at
@@ -2596,7 +2597,7 @@ const RELIEVER_SPACING_SHARE = 0.3;
 //
 // `roles` names which halves of the staff get re-dealt. The auction asks for
 // both; so does a drafting computer.
-export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
+export function pitcherRanking(draft, model, roles = ["SP", "RP"], tune = CPU_TUNABLES) {
   const batters = roomBatters(draft, model);
   const ranked = new Map();
   // The rotation a room this size fields — what a reliever has to beat.
@@ -2618,9 +2619,9 @@ export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
   const meanOf = (list) => (list.length ? list.reduce((sum, value) => sum + value, 0) / list.length : 0);
   const rateMean = meanOf(rotationRates);
   const starterSpread = Math.sqrt(meanOf(rotationRates.map((rate) => (rate - rateMean) ** 2)));
-  const STARTER_DISCOUNT = 0.65; // what a narrow board's starters are worth
-  const NARROW_SPREAD = 0.04; // full discount at or below this
-  const WIDE_SPREAD = 0.05; // none at or above it
+  const STARTER_DISCOUNT = tune.starterDiscount; // what a narrow board's starters are worth
+  const NARROW_SPREAD = tune.starterNarrowSpread; // full discount at or below this
+  const WIDE_SPREAD = tune.starterWideSpread; // none at or above it
   const widening = Math.max(0, Math.min(1, (starterSpread - NARROW_SPREAD) / (WIDE_SPREAD - NARROW_SPREAD)));
   const starterTilt = STARTER_DISCOUNT + (1 - STARTER_DISCOUNT) * widening;
   for (const role of roles) {
@@ -2637,7 +2638,7 @@ export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
     const share = role === "RP" && arms.length > 1
       ? arms.filter((card) => rotationRpa - runsPerPa(card, 0, batters) > 0.02).length / arms.length
       : 0;
-    const spacing = Math.max(0, Math.min(1, share / RELIEVER_SPACING_SHARE));
+    const spacing = Math.max(0, Math.min(1, share / tune.relieverSpacingShare));
     if (!spacing) {
       arms.forEach((card) => ranked.set(card.id, byRank.get(card.id)));
       continue;
@@ -2665,7 +2666,8 @@ export function pitcherRanking(draft, model, roles = ["SP", "RP"]) {
 // coming. Any card is then priced by what it adds OVER the field it competes
 // with.
 function auctionMarket(draft, manager) {
-  const model = pitcherRanking(draft, managerValuation(draft, manager));
+  const tune = tunablesFor(manager);
+  const model = pitcherRanking(draft, managerValuation(draft, manager), ["SP", "RP"], tune);
   // The REPLACEMENT LEVEL, read PER POSITION — the freely-had scrub at each spot,
   // because the board deals far more than the rosters hold and sweeps the rest
   // out for nothing. The literal replacement level at a spot is the WORST card
@@ -2708,7 +2710,9 @@ function auctionMarket(draft, manager) {
     if (floor === undefined || value > floor) replacement.set(group, value);
   }
   allValues.sort((a, b) => a - b);
-  return { model, replacement, allValues };
+  // The knob set rides on the market so every pricing function downstream reads
+  // the opinions of the manager the market was built for.
+  return { model, replacement, allValues, tune };
 }
 
 // What a card is worth to this manager: his value over the REPLACEMENT level at
@@ -2753,14 +2757,13 @@ function auctionWorth(market, player, roster = null) {
 // arms for the worst card at the role across 60 leagues a format, a point of
 // value is worth ~2.5x a starter's in a team's best reliever and ~0.7x in the
 // rest. So the part of him that beats the manager's current best reliever is
-// priced at RELIEVER_TOP_RATE and the part below it at RELIEVER_DEPTH_RATE.
+// priced at relieverTopRate and the part below it at relieverDepthRate.
 //
 // A starter's value is per start and the model lifts it by rotation size
 // (spSlotFactor); a reliever pitches every game whatever the rotation. The
 // ratios above were measured at four starters, so both rates scale by
 // K · spSlotFactor(K) / 4: 0.75 at two or three starters, 1 at four or five.
-const RELIEVER_TOP_RATE = 2.5;
-const RELIEVER_DEPTH_RATE = 0.7;
+// (the rates are relieverTopRate and relieverDepthRate in cpuTunables.js)
 
 // The same pen arithmetic, for a DRAFTING computer rather than a bidding one.
 //
@@ -2775,7 +2778,7 @@ const RELIEVER_DEPTH_RATE = 0.7;
 //
 // So price him the way the auction has priced him since the reliever rates were
 // measured: the part of him that beats the manager's OWN best arm at
-// RELIEVER_TOP_RATE, the part below it at RELIEVER_DEPTH_RATE, anchored on the
+// relieverTopRate, the part below it at relieverDepthRate, anchored on the
 // board's replacement reliever so the worst arm out there still scores what he
 // scored. This is penWorth's delta — the same function the bidder prices an
 // arm with — on the one value scale a snake score can use.
@@ -2804,6 +2807,7 @@ const RELIEVER_DEPTH_RATE = 0.7;
 // reaches an auction room too; measured there it is a null to a small gain
 // (+0.20 +-1.30 classic, +1.63 +-1.12 fictional, 93 of 120 nominations moved).
 function penPricedValue(draft, manager, model) {
+  const tune = tunablesFor(manager);
   const relievers = draft.pool.filter((card) =>
     card?.kind === "pitcher" && pitcherRole(card) === "RP" && !card.replacement && !isCoach(card));
   if (!relievers.length) return model;
@@ -2812,12 +2816,33 @@ function penPricedValue(draft, manager, model) {
   const standing = standingReplacements(draft)
     .filter((card) => card?.kind === "pitcher" && pitcherRole(card) === "RP")
     .map((card) => model.value(card));
-  const floor = Math.max(
+  let floor = Math.max(
     Math.min(...relievers.map((card) => model.value(card))),
     ...(standing.length ? standing : [-Infinity])
   );
+  // ...which is the right floor for an AUCTION, where the night ends with the
+  // board stripped and the worst arm dealt really is what a dollar buys. A
+  // snake room is not that: wise-robin-jersey dealt eighteen relievers to three
+  // managers who could seat two each, so twelve of them were never in play and
+  // the premium was being measured from a card no roster would ever hold. Read
+  // off the ROOM instead — the first arm the seats do not reach — and the top
+  // of the shelf comes back toward the board (see replacementLevel.js, which
+  // settled the same question for the measurement surface in the same way).
+  // Zero keeps the board's own floor, which is what shipped.
+  if (tune.relieverFloorByRoom) {
+    // Arms a roster will really hold: the depth it plans for, held down by the
+    // turns left once the nine and the rotation are paid for. A fifteen-pick
+    // room plans for five and has room for two, and it is the two that decide
+    // which arm nobody takes.
+    const carried = Math.max(
+      bullpenRequirement(draft),
+      Math.min(penDepthTarget(draft), draft.rosterSize - HITTER_TARGET - normalizeStartingPitchers(draft.startingPitchers))
+    );
+    const ranked = relievers.map((card) => model.value(card)).sort((a, b) => b - a);
+    floor = Math.max(floor, ranked[Math.min(ranked.length - 1, draft.managers.length * carried)]);
+  }
   const slots = normalizeBullpenSlots(draft.bullpenSlots);
-  const cap = slots === UNLIMITED_BULLPEN ? PEN_DEPTH_TARGET : slots;
+  const cap = slots === UNLIMITED_BULLPEN ? tune.penDepthTarget : slots;
   const sp = normalizeStartingPitchers(draft.startingPitchers);
   const scale = sp * spSlotFactor(sp) / 4;
   const penWorth = (roster) => {
@@ -2827,8 +2852,8 @@ function penPricedValue(draft, manager, model) {
       .sort((a, b) => b - a)
       .slice(0, cap);
     if (!arms.length) return 0;
-    let total = RELIEVER_TOP_RATE * Math.max(0, arms[0] - floor);
-    for (let i = 1; i < arms.length; i += 1) total += RELIEVER_DEPTH_RATE * Math.max(0, arms[i] - floor);
+    let total = tune.relieverTopRate * Math.max(0, arms[0] - floor);
+    for (let i = 1; i < arms.length; i += 1) total += tune.relieverDepthRate * Math.max(0, arms[i] - floor);
     return scale * total;
   };
   const owned = manager.roster.filter((card) => card?.kind === "pitcher" && pitcherRole(card) === "RP");
@@ -2882,14 +2907,15 @@ function penPricedValue(draft, manager, model) {
 // A turn costs the same whatever it buys, so a card that upgrades NOTHING is
 // not worth zero here the way it is at an auction: taking the best bench man is
 // free, and he is the man a rival does not get. So a card worth nothing is
-// ordered by SLOT_TIEBREAK of his raw value and nothing else — on a 0-400 scale
+// ordered by slotTiebreak of his raw value and nothing else — on a 0-400 scale
 // at most 20, well under the 80 that the least needBonus pays a card which
 // closes a hole. It applies ONLY where the gain is zero: added on top of a real
 // gain it was worth 21 points to a 430-point designated hitter and put him in
 // front of the right fielder a four-bat roster was missing.
-const SLOT_TIEBREAK = 0.05;
+// (the knob is slotTiebreak in cpuTunables.js)
 
 function slotPricedValue(draft, manager, priced, model) {
+  const SLOT_TIEBREAK = tunablesFor(manager).slotTiebreak;
   const seatedValue = (roster) => seatedModelValue(model, roster);
   const nineNow = seatedValue(manager.roster);
   const starters = staffStatus(manager.roster).starters.map((card) => model.value(card));
@@ -2936,8 +2962,8 @@ function relieverWorth(market, player, bestReliever, startingPitchers) {
   const slots = normalizeStartingPitchers(startingPitchers);
   const scale = slots * spSlotFactor(slots) / 4;
   return scale * (
-    RELIEVER_TOP_RATE * Math.max(0, value - best)
-    + RELIEVER_DEPTH_RATE * Math.max(0, Math.min(value, best) - floor)
+    market.tune.relieverTopRate * Math.max(0, value - best)
+    + market.tune.relieverDepthRate * Math.max(0, Math.min(value, best) - floor)
   );
 }
 
@@ -2952,26 +2978,27 @@ function relieverWorth(market, player, bestReliever, startingPitchers) {
 // multiplier already leans on them, and losing contested lots thins the supply
 // on its own. The same reading holds under manual nomination against the
 // thinning board.
-const URGENCY_PATIENT = 0.5; // holes-per-remaining below this: no hurry
-const URGENCY_DESPERATE = 1; // holes at or above the men left to fill them: all in
-const URGENCY_WEIGHT = 1; // how far full desperation lifts a card's worth (×2 at the limit)
+// The three numbers are urgencyPatient, urgencyDesperate and urgencyWeight in
+// cpuTunables.js: holes-per-remaining below which there is no hurry, holes at
+// or above the men left to fill them, and how far full desperation lifts a
+// card's worth.
 
-function auctionUrgency(needs, player, forthcoming) {
+function auctionUrgency(needs, player, forthcoming, tune) {
   const bucket = playerBucket(player);
   const need = bucketNeed(needs, bucket);
   if (need <= 0) return 0;
   const supply = forthcoming.reduce((count, entry) => count + (playerBucket(entry.player) === bucket ? entry.chance : 0), 0);
   if (supply <= 0) return 1;
   const pressure = need / supply;
-  return Math.max(0, Math.min(1, (pressure - URGENCY_PATIENT) / (URGENCY_DESPERATE - URGENCY_PATIENT)));
+  return Math.max(0, Math.min(1, (pressure - tune.urgencyPatient) / (tune.urgencyDesperate - tune.urgencyPatient)));
 }
 
 // Two managers with the same budget and the same board should not arrive at the
 // same number. A seeded wobble breaks the tie, so the room is an auction rather
 // than a coin toss.
-function auctionAggression(draft, manager, player) {
+function auctionAggression(draft, manager, player, tune) {
   const rng = createRng(`${draft.seed ?? "showdown"}:bid:${manager.id}:${player.id}`);
-  return 0.86 + rng.next() * 0.28;
+  return tune.aggressionFloor + rng.next() * tune.aggressionSpan;
 }
 
 // Money left over at the last out is money you never had. A manager that is
@@ -2982,13 +3009,13 @@ function auctionAggression(draft, manager, player) {
 // stacked counted one fat bankroll twice: a $785 manager with two holes read
 // pace 1.8 × rounds 1.27 and bid $181 on a 210-point second baseman, where
 // the spend-down alone bids $101.
-function auctionPace(draft, manager, openSlots) {
+function auctionPace(draft, manager, openSlots, tune) {
   const starting = draft.auction?.budget ?? 0;
   if (!starting || openSlots <= 0) return 1;
   const parPerSlot = starting / Math.max(1, draft.rosterSize);
   const nowPerSlot = auctionBudget(draft, manager) / openSlots;
   if (parPerSlot <= 0) return 1;
-  return Math.max(0.75, Math.min(1.8, nowPerSlot / parPerSlot));
+  return Math.max(tune.paceFloor, Math.min(tune.paceCeiling, nowPerSlot / parPerSlot));
 }
 
 // Spend the bankroll DOWN as the board empties — leftover budget is value you
@@ -2996,18 +3023,18 @@ function auctionPace(draft, manager, openSlots) {
 // one that has already committed pulls back. Keyed to the REAL lots left in the
 // nomination queue and made budget-relative so it holds at any bankroll. (Manual
 // nomination has no queue, so pacing lives in auctionPace there instead.)
-function auctionRoundsFactor(draft, manager, openSlots) {
+function auctionRoundsFactor(draft, manager, openSlots, tune) {
   const starting = draft.auction?.budget ?? 0;
   const roundsLeft = nominationQueueRemaining(draft);
   if (!starting || roundsLeft <= 0) return 1;
   const spendable = auctionBudget(draft, manager) - AUCTION_MIN_BID * Math.max(0, openSlots - 1);
   const perRound = spendable / roundsLeft;
-  return Math.max(0.7, Math.min(2.2, 1 + perRound / (starting / 25)));
+  return Math.max(tune.roundsFloor, Math.min(tune.roundsCeiling, 1 + perRound / (starting / tune.roundsBudgetDivisor)));
 }
 
 // A stud in the top decile of the WHOLE deck is worth cornering — and as the
 // field grows you must out-reach more rivals to land him — so lift the bid on
-// cards past the pool's 80th percentile, up to +POOL_PREMIUM_STRENGTH at the
+// cards past the pool's 80th percentile, up to +poolPremiumStrength at the
 // very top. This is POOL scarcity (reward absolute studs); it is deliberately
 // distinct from POSITION scarcity above, which the study found counterproductive.
 function auctionPoolPremium(market, player) {
@@ -3022,21 +3049,19 @@ function auctionPoolPremium(market, player) {
     else hi = mid;
   }
   const pct = lo / values.length;
-  const over = Math.max(0, pct - POOL_PREMIUM_THRESHOLD);
-  return 1 + POOL_PREMIUM_STRENGTH * over / (1 - POOL_PREMIUM_THRESHOLD);
+  const over = Math.max(0, pct - market.tune.poolPremiumThreshold);
+  return 1 + market.tune.poolPremiumStrength * over / (1 - market.tune.poolPremiumThreshold);
 }
 
-const DEPTH_SLOTS = 3;
-const DEPTH_DAMP = 0.7;
-// How hard budget concentrates on the best cards. A simulation study across pools
-// and opponent counts (2–9) found ^2 badly over-concentrates — ruinous in large
-// fields where rivals bid the studs up — and that a near-linear share is best.
-const SHARE_EXPONENT = 1.1;
-// A card in the top decile of the WHOLE deck is a stud worth cornering; you must
-// out-reach more rivals for him as the field grows. Keyed to pool percentile,
-// not position — positional scarcity, by contrast, was a net negative.
-const POOL_PREMIUM_STRENGTH = 0.7;
-const POOL_PREMIUM_THRESHOLD = 0.8;
+// The bid's shape lives in cpuTunables.js now: depthSlots and depthDamp (what
+// a full roster does with the rest of its money), shareExponent (how hard the
+// bankroll concentrates on the best men left — a study across pools and
+// opponent counts (2–9) found a squared share badly over-concentrates, ruinous
+// in large fields where rivals bid the studs up, and that a near-linear share
+// is best), and poolPremiumStrength/Threshold (the lift on a card in the top
+// decile of the WHOLE deck, whom you must out-reach more rivals for as the
+// field grows — keyed to pool percentile, not position, since positional
+// scarcity measured as a net negative).
 
 // The value of this manager's WEAKEST fielded card at each bucket — its worst
 // starter, worst reliever, worst regular. A card that clears the floor at its
@@ -3079,12 +3104,13 @@ function hitterTakesOpenSlot(roster, card) {
 // open, and a card bought for that hole has to be a hole the budget knows about.
 //
 // Relievers are counted up to the pen a manager should carry, not the room's
-// minimum: PEN_DEPTH_TARGET, the same count the board is dealt to.
+// minimum: penDepthTarget, the same count the board is dealt to.
 
 function auctionNeeds(draft, manager) {
   const needs = getRosterNeeds(manager.roster, draft);
   const slots = normalizeBullpenSlots(draft.bullpenSlots);
-  const penTarget = slots === UNLIMITED_BULLPEN ? PEN_DEPTH_TARGET : Math.min(PEN_DEPTH_TARGET, slots);
+  const target = tunablesFor(manager).penDepthTarget;
+  const penTarget = slots === UNLIMITED_BULLPEN ? target : Math.min(target, slots);
   needs.bullpen = Math.max(needs.bullpen, penTarget - staffStatus(manager.roster).bullpen.length);
   needs.pitcher = needs.starter + needs.bullpen;
   const openLineup = assignLineupSlots(manager.roster).slots.filter((slot) => !slot.player).length;
@@ -3101,6 +3127,7 @@ function cardFillsNeed(manager, draft, card) {
 }
 
 function auctionWillingness(draft, manager, player) {
+  const tune = tunablesFor(manager);
   const maxBid = auctionMaxBid(draft, manager);
   if (maxBid < AUCTION_MIN_BID) return 0;
   const needs = auctionNeeds(draft, manager);
@@ -3112,13 +3139,13 @@ function auctionWillingness(draft, manager, player) {
   // A limited-roster draft has a real cap, so a full roster is genuinely done.
   // But under unlimited rosters, money left at the last out is money you never
   // had — so a computer whose nine and staff are whole keeps SHOPPING FOR VALUE:
-  // it spreads its remaining budget over a few more good cards (DEPTH_SLOTS) and
-  // bids a touch softer (DEPTH_DAMP). It is worth-gated like everything else, so
+  // it spreads its remaining budget over a few more good cards (depthSlots) and
+  // bids a touch softer (depthDamp). It is worth-gated like everything else, so
   // it buys the best men left over and never a scrub — no dumping the bankroll
   // on the last body to cross the block.
   if (needSlots <= 0 && !hasUnlimitedRoster(draft)) return 0;
   const depthMode = needSlots <= 0;
-  const openSlots = depthMode ? DEPTH_SLOTS : needSlots;
+  const openSlots = depthMode ? tune.depthSlots : needSlots;
 
   const forthcoming = forthcomingPlayers(draft);
   const market = auctionMarket(draft, manager);
@@ -3169,9 +3196,9 @@ function auctionWillingness(draft, manager, player) {
   const nineNow = seatedValue(pricingNine);
   // THE SAME ERROR ON THE OTHER SIDE OF THE STAFF. A reliever who fills no pen
   // seat falls to the bucket floor below, which is a flat value difference with
-  // no innings rate at all — it drops both RELIEVER_TOP_RATE and
-  // RELIEVER_DEPTH_RATE, the whole reason a pen is priced the way it is. An
-  // UNCAPPED pen never reaches that branch (auctionNeeds wants PEN_DEPTH_TARGET
+  // no innings rate at all — it drops both relieverTopRate and
+  // relieverDepthRate, the whole reason a pen is priced the way it is. An
+  // UNCAPPED pen never reaches that branch (auctionNeeds wants penDepthTarget
   // arms, and no computer in twelve live rooms ever held five), but two is the
   // DEFAULT cap, and there the branch is live on 31% of reliever bids. The card
   // it misprices worst is the one the top rate exists for: an arm who would
@@ -3185,7 +3212,7 @@ function auctionWillingness(draft, manager, player) {
   // then it correctly drops the arm who loses his seat. Verified: identical on
   // all 3036 computer bids across the twelve (uncapped) live rooms.
   const penSlots = normalizeBullpenSlots(draft.bullpenSlots);
-  const penCap = penSlots === UNLIMITED_BULLPEN ? PEN_DEPTH_TARGET : penSlots;
+  const penCap = penSlots === UNLIMITED_BULLPEN ? tune.penDepthTarget : penSlots;
   const penFloor = market.replacement.get("RP") ?? 0;
   const penSp = normalizeStartingPitchers(draft.startingPitchers);
   const penScale = penSp * spSlotFactor(penSp) / 4;
@@ -3196,8 +3223,8 @@ function auctionWillingness(draft, manager, player) {
       .sort((a, b) => b - a)
       .slice(0, penCap);
     if (!pitching.length) return 0;
-    let total = RELIEVER_TOP_RATE * Math.max(0, pitching[0] - penFloor);
-    for (let i = 1; i < pitching.length; i += 1) total += RELIEVER_DEPTH_RATE * Math.max(0, pitching[i] - penFloor);
+    let total = tune.relieverTopRate * Math.max(0, pitching[0] - penFloor);
+    for (let i = 1; i < pitching.length; i += 1) total += tune.relieverDepthRate * Math.max(0, pitching[i] - penFloor);
     return penScale * total;
   };
   const penNow = penWorth(manager.roster);
@@ -3217,11 +3244,11 @@ function auctionWillingness(draft, manager, player) {
     // hole that is still open. (The old gate counted bats nine-deep as one pool,
     // so duplicate positions read as needs until the ninth bat was aboard.)
     const fills = cardFillsNeed(manager, draft, card);
-    const urgency = fills ? auctionUrgency(needs, card, forthcoming) : 0;
+    const urgency = fills ? auctionUrgency(needs, card, forthcoming, tune) : 0;
     const surplus = playerBucket(card) === "bullpen"
       ? relieverWorth(market, card, bestReliever, draft.startingPitchers)
       : auctionWorth(market, card, manager.roster);
-    const base = surplus * (1 + URGENCY_WEIGHT * urgency);
+    const base = surplus * (1 + tune.urgencyWeight * urgency);
     if (fills) return base;
     if (positionAware && playerBucket(card) === "hitter") {
       return Math.max(0, seatedValue([...pricingNine, card]) - nineNow);
@@ -3230,14 +3257,14 @@ function auctionWillingness(draft, manager, player) {
       return Math.max(0, penWorth([...manager.roster, card]) - penNow);
     }
     const ownFloor = fieldedFloor.get(playerBucket(card));
-    if (ownFloor == null) return base * DEPTH_DAMP;
+    if (ownFloor == null) return base * tune.depthDamp;
     return Math.max(0, market.model.value(card) - ownFloor);
   };
   const worth = effectiveWorth(player, true);
   if (worth <= 0) return 0;
 
   // BUDGET SHARE. A manager splits its bankroll over the best men still coming in
-  // proportion to their worth — raised to SHARE_EXPONENT, a near-linear tilt so
+  // proportion to their worth — raised to shareExponent, a near-linear tilt so
   // the standouts take a larger bite than a flat split would give without the
   // ruinous over-concentration a squared share produced in a crowded room. Then
   // the spend-down and pool-elite premium (below) shape the actual bid. The plan
@@ -3251,26 +3278,27 @@ function auctionWillingness(draft, manager, player) {
   for (const entry of plan) {
     if (slotsLeft <= 0) break;
     const take = Math.min(entry.chance, slotsLeft);
-    planned += take * entry.worth ** SHARE_EXPONENT;
+    planned += take * entry.worth ** tune.shareExponent;
     slotsLeft -= take;
   }
-  planned = planned || worth ** SHARE_EXPONENT;
+  planned = planned || worth ** tune.shareExponent;
 
-  const share = worth ** SHARE_EXPONENT / planned;
+  const share = worth ** tune.shareExponent / planned;
   const spendDown = isRandomNomination(draft)
-    ? auctionRoundsFactor(draft, manager, openSlots)
-    : auctionPace(draft, manager, openSlots);
+    ? auctionRoundsFactor(draft, manager, openSlots, tune)
+    : auctionPace(draft, manager, openSlots, tune);
   const raw = maxBid
     * share
-    * auctionAggression(draft, manager, player)
+    * auctionAggression(draft, manager, player, tune)
     * spendDown
     * auctionPoolPremium(market, player)
-    * (depthMode ? DEPTH_DAMP : 1);
+    * (depthMode ? tune.depthDamp : 1);
   // Sealed bids are whole points, not raise steps — odd amounts make ties rare.
   return Math.max(AUCTION_MIN_BID, Math.min(maxBid, Math.round(raw)));
 }
 
 export function managerValuation(draft, manager) {
+  const tune = tunablesFor(manager);
   const persona = manager.persona ?? "balanced";
   // The rotation size is part of what a card is worth (a starter's value scales
   // with how many games he opens), so it keys the cache alongside the persona.
@@ -3279,10 +3307,14 @@ export function managerValuation(draft, manager) {
   // that differ only in SP slots draw the SAME archetype and differ solely by
   // the starter lift — but the cache still keys on slots so each is its own model.
   const seedKey = `${draft.seed ?? "showdown"}:valuation:${manager.id}:${persona}`;
-  const cacheKey = `${seedKey}:sp${startingPitchers}`;
+  // A manager who weighs cards differently is a different model, so his knobs
+  // key the cache too: two rooms off one seed — the lab's standing comparison —
+  // share this map, and without the key the second room would read the first
+  // one's opinions.
+  const cacheKey = `${seedKey}:sp${startingPitchers}${tune.key ? `:${tune.key}` : ""}`;
   let model = valuationModels.get(cacheKey);
   if (!model) {
-    model = createValuationModel(seedKey, persona, startingPitchers);
+    model = createValuationModel(seedKey, persona, startingPitchers, tune);
     valuationModels.set(cacheKey, model);
   }
   return model;
@@ -4381,6 +4413,7 @@ function fillsRosterGap(gaps, player) {
 }
 
 function autopickScore(draft, manager, player, needs, personalValue, dropoff, bias = null, gaps = null) {
+  const tune = tunablesFor(manager);
   const lean = bias ?? cpuPersonality(manager.persona).bias;
   const remainingSlots = draft.rosterSize - rosterPlayerCount(manager);
   const matchingNeed = player.kind === "pitcher" ? pitcherNeed(player, needs) : needs.hitter;
@@ -4391,15 +4424,17 @@ function autopickScore(draft, manager, player, needs, personalValue, dropoff, bi
   // closes one beats every card that does not.
   const holes = gaps ?? activeRosterGaps(manager.roster, draft);
   const forcedNeed = requiredPicks(holes) >= remainingSlots && fillsRosterGap(holes, player);
-  const needBonus = matchingNeed > 0 ? 80 + (matchingNeed / Math.max(1, remainingSlots)) * 120 : 0;
-  const balanceBonus = player.kind === "pitcher" && pitcherNeed(player, needs) > 0 ? 35 : 0;
+  const needBonus = matchingNeed > 0
+    ? tune.snakeNeedBonus + (matchingNeed / Math.max(1, remainingSlots)) * tune.snakeNeedSpan
+    : 0;
+  const balanceBonus = player.kind === "pitcher" && pitcherNeed(player, needs) > 0 ? tune.snakeBalanceBonus : 0;
   const positionBonus = hitterPositionBonus(manager.roster, player);
   const scarcityBonus = positionScarcityBonus(manager, player, needs, dropoff) * lean.scarcity;
   // The ace-first man reaches for arms; the slugger lets them come to him.
-  const armLean = player.kind === "pitcher" ? (lean.pitcher - 1) * 140 : 0;
+  const armLean = player.kind === "pitcher" ? (lean.pitcher - 1) * tune.snakeArmLean : 0;
   return (
     personalValue + needBonus + balanceBonus + positionBonus + scarcityBonus + armLean +
-    (forcedNeed ? 1000 : 0)
+    (forcedNeed ? tune.snakeForcedNeed : 0)
   );
 }
 
@@ -4439,7 +4474,8 @@ function positionGroup(player) {
 function positionScarcityBonus(manager, player, needs, dropoff) {
   if (!dropoff || dropoff <= 0) return 0;
   if (!managerNeedsPositionGroup(manager, player, needs)) return 0;
-  return Math.min(120, dropoff * 0.8);
+  const tune = tunablesFor(manager);
+  return Math.min(tune.snakeScarcityCap, dropoff * tune.snakeScarcityRate);
 }
 
 function managerNeedsPositionGroup(manager, player, needs) {

@@ -15,6 +15,7 @@ import { describeRequest, deviceFor, flushVisits, loadVisitLog, logClientEvent, 
 import { allowFiling, draftId, flushDrafts, listDrafts, loadDraftArchive, readDraft, sanitizeDraftRecord, saveDraft } from "./drafts.js";
 import { draftRecord } from "../src/rules/draftRecord.js";
 import { geoFailures } from "./geo.js";
+import { readCpuLab } from "./cpuLab.js";
 import {
   applyDraftAction,
   auctionReviewComplete,
@@ -1228,6 +1229,19 @@ async function handleApi(store, request, response, url) {
         humansOnly: params.get("humans") === "1"
       })
     });
+  }
+  // /api/cpu-lab — what the CPU draft bench has measured (scripts/cpu-lab.mjs),
+  // for cpu-lab.html. Gated the way /api/stats is: public only on a machine that
+  // set no STATS_TOKEN, which means a developer's own. There is nobody's data in
+  // it — it is win percentages of imaginary teams — but a public site has no
+  // business reading files off the box either.
+  if (segments[1] === "cpu-lab" && !segments[2]) {
+    if (request.method !== "GET") return sendJson(response, 404, { error: "Unknown API route" });
+    const required = process.env.STATS_TOKEN;
+    if (required && url.searchParams.get("token") !== required) {
+      return sendJson(response, 401, { error: "The lab is private. Add ?token=… to see it." });
+    }
+    return sendJson(response, 200, readCpuLab(root));
   }
   // /api/drafts — the draft book. POST files a finished local draft (the room
   // server files its own; a draft played on one screen has nobody else to file
@@ -2532,7 +2546,10 @@ async function serveStatic(store, request, response, url) {
       if (setCookie) cookieHeaders["Set-Cookie"] = setCookie;
       // Reading the log must not write to the log, for the same reason the
       // counters skip this page: otherwise the dashboard is its own best visitor.
-      if (page !== "/stats.html") logPageView(store, request, { path: page, query: url.search, device, setCookie });
+      // A dashboard must not be its own best visitor, and both of these poll.
+      if (page !== "/stats.html" && page !== "/cpu-lab.html") {
+        logPageView(store, request, { path: page, query: url.search, device, setCookie });
+      }
     }
     // Size and mtime, which a rebuilt image restamps — so shipping a new module
     // invalidates it on its own, without anyone having to remember to bump a query.

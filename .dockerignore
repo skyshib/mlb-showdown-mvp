@@ -22,6 +22,18 @@ scripts/*
 !scripts/geo.js
 !scripts/visits.js
 !scripts/drafts.js
+# The lab endpoint /api/cpu-lab, and the two data modules it reads. They are
+# small and static — the queue of candidates and the grid of rooms — and on a
+# machine with no results they answer with an empty record.
+!scripts/cpuLab.js
+!scripts/cpu-lab-cells.mjs
+!scripts/cpu-lab-tweaks.mjs
+# The ideas inbox and its reader. The .jsonl is DATA, not an import, so the
+# transitive-import guard in test/traffic.test.js cannot see it — without this
+# line the queue would simply read an empty inbox in production and no proposal
+# would ever show on the page.
+!scripts/cpu-lab-ideas.mjs
+!scripts/cpu-lab-ideas.jsonl
 
 # Never opened by the running server.
 test

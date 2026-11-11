@@ -262,8 +262,24 @@ test("every module the server imports survives .dockerignore", async () => {
   const server = readFileSync("scripts/online-server.js", "utf8");
   const ignore = readFileSync(".dockerignore", "utf8");
 
-  // What the server pulls in from its own directory.
-  const siblings = [...server.matchAll(/from\s+"\.\/([^"]+)"/g)].map((match) => match[1]);
+  // What the server pulls in from its own directory — FOLLOWED ALL THE WAY
+  // DOWN. A module the server imports can import another, and the image dies on
+  // the first boot for a missing grandchild exactly as readily as for a missing
+  // child: /api/cpu-lab shipped with cpuLab.js allowed in and the two modules it
+  // reads still excluded.
+  const siblingsOf = (text) => [...text.matchAll(/from\s+"\.\/([^"]+)"/g)].map((match) => match[1]);
+  const siblings = [];
+  const queue = siblingsOf(server);
+  while (queue.length) {
+    const next = queue.shift();
+    if (siblings.includes(next)) continue;
+    siblings.push(next);
+    try {
+      queue.push(...siblingsOf(readFileSync(`scripts/${next}`, "utf8")));
+    } catch {
+      // Not a file we can read is a different test's problem.
+    }
+  }
   assert.ok(siblings.length, "the server imports something from scripts/");
 
   // What .dockerignore lets back in past `scripts/*`.

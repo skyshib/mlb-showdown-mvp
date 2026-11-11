@@ -8,6 +8,7 @@
     "test": "node --test",
     "serve": "node scripts/serve.js",
     "online": "node scripts/online-server.js",
-    "valuation-doc": "node scripts/valuation-report.mjs"
+    "valuation-doc": "node scripts/valuation-report.mjs",
+    "cpu-lab": "node scripts/cpu-lab.mjs"
   }
 }

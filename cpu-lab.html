@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>CPU lab — MLB Showdown</title>
+<style>
+  /* The tokens are stats.html's, so the two dashboards are one house. What is
+     added here is the DIVERGING PAIR, because every number on this page is a
+     signed difference: blue is a tweak that won, red is a tweak that lost, and
+     the neutral gridline is zero. Validated in both modes (blue/red adjacent
+     ΔE 23 protan, 29 normal, both poles over 3:1 on their surface).
+
+     Colour carries the SIGN and nothing else, so there is no second hue to
+     confuse it with: every chart here plots one series against zero. Green
+     appears only in the health strip, where it means "the bench is sound", and
+     never as a series. */
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --gridline: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.1);
+    --pos: #2a78d6;
+    --pos-rgb: 42 120 214;
+    --neg: #c2493d;
+    --neg-rgb: 194 73 61;
+    --ok: #157a56;
+    --track: #edece7;
+    /* How dark the matrix fill is allowed to get. The cell prints its number in
+       body ink, so the tint has to stop while that is still legible — which is
+       a different place on a near-white surface than on a near-black one. */
+    --fill-max: 0.45;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --plane: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --gridline: #2c2c2a;
+      --baseline: #383835;
+      --border: rgba(255, 255, 255, 0.1);
+      --pos: #3987e5;
+      --pos-rgb: 57 135 229;
+      --neg: #e0675a;
+      --neg-rgb: 224 103 90;
+      --ok: #199e70;
+      --track: #262624;
+      --fill-max: 0.7;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --pos: #3987e5;
+    --pos-rgb: 57 135 229;
+    --neg: #e0675a;
+    --neg-rgb: 224 103 90;
+    --ok: #199e70;
+    --track: #262624;
+    --fill-max: 0.7;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 16px 64px;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 15px; font-weight: 600; margin: 0; }
+  .sub { color: var(--text-secondary); margin: 0 0 20px; max-width: 70ch; }
+  a { color: var(--pos); }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .chart-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 14px;
+  }
+  .hint { color: var(--text-muted); font-size: 12px; margin: 0; max-width: 78ch; }
+  .note { color: var(--text-muted); font-size: 12px; margin: 10px 0 0; max-width: 78ch; }
+
+  /* ---- the live strip ---- */
+  .live {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;
+  }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--baseline); flex: none; }
+  .pulse.on { background: var(--ok); animation: beat 1.6s ease-in-out infinite; }
+  @keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) { .pulse.on { animation: none; } }
+
+  .toggle, select, input[type="search"] {
+    font: inherit; font-size: 13px; color: var(--text-primary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px;
+  }
+  .toggle { color: var(--text-secondary); cursor: pointer; }
+  .toggle:hover { color: var(--text-primary); }
+  .toggle[aria-pressed="true"] { border-color: var(--pos); color: var(--text-primary); }
+
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+  .filters label { color: var(--text-secondary); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+
+  /* ---- tiles ---- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .tile-label { color: var(--text-secondary); font-size: 13px; }
+  .tile-value { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile-note { color: var(--text-muted); font-size: 12px; margin-top: 4px; }
+  .state { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+  .state.good { color: var(--ok); }
+  .state.bad { color: var(--neg); }
+  .state.idle { color: var(--text-muted); }
+
+  /* ---- plots ---- */
+  .plot { width: 100%; height: auto; display: block; overflow: visible; }
+  .plot text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .plot .row-name { fill: var(--text-primary); font-size: 12px; }
+  .plot .value { fill: var(--text-secondary); font-size: 11px; }
+  .plot .zero { stroke: var(--baseline); stroke-width: 1; }
+  .plot .grid { stroke: var(--gridline); stroke-width: 1; }
+  .plot .whisker { stroke-width: 2; stroke-linecap: round; }
+  .band:hover .hit-bg { fill: currentColor; opacity: 0.05; }
+
+  .legend { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .key { display: flex; gap: 6px; align-items: center; color: var(--text-secondary); font-size: 12px; }
+  .key svg { overflow: visible; }
+
+  /* ---- tables ---- */
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--gridline); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; white-space: normal; }
+  th { color: var(--text-secondary); font-weight: 500; font-size: 13px; }
+  tbody tr:hover { background: rgba(var(--pos-rgb) / 0.04); }
+  .scroll { overflow-x: auto; }
+  .num.pos { color: var(--pos); }
+  .num.neg { color: var(--neg); }
+  .muted { color: var(--text-muted); }
+  .params { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; }
+  .from-room { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; border-left: 2px solid var(--line); padding-left: 8px; margin-top: 4px; }
+  .refused { color: var(--neg); }
+
+  /* The matrix is a real table: the fill is the quick read and the number in
+     the cell is the actual one, so nothing here is colour-only. */
+  .matrix td:first-child { white-space: nowrap; padding-right: 14px; }
+  .matrix td.cell { text-align: center; font-size: 12px; min-width: 62px; }
+  .matrix td.cell[data-sign="pos"] { background: rgb(var(--pos-rgb) / calc(var(--weight) * var(--fill-max))); }
+  .matrix td.cell[data-sign="neg"] { background: rgb(var(--neg-rgb) / calc(var(--weight) * var(--fill-max))); }
+  .matrix td.cell.empty { color: var(--text-muted); }
+  .matrix th.cell-head { text-align: center; font-size: 12px; }
+  .matrix th.cell-head span { color: var(--text-muted); font-size: 11px; display: block; font-weight: 400; }
+
+  td.knob { text-align: left; font-variant-numeric: normal; }
+  td.knob-note { text-align: left; color: var(--text-secondary); white-space: normal; font-size: 13px; }
+  #queue td { vertical-align: top; }
+
+  .verdict { font-size: 12px; }
+  .verdict.ship { color: var(--ok); font-weight: 600; }
+  .verdict.reject { color: var(--neg); font-weight: 600; }
+  .verdict.denial { color: var(--neg); }
+
+  /* Small multiples rather than one chart with a line per candidate: a dozen
+     candidates would need a dozen hues, and eight is the point past which a
+     categorical palette stops being separable under colour blindness. Each
+     panel carries its own name and they all share one scale, so they compare by
+     position instead. */
+  .panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .panel-name { font-size: 13px; color: var(--text-primary); margin: 0 0 2px; }
+  .panel-note { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+
+  .runs { display: grid; gap: 12px; }
+  .run-row { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: center; }
+  .run-what { font-size: 13px; }
+  .run-what b { font-weight: 600; }
+  .run-track { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .run-fill { height: 100%; border-radius: 3px; background: var(--pos); transition: width 0.4s ease; }
+
+  .empty { color: var(--text-muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CPU lab</h1>
+  <p class="sub">
+    <em>k</em> of a room's managers get a tweak, the rest keep the shipped bidder, and they bid
+    against each other for the same cards. The reading is <strong>what the tweaked chairs won: their
+    own win% against the room's par</strong>, in win points, one observation per league with a 95%
+    interval on the league-to-league spread. Some chairs always stay untweaked — a room's seats
+    average out between them, so with every chair on the tweak there is nothing left to win it from.
+    Measured by <code>scripts/cpu-lab.mjs</code>; this page only reads what it wrote.
+  </p>
+
+  <div class="live">
+    <span class="pulse" id="pulse" aria-hidden="true"></span>
+    <span id="live-text">Loading…</span>
+    <button class="toggle" id="auto" aria-pressed="true" type="button">Auto-refresh on</button>
+    <button class="toggle" id="refresh" type="button">Refresh now</button>
+  </div>
+
+  <section id="running" class="card" hidden>
+    <div class="chart-head">
+      <h2>Running now</h2>
+      <p class="hint" id="running-hint"></p>
+    </div>
+    <div class="runs" id="runs"></div>
+  </section>
+
+  <section class="card" id="health-card">
+    <div class="chart-head">
+      <h2>Is the bench sound?</h2>
+      <p class="hint">
+        Three fixtures answer that, and nothing else on the page means anything until they do.
+      </p>
+    </div>
+    <div class="tiles" id="health"></div>
+    <p class="note" id="health-note"></p>
+  </section>
+
+  <section class="card" id="bench-card" hidden>
+    <div class="chart-head">
+      <h2>The live bidder against a frozen generation</h2>
+      <p class="hint">
+        <code>naive</code> is the tuning backed out — the absolute scale. A <code>tuned-…</code>
+        generation is what shipped on a date: if the live bidder stops beating the generation it came
+        from, the changes since were fitted to their own seeds, and the old numbers are still in
+        <code>cpuTunables.js</code> to go back to.
+      </p>
+    </div>
+    <div class="tiles" id="bench"></div>
+  </section>
+
+  <div class="filters">
+    <label>Room controls
+      <select id="control"></select>
+    </label>
+    <label>Board
+      <select id="cell-filter"></select>
+    </label>
+    <label>Rank by
+      <select id="sort">
+        <option value="crowd">last holdout</option>
+        <option value="lone">lone adopter</option>
+        <option value="leagues">leagues measured</option>
+        <option value="id">name</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="hide-fixtures" /> hide fixtures</label>
+  </div>
+
+  <section class="card" id="dose-card" hidden>
+    <div class="chart-head">
+      <h2>What it is worth as rivals adopt it</h2>
+      <p class="hint">
+        The same room with <em>k</em> of its chairs on the tweak, and what those chairs won: their own
+        win% against the room's par. A curve that holds up is an edge that survives everyone else
+        having it; one that fades to nothing only existed while nobody else did. Every point is
+        relative by construction — the seats of one room average out between them, which is why some
+        chairs stay untweaked.
+      </p>
+    </div>
+    <div class="panels" id="dose"></div>
+    <p class="note">
+      Tables of different sizes share an axis here, so it reads as the share of the room that has
+      the tweak rather than a raw count: 1 of 3 and 2 of 6 sit in the same place. Hover a point for
+      the exact k.
+    </p>
+  </section>
+
+  <section class="card" id="matrix-card" hidden>
+    <div class="chart-head">
+      <h2>Candidate by board</h2>
+      <div class="legend">
+        <label class="key">reading
+          <select id="matrix-mode">
+            <option value="dose-crowd">last holdout</option>
+            <option value="dose-lone">lone adopter</option>
+          </select>
+        </label>
+        <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--neg)"></span> lost</span>
+        <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--gridline)"></span> nothing</span>
+        <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--pos)"></span> won</span>
+      </div>
+    </div>
+    <div class="scroll"><table class="matrix" id="matrix"></table></div>
+    <p class="note">
+      The table size IS the pool size — the deck is dealt to the room — so the columns run from a
+      thin three-seat board to a wide eight-seat one. A knob that is right at one width and wrong at
+      another shows up here and nowhere else.
+    </p>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <h2>What each candidate changes</h2>
+      <p class="hint">
+        Every knob a tweak moves, the shipped value it moves from, and what that knob does. This is
+        the queue in <code>scripts/cpu-lab-tweaks.mjs</code>, measured or not — plus anything filed
+        to the ideas inbox, <code>scripts/cpu-lab-ideas.jsonl</code>, which carries the room and the
+        observation that prompted it.
+      </p>
+    </div>
+    <div class="scroll"><table id="queue"></table></div>
+    <p class="hint" id="queue-rejects"></p>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <h2>The numbers</h2>
+      <p class="hint">
+        The two ends of each candidate's adoption curve, as read, with what the candidate changes.
+        Every point in between is on the curve above.
+      </p>
+    </div>
+    <div class="scroll"><table id="table"></table></div>
+    <p class="note" id="coverage"></p>
+  </section>
+</main>
+
+<script type="module">
+const token = new URLSearchParams(location.search).get("token");
+const api = `/api/cpu-lab${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+
+const state = {
+  control: null,
+  cell: "all",
+  sort: "crowd",
+  chosen: false,
+  hideFixtures: false,
+  matrixMode: "dose-crowd",
+  auto: true
+};
+let data = null;
+let fetchedAt = null;
+let timer = null;
+
+// ---- the statistics, kept the same as the command line's -------------------
+// cpu-lab.mjs pools a (tweak, cell, mode) by throwing every batch's per-league
+// edges into one list and reading the mean and a 95% interval off the sample
+// spread. The page must do it identically or the two disagree about the same
+// rows, so this is that code and nothing cleverer.
+const mean = (list) => (list.length ? list.reduce((sum, x) => sum + x, 0) / list.length : 0);
+function ci95(list) {
+  if (list.length < 2) return 0;
+  const m = mean(list);
+  const variance = list.reduce((sum, x) => sum + (x - m) ** 2, 0) / (list.length - 1);
+  return 1.96 * Math.sqrt(variance) / Math.sqrt(list.length);
+}
+function pool(rows) {
+  const edges = rows.flatMap((row) => row.edges ?? []);
+  return { n: edges.length, mean: mean(edges), ci: ci95(edges), batches: rows.length };
+}
+
+const signed = (x, places = 2) => `${x >= 0 ? "+" : ""}${x.toFixed(places)}`;
+const controlKey = (row) => [
+  row.persona ?? "balanced",
+  row.perturb ?? "shipped",
+  row.versus ?? "defaults",
+  row.holdout ?? ""
+].join("|");
+const controlLabel = (key) => {
+  const [persona, perturb, versus, holdout] = key.split("|");
+  return `${persona} · perturb ${perturb} · vs ${versus}${holdout ? " · holdout" : ""}`;
+};
+const show = (value) => (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value));
+
+// WHAT THE TWEAK ACTUALLY IS. Every knob it moves, the shipped value it moved
+// from, and the line out of cpuTunables.js saying what that knob does — so a
+// name like "share-steep" never has to be taken on trust by somebody reading
+// the bench while it runs.
+function knobChanges(params) {
+  return Object.entries(params ?? {}).map(([knob, value]) => ({
+    knob,
+    from: show(data?.defaults?.[knob]),
+    to: show(value),
+    note: data?.notes?.[knob] ?? ""
+  }));
+}
+const knobLine = (params) => knobChanges(params)
+  .map((change) => `${change.knob} ${change.from} → ${change.to}`).join(" · ") || "nothing (fixture)";
+
+function ago(iso) {
+  if (!iso) return "never";
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
+  return `${Math.round(seconds / 86400)}d ago`;
+}
+
+// ---- loading ----------------------------------------------------------------
+async function load() {
+  const response = await fetch(api, { cache: "no-store" }).catch(() => null);
+  if (!response || !response.ok) {
+    document.getElementById("live-text").textContent = response && response.status === 401
+      ? "The lab is private on this machine. Add ?token=… to the URL."
+      : "Could not reach /api/cpu-lab — is the dev server running?";
+    document.getElementById("pulse").classList.remove("on");
+    return;
+  }
+  data = await response.json();
+  fetchedAt = new Date().toISOString();
+  render();
+}
+
+function schedule() {
+  clearInterval(timer);
+  if (!state.auto) return;
+  timer = setInterval(() => {
+    // A hidden tab has nobody reading it, and a run has better things to do with
+    // the machine than answer a poll nobody sees.
+    if (!document.hidden) load();
+  }, 5000);
+}
+
+// ---- rendering --------------------------------------------------------------
+// THE PAGE READS THE CURVE AND NOTHING ELSE. Rows from the whole-table modes
+// are still in the file — they were paid for and the command line can still
+// print them — but they answer a different question and are not mixed in here.
+// The one exception is the no-op check below, which is a fact about the bench
+// rather than a finding about a candidate.
+function visibleRows() {
+  if (!data) return [];
+  return data.rows.filter((row) => controlKey(row) === state.control
+    && row.mode.startsWith("dose-")
+    && (state.cell === "all" || row.cell === state.cell));
+}
+
+// The null fixture's half-and-half run: a change that changes nothing, measured.
+// It has to come out at exactly zero or something is leaking between rooms.
+function noOpCheck() {
+  if (!data) return { n: 0 };
+  return pool(data.rows.filter((row) => row.tweak === "null" && row.mode === "mixed"
+    && controlKey(row) === state.control));
+}
+
+// One pooled line per candidate: the two ends of its adoption curve, and a
+// verdict that says what those ends mean — never more than they can.
+function summarize(rows) {
+  const byTweak = new Map();
+  for (const row of rows) {
+    const key = `${row.tweak}|${row.params}`;
+    if (!byTweak.has(key)) byTweak.set(key, []);
+    byTweak.get(key).push(row);
+  }
+  const out = [];
+  for (const [key, group] of byTweak) {
+    const id = key.split("|")[0];
+    const queued = data.tweaks.find((tweak) => tweak.id === id);
+    const lone = pool(group.filter((row) => row.k === 1));
+    const crowd = pool(group.filter((row) => row.k === (row.teams ?? 0) - 1));
+    out.push({
+      id,
+      note: group[0].note ?? queued?.note ?? "",
+      fixture: Boolean(queued?.fixture),
+      retired: !queued,
+      params: queued?.params ?? null,
+      cells: new Set(group.map((row) => row.cell)).size,
+      seconds: group.reduce((sum, row) => sum + (row.seconds ?? 0), 0),
+      lone,
+      crowd,
+      leagues: group.reduce((sum, row) => sum + (row.edges?.length ?? 0), 0),
+      verdict: verdictOf(id, lone, crowd)
+    });
+  }
+  return out;
+}
+
+function verdictOf(id, lone, crowd) {
+  const [, , versus] = (state.control ?? "|||").split("|");
+  // Read whichever dose was measured most precisely, not the first one: the
+  // lone-adopter point is a single seat's deviation and carries the widest
+  // interval of the lot, so a verdict that consulted it alone called a clearly
+  // negative candidate a null.
+  const reads = [
+    { stat: crowd, where: "with all but one chair on it" },
+    { stat: lone, where: "to a lone adopter" }
+  ].filter((read) => read.stat.n).sort((a, b) => a.stat.ci - b.stat.ci);
+  if (!reads.length) {
+    return { text: versus === "defaults" ? "not measured on the curve yet" : `not measured against ${versus} yet`, kind: "" };
+  }
+  const loses = reads.find((read) => read.stat.mean + read.stat.ci < 0);
+  const wins = reads.find((read) => read.stat.mean - read.stat.ci > 0);
+  // With a frozen generation in the control chairs this is the live bidder
+  // against that generation, not a candidate against the live bidder.
+  if (id === "null" && versus !== "defaults") {
+    if (loses) return { text: `DRIFT — ${signed(loses.stat.mean)} against ${versus}`, kind: "reject" };
+    if (wins) return { text: `the live bidder beats ${versus} by ${signed(wins.stat.mean)}`, kind: "ship" };
+    return { text: `no measurable difference from ${versus}`, kind: "" };
+  }
+  if (loses) return { text: `costs ${signed(loses.stat.mean)} ${loses.where}`, kind: "reject" };
+  if (wins) {
+    const holds = lone.n && crowd.n && Math.abs(lone.mean - crowd.mean) < lone.ci + crowd.ci;
+    return {
+      text: `${signed(wins.stat.mean)} ${wins.where}`
+        + (lone.n && crowd.n ? (holds ? ", and it holds as rivals adopt" : ", and it moves as rivals adopt") : ""),
+      kind: "ship"
+    };
+  }
+  return { text: "null on the curve so far", kind: "" };
+}
+
+function render() {
+  if (!data) return;
+  renderControls();
+  const rows = visibleRows();
+  const summary = summarize(rows);
+  renderLive();
+  renderRunning();
+  renderHealth(summary);
+  renderBenchmarks();
+  const shown = summary
+    .filter((entry) => !(state.hideFixtures && entry.fixture))
+    .sort(sorter());
+  renderDose(rows, shown);
+  renderMatrix(rows, shown);
+  renderTable(shown);
+  renderQueue(rows);
+  renderCoverage(rows, summary);
+}
+
+function sorter() {
+  const by = state.sort;
+  if (by === "id") return (a, b) => a.id.localeCompare(b.id);
+  if (by === "leagues") {
+    const banked = (entry) => entry.leagues;
+    return (a, b) => banked(b) - banked(a);
+  }
+  if (by === "denial") return (a, b) => (b.denial ?? -Infinity) - (a.denial ?? -Infinity);
+  // A candidate nobody has measured on this reading has no business sitting
+  // above one that came back negative: unmeasured sorts last, not as a zero.
+  const key = { crowd: "crowd", lone: "lone", mixed: "mixed" }[by] ?? "identical";
+  return (a, b) => {
+    if (Boolean(a[key].n) !== Boolean(b[key].n)) return a[key].n ? -1 : 1;
+    return b[key].mean - a[key].mean;
+  };
+}
+
+function renderControls() {
+  // Open on the reading the bench has actually been taking. The curve is the
+  // default run mode, so a page that opened on `identical` would greet most
+  // readers with a screen of dashes.
+  if (!state.chosen) {
+    const dosed = data.rows.some((row) => row.mode.startsWith("dose-"));
+    state.matrixMode = dosed ? "dose-crowd" : "identical";
+    state.sort = dosed ? "crowd" : "identical";
+    document.getElementById("matrix-mode").value = state.matrixMode;
+    document.getElementById("sort").value = state.sort;
+    state.chosen = data.rows.length > 0;
+  }
+  const control = document.getElementById("control");
+  const keys = [...new Set(data.rows.map(controlKey))].sort();
+  if (!keys.length) keys.push("balanced|shipped|defaults|");
+  if (!state.control || !keys.includes(state.control)) {
+    // Default to the plain room: the archetypes off, the shipped wobble, the
+    // live defaults in the control chairs.
+    state.control = keys.includes("balanced|shipped|defaults|") ? "balanced|shipped|defaults|" : keys[0];
+  }
+  if (control.dataset.keys !== keys.join(",")) {
+    control.dataset.keys = keys.join(",");
+    control.innerHTML = keys.map((key) =>
+      `<option value="${key}">${controlLabel(key)}</option>`).join("");
+  }
+  control.value = state.control;
+
+  const cells = document.getElementById("cell-filter");
+  const tags = data.cells.map((cell) => cell.tag);
+  if (cells.dataset.tags !== tags.join(",")) {
+    cells.dataset.tags = tags.join(",");
+    cells.innerHTML = `<option value="all">every board</option>`
+      + data.cells.map((cell) => `<option value="${cell.tag}">${cell.tag} — ${cellNote(cell)}</option>`).join("");
+  }
+  cells.value = state.cell;
+}
+
+const cellNote = (cell) => `${cell.teams} seats, ${cell.universe}${cell.type === "snake" ? ", snake" : ""}`;
+
+function renderLive() {
+  const running = data.running ?? [];
+  document.getElementById("pulse").classList.toggle("on", running.length > 0);
+  const measured = data.rows.length;
+  document.getElementById("live-text").innerHTML = running.length
+    ? `<strong>${running.length} run${running.length > 1 ? "s" : ""} in flight</strong> · `
+      + `${measured} measurements banked · read ${ago(fetchedAt)}`
+    : `Idle · ${measured} measurements banked · last one ${ago(data.updated)} · read ${ago(fetchedAt)}`;
+}
+
+function renderRunning() {
+  const running = data.running ?? [];
+  document.getElementById("running").hidden = running.length === 0;
+  if (!running.length) return;
+  document.getElementById("running-hint").textContent =
+    "Each process writes a heartbeat beside the results; one untouched for two minutes is treated as gone.";
+  document.getElementById("runs").innerHTML = running.map((run) => {
+    const share = run.leagues ? Math.min(1, (run.league ?? 0) / run.leagues) : 0;
+    const where = run.mode === "reach"
+      ? "checking whether the knob reaches this board at all"
+      : `${run.mode} · league ${run.league ?? 0} of ${run.leagues ?? "?"} · ${run.runs ?? "?"} games a team`;
+    const queued = data.tweaks.find((tweak) => tweak.id === run.tweak);
+    return `<div class="run-row">
+      <span class="run-what"><b>${escape(run.tweak ?? "?")}</b> on <b>${escape(run.cell ?? "?")}</b> — ${escape(where)}
+        <span class="params">${escape(queued ? knobLine(queued.params) : "")}</span></span>
+      <span class="muted">${escape(run.command ?? "run")} · pid ${run.pid} · started ${ago(run.startedAt ?? run.at)}</span>
+      <span class="run-track"><span class="run-fill" style="width:${(share * 100).toFixed(1)}%"></span></span>
+    </div>`;
+  }).join("");
+}
+
+// ---- the health strip -------------------------------------------------------
+function renderHealth(summary) {
+  const find = (id) => summary.find((entry) => entry.id === id)
+    ?? { lone: { n: 0 }, crowd: { n: 0 } };
+  const nul = find("null");
+  const placebo = find("jiggle");
+  const control = find("no-starter-discount");
+  // `find` answers with empty readings for a candidate the curve has not
+  // reached yet, so every tile below renders as "not measured" rather than
+  // vanishing — a reader should see that the check exists and is owed.
+
+  const [, , versus] = (state.control ?? "|||").split("|");
+  const tiles = [];
+
+  if (versus === "defaults") {
+    const check = noOpCheck();
+    const ok = check.n > 0 && Math.abs(check.mean) < 0.005;
+    tiles.push(tile({
+      label: "The null fixture",
+      value: check.n ? signed(check.mean) : "—",
+      state: check.n ? (ok ? "good" : "bad") : "idle",
+      stateText: check.n ? (ok ? "✓ sound" : "✗ broken") : "not measured",
+      note: ok
+        ? "a tweak that changes nothing, measured. It has to come out at exactly zero, and it does."
+        : "a tweak that changes nothing has to come out at zero. It has not — state is leaking between rooms."
+    }));
+
+  }
+  if (placebo) {
+    // Whichever dose it has been measured at, tightest interval first: this is
+    // the floor a real candidate has to clear, so it should be read off the
+    // most precise thing the bench has.
+    const read = [placebo.crowd, placebo.lone].filter((stat) => stat.n)
+      .sort((a, b) => a.ci - b.ci)[0] ?? { n: 0 };
+    const loud = read.n && Math.abs(read.mean) - read.ci > 0;
+    tiles.push(tile({
+      label: "The placebo",
+      value: read.n ? `${signed(read.mean)} ±${read.ci.toFixed(2)}` : "—",
+      state: read.n ? (loud ? "bad" : "good") : "idle",
+      stateText: read.n ? (loud ? "✗ reads something" : "✓ reads nothing") : "not measured",
+      note: "every bid moved a hundredth of a percent, which cannot make a roster better. "
+        + "Nothing inside this interval means anything."
+    }));
+  }
+  if (control) {
+    // Whichever way it was measured. The curve is the default now, so a bench
+    // that has only run doses has still answered this — and the answer is the
+    // same either way: a known loss has to read negative.
+    const read = control.crowd.n ? control.crowd : control.lone;
+    const how = control.crowd.n ? "with all but one chair on it" : "to a lone adopter";
+    const right = read.n && read.mean + read.ci < 0;
+    tiles.push(tile({
+      label: "Positive control",
+      value: read.n ? `${signed(read.mean)} ±${read.ci.toFixed(2)}` : "—",
+      state: read.n ? (right ? "good" : "bad") : "idle",
+      stateText: read.n ? `${right ? "✓ reproduced" : "✗ not reproduced"} ${how}` : "not measured",
+      note: "paying full price for a narrow board's starters is a known loss. It has to read negative."
+    }));
+  }
+  document.getElementById("health").innerHTML = tiles.join("")
+    || `<p class="empty">Nothing measured under these room controls yet.</p>`;
+  document.getElementById("health-note").textContent = versus === "defaults"
+    ? ""
+    : `With ${versus} in the control chairs the null fixture is not a fixture — it is the benchmark above.`;
+}
+
+function tile({ label, value, note, state: kind, stateText }) {
+  return `<div class="card" style="margin:0">
+    <div class="tile-label">${escape(label)}</div>
+    <div class="tile-value">${escape(value)}</div>
+    <div class="state ${kind}">${escape(stateText)}</div>
+    <div class="tile-note">${escape(note)}</div>
+  </div>`;
+}
+
+// ---- the benchmark against a generation -------------------------------------
+function renderBenchmarks() {
+  const tiles = [];
+  for (const generation of data.generations ?? []) {
+    const rows = data.rows.filter((row) => row.tweak === "null" && (row.versus ?? "defaults") === generation.name
+      && (row.persona ?? "balanced") === (state.control ?? "balanced").split("|")[0] && row.k);
+    const crowd = pool(rows.filter((row) => row.k === (row.teams ?? 0) - 1));
+    const lone = pool(rows.filter((row) => row.k === 1));
+    const read = [crowd, lone].filter((stat) => stat.n).sort((a, b) => a.ci - b.ci)[0];
+    if (!read) continue;
+    const which = read === crowd ? "with all but one chair still on it" : "to a lone chair";
+    tiles.push(tile({
+      label: `versus ${generation.name}${generation.isLive ? " (the live knobs)" : ""}`,
+      value: `${signed(read.mean)} ±${read.ci.toFixed(2)}`,
+      state: read.mean - read.ci > 0 ? "good" : read.mean + read.ci < 0 ? "bad" : "idle",
+      stateText: `${read.n} leagues · ${which}`,
+      note: generation.note
+    }));
+  }
+  document.getElementById("bench-card").hidden = tiles.length === 0;
+  document.getElementById("bench").innerHTML = tiles.join("");
+}
+
+// A round number at or above the biggest thing being plotted, so the axis ends
+// somewhere a reader recognises instead of at 3.47.
+function niceSpan(value) {
+  const steps = [0.5, 1, 2, 3, 5, 8, 12, 20, 30, 50];
+  return steps.find((step) => step >= value) ?? Math.ceil(value);
+}
+
+// ---- the adoption curve -----------------------------------------------------
+// One panel a candidate, all on one scale. x is the SHARE of the room carrying
+// the tweak, not the count, so a three-seat table and an eight-seat one can be
+// read against each other; y is what those chairs won over the room's par.
+function renderDose(rows, summary) {
+  const dosed = rows.filter((row) => row.mode.startsWith("dose-"));
+  document.getElementById("dose-card").hidden = dosed.length === 0;
+  if (!dosed.length) return;
+
+  const series = [];
+  for (const entry of summary) {
+    const mine = dosed.filter((row) => row.tweak === entry.id);
+    if (!mine.length) continue;
+    const points = [];
+    for (const row of mine) {
+      const teams = row.teams ?? data.cells.find((cell) => cell.tag === row.cell)?.teams ?? 4;
+      const k = row.k ?? Number(row.mode.slice(5));
+      const found = points.find((point) => point.k === k && point.teams === teams);
+      (found ? found.rows : (points.push({ k, teams, cell: row.cell, rows: [] }), points.at(-1).rows)).push(row);
+    }
+    for (const point of points) Object.assign(point, pool(point.rows));
+    points.sort((a, b) => a.k / a.teams - b.k / b.teams);
+    if (points.length) series.push({ id: entry.id, points });
+  }
+  if (!series.length) {
+    document.getElementById("dose-card").hidden = true;
+    return;
+  }
+
+  let span = 0.5;
+  for (const line of series) {
+    for (const point of line.points) span = Math.max(span, Math.abs(point.mean) + point.ci);
+  }
+  span = niceSpan(span);
+
+  const width = 300;
+  const height = 170;
+  const pad = { top: 14, right: 14, bottom: 34, left: 40 };
+  const x = (share) => pad.left + (width - pad.left - pad.right) * share;
+  const y = (value) => height - pad.bottom - (height - pad.top - pad.bottom) * (0.5 + value / span / 2);
+
+  document.getElementById("dose").innerHTML = series.map((line) => {
+    // Read the decay on the board that has the most of the curve, so the
+    // sentence is about one room rather than about two different ones.
+    const widest = [...new Set(line.points.map((point) => point.cell))]
+      .map((cell) => line.points.filter((point) => point.cell === cell))
+      .sort((a, b) => b.length - a.length)[0];
+    const first = widest[0];
+    const last = widest[widest.length - 1];
+    const fades = widest.length > 1 && Math.abs(first.mean - last.mean) > first.ci + last.ci;
+    const reading = widest.length < 2
+      ? "one dose measured so far"
+      : `${fades ? (Math.abs(first.mean) > Math.abs(last.mean) ? "fades" : "grows") : "holds up"} as rivals adopt it`
+        + ` (${widest[0].cell})`;
+    // One stroke per BOARD, not one through the lot: a three-seat room and a
+    // six-seat one are different boards as well as different doses, and joining
+    // them would draw a trend that nothing measured. The strokes are all the
+    // same recessive grey and the board is named at the end of each, so the
+    // identity is in the label rather than in a colour.
+    const boards = [...new Set(line.points.map((point) => point.cell))];
+    const path = boards.map((cell) => {
+      const own = line.points.filter((point) => point.cell === cell);
+      const stroke = own.map((point, index) =>
+        `${index ? "L" : "M"}${x(point.k / point.teams).toFixed(1)} ${y(point.mean).toFixed(1)}`).join(" ");
+      const end = own[own.length - 1];
+      return `<path d="${stroke}" fill="none" stroke="var(--baseline)" stroke-width="2" />`
+        + (boards.length > 1
+          ? `<text x="${x(end.k / end.teams) + 7}" y="${y(end.mean) + 3}">${escape(cell.split("-")[0])}</text>`
+          : "");
+    }).join("");
+    const marks = line.points.map((point) => {
+      const colour = point.mean >= 0 ? "var(--pos)" : "var(--neg)";
+      const at = x(point.k / point.teams);
+      return `<g><title>${escape(`${line.id} · ${point.cell} · ${point.k} of ${point.teams} chairs: `
+        + `${signed(point.mean)} ±${point.ci.toFixed(2)} over ${point.n} leagues`)}</title>
+        <line class="whisker" x1="${at}" y1="${y(point.mean - point.ci)}" x2="${at}" y2="${y(point.mean + point.ci)}" stroke="${colour}" />
+        <circle cx="${at}" cy="${y(point.mean)}" r="4" fill="${colour}" stroke="var(--surface-1)" stroke-width="2" />
+      </g>`;
+    }).join("");
+    const queued = data.tweaks.find((tweak) => tweak.id === line.id);
+    return `<div>
+      <p class="panel-name">${escape(line.id)}</p>
+      <p class="panel-note">${escape(queued ? knobLine(queued.params) : "")}</p>
+      <p class="panel-note">${escape(reading)}</p>
+      <svg class="plot" viewBox="0 0 ${width} ${height}" role="img"
+        aria-label="${escape(`${line.id}: win-point change of the tweaked chairs against the share of the room carrying the tweak`)}">
+        <line class="zero" x1="${pad.left}" y1="${y(0)}" x2="${width - pad.right}" y2="${y(0)}" />
+        <line class="grid" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" />
+        <text x="${pad.left - 6}" y="${y(span) + 4}" text-anchor="end">${signed(span, 1)}</text>
+        <text x="${pad.left - 6}" y="${y(0) + 4}" text-anchor="end">0</text>
+        <text x="${pad.left - 6}" y="${y(-span) + 4}" text-anchor="end">${signed(-span, 1)}</text>
+        <text x="${x(0)}" y="${height - 14}" text-anchor="start">lone adopter</text>
+        <text x="${x(1)}" y="${height - 14}" text-anchor="end">last holdout</text>
+        <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">share of the room with the tweak</text>
+        ${path}
+        ${marks}
+      </svg>
+    </div>`;
+  }).join("");
+}
+
+// ---- candidate by board -----------------------------------------------------
+function renderMatrix(rows, summary) {
+  const table = document.getElementById("matrix");
+  const cells = state.cell === "all" ? data.cells : data.cells.filter((cell) => cell.tag === state.cell);
+  const wanted = (row) => {
+    if (state.matrixMode === "dose-lone") return (row.k ?? 0) === 1;
+    if (state.matrixMode === "dose-crowd") return row.k && row.k === (row.teams ?? 0) - 1;
+    return row.mode === state.matrixMode;
+  };
+  const valueOf = (id, tag) => {
+    const mine = rows.filter((row) => row.tweak === id && row.cell === tag && wanted(row));
+    return mine.length ? pool(mine) : null;
+  };
+  // A row with nothing in it under this reading says nothing. It belongs in the
+  // queue table below, which is where a reader goes to see what is still owed.
+  const present = summary.filter((entry) => cells.some((cell) => valueOf(entry.id, cell.tag)));
+  document.getElementById("matrix-card").hidden = present.length === 0;
+  if (!present.length) return;
+
+  let span = 1;
+  for (const entry of present) {
+    for (const cell of cells) {
+      const stat = valueOf(entry.id, cell.tag);
+      if (stat) span = Math.max(span, Math.abs(stat.mean));
+    }
+  }
+  const head = `<thead><tr><th>candidate</th>${cells.map((cell) =>
+    `<th class="cell-head">${cell.tag}<span>${cellNote(cell)}</span></th>`).join("")}</tr></thead>`;
+  const body = present.map((entry) => `<tr>
+    <td>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}</td>
+    ${cells.map((cell) => {
+      const stat = valueOf(entry.id, cell.tag);
+      if (!stat) return `<td class="cell empty" title="not measured">—</td>`;
+      // Hue says the sign, weight says the size, and the number is printed on
+      // top so nothing here is colour-only. The weight is a share of the
+      // theme's own ceiling (--fill-max) rather than an absolute alpha, so the
+      // strongest cell stops where its number is still readable in both modes.
+      const weight = Math.min(1, 0.14 + 0.86 * Math.abs(stat.mean) / span);
+      return `<td class="cell" data-sign="${stat.mean >= 0 ? "pos" : "neg"}" style="--weight:${weight.toFixed(3)}"
+        title="${escape(`${entry.id} on ${cell.tag}: ${signed(stat.mean)} ±${stat.ci.toFixed(2)} over ${stat.n} leagues`)}">${signed(stat.mean)}</td>`;
+    }).join("")}
+  </tr>`).join("");
+  table.innerHTML = `${head}<tbody>${body}</tbody>`;
+}
+
+// ---- the numbers ------------------------------------------------------------
+function renderTable(summary) {
+  const table = document.getElementById("table");
+  const num = (stat) => stat.n
+    ? `<span class="num ${stat.mean >= 0 ? "pos" : "neg"}">${signed(stat.mean)}</span> <span class="muted">±${stat.ci.toFixed(2)}</span>`
+    : `<span class="muted">—</span>`;
+  // Only the columns that have something in them. Which readings exist depends
+  // on how the bench was run, and a column of dashes down its whole length is
+  // just a question nobody asked.
+  // The ends of the adoption curve. The whole-table readings are a different
+  // question and are tabulated under their own chart, so they are not repeated
+  // here.
+  const columns = [
+    { head: "lone adopter", has: (entry) => entry.lone.n, cell: (entry) => num(entry.lone) },
+    { head: "last holdout", has: (entry) => entry.crowd.n, cell: (entry) => num(entry.crowd) }
+  ].filter((column) => summary.some(column.has));
+  table.innerHTML = `<thead><tr>
+      <th>candidate</th>${columns.map((column) => `<th>${column.head}</th>`).join("")}
+      <th>boards</th><th>leagues</th><th>verdict</th>
+    </tr></thead>
+    <tbody>${summary.map((entry) => `<tr>
+      <td>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}
+        <div class="params">${escape(entry.note)}</div>
+        <div class="params">${escape(entry.params ? knobLine(entry.params) : "no knobs changed")}</div></td>
+      ${columns.map((column) => `<td>${column.has(entry) ? column.cell(entry) : '<span class="muted">—</span>'}</td>`).join("")}
+      <td>${entry.cells}/${data.cells.length}</td>
+      <td>${entry.leagues}</td>
+      <td><span class="verdict ${entry.verdict.kind}">${escape(entry.verdict.text)}</span></td>
+    </tr>`).join("")}</tbody>`;
+}
+
+// Where a proposal came from. The measurement can say whether the number is
+// better; it can never say why anyone thought to try it, and in a month that is
+// the part that decides what to do next — so it travels with the candidate.
+function provenance(tweak) {
+  if (!tweak.idea) return "";
+  const who = [tweak.by, tweak.room ? `from ${tweak.room}` : null].filter(Boolean).join(", ");
+  return `<div class="from-room">${who ? `${escape(who)}` : "proposed"}`
+    + `${tweak.why ? `<br>${escape(tweak.why)}` : ""}</div>`;
+}
+
+function renderQueue(rows) {
+  const measured = new Map();
+  for (const row of rows) {
+    measured.set(row.tweak, (measured.get(row.tweak) ?? 0) + (row.edges?.length ?? 0));
+  }
+  const body = data.tweaks.map((tweak) => {
+    const changes = knobChanges(tweak.params);
+    const leagues = measured.get(tweak.id) ?? 0;
+    const rowsFor = changes.length ? changes : [{ knob: "—", from: "", to: "", note: "changes nothing — a fixture" }];
+    return rowsFor.map((change, index) => `<tr>
+      ${index === 0
+        ? `<td rowspan="${rowsFor.length}">${escape(tweak.id)}${tweak.fixture ? ' <span class="muted">*</span>' : ""}
+             <div class="params">${escape(tweak.note)}</div>${provenance(tweak)}</td>`
+        : ""}
+      <td class="knob">${escape(change.knob)}</td>
+      <td>${change.from ? `<span class="muted">${escape(change.from)}</span> → <b>${escape(change.to)}</b>` : ""}</td>
+      <td class="knob-note">${escape(change.note)}</td>
+      ${index === 0
+        ? `<td rowspan="${rowsFor.length}">${leagues ? `${leagues} leagues` : '<span class="muted">not measured</span>'}</td>`
+        : ""}
+    </tr>`).join("");
+  }).join("");
+  document.getElementById("queue").innerHTML =
+    `<thead><tr><th>candidate</th><th>knob</th><th>shipped → tweaked</th><th>what the knob does</th><th>measured</th></tr></thead>`
+    + `<tbody>${body}</tbody>`;
+  // A proposal the inbox could not use is skipped rather than measured. If that
+  // were not said anywhere, an agent's typo would simply vanish.
+  const bad = data.rejects ?? [];
+  document.getElementById("queue-rejects").innerHTML = bad.length
+    ? `<span class="refused">${bad.length} proposal${bad.length > 1 ? "s" : ""} in the ideas inbox could `
+      + `not be used and ${bad.length > 1 ? "were" : "was"} skipped:</span> `
+      + bad.map((reject) => `line ${reject.line}, ${escape(reject.id ?? "no id")} — ${escape(reject.reason)}`).join("; ")
+    : "";
+}
+
+function renderCoverage(rows, summary) {
+  const measured = new Set(rows.map((row) => `${row.tweak}|${row.cell}|${row.mode}`)).size;
+  // Every dose of every candidate on every board: a board with N chairs has
+  // N-1 of them, since there is nothing to measure once every chair has it.
+  const perBoard = data.cells.reduce((sum, cell) => sum + cell.teams - 1, 0);
+  const possible = data.tweaks.length * perBoard;
+  const hours = rows.reduce((sum, row) => sum + (row.seconds ?? 0), 0) / 3600;
+  document.getElementById("coverage").textContent =
+    `${measured} of ${possible} (candidate × board × dose) measurements exist under these room `
+    + `controls, from ${rows.length} batches and ${hours.toFixed(1)} hours of simulation. `
+    + `A fixture is marked *. A candidate skipped as inert on a board leaves no row — `
+    + `scripts/cpu-lab.mjs check says which those are.`;
+}
+
+function escape(text) {
+  return String(text ?? "").replace(/[&<>"']/g, (char) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+
+// ---- wiring -----------------------------------------------------------------
+document.getElementById("control").addEventListener("change", (event) => {
+  state.control = event.target.value;
+  render();
+});
+document.getElementById("cell-filter").addEventListener("change", (event) => {
+  state.cell = event.target.value;
+  render();
+});
+document.getElementById("sort").addEventListener("change", (event) => {
+  state.sort = event.target.value;
+  state.chosen = true;
+  render();
+});
+document.getElementById("hide-fixtures").addEventListener("change", (event) => {
+  state.hideFixtures = event.target.checked;
+  render();
+});
+document.getElementById("matrix-mode").addEventListener("change", (event) => {
+  state.matrixMode = event.target.value;
+  state.chosen = true;
+  render();
+});
+document.getElementById("auto").addEventListener("click", (event) => {
+  state.auto = !state.auto;
+  event.target.setAttribute("aria-pressed", String(state.auto));
+  event.target.textContent = state.auto ? "Auto-refresh on" : "Auto-refresh off";
+  schedule();
+  if (state.auto) load();
+});
+document.getElementById("refresh").addEventListener("click", () => load());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.auto) load();
+});
+
+await load();
+schedule();
+</script>
+</body>
+</html>

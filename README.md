@@ -137,6 +137,7 @@ Implemented:
 Documented in more detail:
 
 - [docs/rules.md](docs/rules.md)
+- [docs/cpu-lab.md](docs/cpu-lab.md) — the standing bench for changes to how computers draft
 
 ## Important Gaps
 
@@ -165,9 +166,13 @@ Known rough edges:
 
 ```text
 card-lab.html                  Card mockup/testing page
+docs/cpu-lab.md                The standing bench for CPU draft tweaks
 docs/rules.md                  Current rules contract and research notes
 index.html                     Main app shell
 scripts/balance-sim.js         Draft/tournament balance simulation
+cpu-lab.html                   Live view of the CPU draft bench (served at /cpu-lab.html)
+scripts/cpu-lab.mjs            Half a table on a tweak, half on the shipped bidder, across a grid of board sizes
+scripts/cpu-fingerprint.mjs    Every bid and pick a room of computers makes, hashed: the refactor check
 scripts/serve.js               Zero-dependency static dev server (sends no-store headers)
 src/app.js                     UI state, draft/game/batch screens, browser save logic
 src/data/universes.js          The card sets both games share: pools, charts, prices, rarity, the draft deck
@@ -175,6 +180,7 @@ src/data/playerGeneration.js   Fictional card generation
 src/rules/batch.js             Batch season simulation and aggregation
 src/rules/battle/             The interactive game: pausable engine loop, fast forward, opposing-skipper AI
 src/rules/cards.js             Card chart helpers
+src/rules/cpuTunables.js       The knobs a drafting computer turns, and one manager's own set of them
 src/rules/draft.js             Draft, roster, lineup, repair logic
 src/rules/game.js              Game simulation rules
 src/rules/rng.js               Deterministic seeded RNG

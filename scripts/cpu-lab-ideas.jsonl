@@ -1,0 +1,37 @@
+// THE IDEAS INBOX. One JSON object a line, appended, never edited. Lines like
+// this one are ignored, so these instructions live in the file they describe.
+//
+// Append with the CLI, which validates before it writes — a knob that does not
+// exist is refused here rather than measured as a perfect null:
+//
+//   node scripts/cpu-lab.mjs idea --id pen-arm-cheaper \
+//     --knobs '{"relieverDepthRate":0.5}' \
+//     --note "the arms behind the closer at half a starter's rate" \
+//     --room misty-fox-open \
+//     --why "seat 3 paid $182 for a replacement arm two lots from the end" \
+//     --by "room-analysis agent"
+//
+// Or write the line yourself:
+//   {"id":"...","knobs":{"...":1},"note":"...","room":"...","why":"...","by":"..."}
+//
+// WHAT MAKES A GOOD ONE: a knob out of src/rules/cpuTunables.js (`cpu-lab.mjs
+// list` prints every one with its shipped value), a note saying what it claims,
+// and the room and the observation that made you think of it. The bench cannot
+// tell a hunch from a reading, so the `why` is the only place the evidence
+// survives — write it for someone who will read the result in a month and ask
+// where the idea came from.
+//
+// WHAT HAPPENS NEXT: nothing you have to do. The queue reads this file, so the
+// idea is a candidate from the next command onward, and the next `run` that has
+// budget measures it across the whole grid.
+{"id":"arm-balance-off","knobs":{"snakeBalanceBonus":0},"note":"drop the flat +35 an arm gets on top of its own need bonus","room":"fast-otter-grove","why":"snakeBalanceBonus fires on exactly the condition an arm's needBonus already fires on (pitcherNeed>0), so a needed arm is paid two need bonuses and a needed bat one. Zeroing it moves 22 of 90 computer turns across wise-robin-jersey/fast-otter-grove/sunny-trout-series and every single one swaps an arm for a bat (Nolan Ryan 730pt -> Vlad Guerrero 660pt at 2.1, Mark Mulder -> Jeff Kent, Freddy Garcia -> Junior Spivey). In those rooms the two seats that bought the most rotation finished last and next-to-last: the ace in fast-otter-grove put 2390 pts in four starters against a 2940-pt lineup and ran 44.4% while the human at 3990 pts of bats ran 55.2%.","by":"room-analysis agent (3 live snake rooms, 2026-11-11)","at":"2026-11-11"}
+{"id":"scarcity-off","knobs":{"snakeScarcityRate":0},"note":"delete the snake positional scarcity term the auction deliberately does not have","room":"wise-robin-jersey","why":"The 2026-11-04 audit listed this as contradiction 1 and nobody has measured it; both queued scarcity candidates move the CAP, and the cap is not what binds. Across these three 3-team rooms the computers paid 83 scarcity bonuses averaging 13 pts, and snakeScarcityCap 120->60 moves ZERO of 90 turns while snakeScarcityRate 0 moves 18 (20%). In 57 of those 83 reaches (69%) the man being reached past was still on the board at that manager's next turn — Scott paid +65 for Whitey Ford past Kazuhisa Ishii, who lasted another three picks; Kasey paid +68 for Vinny Castilla past Troy Glaus, who lasted twenty-two. CAUTION for whoever reads the result: zeroing it is not a clean test of scarcity alone, because scarcity is the only counterweight the ace has to its own armLean — 12 of the 18 moved picks swap a bat for a starter.","by":"room-analysis agent (3 live snake rooms, 2026-11-11)","at":"2026-11-11"}
+{"id":"pen-floor-by-room","knobs":{"relieverFloorByRoom":1},"note":"price the pen over the first arm the room will not take, not the worst arm dealt","room":"fast-otter-grove","why":"penPricedValue anchors the 2.5x top-reliever premium on the WORST reliever on the board, which is an auction fact (the night ends with the board stripped). These three rooms dealt 18 relievers to 3 managers with two pen seats each, so 12 arms were never in play, and the floor sat 46-84 model points under the first arm nobody took (114/88/64 against 172/172/110). At 2.5x that overprices every top arm by 1.5x the gap: Eric Gagne goes 236 raw -> 458, and he was the FIRST PICK OF THE DRAFT, ahead of Kevin Brown (358) and Barry Bonds (334); off a room-sized floor he is 331 and goes behind both. Five of the six computer bullpens in these rooms opened with a reliever inside the first five picks of the draft (#1 #2 #3 #4 #5) while the three humans waited until #13, #25 and #33, and the humans took two of the three rooms. Knob added dormant with this proposal: relieverFloorByRoom 0 is today's behavior, cpu-fingerprint identical on all 17 cells; 1 moves 8 of 90 computer turns in these rooms and every move is a round-1 closer giving way to a bat or an ace.","by":"room-analysis agent (3 live snake rooms, 2026-11-11)","at":"2026-11-11"}
+// CHECK, 2026-11-11, on "pen-floor-by-room" above: it moves every seat at
+// s4-classic / s4-long / s4-history, HALF the seats at s6-classic and s6-fiction,
+// and is INERT at s8-classic. That is the mechanism, not a bug — the wider the
+// room, the more of the board's relievers the pen seats actually reach, until the
+// first arm nobody takes IS the worst arm dealt and the two floors coincide. So
+// read its curve as a small-room fix and do not let an s8 null sink it. Live in
+// a4-manual too (82/120 prices, mean $22.8), which is the one auction path that
+// nominates through bestAutopickTarget.

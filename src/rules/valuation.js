@@ -170,15 +170,20 @@ export const VALUATION_BASE_WEIGHTS = {
 };
 export const VALUATION_PERTURBATION = PERTURBATION;
 
-export function createValuationModel(seed, personalityKey = "balanced", startingPitchers = SP_SLOT_ANCHOR) {
+// `tune` is one manager's knob set (see cpuTunables.js). It can restate a
+// weight and it can turn the noise off, which is what a controlled room wants:
+// at perturbation 0 every seat of one archetype values the board identically,
+// so the only thing left between two sides of a table is the tweak.
+export function createValuationModel(seed, personalityKey = "balanced", startingPitchers = SP_SLOT_ANCHOR, tune = null) {
   const rng = createRng(String(seed));
   const persona = cpuPersonality(personalityKey);
   const spFactor = spSlotFactor(startingPitchers);
+  const spread = tune?.perturbation ?? PERTURBATION;
   // The archetype states its case; the noise keeps two of the same archetype
   // from being the same manager.
   const weights = {
-    hitter: perturbWeights(rng, { ...HITTER_BASE_WEIGHTS, ...persona.weights.hitter }),
-    pitcher: perturbWeights(rng, { ...PITCHER_BASE_WEIGHTS, ...persona.weights.pitcher })
+    hitter: perturbWeights(rng, { ...HITTER_BASE_WEIGHTS, ...persona.weights.hitter, ...tune?.hitterWeights }, spread),
+    pitcher: perturbWeights(rng, { ...PITCHER_BASE_WEIGHTS, ...persona.weights.pitcher, ...tune?.pitcherWeights }, spread)
   };
 
   return {
@@ -200,9 +205,9 @@ export function createValuationModel(seed, personalityKey = "balanced", starting
   };
 }
 
-function perturbWeights(rng, base) {
+function perturbWeights(rng, base, spread = PERTURBATION) {
   return Object.fromEntries(
-    Object.entries(base).map(([key, weight]) => [key, weight * (1 - PERTURBATION + rng.next() * PERTURBATION * 2)])
+    Object.entries(base).map(([key, weight]) => [key, weight * (1 - spread + rng.next() * spread * 2)])
   );
 }
 
