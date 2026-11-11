@@ -144,7 +144,49 @@
   .plot .zero { stroke: var(--baseline); stroke-width: 1; }
   .plot .grid { stroke: var(--gridline); stroke-width: 1; }
   .plot .whisker { stroke-width: 2; stroke-linecap: round; }
-  .band:hover .hit-bg { fill: currentColor; opacity: 0.05; }
+  /* ---- the hover layer ----
+     Every mark on this page carries its own readout. It used to be an SVG
+     <title> inside an svg[role="img"], which is a dead end: role="img" tells
+     the browser the subtree is ONE image, and Chrome then shows no descendant
+     tooltip at all. So the marks drive a real tooltip instead, and a <title>
+     is nowhere on the page.
+     Per the house rules: the hit target is far bigger than the mark (a 4px dot
+     is a pinpoint nobody hits), the value leads and the label follows, the
+     hovered mark lifts so the reader sees it respond, and focus does
+     everything hover does. Nothing here GATES a number — the matrix prints its
+     own value and the table below carries every one of them. */
+  .hit { fill: transparent; stroke: none; cursor: pointer; outline: none; }
+  .mark { transition: r 0.08s ease, opacity 0.08s ease; }
+  .point.on .mark, .hit:focus-visible + .mark { r: 6; }
+  .point.on .whisker { stroke-width: 3; }
+  .hit:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; border-radius: 50%; }
+
+  #tip {
+    /* top/left PINNED to the document origin. Without them an absolutely
+       positioned box keeps its static position — and #tip sits at the end of
+       the body, so the transform offset from there landed it ten thousand
+       pixels below the fold. It looked exactly like a tooltip that never
+       opened. */
+    position: absolute; top: 0; left: 0;
+    z-index: 40; pointer-events: none; opacity: 0;
+    transform: translate3d(-9999px, -9999px, 0); transition: opacity 0.1s ease;
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; max-width: 280px;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
+  }
+  #tip[data-open="1"] { opacity: 1; }
+  #tip .tip-value { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  #tip .tip-value.pos { color: var(--pos); }
+  #tip .tip-value.neg { color: var(--neg); }
+  #tip .tip-label { color: var(--text-primary); font-size: 12px; margin-top: 2px; }
+  #tip .tip-sub { color: var(--text-muted); font-size: 12px; margin-top: 3px; }
+  @media (prefers-reduced-motion: reduce) { #tip, .mark { transition: none; } }
+
+  /* The matrix cell is its own hit target and lifts on hover, same as a dot. */
+  .matrix td.cell { cursor: pointer; }
+  .matrix td.cell:hover, .matrix td.cell:focus-visible {
+    outline: 2px solid var(--text-primary); outline-offset: -2px;
+  }
 
   .legend { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
   .key { display: flex; gap: 6px; align-items: center; color: var(--text-secondary); font-size: 12px; }
@@ -161,7 +203,7 @@
   .num.neg { color: var(--neg); }
   .muted { color: var(--text-muted); }
   .params { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; }
-  .from-room { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; border-left: 2px solid var(--line); padding-left: 8px; margin-top: 4px; }
+  .from-room { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; border-left: 2px solid var(--gridline); padding-left: 8px; margin-top: 4px; }
   .refused { color: var(--neg); }
   /* A question the bench has closed. Dimmed rather than removed: the answer is
      the most useful thing on the row, and a candidate that quietly vanished
@@ -195,8 +237,67 @@
      panel carries its own name and they all share one scale, so they compare by
      position instead. */
   .panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .panel { border: 1px solid transparent; border-radius: 8px; padding: 8px; margin: -8px; }
   .panel-name { font-size: 13px; color: var(--text-primary); margin: 0 0 2px; }
   .panel-note { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+
+  /* ---- what is running, and what is paying off ----
+     Two things a reader wants in the first screen: is the bench working right
+     now, and which of the twenty-odd candidates is worth reading about. Both
+     used to be buried — the run list was a thin strip below the fold and the
+     winners were a sort order on a table of everything. */
+  #running.card { border-color: rgb(var(--pos-rgb) / 0.45); }
+  .now-head { display: flex; align-items: center; gap: 8px; }
+  .now-tag {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--pos); border: 1px solid rgb(var(--pos-rgb) / 0.4);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  /* The same tag, inline beside a candidate's name anywhere else on the page,
+     so a row that is moving while you read it says so. */
+  .badge {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+    border-radius: 999px; padding: 1px 6px; margin-left: 6px; white-space: nowrap;
+    border: 1px solid currentColor; vertical-align: 1px;
+  }
+  /* These modifiers are deliberately NOT called .live or .lead: `.live` is
+     already the status strip at the top of the page (display:flex), and a
+     badge that picked it up stretched to fill its whole column. */
+  .badge.badge-now { color: var(--pos); }
+  .badge.badge-win { color: var(--ok); }
+  tr.live-row { background: rgb(var(--pos-rgb) / 0.07); }
+  .panel.live-panel { border-color: rgb(var(--pos-rgb) / 0.45); }
+
+  .leaders { display: grid; gap: 2px; }
+  .leader {
+    display: grid; grid-template-columns: minmax(150px, 1.1fr) 92px minmax(120px, 1fr) 2.2fr;
+    gap: 14px; align-items: center; padding: 7px 8px; border-radius: 6px;
+  }
+  .leader:hover { background: rgb(var(--pos-rgb) / 0.05); }
+  .leader + .leader { border-top: 1px solid var(--gridline); }
+  .leader-name { font-weight: 600; font-size: 13px; }
+  .leader-knob { color: var(--text-muted); font-size: 12px; font-weight: 400; font-variant-numeric: normal; }
+  .leader-num { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; }
+  .leader-why { color: var(--text-secondary); font-size: 12px; }
+  /* The bar is the SIZE of the reading and the whisker is its interval, drawn
+     against a shared scale with zero in the middle — so a long bar whose
+     whisker crosses the centre line reads as "big but not established", which
+     is exactly the mistake this page exists to stop somebody making. */
+  .leader-bar { position: relative; height: 16px; }
+  .leader-bar .zero-rule { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--baseline); }
+  .leader-bar .fill { position: absolute; top: 5px; height: 6px; border-radius: 3px; }
+  .leader-bar .fill.pos { background: var(--pos); }
+  .leader-bar .fill.neg { background: var(--neg); }
+  .leader-bar .ci { position: absolute; top: 7px; height: 2px; background: var(--text-muted); opacity: 0.75; }
+  .leaders-empty { color: var(--text-muted); font-size: 13px; }
+  /* Narrow: the reading and its bar stay side by side on one line, because the
+     bar is only readable next to the number it draws, and the sentence drops
+     below them rather than squeezing all four columns into a phone. */
+  @media (max-width: 720px) {
+    .leader { grid-template-columns: 1fr auto; gap: 4px 12px; }
+    .leader > :nth-child(3) { grid-column: 1 / -1; }
+    .leader-why { grid-column: 1 / -1; }
+  }
 
   .runs { display: grid; gap: 12px; }
   .run-row { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: center; }
@@ -230,7 +331,7 @@
 
   <section id="running" class="card" hidden>
     <div class="chart-head">
-      <h2>Running now</h2>
+      <h2 class="now-head"><span class="now-tag">live</span> Running now</h2>
       <p class="hint" id="running-hint"></p>
     </div>
     <div class="runs" id="runs"></div>
@@ -245,6 +346,21 @@
     </div>
     <div class="tiles" id="health"></div>
     <p class="note" id="health-note"></p>
+  </section>
+
+  <section class="card" id="leaders-card" hidden>
+    <div class="chart-head">
+      <h2>What is paying off</h2>
+      <p class="hint">
+        Ranked by how far the reading is from zero against its own interval — not by the size of
+        the number, which is how noise gets promoted. The reading used is the one at the
+        <strong>last holdout</strong>: everybody has the tweak but one chair, the precise end of the
+        curve and the end that matters for shipping, since a change that only wins while rivals
+        lack it is denial. Nothing ships off this list.
+      </p>
+    </div>
+    <div class="leaders" id="leaders"></div>
+    <p class="note" id="leaders-note"></p>
   </section>
 
   <section class="card" id="bench-card" hidden>
@@ -346,6 +462,10 @@
     <p class="note" id="coverage"></p>
   </section>
 </main>
+<!-- One tooltip for the whole page: the dose dots and the matrix cells both
+     drive it. Built with textContent, never innerHTML — candidate names come
+     out of the ideas inbox, which any agent can write to. -->
+<div id="tip" role="tooltip" aria-hidden="true"></div>
 
 <script type="module">
 const token = new URLSearchParams(location.search).get("token");
@@ -530,8 +650,17 @@ function verdictOf(id, lone, crowd) {
   return { text: "null on the curve so far", kind: "" };
 }
 
+// A refresh lands every few seconds and every renderer below replaces its
+// section's innerHTML — which deletes the node a tooltip is anchored to. The
+// reading would vanish mid-sentence and the hover state with it. So a render
+// that arrives while the pointer is on a mark is HELD until the pointer leaves,
+// and then runs. The fetched data is already in `data`; only the redraw waits.
+let pendingRender = false;
+
 function render() {
   if (!data) return;
+  if (tipFor) { pendingRender = true; return; }
+  pendingRender = false;
   renderControls();
   const rows = visibleRows();
   const summary = summarize(rows);
@@ -542,6 +671,7 @@ function render() {
   const shown = summary
     .filter((entry) => !(state.hideFixtures && entry.fixture))
     .sort(sorter());
+  renderStandings(summary);
   renderDose(rows, shown);
   renderMatrix(rows, shown);
   renderTable(shown);
@@ -615,16 +745,25 @@ function renderLive() {
     : `Idle · ${measured} measurements banked · last one ${ago(data.updated)} · read ${ago(fetchedAt)}`;
 }
 
+// Which candidates are under the knife this second. Set here and read by every
+// renderer below, so a row that is moving while you look at it says so rather
+// than silently changing under you on the next refresh.
+let liveIds = new Set();
+
 function renderRunning() {
   const running = data.running ?? [];
+  liveIds = new Set(running.map((run) => run.tweak).filter(Boolean));
   document.getElementById("running").hidden = running.length === 0;
   if (!running.length) return;
   document.getElementById("running-hint").textContent =
     "Each process writes a heartbeat beside the results; one untouched for two minutes is treated as gone.";
   document.getElementById("runs").innerHTML = running.map((run) => {
     const share = run.leagues ? Math.min(1, (run.league ?? 0) / run.leagues) : 0;
+    // A reach check and a measurement are different kinds of work and take
+    // wildly different amounts of time; saying which is running is the
+    // difference between "stuck" and "about to start".
     const where = run.mode === "reach"
-      ? "checking whether the knob reaches this board at all"
+      ? "checking whether the knob moves anything on this board at all — seconds, no games played"
       : `${run.mode} · league ${run.league ?? 0} of ${run.leagues ?? "?"} · ${run.runs ?? "?"} games a team`;
     const queued = data.tweaks.find((tweak) => tweak.id === run.tweak);
     return `<div class="run-row">
@@ -676,8 +815,9 @@ function renderHealth(summary) {
       value: read.n ? `${signed(read.mean)} ±${read.ci.toFixed(2)}` : "—",
       state: read.n ? (loud ? "bad" : "good") : "idle",
       stateText: read.n ? (loud ? "✗ reads something" : "✓ reads nothing") : "not measured",
-      note: "every bid moved a hundredth of a percent, which cannot make a roster better. "
-        + "Nothing inside this interval means anything."
+      note: "the same bid wobble re-drawn off a different seed — same floor, same width, same "
+        + "mean bid, so it is the shipped bidder in a different auction. Nothing inside this "
+        + "interval means anything."
     }));
   }
   if (control) {
@@ -745,6 +885,177 @@ function niceSpan(value) {
 // One panel a candidate, all on one scale. x is the SHARE of the room carrying
 // the tweak, not the count, so a three-seat table and an eight-seat one can be
 // read against each other; y is what those chairs won over the room's par.
+// ---- what is paying off -----------------------------------------------------
+// The page's twenty-odd candidates are mostly nulls, which is the normal and
+// correct outcome of a bench like this — but it means the interesting two or
+// three were previously findable only by sorting a long table and squinting.
+//
+// RANKED BY |z|, NOT BY SIZE. A big reading with a big interval is the single
+// way this bench gets fooled: the lone-adopter column is ~3x noisier than the
+// far end, so sorting on the number alone promotes exactly the measurements
+// that deserve it least. Dividing by the interval is the whole point.
+//
+// READ AT THE LAST HOLDOUT wherever it exists, because that is both the precise
+// end of the curve and the end that answers the shipping question. A candidate
+// that has only ever been measured at the lone-adopter end is shown with its
+// reading labelled as such, not quietly mixed in with the others.
+function renderStandings(summary) {
+  const live = summary.filter((entry) => !entry.fixture && !entry.retired
+    && !data.tweaks.find((tweak) => tweak.id === entry.id)?.settled);
+  const scored = live.map((entry) => {
+    const read = entry.crowd.n ? { stat: entry.crowd, where: "last holdout" }
+      : entry.lone.n ? { stat: entry.lone, where: "lone adopter only" }
+      : null;
+    if (!read) return null;
+    const se = read.stat.ci / 1.96;
+    return { ...entry, ...read, z: se ? Math.abs(read.stat.mean) / se : 0 };
+  }).filter(Boolean).sort((a, b) => b.z - a.z);
+
+  const card = document.getElementById("leaders-card");
+  card.hidden = scored.length === 0;
+  if (!scored.length) return;
+
+  const shown = scored.slice(0, 8);
+  const max = Math.max(...shown.map((entry) => Math.abs(entry.stat.mean) + entry.stat.ci), 0.5);
+  const at = (value) => 50 + 50 * Math.max(-1, Math.min(1, value / max));
+  document.getElementById("leaders").innerHTML = shown.map((entry) => {
+    const { mean, ci, n } = entry.stat;
+    const clear = Math.abs(mean) > ci;
+    const sign = mean >= 0 ? "pos" : "neg";
+    const mid = at(mean);
+    const lo = at(mean - ci);
+    const hi = at(mean + ci);
+    const why = !clear
+      ? `inside its own interval — nothing established yet`
+      : mean > 0
+        ? `holds up with all but one chair on it`
+        : `costs win points once the table has it`;
+    return `<div class="leader">
+      <div>
+        <div class="leader-name">${escape(entry.id)}${
+          liveIds.has(entry.id) ? ' <span class="badge badge-now">measuring</span>' : ""}${
+          clear && mean > 0 ? ' <span class="badge badge-win">promising</span>' : ""}</div>
+        <div class="leader-knob">${escape(entry.params ? knobLine(entry.params) : "")}</div>
+      </div>
+      <div class="leader-num num ${sign}">${signed(mean)} <span class="muted">±${ci.toFixed(2)}</span></div>
+      <div class="leader-bar" ${tipAttrs({
+        value: `${signed(mean)} ±${ci.toFixed(2)}`,
+        sign,
+        label: `${entry.id} · ${entry.where}`,
+        sub: `${n} leagues across ${entry.cells} boards · ${entry.z.toFixed(1)} intervals from zero`
+      })} tabindex="0">
+        <span class="zero-rule"></span>
+        <span class="ci" style="left:${lo.toFixed(2)}%; width:${Math.max(0.5, hi - lo).toFixed(2)}%"></span>
+        <span class="fill ${sign}" style="left:${Math.min(50, mid).toFixed(2)}%; width:${Math.abs(mid - 50).toFixed(2)}%"></span>
+      </div>
+      <div class="leader-why">${escape(why)}${
+        entry.where === "lone adopter only" ? " — lone adopter only, the noisiest reading there is" : ""}</div>
+    </div>`;
+  }).join("");
+
+  const clear = scored.filter((entry) => Math.abs(entry.stat.mean) > entry.stat.ci);
+  const settled = data.tweaks.filter((tweak) => tweak.settled).length;
+  document.getElementById("leaders-note").textContent =
+    `${clear.length} of ${scored.length} measured candidates read clear of zero; at this bar about `
+    + `${(scored.length * 0.05).toFixed(1)} would from noise alone, which is why a promotion here buys `
+    + `a deeper measurement rather than a change to the bidder.`
+    + (settled ? ` ${settled} further candidate${settled > 1 ? "s have" : " has"} been answered and `
+      + `retired to the queue table below.` : "");
+}
+
+// ---- the hover layer --------------------------------------------------------
+// One tooltip, driven by delegation, so it survives every innerHTML rebuild
+// without rebinding a listener. A mark opts in by carrying data-tip-value; the
+// hit target is the thing that carries it, and it is always bigger than the
+// painted mark. Focus does exactly what hover does.
+const tip = document.getElementById("tip");
+let tipFor = null;
+
+function tipLine(cls, text) {
+  const el = document.createElement("div");
+  el.className = cls;
+  el.textContent = text;              // candidate names come from the ideas inbox
+  return el;
+}
+
+function showTip(target) {
+  const { tipValue, tipLabel, tipSub, tipSign } = target.dataset;
+  tip.replaceChildren();
+  if (tipValue) tip.append(tipLine(`tip-value ${tipSign ?? ""}`, tipValue));
+  if (tipLabel) tip.append(tipLine("tip-label", tipLabel));
+  if (tipSub) tip.append(tipLine("tip-sub", tipSub));
+  tip.dataset.open = "1";
+  tip.setAttribute("aria-hidden", "false");
+  tipFor = target;
+  target.closest(".point")?.classList.add("on");
+  placeTip();
+}
+
+function placeTip() {
+  if (!tipFor) return;
+  const rect = tipFor.getBoundingClientRect();
+  const box = tip.getBoundingClientRect();
+  const gutter = 8;
+  let left = rect.left + rect.width / 2 - box.width / 2 + window.scrollX;
+  // Above the mark, unless that is off the top of the window — then below it,
+  // so a point near the top of a panel is still readable.
+  let top = rect.top - box.height - 10 + window.scrollY;
+  if (rect.top - box.height - 10 < 0) top = rect.bottom + 10 + window.scrollY;
+  const rightEdge = window.scrollX + document.documentElement.clientWidth - box.width - gutter;
+  left = Math.max(window.scrollX + gutter, Math.min(left, rightEdge));
+  tip.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
+}
+
+function hideTip() {
+  tipFor?.closest(".point")?.classList.remove("on");
+  tipFor = null;
+  tip.dataset.open = "0";
+  tip.setAttribute("aria-hidden", "true");
+  tip.style.transform = "translate3d(-9999px, -9999px, 0)";
+}
+
+// Leaving a mark for good, as opposed to moving to the next one. Only this
+// path flushes a render the hover was holding back — doing it inside showTip
+// would rebuild the page and delete the very mark about to be described.
+function leaveTip() {
+  hideTip();
+  if (pendingRender) render();
+}
+
+const TIP_TARGET = "[data-tip-value]";
+const tipTarget = (node) => (node instanceof Element ? node.closest(TIP_TARGET) : null);
+// BOTH event families. pointerover carries pen and touch; mouseover is what
+// every synthetic pointer emits (assistive tooling, extensions, test drivers),
+// and some of them never emit a pointer event at all. A real mouse fires both,
+// which is harmless: entering a mark twice is a no-op against `tipFor`.
+for (const type of ["pointerover", "mouseover"]) {
+  document.addEventListener(type, (event) => {
+    const target = tipTarget(event.target);
+    if (target && target !== tipFor) { hideTip(); showTip(target); }
+  });
+}
+for (const type of ["pointerout", "mouseout"]) {
+  document.addEventListener(type, (event) => {
+    if (tipFor && tipTarget(event.target) === tipFor && !tipFor.contains(event.relatedTarget)) leaveTip();
+  });
+}
+document.addEventListener("focusin", (event) => {
+  const target = tipTarget(event.target);
+  if (target) { hideTip(); showTip(target); }
+});
+document.addEventListener("focusout", () => leaveTip());
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") leaveTip(); });
+window.addEventListener("scroll", placeTip, { passive: true });
+window.addEventListener("resize", leaveTip);
+
+// What a mark hands the tooltip. The value leads and is the only coloured thing
+// in it; the board and the dose are the label; the sample is the quiet line.
+function tipAttrs({ value, sign, label, sub, aria }) {
+  return `data-tip-value="${escape(value)}" data-tip-sign="${sign}" `
+    + `data-tip-label="${escape(label)}" data-tip-sub="${escape(sub)}" `
+    + `aria-label="${escape(aria ?? `${label}: ${value}. ${sub}`)}"`;
+}
+
 function renderDose(rows, summary) {
   const dosed = rows.filter((row) => row.mode.startsWith("dose-"));
   document.getElementById("dose-card").hidden = dosed.length === 0;
@@ -814,18 +1125,32 @@ function renderDose(rows, summary) {
     const marks = line.points.map((point) => {
       const colour = point.mean >= 0 ? "var(--pos)" : "var(--neg)";
       const at = x(point.k / point.teams);
-      return `<g><title>${escape(`${line.id} · ${point.cell} · ${point.k} of ${point.teams} chairs: `
-        + `${signed(point.mean)} ±${point.ci.toFixed(2)} over ${point.n} leagues`)}</title>
+      const mid = y(point.mean);
+      // The hit circle is last so it sits on top of its own mark, and it is
+      // r=13 against a 4px dot: a reader aims at a point, not at four pixels.
+      return `<g class="point">
         <line class="whisker" x1="${at}" y1="${y(point.mean - point.ci)}" x2="${at}" y2="${y(point.mean + point.ci)}" stroke="${colour}" />
-        <circle cx="${at}" cy="${y(point.mean)}" r="4" fill="${colour}" stroke="var(--surface-1)" stroke-width="2" />
+        <circle class="mark" cx="${at}" cy="${mid}" r="4" fill="${colour}" stroke="var(--surface-1)" stroke-width="2" />
+        <circle class="hit" cx="${at}" cy="${mid}" r="13" tabindex="0" role="img" ${tipAttrs({
+          value: `${signed(point.mean)} ±${point.ci.toFixed(2)}`,
+          sign: point.mean >= 0 ? "pos" : "neg",
+          label: `${line.id} · ${point.cell}`,
+          sub: `${point.k} of ${point.teams} chairs on it · ${point.n} leagues`,
+          aria: `${line.id} on ${point.cell}, ${point.k} of ${point.teams} chairs: `
+            + `${signed(point.mean)} plus or minus ${point.ci.toFixed(2)} win points over ${point.n} leagues`
+        })} />
       </g>`;
     }).join("");
     const queued = data.tweaks.find((tweak) => tweak.id === line.id);
-    return `<div>
-      <p class="panel-name">${escape(line.id)}</p>
+    const isLive = liveIds.has(line.id);
+    return `<div class="panel${isLive ? " live-panel" : ""}">
+      <p class="panel-name">${escape(line.id)}${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
       <p class="panel-note">${escape(queued ? knobLine(queued.params) : "")}</p>
       <p class="panel-note">${escape(reading)}</p>
-      <svg class="plot" viewBox="0 0 ${width} ${height}" role="img"
+      <!-- role="group", NOT role="img". role="img" tells the browser the whole
+           subtree is one image, which is what suppressed every tooltip in here
+           and hid each point from a screen reader as well. -->
+      <svg class="plot" viewBox="0 0 ${width} ${height}" role="group"
         aria-label="${escape(`${line.id}: win-point change of the tweaked chairs against the share of the room carrying the tweak`)}">
         <line class="zero" x1="${pad.left}" y1="${y(0)}" x2="${width - pad.right}" y2="${y(0)}" />
         <line class="grid" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" />
@@ -881,7 +1206,12 @@ function renderMatrix(rows, summary) {
       // strongest cell stops where its number is still readable in both modes.
       const weight = Math.min(1, 0.14 + 0.86 * Math.abs(stat.mean) / span);
       return `<td class="cell" data-sign="${stat.mean >= 0 ? "pos" : "neg"}" style="--weight:${weight.toFixed(3)}"
-        title="${escape(`${entry.id} on ${cell.tag}: ${signed(stat.mean)} ±${stat.ci.toFixed(2)} over ${stat.n} leagues`)}">${signed(stat.mean)}</td>`;
+        tabindex="0" ${tipAttrs({
+          value: `${signed(stat.mean)} ±${stat.ci.toFixed(2)}`,
+          sign: stat.mean >= 0 ? "pos" : "neg",
+          label: `${entry.id} · ${cell.tag}`,
+          sub: `${cellNote(cell)} · ${stat.n} leagues`
+        })}>${signed(stat.mean)}</td>`;
     }).join("")}
   </tr>`).join("");
   table.innerHTML = `${head}<tbody>${body}</tbody>`;
@@ -907,8 +1237,9 @@ function renderTable(summary) {
       <th>candidate</th>${columns.map((column) => `<th>${column.head}</th>`).join("")}
       <th>boards</th><th>leagues</th><th>verdict</th>
     </tr></thead>
-    <tbody>${summary.map((entry) => `<tr>
-      <td>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}
+    <tbody>${summary.map((entry) => `<tr${liveIds.has(entry.id) ? ' class="live-row"' : ""}>
+      <td>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}${
+        liveIds.has(entry.id) ? ' <span class="badge badge-now">measuring</span>' : ""}
         <div class="params">${escape(entry.note)}</div>
         <div class="params">${escape(entry.params ? knobLine(entry.params) : "no knobs changed")}</div></td>
       ${columns.map((column) => `<td>${column.has(entry) ? column.cell(entry) : '<span class="muted">—</span>'}</td>`).join("")}
