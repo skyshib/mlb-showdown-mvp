@@ -8164,9 +8164,13 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 /* The dice sit under the board, not out at the edges of the column it is
    centred in, so the two read as one stack. */
 .duel-middle { grid-column: 2; grid-row: 3; align-self: start; justify-self: center; width: min(100%, 460px); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: clamp(10px, 1.6vw, 26px); min-width: 0; }
-.duel-call { display: grid; justify-items: center; gap: 7px; min-width: 0; }
+.duel-call { display: grid; justify-items: center; gap: 7px; min-width: 0; grid-column: 2; }
 .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { order: -1; }
 .duel[data-lead="batting"] .duel-roll[data-roll="control"] { order: 1; }
+/* A steal has one die and it is the catcher's throw, so it takes the column on
+   HIS side of the call: the runner's card never has a die against it. */
+.duel-roll[data-roll="throw"] { grid-column: 1; }
+.duel[data-lead="running"] .duel-roll[data-roll="throw"] { grid-column: 3; }
 .duel-roll { display: grid; justify-items: center; gap: 4px; }
 .roll-label { font-family: var(--display); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; font-size: 11px; color: var(--muted); text-align: center; }
 
@@ -8183,6 +8187,8 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .duel-roll[data-roll="swing"] { --die-run: clamp(-38px, -2.2vw, -16px); }
 .duel[data-lead="batting"] .duel-roll[data-roll="control"] { --die-run: clamp(-38px, -2.2vw, -16px); }
 .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { --die-run: clamp(16px, 2.2vw, 38px); }
+.duel-roll[data-roll="throw"] { --die-run: clamp(16px, 2.2vw, 38px); }
+.duel[data-lead="running"] .duel-roll[data-roll="throw"] { --die-run: clamp(-38px, -2.2vw, -16px); }
 /* The word stays with the man whose throw it is; the die and what it says about
    the die travel. */
 .die, .roll-note { transition: transform 0.5s cubic-bezier(0.22, 0.72, 0.3, 1); }
@@ -8217,7 +8223,9 @@ html.club .coach-flip.pending { color: #ff7a6b; }
 .duel.duel-negative .duel-result { color: var(--navy); }
 .duel[data-phase="spot"] .duel-roll,
 .duel[data-phase="pitch"] [data-roll="swing"],
-.duel[data-phase="advantage"] [data-roll="swing"] { opacity: 0.25; }
+.duel[data-phase="pitch"] [data-roll="throw"],
+.duel[data-phase="advantage"] [data-roll="swing"],
+.duel[data-phase="advantage"] [data-roll="throw"] { opacity: 0.25; }
 .duel[data-phase="advantage"] .duel-advantage,
 .duel[data-phase="swing"] .duel-advantage,
 .duel[data-phase="result"] .duel-advantage { opacity: 1; }
@@ -8275,15 +8283,18 @@ html.club .coach-flip.pending { color: #ff7a6b; }
   .duel-roll[data-roll="swing"] { grid-column: 2; grid-row: 1; }
   .duel[data-lead="batting"] .duel-roll[data-roll="control"] { grid-column: 2; }
   .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { grid-column: 1; }
-  /* A steal has one die — the throw, first in the middle because there is no
-     pitch before it — and it sits centred rather than in the swing corner. */
-  .duel-roll[data-roll="swing"]:first-child { grid-column: 1 / -1; justify-self: center; }
+  /* A steal has one die — the catcher's throw — and it sits centred above the
+     call rather than in either corner. */
+  .duel-roll[data-roll="throw"],
+  .duel[data-lead="running"] .duel-roll[data-roll="throw"] { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
   .duel-call { grid-column: 1 / -1; grid-row: 2; }
   /* Each die is already under its own man; there is nowhere to roll in from. */
   .duel-roll[data-roll="control"],
   .duel-roll[data-roll="swing"],
+  .duel-roll[data-roll="throw"],
   .duel[data-lead="batting"] .duel-roll[data-roll="control"],
-  .duel[data-lead="batting"] .duel-roll[data-roll="swing"] { --die-run: 0px; }
+  .duel[data-lead="batting"] .duel-roll[data-roll="swing"],
+  .duel[data-lead="running"] .duel-roll[data-roll="throw"] { --die-run: 0px; }
   .die { width: 46px; height: 46px; }
   .die-roll { font-size: 21px; }
   .scoreboard { grid-template-columns: 1fr auto 1fr; }

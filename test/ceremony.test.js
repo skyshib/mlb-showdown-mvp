@@ -20,6 +20,7 @@ import {
   teamStatBoard,
   winProbabilitySeries
 } from "../src/rules/ceremony.js";
+import { duelHtml } from "../src/ui/ceremony.js";
 
 function season(seed, { teamCount = 4, games = 1200 } = {}) {
   const managers = Array.from({ length: teamCount }, (_, i) => `Team ${i + 1}`);
@@ -297,4 +298,40 @@ test("the win probability line is read from the champion's side", () => {
   // It ends where the game ended.
   const last = home[home.length - 1].wp;
   assert.ok(last > 99 || last < 1, `the line finishes decided, got ${last}`);
+});
+
+// A steal's one die is the catcher's throw. It has to sit on the defence's
+// side of the call both ways round, because the two cards swap sides with the
+// innings and a die fixed to the left came off the runner half the time.
+test("a steal's throw die stands with the catcher, whichever side he is on", () => {
+  const stealMoment = (battingTeam, pitchingTeam) => ({
+    away: "Away",
+    home: "Home",
+    moment: {
+      phase: "swing",
+      index: 0,
+      event: {
+        battingTeam,
+        pitchingTeam,
+        runner: "The Runner",
+        catcher: "The Catcher",
+        result: "SB",
+        half: battingTeam === "Away" ? "top" : "bottom",
+        inning: 3,
+        playDetails: { kind: "steal", stealAttempt: { roll: 12, fielding: 2, thrown: true } }
+      }
+    }
+  });
+  const options = { cardFor: () => null };
+  for (const [batting, pitching] of [["Away", "Home"], ["Home", "Away"]]) {
+    const html = duelHtml({}, stealMoment(batting, pitching), options);
+    const dice = [...html.matchAll(/data-roll="(\w+)"/g)].map((match) => match[1]);
+    assert.deepEqual(dice, ["throw"], "a steal throws one die");
+    const lead = html.match(/data-lead="(\w+)"/)[1];
+    const middle = html.split('class="duel-middle"')[1];
+    const dieLeadsCall = middle.indexOf('data-roll="throw"') < middle.indexOf('class="duel-call"');
+    // `data-lead` names the left-hand card; the die takes the column beside the
+    // catcher, so it leads the call only when the catcher is on the left.
+    assert.equal(dieLeadsCall, lead === "catching");
+  }
 });

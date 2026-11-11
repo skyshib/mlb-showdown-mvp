@@ -537,20 +537,27 @@ export function duelHtml(state, game, options) {
       ${man.card ? cardPanelHtml(man.card) : ""}
       <p class="duel-name">${escapeHtml(stripCardYear(man.name ?? ""))}</p>
     </div>`;
-  const roll = (key, label) => `<div class="duel-roll" data-roll="${key === "die-control" ? "control" : "swing"}">
+  const roll = (key, label, kind) => `<div class="duel-roll" data-roll="${kind ?? (key === "die-control" ? "control" : "swing")}">
         <span class="roll-label">${label}</span>
         ${dieHtml(key)}
         <span class="roll-note" data-board="note-${key === "die-control" ? "control" : "swing"}"></span>
       </div>`;
+  // The throw is the catcher's, so it has to leave HIS card: the runner never
+  // rolls anything. The die is marked `throw` rather than `swing` and is
+  // emitted on whichever side of the call the catcher is standing, because a
+  // die that always sat on the left came off the runner every time the away
+  // club was batting.
+  const throwRoll = steal ? roll("die-swing", "Throw", "throw") : "";
+  const catcherLeads = left.role === "catching";
   return `<div class="duel" data-phase="${moment.phase}" data-lead="${left.role}">
     ${side(left)}
     <div class="duel-middle">
-      ${steal ? roll("die-swing", "Throw") : roll("die-control", "Pitch")}
+      ${steal ? (catcherLeads ? throwRoll : "") : roll("die-control", "Pitch")}
       <div class="duel-call">
         <p class="duel-advantage ${advantage ? `${advantage.key}-advantage` : ""}">${advantage ? escapeHtml(advantage.label) : ""}</p>
         <p class="duel-result" data-board="result"></p>
       </div>
-      ${steal ? "" : roll("die-swing", "Swing")}
+      ${steal ? (catcherLeads ? "" : throwRoll) : roll("die-swing", "Swing")}
     </div>
     ${side(right)}
   </div>`;
