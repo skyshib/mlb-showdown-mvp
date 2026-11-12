@@ -190,6 +190,25 @@ const QUEUED = [
     id: "stud-premium-broader",
     note: "the top-of-deck lift starts at the 60th percentile rather than the 80th, "
       + "at the same strength where it peaks",
+    // SHIPPED 2026-11-11 — the first knob this bench moved. It is kept in the
+    // queue, not deleted, because its params now RESTATE the shipped value and
+    // so it measures nothing; that is deliberate. The record of what it bought
+    // is the point, and `--versus tuned-2026-11-10` is how to re-read it.
+    //
+    // WHAT IT BOUGHT, and what it did not. Far dose, pooled over 11 auction
+    // cells: +0.42 +-0.12 over 912 leagues, positive in ALL ELEVEN, and +0.40
+    // +-0.35 on holdout seeds that had no hand in choosing it. Inert on the
+    // snake, which the fingerprint confirms — the three snake cells did not
+    // move a single pick when this shipped.
+    //
+    // BUT ITS CURVE DECAYS LIKE share-flat's: a8 +3.25 -> +0.26, a6 +3.27 ->
+    // +0.20. About 90% of the headline is DENIAL that evaporates once rivals
+    // have it too. The durable part is ~0.3-0.5 win points. Anybody quoting
+    // the +3.25 is quoting what it gains against copies of the OLD bidder,
+    // which is the right number only for a room holding exactly one computer
+    // (about 3 in 8 of the rooms that have one at all) and even then is
+    // measured against computers, never against humans.
+    settled: "SHIPPED — +0.42 +-0.12 pooled at the last holdout, +0.40 on holdout seeds",
     params: { poolPremiumThreshold: 0.6 }
   },
   {

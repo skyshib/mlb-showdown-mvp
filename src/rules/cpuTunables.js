@@ -66,7 +66,9 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
   depthDamp: 0.7, // how much softer a bench card is bid
   shareExponent: 1.1, // how hard the bankroll concentrates on the best men left
   poolPremiumStrength: 0.7, // the lift on a card at the very top of the deck
-  poolPremiumThreshold: 0.8, // the percentile the lift starts at
+  // 0.8 until 2026-11-11, when the lab measured the band between. See the
+  // tuned-2026-11-11 generation below for what it bought and what it did not.
+  poolPremiumThreshold: 0.6, // the percentile the lift starts at
   aggressionFloor: 0.86, // the seeded per-card wobble: floor and width
   aggressionSpan: 0.28,
   // The salt on that wobble's seed. It is the one knob here that is NOT a
@@ -165,6 +167,49 @@ const KNOBS = Object.keys(CPU_TUNABLE_DEFAULTS);
 // old behavior, and a fingerprint that no longer reproduces is how you find
 // that out.
 export const CPU_KNOB_GENERATIONS = Object.freeze({
+  "tuned-2026-11-11": Object.freeze({
+    at: "2026-11-11",
+    git: "20193df",
+    fingerprint: "a99689d3874c",
+    note: "the top-of-deck lift widened to the 60th percentile — the first knob the CPU lab moved",
+    knobs: Object.freeze({
+      perturbation: 0.25,
+      hitterWeights: null,
+      pitcherWeights: null,
+      starterDiscount: 0.65,
+      starterNarrowSpread: 0.04,
+      starterWideSpread: 0.05,
+      relieverSpacingShare: 0.3,
+      relieverTopRate: 2.5,
+      relieverDepthRate: 0.7,
+      penDepthTarget: 5,
+      relieverFloorByRoom: 0,
+      slotTiebreak: 0.05,
+      urgencyPatient: 0.5,
+      urgencyDesperate: 1,
+      urgencyWeight: 1,
+      depthSlots: 3,
+      depthDamp: 0.7,
+      shareExponent: 1.1,
+      poolPremiumStrength: 0.7,
+      poolPremiumThreshold: 0.6,
+      aggressionFloor: 0.86,
+      wobbleSalt: "",
+      aggressionSpan: 0.28,
+      paceFloor: 0.75,
+      paceCeiling: 1.8,
+      roundsFloor: 0.7,
+      roundsCeiling: 2.2,
+      roundsBudgetDivisor: 25,
+      snakeNeedBonus: 80,
+      snakeNeedSpan: 120,
+      snakeBalanceBonus: 35,
+      snakeArmLean: 140,
+      snakeForcedNeed: 1000,
+      snakeScarcityRate: 0.8,
+      snakeScarcityCap: 120
+    })
+  }),
   "tuned-2026-11-10": Object.freeze({
     at: "2026-11-10",
     git: "acc9aae",
