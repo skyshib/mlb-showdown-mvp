@@ -1196,7 +1196,23 @@ function screenReport(rows) {
     if (answered) return `settled — ${answered}`;
     if (s.z >= 2 && s.all.mean > 0) return "PROMOTE — helps with all but one chair on it, pooled";
     if (s.z >= 2) return "REJECT — costs win points pooled across the grid";
-    if (s.top.z >= 3) return `PROMOTE — ${s.top.tag} alone, ${signed(s.top.mean)}; check the width story`;
+    // THE PER-CELL ARM ONLY EVER FIRES ON A CELL THAT HELPS. It is here for a
+    // knob that is good on narrow boards and bad on wide ones, which pools to
+    // nothing and is worth the expensive stage anyway — and that case always
+    // has a POSITIVE cell in it. Tested on |z| alone it also fired on a
+    // candidate that is mildly unhelpful everywhere and merely noisiest in one
+    // place, which sent uniformly negative knobs to a five-hour confirm with
+    // "PROMOTE ... -1.64" printed beside them. A cell that is clearly negative
+    // is evidence AGAINST a candidate; it is never a reason to buy more of it.
+    const best = s.cells.filter((cell) => cell.mean > 0).sort((a, b) => b.z - a.z)[0];
+    if (best && best.z >= 3) {
+      const against = s.cells.find((cell) => cell.mean < 0 && cell.z >= 3);
+      return against
+        ? `PROMOTE — ${best.tag} ${signed(best.mean)} against ${against.tag} ${signed(against.mean)}; the boards disagree`
+        : `PROMOTE — ${best.tag} alone, ${signed(best.mean)}; check the width story`;
+    }
+    const worst = s.cells.find((cell) => cell.mean < 0 && cell.z >= 3);
+    if (worst) return `park — nothing anywhere, and ${worst.tag} reads ${signed(worst.mean)} against it`;
     return "park — nothing at the far dose anywhere";
   };
 
