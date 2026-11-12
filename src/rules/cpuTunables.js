@@ -169,7 +169,7 @@ const KNOBS = Object.keys(CPU_TUNABLE_DEFAULTS);
 export const CPU_KNOB_GENERATIONS = Object.freeze({
   "tuned-2026-11-11": Object.freeze({
     at: "2026-11-11",
-    git: "20193df",
+    git: "ef55c02",
     fingerprint: "a99689d3874c",
     note: "the top-of-deck lift widened to the 60th percentile — the first knob the CPU lab moved",
     knobs: Object.freeze({
