@@ -67,7 +67,7 @@ import { execSync } from "node:child_process";
 import { autopick, buildTeam, completeAuctionReview, createDraft, repairDraftRosters } from "../src/rules/draft.js";
 import { buildDraftPool } from "../src/data/universes.js";
 import { simulateBatch } from "../src/rules/batch.js";
-import { CPU_KNOB_GENERATIONS, cpuTunables, knobGeneration } from "../src/rules/cpuTunables.js";
+import { CPU_KNOB_GENERATIONS, baselineKey, cpuTunables, knobGeneration } from "../src/rules/cpuTunables.js";
 import { IDEA_REJECTS, TWEAKS, tweakById } from "./cpu-lab-tweaks.mjs";
 import { appendIdea, ideasFile, knobKey } from "./cpu-lab-ideas.mjs";
 // The grid lives in its own module: the room server reads it too, and importing
@@ -111,6 +111,11 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
               a seat averages when nothing sets it apart — which is why some
               chairs stay untweaked: with every chair on the tweak there is
               nothing left for them to win it from.
+  --baseline  READ ONLY: pool the rows taken when the shipped bidder was a
+              different generation (a knob that ships changes what the control
+              chairs believe, so those are a different experiment and are
+              quarantined by default). Rows banked before 2026-11-11 carry no
+              baseline and count as tuned-2026-11-10.
   --versus    who sits in the CONTROL chairs: a generation out of
               cpuTunables.js, or "defaults" (the live values).
   --holdout   move every seed into a separate namespace. Confirm a winner here
@@ -198,6 +203,21 @@ const VERSUS = args.versus ?? (command === "bench" ? "naive" : "defaults");
 // winner here asks whether it was the seeds.
 const HOLDOUT = args.holdout == null ? "" : "-holdout";
 const CONTROL = VERSUS === "defaults" ? {} : knobGeneration(VERSUS).knobs;
+
+// WHO THE CONTROL CHAIRS ARE. `--versus defaults` seats them on the LIVE
+// defaults, so it names a different bidder every time a knob ships and two
+// readings taken either side of that are two different experiments. Recorded on
+// every row and required to match before anything pools.
+//
+// Rows banked before 2026-11-11 carry no such field, and they were all taken
+// against the knob set frozen as `tuned-2026-11-10` — that is what the defaults
+// were — so that is what a missing one means.
+// `--baseline <generation>` reads the record as it stood against an OLDER
+// shipped bidder. It only ever reads: a run always measures against the live
+// defaults, because that is the bidder the control chairs actually are.
+const BASELINE = args.baseline ?? baselineKey();
+const LEGACY_BASELINE = "tuned-2026-11-10";
+const baselineOf = (row) => row.baseline ?? LEGACY_BASELINE;
 
 const GIT = (() => {
   try { return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim(); } catch { return "unknown"; }
@@ -493,6 +513,7 @@ const rowMatches = (row, tweak, cell, mode) => row.tweak === tweak.id
   && row.params === paramKey(tweak.params) && row.cell === cell.tag && row.mode === mode
   && row.persona === PERSONA && row.perturb === (PERTURB == null ? "shipped" : PERTURB)
   && (row.versus ?? "defaults") === VERSUS && (row.holdout ?? "") === HOLDOUT
+  && baselineOf(row) === BASELINE
   && row.runs === RUNS;
 
 function measure(tweak, cell, mode, rows) {
@@ -519,6 +540,7 @@ function measure(tweak, cell, mode, rows) {
   const row = {
     at: new Date().toISOString(),
     git: GIT,
+    baseline: BASELINE,
     tweak: tweak.id,
     note: tweak.note,
     params: paramKey(tweak.params),
@@ -559,7 +581,8 @@ function pooled(rows) {
 const sameRoom = (row) => row.persona === PERSONA
   && row.perturb === (PERTURB == null ? "shipped" : PERTURB)
   && (row.versus ?? "defaults") === VERSUS
-  && (row.holdout ?? "") === HOLDOUT;
+  && (row.holdout ?? "") === HOLDOUT
+  && baselineOf(row) === BASELINE;
 
 // The record outlives the queue: a candidate measured months ago and since
 // deleted from cpu-lab-tweaks.mjs still has rows, and they still count. So the
@@ -582,6 +605,16 @@ function reportFor(tweakIds, cellTags, rows) {
       `persona=${row.persona} perturb=${row.perturb} versus=${row.versus ?? "defaults"}${row.holdout ?? ""}`))];
     console.log(`\n  (${elsewhere.length} measurements sit under other room controls — ${sets.join("; ")}`
       + ` — and are not pooled here. Pass --persona/--perturb to read them.)`);
+  }
+  const stale = rows.filter((row) => baselineOf(row) !== BASELINE
+    && row.persona === PERSONA && (row.versus ?? "defaults") === VERSUS
+    && (row.holdout ?? "") === HOLDOUT);
+  if (stale.length) {
+    const sets = [...new Set(stale.map(baselineOf))].sort();
+    console.log(`\n  (${stale.length} measurements were taken against a DIFFERENT SHIPPED BIDDER`
+      + ` — ${sets.join(", ")}, where this is ${BASELINE} — and are not pooled here. A knob that`
+      + `\n   ships changes what the control chairs believe, so those readings answer a question`
+      + ` about a bidder that no longer exists.)`);
   }
   for (const id of tweakIds) {
     const tweak = tweakOf(id, rows);
@@ -1033,6 +1066,7 @@ function screenReport(rows) {
   const tags = new Set(screenCells.map((cell) => cell.tag));
   const far = rows.filter((row) => (row.versus ?? "defaults") === VERSUS
     && (row.holdout ?? "") === HOLDOUT && row.persona === PERSONA
+    && baselineOf(row) === BASELINE
     && tags.has(row.cell) && row.mode === `dose-${cellByTag(row.cell).teams - 1}`);
   if (!far.length) {
     console.log(`cpu-lab screen — nothing screened yet (${OUT}).\n  node scripts/cpu-lab.mjs run --stage screen`);

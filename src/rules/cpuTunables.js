@@ -292,6 +292,35 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
   })
 });
 
+// WHICH BIDDER THE CONTROL CHAIRS ARE. Every lab measurement seats the control
+// half on the live defaults, so "versus defaults" names a DIFFERENT bidder after
+// any knob ships — and pooling a reading taken against the old one with a
+// reading taken against the new one silently averages two experiments. This is
+// not hypothetical: poolPremiumThreshold shipped on 2026-11-11 and every row
+// banked before it compared candidates against a 0.8 bidder.
+//
+// A digest of the defaults is the right key for that, where the git hash is
+// not: the hash moves on every commit, including the hundreds that do not touch
+// a knob, and would shatter the record into useless slivers. This moves exactly
+// when the bidder's shipped opinions move.
+export function baselineKey() {
+  const body = Object.keys(CPU_TUNABLE_DEFAULTS).sort()
+    .map((knob) => `${knob}=${JSON.stringify(CPU_TUNABLE_DEFAULTS[knob])}`).join("|");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < body.length; i += 1) {
+    hash ^= body.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  const digest = hash.toString(16).padStart(8, "0");
+  // Name it after the generation that matches, when one does — a row saying
+  // `tuned-2026-11-11` is readable in a way `3f2a9c01` is not. The test in
+  // test/cpu-tunables.test.js guarantees some generation always matches.
+  const named = Object.entries(CPU_KNOB_GENERATIONS).find(([, generation]) =>
+    Object.keys(CPU_TUNABLE_DEFAULTS).every((knob) =>
+      JSON.stringify(generation.knobs[knob]) === JSON.stringify(CPU_TUNABLE_DEFAULTS[knob])));
+  return named ? named[0] : digest;
+}
+
 export function knobGeneration(name) {
   const found = CPU_KNOB_GENERATIONS[name];
   if (!found) {

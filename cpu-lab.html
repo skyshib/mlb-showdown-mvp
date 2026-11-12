@@ -502,15 +502,22 @@ function pool(rows) {
 }
 
 const signed = (x, places = 2) => `${x >= 0 ? "+" : ""}${x.toFixed(places)}`;
+// WHAT COUNTS AS THE SAME EXPERIMENT. The baseline is in here because the
+// control chairs sit on the LIVE defaults: ship a knob and "vs defaults" names
+// a different bidder, so a reading from either side of that answers a different
+// question. Rows banked before 2026-11-11 carry no baseline and were all taken
+// against the knob set frozen as tuned-2026-11-10.
 const controlKey = (row) => [
   row.persona ?? "balanced",
   row.perturb ?? "shipped",
   row.versus ?? "defaults",
-  row.holdout ?? ""
+  row.holdout ?? "",
+  row.baseline ?? "tuned-2026-11-10"
 ].join("|");
 const controlLabel = (key) => {
-  const [persona, perturb, versus, holdout] = key.split("|");
-  return `${persona} · perturb ${perturb} · vs ${versus}${holdout ? " · holdout" : ""}`;
+  const [persona, perturb, versus, holdout, baseline] = key.split("|");
+  return `${persona} · perturb ${perturb} · vs ${versus}${holdout ? " · holdout" : ""}`
+    + `${baseline ? ` · bidder ${baseline}` : ""}`;
 };
 const show = (value) => (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value));
 
