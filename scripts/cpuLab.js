@@ -13,7 +13,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { CPU_KNOB_GENERATIONS, CPU_TUNABLE_DEFAULTS, CPU_TUNABLE_NOTES, cpuTunables } from "../src/rules/cpuTunables.js";
+import { CPU_KNOB_GENERATIONS, CPU_TUNABLE_DEFAULTS, CPU_TUNABLE_NOTES, cpuTunables, baselineKey } from "../src/rules/cpuTunables.js";
 import { CELLS } from "./cpu-lab-cells.mjs";
 import { IDEA_REJECTS, TWEAKS } from "./cpu-lab-tweaks.mjs";
 
@@ -109,6 +109,11 @@ export function readCpuLab(root) {
       isLive: cpuTunables(generation.knobs).key === ""
     })),
     defaults: CPU_TUNABLE_DEFAULTS,
+    // WHO THE CONTROL CHAIRS ARE RIGHT NOW. The page needs this to tell a
+    // current reading from one taken against a bidder that has since been
+    // changed — ship a knob and every earlier row answers a question about an
+    // opponent that no longer exists.
+    baseline: baselineKey(),
     notes: CPU_TUNABLE_NOTES
   };
 }

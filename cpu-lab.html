@@ -205,6 +205,14 @@
   .params { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; }
   .from-room { color: var(--text-muted); font-size: 12px; font-variant-numeric: normal; border-left: 2px solid var(--gridline); padding-left: 8px; margin-top: 4px; }
   .refused { color: var(--neg); }
+  /* Reading a bidder that has since been changed. Not an error — the old
+     record is worth keeping and worth reading — but it must never be mistaken
+     for the current one. */
+  .stale {
+    margin: 0 0 20px; padding: 10px 14px; border-radius: 8px; font-size: 13px;
+    color: var(--text-primary); background: rgb(var(--neg-rgb) / 0.08);
+    border: 1px solid rgb(var(--neg-rgb) / 0.4); max-width: 100ch;
+  }
   /* A question the bench has closed. Dimmed rather than removed: the answer is
      the most useful thing on the row, and a candidate that quietly vanished
      once somebody decided about it is how a queue loses its own history. */
@@ -337,6 +345,8 @@
     <div class="runs" id="runs"></div>
   </section>
 
+  <p class="stale" id="stale-baseline" hidden></p>
+
   <section class="card" id="health-card">
     <div class="chart-head">
       <h2>Is the bench sound?</h2>
@@ -406,6 +416,7 @@
       </p>
     </div>
     <div class="panels" id="dose"></div>
+    <p class="note" id="dose-omitted"></p>
     <p class="note">
       Tables of different sizes share an axis here, so it reads as the share of the room that has
       the tweak rather than a raw count: 1 of 3 and 2 of 6 sit in the same place. Hover a point for
@@ -719,9 +730,19 @@ function renderControls() {
   const keys = [...new Set(data.rows.map(controlKey))].sort();
   if (!keys.length) keys.push("balanced|shipped|defaults|");
   if (!state.control || !keys.includes(state.control)) {
-    // Default to the plain room: the archetypes off, the shipped wobble, the
-    // live defaults in the control chairs.
-    state.control = keys.includes("balanced|shipped|defaults|") ? "balanced|shipped|defaults|" : keys[0];
+    // Default to the plain room measured against the bidder that is SHIPPED
+    // RIGHT NOW: archetypes off, shipped wobble, live defaults in the control
+    // chairs, current baseline.
+    //
+    // The baseline clause is the one that matters and it is new. This used to
+    // default to a hardcoded "balanced|shipped|defaults|", and when the
+    // baseline joined the key that string stopped existing — so the page fell
+    // through to keys[0], which sorts to the OLDEST bidder. It opened on a
+    // thousand measurements taken against knobs that had since been changed and
+    // said nothing about it.
+    const live = `balanced|shipped|defaults||${data.baseline ?? ""}`;
+    state.control = keys.includes(live) ? live
+      : (keys.filter((key) => key.endsWith(`|${data.baseline ?? ""}`))[0] ?? keys[keys.length - 1]);
   }
   if (control.dataset.keys !== keys.join(",")) {
     control.dataset.keys = keys.join(",");
@@ -729,6 +750,21 @@ function renderControls() {
       `<option value="${key}">${controlLabel(key)}</option>`).join("");
   }
   control.value = state.control;
+
+  // LOUD when the view is not the shipped bidder. Everything below — the
+  // standings, the curves, the "shipped value" each knob is moving FROM — is
+  // then describing an opponent that no longer exists, and the numbers look
+  // exactly as authoritative as the current ones.
+  const viewing = state.control.split("|")[4] ?? "";
+  const stale = Boolean(data.baseline) && viewing !== data.baseline;
+  const banner = document.getElementById("stale-baseline");
+  banner.hidden = !stale;
+  if (stale) {
+    banner.textContent = `You are reading measurements taken against ${viewing}. `
+      + `The shipped bidder is now ${data.baseline} — a knob has changed since these were run, `
+      + `so the control chairs in them are not the computers playing today. `
+      + `Switch the room control to ${data.baseline} for the current record.`;
+  }
 
   const cells = document.getElementById("cell-filter");
   const tags = data.cells.map((cell) => cell.tag);
@@ -1068,7 +1104,7 @@ function renderDose(rows, summary) {
   document.getElementById("dose-card").hidden = dosed.length === 0;
   if (!dosed.length) return;
 
-  const series = [];
+  let series = [];
   for (const entry of summary) {
     const mine = dosed.filter((row) => row.tweak === entry.id);
     if (!mine.length) continue;
@@ -1083,6 +1119,23 @@ function renderDose(rows, summary) {
     points.sort((a, b) => a.k / a.teams - b.k / b.teams);
     if (points.length) series.push({ id: entry.id, points });
   }
+  // A CURVE NEEDS TWO POINTS. The screen stage measures one dose per cell by
+  // design, so while it is running most candidates have a single point on each
+  // board — and twenty panels each holding one dot, captioned "one dose
+  // measured so far", is twenty panels of nothing. Those candidates are already
+  // in the standings and in the matrix, both of which are built for exactly one
+  // reading. Only draw a panel where there is a shape to see, and say how many
+  // were left out so nobody thinks they vanished.
+  const curves = series.filter((line) =>
+    [...new Set(line.points.map((point) => point.cell))]
+      .some((cell) => line.points.filter((point) => point.cell === cell).length > 1));
+  const flat = series.length - curves.length;
+  series = curves;
+  document.getElementById("dose-omitted").textContent = flat
+    ? `${flat} further candidate${flat > 1 ? "s have" : " has"} only one dose measured so far — `
+      + `no curve to draw yet. They are in the standings above and the matrix below. `
+      + `The screen stage measures one dose a board on purpose; the confirm stage fills the rest in.`
+    : "";
   if (!series.length) {
     document.getElementById("dose-card").hidden = true;
     return;
