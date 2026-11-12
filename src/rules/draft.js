@@ -3316,11 +3316,34 @@ export function managerValuation(draft, manager) {
   let model = valuationModels.get(cacheKey);
   if (!model) {
     model = createValuationModel(seedKey, persona, startingPitchers, tune);
+    if (valuationModels.size >= VALUATION_CACHE_MAX) {
+      // Oldest first. A Map iterates in insertion order, so this is FIFO rather
+      // than true LRU — and that is deliberate: the working set is tiny next to
+      // the cap, so the two are the same in practice, and FIFO costs nothing on
+      // the hot path where LRU would re-insert on every hit.
+      valuationModels.delete(valuationModels.keys().next().value);
+    }
     valuationModels.set(cacheKey, model);
   }
   return model;
 }
 
+// THE CACHE IS BOUNDED, because its key contains the DRAFT SEED and a bench run
+// uses a fresh seed for every league of every batch. Unbounded, it grew by one
+// full valuation model — a value for every card in the deck — per manager per
+// league, forever. In an eight-hour lab run that is thousands of them, and the
+// cost is not the memory but the GC pressure: measurements that took 50s at the
+// start of a run were taking 398s by the end of it, which read as the machine
+// being slow and was really this.
+//
+// Nothing here is load-bearing for correctness. The cache is pure — the same
+// key always rebuilds the same model — so an eviction costs one recomputation
+// and never changes an answer. The fingerprint test is what proves that.
+//
+// The live working set is one draft's managers times the knob sets in the room:
+// at most a few dozen, against a cap of 256. A browser drafting one room never
+// reaches it; only the bench does, and only because it is a new room each time.
+const VALUATION_CACHE_MAX = 256;
 const valuationModels = new Map();
 
 // The configured staff slots. A capped roster holds exactly these arms, so the
