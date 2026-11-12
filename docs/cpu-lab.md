@@ -56,6 +56,27 @@ many promotions to expect from noise alone, because **nothing ships off the
 screen**: a candidate ships by clearing confirm and then reading the same way
 on `--holdout` seeds that had no hand in choosing it.
 
+**Bracketing a winner.** A knob that measures as real has been shown to *matter*,
+not to be *right* — the bench compared one value against one other value, and the
+honest reading of "0.8 → 0.6 is worth +0.42" is "0.6 beats 0.8", never "0.6 is the
+answer". `bracket` queues the neighbours:
+
+```sh
+node scripts/cpu-lab.mjs bracket --knob poolPremiumThreshold --values 0.5,0.7,0.8
+```
+
+They go in through the ideas inbox like any other proposal, so they inherit its
+validation, its duplicate check and its provenance, and become candidates
+everywhere at once with no file to edit.
+
+**The reversal is queued too, and it is the most interesting one.** Where an older
+generation holds a different value for the knob, that value joins the bracket —
+because the bench has already measured the move *away* from it and knows what that
+was worth. Measuring the move *back*, against the new baseline, must reproduce
+that number with the sign flipped. If it doesn't, the effect was never a property
+of the knob; it was a property of the comparison, and every number the bench has
+produced is worth less than it looks. Nothing else here checks that.
+
 **Settled candidates.** A tweak carrying `settled:` in the queue is one the
 bench has answered. A sweep leaves it alone; naming it with `--tweak` re-opens
 it. A bench whose queue only grows spends its nights re-measuring what it knows.

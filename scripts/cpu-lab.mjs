@@ -67,7 +67,7 @@ import { execSync } from "node:child_process";
 import { autopick, buildTeam, completeAuctionReview, createDraft, repairDraftRosters } from "../src/rules/draft.js";
 import { buildDraftPool } from "../src/data/universes.js";
 import { simulateBatch } from "../src/rules/batch.js";
-import { CPU_KNOB_GENERATIONS, baselineKey, cpuTunables, knobGeneration } from "../src/rules/cpuTunables.js";
+import { CPU_KNOB_GENERATIONS, CPU_TUNABLE_DEFAULTS, baselineKey, cpuTunables, knobGeneration } from "../src/rules/cpuTunables.js";
 import { IDEA_REJECTS, TWEAKS, tweakById } from "./cpu-lab-tweaks.mjs";
 import { appendIdea, ideasFile, knobKey } from "./cpu-lab-ideas.mjs";
 // The grid lives in its own module: the room server reads it too, and importing
@@ -92,12 +92,22 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
   node scripts/cpu-lab.mjs report [--tweak id,id|all] [--cells tag,tag|all] [--versus G] [--out FILE]
   node scripts/cpu-lab.mjs idea   --id NAME --knobs '{"knob":value}' --note "what it claims"
                                   [--room ROOM] [--why "the observation"] [--by WHO]
+  node scripts/cpu-lab.mjs bracket --knob KNOB [--values a,b,c] [--why "..."] [--by WHO]
 
   idea        propose a candidate from outside this bench — an agent that read
               one room, a study of one board, anything with evidence behind it.
               Validated and appended to scripts/cpu-lab-ideas.jsonl, after which
               it is a candidate like any other and the next run measures it.
               Values here may contain spaces; they end at the next --flag.
+
+  bracket     a knob that measured as real has been shown to MATTER, not to be
+              right: the bench compared one value against one other value, and
+              the shape either side of it is unmeasured. This queues the
+              neighbours as candidates through the ideas inbox. It also queues
+              THE REVERSAL — the value an older generation holds — whose reading
+              against the new baseline must reproduce the shipped move with the
+              sign flipped. Nothing else here checks that the effect is a
+              property of the knob rather than of the comparison.
 
   bench       the live bidder against a frozen generation of knobs across the
               whole grid (default "naive", the tuning backed out — the absolute
@@ -907,7 +917,7 @@ if (command === "list") {
     process.exitCode = 1;
   }
   console.log(`\n  reach (what each tweak moves, two seeds a cell)`);
-  console.log(`    ${"tweak".padEnd(24)}${"cell".padEnd(13)}${"rosters".padStart(10)}${"prices".padStart(10)}${"mean $".padStart(9)}`);
+  console.log(`    ${"tweak".padEnd(30)}${"cell".padEnd(13)}${"rosters".padStart(10)}${"prices".padStart(10)}${"mean $".padStart(9)}`);
   for (const id of tweakIds) {
     const tweak = tweakById(id);
     // `null` changes nothing against the live defaults, so there is nothing to
@@ -917,7 +927,7 @@ if (command === "list") {
     if (id === "null" && VERSUS === "defaults") continue;
     for (const tag of cellTags) {
       const touch = reach(cellByTag(tag), tweak.params);
-      console.log(`    ${id.padEnd(24)}${tag.padEnd(13)}`
+      console.log(`    ${id.padEnd(30)}${tag.padEnd(13)}`
         + `${`${touch.seatsMoved}/${touch.seats}`.padStart(10)}`
         + `${`${touch.lotsMoved}/${touch.lots}`.padStart(10)}`
         + `${touch.dollars.toFixed(1).padStart(9)}`
@@ -995,7 +1005,7 @@ if (command === "list") {
         heartbeat({ tweak: tweak.id, cell: cell.tag, mode: "reach", league: 0, leagues: 0 });
         const touch = reach(cell, tweak.params);
         if (!touch.moves) {
-          console.log(`  ${id.padEnd(24)} ${tag.padEnd(12)} INERT — no roster and no price moved, skipped`);
+          console.log(`  ${id.padEnd(30)} ${tag.padEnd(12)} INERT — no roster and no price moved, skipped`);
           continue;
         }
       }
@@ -1011,7 +1021,7 @@ if (command === "list") {
           const stat = pooled([row]);
           have += 1;
           ran += 1;
-          console.log(`  ${id.padEnd(24)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
+          console.log(`  ${id.padEnd(30)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
             + `${signed(stat.mean).padStart(7)} ±${stat.ci.toFixed(2).padStart(5)}  ${row.seconds}s`);
         }
       }
@@ -1032,11 +1042,106 @@ if (command === "list") {
       : tweakIds;
     reportFor(asked.filter((id) => recorded.includes(id)), cellTags, rows);
   }
+} else if (command === "bracket") {
+  bracket();
 } else if (command === "screen") {
   screenReport(readRows());
 } else {
   console.log(USAGE);
   process.exit(command === "help" || args.help ? 0 : 1);
+}
+
+// BRACKET A KNOB THAT MOVED. A knob that measures as real has been shown to
+// matter, not to be RIGHT — the bench tested one value against one other value,
+// and the honest reading of "0.8 -> 0.6 is worth +0.42" is "0.6 beats 0.8",
+// never "0.6 is the answer". The shape either side of it is unmeasured, and the
+// first value anybody happened to try is a bad place to stop.
+//
+// So: name a knob, get its neighbours queued as candidates. They go in through
+// the ideas inbox like any other proposal, which gets them validation, the
+// duplicate check and provenance for free, and makes them candidates everywhere
+// at once with no file to edit.
+//
+//   node scripts/cpu-lab.mjs bracket --knob poolPremiumThreshold
+//   node scripts/cpu-lab.mjs bracket --knob poolPremiumThreshold --values 0.5,0.7
+//
+// THE REVERSAL IS QUEUED TOO, and it is the most interesting one. Where an
+// older generation holds a different value for this knob, that value goes in
+// the bracket — because the bench has already measured the move away from it
+// and knows what it is worth. Measuring the move BACK, against the new
+// baseline, must reproduce that number with the sign flipped. If it does not,
+// the effect was never a property of the knob; it was a property of the
+// comparison, and every number this bench has produced is worth less than it
+// looks. Nothing else here checks that.
+function bracket() {
+  const knob = rawFlag("knob");
+  if (!knob || !(knob in CPU_TUNABLE_DEFAULTS)) {
+    console.log(`  bracket: --knob must name a knob out of src/rules/cpuTunables.js, got ${JSON.stringify(knob)}`);
+    console.log(`  "cpu-lab.mjs list" prints every one with the value that ships today.`);
+    process.exit(1);
+  }
+  const shipped = CPU_TUNABLE_DEFAULTS[knob];
+  if (typeof shipped !== "number") {
+    console.log(`  bracket: ${knob} ships as ${JSON.stringify(shipped)}, which has no neighbours to try.`);
+    process.exit(1);
+  }
+
+  // Where an older generation disagrees, that value is the reversal.
+  const reversals = [...new Set(Object.entries(CPU_KNOB_GENERATIONS)
+    .map(([name, generation]) => [name, generation.knobs[knob]])
+    .filter(([, value]) => typeof value === "number" && value !== shipped)
+    .map(([, value]) => value))];
+
+  const asked = rawFlag("values");
+  // Default neighbours: a step either side, sized to the knob rather than to a
+  // fixed number, because these range from 0.05 to 1000.
+  const step = Math.abs(shipped) * 0.17;
+  const round = (value) => Number(value.toPrecision(3));
+  const values = [...new Set((asked
+    ? asked.split(",").map((text) => Number(text.trim()))
+    : [round(shipped - step), round(shipped + step), ...reversals])
+    .filter((value) => Number.isFinite(value) && value !== shipped))];
+
+  if (!values.length) {
+    console.log(`  bracket: nothing to queue — every value given is already what ${knob} ships (${shipped}).`);
+    process.exit(1);
+  }
+
+  const spokenFor = new Map();
+  for (const tweak of TWEAKS) {
+    spokenFor.set(`id:${tweak.id}`, tweak.fixture ? "a fixture" : (tweak.idea ? "in the inbox" : "a queued candidate"));
+    if (Object.keys(tweak.params).length) spokenFor.set(`knobs:${knobKey(tweak.params)}`, tweak.id);
+  }
+
+  const slug = knob.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+  const tag = (value) => String(value).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
+  const why = rawFlag("why") ?? `${knob} measured as real at ${shipped}, which says it matters, not that it is `
+    + `right — the bench compared it against one other value and the shape either side is unmeasured.`;
+
+  console.log(`cpu-lab bracket — ${knob}, which ships at ${shipped}\n`);
+  for (const value of values) {
+    const reversal = reversals.includes(value);
+    const outcome = appendIdea({
+      id: `${slug}-${tag(value)}`,
+      knobs: { [knob]: value },
+      note: reversal
+        ? `the reversal: back to ${value}, the value ${knob} shipped before. Must read the move that `
+          + `replaced it with the SIGN FLIPPED, or the bench is measuring the comparison and not the knob`
+        : `bracket: ${knob} at ${value} instead of the shipped ${shipped}`,
+      why,
+      by: rawFlag("by") ?? "cpu-lab bracket"
+    }, spokenFor);
+    if (outcome.ok) {
+      spokenFor.set(`id:${outcome.record.id}`, "in the inbox");
+      spokenFor.set(`knobs:${knobKey(outcome.record.knobs)}`, outcome.record.id);
+      console.log(`  queued  ${outcome.record.id.padEnd(30)} ${knob} -> ${value}`
+        + `${reversal ? "   (the reversal — expect the ship's number, negated)" : ""}`);
+    } else {
+      console.log(`  skipped ${`${slug}-${tag(value)}`.padEnd(30)} ${outcome.reason}`);
+    }
+  }
+  console.log(`\n  they are candidates from the next command onward: the screen picks them up with`);
+  console.log(`  "cpu-lab.mjs run --stage screen".`);
 }
 
 // THE CUT. What the screen stage bought, ranked, with the rule applied rather
