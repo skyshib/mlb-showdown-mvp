@@ -128,6 +128,10 @@ export function readCpuLab(root) {
     })),
     defaults: CPU_TUNABLE_DEFAULTS,
     // Both commits, so the page can tell the reader its numbers are a ghost.
+    // How the readings were arrived at. A row with no `method` predates the
+    // field and used the old room-average statistic, which is a different
+    // number and must not pool with the current one.
+    method: "seat-paired",
     serverGit: STARTED_AT_GIT,
     diskGit: gitOnDisk(),
     // WHO THE CONTROL CHAIRS ARE RIGHT NOW. The page needs this to tell a

@@ -226,6 +226,17 @@ const CONTROL = VERSUS === "defaults" ? {} : knobGeneration(VERSUS).knobs;
 // `--baseline <generation>` reads the record as it stood against an OLDER
 // shipped bidder. It only ever reads: a run always measures against the live
 // defaults, because that is the bidder the control chairs actually are.
+// HOW THE NUMBER WAS ARRIVED AT. Changing the statistic changes what a row
+// MEANS, exactly the way changing the shipped knobs or the room does, and the
+// record has now been quietly mixed three times by three different versions of
+// that mistake. `room-mean` compared a seat to its room's average and carried
+// every seat's luck; `seat-paired` compares a seat to itself in the same room
+// with nobody tweaked. Rows with no `method` predate the field and are
+// `room-mean`.
+const METHOD = "seat-paired";
+const LEGACY_METHOD = "room-mean";
+const methodOf = (row) => row.method ?? LEGACY_METHOD;
+
 const BASELINE = args.baseline ?? baselineKey();
 const LEGACY_BASELINE = "tuned-2026-11-10";
 const baselineOf = (row) => row.baseline ?? LEGACY_BASELINE;
@@ -565,6 +576,7 @@ const rowMatches = (row, tweak, cell, mode) => row.tweak === tweak.id
   && row.persona === PERSONA && row.perturb === (PERTURB == null ? "shipped" : PERTURB)
   && (row.versus ?? "defaults") === VERSUS && (row.holdout ?? "") === HOLDOUT
   && baselineOf(row) === BASELINE
+  && methodOf(row) === METHOD
   && (row.shape == null || row.shape === cellShape(cell))
   && row.runs === RUNS;
 
@@ -597,6 +609,7 @@ function measure(tweak, cell, mode, rows) {
     at: new Date().toISOString(),
     git: GIT,
     baseline: BASELINE,
+    method: METHOD,
     // What the cell's tag MEANT when this was measured. A tag is a name, not a
     // definition; editing the grid can point it at a different room.
     shape: cellShape(cell),
@@ -641,7 +654,8 @@ const sameRoom = (row) => row.persona === PERSONA
   && row.perturb === (PERTURB == null ? "shipped" : PERTURB)
   && (row.versus ?? "defaults") === VERSUS
   && (row.holdout ?? "") === HOLDOUT
-  && baselineOf(row) === BASELINE;
+  && baselineOf(row) === BASELINE
+  && methodOf(row) === METHOD;
 
 // The record outlives the queue: a candidate measured months ago and since
 // deleted from cpu-lab-tweaks.mjs still has rows, and they still count. So the
@@ -1255,7 +1269,7 @@ function screenReport(rows) {
   const tags = new Set(screenCells.map((cell) => cell.tag));
   const far = rows.filter((row) => (row.versus ?? "defaults") === VERSUS
     && (row.holdout ?? "") === HOLDOUT && row.persona === PERSONA
-    && baselineOf(row) === BASELINE
+    && baselineOf(row) === BASELINE && methodOf(row) === METHOD
     && tags.has(row.cell) && row.mode.startsWith("dose-"));
   if (!far.length) {
     console.log(`cpu-lab screen — nothing measured yet (${OUT}).\n  node scripts/cpu-lab.mjs run --stage screen`);

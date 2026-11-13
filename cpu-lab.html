@@ -251,6 +251,10 @@
   .panel { border: 1px solid transparent; border-radius: 8px; padding: 8px; margin: -8px; }
   .panel-name { font-size: 13px; color: var(--text-primary); margin: 0 0 2px; }
   .panel-note { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+  /* The number the curve adds up to, said out loud above the curve. */
+  .panel-headline { margin: 2px 0 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .panel-avg { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .panel-avg-note { font-size: 11px; color: var(--text-muted); }
 
   /* ---- what is running, and what is paying off ----
      Two things a reader wants in the first screen: is the bench working right
@@ -531,12 +535,16 @@ const controlKey = (row) => [
   row.perturb ?? "shipped",
   row.versus ?? "defaults",
   row.holdout ?? "",
-  row.baseline ?? "tuned-2026-11-10"
+  row.baseline ?? "tuned-2026-11-10",
+  // The statistic itself. Changing how the number is arrived at changes what
+  // it means, as surely as changing the room does.
+  row.method ?? "room-mean"
 ].join("|");
 const controlLabel = (key) => {
-  const [persona, perturb, versus, holdout, baseline] = key.split("|");
+  const [persona, perturb, versus, holdout, baseline, method] = key.split("|");
   return `${persona} · perturb ${perturb} · vs ${versus}${holdout ? " · holdout" : ""}`
-    + `${baseline ? ` · bidder ${baseline}` : ""}`;
+    + `${baseline ? ` · bidder ${baseline}` : ""}`
+    + `${method && method !== "seat-paired" ? ` · ${method}` : ""}`;
 };
 const show = (value) => (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value));
 
@@ -748,7 +756,7 @@ function renderControls() {
     // through to keys[0], which sorts to the OLDEST bidder. It opened on a
     // thousand measurements taken against knobs that had since been changed and
     // said nothing about it.
-    const live = `balanced|shipped|defaults||${data.baseline ?? ""}`;
+    const live = `balanced|shipped|defaults||${data.baseline ?? ""}|${data.method ?? "seat-paired"}`;
     state.control = keys.includes(live) ? live
       : (keys.filter((key) => key.endsWith(`|${data.baseline ?? ""}`))[0] ?? keys[keys.length - 1]);
   }
@@ -1226,8 +1234,30 @@ function renderDose(rows, summary) {
     }).join("");
     const queued = data.tweaks.find((tweak) => tweak.id === line.id);
     const isLive = liveIds.has(line.id);
+    // THE HEADLINE, on the chart itself: the average across every room and
+    // every adoption level, with its interval. The curve shows the shape; this
+    // is the one number that shape adds up to, and reading it off the picture
+    // by eye is exactly how a reader talks themselves into a result.
+    // Weighted per measurement, not per game, matching the CLI.
+    const levels = new Map();
+    for (const point of line.points) {
+      const key = `${point.cell}|${point.k}`;
+      if (!levels.has(key)) levels.set(key, []);
+      levels.get(key).push(point.mean);
+    }
+    const each = [...levels.values()].map((v) => v.reduce((a, b) => a + b, 0) / v.length);
+    const avg = each.reduce((a, b) => a + b, 0) / each.length;
+    const band = each.length > 1
+      ? 1.96 * Math.sqrt(each.reduce((a, b) => a + (b - avg) * (b - avg), 0) / (each.length - 1)) / Math.sqrt(each.length)
+      : null;
+    const clear = band != null && Math.abs(avg) > band;
+    const headline = `<span class="panel-avg ${clear ? (avg > 0 ? "num pos" : "num neg") : "muted"}">`
+      + `${signed(avg)}${band != null ? ` ±${band.toFixed(2)}` : ""}</span>`
+      + `<span class="panel-avg-note">${each.length} room${each.length > 1 ? "s" : ""} × adoption level`
+      + `${each.length > 1 ? "s" : ""}${clear ? "" : ", not clear of zero"}</span>`;
     return `<div class="panel${isLive ? " live-panel" : ""}">
       <p class="panel-name">${escape(line.id)}${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
+      <p class="panel-headline">${headline}</p>
       <p class="panel-note">${escape(queued ? knobLine(queued.params) : "")}</p>
       <p class="panel-note">${escape(reading)}</p>
       <!-- role="group", NOT role="img". role="img" tells the browser the whole
