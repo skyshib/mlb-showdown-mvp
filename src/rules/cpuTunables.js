@@ -206,6 +206,9 @@ const KNOBS = Object.keys(CPU_TUNABLE_DEFAULTS);
 // that out.
 export const CPU_KNOB_GENERATIONS = Object.freeze({
   "tuned-2026-11-11": Object.freeze({
+    // Where this sits in the lineage. EXPLICIT, because `at` is a date and four
+    // generations were crowned on 2026-11-13 — nothing derivable orders them.
+    seq: 2,
     at: "2026-11-11",
     git: "ef55c02",
     fingerprint: "a99689d3874c",
@@ -256,6 +259,9 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     })
   }),
   "tuned-2026-11-13d": Object.freeze({
+    // Where this sits in the lineage. EXPLICIT, because `at` is a date and four
+    // generations were crowned on 2026-11-13 — nothing derivable orders them.
+    seq: 6,
     at: "2026-11-13",
     git: "dca76ff",
     fingerprint: "eadc1fe008f3",
@@ -306,6 +312,9 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     })
   }),
   "tuned-2026-11-13c": Object.freeze({
+    // Where this sits in the lineage. EXPLICIT, because `at` is a date and four
+    // generations were crowned on 2026-11-13 — nothing derivable orders them.
+    seq: 5,
     at: "2026-11-13",
     git: "9e9782b",
     fingerprint: "cef65dcfdc89",
@@ -360,6 +369,9 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     })
   }),
   "tuned-2026-11-13b": Object.freeze({
+    // Where this sits in the lineage. EXPLICIT, because `at` is a date and four
+    // generations were crowned on 2026-11-13 — nothing derivable orders them.
+    seq: 4,
     at: "2026-11-13",
     git: "b142255",
     fingerprint: "461e01104bef",
@@ -412,6 +424,9 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     })
   }),
   "tuned-2026-11-13": Object.freeze({
+    // Where this sits in the lineage. EXPLICIT, because `at` is a date and four
+    // generations were crowned on 2026-11-13 — nothing derivable orders them.
+    seq: 3,
     at: "2026-11-13",
     git: "dc58920",
     fingerprint: "f68e04c38f3d",
@@ -461,6 +476,9 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     })
   }),
   "tuned-2026-11-10": Object.freeze({
+    // Where this sits in the lineage. EXPLICIT, because `at` is a date and four
+    // generations were crowned on 2026-11-13 — nothing derivable orders them.
+    seq: 1,
     at: "2026-11-10",
     git: "acc9aae",
     fingerprint: "c4661e913763",

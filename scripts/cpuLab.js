@@ -119,6 +119,9 @@ export function readCpuLab(root) {
     // now, which is the only way the page can say what "defaults" means today.
     generations: Object.entries(CPU_KNOB_GENERATIONS).map(([name, generation]) => ({
       name,
+      // Lineage order. `at` is a date and four generations share one, so the
+      // page cannot sort the history without this.
+      seq: generation.seq ?? null,
       at: generation.at,
       git: generation.git,
       fingerprint: generation.fingerprint,
