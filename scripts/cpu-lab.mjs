@@ -275,14 +275,33 @@ const LEGACY_BASELINE = "tuned-2026-11-10";
 // rather than stack with. Read off the two newest generations: whatever differs
 // between them is what the last ship changed.
 const THRONE_KNOBS = (() => {
+  // Generations are declared NEWEST FIRST, so the one the throne succeeded is
+  // the next full knob set below it — not the first match by date. Two ships on
+  // the same day tie on `at`, and picking by date then reached past the real
+  // predecessor and reported both ships' knobs as one.
   const gens = Object.entries(CPU_KNOB_GENERATIONS).filter(([, g]) => g.knobs);
-  const live = gens.find(([, g]) => cpuTunables(g.knobs).key === "");
-  if (!live) return new Set();
-  const previous = gens.find(([name, g]) => name !== live[0] && g.at && g.at <= live[1].at
-    && Object.keys(g.knobs).length === Object.keys(live[1].knobs).length);
+  const at = gens.findIndex(([, g]) => cpuTunables(g.knobs).key === "");
+  if (at < 0) return new Set();
+  const live = gens[at][1];
+  const previous = gens.slice(at + 1).find(([, g]) =>
+    Object.keys(g.knobs).length === Object.keys(live.knobs).length);
   if (!previous) return new Set();
-  return new Set(Object.keys(live[1].knobs).filter((knob) =>
-    JSON.stringify(live[1].knobs[knob]) !== JSON.stringify(previous[1].knobs[knob])));
+  return new Set(Object.keys(live.knobs).filter((knob) =>
+    JSON.stringify(live.knobs[knob]) !== JSON.stringify(previous[1].knobs[knob])));
+})();
+
+// EVERY POSITION THE THRONE HOLDS, not just its last move — measured against
+// the generation the lab was built on. This is what decides RIVAL: a challenger
+// moving one of these would OVERWRITE a value the bench deliberately chose,
+// where a challenger on any other knob would ship alongside it. The last ship's
+// knobs are the wrong test as soon as there is a second ship, which there was
+// four hours later.
+const THRONE_POSITIONS = (() => {
+  const live = Object.values(CPU_KNOB_GENERATIONS).find((g) => g.knobs && cpuTunables(g.knobs).key === "");
+  const origin = CPU_KNOB_GENERATIONS[LEGACY_BASELINE];
+  if (!live || !origin) return new Set();
+  return new Set(Object.keys(live.knobs).filter((knob) =>
+    JSON.stringify(live.knobs[knob]) !== JSON.stringify(origin.knobs[knob])));
 })();
 
 const baselineOf = (row) => row.baseline ?? LEGACY_BASELINE;
@@ -1023,6 +1042,10 @@ if (command === "list") {
   // had already been made three times before `baseline` was recorded at all.
   console.log(`\n  THE THRONE is ${BASELINE}, the bidder that ships today`
     + `${THRONE_KNOBS.size ? ` — its last ship moved ${[...THRONE_KNOBS].join(", ")}` : ""}`);
+  if (THRONE_POSITIONS.size) {
+    console.log(`  it holds ${THRONE_POSITIONS.size} position(s) against ${LEGACY_BASELINE}: `
+      + `${[...THRONE_POSITIONS].map((knob) => `${knob}=${JSON.stringify(CPU_TUNABLE_DEFAULTS[knob])}`).join(", ")}`);
+  }
   // An accepted candidate is a CHALLENGER, not a winner: it beat whoever was on
   // the throne when it was measured, and a ship replaces that opponent. Listing
   // them here is how you see, without running anything, what the next pass will
@@ -1863,7 +1886,7 @@ function challengerRank(rows) {
       // Does it move a knob the reigning bidder's last ship moved? Then it is a
       // succession fight over one number. Otherwise it stacks.
       rival: Object.keys(tweak.params ?? {}).some((knob) => shipped.has(knob)
-        && THRONE_KNOBS.has(knob))
+        && THRONE_POSITIONS.has(knob))
     });
   }
   return out;

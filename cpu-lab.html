@@ -506,6 +506,12 @@ const api = `/api/cpu-lab${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
 const state = {
   control: null,
+  // Did the READER choose this view, or did the page? An auto-chosen view
+  // FOLLOWS THE THRONE — ship a knob and it moves to the new bidder by itself,
+  // because the default is always "the current wave against the current
+  // leader". A view the reader picked stays picked, because that is the toggle
+  // for reading old rounds against old leaders.
+  controlPinned: false,
   cell: "all",
   sort: "crowd",
   chosen: false,
@@ -550,11 +556,31 @@ const controlKey = (row) => [
   // it means, as surely as changing the room does.
   row.method ?? "room-mean"
 ].join("|");
+// WHICH ROUND A VIEW IS, said in those words. The key is six fields of
+// machinery and the reader's actual question is only ever "is this the current
+// wave or an old one", so that goes first and the machinery goes after.
 const controlLabel = (key) => {
   const [persona, perturb, versus, holdout, baseline, method] = key.split("|");
-  return `${persona} · perturb ${perturb} · vs ${versus}${holdout ? " · holdout" : ""}`
-    + `${baseline ? ` · bidder ${baseline}` : ""}`
-    + `${method && method !== "seat-paired" ? ` · ${method}` : ""}`;
+  const current = Boolean(data?.baseline) && baseline === data.baseline;
+  // Only what DIFFERS from the plain room. Naming the fields that are already
+  // at their defaults buries the one clause that is doing work.
+  const bits = [];
+  if (persona !== "balanced") bits.push(persona);
+  if (perturb !== "shipped") bits.push(`perturb ${perturb}`);
+  if (holdout) bits.push("holdout seeds");
+  if (method && method !== "seat-paired") bits.push(method);
+  const tail = bits.length ? ` · ${bits.join(" · ")}` : "";
+  // A NAMED OPPONENT IS A DIFFERENT KIND OF READING, not a variation on the
+  // wave. The default view is the within-room adoption curve, where the control
+  // chairs are simply whoever ships. Seating a FROZEN GENERATION in them makes
+  // it a whole-table comparison — the gate — and the only reason to run one is
+  // that a shipped knob cannot be its own control. Calling that a "wave with
+  // different control chairs" buries the single thing that distinguishes it.
+  if (versus !== "defaults") {
+    return `head to head — ${current ? "today's bidder" : baseline} against ${versus}${tail}`;
+  }
+  return `${current ? "current wave" : "old round"} — `
+    + `${current ? "against the reigning " : "against "}${baseline || "(unrecorded)"}${tail}`;
 };
 const show = (value) => (typeof value === "object" && value !== null ? JSON.stringify(value) : String(value));
 
@@ -753,9 +779,15 @@ function renderControls() {
     state.chosen = data.rows.length > 0;
   }
   const control = document.getElementById("control");
+  const live = `balanced|shipped|defaults||${data.baseline ?? ""}|${data.method ?? "seat-paired"}`;
   const keys = [...new Set(data.rows.map(controlKey))].sort();
-  if (!keys.length) keys.push("balanced|shipped|defaults|");
-  if (!state.control || !keys.includes(state.control)) {
+  // THE CURRENT WAVE IS ALWAYS ON THE LIST, even with nothing in it yet. The
+  // morning after a ship there are no rows against the new bidder at all, and
+  // without this the page would quietly open on an old round — which is how it
+  // came to show the 0.8 numbers under a 0.5 bidder.
+  if (!keys.includes(live)) keys.push(live);
+  keys.sort();
+  if (!state.controlPinned || !keys.includes(state.control)) {
     // Default to the plain room measured against the bidder that is SHIPPED
     // RIGHT NOW: archetypes off, shipped wobble, live defaults in the control
     // chairs, current baseline.
@@ -766,7 +798,6 @@ function renderControls() {
     // through to keys[0], which sorts to the OLDEST bidder. It opened on a
     // thousand measurements taken against knobs that had since been changed and
     // said nothing about it.
-    const live = `balanced|shipped|defaults||${data.baseline ?? ""}|${data.method ?? "seat-paired"}`;
     state.control = keys.includes(live) ? live
       : (keys.filter((key) => key.endsWith(`|${data.baseline ?? ""}`))[0] ?? keys[keys.length - 1]);
   }
@@ -799,12 +830,24 @@ function renderControls() {
   }
   const viewing = state.control.split("|")[4] ?? "";
   const stale = Boolean(data.baseline) && viewing !== data.baseline;
-  banner.hidden = !stale;
+  // NOTHING HERE YET IS NOT NOTHING ANYWHERE. The wave against a freshly
+  // crowned bidder starts empty, and an empty board with no explanation reads
+  // as a broken page rather than as a pass that has not been run.
+  const waveEmpty = !stale && !data.rows.some((row) => controlKey(row) === state.control);
+  const elsewhere = waveEmpty
+    ? data.rows.filter((row) => (row.baseline ?? "tuned-2026-11-10") !== viewing).length
+    : 0;
+  banner.hidden = !stale && !waveEmpty;
   if (stale) {
     banner.textContent = `You are reading measurements taken against ${viewing}. `
       + `The shipped bidder is now ${data.baseline} — a knob has changed since these were run, `
       + `so the control chairs in them are not the computers playing today. `
       + `Switch the room control to ${data.baseline} for the current record.`;
+  } else if (waveEmpty) {
+    banner.textContent = `Nothing has been measured against ${viewing} yet — it is the bidder `
+      + `that ships today, and the wave against it has not been run.`
+      + `${elsewhere ? ` ${elsewhere} readings stand against earlier bidders; switch the room `
+        + `control above to read those old rounds.` : ""}`;
   }
 
   const cells = document.getElementById("cell-filter");
@@ -1647,6 +1690,9 @@ function escape(text) {
 // ---- wiring -----------------------------------------------------------------
 document.getElementById("control").addEventListener("change", (event) => {
   state.control = event.target.value;
+  // Chosen by hand from here on, so a later poll does not pull the reader back
+  // to the current wave mid-sentence.
+  state.controlPinned = true;
   render();
 });
 document.getElementById("cell-filter").addEventListener("change", (event) => {

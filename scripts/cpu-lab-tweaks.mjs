@@ -224,6 +224,28 @@ const QUEUED = [
     params: { poolPremiumThreshold: 0.6 }
   },
   {
+    id: "need-span-flat",
+    note: "stop scaling a snake pick's need bonus by how many holes of that TYPE are "
+      + "left, so a rotation hole counts like a lineup hole",
+    // SHIPPED 2026-11-13 (tuned-2026-11-13b), the second ship of the day and the
+    // first candidate accepted ON TOP OF another one — it was measured against
+    // tuned-2026-11-13, the 0.5 threshold already in the chairs, so the two
+    // readings do not have to be taken on trust about each other.
+    // +0.38 +-0.27 over 33 readings in 18 rooms and three table sizes, 100% of
+    // the posterior above zero.
+    //
+    // The fingerprint is the part worth keeping: all three snake cells moved
+    // AND exactly the two manual-nomination auction cells, with no
+    // random-nomination auction cell touched. Manual nomination reaches the
+    // snake scoring path, so a "snake" knob is not snake-only, and the reach
+    // check says so without anybody having to remember it.
+    //
+    // SHIPPED WITHOUT THE GATE, like the threshold before it: neither the
+    // holdout seeds nor the head to head were run at this value.
+    settled: "SHIPPED tuned-2026-11-13b — +0.38 +-0.27 accepted; holdout and head-to-head still outstanding",
+    params: { snakeNeedSpan: 0 }
+  },
+  {
     id: "pool-premium-threshold-0-5",
     note: "the top-of-deck lift starts at the 50th percentile instead of the 80th",
     // SHIPPED 2026-11-13 (tuned-2026-11-13). Came in through the ideas inbox as

@@ -93,7 +93,19 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
 
   // ---- what he picks (snake autopickScore) ----
   snakeNeedBonus: 80, // a card that fills a hole, flat
-  snakeNeedSpan: 120, // and more as the holes crowd the turns left
+  // 120 -> 0 on 2026-11-13. The span scaled a snake pick's need bonus by holes
+  // OF THAT TYPE over turns left, which at turn one of a 15-man room paid a bat
+  // 9/15*120 = 72 against a starter's 32 — a 2.25x tilt to bats on exactly the
+  // turns when the top of the starter board is still there, and it went quiet
+  // once it was gone. It was counting HOLES, not SUPPLY: these rooms deal 94
+  // bats and 41 starters, and a 4-seat room seats 38% of the bats and 39% of
+  // the starters, so the two are equally scarce on the board. Accepted on the
+  // seat-paired bench at +0.38 +-0.27 over 33 readings in 18 rooms and three
+  // table sizes, 100% of the posterior above zero. snakeNeedBonus (the flat
+  // term) stays: it is provably dead weight — zeroing it moves 0 of 180 turns,
+  // because forcedNeed holds the roster shape and every legal candidate
+  // collects the same 80 — so there is nothing to gain by touching it.
+  snakeNeedSpan: 0, // and more as the holes crowd the turns left
   snakeBalanceBonus: 35, // an arm when the staff is short
   snakeArmLean: 140, // how far an archetype's pitcher bias moves an arm
   snakeForcedNeed: 1000, // the override that stops a roster stranding a slot
@@ -224,6 +236,58 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
       snakeScarcityCap: 120
     })
   }),
+  "tuned-2026-11-13b": Object.freeze({
+    at: "2026-11-13",
+    git: "b142255",
+    fingerprint: "461e01104bef",
+    // THE SECOND SHIP OF THE DAY, and the throne as it stands: the top-of-deck
+    // lift at the 50th percentile AND the snake need span switched off. Both
+    // went in the moment the stopping rule accepted them, under Skylar's
+    // 2026-11-13 standard, and the record was re-based each time.
+    //
+    // need-span-flat was accepted AGAINST tuned-2026-11-13 — that is, on top of
+    // the 0.5 threshold rather than instead of it — so this generation is the
+    // two of them together and neither reading has to be taken on trust about
+    // the other. Its head to head is NOT measured; see tuned-2026-11-13.
+    note: "the 50th-percentile top-of-deck lift, plus the snake need span switched off",
+    knobs: Object.freeze({
+      perturbation: 0.25,
+      hitterWeights: null,
+      pitcherWeights: null,
+      starterDiscount: 0.65,
+      starterNarrowSpread: 0.04,
+      starterWideSpread: 0.05,
+      relieverSpacingShare: 0.3,
+      relieverTopRate: 2.5,
+      relieverDepthRate: 0.7,
+      penDepthTarget: 5,
+      relieverFloorByRoom: 0,
+      slotTiebreak: 0.05,
+      urgencyPatient: 0.5,
+      urgencyDesperate: 1,
+      urgencyWeight: 1,
+      depthSlots: 3,
+      depthDamp: 0.7,
+      shareExponent: 1.1,
+      poolPremiumStrength: 0.7,
+      poolPremiumThreshold: 0.5,
+      aggressionFloor: 0.86,
+      wobbleSalt: "",
+      aggressionSpan: 0.28,
+      paceFloor: 0.75,
+      paceCeiling: 1.8,
+      roundsFloor: 0.7,
+      roundsCeiling: 2.2,
+      roundsBudgetDivisor: 25,
+      snakeNeedBonus: 80,
+      snakeNeedSpan: 0,
+      snakeBalanceBonus: 35,
+      snakeArmLean: 140,
+      snakeForcedNeed: 1000,
+      snakeScarcityRate: 0.8,
+      snakeScarcityCap: 120
+    })
+  }),
   "tuned-2026-11-13": Object.freeze({
     at: "2026-11-13",
     git: "dc58920",
@@ -234,7 +298,7 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     // WITHOUT the head-to-head gate, which is the one check that caught the
     // same knob at 0.6; if a table of 0.5 bidders turns out not to beat a table
     // without, this is the generation to revert to tuned-2026-11-10.
-    note: "the top-of-deck lift widened to the 50th percentile",
+    note: "the top-of-deck lift widened to the 50th percentile — superseded the same day by tuned-2026-11-13b",
     knobs: Object.freeze({
       perturbation: 0.25,
       hitterWeights: null,
