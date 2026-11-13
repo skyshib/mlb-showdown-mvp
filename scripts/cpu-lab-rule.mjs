@@ -29,6 +29,18 @@ export const RULE = Object.freeze({
   kill: 0.90,        // share of the posterior below zero
   above: 0,          // what the average must beat to be accepted
   minLooks: 5,
+  // ...AND READINGS FROM AT LEAST THIS MANY DIFFERENT TABLE SIZES before a
+  // candidate may be ACCEPTED. The grid runs smallest room first, so the first
+  // sixteen readings are all two-manager rooms: without this, a candidate could
+  // be accepted having only ever been seen at one table size, which is the very
+  // axis a knob is most likely to vary along.
+  //
+  // Nearly free, simulated against the measured noise gradient (2.26 a reading
+  // at two seats down to about 0.8 at eight): false accepts on a true null fall
+  // from 9.3% to 6.3%, while finding a real +0.3 stays at 88% and killing is
+  // untouched — kills do not wait for breadth, because an obviously bad
+  // candidate is obviously bad in any room.
+  acceptSizes: 2,
   passes: 4
 });
 
@@ -66,12 +78,15 @@ export function chances(samples, rule = RULE) {
   };
 }
 
-// Accept, kill, or keep going.
-export function verdictSoFar(samples, rule = RULE) {
+// Accept, kill, or keep going. `sizesSeen` is how many different table sizes
+// the readings come from; accepting waits for breadth, killing does not.
+export function verdictSoFar(samples, rule = RULE, sizesSeen = Infinity) {
   if (!samples || samples.length < Math.max(2, rule.minLooks)) return null;
   const odds = chances(samples, rule);
   if (!odds) return null;
-  if (odds.above > rule.accept) return { ...odds, call: "accept" };
   if (odds.below > rule.kill) return { ...odds, call: "kill" };
+  if (odds.above > rule.accept && sizesSeen >= rule.acceptSizes) {
+    return { ...odds, call: "accept" };
+  }
   return null;
 }

@@ -54,3 +54,46 @@
 // terms stop binding. need-span-flat has the wider snake reach of the two
 // (parity drops to 6/8 at s4-fiction), so if both read positive the span is the
 // likelier double-count.
+// COUNTER-EXAMPLE, 2026-11-13, room fair-alpaca-slider, on "arm-balance-parity"
+// and "need-span-flat" above. READ THEM OFF THE DOSE CURVE, NOT THE MIXED
+// COLUMN. The rooms those ideas came from had TWO reaching seats in a 4-seat
+// room, which is what stripped the arm board before the waiting seat's turn.
+// fair-alpaca-slider is the natural experiment with only ONE: 3 seats, one ace,
+// one purist, one human. Every seat took its first starter LATE (own-turn 5, 6,
+// 6) and nobody paid for it — rotations bunched at 0.0229 / 0.0288 / 0.0420 mean
+// runsPerPa and both computers beat the human (52.5 / 51.5 / 46.0). The starter
+// cliff is only a little shallower at 3 seats than 4 (best to last-drafted arm
+// 0.052-0.062 against 0.064-0.087), so the moderator is not board width on its
+// own: it is HOW MANY RIVALS ARE ALSO REACHING. That is exactly the shape
+// league-duels-measure-denial exists to catch, so if parity wins at k=1 and
+// decays to nothing as the table adopts it, it is denial and must be rejected,
+// however good the mechanism looks. The mechanism is still visible here: at
+// snakeBalanceBonus 60 the purist takes Greg Maddux '03 (580pt SP, two rotation
+// holes open) instead of ERIC OWENS '03, a 110-point centre fielder ranked 46th
+// on his own model — the least defensible pick in the six rooms read so far.
+// Six-room totals now, 210 computer turns: 60 moves 34 (26 to a starter, 8 to a
+// reliever, 0 to a bat), 140 moves 92 but 54 go to the pen, 0 moves 41 all to a
+// bat, snakeNeedSpan=0 moves 55 (30 SP / 22 RP / 3 bat). snakeNeedBonus=0 still
+// moves 0 OF 210 — six rooms, provably dead weight, deletable.
+// RETRACTION, 2026-11-13, room nimble-seal-maple, correcting the COUNTER-EXAMPLE
+// comment directly above. That comment said fair-alpaca-slider's flat standings
+// showed the moderator is "HOW MANY RIVALS ARE ALSO REACHING". That explanation
+// is WRONG, and nimble-seal-maple falsifies it: 3 seats, one reaching computer,
+// the same shape as alpaca — and here the purist took its first starter on own
+// turn 5 and read 52.8 while the slugger waited to turn 11, drafted the exact
+// nine-bats-first shape BBBBBBBBBRSSSSR, and read 49.1 on a rotation 0.027
+// runsPerPa worse. The real reading is simpler: alpaca had NO TREATMENT. Its
+// three seats took their first starter on turns 5, 6, 6 — a one-turn spread, so
+// there was no late seat to punish. Normalised by the turn gap, alpaca pays the
+// same rate as everywhere else. Pooled over seven rooms, 45 turns of delay
+// between each room's earliest and latest first-starter seat: 0.2209 rpa, or
+// 0.0049 RUNS PER PA PER TURN OF WAITING, with per-room rates 0.0032 to 0.0104
+// and alpaca at 0.0059, dead centre. Deepest starter cliffs are cosmic 0.087 and
+// seal 0.089 and the two shallowest rooms are still 0.052, so board width is not
+// the moderator either. WHAT STANDS from that comment is only the general
+// practice, which holds for any CPU change and not because of alpaca: read these
+// off the DOSE curve, not the mixed column, or denial reads as a gain
+// (league-duels-measure-denial). Seven-room totals, 240 computer turns:
+// snakeBalanceBonus 60 moves 40 (31 to a starter, 9 to a reliever, 0 to a bat),
+// 140 moves 105 but 60 go to the pen, 0 moves 46 all to a bat, snakeNeedSpan=0
+// moves 61 (36 SP / 22 RP / 3 bat), snakeNeedBonus=0 still moves 0 OF 240.

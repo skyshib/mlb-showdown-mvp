@@ -1041,7 +1041,11 @@ function renderStandings(summary) {
       if (!levels.has(key)) levels.set(key, []);
       levels.get(key).push(...row.edges);
     }
-    const called = verdictSoFar([...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length));
+    const called = verdictSoFar(
+      [...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length),
+      RULE,
+      new Set(readings.map((row) => data.cells.find((cell) => cell.tag === row.cell)?.teams)
+        .filter(Boolean)).size);
     const why = called
       ? `${called.call === "kill" ? "killed" : "accepted"} after ${called.n} readings`
       : !clear
@@ -1379,7 +1383,10 @@ function renderDose(rows, summary) {
     // and the page simply never said so. The verdict comes from the same
     // module the bench stops on.
     const odds = chances(each);
-    const called = verdictSoFar(each);
+    const sizesSeen = new Set(line.points
+      .map((point) => data.cells.find((cell) => cell.tag === point.cell)?.teams)
+      .filter(Boolean)).size;
+    const called = verdictSoFar(each, RULE, sizesSeen);
     const toGo = !odds ? ""
       : called
         ? `<span class="panel-odds"><span class="badge ${called.call === "kill" ? "badge-dead" : "badge-win"}">`
@@ -1391,7 +1398,10 @@ function renderDose(rows, summary) {
           ? `<span class="panel-odds"><b>${(100 * odds.below).toFixed(0)}%</b> below zero`
             + `<span class="muted"> · killed at ${(100 * RULE.kill).toFixed(0)}%</span></span>`
           : `<span class="panel-odds"><b>${(100 * odds.above).toFixed(0)}%</b> above zero`
-            + `<span class="muted"> · accepted at ${(100 * RULE.accept).toFixed(0)}%</span></span>`;
+            + `<span class="muted"> · accepted at ${(100 * RULE.accept).toFixed(0)}%`
+            + `${odds.above > RULE.accept && sizesSeen < RULE.acceptSizes
+              ? `, and at ${RULE.acceptSizes} table sizes — seen ${sizesSeen} so far` : ""}`
+            + `</span></span>`;
     const headline = `<span class="panel-avg ${clear ? (avg > 0 ? "num pos" : "num neg") : "muted"}">`
       + `${signed(avg)}${band != null ? ` ±${band.toFixed(2)}` : ""}</span>`
       + `<span class="panel-avg-note">${each.length} reading${each.length > 1 ? "s" : ""} `

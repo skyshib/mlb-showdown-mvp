@@ -156,7 +156,12 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
   --prior     how big effects are expected to be before measuring anything
               (default 0.5 win points). Centred on zero, because nearly all
               tweaks are worth nothing.
-  --min-looks don't call it before this many readings (default 3).
+  --min-looks don't call it before this many readings (default 5).
+  --accept-sizes  don't ACCEPT until the readings span this many different
+              table sizes (default 2). The grid runs smallest room first, so
+              without it a candidate could be accepted having only ever been
+              seen at two managers — the very axis a knob is most likely to
+              vary along. Killing does not wait for breadth.
   --persona   the archetype every seat wears (default balanced), or "rotate".
   --perturb   the seeded wobble on a manager's weights (default 0.25, the
               shipped value; 0 makes every seat of an archetype think alike).
@@ -904,7 +909,8 @@ const RULE_ARGS = {
   accept: Number(args.accept ?? RULE.accept),
   kill: Number(args.kill ?? RULE.kill),
   above: Number(args["accept-above"] ?? RULE.above),
-  minLooks: Number(args["min-looks"] ?? RULE.minLooks)
+  minLooks: Number(args["min-looks"] ?? RULE.minLooks),
+  acceptSizes: Number(args["accept-sizes"] ?? RULE.acceptSizes)
 };
 const KILL_AT = RULE_ARGS.kill;
 const ACCEPT_ABOVE = RULE_ARGS.above;
@@ -1142,6 +1148,7 @@ if (command === "list") {
   // fired. The decision has to use every reading that exists under these
   // controls, not the ones this process has personally seen.
   const seenSoFar = new Map();
+  const seenSizes = new Map();          // which table sizes each candidate has read in
   const abandoned = new Map();
   for (const id of order) {
     const tweak = tweakById(id);
@@ -1151,7 +1158,11 @@ if (command === "list") {
       for (const mode of modesFor(cell, tweak)) {
         if (!mode.startsWith("dose-")) continue;
         const banked = rows.filter((row) => rowMatches(row, tweak, cell, mode));
-        if (banked.length) already.push(pooled(banked).mean);
+        if (banked.length) {
+          already.push(pooled(banked).mean);
+          if (!seenSizes.has(id)) seenSizes.set(id, new Set());
+          seenSizes.get(id).add(cell.teams);
+        }
       }
     }
     if (already.length) seenSoFar.set(id, already);
@@ -1176,7 +1187,7 @@ if (command === "list") {
       // twelve minutes, to reach a verdict its 74 banked readings had already
       // settled.
       {
-        const called = verdictSoFar(seenSoFar.get(id), RULE_ARGS);
+        const called = verdictSoFar(seenSoFar.get(id), RULE_ARGS, (seenSizes.get(id) ?? new Set()).size);
         if (called) {
           abandoned.set(id, called);
           const why = called.call === "accept"
@@ -1230,6 +1241,8 @@ if (command === "list") {
           // different data sources for the same question.
           if (!seenSoFar.has(id)) seenSoFar.set(id, []);
           seenSoFar.get(id).push(stat.mean);
+          if (!seenSizes.has(id)) seenSizes.set(id, new Set());
+          seenSizes.get(id).add(cell.teams);
           console.log(`  ${id.padEnd(32)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
             + `${signed(stat.mean).padStart(7)} ±${stat.ci.toFixed(2).padStart(5)}  ${row.seconds}s`);
         }
@@ -1248,7 +1261,7 @@ if (command === "list") {
       // cheaply. This buys the verdict in minutes; a full sweep for coverage is
       // a deliberate `--kill 0` run, not something every launch pays for.
       if (KILL_AT > 0) {
-        const called = verdictSoFar(soFar, RULE_ARGS);
+        const called = verdictSoFar(soFar, RULE_ARGS, (seenSizes.get(id) ?? new Set()).size);
         if (called) {
           abandoned.set(id, called);
           const why = called.call === "accept"
