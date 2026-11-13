@@ -1261,14 +1261,28 @@ if (command === "list") {
       // ENOUGH? Asked after each room, because the grid runs cheapest first
       // and the point is to decide before the eight-seat rooms are bought.
       const soFar = seenSoFar.get(id);
-      if (!tweak.fixture && KILL_AT > 0) {
+      // THE RULE APPLIES TO FIXTURES TOO. The positive control is expected to
+      // be NEGATIVE, so the kill call is its PASS: it stops as soon as the
+      // readings are confidently below zero, which on the last run would have
+      // been after nine of them rather than all ninety-three. `null` is
+      // unaffected — every reading is exactly zero, so the posterior sits on
+      // zero and neither call ever fires, and it simply finishes its rooms.
+      //
+      // Coverage and verdict are different jobs and the control cannot do both
+      // cheaply. This buys the verdict in minutes; a full sweep for coverage is
+      // a deliberate `--kill 0` run, not something every launch pays for.
+      if (KILL_AT > 0) {
         const called = verdictSoFar(soFar);
         if (called) {
           abandoned.set(id, called);
           const why = called.call === "accept"
             ? `${(100 * called.above).toFixed(1)}% above ${signed(ACCEPT_ABOVE)}`
             : `${(100 * called.below).toFixed(1)}% below zero`;
-          console.log(`  ${id.padEnd(32)} ${called.call === "accept" ? "ACCEPTED" : "KILLED  "} after `
+          // For the positive control, confidently negative is the PASS.
+          const word = tweak.fixture
+            ? (called.call === "kill" ? "CONFIRMED" : "UNEXPECTED")
+            : (called.call === "accept" ? "ACCEPTED " : "KILLED   ");
+          console.log(`  ${id.padEnd(32)} ${word} after `
             + `${called.n} readings — ${signed(called.mean)} so far, ${why}`);
         }
       }
