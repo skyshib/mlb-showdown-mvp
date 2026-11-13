@@ -1138,33 +1138,42 @@ function renderDose(rows, summary) {
   for (const entry of summary) {
     const mine = dosed.filter((row) => row.tweak === entry.id);
     if (!mine.length) continue;
+    // ONE POINT PER ROOM PER ADOPTION LEVEL. The key used to be (k, teams) with
+    // no room in it, which silently averaged every room of the same table size
+    // into a single point and labelled it with whichever room arrived first —
+    // all eight two-seat rooms became one dot, and on the old grid all eight
+    // four-seat rooms did. The strokes below claim to be one per board, and
+    // until now they were not.
     const points = [];
     for (const row of mine) {
       const teams = row.teams ?? data.cells.find((cell) => cell.tag === row.cell)?.teams ?? 4;
       const k = row.k ?? Number(row.mode.slice(5));
-      const found = points.find((point) => point.k === k && point.teams === teams);
+      const found = points.find((point) => point.k === k && point.cell === row.cell);
       (found ? found.rows : (points.push({ k, teams, cell: row.cell, rows: [] }), points.at(-1).rows)).push(row);
     }
     for (const point of points) Object.assign(point, pool(point.rows));
     points.sort((a, b) => a.k / a.teams - b.k / b.teams);
     if (points.length) series.push({ id: entry.id, points });
   }
-  // A CURVE NEEDS TWO POINTS. The screen stage measures one dose per cell by
-  // design, so while it is running most candidates have a single point on each
-  // board — and twenty panels each holding one dot, captioned "one dose
-  // measured so far", is twenty panels of nothing. Those candidates are already
-  // in the standings and in the matrix, both of which are built for exactly one
-  // reading. Only draw a panel where there is a shape to see, and say how many
-  // were left out so nobody thinks they vanished.
-  const curves = series.filter((line) =>
-    [...new Set(line.points.map((point) => point.cell))]
-      .some((cell) => line.points.filter((point) => point.cell === cell).length > 1));
+  // DRAW ANYTHING WITH TWO READINGS, from any rooms. This used to demand that
+  // a SINGLE room had two or more adoption levels — a real curve — which was
+  // right on the old grid and is wrong on this one: SIXTEEN of the thirty-nine
+  // rooms seat two managers, and a two-manager room has exactly one adoption
+  // level (1 of 2) by construction. The grid runs cheapest-first, so every
+  // candidate spends its first sixteen rooms somewhere a curve is impossible,
+  // and the whole section sat empty through the part of a run you most want to
+  // watch. The positive control had three readings and no panel.
+  //
+  // Points from different rooms already share this axis, so two readings are
+  // worth drawing whether or not they come from the same room. A candidate
+  // measured only in two-seat rooms shows as a column of dots at the halfway
+  // mark, which is honest: that is what has been measured.
+  const curves = series.filter((line) => line.points.length > 1);
   const flat = series.length - curves.length;
   series = curves;
   document.getElementById("dose-omitted").textContent = flat
-    ? `${flat} further candidate${flat > 1 ? "s have" : " has"} only one dose measured so far — `
-      + `no curve to draw yet. They are in the standings above and the matrix below. `
-      + `The screen stage measures one dose a board on purpose; the confirm stage fills the rest in.`
+    ? `${flat} further candidate${flat > 1 ? "s have" : " has"} a single reading so far, which is a `
+      + `dot rather than a picture. They are in the standings above and the matrix below.`
     : "";
   if (!series.length) {
     document.getElementById("dose-card").hidden = true;
