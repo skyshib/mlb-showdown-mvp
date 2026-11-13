@@ -83,6 +83,7 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
   THE TWO STAGES — screen wide and cheap, then spend on what survives:
   node scripts/cpu-lab.mjs run --stage screen                every candidate, 15 cheap cells, far dose, 1 batch
   node scripts/cpu-lab.mjs screen                            what that bought, ranked, with the cut applied
+  node scripts/cpu-lab.mjs ship --tweak ID                   the pre-ship checklist; reports, never edits
   node scripts/cpu-lab.mjs run --stage confirm --tweak ID    a survivor: all 17 cells, whole curve, 4 batches
 
   node scripts/cpu-lab.mjs list
@@ -1379,6 +1380,8 @@ if (command === "list") {
   }
 } else if (command === "bracket") {
   bracket();
+} else if (command === "ship") {
+  shipCheck(rawFlag("tweak") ?? args.tweak);
 } else if (command === "screen") {
   screenReport(readRows());
 } else {
@@ -1477,6 +1480,100 @@ function bracket() {
   }
   console.log(`\n  they are candidates from the next command onward: the screen picks them up with`);
   console.log(`  "cpu-lab.mjs run --stage screen".`);
+}
+
+// THE PRE-SHIP CHECKLIST. Read-only: it never edits the bidder. Shipping a knob
+// changes what every computer in every room does, so the edit is a human's to
+// make — this only says whether the evidence is there, and names what is
+// missing when it is not.
+//
+// IT EXISTS BECAUSE "ACCEPTED" DOES NOT MEAN "SHIP". The average boost asks
+// whether a manager carrying the tweak beats managers who do not, which is the
+// right question for a room with humans in it and the wrong one for a change
+// going to every computer at once. poolPremiumThreshold is the worked example:
+// it reads clearly positive on that measure, it shipped on 2026-11-11, and the
+// absolute test read +1.48 mixed against -0.04 identical — it beat a table that
+// lacked it and gained nothing against a table that had it. Reverted the next
+// day, and the current screen promotes two more values of the same knob.
+//
+// So the gate is the absolute read, and it is the only check here that needs a
+// comparison ACROSS rooms rather than within one.
+function shipCheck(id) {
+  if (!id) {
+    console.log("cpu-lab ship — the pre-ship checklist for one candidate.\n");
+    console.log("  node scripts/cpu-lab.mjs ship --tweak <candidate>\n");
+    console.log("  Reports only. It never edits the bidder.");
+    return;
+  }
+  const tweak = tweakById(id);
+  const rows = readRows();
+  const knobs = Object.keys(tweak.params ?? {});
+  const ok = [];
+  const no = [];
+
+  // 1. Does it read positive, and is it clear of zero?
+  const mine = rows.filter((row) => sameRoom(row) && row.tweak === id && row.mode.startsWith("dose-"));
+  const boost = averageBoost(mine);
+  const clear = boost.n > 1 && Math.abs(boost.mean) > boost.ci;
+  (clear && boost.mean > 0 ? ok : no).push(
+    `the average boost is ${signed(boost.mean)} ±${boost.ci.toFixed(2)} over ${boost.n} readings`
+    + `${clear ? "" : " — not clear of zero"}${boost.mean > 0 ? "" : " — and it is negative"}`);
+
+  // 2. How much of the grid can it even reach?
+  const roomsHit = new Set(mine.map((row) => row.cell)).size;
+  (roomsHit >= MIN_ROOMS ? ok : no).push(
+    `it moves something in ${roomsHit} of ${CELLS.length} rooms`);
+
+  // 3. Is another promoted candidate fighting it for the same knob?
+  const rivals = TWEAKS.filter((other) => other.id !== id && !other.fixture && !other.settled
+    && Object.keys(other.params ?? {}).some((knob) => knobs.includes(knob)))
+    .filter((other) => {
+      const theirs = averageBoost(rows.filter((row) => sameRoom(row) && row.tweak === other.id
+        && row.mode.startsWith("dose-")));
+      return theirs.n > 1 && theirs.mean > 0 && Math.abs(theirs.mean) > theirs.ci;
+    });
+  (rivals.length ? no : ok).push(rivals.length
+    ? `${rivals.length} other promoted candidate(s) move the same knob — only one can ship: `
+      + rivals.map((other) => other.id).join(", ")
+    : "no other promoted candidate moves these knobs");
+
+  // 4. Does it hold on seeds that had no hand in choosing it?
+  const held = rows.filter((row) => row.tweak === id && (row.holdout ?? "") === "-holdout"
+    && row.mode.startsWith("dose-"));
+  const holdout = averageBoost(held);
+  (holdout.n > 1 && holdout.mean > 0 && Math.abs(holdout.mean) > holdout.ci ? ok : no).push(
+    holdout.n > 1
+      ? `on holdout seeds it reads ${signed(holdout.mean)} ±${holdout.ci.toFixed(2)} over ${holdout.n} readings`
+      : `NOT MEASURED on holdout seeds — run: cpu-lab.mjs run --holdout --tweak ${id}`);
+
+  // 5. THE GATE. Does a table of them beat a table without?
+  const absolute = rows.filter((row) => row.tweak === id && row.mode === "identical"
+    && (row.holdout ?? "") === "");
+  const abs = pooled(absolute);
+  (abs.n && abs.mean - abs.ci > 0 ? ok : no).push(abs.n
+    ? `head to head, a table of them reads ${signed(abs.mean)} ±${abs.ci.toFixed(2)}`
+      + `${abs.mean - abs.ci > 0 ? "" : " — NOT clear of zero, so this is denial and not strength"}`
+    : `NOT MEASURED head to head — the check that caught poolPremiumThreshold. `
+      + `Run: cpu-lab.mjs run --tweak ${id} --mode identical`);
+
+  console.log(`cpu-lab ship — ${id}`);
+  console.log(`  ${tweak.note}`);
+  console.log(`  ${knobs.map((knob) => `${knob}: ${JSON.stringify(CPU_TUNABLE_DEFAULTS[knob])} -> ${JSON.stringify(tweak.params[knob])}`).join(", ")}\n`);
+  for (const line of ok) console.log(`  PASS  ${line}`);
+  for (const line of no) console.log(`  STOP  ${line}`);
+
+  if (no.length) {
+    console.log(`\n  ${no.length} of ${ok.length + no.length} checks not met. Not ready.`);
+    return;
+  }
+  console.log(`\n  All ${ok.length} checks met. To ship it:`);
+  console.log(`    1. set ${knobs.map((knob) => `${knob} = ${JSON.stringify(tweak.params[knob])}`).join(", ")} in src/rules/cpuTunables.js`);
+  console.log(`    2. record a generation beside tuned-${new Date().toISOString().slice(0, 10)} holding the whole knob set`);
+  console.log(`    3. re-record test/fixtures/cpu-fingerprint.txt IN THE SAME COMMIT — the bidder is`);
+  console.log(`       meant to change, and the moved hashes are how a reviewer sees which rooms moved`);
+  console.log(`    4. mark ${id} settled in cpu-lab-tweaks.mjs with what it bought`);
+  console.log(`    5. re-screen: the control chairs are now a different bidder, so every other`);
+  console.log(`       candidate's reading is about an opponent that no longer exists`);
 }
 
 // THE CUT. What the screen stage bought, ranked, with the rule applied rather
