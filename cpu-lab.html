@@ -179,7 +179,10 @@
   #tip .tip-value.pos { color: var(--pos); }
   #tip .tip-value.neg { color: var(--neg); }
   #tip .tip-label { color: var(--text-primary); font-size: 12px; margin-top: 2px; }
-  #tip .tip-sub { color: var(--text-muted); font-size: 12px; margin-top: 3px; }
+  #tip .tip-sub { color: var(--text-muted); font-size: 12px; margin-top: 3px; white-space: pre-line; }
+  #tip { max-width: 420px; }
+  .matrix td.who { cursor: help; }
+  .matrix td.who:hover, .matrix td.who:focus-visible { color: var(--pos); outline: none; }
   @media (prefers-reduced-motion: reduce) { #tip, .mark { transition: none; } }
 
   /* The matrix cell is its own hit target and lifts on hover, same as a dot. */
@@ -467,12 +470,12 @@
 
   <section class="card">
     <div class="chart-head">
-      <h2>What each candidate changes</h2>
+      <h2>The queue</h2>
       <p class="hint">
-        Every knob a tweak moves, the shipped value it moves from, and what that knob does. This is
-        the queue in <code>scripts/cpu-lab-tweaks.mjs</code>, measured or not — plus anything filed
-        to the ideas inbox, <code>scripts/cpu-lab-ideas.jsonl</code>, which carries the room and the
-        observation that prompted it.
+        Everything in <code>scripts/cpu-lab-tweaks.mjs</code>, measured or not, plus anything filed
+        to the ideas inbox, <code>scripts/cpu-lab-ideas.jsonl</code>. What each one CHANGES — the
+        knobs it moves, the shipped values it moves from, what those knobs do, and the room and
+        observation behind a filed proposal — is on the candidate's name in the table above.
       </p>
     </div>
     <div class="scroll"><table id="queue"></table></div>
@@ -1441,8 +1444,31 @@ function renderMatrix(rows, summary) {
   }
   const head = `<thead><tr><th>candidate</th>${cells.map((cell) =>
     `<th class="cell-head">${cell.tag}<span>${cellNote(cell)}</span></th>`).join("")}</tr></thead>`;
+  // WHAT THE TWEAK ACTUALLY IS, on the name. Every knob it moves, the shipped
+  // value it moves from, what that knob does, and — for anything filed to the
+  // ideas inbox — the room and the observation that prompted it. This used to
+  // be a whole table of its own below; a reader looking at a row of numbers had
+  // to scroll away from it to find out what the row was about.
+  const whatItIs = (entry) => {
+    const tweak = data.tweaks.find((t) => t.id === entry.id);
+    const changes = knobChanges(tweak?.params ?? entry.params);
+    const knobs = changes.length
+      ? changes.map((c) => `${c.knob}: ${c.from} → ${c.to}${c.note ? `\n    ${c.note}` : ""}`).join("\n")
+      : "changes nothing — a fixture";
+    const from = tweak?.idea
+      ? `\n\nproposed by ${tweak.by ?? "an agent"}${tweak.room ? `, from ${tweak.room}` : ""}`
+        + `${tweak.why ? `\n${tweak.why}` : ""}`
+      : "";
+    const answered = tweak?.settled ? `\n\nANSWERED — ${tweak.settled}` : "";
+    return tipAttrs({
+      value: entry.id,
+      sign: "",
+      label: tweak?.note ?? entry.note ?? "",
+      sub: knobs + from + answered
+    });
+  };
   const body = present.map((entry) => `<tr>
-    <td>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}</td>
+    <td class="who" tabindex="0" ${whatItIs(entry)}>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}</td>
     ${cells.map((cell) => {
       const stat = valueOf(entry.id, cell.tag);
       if (!stat) return `<td class="cell empty" title="not measured">—</td>`;
@@ -1519,25 +1545,33 @@ function renderQueue(rows) {
   for (const row of rows) {
     measured.set(row.tweak, (measured.get(row.tweak) ?? 0) + (row.edges?.length ?? 0));
   }
+  // WHAT IS QUEUED AND HOW FAR IT HAS GOT. The knobs, the shipped values and
+  // what each knob does moved onto the candidate's name in the matrix above —
+  // a reader looking at a row of numbers should not have to scroll past it to
+  // learn what the row is about. What is left here is the one thing the matrix
+  // cannot show: the candidates with NOTHING measured yet, which have no row up
+  // there at all.
   const body = data.tweaks.map((tweak) => {
-    const changes = knobChanges(tweak.params);
     const leagues = measured.get(tweak.id) ?? 0;
-    const rowsFor = changes.length ? changes : [{ knob: "—", from: "", to: "", note: "changes nothing — a fixture" }];
-    return rowsFor.map((change, index) => `<tr${tweak.settled ? ' class="settled"' : ""}>
-      ${index === 0
-        ? `<td rowspan="${rowsFor.length}">${escape(tweak.id)}${tweak.fixture ? ' <span class="muted">*</span>' : ""}
-             <div class="params">${escape(tweak.note)}</div>${provenance(tweak)}${answer(tweak)}</td>`
-        : ""}
-      <td class="knob">${escape(change.knob)}</td>
-      <td>${change.from ? `<span class="muted">${escape(change.from)}</span> → <b>${escape(change.to)}</b>` : ""}</td>
-      <td class="knob-note">${escape(change.note)}</td>
-      ${index === 0
-        ? `<td rowspan="${rowsFor.length}">${leagues ? `${leagues} leagues` : '<span class="muted">not measured</span>'}</td>`
-        : ""}
-    </tr>`).join("");
+    const knobs = knobChanges(tweak.params);
+    return `<tr${tweak.settled ? ' class="settled"' : ""}>
+      <td tabindex="0" ${tipAttrs({
+        value: tweak.id,
+        sign: "",
+        label: tweak.note ?? "",
+        sub: (knobs.length
+          ? knobs.map((c) => `${c.knob}: ${c.from} → ${c.to}${c.note ? `\n    ${c.note}` : ""}`).join("\n")
+          : "changes nothing — a fixture")
+          + (tweak.idea ? `\n\nproposed by ${tweak.by ?? "an agent"}`
+            + `${tweak.room ? `, from ${tweak.room}` : ""}${tweak.why ? `\n${tweak.why}` : ""}` : "")
+      })}>${escape(tweak.id)}${tweak.fixture ? ' <span class="muted">*</span>' : ""}
+        <div class="params">${escape(tweak.note)}</div>${answer(tweak)}</td>
+      <td class="knob">${escape(knobs.map((c) => c.knob).join(", ") || "—")}</td>
+      <td>${leagues ? `${leagues} leagues` : '<span class="muted">not measured</span>'}</td>
+    </tr>`;
   }).join("");
   document.getElementById("queue").innerHTML =
-    `<thead><tr><th>candidate</th><th>knob</th><th>shipped → tweaked</th><th>what the knob does</th><th>measured</th></tr></thead>`
+    `<thead><tr><th>candidate</th><th>knobs it moves</th><th>measured</th></tr></thead>`
     + `<tbody>${body}</tbody>`;
   // A proposal the inbox could not use is skipped rather than measured. If that
   // were not said anywhere, an agent's typo would simply vanish.
