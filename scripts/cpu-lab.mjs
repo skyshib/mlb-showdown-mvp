@@ -404,6 +404,30 @@ function runMixed(cell, params, seedOf) {
 // Which chairs get it ROTATES with the league, so over a batch every seat
 // carries the tweak exactly k/N of the time and no chair or nomination slot can
 // carry the result.
+// THE NO-TWEAK RUN OF THE SAME ROOM, which is what every seat is measured
+// against. Drafted and simulated once per (room, seed) and reused by every
+// adoption level, since none of them change it.
+//
+// Bounded, for the reason the valuation cache had to be: a run walks thousands
+// of seeds and would otherwise hold every room it ever built.
+const CONTROL_RUNS = new Map();
+const CONTROL_RUNS_MAX = 64;
+
+function controlRun(cell, seed) {
+  const key = `${cell.tag}|${seed}`;
+  let found = CONTROL_RUNS.get(key);
+  if (!found) {
+    const draft = driveRoom(cell, seed, () => CONTROL, personaFor);
+    const teams = draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
+    const win = new Map(simulateBatch(teams, { runs: RUNS, seed: `${seed}-sim` })
+      .teams.map((row) => [row.team, row.winPct]));
+    found = draft.managers.map((manager) => win.get(manager.name) ?? 0);
+    if (CONTROL_RUNS.size >= CONTROL_RUNS_MAX) CONTROL_RUNS.delete(CONTROL_RUNS.keys().next().value);
+    CONTROL_RUNS.set(key, found);
+  }
+  return found;
+}
+
 function runDose(cell, params, seedOf, k) {
   const edges = [];
   const foils = [];
@@ -419,10 +443,12 @@ function runDose(cell, params, seedOf, k) {
     const teams = draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
     const win = new Map(simulateBatch(teams, { runs: RUNS, seed: `${seed}-sim` })
       .teams.map((row) => [row.team, row.winPct]));
+    // Each seat against ITSELF in the room where nobody was tweaked.
+    const before = controlRun(cell, seed);
     const tweaked = [];
     const shipped = [];
     draft.managers.forEach((manager, seat) => {
-      (isTweaked(seat) ? tweaked : shipped).push(win.get(manager.name) ?? 0);
+      (isTweaked(seat) ? tweaked : shipped).push((win.get(manager.name) ?? 0) - before[seat]);
     });
     // THE TWEAKED TEAMS' OWN WIN%, against the room's par. Not the gap to the
     // other chairs: that gap is this number scaled by N/(N-k), so it says the
@@ -435,9 +461,23 @@ function runDose(cell, params, seedOf, k) {
     // 0.16 win points, which is a third of the smallest effect worth shipping.
     // Against the room's own mean the two sides sum back to it exactly, by
     // construction, which is the identity the foil below is kept to check.
-    const par = mean([...tweaked, ...shipped]);
-    edges.push(mean(tweaked) - par);
-    foils.push(mean(shipped) - par);
+    // WHAT THE TWEAKED SEATS GAINED OVER THEMSELVES. Measuring against the
+    // room's own mean instead made every seat's luck part of the answer: with
+    // no tweak at all the reading was one chair's good season against the
+    // room average, which at two seats is one roster's luck against one
+    // other's. The `null` fixture read -1.31 and +3.14 in neighbouring rooms
+    // and the page painted both as results.
+    //
+    // Paired against the same seat in the no-tweak room, that luck is the same
+    // number on both sides and cancels. null is now EXACTLY zero, by
+    // construction, in every room and at every adoption level.
+    //
+    // This buys precision, not a different question: a room's win% still sums
+    // to a constant, so what the tweaked seats gain the others lose, and this
+    // reading still cannot tell drafting better from taking cards off rivals.
+    // The foil is kept because it says which seats paid for it.
+    edges.push(mean(tweaked));
+    foils.push(mean(shipped));
   }
   return { edges, foils };
 }
@@ -531,7 +571,11 @@ const rowMatches = (row, tweak, cell, mode) => row.tweak === tweak.id
 function measure(tweak, cell, mode, rows) {
   const done = rows.filter((row) => rowMatches(row, tweak, cell, mode));
   const batch = done.length;
-  const seedOf = (league) => `lab-${cell.tag}-${mode}-${batch}-${league}${HOLDOUT}`;
+  // THE ROOM SEED DOES NOT CARRY THE ADOPTION LEVEL. Every level of a batch
+  // draws the same rooms, so they all share one control room — the no-tweak
+  // run each is measured against — and that control is drafted and simulated
+  // once instead of once per level.
+  const seedOf = (league) => `lab-${cell.tag}-${batch}-${league}${HOLDOUT}`;
   const started = Date.now();
   heartbeat({
     tweak: tweak.id,
