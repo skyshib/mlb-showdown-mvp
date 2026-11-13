@@ -431,10 +431,10 @@
     <div class="panels" id="dose"></div>
     <p class="note" id="dose-omitted"></p>
     <p class="note">
-      Tables of different sizes share an axis here, so it reads as the share of the room that has
-      the tweak rather than a raw count: 1 of 3 and 2 of 6 sit in the same place. Rooms landing on the
-      same share are spread a few pixels apart in alphabetical order, so a room keeps the same column
-      in every panel and can be compared down the page. Hover a point for the exact k and the room.
+      One dot per room, in alphabetical order, in the same place in every panel — so a column can be
+      read down the page to compare one room across candidates. A dot is that room's average over the
+      adoption levels measured in it, weighted equally, which is what the number above the chart adds
+      up to. Hover a dot for the room, its interval and how many levels are behind it.
     </p>
   </section>
 
@@ -1163,6 +1163,16 @@ function tipAttrs({ value, sign, label, sub, aria }) {
     + `aria-label="${escape(aria ?? `${label}: ${value}. ${sub}`)}"`;
 }
 
+// WHERE A ROOM SITS, the same in every panel: its alphabetical rank among all
+// the grid's rooms, as a 0..1 share of the axis. Fixed by the grid, not by
+// which rooms a candidate happens to have reached, so columns line up.
+function roomSlot(tag) {
+  const tags = (data.cells ?? []).map((cell) => cell.tag).sort();
+  const index = tags.indexOf(tag);
+  if (index < 0 || tags.length < 2) return 0.5;
+  return index / (tags.length - 1);
+}
+
 function renderDose(rows, summary) {
   const dosed = rows.filter((row) => row.mode.startsWith("dose-"));
   document.getElementById("dose-card").hidden = dosed.length === 0;
@@ -1178,15 +1188,32 @@ function renderDose(rows, summary) {
     // all eight two-seat rooms became one dot, and on the old grid all eight
     // four-seat rooms did. The strokes below claim to be one per board, and
     // until now they were not.
-    const points = [];
+    // One point per ROOM. Its value is that room's average across the adoption
+    // levels measured in it, weighted equally — the same way the headline and
+    // the CLI average, so the dots add up to the number above them.
+    const byRoom = new Map();
     for (const row of mine) {
-      const teams = row.teams ?? data.cells.find((cell) => cell.tag === row.cell)?.teams ?? 4;
       const k = row.k ?? Number(row.mode.slice(5));
-      const found = points.find((point) => point.k === k && point.cell === row.cell);
-      (found ? found.rows : (points.push({ k, teams, cell: row.cell, rows: [] }), points.at(-1).rows)).push(row);
+      if (!byRoom.has(row.cell)) byRoom.set(row.cell, new Map());
+      const levels = byRoom.get(row.cell);
+      if (!levels.has(k)) levels.set(k, []);
+      levels.get(k).push(...row.edges);
     }
-    for (const point of points) Object.assign(point, pool(point.rows));
-    points.sort((a, b) => a.k / a.teams - b.k / b.teams);
+    const points = [...byRoom].map(([cell, levels]) => {
+      const each = [...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length);
+      const m = each.reduce((a, b) => a + b, 0) / each.length;
+      const all = [...levels.values()].flat();
+      return {
+        cell,
+        levels: each.length,
+        n: all.length,
+        mean: m,
+        ci: each.length > 1
+          ? 1.96 * Math.sqrt(each.reduce((a, b) => a + (b - m) ** 2, 0) / (each.length - 1)) / Math.sqrt(each.length)
+          : ci95(all)
+      };
+    });
+    points.sort((a, b) => a.cell.localeCompare(b.cell));
     if (points.length) series.push({ id: entry.id, points });
   }
   // DRAW ANYTHING WITH TWO READINGS, from any rooms. This used to demand that
@@ -1230,18 +1257,16 @@ function renderDose(rows, summary) {
   const y = (value) => height - pad.bottom - (height - pad.top - pad.bottom) * (0.5 + value / span / 2);
 
   document.getElementById("dose").innerHTML = series.map((line) => {
-    // Read the decay on the board that has the most of the curve, so the
-    // sentence is about one room rather than about two different ones.
-    const widest = [...new Set(line.points.map((point) => point.cell))]
-      .map((cell) => line.points.filter((point) => point.cell === cell))
-      .sort((a, b) => b.length - a.length)[0];
-    const first = widest[0];
-    const last = widest[widest.length - 1];
-    const fades = widest.length > 1 && Math.abs(first.mean - last.mean) > first.ci + last.ci;
-    const reading = widest.length < 2
-      ? "one dose measured so far"
-      : `${fades ? (Math.abs(first.mean) > Math.abs(last.mean) ? "fades" : "grows") : "holds up"} as rivals adopt it`
-        + ` (${widest[0].cell})`;
+    // HOW THE ROOMS DISAGREE, which is what this chart shows now that each dot
+    // is a room. "Fades as rivals adopt it" belonged to the old axis and could
+    // not be read off this one.
+    const up = line.points.filter((point) => point.mean > 0).length;
+    const down = line.points.length - up;
+    const reading = line.points.length < 2
+      ? "one room measured so far"
+      : up === 0 ? `down in all ${down} rooms`
+      : down === 0 ? `up in all ${up} rooms`
+      : `up in ${up} room${up > 1 ? "s" : ""}, down in ${down}`;
     // One stroke per BOARD, not one through the lot: a three-seat room and a
     // six-seat one are different boards as well as different doses, and joining
     // them would draw a trend that nothing measured. The strokes are all the
@@ -1254,29 +1279,21 @@ function renderDose(rows, summary) {
     // strokes, the end labels and the hit targets all agree. It is
     // deliberately smaller than the gap between genuine adoption levels: it
     // separates, it never moves a point to a share it was not measured at.
-    // A ROOM KEEPS ITS COLUMN. The offset is the room's alphabetical rank among
-    // EVERY room on the grid that can land on that share — not its position
-    // among the rooms this candidate happens to have measured. So `a4` sits at
-    // the same horizontal place in every panel, and a reader can run an eye
-    // down a column to compare one room across candidates. Ordering by
-    // whatever arrived first made that impossible: the same room moved panel
-    // to panel depending on which of its neighbours had been measured yet.
-    const slotsAt = new Map();
-    for (const cell of data.cells) {
-      for (let k = 1; k <= cell.teams - 1; k += 1) {
-        const share = (k / cell.teams).toFixed(4);
-        if (!slotsAt.has(share)) slotsAt.set(share, []);
-        if (!slotsAt.get(share).includes(cell.tag)) slotsAt.get(share).push(cell.tag);
-      }
-    }
-    for (const [, tags] of slotsAt) tags.sort();
-    const NUDGE = 5;
-    for (const point of line.points) {
-      const share = (point.k / point.teams).toFixed(4);
-      const tags = slotsAt.get(share) ?? [point.cell];
-      const index = Math.max(0, tags.indexOf(point.cell));
-      point.at = x(point.k / point.teams) + (index - (tags.length - 1) / 2) * NUDGE;
-    }
+    // THE X AXIS IS THE ROOM, alphabetical, the same in every panel — so a
+    // reader can run an eye down a column and compare one room across
+    // candidates, which is the whole point of a grid of rooms.
+    //
+    // It used to be the adoption share, with rooms nudged apart where they
+    // landed on the same share. That could not work here and quietly broke the
+    // axis: thirty-one rooms sit at the half-way share, spreading 150 units,
+    // while the closest two adoption shares are 10 units apart. A dot ended up
+    // sitting on top of a different adoption level, and fitting the nudge
+    // inside the gap would have meant 0.21 units — invisible.
+    //
+    // Adoption share does not need the axis any more. The criterion is the
+    // average OVER adoption, so each room contributes one dot: its own average
+    // across the levels measured in it. The levels are on the hover.
+    for (const point of line.points) point.at = x(roomSlot(point.cell));
     // NO STROKES BETWEEN THE DOTS. A line joining a board's readings looked
     // like a trend and was not one: on this grid most boards have a single
     // point, the rest have two or three, and at panel size the strokes were a
@@ -1300,8 +1317,9 @@ function renderDose(rows, summary) {
           value: `${signed(point.mean)} ±${point.ci.toFixed(2)}`,
           sign: point.mean >= 0 ? "pos" : "neg",
           label: `${line.id} · ${point.cell}`,
-          sub: `${point.k} of ${point.teams} chairs on it · ${point.n} leagues`,
-          aria: `${line.id} on ${point.cell}, ${point.k} of ${point.teams} chairs: `
+          sub: `${point.levels} adoption level${point.levels > 1 ? "s" : ""} · ${point.n} leagues`,
+          aria: `${line.id} on ${point.cell}, averaged over ${point.levels} adoption level`
+            + `${point.levels > 1 ? "s" : ""}: `
             + `${signed(point.mean)} plus or minus ${point.ci.toFixed(2)} win points over ${point.n} leagues`
         })} />
       </g>`;
@@ -1350,15 +1368,15 @@ function renderDose(rows, summary) {
            subtree is one image, which is what suppressed every tooltip in here
            and hid each point from a screen reader as well. -->
       <svg class="plot" viewBox="0 0 ${width} ${height}" role="group"
-        aria-label="${escape(`${line.id}: win-point change of the tweaked chairs against the share of the room carrying the tweak`)}">
+        aria-label="${escape(`${line.id}: win-point change in each of the ${(data.cells ?? []).length} rooms, averaged over how many managers carry it`)}">
         <line class="zero" x1="${pad.left}" y1="${y(0)}" x2="${width - pad.right}" y2="${y(0)}" />
         <line class="grid" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" />
         <text x="${pad.left - 6}" y="${y(span) + 4}" text-anchor="end">${signed(span, 1)}</text>
         <text x="${pad.left - 6}" y="${y(0) + 4}" text-anchor="end">0</text>
         <text x="${pad.left - 6}" y="${y(-span) + 4}" text-anchor="end">${signed(-span, 1)}</text>
-        <text x="${x(0)}" y="${height - 14}" text-anchor="start">lone adopter</text>
-        <text x="${x(1)}" y="${height - 14}" text-anchor="end">last holdout</text>
-        <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">share of the room with the tweak</text>
+        <text x="${x(0)}" y="${height - 14}" text-anchor="start">${escape((data.cells[0] ?? {}).tag ?? "")}</text>
+        <text x="${x(1)}" y="${height - 14}" text-anchor="end">${escape([...(data.cells ?? [])].map((c) => c.tag).sort().at(-1) ?? "")}</text>
+        <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">the ${(data.cells ?? []).length} rooms, alphabetical</text>
         ${path}
         ${marks}
       </svg>
