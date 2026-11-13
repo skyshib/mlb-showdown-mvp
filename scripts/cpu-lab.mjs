@@ -70,6 +70,7 @@ import { simulateBatch } from "../src/rules/batch.js";
 import { CPU_KNOB_GENERATIONS, CPU_TUNABLE_DEFAULTS, baselineKey, cpuTunables, knobGeneration } from "../src/rules/cpuTunables.js";
 import { IDEA_REJECTS, TWEAKS, tweakById } from "./cpu-lab-tweaks.mjs";
 import { appendIdea, ideasFile, knobKey } from "./cpu-lab-ideas.mjs";
+import { RULE, chances, verdictSoFar } from "./cpu-lab-rule.mjs";
 // The grid lives in its own module: the room server reads it too, and importing
 // this file for it would run the CLI.
 import { CELLS, cellShape } from "./cpu-lab-cells.mjs";
@@ -890,97 +891,23 @@ function verdict(mixed, abs, id, dose = { lone: { n: 0 }, crowd: { n: 0 } }) {
 // measured so far, and those are the small ones. A candidate called either way
 // keeps its rows and is re-opened by naming it with --tweak.
 //
-// THE RULE (Skylar's, 2026-11-13). A candidate keeps being measured until the
-// readings so far say one of two things:
+// THE RULE lives in cpu-lab-rule.mjs, because cpu-lab.html needs it too and
+// keeping a second copy on the page is how the page and the bench came to
+// disagree about the positive control. The flags below override its defaults.
 //
-//   ACCEPT  the average is above zero with 99% confidence
-//   KILL    90% of the posterior sits below zero
-//
-// Deliberately asymmetric. Accepting only means "keep measuring this one
-// properly", so a wrong accept costs time; killing ends the run, so it wants
-// to be the easier call for a candidate that is going nowhere.
-//
-// THE NUMBERS ARE FITTED, not chosen by taste. Skylar asked for at most a 5%
-// false-accept rate on a true null and at most 20% of genuine gains killed,
-// and these were simulated to hit it.
-//
-// FITTED TWICE, AND THE FIRST FIT WAS WRONG. It assumed each reading varies by
-// about 0.9 win points, which was measured on a FOUR-manager auction room. The
-// grid runs cheapest-first, so the readings that actually drive these
-// decisions come from TWO-manager rooms — one chair's luck against one other
-// chair's, with no averaging across seats — and the positive control measured
-// the real spread there at 2.26, ranging -6.28 to +2.98 across sixteen rooms.
-//
-// At that spread the first fit delivered the opposite of what was asked: it
-// killed a real +0.3 thirty percent of the time against a twenty percent
-// limit, and accepted one only seven percent of the time. Re-fitted:
-//
-//                   accept kill min | false-acc  kills a real +0.3  finds it
-//   fitted to 0.9    0.999  0.75  5      1.5%         30.2%            7%
-//   fitted to 2.26   0.99   0.90  8      5.0%          8.0%           21%
-//
-// A NOMINAL FIGURE HERE READS FAR LOOSER THAN IT SOUNDS, because the question
-// is asked after every one of ninety-three readings. 99% nominal is a 5% rate
-// in practice. That is also why these cannot be reasoned about and have to be
-// re-simulated whenever the spread changes.
-//
-// AND THE SPREAD IS NOT ONE NUMBER. It narrows as a candidate moves into wider
-// rooms, where each reading averages over more seats. Fitting to the two-seat
-// figure is the conservative end: later readings are steadier than this
-// assumes, which errs toward not killing.
-//
-// A 21% find rate is not a tuning failure. At a spread of 2.26 a tweak worth
-// +0.3 is near the detection limit — the signal is an eighth of the noise in a
-// single reading — and no choice of threshold fixes that. The 79% are not
-// killed either; they run the full grid and land in the report.
-//
-// The accept bar is ABOVE ZERO rather than above some worth-shipping figure,
-// which was tried: at +0.2 the false accepts fall to 6%, but a genuine +0.3
-// then runs the whole grid without deciding 64% of the time, and failing to
-// decide is worse than occasionally deciding wrong.
-//
-// A candidate that is neither accepted nor killed is NOT lost — it runs the
-// full grid and lands in the report with its number. The early accept is a
-// shortcut, so a lower accept rate costs time rather than discoveries.
-const PRIOR_SD = Number(args.prior ?? 0.5);        // most tweaks land inside ±0.5 win points
-const ACCEPT_ABOVE = Number(args["accept-above"] ?? 0);
-const ACCEPT_AT = Number(args.accept ?? 0.99);
-const KILL_AT = Number(args.kill ?? 0.90);
-const MIN_LOOKS = Number(args["min-looks"] ?? 8);
-
-// Φ, good to about 1e-7 — plenty for a stopping rule.
-function normalCdf(z) {
-  const t = 1 / (1 + 0.2316419 * Math.abs(z));
-  const d = 0.3989422804014327 * Math.exp(-z * z / 2);
-  const p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-  return z >= 0 ? 1 - p : p;
-}
-
-// What the readings so far say about the true average effect.
-function chances(samples) {
-  const n = samples.length;
-  if (n < 2) return null;
-  const m = mean(samples);
-  const spread = Math.sqrt(samples.reduce((a, b) => a + (b - m) * (b - m), 0) / (n - 1));
-  // A spread of zero (the null fixture, every reading exactly 0) would divide
-  // by nothing; floor it at something small but real.
-  const s = Math.max(spread, 0.05);
-  const post = 1 / (1 / (PRIOR_SD * PRIOR_SD) + n / (s * s));
-  const centre = post * (n * m / (s * s));
-  const sd = Math.sqrt(post);
-  const above = 1 - normalCdf((ACCEPT_ABOVE - centre) / sd);
-  return { n, mean: m, centre, sd, above, below: normalCdf((0 - centre) / sd) };
-}
-
-// Accept, kill, or keep going.
-function verdictSoFar(samples) {
-  if (!samples || samples.length < Math.max(2, MIN_LOOKS)) return null;
-  const odds = chances(samples);
-  if (!odds) return null;
-  if (odds.above > ACCEPT_AT) return { ...odds, call: "accept" };
-  if (odds.below > KILL_AT) return { ...odds, call: "kill" };
-  return null;
-}
+// Either call is a SCREENING decision, not a verdict: it is made on the rooms
+// measured so far, and the grid runs cheapest-first so those are the small
+// ones. A candidate called either way keeps its rows and is re-opened by
+// naming it with --tweak.
+const RULE_ARGS = {
+  prior: Number(args.prior ?? RULE.prior),
+  accept: Number(args.accept ?? RULE.accept),
+  kill: Number(args.kill ?? RULE.kill),
+  above: Number(args["accept-above"] ?? RULE.above),
+  minLooks: Number(args["min-looks"] ?? RULE.minLooks)
+};
+const KILL_AT = RULE_ARGS.kill;
+const ACCEPT_ABOVE = RULE_ARGS.above;
 
 // ---- commands ---------------------------------------------------------------
 const allTweakIds = TWEAKS.map((tweak) => tweak.id);
@@ -1191,7 +1118,7 @@ if (command === "list") {
   // room four times and then moves on, which is the wrong order for a rule
   // meant to decide early: it would spend its whole budget in the two-seat
   // rooms before seeing a four-seat one.
-  const PASSES = Number(args.passes ?? 4);
+  const PASSES = Number(args.passes ?? RULE.passes);
   const plan = [];
   for (const id of order) {
     if (!tweakById(id).fixture) continue;
@@ -1272,7 +1199,7 @@ if (command === "list") {
       // cheaply. This buys the verdict in minutes; a full sweep for coverage is
       // a deliberate `--kill 0` run, not something every launch pays for.
       if (KILL_AT > 0) {
-        const called = verdictSoFar(soFar);
+        const called = verdictSoFar(soFar, RULE_ARGS);
         if (called) {
           abandoned.set(id, called);
           const why = called.call === "accept"

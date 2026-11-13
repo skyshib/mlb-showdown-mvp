@@ -255,6 +255,10 @@
   .panel-headline { margin: 2px 0 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .panel-avg { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
   .panel-avg-note { font-size: 11px; color: var(--text-muted); }
+  /* How near this candidate is to being accepted or killed — the same
+     posterior the bench stops on, so the page can show one coming. */
+  .panel-odds { font-size: 11px; color: var(--text-secondary); flex-basis: 100%; }
+  .panel-odds b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
 
   /* ---- what is running, and what is paying off ----
      Two things a reader wants in the first screen: is the bench working right
@@ -358,7 +362,9 @@
     <div class="chart-head">
       <h2>Is the bench sound?</h2>
       <p class="hint">
-        Three fixtures answer that, and nothing else on the page means anything until they do.
+        Two fixtures answer that, and nothing else on the page means anything until they do.
+        (A third, the placebo, became <code>test/cpu-wobble-salt.test.js</code> — it was checking a
+        property of the random number generator, which does not need a sweep of the grid.)
       </p>
     </div>
     <div class="tiles" id="health"></div>
@@ -491,6 +497,11 @@
 <div id="tip" role="tooltip" aria-hidden="true"></div>
 
 <script type="module">
+// THE STOPPING RULE, IMPORTED, not restated. The page shows how near a
+// candidate is to being accepted or killed, and the bench decides it — a
+// second copy of either the thresholds or the arithmetic is how those two came
+// to disagree about the positive control earlier today.
+import { RULE, chances } from "./scripts/cpu-lab-rule.mjs";
 const token = new URLSearchParams(location.search).get("token");
 const api = `/api/cpu-lab${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
@@ -850,11 +861,27 @@ function renderRunning() {
 }
 
 // ---- the health strip -------------------------------------------------------
+// The average across every room and adoption level, each weighted the same —
+// the CLI's averageBoost, so the page and the bench cannot disagree.
+function averageOfRows(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.cell}|${row.mode}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(...row.edges);
+  }
+  const each = [...groups.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length);
+  if (!each.length) return { n: 0, mean: 0, ci: 0 };
+  const m = each.reduce((a, b) => a + b, 0) / each.length;
+  if (each.length < 2) return { n: 1, mean: m, ci: Infinity };
+  const sd = Math.sqrt(each.reduce((a, b) => a + (b - m) ** 2, 0) / (each.length - 1));
+  return { n: each.length, mean: m, ci: 1.96 * sd / Math.sqrt(each.length) };
+}
+
 function renderHealth(summary) {
   const find = (id) => summary.find((entry) => entry.id === id)
     ?? { lone: { n: 0 }, crowd: { n: 0 } };
   const nul = find("null");
-  const placebo = find("jiggle");
   const control = find("no-starter-discount");
   // `find` answers with empty readings for a candidate the curve has not
   // reached yet, so every tile below renders as "not measured" rather than
@@ -877,36 +904,42 @@ function renderHealth(summary) {
     }));
 
   }
-  if (placebo) {
-    // Whichever dose it has been measured at, tightest interval first: this is
-    // the floor a real candidate has to clear, so it should be read off the
-    // most precise thing the bench has.
-    const read = [placebo.crowd, placebo.lone].filter((stat) => stat.n)
-      .sort((a, b) => a.ci - b.ci)[0] ?? { n: 0 };
-    const loud = read.n && Math.abs(read.mean) - read.ci > 0;
-    tiles.push(tile({
-      label: "The placebo",
-      value: read.n ? `${signed(read.mean)} ±${read.ci.toFixed(2)}` : "—",
-      state: read.n ? (loud ? "bad" : "good") : "idle",
-      stateText: read.n ? (loud ? "✗ reads something" : "✓ reads nothing") : "not measured",
-      note: "the same bid wobble re-drawn off a different seed — same floor, same width, same "
-        + "mean bid, so it is the shipped bidder in a different auction. Nothing inside this "
-        + "interval means anything."
-    }));
-  }
+  // THE PLACEBO TILE IS GONE. `jiggle` re-rolls a manager's private per-card
+  // bid wobble, and since every manager already carries their own independent
+  // wobble, re-rolling one does not make him more different from the rest than
+  // he already was — it swaps one arbitrary draw for another, which is zero by
+  // symmetry. Its spread was never a floor either: the wobble is on for every
+  // manager in every league, so its variation is already inside every interval
+  // the bench reports.
+  //
+  // What it did uniquely check — that salting the RNG key re-rolls without
+  // shifting the distribution — is test/cpu-wobble-salt.test.js now, and takes
+  // a second rather than a sweep. So it is no longer run, and a tile that can
+  // only ever say "not measured" is worse than no tile.
   if (control) {
-    // Whichever way it was measured. The curve is the default now, so a bench
-    // that has only run doses has still answered this — and the answer is the
-    // same either way: a known loss has to read negative.
-    const read = control.crowd.n ? control.crowd : control.lone;
-    const how = control.crowd.n ? "with all but one chair on it" : "to a lone adopter";
-    const right = read.n && read.mean + read.ci < 0;
+    // JUDGED THE WAY THE RUN JUDGES IT. This tile used to read one end of the
+    // adoption curve and call the control failed whenever that end's interval
+    // touched zero — a different question from the one the bench actually
+    // asks, so the page could print "not reproduced" about a control the run
+    // had already CONFIRMED. Both now read the average across every room and
+    // adoption level, which is the criterion.
+    //
+    // It is also worth knowing this tile is hard to light up at one sweep: the
+    // control is strongly negative where the discount applies and near zero
+    // where it does not, so the average needs several sweeps to separate from
+    // zero even though the effect is large and real.
+    const read = averageOfRows(data.rows.filter((row) => row.tweak === "no-starter-discount"
+      && row.mode.startsWith("dose-") && controlKey(row) === state.control));
+    const right = read.n > 1 && read.mean + read.ci < 0;
     tiles.push(tile({
       label: "Positive control",
       value: read.n ? `${signed(read.mean)} ±${read.ci.toFixed(2)}` : "—",
-      state: read.n ? (right ? "good" : "bad") : "idle",
-      stateText: read.n ? `${right ? "✓ reproduced" : "✗ not reproduced"} ${how}` : "not measured",
-      note: "paying full price for a narrow board's starters is a known loss. It has to read negative."
+      state: read.n ? (right ? "good" : "idle") : "idle",
+      stateText: read.n
+        ? (right ? "✓ reproduced as a known loss" : "measuring — not yet clear of zero")
+        : "not measured",
+      note: "paying full price for a narrow board's starters is a known loss, so this has to come "
+        + "out negative. Averaged over every room and adoption level, the same way a candidate is."
     }));
   }
   document.getElementById("health").innerHTML = tiles.join("")
@@ -1289,10 +1322,22 @@ function renderDose(rows, summary) {
       ? 1.96 * Math.sqrt(each.reduce((a, b) => a + (b - avg) * (b - avg), 0) / (each.length - 1)) / Math.sqrt(each.length)
       : null;
     const clear = band != null && Math.abs(avg) > band;
+    // HOW CLOSE IS IT TO BEING DECIDED. The same posterior the bench stops on,
+    // so a reader can see a candidate approaching its call rather than only
+    // learning it happened. Whichever side it is leaning, with the bar it has
+    // to reach.
+    const odds = chances(each);
+    const toGo = !odds ? ""
+      : odds.below >= odds.above
+        ? `<span class="panel-odds"><b>${(100 * odds.below).toFixed(0)}%</b> below zero`
+          + `<span class="muted"> · killed at ${(100 * RULE.kill).toFixed(0)}%</span></span>`
+        : `<span class="panel-odds"><b>${(100 * odds.above).toFixed(0)}%</b> above zero`
+          + `<span class="muted"> · accepted at ${(100 * RULE.accept).toFixed(0)}%</span></span>`;
     const headline = `<span class="panel-avg ${clear ? (avg > 0 ? "num pos" : "num neg") : "muted"}">`
       + `${signed(avg)}${band != null ? ` ±${band.toFixed(2)}` : ""}</span>`
       + `<span class="panel-avg-note">${each.length} room${each.length > 1 ? "s" : ""} × adoption level`
-      + `${each.length > 1 ? "s" : ""}${clear ? "" : ", not clear of zero"}</span>`;
+      + `${each.length > 1 ? "s" : ""}</span>`
+      + toGo;
     return `<div class="panel${isLive ? " live-panel" : ""}">
       <p class="panel-name">${escape(line.id)}${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
       <p class="panel-headline">${headline}</p>

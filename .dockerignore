@@ -34,6 +34,11 @@ scripts/*
 # would ever show on the page.
 !scripts/cpu-lab-ideas.mjs
 !scripts/cpu-lab-ideas.jsonl
+# The stopping rule, which cpu-lab.html imports IN THE BROWSER so the page and
+# the bench cannot drift apart on when a candidate is decided. Note that
+# test/traffic.test.js cannot catch a mistake here: it walks what the SERVER
+# imports, and this is fetched by the page.
+!scripts/cpu-lab-rule.mjs
 
 # Never opened by the running server.
 test
