@@ -1189,25 +1189,33 @@ if (command === "list") {
   // at 91% against a 90% bar, and the bench sat on ten readings and never
   // fired. The decision has to use every reading that exists under these
   // controls, not the ones this process has personally seen.
+  // id -> Map("<cell>|<dose>" -> that pair's pooled mean). KEYED, not a list:
+  // a reading is a room-and-adoption-level, pooled over however many batches
+  // it has, and a repeat batch REPLACES that pair's number instead of adding a
+  // second one. Pushing each batch as its own entry made the same pair count
+  // as independent evidence — scarcity-off's 51 pairs arrived as 115 entries,
+  // and the extra n carried it over the 99% accept bar that the page, reading
+  // the same rows off disk, put at 97.8%. Two data sources, two verdicts.
   const seenSoFar = new Map();
+  const readingsFor = (id) => [...(seenSoFar.get(id)?.values() ?? [])];
   const seenSizes = new Map();          // which table sizes each candidate has read in
   const abandoned = new Map();
   for (const id of order) {
     const tweak = tweakById(id);
-    const already = [];
+    const already = new Map();
     for (const tag of cellTags) {
       const cell = cellByTag(tag);
       for (const mode of modesFor(cell, tweak)) {
         if (!mode.startsWith("dose-")) continue;
         const banked = rows.filter((row) => rowMatches(row, tweak, cell, mode));
         if (banked.length) {
-          already.push(pooled(banked).mean);
+          already.set(`${tag}|${mode}`, pooled(banked).mean);
           if (!seenSizes.has(id)) seenSizes.set(id, new Set());
           seenSizes.get(id).add(cell.teams);
         }
       }
     }
-    if (already.length) seenSoFar.set(id, already);
+    if (already.size) seenSoFar.set(id, already);
   }
   outer:
   {
@@ -1229,7 +1237,7 @@ if (command === "list") {
       // twelve minutes, to reach a verdict its 74 banked readings had already
       // settled.
       {
-        const called = verdictSoFar(seenSoFar.get(id), RULE_ARGS, (seenSizes.get(id) ?? new Set()).size);
+        const called = verdictSoFar(readingsFor(id), RULE_ARGS, (seenSizes.get(id) ?? new Set()).size);
         if (called) {
           abandoned.set(id, called);
           const why = called.call === "accept"
@@ -1281,8 +1289,11 @@ if (command === "list") {
           // and never fired. The page, reading the stored rows, showed it at
           // 91% against a 90% bar while the run carried on regardless: two
           // different data sources for the same question.
-          if (!seenSoFar.has(id)) seenSoFar.set(id, []);
-          seenSoFar.get(id).push(stat.mean);
+          if (!seenSoFar.has(id)) seenSoFar.set(id, new Map());
+          // Re-pooled from every batch this pair has, so a second batch sharpens
+          // the pair's number rather than counting as a second reading.
+          seenSoFar.get(id).set(`${tag}|${mode}`,
+            pooled(rows.filter((row) => rowMatches(row, tweak, cell, mode))).mean);
           if (!seenSizes.has(id)) seenSizes.set(id, new Set());
           seenSizes.get(id).add(cell.teams);
           console.log(`  ${id.padEnd(32)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
@@ -1291,7 +1302,7 @@ if (command === "list") {
       }
       // ENOUGH? Asked after each room, because the grid runs cheapest first
       // and the point is to decide before the eight-seat rooms are bought.
-      const soFar = seenSoFar.get(id);
+      const soFar = readingsFor(id);
       // THE RULE APPLIES TO FIXTURES TOO. The positive control is expected to
       // be NEGATIVE, so the kill call is its PASS: it stops as soon as the
       // readings are confidently below zero, which on the last run would have
