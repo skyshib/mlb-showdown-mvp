@@ -271,6 +271,20 @@ const methodOf = (row) => row.method ?? LEGACY_METHOD;
 
 const BASELINE = args.baseline ?? baselineKey();
 const LEGACY_BASELINE = "tuned-2026-11-10";
+// The knobs the THRONE last moved — what a challenger would have to displace
+// rather than stack with. Read off the two newest generations: whatever differs
+// between them is what the last ship changed.
+const THRONE_KNOBS = (() => {
+  const gens = Object.entries(CPU_KNOB_GENERATIONS).filter(([, g]) => g.knobs);
+  const live = gens.find(([, g]) => cpuTunables(g.knobs).key === "");
+  if (!live) return new Set();
+  const previous = gens.find(([name, g]) => name !== live[0] && g.at && g.at <= live[1].at
+    && Object.keys(g.knobs).length === Object.keys(live[1].knobs).length);
+  if (!previous) return new Set();
+  return new Set(Object.keys(live[1].knobs).filter((knob) =>
+    JSON.stringify(live[1].knobs[knob]) !== JSON.stringify(previous[1].knobs[knob])));
+})();
+
 const baselineOf = (row) => row.baseline ?? LEGACY_BASELINE;
 
 const GIT = (() => {
@@ -1007,7 +1021,23 @@ if (command === "list") {
   // reading answers a question about an opponent that no longer exists; pooling
   // the two silently is the mistake this whole column exists to prevent, and it
   // had already been made three times before `baseline` was recorded at all.
-  console.log(`\n  measured against ${BASELINE}, the bidder that ships today`);
+  console.log(`\n  THE THRONE is ${BASELINE}, the bidder that ships today`
+    + `${THRONE_KNOBS.size ? ` — its last ship moved ${[...THRONE_KNOBS].join(", ")}` : ""}`);
+  // An accepted candidate is a CHALLENGER, not a winner: it beat whoever was on
+  // the throne when it was measured, and a ship replaces that opponent. Listing
+  // them here is how you see, without running anything, what the next pass will
+  // spend its first hours on.
+  const pretenders = challengerRank(rows);
+  if (pretenders.size) {
+    const claims = [...pretenders.entries()].sort((a, b) => b[1].mean - a[1].mean);
+    console.log(`  ${claims.length} challenger(s), measured first by every run until they are settled:`);
+    for (const [id, claim] of claims) {
+      console.log(`    ${id.padEnd(30)} ${signed(claim.mean).padStart(6)} over ${String(claim.n).padStart(3)}`
+        + ` readings against ${claim.norm}`
+        + `${claim.current ? " (the current throne)" : " — must win again"}`
+        + `${claim.rival ? ", RIVAL for the same knob" : ""}`);
+    }
+  }
   console.log(`\n  ${"tweak".padEnd(30)}${"cells measured".padStart(16)}${"leagues".padStart(10)}`
     + `${"older norm".padStart(12)}  knobs`);
   let strandedTotal = 0;
@@ -1157,17 +1187,44 @@ if (command === "list") {
   // The bench is the `null` tweak against a frozen generation: nothing is
   // changed relative to the LIVE defaults, so what it measures is the live
   // bidder against that generation.
+  // FIXTURES FIRST, THEN THE CHALLENGERS. An accepted candidate beat whoever was
+  // on the throne at the time; once something ships it has to win again against
+  // the new control, and it gets measured first because it is the only thing in
+  // the queue with a claim.
+  const pretenders = command === "bench" ? new Map() : challengerRank(rows);
   const order = command === "bench"
     ? ["null"]
-    : [...tweakIds].sort((a, b) =>
-      Number(Boolean(tweakById(b).fixture)) - Number(Boolean(tweakById(a).fixture)));
+    : [...tweakIds].sort((a, b) => {
+      const fixture = Number(Boolean(tweakById(b).fixture)) - Number(Boolean(tweakById(a).fixture));
+      if (fixture) return fixture;
+      const ca = pretenders.get(a);
+      const cb = pretenders.get(b);
+      if (Boolean(ca) !== Boolean(cb)) return Number(Boolean(cb)) - Number(Boolean(ca));
+      if (ca && cb) return cb.mean - ca.mean;
+      return 0;
+    });
   console.log(`cpu-lab ${command} — ${LEAGUES} leagues x ${RUNS} games a batch, persona=${PERSONA}, `
     + `perturb=${PERTURB == null ? "shipped" : PERTURB}, versus ${VERSUS}${HOLDOUT}, git ${GIT}`);
   if (VERSUS !== "defaults") {
     const generation = knobGeneration(VERSUS);
     console.log(`  control chairs: ${VERSUS} (${generation.at}, ${generation.git}) — ${generation.note}`);
   }
-  console.log(`  ${order.length} tweaks x ${cellTags.length} cells x ${MODE} x ${BATCHES} batches -> ${OUT}\n`);
+  console.log(`  ${order.length} tweaks x ${cellTags.length} cells x ${MODE} x ${BATCHES} batches -> ${OUT}`);
+  const claiming = order.filter((id) => pretenders.has(id));
+  if (claiming.length) {
+    console.log(`\n  THE THRONE is ${BASELINE}`
+      + `${THRONE_KNOBS.size ? ` — last ship moved ${[...THRONE_KNOBS].join(", ")}` : ""}.`);
+    console.log(`  ${claiming.length} challenger(s) measured first, strongest claim first:`);
+    for (const id of claiming) {
+      const claim = pretenders.get(id);
+      console.log(`    ${id.padEnd(30)} ${signed(claim.mean).padStart(6)} over ${String(claim.n).padStart(3)} readings`
+        + ` against ${claim.norm}${claim.current ? " (the current throne)" : " — must win again"}`
+        + `${claim.rival ? ", RIVAL for the same knob" : ""}`);
+    }
+    console.log("");
+  } else {
+    console.log("");
+  }
   let ran = 0;
   let stopped = false;
   // THE ORDER THE WORK IS DONE IN, as a flat list of (tweak, cell) pairs,
@@ -1741,6 +1798,78 @@ function shipCheck(id) {
 // conservative choice and the honest one: it carries the spread BETWEEN rooms,
 // not just the luck inside each, so a tweak that helps in half the rooms and
 // hurts in the other half reads as unsettled rather than as a confident zero.
+// ---- the throne ------------------------------------------------------------
+// WHO IS CHALLENGING, and why "accepted" is not a resting place.
+//
+// Skylar's rule, 2026-11-13: the shipped bidder is the throne. A candidate the
+// stopping rule ACCEPTS has beaten whoever was on the throne AT THE TIME — and
+// the moment anything ships, that sentence is about a bidder that no longer
+// exists. So an accepted candidate does not retire to the back of the queue
+// holding a win: it goes to the FRONT and has to beat the new control before it
+// can take the throne itself.
+//
+// Derived from the record rather than hand-flagged, so it cannot go stale. A
+// candidate is a challenger if the rule reads `accept` on it under ANY norm and
+// it has not since been settled. Ranked by the size of that accepted reading,
+// so the strongest pretender is measured first.
+//
+// NOTE WHAT "THE THRONE" MEANS FOR AN ORTHOGONAL KNOB. Two candidates moving
+// the SAME knob are rivals — only one value can ship. Candidates moving
+// different knobs are not: they would ship alongside each other, and beating
+// the new control means clearing it on top of the shipped change rather than
+// instead of it. The `rival` flag below is the difference.
+function challengerRank(rows) {
+  const out = new Map();
+  const sizeOf = new Map(CELLS.map((cell) => [cell.tag, cell.teams]));
+  const shipped = new Set(Object.keys(CPU_TUNABLE_DEFAULTS));
+  for (const tweak of TWEAKS) {
+    if (tweak.fixture || tweak.settled) continue;
+    const mine = rows.filter((row) => row.tweak === tweak.id
+      && row.params === paramKey(tweak.params)
+      && row.mode.startsWith("dose-")
+      && row.persona === PERSONA && row.perturb === (PERTURB == null ? "shipped" : PERTURB)
+      && (row.versus ?? "defaults") === "defaults" && (row.holdout ?? "") === ""
+      && methodOf(row) === METHOD);
+    if (!mine.length) continue;
+    // One verdict per norm: a reading against an older bidder still counts as
+    // the win that made this a challenger, it just does not count as the win
+    // that takes the throne.
+    const byNorm = new Map();
+    for (const row of mine) {
+      const norm = baselineOf(row);
+      if (!byNorm.has(norm)) byNorm.set(norm, new Map());
+      const key = `${row.cell}|${row.mode}`;
+      const seen = byNorm.get(norm);
+      if (!seen.has(key)) seen.set(key, []);
+      seen.get(key).push(...row.edges);
+    }
+    let best = null;
+    for (const [norm, seen] of byNorm) {
+      const samples = [...seen.values()].map((edges) => mean(edges));
+      const sizes = new Set([...seen.keys()].map((key) => sizeOf.get(key.split("|")[0])));
+      const called = verdictSoFar(samples, RULE_ARGS, sizes.size);
+      if (called?.call !== "accept") continue;
+      const score = mean(samples);
+      // The current norm always wins the tie: a win against today's bidder is
+      // the one that counts, whatever an older bucket says.
+      if (!best || (norm === BASELINE && best.norm !== BASELINE) || (norm === best.norm && score > best.mean)) {
+        best = { norm, mean: score, n: samples.length, rooms: new Set([...seen.keys()].map((k) => k.split("|")[0])).size };
+      }
+    }
+    if (!best) continue;
+    out.set(tweak.id, {
+      ...best,
+      current: best.norm === BASELINE,
+      // Does it move a knob the reigning bidder's last ship moved? Then it is a
+      // succession fight over one number. Otherwise it stacks.
+      rival: Object.keys(tweak.params ?? {}).some((knob) => shipped.has(knob)
+        && THRONE_KNOBS.has(knob))
+    });
+  }
+  return out;
+}
+
+
 function averageBoost(rows) {
   const groups = new Map();
   for (const row of rows) {

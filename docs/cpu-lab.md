@@ -77,6 +77,33 @@ that number with the sign flipped. If it doesn't, the effect was never a propert
 of the knob; it was a property of the comparison, and every number the bench has
 produced is worth less than it looks. Nothing else here checks that.
 
+**The throne.** The shipped bidder is the throne, and `accepted` is not a
+resting place. The rule accepting a candidate means it beat whoever was on the
+throne *at the time* — so the moment anything ships, that sentence is about a
+bidder that no longer exists. An accepted candidate therefore goes back to the
+**front of the queue** and has to win again against the new control before it
+can take the throne itself.
+
+`list` and `run` both show it, and `run` measures challengers first, strongest
+claim first:
+
+```
+THE THRONE is tuned-2026-11-13 — its last ship moved poolPremiumThreshold
+4 challenger(s), measured first by every run until they are settled:
+  arm-balance-parity          +0.49 over 22 readings against tuned-2026-11-10 — must win again
+  pool-premium-threshold-0-7  +0.41 over 48 readings ... RIVAL for the same knob
+```
+
+It is **derived from the record, not hand-flagged**, so it cannot go stale: a
+candidate is a challenger whenever the stopping rule reads `accept` on it under
+any norm and it has not since been settled.
+
+**`RIVAL` is the distinction that matters.** Two candidates moving the *same*
+knob are in a succession fight — only one value can ship, so beating the throne
+means replacing it. Candidates moving *different* knobs are not rivals: they
+would ship alongside the throne, and winning means clearing the bar *on top of*
+the shipped change rather than instead of it. Only the first kind is a contest.
+
 **Which bidder a reading was taken against.** Every row carries `baseline`: the
 name of the generation whose knobs were the *shipped defaults* when it was
 measured. This is not the same as `versus`, which is who sat in the **control
