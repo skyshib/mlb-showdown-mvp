@@ -117,7 +117,15 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
   // and the pen is the cheaper staff hole. Accepted at +0.33 +-0.25 over 28
   // readings in 17 rooms and three table sizes, ON TOP OF the two positions
   // already held.
-  snakeBalanceBonus: 60, // an arm when the staff is short
+  // ...and 60 -> 70 the same day, by the bracket the accept queued. 60 was
+  // PARITY with hitterPositionBonus, which was a principled place to look and
+  // turned out not to be the optimum: 70 reads +0.33 +-0.24 against a table on
+  // 60 (99% above zero) while 50 reads -0.16 against the same table, so the knob
+  // wants to go UP past parity rather than sit on it. The staff hole is worth
+  // MORE than the lineup hole it was matched to, which is a claim about the
+  // board — a lineup hole can be filled from a deep pool of bats and a rotation
+  // hole cannot. 65 and 75 are queued to narrow it.
+  snakeBalanceBonus: 70, // an arm when the staff is short
   snakeArmLean: 140, // how far an archetype's pitcher bias moves an arm
   snakeForcedNeed: 1000, // the override that stops a roster stranding a slot
   snakeScarcityRate: 0.8, // of the dropoff to the next man at the spot
@@ -247,6 +255,56 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
       snakeScarcityCap: 120
     })
   }),
+  "tuned-2026-11-13d": Object.freeze({
+    at: "2026-11-13",
+    git: "dca76ff",
+    fingerprint: "eadc1fe008f3",
+    // THE FOURTH SHIP OF THE DAY, and the first won by a BRACKET rather than by
+    // a proposal: accepting snakeBalanceBonus=60 queued 50 and 70 automatically,
+    // 70 won and 50 lost, so the knob went past the parity value it had just
+    // been crowned at. That is the bracket doing its job — 60 was the first
+    // number anybody tried, and it was not the best one.
+    //
+    // Still no head to head on any of the four positions. See tuned-2026-11-13.
+    note: "three positions, with the staff bonus past parity at 70",
+    knobs: Object.freeze({
+      perturbation: 0.25,
+      hitterWeights: null,
+      pitcherWeights: null,
+      starterDiscount: 0.65,
+      starterNarrowSpread: 0.04,
+      starterWideSpread: 0.05,
+      relieverSpacingShare: 0.3,
+      relieverTopRate: 2.5,
+      relieverDepthRate: 0.7,
+      penDepthTarget: 5,
+      relieverFloorByRoom: 0,
+      slotTiebreak: 0.05,
+      urgencyPatient: 0.5,
+      urgencyDesperate: 1,
+      urgencyWeight: 1,
+      depthSlots: 3,
+      depthDamp: 0.7,
+      shareExponent: 1.1,
+      poolPremiumStrength: 0.7,
+      poolPremiumThreshold: 0.5,
+      aggressionFloor: 0.86,
+      wobbleSalt: "",
+      aggressionSpan: 0.28,
+      paceFloor: 0.75,
+      paceCeiling: 1.8,
+      roundsFloor: 0.7,
+      roundsCeiling: 2.2,
+      roundsBudgetDivisor: 25,
+      snakeNeedBonus: 80,
+      snakeNeedSpan: 0,
+      snakeBalanceBonus: 70,
+      snakeArmLean: 140,
+      snakeForcedNeed: 1000,
+      snakeScarcityRate: 0.8,
+      snakeScarcityCap: 120
+    })
+  }),
   "tuned-2026-11-13c": Object.freeze({
     at: "2026-11-13",
     git: "9e9782b",
@@ -262,7 +320,7 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     // adoption curves, which is the reading that pays for denial. If the stack
     // turns out not to beat a table without it, tuned-2026-11-10 is the revert
     // for all three at once.
-    note: "three positions: the 50th-percentile lift, no snake need span, and the staff bonus at parity",
+    note: "three positions: the 50th-percentile lift, no snake need span, and the staff bonus at parity — superseded the same day by tuned-2026-11-13d",
     knobs: Object.freeze({
       perturbation: 0.25,
       hitterWeights: null,

@@ -1545,6 +1545,29 @@ if (command === "list") {
 // proportional — but a raw 17% of 60 is 10.2 and queues 49.8 and 70.2, which
 // are not values anybody is asking about. Rounding the STEP to the nearest
 // 1, 2 or 5 times a power of ten gives 10, and so 50 and 70.
+// HALF THE LAST MOVE, EITHER SIDE OF THE WINNER. A bisection rather than a walk:
+// each accept halves the stride, so the search narrows instead of marching
+// outward, and it terminates — which matters because every accept queues two
+// more candidates.
+//
+// It stops when the step gets below 2% of the winning value, which is the point
+// at which the bench cannot tell the neighbours apart anyway: three rounds of
+// halving off a 25-point move lands inside a win-point interval of +-0.25.
+function halvedNeighbours(won, previous) {
+  const move = Math.abs(won - previous);
+  if (!Number.isFinite(move) || move <= 0) return [];
+  const step = move / 2;
+  if (step < Math.abs(won) * 0.02) return [];
+  // 0.5 - 0.15 is 0.35000000000000003, and the value is the candidate's id as
+  // well as its number. Round to one more decimal than the step needs.
+  const places = Math.max(0, Math.ceil(-Math.log10(step)) + 1);
+  const clean = (value) => Number(value.toFixed(places));
+  return [clean(won - step), clean(won + step)]
+    .filter((value) => value !== won)
+    // A term switched off has no smaller dose; negative points the other way.
+    .filter((value) => won !== 0 || value > 0);
+}
+
 // A KNOB SHIPPED AT ZERO HAS NO PROPORTIONAL NEIGHBOURS, and switching a term
 // off is exactly the kind of change that wins here — snakeNeedSpan is 0 as of
 // today. Scale those off the largest value the knob has ever held instead, so
@@ -1687,17 +1710,26 @@ function queueTheNeighbours(winner, called) {
   const tag = (value) => String(value).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
   for (const [knob, won] of Object.entries(tweak.params ?? {})) {
     if (typeof won !== "number") continue;
-    const scale = Math.max(0, ...Object.values(CPU_KNOB_GENERATIONS)
-      .map((generation) => Math.abs(Number(generation.knobs?.[knob]) || 0)));
-    for (const value of neighboursOf(won, scale)) {
+    // THE STEP IS HALF THE MOVE THAT JUST WON (Skylar, 2026-11-13), and at
+    // accept time the shipped default is still the value this candidate was
+    // measured against — so that difference IS the last move. 60 -> 70 won by a
+    // move of 10, so the next pair is 70 +- 5: 65 and 75.
+    //
+    // Halving converges. A fixed proportional step would walk the knob outward
+    // at the same stride forever and never narrow on an answer, and each accept
+    // queues two more candidates, so an unconverging search is also an
+    // unbounded one.
+    const previous = Number(CPU_TUNABLE_DEFAULTS[knob]);
+    for (const value of halvedNeighbours(won, previous)) {
       const outcome = appendIdea({
         id: `${slug(knob)}-${tag(value)}`,
         knobs: { [knob]: value },
         note: `bracket off an accepted value: ${knob} at ${value} rather than the ${won} that just won`,
         why: `${winner} was accepted at ${knob}=${won} (${signed(called?.centre ?? 0)} on `
-          + `${called?.n ?? 0} readings). That says the knob matters and that ${won} beats what it was `
-          + `compared against — not that ${won} is the right number. The shape either side of it is `
-          + `unmeasured, and the first value tried is a bad place to stop.`,
+          + `${called?.n ?? 0} readings), a move of ${Math.abs(won - previous)} from ${previous}. That `
+          + `says the knob matters and that ${won} beats ${previous} — not that ${won} is the right `
+          + `number. This is half that move either side, so each round narrows on an answer instead of `
+          + `walking outward at a fixed stride.`,
         by: "cpu-lab accept",
         bracketOf: winner
       }, spokenFor);

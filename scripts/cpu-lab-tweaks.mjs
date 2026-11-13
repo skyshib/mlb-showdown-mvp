@@ -224,6 +224,31 @@ const QUEUED = [
     params: { poolPremiumThreshold: 0.6 }
   },
   {
+    id: "snake-balance-bonus-70",
+    note: "the staff-hole bonus past parity at 70, the upper neighbour of the 60 that had just won",
+    // SHIPPED 2026-11-13 (tuned-2026-11-13d). THE FIRST POSITION WON BY A
+    // BRACKET rather than by a proposal: accepting 60 queued 50 and 70
+    // automatically, 70 read +0.33 +-0.24 (99% above zero) and 50 read -0.16
+    // against the same table, so the knob wanted to go UP past the parity value
+    // it had just been crowned at.
+    //
+    // Which is a claim about the board, not just a number: a lineup hole can be
+    // filled from a deep pool of bats and a rotation hole cannot, so matching
+    // the staff bonus to hitterPositionBonus was always going to undershoot.
+    // 65 and 75 are queued to narrow it.
+    settled: "SHIPPED tuned-2026-11-13d — +0.33 +-0.24 accepted; holdout and head-to-head still outstanding",
+    params: { snakeBalanceBonus: 70 }
+  },
+  {
+    id: "snake-balance-bonus-50",
+    note: "the staff-hole bonus at 50, the lower neighbour of the 60 that had just won",
+    // REJECTED 2026-11-13: -0.16 +-0.27 against a table on 60, with 70 winning
+    // on the same pass. The pair is what makes either reading mean anything —
+    // one neighbour up and one down, and the knob moved up.
+    settled: "REJECTED — -0.16 +-0.27 against the 60 bidder while 70 read +0.33; the knob wants to go up",
+    params: { snakeBalanceBonus: 50 }
+  },
+  {
     id: "arm-balance-parity",
     note: "pay an arm who fills a staff hole the same 60 a bat who fills a lineup hole gets, "
       + "instead of 35",
