@@ -449,10 +449,11 @@
     </div>
     <div class="scroll"><table class="matrix" id="matrix"></table></div>
     <p class="note">
-      The <b>null</b> row is the yardstick. It carries no tweak, so whatever it reads in a room is
-      that room's noise — and at two seats, where one chair's luck is measured against one other
-      chair's, that noise is large. Any reading inside its own room's band is printed but not
-      painted, whoever it belongs to.
+      The <b>jiggle</b> row is the yardstick. It re-draws the bid wobble from the same
+      distribution — the shipped bidder in a different auction — so whatever it reads in a room is
+      what this bench pays for a change worth nothing. Any reading inside its own room's band is
+      printed but not painted, whoever it belongs to. (<b>null</b> changes nothing at all and now
+      reads exactly zero everywhere, which makes it a plumbing check rather than a ruler.)
       The table size IS the pool size — the deck is dealt to the room — so the columns run from a
       two-seat duel to a wide eight-seat board. A knob that is right at one width and wrong at
       another shows up here and nowhere else.
@@ -1309,14 +1310,18 @@ function renderMatrix(rows, summary) {
     return { n, mean: m, ci: 1.96 * sd / Math.sqrt(each.length) };
   };
 
-  // THE YARDSTICK. The `null` fixture changes nothing, so whatever it reads in
-  // a room is that room's noise — and at two seats, where one chair's luck is
-  // measured against one other chair's, that noise is LARGE. Before this, the
-  // matrix painted null's own +3.14 at s2-fiction in full "won" blue, which is
-  // the page confidently reporting a result for a tweak that does not exist.
-  // Anything inside the band is drawn as nothing, whoever it belongs to.
+  // THE YARDSTICK IS THE PLACEBO, NOT THE NULL. `null` changes nothing at all,
+  // and since each seat is now measured against itself in a no-tweak room it
+  // reads EXACTLY zero everywhere — which makes it a perfect plumbing check and
+  // a useless ruler, because a band of zero greys out nothing.
+  //
+  // `jiggle` is the right source: it re-draws the per-card bid wobble from the
+  // same distribution, so it is the shipped bidder in a different auction. Its
+  // rosters really do differ, so whatever it reads is what this bench pays for
+  // a change worth nothing — which is exactly the bar a candidate has to clear.
+  // Anything inside the band is printed but not painted, whoever it belongs to.
   const noiseIn = (tag) => {
-    const mine = rows.filter((row) => row.tweak === "null" && row.cell === tag && wanted(row));
+    const mine = rows.filter((row) => row.tweak === "jiggle" && row.cell === tag && wanted(row));
     if (!mine.length) return 0;
     const all = mine.flatMap((row) => row.edges);
     return Math.max(Math.abs(ci95(all)), ...mine.map((row) => Math.abs(row.edges.reduce((a, b) => a + b, 0) / row.edges.length)));
