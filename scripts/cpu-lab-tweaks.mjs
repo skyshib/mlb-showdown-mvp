@@ -224,6 +224,27 @@ const QUEUED = [
     params: { poolPremiumThreshold: 0.6 }
   },
   {
+    id: "pool-premium-threshold-0-5",
+    note: "the top-of-deck lift starts at the 50th percentile instead of the 80th",
+    // SHIPPED 2026-11-13 (tuned-2026-11-13). Came in through the ideas inbox as
+    // the bracket below the 0.6 that shipped and was reverted, and is the first
+    // candidate accepted by the stopping rule on the REBUILT bench: +0.73 +-0.54
+    // over 48 readings in 20 of 39 rooms and five table sizes, and the better of
+    // the two values tried (0.7 reads +0.41).
+    //
+    // SHIPPED WITHOUT THE GATE, and that is on the record on purpose. The
+    // pre-ship checklist reads 3 of 5: the holdout seeds and the head-to-head
+    // were never run at this value, and the head-to-head is the exact check
+    // that caught the SAME KNOB at 0.6 (+1.48 mixed, -0.04 identical, reverted
+    // in a day). Skylar's 2026-11-13 standard is to implement an accepted
+    // candidate at once and re-measure everything else against it, so this went
+    // in and the two missing checks are being taken after the fact. If the
+    // head-to-head comes back flat, revert to tuned-2026-11-10 — the generation
+    // is there for exactly that.
+    settled: "SHIPPED tuned-2026-11-13 — +0.73 +-0.54 accepted; holdout and head-to-head still outstanding",
+    params: { poolPremiumThreshold: 0.5 }
+  },
+  {
     id: "rounds-divisor-tight",
     note: "judge a round's spending against a smaller slice of the bankroll, so the "
       + "spend-down reacts sooner",

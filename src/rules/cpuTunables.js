@@ -66,10 +66,16 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
   depthDamp: 0.7, // how much softer a bench card is bid
   shareExponent: 1.1, // how hard the bankroll concentrates on the best men left
   poolPremiumStrength: 0.7, // the lift on a card at the very top of the deck
-  // Moved to 0.6 on 2026-11-11 and PUT BACK on 2026-11-12. It reads +1.48
-  // +-0.25 against a table still on 0.8 and -0.04 +-0.16 head to head, which is
-  // denial and nothing else — see the tuned-2026-11-11 generation below.
-  poolPremiumThreshold: 0.8, // the percentile the lift starts at
+  // 0.8 -> 0.6 on 2026-11-11 and PUT BACK on 2026-11-12: +1.48 +-0.25 against a
+  // table still on 0.8 but -0.04 +-0.16 head to head, which is denial and
+  // nothing else — see the tuned-2026-11-11 generation below. 0.5 on
+  // 2026-11-13 on the REBUILT bench (seat-paired, 39 real-shaped rooms): the
+  // average boost is +0.73 +-0.54 over 48 readings in 20 rooms and five table
+  // sizes, and the rule accepted it. THE HEAD TO HEAD IS STILL UNMEASURED AT
+  // THIS VALUE — the check that caught 0.6 has not been run on 0.5. Shipped
+  // under Skylar's 2026-11-13 standard of implementing an accepted candidate
+  // at once and re-measuring the rest against it.
+  poolPremiumThreshold: 0.5, // the percentile the lift starts at
   aggressionFloor: 0.86, // the seeded per-card wobble: floor and width
   aggressionSpan: 0.28,
   // The salt on that wobble's seed. It is the one knob here that is NOT a
@@ -218,11 +224,60 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
       snakeScarcityCap: 120
     })
   }),
+  "tuned-2026-11-13": Object.freeze({
+    at: "2026-11-13",
+    git: "dc58920",
+    fingerprint: "f68e04c38f3d",
+    // WHAT SHIPS TODAY. The only knob that moved since tuned-2026-11-10 is the
+    // top-of-deck threshold, now 0.5 — accepted by the stopping rule on the
+    // rebuilt seat-paired bench at +0.73 +-0.54 over 48 readings. It ships
+    // WITHOUT the head-to-head gate, which is the one check that caught the
+    // same knob at 0.6; if a table of 0.5 bidders turns out not to beat a table
+    // without, this is the generation to revert to tuned-2026-11-10.
+    note: "the top-of-deck lift widened to the 50th percentile",
+    knobs: Object.freeze({
+      perturbation: 0.25,
+      hitterWeights: null,
+      pitcherWeights: null,
+      starterDiscount: 0.65,
+      starterNarrowSpread: 0.04,
+      starterWideSpread: 0.05,
+      relieverSpacingShare: 0.3,
+      relieverTopRate: 2.5,
+      relieverDepthRate: 0.7,
+      penDepthTarget: 5,
+      relieverFloorByRoom: 0,
+      slotTiebreak: 0.05,
+      urgencyPatient: 0.5,
+      urgencyDesperate: 1,
+      urgencyWeight: 1,
+      depthSlots: 3,
+      depthDamp: 0.7,
+      shareExponent: 1.1,
+      poolPremiumStrength: 0.7,
+      poolPremiumThreshold: 0.5,
+      aggressionFloor: 0.86,
+      wobbleSalt: "",
+      aggressionSpan: 0.28,
+      paceFloor: 0.75,
+      paceCeiling: 1.8,
+      roundsFloor: 0.7,
+      roundsCeiling: 2.2,
+      roundsBudgetDivisor: 25,
+      snakeNeedBonus: 80,
+      snakeNeedSpan: 120,
+      snakeBalanceBonus: 35,
+      snakeArmLean: 140,
+      snakeForcedNeed: 1000,
+      snakeScarcityRate: 0.8,
+      snakeScarcityCap: 120
+    })
+  }),
   "tuned-2026-11-10": Object.freeze({
     at: "2026-11-10",
     git: "acc9aae",
     fingerprint: "c4661e913763",
-    note: "the bidder as tuned by three years of paired studies — the shipped values the day the lab was built",
+    note: "the bidder as tuned by three years of paired studies — the shipped values the day the lab was built; what tuned-2026-11-13 reverts to",
     knobs: Object.freeze({
       perturbation: 0.25,
       hitterWeights: null,
