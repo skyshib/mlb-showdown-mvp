@@ -890,6 +890,12 @@ const WORTH = Number(args.worth ?? 0.2);      // the smallest gain worth shippin
 const GIVE_UP = Number(args["give-up"] ?? 0.03);
 const SURE = Number(args.sure ?? 0.9);
 const MIN_LOOKS = Number(args["min-looks"] ?? 6);
+// An OBVIOUSLY bad candidate should not have to wait for the full count. Three
+// readings cannot settle a close call, but they can settle a hopeless one, so a
+// candidate whose chance of being worth it has fallen below a tenth of the
+// ordinary bar goes immediately. The point of the whole rule is not spending an
+// hour on something that announced itself in the first three minutes.
+const SURE_LOOKS = 3;
 
 // Φ, good to about 1e-7 — plenty for a stopping rule.
 function normalCdf(z) {
@@ -1173,7 +1179,9 @@ if (command === "list") {
       // ENOUGH? Asked after each room, because the grid runs cheapest first
       // and the point is to decide before the eight-seat rooms are bought.
       const soFar = seenSoFar.get(id);
-      if (!tweak.fixture && GIVE_UP > 0 && soFar && soFar.length >= MIN_LOOKS) {
+      const looksEnough = soFar && (soFar.length >= MIN_LOOKS
+        || (soFar.length >= SURE_LOOKS && (chances(soFar)?.worthIt ?? 1) < GIVE_UP / 10));
+      if (!tweak.fixture && GIVE_UP > 0 && looksEnough) {
         const odds = chances(soFar);
         if (odds && odds.worthIt < GIVE_UP) {
           abandoned.set(id, odds);
