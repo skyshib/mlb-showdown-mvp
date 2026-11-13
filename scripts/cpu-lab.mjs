@@ -131,11 +131,24 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
   --holdout   move every seed into a separate namespace. Confirm a winner here
               and it is a winner on seeds that had no hand in picking it.
   --leagues   leagues per batch (default 24). One league = two drafted rooms.
-  --runs      simulated games per team per league (default 1500).
+  --runs      games simulated per league (default 1500) — the LEAGUE's total,
+              not each team's. Every team plays runs x 2 / teams of them, so a
+              team plays 1500 games in a two-manager room, 750 in a four and
+              372 in an eight. Averaging over more seats makes up most of the
+              difference, but a wide room is not giving each team more data.
   --batches   how deep each (tweak, cell, mode) should be measured (default 1).
               A pair that is already that deep is skipped, so re-running fills
               gaps and raising this is how you add precision.
   --minutes   stop starting new work after this long. Finished rows are kept.
+  --worth     the smallest average gain worth shipping, in win points
+              (default 0.2). A candidate is abandoned once the readings so far
+              make it unlikely to clear this.
+  --give-up   abandon at this probability of being worth it (default 0.03).
+              --give-up 0 measures everything, whatever it looks like.
+  --prior     how big effects are expected to be before measuring anything
+              (default 0.5 win points). Centred on zero, because nearly all
+              tweaks are worth nothing.
+  --min-looks don't abandon before this many readings (default 6).
   --persona   the archetype every seat wears (default balanced), or "rotate".
   --perturb   the seeded wobble on a manager's weights (default 0.25, the
               shipped value; 0 makes every seat of an archetype think alike).
@@ -848,6 +861,59 @@ function verdict(mixed, abs, id, dose = { lone: { n: 0 }, crowd: { n: 0 } }) {
   return "null so far — inside the interval, needs more batches or it is nothing";
 }
 
+// ---- WHEN TO GIVE UP ON A CANDIDATE -----------------------------------------
+//
+// One batch of one candidate over the whole grid is about two hours, and most
+// candidates are worth nothing — that is the normal and correct outcome of a
+// bench like this, and the record bears it out. Spending the same two hours on
+// each of them is the single biggest waste left in the lab.
+//
+// So a candidate is judged as it goes. The grid runs cheapest room first, so by
+// the time the two- and three-seat rooms are done a candidate has a real
+// reading for a few minutes of work, and the expensive eight-seat rooms are
+// only bought by candidates that still look alive.
+//
+// THE MODEL. Each room-and-adoption-level gives one observation of the true
+// average effect. Take those observations as normal around the truth with a
+// spread estimated from themselves, and put a prior on the truth centred at
+// zero — because the overwhelming majority of tweaks ARE zero, and a prior
+// that pretends otherwise is how a bench talks itself into noise. WORTH is the
+// smallest effect anybody would ship for; the posterior says how likely the
+// truth is to clear it.
+//
+// Abandoned when that probability falls below GIVE_UP. This is a SCREENING
+// decision, not a verdict: it says the candidate stopped looking promising in
+// the rooms measured so far, and those are the small ones. A candidate cut this
+// way keeps its rows and can be re-opened by naming it with --tweak.
+const PRIOR_SD = Number(args.prior ?? 0.5);   // most tweaks land inside ±0.5 win points
+const WORTH = Number(args.worth ?? 0.2);      // the smallest gain worth shipping
+const GIVE_UP = Number(args["give-up"] ?? 0.03);
+const SURE = Number(args.sure ?? 0.9);
+const MIN_LOOKS = Number(args["min-looks"] ?? 6);
+
+// Φ, good to about 1e-7 — plenty for a stopping rule.
+function normalCdf(z) {
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989422804014327 * Math.exp(-z * z / 2);
+  const p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  return z >= 0 ? 1 - p : p;
+}
+
+// What the readings so far say about the true average effect.
+function chances(samples) {
+  const n = samples.length;
+  if (n < 2) return null;
+  const m = mean(samples);
+  const spread = Math.sqrt(samples.reduce((a, b) => a + (b - m) * (b - m), 0) / (n - 1));
+  // A spread of zero (the null fixture, every reading exactly 0) would divide
+  // by nothing; floor it at something small but real.
+  const s = Math.max(spread, 0.05);
+  const post = 1 / (1 / (PRIOR_SD * PRIOR_SD) + n / (s * s));
+  const centre = post * (n * m / (s * s));
+  const sd = Math.sqrt(post);
+  return { n, mean: m, centre, sd, worthIt: 1 - normalCdf((WORTH - centre) / sd) };
+}
+
 // ---- commands ---------------------------------------------------------------
 const allTweakIds = TWEAKS.map((tweak) => tweak.id);
 const wanted = (value, every) => (value == null || value === "all" ? every : value.split(","));
@@ -1031,17 +1097,28 @@ if (command === "list") {
   // leaves the rest with nothing; cell-outer leaves every candidate measured on
   // the SAME boards, which is a comparison. The first is a report you cannot
   // read across.
+  // Fixtures first, all of them, across every room: there is no point
+  // measuring a candidate on a bench that has not shown it can measure nothing.
+  //
+  // Then CANDIDATE-OUTER, cheapest room first. This used to be room-outer so
+  // that a budget running short left every candidate measured on the same
+  // ground — a fair comparison. Abandoning early is worth more than that
+  // fairness: a candidate has to accumulate its own evidence in one run before
+  // the rule can act on it, and the rooms are ordered cheapest-first so the
+  // verdict arrives before the expensive rooms are bought.
   const plan = [];
   for (const id of order) {
     if (!tweakById(id).fixture) continue;
     for (const tag of cellTags) plan.push([id, tag]);
   }
-  for (const tag of cellTags) {
-    for (const id of order) {
-      if (tweakById(id).fixture) continue;
-      plan.push([id, tag]);
-    }
+  for (const id of order) {
+    if (tweakById(id).fixture) continue;
+    for (const tag of cellTags) plan.push([id, tag]);
   }
+  // What each candidate has read so far in THIS run, one number per
+  // room-and-adoption-level, and who has been given up on.
+  const seenSoFar = new Map();
+  const abandoned = new Map();
   outer:
   {
     for (const [id, tag] of plan) {
@@ -1053,6 +1130,7 @@ if (command === "list") {
       // queue only grows spends its nights re-measuring things it already
       // knows. The answer lives on the tweak in cpu-lab-tweaks.mjs.
       if (tweak.settled && args.tweak == null) continue;
+      if (abandoned.has(id)) continue;
       const cell = cellByTag(tag);
       const owed = modesFor(cell, tweak).filter((mode) =>
         rows.filter((row) => rowMatches(row, tweak, cell, mode)).length < BATCHES);
@@ -1084,11 +1162,30 @@ if (command === "list") {
           const stat = pooled([row]);
           have += 1;
           ran += 1;
+          if (!tweak.fixture) {
+            if (!seenSoFar.has(id)) seenSoFar.set(id, []);
+            seenSoFar.get(id).push(stat.mean);
+          }
           console.log(`  ${id.padEnd(32)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
             + `${signed(stat.mean).padStart(7)} ±${stat.ci.toFixed(2).padStart(5)}  ${row.seconds}s`);
         }
       }
+      // ENOUGH? Asked after each room, because the grid runs cheapest first
+      // and the point is to decide before the eight-seat rooms are bought.
+      const soFar = seenSoFar.get(id);
+      if (!tweak.fixture && GIVE_UP > 0 && soFar && soFar.length >= MIN_LOOKS) {
+        const odds = chances(soFar);
+        if (odds && odds.worthIt < GIVE_UP) {
+          abandoned.set(id, odds);
+          console.log(`  ${id.padEnd(32)} GIVEN UP after ${odds.n} readings — `
+            + `${signed(odds.mean)} so far, ${(100 * odds.worthIt).toFixed(1)}% chance of clearing ${signed(WORTH)}`);
+        }
+      }
     }
+  }
+  if (abandoned.size) {
+    console.log(`\n  ${abandoned.size} candidate(s) abandoned early. They keep their rows and are measured`);
+    console.log(`  again whenever named with --tweak; --give-up 0 turns this off.`);
   }
   console.log(ran || stopped ? "" : "\n  nothing owed — every pair already has its batches. --batches N to deepen.\n");
   reportFor(order, cellTags, readRows());
