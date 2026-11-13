@@ -157,6 +157,11 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
               (default 0.5 win points). Centred on zero, because nearly all
               tweaks are worth nothing.
   --min-looks don't call it before this many readings (default 5).
+  --min-rooms don't measure a candidate the grid barely reaches: once every
+              room has been walked once, drop it if it moves nothing in all but
+              this many (default 3). Not a verdict on the knob — it says the
+              grid cannot answer, and only a room built for the knob's
+              precondition could. --min-rooms 0 measures them anyway.
   --accept-sizes  don't ACCEPT until the readings span this many different
               table sizes (default 2). The grid runs smallest room first, so
               without it a candidate could be accepted having only ever been
@@ -954,6 +959,14 @@ const RULE_ARGS = {
   minLooks: Number(args["min-looks"] ?? RULE.minLooks),
   acceptSizes: Number(args["accept-sizes"] ?? RULE.acceptSizes)
 };
+// HOW MANY ROOMS A CANDIDATE MUST BITE IN to be worth measuring at all. Some
+// knobs only apply where a precondition holds — an uncapped bullpen, a long
+// roster — and the grid is built from the rooms people actually play, where
+// those are rare. `check` skips a room the knob moves nothing in, so such a
+// candidate runs out of grid and sits undecided forever however many passes it
+// is given. Dropping it is not a verdict on the knob: it says the grid cannot
+// answer the question, and only a room built for the precondition could.
+const MIN_ROOMS = Number(args["min-rooms"] ?? 3);
 const KILL_AT = RULE_ARGS.kill;
 const ACCEPT_ABOVE = RULE_ARGS.above;
 
@@ -1199,6 +1212,7 @@ if (command === "list") {
   const seenSoFar = new Map();
   const readingsFor = (id) => [...(seenSoFar.get(id)?.values() ?? [])];
   const seenSizes = new Map();          // which table sizes each candidate has read in
+  const roomsTried = new Map();         // rooms walked, and of those the ones it moves
   const abandoned = new Map();
   for (const id of order) {
     const tweak = tweakById(id);
@@ -1265,6 +1279,18 @@ if (command === "list") {
       if (!tweak.fixture) {
         heartbeat({ tweak: tweak.id, cell: cell.tag, mode: "reach", league: 0, leagues: 0 });
         const touch = reach(cell, tweak.params);
+        if (!roomsTried.has(id)) roomsTried.set(id, { walked: new Set(), bites: new Set() });
+        const seen = roomsTried.get(id);
+        seen.walked.add(tag);
+        if (touch.moves) seen.bites.add(tag);
+        // Once the whole grid has been walked once, we know how much of it this
+        // knob can ever reach. Below the bar, stop: more passes cannot help.
+        if (MIN_ROOMS > 0 && seen.walked.size >= cellTags.length && seen.bites.size < MIN_ROOMS) {
+          abandoned.set(id, { call: "narrow", n: seen.bites.size });
+          console.log(`  ${id.padEnd(32)} DROPPED — moves nothing in ${cellTags.length - seen.bites.size} `
+            + `of ${cellTags.length} rooms; ${seen.bites.size} is too few for this grid to settle it`);
+          continue;
+        }
         if (!touch.moves) {
           console.log(`  ${id.padEnd(32)} ${tag.padEnd(12)} INERT — no roster and no price moved, skipped`);
           continue;
@@ -1331,9 +1357,10 @@ if (command === "list") {
     }
   }
   if (abandoned.size) {
-    const killed = [...abandoned.values()].filter((v) => v.call === "kill").length;
-    console.log(`\n  ${killed} killed, ${abandoned.size - killed} accepted early. Both keep their rows and`);
-    console.log(`  are measured again whenever named with --tweak; --kill 0 turns the rule off.`);
+    const tally = (call) => [...abandoned.values()].filter((v) => v.call === call).length;
+    console.log(`\n  ${tally("kill")} killed, ${tally("accept")} accepted early, ${tally("narrow")} dropped for`);
+    console.log(`  reaching too little of the grid. All keep their rows and are measured again`);
+    console.log(`  whenever named with --tweak; --kill 0 and --min-rooms 0 turn the two rules off.`);
   }
   console.log(ran || stopped ? "" : "\n  nothing owed — every pair already has its batches. --batches N to deepen.\n");
   reportFor(order, cellTags, readRows());
