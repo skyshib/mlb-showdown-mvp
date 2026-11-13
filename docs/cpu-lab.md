@@ -77,6 +77,43 @@ that number with the sign flipped. If it doesn't, the effect was never a propert
 of the knob; it was a property of the comparison, and every number the bench has
 produced is worth less than it looks. Nothing else here checks that.
 
+**Which bidder a reading was taken against.** Every row carries `baseline`: the
+name of the generation whose knobs were the *shipped defaults* when it was
+measured. This is not the same as `versus`, which is who sat in the **control
+chairs** because somebody asked for them. `baseline` is who the control chairs
+were *by default* — and shipping a knob changes that for everything measured
+afterwards.
+
+So a ship splits the record in two, and the halves must never be pooled:
+"candidate against a 0.8 bidder" and "candidate against a 0.5 bidder" are two
+different experiments that would otherwise average into one meaningless number.
+Every reader partitions on it and says what it set aside:
+
+| surface | what it shows |
+| --- | --- |
+| `list` | counts are against today's bidder; an **older norm** column holds what the last ship stranded |
+| `report` | pools only the current norm and prints how many rows it quarantined, and under which generation |
+| `screen` | names the bidder in its header, and after a ship says *nothing measured against this bidder* rather than *nothing measured* |
+| `ship` | all five checks read the current norm only, and the message names the bidder when a check has no rows |
+| `cpu-lab.html` | the room-control key includes the baseline, and a banner fires when you are looking at a stale bucket |
+
+`--baseline <generation>` reads an older bucket on purpose. It is **read-only**:
+a run always measures against the live defaults, because that is who the control
+chairs actually are.
+
+Expect a ship to cost most of the record — it stranded 23,760 leagues on
+2026-11-13 — and plan on re-screening the queue rather than carrying on.
+
+**A shipped candidate cannot be its own control.** Once a knob's value *is* the
+default, `--mode identical` with no `--versus` compares a table against a copy of
+itself and reads zero for a reason that has nothing to do with the knob. `ship`
+drops such rows instead of counting them as a pass or a fail, and tells you to
+name the generation from before the ship:
+
+```sh
+node scripts/cpu-lab.mjs run --tweak <id> --mode identical --versus tuned-2026-11-10
+```
+
 **Settled candidates.** A tweak carrying `settled:` in the queue is one the
 bench has answered. A sweep leaves it alone; naming it with `--tweak` re-opens
 it. A bench whose queue only grows spends its nights re-measuring what it knows.

@@ -1002,19 +1002,41 @@ const modesFor = (cell, tweak) => {
 if (command === "list") {
   const rows = readRows();
   console.log(`cpu-lab — ${OUT}`);
-  console.log(`\n  ${"tweak".padEnd(26)}${"cells measured".padStart(16)}${"leagues".padStart(10)}  knobs`);
+  // THE COUNTS ARE AGAINST THE BIDDER THAT SHIPS TODAY, and the last column is
+  // what that cost. Shipping a knob moves the control chairs, so every earlier
+  // reading answers a question about an opponent that no longer exists; pooling
+  // the two silently is the mistake this whole column exists to prevent, and it
+  // had already been made three times before `baseline` was recorded at all.
+  console.log(`\n  measured against ${BASELINE}, the bidder that ships today`);
+  console.log(`\n  ${"tweak".padEnd(30)}${"cells measured".padStart(16)}${"leagues".padStart(10)}`
+    + `${"older norm".padStart(12)}  knobs`);
+  let strandedTotal = 0;
+  const strandedSets = new Set();
   for (const tweak of TWEAKS) {
-    const mine = rows.filter((row) => row.tweak === tweak.id && row.params === paramKey(tweak.params));
+    const every = rows.filter((row) => row.tweak === tweak.id && row.params === paramKey(tweak.params));
+    const mine = every.filter((row) => baselineOf(row) === BASELINE);
+    const stale = every.filter((row) => baselineOf(row) !== BASELINE);
+    for (const row of stale) strandedSets.add(baselineOf(row));
+    const stranded = stale.reduce((sum, row) => sum + row.edges.length, 0);
+    strandedTotal += stranded;
     const cells = new Set(mine.map((row) => row.cell));
     const leagues = mine.reduce((sum, row) => sum + row.edges.length, 0);
     const mark = tweak.fixture ? `${tweak.id} *` : (tweak.idea ? `${tweak.id} +` : tweak.id);
+    const older = stranded ? String(stranded) : "-";
     if (tweak.settled) {
-      console.log(`  ${mark.padEnd(26)}${"ANSWERED".padStart(16)}${String(leagues).padStart(10)}  ${tweak.settled}`);
+      console.log(`  ${mark.padEnd(30)}${"ANSWERED".padStart(16)}${String(leagues).padStart(10)}`
+        + `${older.padStart(12)}  ${tweak.settled}`);
       continue;
     }
-    console.log(`  ${mark.padEnd(26)}`
-      + `${`${cells.size}/${CELLS.length}`.padStart(16)}${String(leagues).padStart(10)}  `
+    console.log(`  ${mark.padEnd(30)}`
+      + `${`${cells.size}/${CELLS.length}`.padStart(16)}${String(leagues).padStart(10)}${older.padStart(12)}  `
       + `${Object.entries(tweak.params).map(([k, v]) => `${k}=${v}`).join(" ") || "(none)"}`);
+  }
+  if (strandedTotal) {
+    console.log(`\n  "older norm" is ${strandedTotal} leagues measured when a DIFFERENT bidder shipped`);
+    console.log(`  (${[...strandedSets].sort().join(", ")}). They are real measurements and they still`);
+    console.log(`  say what they said — about an opponent that is no longer in the control chairs — so`);
+    console.log(`  they are not pooled with the columns to their left. Read them with --baseline <gen>.`);
   }
   console.log(`\n  * fixture: null must read 0.00, jiggle is the placebo, no-starter-discount is the positive control`);
   const answered = TWEAKS.filter((tweak) => tweak.settled);
@@ -1040,9 +1062,16 @@ if (command === "list") {
   for (const [name, generation] of Object.entries(CPU_KNOB_GENERATIONS)) {
     const drift = cpuTunables(generation.knobs).key;
     const measured = rows.filter((row) => (row.versus ?? "defaults") === name).length;
+    // Two different counts, and conflating them is easy: `measured` is rows
+    // where this generation sat in the CONTROL chairs because somebody passed
+    // --versus, while `norm` is rows taken while this generation WAS what
+    // shipped. The second is the one that says whether a candidate's record
+    // still applies.
+    const norm = rows.filter((row) => baselineOf(row) === name).length;
     console.log(`    ${name.padEnd(20)} ${generation.at}  ${String(generation.git ?? "-").padEnd(9)}`
       + `${drift ? `${drift.split("|").length} knobs differ from live` : "matches the live defaults"}`
-      + `${measured ? `, ${measured} measurements` : ""}`);
+      + `${norm ? `, the norm for ${norm} rows` : ""}`
+      + `${measured ? `, seated as control in ${measured}` : ""}`);
     console.log(`      ${generation.note}`);
   }
 } else if (command === "idea") {
@@ -1539,12 +1568,23 @@ function shipCheck(id) {
   const no = [];
 
   // 1. Does it read positive, and is it clear of zero?
+  //
+  // NO READINGS IS NOT A NEGATIVE READING. After a ship every candidate's
+  // record is against the previous bidder, so this check goes from a number to
+  // nothing at all — and saying "+0.00, and it is negative" of an empty set
+  // reads as a verdict the bench has not got.
   const mine = rows.filter((row) => sameRoom(row) && row.tweak === id && row.mode.startsWith("dose-"));
   const boost = averageBoost(mine);
+  const doseStale = rows.filter((row) => row.tweak === id && row.mode.startsWith("dose-")
+    && baselineOf(row) !== BASELINE);
   const clear = boost.n > 1 && Math.abs(boost.mean) > boost.ci;
-  (clear && boost.mean > 0 ? ok : no).push(
-    `the average boost is ${signed(boost.mean)} ±${boost.ci.toFixed(2)} over ${boost.n} readings`
-    + `${clear ? "" : " — not clear of zero"}${boost.mean > 0 ? "" : " — and it is negative"}`);
+  (clear && boost.mean > 0 ? ok : no).push(boost.n
+    ? `the average boost is ${signed(boost.mean)} ±${boost.ci.toFixed(2)} over ${boost.n} readings`
+      + `${clear ? "" : " — not clear of zero"}${boost.mean > 0 ? "" : " — and it is negative"}`
+    : `NOT MEASURED against ${BASELINE} yet`
+      + `${doseStale.length ? ` — its ${doseStale.length} readings were taken against `
+        + `${[...new Set(doseStale.map(baselineOf))].sort().join(", ")}, so they answer a question `
+        + `about a bidder that no longer exists` : ""}`);
 
   // 2. How much of the grid can it even reach?
   const roomsHit = new Set(mine.map((row) => row.cell)).size;
@@ -1583,27 +1623,65 @@ function shipCheck(id) {
   }
 
   // 4. Does it hold on seeds that had no hand in choosing it?
+  // ONLY ROWS TAKEN AGAINST THE BIDDER THAT SHIPS TODAY. Checks 1 and 3 get
+  // this from sameRoom; 4 and 5 used to read the whole file, so a candidate
+  // could clear the gate on a head-to-head against a bidder that has since been
+  // changed — which is precisely the failure the gate was added to catch.
+  const currentNorm = (row) => baselineOf(row) === BASELINE && methodOf(row) === METHOD
+    && row.persona === PERSONA && row.perturb === (PERTURB == null ? "shipped" : PERTURB);
+  const strandedFor = (keep) => rows.filter((row) => row.tweak === id && keep(row) && !currentNorm(row));
+  const sinceNote = (stale) => stale.length
+    ? ` (${stale.length} more were taken against ${[...new Set(stale.map(baselineOf))].sort().join(", ")}`
+      + ` and do not count here)` : "";
+
   const held = rows.filter((row) => row.tweak === id && (row.holdout ?? "") === "-holdout"
-    && row.mode.startsWith("dose-"));
+    && row.mode.startsWith("dose-") && currentNorm(row));
+  const heldStale = strandedFor((row) => (row.holdout ?? "") === "-holdout" && row.mode.startsWith("dose-"));
   const holdout = averageBoost(held);
   (holdout.n > 1 && holdout.mean > 0 && Math.abs(holdout.mean) > holdout.ci ? ok : no).push(
     holdout.n > 1
       ? `on holdout seeds it reads ${signed(holdout.mean)} ±${holdout.ci.toFixed(2)} over ${holdout.n} readings`
-      : `NOT MEASURED on holdout seeds — run: cpu-lab.mjs run --holdout --tweak ${id}`);
+        + sinceNote(heldStale)
+      : `NOT MEASURED on holdout seeds against ${BASELINE}${sinceNote(heldStale)}`
+        + ` — run: cpu-lab.mjs run --holdout --tweak ${id}`);
 
   // 5. THE GATE. Does a table of them beat a table without?
-  const absolute = rows.filter((row) => row.tweak === id && row.mode === "identical"
-    && (row.holdout ?? "") === "");
-  const abs = pooled(absolute);
+  //
+  // AND IS IT STILL A "WITHOUT"? In identical mode the opposing table is the
+  // `versus` generation, which defaults to the live bidder. Once this knob has
+  // shipped the live bidder HAS the tweak, so a --versus defaults reading
+  // compares a table against a copy of itself and reads zero for a reason that
+  // has nothing to do with the knob. Such a row is not evidence either way, so
+  // it is dropped rather than pooled into a pass or a fail.
+  const degenerate = cpuTunables(tweak.params ?? {}).key === "";
+  const gateRows = rows.filter((row) => row.tweak === id && row.mode === "identical"
+    && (row.holdout ?? "") === "" && currentNorm(row)
+    && !(degenerate && (row.versus ?? "defaults") === "defaults"));
+  const gateStale = strandedFor((row) => row.mode === "identical" && (row.holdout ?? "") === "");
+  const framings = [...new Set(gateRows.map((row) => row.versus ?? "defaults"))].sort();
+  const abs = pooled(gateRows);
   (abs.n && abs.mean - abs.ci > 0 ? ok : no).push(abs.n
-    ? `head to head, a table of them reads ${signed(abs.mean)} ±${abs.ci.toFixed(2)}`
+    ? `head to head against ${framings.join(", ")}, a table of them reads `
+      + `${signed(abs.mean)} ±${abs.ci.toFixed(2)}`
       + `${abs.mean - abs.ci > 0 ? "" : " — NOT clear of zero, so this is denial and not strength"}`
-    : `NOT MEASURED head to head — the check that caught poolPremiumThreshold. `
-      + `Run: cpu-lab.mjs run --tweak ${id} --mode identical`);
+      + sinceNote(gateStale)
+    : `NOT MEASURED head to head against ${BASELINE} — the check that caught `
+      + `poolPremiumThreshold.${sinceNote(gateStale)}\n        Run: cpu-lab.mjs run --tweak ${id} `
+      + `--mode identical${degenerate ? ` --versus <the generation before it shipped>` : ""}`
+      + `${degenerate ? `\n        (its knobs are the live values now, so --versus defaults would `
+        + `compare a table against a copy of itself)` : ""}`);
 
   console.log(`cpu-lab ship — ${id}`);
   console.log(`  ${tweak.note}`);
-  console.log(`  ${knobs.map((knob) => `${knob}: ${JSON.stringify(CPU_TUNABLE_DEFAULTS[knob])} -> ${JSON.stringify(tweak.params[knob])}`).join(", ")}\n`);
+  console.log(`  ${knobs.map((knob) => `${knob}: ${JSON.stringify(CPU_TUNABLE_DEFAULTS[knob])} -> ${JSON.stringify(tweak.params[knob])}`).join(", ")}`);
+  // A candidate whose knobs ARE the live values has already shipped. Say so, or
+  // the header reads "0.5 -> 0.5" and the whole checklist below looks broken
+  // rather than looking like what it is: the after-the-fact audit of a ship.
+  if (cpuTunables(tweak.params ?? {}).key === "") {
+    console.log(`  THESE ARE THE LIVE VALUES — this candidate has SHIPPED, and the checks below are`);
+    console.log(`  the audit of that ship, not a decision still to be taken.`);
+  }
+  console.log("");
   for (const line of ok) console.log(`  PASS  ${line}`);
   for (const line of no) console.log(`  STOP  ${line}`);
 
@@ -1686,6 +1764,21 @@ function screenReport(rows) {
     && baselineOf(row) === BASELINE && methodOf(row) === METHOD
     && tags.has(row.cell) && row.mode.startsWith("dose-"));
   if (!far.length) {
+    // "NOTHING MEASURED" AND "NOTHING MEASURED AGAINST THIS BIDDER" are
+    // different situations and only one of them means the bench is empty. A
+    // ship puts every row on the wrong side of the baseline filter at once, so
+    // this is the message that greets you the morning after one.
+    const elsewhere = rows.filter((row) => baselineOf(row) !== BASELINE && row.mode.startsWith("dose-"));
+    if (elsewhere.length) {
+      console.log(`cpu-lab screen — nothing measured against ${BASELINE}, the bidder that ships today.`);
+      console.log(`  ${elsewhere.length} readings stand against `
+        + `${[...new Set(elsewhere.map(baselineOf))].sort().join(", ")} — a knob has shipped since, so`);
+      console.log(`  the control chairs are a different bidder and those readings are not pooled here.`);
+      console.log(`  Re-screen: node scripts/cpu-lab.mjs run --stage screen`);
+      console.log(`  Or read the old bucket: node scripts/cpu-lab.mjs screen --baseline `
+        + `${[...new Set(elsewhere.map(baselineOf))].sort()[0]}`);
+      return;
+    }
     console.log(`cpu-lab screen — nothing measured yet (${OUT}).\n  node scripts/cpu-lab.mjs run --stage screen`);
     return;
   }
@@ -1730,7 +1823,8 @@ function screenReport(rows) {
   console.log(`cpu-lab screen — the AVERAGE BOOST: what a manager carrying the tweak gains,`);
   console.log(`  averaged over every room and every number of rivals who also have it.`);
   console.log(`  A gain with 1 of 4 managers on it counts the same as one with 3 of 4.`);
-  console.log(`  ${tags.size} rooms, ${VERSUS} controls. The interval is the spread BETWEEN rooms, so it is wide`);
+  console.log(`  ${tags.size} rooms, ${VERSUS} controls, against the ${BASELINE} bidder. The interval is`);
+  console.log(`  the spread BETWEEN rooms, so it is wide`);
   console.log(`  on purpose: a tweak that helps in half of them and hurts in the rest reads unsettled.\n`);
   console.log(`  ${"candidate".padEnd(26)} ${"average".padStart(14)}  ${"rooms".padStart(5)}  `
     + `${"best room".padStart(20)}  ${"worst room".padStart(20)}   verdict`);
