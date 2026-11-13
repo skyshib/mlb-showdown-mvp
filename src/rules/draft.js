@@ -3964,9 +3964,13 @@ export function staffStatus(roster) {
   };
 }
 
-export function lineupStatus(roster) {
+// The holes in a roster, read off the lineup the manager is actually fielding.
+// Passing the manager's own assignments matters: a utility card the matcher
+// would have seated at third may be playing centre because the manager put him
+// there, and a hole list that ignores that names the wrong empty slot.
+export function lineupStatus(roster, assignments = {}) {
   const hitters = roster.filter((player) => player.kind === "hitter");
-  const assigned = assignLineupSlots(roster);
+  const assigned = assignLineupSlots(roster, assignments);
   const counts = new Map();
   for (const hitter of hitters) {
     counts.set(hitter.position, (counts.get(hitter.position) ?? 0) + 1);

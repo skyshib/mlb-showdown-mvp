@@ -10027,7 +10027,7 @@ function viewReplacementLevels(draft) {
 function leagueOpenGroups(draft) {
   const needed = new Set();
   for (const manager of draft.managers) {
-    const lineup = lineupStatus(manager.roster);
+    const lineup = lineupStatus(manager.roster, manager.lineupAssignments);
     for (const position of lineup.missingPositions) {
       needed.add(isCornerOutfielder(position) ? "LF/RF" : position);
     }
@@ -10361,7 +10361,7 @@ function dockChipName(player) {
 
 function dockNeedsSummary(manager) {
   const needs = getRosterNeeds(manager.roster, state.draft);
-  const lineup = lineupStatus(manager.roster);
+  const lineup = lineupStatus(manager.roster, manager.lineupAssignments);
   const parts = [...lineup.missingPositions];
   if (needs.starter) parts.push(`${needs.starter}SP`);
   if (needs.bullpen) parts.push(`${needs.bullpen}RP`);
@@ -12085,7 +12085,7 @@ function rosterOpenings(manager, draft) {
   if (hasUnlimitedRoster(draft) && isAuctionDraft(draft)) return null;
   if (rosterFull(draft, manager)) return null;
 
-  const lineup = lineupStatus(manager.roster);
+  const lineup = lineupStatus(manager.roster, manager.lineupAssignments);
   const needs = getRosterNeeds(manager.roster, draft);
   const bats = [...lineup.missingPositions];
   if (!lineup.dhFilled && needs.hitter > bats.length) bats.push("DH");
