@@ -106,8 +106,23 @@ const QUEUED = [
     params: { starterDiscount: 0.8 }
   },
   {
+    id: "starter-discount-0-875",
+    note: "a shallower starter discount still: 0.875 rather than the 0.8 that just won",
+    // REJECTED 2026-11-13: -0.42 +-0.54 over 14 readings. The upper neighbour of
+    // the accepted 0.8, queued automatically by the crown.
+    //
+    // WITH ITS PARTNER THIS BRACKETS THE KNOB. 0.875 loses, 0.5 loses by -0.53,
+    // and 0.725 reads +0.01 +-0.21 over 71 readings — flat against 0.8 rather
+    // than better. So the discount sits on a PLATEAU between about 0.725 and 0.8
+    // and falls away either side of it, which is a more useful shape than a peak:
+    // anywhere in that band is the same bidder as far as the bench can tell.
+    settled: "REJECTED — -0.42 +-0.54; with 0.5 and 0.725 this puts the knob on a plateau at 0.725-0.8",
+    params: { starterDiscount: 0.875 }
+  },
+  {
     id: "starter-discount-hard",
     note: "pay 0.5x — free even more money for bats and arms out of the pen",
+    settled: "REJECTED — -0.53 +-0.66 against the 0.8 bidder; with 0.875 killed too, the knob is bracketed on both sides",
     params: { starterDiscount: 0.5 }
   },
   {
@@ -137,6 +152,7 @@ const QUEUED = [
   {
     id: "stud-premium-up",
     note: "reach further for the top decile of the whole deck",
+    settled: "REJECTED — -2.79 +-1.71, the worst reading of the day; the 0.7 lift strength stands",
     params: { poolPremiumStrength: 1 }
   },
   {
@@ -165,12 +181,14 @@ const QUEUED = [
   {
     id: "share-flatter",
     note: "past flat: spread the bankroll AGAINST the studs, the direction share-flat points",
+    settled: "REJECTED — -1.44 +-1.07; with share-flat and share-steep answered, 1.1 is settled from all three sides",
     params: { shareExponent: 0.9 }
   },
   {
     id: "starter-band-gentle",
     note: "the starter discount fades out over 0.02-0.08 of board spread instead of 0.04-0.05 — "
       + "every real card set lands in 0.019-0.045, so today's band is a cliff, not a fade",
+    settled: "REJECTED — -0.49 +-0.60; widening the narrow/wide starter bands costs",
     params: { starterNarrowSpread: 0.02, starterWideSpread: 0.08 }
   },
   {
