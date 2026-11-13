@@ -376,10 +376,10 @@
       <h2>What is paying off</h2>
       <p class="hint">
         Ranked by how far the reading is from zero against its own interval — not by the size of
-        the number, which is how noise gets promoted. The reading used is the one at the
-        <strong>last holdout</strong>: everybody has the tweak but one chair, the precise end of the
-        curve and the end that matters for shipping, since a change that only wins while rivals
-        lack it is denial. Nothing ships off this list.
+        the number, which is how noise gets promoted. The reading is the <strong>average boost</strong>:
+        every room on the grid and every number of rivals who also carry the tweak, each weighted the
+        same. Nothing ships off this list — a candidate here has earned a deeper measurement, not a
+        change to the bidder.
       </p>
     </div>
     <div class="leaders" id="leaders"></div>
@@ -419,13 +419,13 @@
 
   <section class="card" id="dose-card" hidden>
     <div class="chart-head">
-      <h2>What it is worth as rivals adopt it</h2>
+      <h2>What it is worth, room by room</h2>
       <p class="hint">
-        The same room with <em>k</em> of its chairs on the tweak, and what those chairs won: their own
-        win% against the room's par. A curve that holds up is an edge that survives everyone else
-        having it; one that fades to nothing only existed while nobody else did. Every point is
-        relative by construction — the seats of one room average out between them, which is why some
-        chairs stay untweaked.
+        One dot per room: what the managers carrying the tweak won there, as their own win% against
+        the same seats in a room where nobody carried it, averaged over how many of them had it.
+        Every point is relative by construction — the seats of one room average out between them,
+        which is why some chairs stay untweaked, and why this says a tweak is better IN A MIXED ROOM
+        rather than that a table of them would be better.
       </p>
     </div>
     <div class="panels" id="dose"></div>
@@ -1205,6 +1205,7 @@ function renderDose(rows, summary) {
       const all = [...levels.values()].flat();
       return {
         cell,
+        each,                       // the per-level means, kept for the headline
         levels: each.length,
         n: all.length,
         mean: m,
@@ -1331,13 +1332,13 @@ function renderDose(rows, summary) {
     // is the one number that shape adds up to, and reading it off the picture
     // by eye is exactly how a reader talks themselves into a result.
     // Weighted per measurement, not per game, matching the CLI.
-    const levels = new Map();
-    for (const point of line.points) {
-      const key = `${point.cell}|${point.k}`;
-      if (!levels.has(key)) levels.set(key, []);
-      levels.get(key).push(point.mean);
-    }
-    const each = [...levels.values()].map((v) => v.reduce((a, b) => a + b, 0) / v.length);
+    // WEIGHTED PER ADOPTION LEVEL, not per room — one reading from a 1-of-4
+    // room counts the same as one from a 3-of-4 room, which is the rule. The
+    // dots are rooms now, so the per-level means are carried on each dot
+    // rather than recomputed from them; grouping by `point.k` silently became
+    // grouping by room when the axis changed, and the headline quietly stopped
+    // matching what the CLI reports.
+    const each = line.points.flatMap((point) => point.each);
     const avg = each.reduce((a, b) => a + b, 0) / each.length;
     const band = each.length > 1
       ? 1.96 * Math.sqrt(each.reduce((a, b) => a + (b - avg) * (b - avg), 0) / (each.length - 1)) / Math.sqrt(each.length)
@@ -1356,8 +1357,8 @@ function renderDose(rows, summary) {
           + `<span class="muted"> · accepted at ${(100 * RULE.accept).toFixed(0)}%</span></span>`;
     const headline = `<span class="panel-avg ${clear ? (avg > 0 ? "num pos" : "num neg") : "muted"}">`
       + `${signed(avg)}${band != null ? ` ±${band.toFixed(2)}` : ""}</span>`
-      + `<span class="panel-avg-note">${each.length} room${each.length > 1 ? "s" : ""} × adoption level`
-      + `${each.length > 1 ? "s" : ""}</span>`
+      + `<span class="panel-avg-note">${each.length} reading${each.length > 1 ? "s" : ""} `
+      + `across ${line.points.length} room${line.points.length > 1 ? "s" : ""}</span>`
       + toGo;
     return `<div class="panel${isLive ? " live-panel" : ""}">
       <p class="panel-name">${escape(line.id)}${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
@@ -1374,7 +1375,7 @@ function renderDose(rows, summary) {
         <text x="${pad.left - 6}" y="${y(span) + 4}" text-anchor="end">${signed(span, 1)}</text>
         <text x="${pad.left - 6}" y="${y(0) + 4}" text-anchor="end">0</text>
         <text x="${pad.left - 6}" y="${y(-span) + 4}" text-anchor="end">${signed(-span, 1)}</text>
-        <text x="${x(0)}" y="${height - 14}" text-anchor="start">${escape((data.cells[0] ?? {}).tag ?? "")}</text>
+        <text x="${x(0)}" y="${height - 14}" text-anchor="start">${escape([...(data.cells ?? [])].map((c) => c.tag).sort()[0] ?? "")}</text>
         <text x="${x(1)}" y="${height - 14}" text-anchor="end">${escape([...(data.cells ?? [])].map((c) => c.tag).sort().at(-1) ?? "")}</text>
         <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">the ${(data.cells ?? []).length} rooms, alphabetical</text>
         ${path}
