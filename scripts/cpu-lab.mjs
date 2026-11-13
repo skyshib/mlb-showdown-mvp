@@ -1168,6 +1168,28 @@ if (command === "list") {
       // knows. The answer lives on the tweak in cpu-lab-tweaks.mjs.
       if (tweak.settled && args.tweak == null) continue;
       if (abandoned.has(id)) continue;
+      // ASK BEFORE SPENDING, not only after. The rule used to be evaluated at
+      // the END of a room, and a room already banked hits the `continue`
+      // below — so a resumed run had to measure one whole fresh room before it
+      // would even consider what the readings on disk already said. With the
+      // positive control that meant five more levels of a six-seat room, about
+      // twelve minutes, to reach a verdict its 74 banked readings had already
+      // settled.
+      {
+        const called = verdictSoFar(seenSoFar.get(id), RULE_ARGS);
+        if (called) {
+          abandoned.set(id, called);
+          const why = called.call === "accept"
+            ? `${(100 * called.above).toFixed(1)}% above ${signed(ACCEPT_ABOVE)}`
+            : `${(100 * called.below).toFixed(1)}% below zero`;
+          const word = tweak.fixture
+            ? (called.call === "kill" ? "CONFIRMED" : "UNEXPECTED")
+            : (called.call === "accept" ? "ACCEPTED " : "KILLED   ");
+          console.log(`  ${id.padEnd(32)} ${word} on what was already banked — `
+            + `${called.n} readings, ${signed(called.mean)}, ${why}`);
+          continue;
+        }
+      }
       const cell = cellByTag(tag);
       const owed = modesFor(cell, tweak).filter((mode) =>
         rows.filter((row) => rowMatches(row, tweak, cell, mode)).length < want);
