@@ -182,6 +182,13 @@
   #tip .tip-sub { color: var(--text-muted); font-size: 12px; margin-top: 3px; white-space: pre-line; }
   #tip { max-width: 420px; }
   .matrix td.who { cursor: help; }
+  /* Any candidate NAME explains itself on hover, wherever it is printed. The
+     dotted underline is the only thing that says a name is worth hovering. */
+  .named {
+    cursor: help; text-decoration: underline dotted; text-underline-offset: 3px;
+    text-decoration-color: var(--border); outline: none;
+  }
+  .named:hover, .named:focus-visible { text-decoration-color: var(--text-secondary); }
   /* The candidate's one number, ahead of the rooms that make it up. */
   .matrix td.overall { font-weight: 600; font-variant-numeric: tabular-nums; border-right: 1px solid var(--border); }
   .matrix td.overall .band { font-weight: 400; color: var(--text-muted); font-size: 12px; }
@@ -873,7 +880,9 @@ function renderThrone() {
     + `<td class="throne-step"><strong>${step.knob}</strong> `
     + `<span class="muted">${show(step.from)} → ${show(step.to)}</span>`
     + `${step.inPlace ? ` <span class="badge badge-win">in place</span>` : ""}</td>`
-    + `<td class="throne-step"><span class="won">${step.winner ?? "—"}</span></td>`
+    + `<td class="throne-step">${step.winner
+      ? `<span class="won named" tabindex="0" ${whatItIs({ id: step.winner })}>${step.winner}</span>`
+      : `<span class="won">—</span>`}</td>`
     + `<td class="throne-step"><span class="won">${step.generation} · ${step.at}</span></td>`
     + `<td class="throne-step"><span class="won">${step.why}</span></td></tr>`;
 
@@ -912,7 +921,8 @@ function renderThrone() {
       <h3>Up for competition — measured against ${data.baseline}</h3>
       ${running.length ? `<table><thead><tr><th>candidate</th><th>reading</th>`
         + `<th>rooms</th><th>where it stands</th></tr></thead><tbody>`
-        + running.map((c) => `<tr><td class="throne-step"><strong>${c.id}</strong>`
+        + running.map((c) => `<tr><td class="throne-step">`
+          + `<strong class="named" tabindex="0" ${whatItIs(c)}>${c.id}</strong>`
           + `${c.rival ? ` <span class="throne-rival">· rival for a position the throne holds</span>` : ""}`
           + `<br><span class="muted">${knobLine(c.params)}</span></td>`
           + `<td>${signed(c.mean)} <span class="muted">±${c.ci.toFixed(2)}</span></td>`
@@ -1355,7 +1365,7 @@ function renderStandings(summary) {
           : `costs win points once the table has it`;
     return `<div class="leader">
       <div>
-        <div class="leader-name">${escape(entry.id)}${
+        <div class="leader-name"><span class="named" tabindex="0" ${whatItIs(entry)}>${escape(entry.id)}</span>${
           liveIds.has(entry.id) ? ' <span class="badge badge-now">measuring</span>' : ""}${
           clear && mean > 0 ? ' <span class="badge badge-win">promising</span>' : ""}</div>
         <div class="leader-knob">${escape(entry.params ? knobLine(entry.params) : "")}</div>
@@ -1477,6 +1487,33 @@ function tipAttrs({ value, sign, label, sub, aria }) {
   return `data-tip-value="${escape(value)}" data-tip-sign="${sign}" `
     + `data-tip-label="${escape(label)}" data-tip-sub="${escape(sub)}" `
     + `aria-label="${escape(aria ?? `${label}: ${value}. ${sub}`)}"`;
+}
+
+// WHAT A CANDIDATE ACTUALLY IS, as tooltip attributes: the knobs it moves and
+// what each one does, the claim behind it, who proposed it and on what evidence,
+// and the answer if the bench has given one.
+//
+// Module scope because every panel that prints a candidate's NAME should explain
+// it on hover, and the matrix had the only copy — so the one place a reader is
+// most likely to be looking at an unfamiliar name, the big per-room panels, was
+// the one place that could not tell them what it meant.
+function whatItIs(entry) {
+  const tweak = data.tweaks.find((t) => t.id === entry.id);
+  const changes = knobChanges(tweak?.params ?? entry.params);
+  const knobs = changes.length
+    ? changes.map((c) => `${c.knob}: ${c.from} → ${c.to}${c.note ? `\n    ${c.note}` : ""}`).join("\n")
+    : "changes nothing — a fixture";
+  const from = tweak?.idea
+    ? `\n\nproposed by ${tweak.by ?? "an agent"}${tweak.room ? `, from ${tweak.room}` : ""}`
+      + `${tweak.why ? `\n${tweak.why}` : ""}`
+    : "";
+  const answered = tweak?.settled ? `\n\nANSWERED — ${tweak.settled}` : "";
+  return tipAttrs({
+    value: entry.id,
+    sign: "",
+    label: tweak?.note ?? entry.note ?? "",
+    sub: knobs + from + answered
+  });
 }
 
 // THE ORDER THE ROOMS SIT IN, left to right: table size first, then name. Size
@@ -1721,7 +1758,8 @@ function renderDose(rows, summary) {
       + `across ${line.points.length} room${line.points.length > 1 ? "s" : ""}</span>`
       + toGo;
     return `<div class="panel${isLive ? " live-panel" : ""}${called ? " decided" : ""}">
-      <p class="panel-name">${escape(line.id)}${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
+      <p class="panel-name"><span class="named" tabindex="0" ${whatItIs(line)}>${escape(line.id)}</span>`
+      + `${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
       <p class="panel-headline">${headline}</p>
       <p class="panel-note">${escape(queued ? knobLine(queued.params) : "")}</p>
       <p class="panel-note">${escape(reading)}</p>${narrow}
@@ -1825,24 +1863,6 @@ function renderMatrix(rows, summary) {
   // ideas inbox — the room and the observation that prompted it. This used to
   // be a whole table of its own below; a reader looking at a row of numbers had
   // to scroll away from it to find out what the row was about.
-  const whatItIs = (entry) => {
-    const tweak = data.tweaks.find((t) => t.id === entry.id);
-    const changes = knobChanges(tweak?.params ?? entry.params);
-    const knobs = changes.length
-      ? changes.map((c) => `${c.knob}: ${c.from} → ${c.to}${c.note ? `\n    ${c.note}` : ""}`).join("\n")
-      : "changes nothing — a fixture";
-    const from = tweak?.idea
-      ? `\n\nproposed by ${tweak.by ?? "an agent"}${tweak.room ? `, from ${tweak.room}` : ""}`
-        + `${tweak.why ? `\n${tweak.why}` : ""}`
-      : "";
-    const answered = tweak?.settled ? `\n\nANSWERED — ${tweak.settled}` : "";
-    return tipAttrs({
-      value: entry.id,
-      sign: "",
-      label: tweak?.note ?? entry.note ?? "",
-      sub: knobs + from + answered
-    });
-  };
   const body = present.map((entry) => `<tr>
     <td class="who" tabindex="0" ${whatItIs(entry)}>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}</td>
     ${(() => {
