@@ -433,8 +433,8 @@
     <p class="note">
       Tables of different sizes share an axis here, so it reads as the share of the room that has
       the tweak rather than a raw count: 1 of 3 and 2 of 6 sit in the same place. Rooms landing on the
-      same share are nudged a few pixels apart so they can be told apart and hovered — always by less
-      than the gap between real adoption levels. Hover a point for the exact k and the room.
+      same share are spread a few pixels apart in alphabetical order, so a room keeps the same column
+      in every panel and can be compared down the page. Hover a point for the exact k and the room.
     </p>
   </section>
 
@@ -1254,17 +1254,28 @@ function renderDose(rows, summary) {
     // strokes, the end labels and the hit targets all agree. It is
     // deliberately smaller than the gap between genuine adoption levels: it
     // separates, it never moves a point to a share it was not measured at.
-    const atShare = new Map();
+    // A ROOM KEEPS ITS COLUMN. The offset is the room's alphabetical rank among
+    // EVERY room on the grid that can land on that share — not its position
+    // among the rooms this candidate happens to have measured. So `a4` sits at
+    // the same horizontal place in every panel, and a reader can run an eye
+    // down a column to compare one room across candidates. Ordering by
+    // whatever arrived first made that impossible: the same room moved panel
+    // to panel depending on which of its neighbours had been measured yet.
+    const slotsAt = new Map();
+    for (const cell of data.cells) {
+      for (let k = 1; k <= cell.teams - 1; k += 1) {
+        const share = (k / cell.teams).toFixed(4);
+        if (!slotsAt.has(share)) slotsAt.set(share, []);
+        if (!slotsAt.get(share).includes(cell.tag)) slotsAt.get(share).push(cell.tag);
+      }
+    }
+    for (const [, tags] of slotsAt) tags.sort();
+    const NUDGE = 5;
     for (const point of line.points) {
       const share = (point.k / point.teams).toFixed(4);
-      if (!atShare.has(share)) atShare.set(share, []);
-      atShare.get(share).push(point);
-    }
-    const NUDGE = 5;
-    for (const [, together] of atShare) {
-      together.forEach((point, index) => {
-        point.at = x(point.k / point.teams) + (index - (together.length - 1) / 2) * NUDGE;
-      });
+      const tags = slotsAt.get(share) ?? [point.cell];
+      const index = Math.max(0, tags.indexOf(point.cell));
+      point.at = x(point.k / point.teams) + (index - (tags.length - 1) / 2) * NUDGE;
     }
     // NO STROKES BETWEEN THE DOTS. A line joining a board's readings looked
     // like a trend and was not one: on this grid most boards have a single

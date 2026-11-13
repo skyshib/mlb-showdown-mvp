@@ -1177,10 +1177,15 @@ if (command === "list") {
           const stat = pooled([row]);
           have += 1;
           ran += 1;
-          if (!tweak.fixture) {
-            if (!seenSoFar.has(id)) seenSoFar.set(id, []);
-            seenSoFar.get(id).push(stat.mean);
-          }
+          // EVERY tweak's readings are recorded, fixtures included. The rule
+          // was made to apply to fixtures — a control expected to be negative
+          // passes by being killed — but this guard stayed, so the control's
+          // readings were never collected and the rule judged an empty list
+          // and never fired. The page, reading the stored rows, showed it at
+          // 91% against a 90% bar while the run carried on regardless: two
+          // different data sources for the same question.
+          if (!seenSoFar.has(id)) seenSoFar.set(id, []);
+          seenSoFar.get(id).push(stat.mean);
           console.log(`  ${id.padEnd(32)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
             + `${signed(stat.mean).padStart(7)} ±${stat.ci.toFixed(2).padStart(5)}  ${row.seconds}s`);
         }
