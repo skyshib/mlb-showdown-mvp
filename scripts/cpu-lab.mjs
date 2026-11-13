@@ -1263,6 +1263,7 @@ if (command === "list") {
             : (called.call === "accept" ? "ACCEPTED " : "KILLED   ");
           console.log(`  ${id.padEnd(32)} ${word} on what was already banked — `
             + `${called.n} readings, ${signed(called.mean)}, ${why}`);
+          if (called.call === "accept") pickTheKnob(id, called, abandoned, seenSoFar);
           continue;
         }
       }
@@ -1353,15 +1354,17 @@ if (command === "list") {
             : (called.call === "accept" ? "ACCEPTED " : "KILLED   ");
           console.log(`  ${id.padEnd(32)} ${word} after `
             + `${called.n} readings — ${signed(called.mean)} so far, ${why}`);
+          if (called.call === "accept") pickTheKnob(id, called, abandoned, seenSoFar);
         }
       }
     }
   }
   if (abandoned.size) {
     const tally = (call) => [...abandoned.values()].filter((v) => v.call === call).length;
-    console.log(`\n  ${tally("kill")} killed, ${tally("accept")} accepted early, ${tally("narrow")} dropped for`);
-    console.log(`  reaching too little of the grid. All keep their rows and are measured again`);
-    console.log(`  whenever named with --tweak; --kill 0 and --min-rooms 0 turn the two rules off.`);
+    console.log(`\n  ${tally("kill")} killed, ${tally("accept")} accepted, ${tally("parked")} parked behind an`);
+    console.log(`  accepted value of the same knob, ${tally("narrow")} dropped for reaching too little of`);
+    console.log(`  the grid. All keep their rows and are measured again whenever named with`);
+    console.log(`  --tweak; --kill 0 and --min-rooms 0 turn the two rules off.`);
   }
   console.log(ran || stopped ? "" : "\n  nothing owed — every pair already has its batches. --batches N to deepen.\n");
   reportFor(order, cellTags, readRows());
@@ -1480,6 +1483,30 @@ function bracket() {
   }
   console.log(`\n  they are candidates from the next command onward: the screen picks them up with`);
   console.log(`  "cpu-lab.mjs run --stage screen".`);
+}
+
+// ONE WINNER PER KNOB, DECIDED WHEN THE FIRST VALUE IS ACCEPTED (Skylar,
+// 2026-11-13). Once a value of a knob is accepted, the other values of that
+// same knob stop being measured: they are a bracket on one question — how far
+// should this knob move — and the question is now answered well enough to act
+// on. Carrying on would spend passes refining a number nobody is waiting for,
+// and would leave two accepted values of one knob to untangle later.
+//
+// It does mean the winner is whichever value crossed the bar FIRST, not
+// necessarily the best. pool-premium-threshold-0-7 was accepted beside 0-5
+// while reading +0.41 against 0-5's +0.73, so the first-past-the-post pick can
+// be the weaker one. The parked siblings keep their rows and are re-opened by
+// naming them with --tweak, which is where the better value would be found.
+function pickTheKnob(winner, called, abandoned, seenSoFar) {
+  const mine = Object.keys(tweakById(winner).params ?? {});
+  for (const other of TWEAKS) {
+    if (other.id === winner || other.fixture || other.settled) continue;
+    if (abandoned.has(other.id)) continue;
+    if (!Object.keys(other.params ?? {}).some((knob) => mine.includes(knob))) continue;
+    abandoned.set(other.id, { call: "parked", n: (seenSoFar.get(other.id)?.size ?? 0) });
+    console.log(`  ${other.id.padEnd(32)} PARKED — ${winner} was accepted first on the same knob; `
+      + `re-open it with --tweak if the chosen value disappoints`);
+  }
 }
 
 // THE PRE-SHIP CHECKLIST. Read-only: it never edits the bidder. Shipping a knob
