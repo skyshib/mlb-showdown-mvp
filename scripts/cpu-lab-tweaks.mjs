@@ -102,6 +102,7 @@ const QUEUED = [
   {
     id: "starter-discount-soft",
     note: "pay 0.8x for a narrow board's starters instead of 0.65x",
+    settled: "SHIPPED tuned-2026-11-13e — +0.26 over 73 readings accepted; crowned by the bench, holdout and head-to-head still outstanding",
     params: { starterDiscount: 0.8 }
   },
   {

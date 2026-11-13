@@ -1,10 +1,10 @@
-  auc-c4-rand    cb498c808618  103 lines
-  auc-c4-man     e9c00f46b19f  64 lines
-  auc-c4-first   fc4b0c7a6bba  96 lines
-  auc-c8-rand    9d60da7a7ee6  188 lines
-  auc-f3-rand    37fbbfa88039  68 lines
-  auc-h4-man     f1cd64ce8976  64 lines
-  snk-c4         1418134b0105  4 lines
+  auc-c4-rand    b8fbe71bf69a  101 lines
+  auc-c4-man     f8584fe8de64  64 lines
+  auc-c4-first   075a39bc301a  96 lines
+  auc-c8-rand    e8c12bd6afb1  188 lines
+  auc-f3-rand    9a14f33d2d8b  68 lines
+  auc-h4-man     f658b92461c2  64 lines
+  snk-c4         b4cd26d6956c  4 lines
   snk-f6         17999d7b0d06  6 lines
-  snk-h4         3c5f3d2a4597  4 lines
-  ALL            eadc1fe008f3  597 lines
+  snk-h4         4bb18b9b6e59  4 lines
+  ALL            6c42f3fa1750  595 lines

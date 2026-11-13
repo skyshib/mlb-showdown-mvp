@@ -37,7 +37,7 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
   // ---- how the board's arms are re-dealt (pitcherRanking) ----
   // What a narrow-spread board's starters are worth. Frees money for bats and
   // relievers where the ace and the fourth starter are nearly the same card.
-  starterDiscount: 0.65,
+  starterDiscount: 0.8,
   starterNarrowSpread: 0.04, // full discount at or below this spread
   starterWideSpread: 0.05, // none at or above it
   // The share of a board's relievers who must beat the rotation before the
@@ -205,6 +205,54 @@ const KNOBS = Object.keys(CPU_TUNABLE_DEFAULTS);
 // old behavior, and a fingerprint that no longer reproduces is how you find
 // that out.
 export const CPU_KNOB_GENERATIONS = Object.freeze({
+  "tuned-2026-11-13e": Object.freeze({
+    seq: 7,
+    at: "2026-11-13",
+    git: "9a73f3b",
+    fingerprint: "6c42f3fa1750",
+    // Crowned automatically by the bench the moment the stopping rule accepted
+    // it. The reading is in the candidate's `settled` line in
+    // scripts/cpu-lab-tweaks.mjs; WHY the knob wants to be here is not something
+    // the bench can write, and belongs in the commit that follows.
+    note: "starterDiscount 0.8 — crowned by the bench on starter-discount-soft",
+    knobs: Object.freeze({
+      perturbation: 0.25,
+      hitterWeights: null,
+      pitcherWeights: null,
+      starterDiscount: 0.8,
+      starterNarrowSpread: 0.04,
+      starterWideSpread: 0.05,
+      relieverSpacingShare: 0.3,
+      relieverTopRate: 2.5,
+      relieverDepthRate: 0.7,
+      penDepthTarget: 5,
+      relieverFloorByRoom: 0,
+      slotTiebreak: 0.05,
+      urgencyPatient: 0.5,
+      urgencyDesperate: 1,
+      urgencyWeight: 1,
+      depthSlots: 3,
+      depthDamp: 0.7,
+      shareExponent: 1.1,
+      poolPremiumStrength: 0.7,
+      poolPremiumThreshold: 0.5,
+      aggressionFloor: 0.86,
+      aggressionSpan: 0.28,
+      wobbleSalt: "",
+      paceFloor: 0.75,
+      paceCeiling: 1.8,
+      roundsFloor: 0.7,
+      roundsCeiling: 2.2,
+      roundsBudgetDivisor: 25,
+      snakeNeedBonus: 80,
+      snakeNeedSpan: 0,
+      snakeBalanceBonus: 70,
+      snakeArmLean: 140,
+      snakeForcedNeed: 1000,
+      snakeScarcityRate: 0.8,
+      snakeScarcityCap: 120
+    })
+  }),
   "tuned-2026-11-11": Object.freeze({
     // Where this sits in the lineage. EXPLICIT, because `at` is a date and four
     // generations were crowned on 2026-11-13 — nothing derivable orders them.

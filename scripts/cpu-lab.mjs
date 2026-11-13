@@ -70,6 +70,7 @@ import { simulateBatch } from "../src/rules/batch.js";
 import { CPU_KNOB_GENERATIONS, CPU_TUNABLE_DEFAULTS, baselineKey, cpuTunables, knobGeneration } from "../src/rules/cpuTunables.js";
 import { IDEA_REJECTS, TWEAKS, tweakById } from "./cpu-lab-tweaks.mjs";
 import { appendIdea, ideasFile, knobKey } from "./cpu-lab-ideas.mjs";
+import { crownTheWinner } from "./cpu-lab-crown.mjs";
 import { RULE, chances, verdictSoFar } from "./cpu-lab-rule.mjs";
 // The grid lives in its own module: the room server reads it too, and importing
 // this file for it would run the CLI.
@@ -84,6 +85,8 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
   node scripts/cpu-lab.mjs run --stage screen                every candidate, 15 cheap cells, far dose, 1 batch
   node scripts/cpu-lab.mjs screen                            what that bought, ranked, with the cut applied
   node scripts/cpu-lab.mjs ship --tweak ID                   the pre-ship checklist; reports, never edits
+  node scripts/cpu-lab.mjs crown --tweak ID                  write an accepted candidate into the bidder
+                                                             (the run does this by itself; --no-crown stops it)
   node scripts/cpu-lab.mjs run --stage confirm --tweak ID    a survivor: all 17 cells, whole curve, 4 batches
 
   node scripts/cpu-lab.mjs list
@@ -271,6 +274,10 @@ const methodOf = (row) => row.method ?? LEGACY_METHOD;
 
 const BASELINE = args.baseline ?? baselineKey();
 const LEGACY_BASELINE = "tuned-2026-11-10";
+// Crowning an accepted candidate is what the run does by default. --no-crown
+// measures without touching the bidder, for a pass whose answers you want to
+// read before anything acts on them.
+const CROWN = args["no-crown"] == null;
 // The knobs the THRONE last moved — what a challenger would have to displace
 // rather than stack with. Read off the two newest generations: whatever differs
 // between them is what the last ship changed.
@@ -1407,7 +1414,10 @@ if (command === "list") {
             : (called.call === "accept" ? "ACCEPTED " : "KILLED   ");
           console.log(`  ${id.padEnd(32)} ${word} on what was already banked — `
             + `${called.n} readings, ${signed(called.mean)}, ${why}`);
-          if (called.call === "accept") pickTheKnob(id, called, abandoned, seenSoFar);
+          if (called.call === "accept") {
+            pickTheKnob(id, called, abandoned, seenSoFar);
+            if (crownNow(id, called)) { stopped = true; break; }
+          }
           continue;
         }
       }
@@ -1498,7 +1508,10 @@ if (command === "list") {
             : (called.call === "accept" ? "ACCEPTED " : "KILLED   ");
           console.log(`  ${id.padEnd(32)} ${word} after `
             + `${called.n} readings — ${signed(called.mean)} so far, ${why}`);
-          if (called.call === "accept") pickTheKnob(id, called, abandoned, seenSoFar);
+          if (called.call === "accept") {
+            pickTheKnob(id, called, abandoned, seenSoFar);
+            if (crownNow(id, called)) { stopped = true; break; }
+          }
         }
       }
     }
@@ -1527,6 +1540,47 @@ if (command === "list") {
   }
 } else if (command === "bracket") {
   bracket();
+} else if (command === "crown") {
+  // The same path the run loop takes, by hand — for a candidate the rule accepted
+  // in a run that has since ended, or one accepted while --no-crown was set.
+  const id = rawFlag("tweak") ?? args.tweak;
+  if (!id) {
+    console.log("cpu-lab crown — write an accepted candidate into the bidder.\n");
+    console.log("  node scripts/cpu-lab.mjs crown --tweak <candidate>\n");
+    console.log("  Refuses unless the record shows it accepted against the shipped bidder.");
+  } else {
+    const rows = readRows();
+    const tweak = tweakById(id);
+    const mine = rows.filter((row) => row.tweak === id
+      && row.params === paramKey(tweak.params) && row.mode.startsWith("dose-") && sameRoom(row));
+    const levels = new Map();
+    for (const row of mine) {
+      const key = `${row.cell}|${row.mode}`;
+      if (!levels.has(key)) levels.set(key, []);
+      levels.get(key).push(...row.edges);
+    }
+    const each = [...levels.values()].map((e) => mean(e));
+    const sizes = new Set(mine.map((row) => cellByTag(row.cell)?.teams).filter(Boolean)).size;
+    const called = verdictSoFar(each, RULE_ARGS, sizes);
+    if (called?.call !== "accept") {
+      console.log(`cpu-lab crown — refused: the record does not show ${id} accepted against ${BASELINE}.`);
+      console.log(`  ${each.length} readings, ${sizes} table size(s)`
+        + `${each.length ? `, average ${signed(mean(each))}` : ""}`
+        + `${called ? `, the rule says ${called.call}` : ", the rule has not called it"}`);
+      process.exit(1);
+    }
+    const outcome = crownTheWinner({
+      tweak,
+      reading: `${signed(called.centre)} over ${called.n} readings`,
+      git: GIT,
+      verify: () => true
+    });
+    if (!outcome.ok) {
+      console.log(`cpu-lab crown — refused: ${outcome.reason}`);
+      process.exit(1);
+    }
+    queueTheNeighbours(id, called);
+  }
 } else if (command === "ship") {
   shipCheck(rawFlag("tweak") ?? args.tweak);
 } else if (command === "screen") {
@@ -1690,6 +1744,54 @@ function bracket() {
 // while reading +0.41 against 0-5's +0.73, so the first-past-the-post pick can
 // be the weaker one. The parked siblings keep their rows and are re-opened by
 // naming them with --tweak, which is where the better value would be found.
+// CROWN IT, HERE, NOW. Skylar's standard is that an accepted candidate ships
+// immediately, and leaving that to whoever next reads the log missed it three
+// times in one day. So the run does it and then stops: the defaults have moved,
+// so BASELINE no longer describes the control chairs, and every further reading
+// would be filed against a bidder that does not exist.
+//
+// Returns true when the run must end. A fixture is never crowned — the positive
+// control passing by being killed is the point of it — and neither is a run that
+// is not measuring the live bidder (--versus, --holdout, a non-default persona),
+// because those are deliberately asking a different question.
+function crownNow(id, called) {
+  if (!CROWN) return false;
+  const tweak = tweakById(id);
+  if (tweak.fixture) return false;
+  if (VERSUS !== "defaults" || HOLDOUT || PERSONA !== "balanced" || PERTURB != null) {
+    console.log(`  ${id.padEnd(32)} ACCEPTED, but this run is not measuring the shipped bidder `
+      + `(versus ${VERSUS}${HOLDOUT}, persona ${PERSONA}) — not crowning it`);
+    return false;
+  }
+  const reading = `${signed(called.centre)} over ${called.n} readings`;
+  const outcome = crownTheWinner({
+    tweak,
+    reading,
+    git: GIT,
+    // RE-DERIVED FROM THE RECORD, not taken from the caller. The crown edits the
+    // source the live site runs, so it checks the claim itself against what is
+    // on disk rather than trusting the loop that called it.
+    verify: () => {
+      const fresh = readRows().filter((row) => row.tweak === id
+        && row.params === paramKey(tweak.params) && row.mode.startsWith("dose-")
+        && sameRoom(row));
+      const levels = new Map();
+      for (const row of fresh) {
+        const key = `${row.cell}|${row.mode}`;
+        if (!levels.has(key)) levels.set(key, []);
+        levels.get(key).push(...row.edges);
+      }
+      const sizes = new Set(fresh.map((row) => cellByTag(row.cell)?.teams).filter(Boolean)).size;
+      return verdictSoFar([...levels.values()].map((e) => mean(e)), RULE_ARGS, sizes)?.call === "accept";
+    }
+  });
+  if (!outcome.ok) {
+    console.log(`  ${id.padEnd(32)} ACCEPTED but NOT crowned — ${outcome.reason}`);
+    return false;
+  }
+  return true;
+}
+
 function pickTheKnob(winner, called, abandoned, seenSoFar) {
   const mine = Object.keys(tweakById(winner).params ?? {});
   for (const other of TWEAKS) {
