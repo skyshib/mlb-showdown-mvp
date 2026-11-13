@@ -170,25 +170,26 @@ function rawFlag(name) {
 // any effect worth shipping. Spreading the budget evenly over 27 candidates
 // buys 27 unreadable numbers.
 //
-//   --stage screen    every candidate, the 15 cheap cells, the FAR DOSE ONLY,
-//                     one batch. ~7 minutes a candidate instead of ~48.
-//   --stage confirm   the survivors, all 17 cells, the whole adoption curve,
-//                     four batches. Expensive, and spent on something.
+//   --stage screen    every candidate, every room, every adoption level, one
+//                     batch each. One pass of the grid.
+//   --stage confirm   the survivors, the same ground at four batches.
 //
-// WHY THE FAR DOSE IS THE SCREEN. At k = N-1 every league hands back the
-// average of N-1 tweaked chairs instead of one chair's result, so it is the
-// precise end of the curve (±0.34 against ±1.11 pooled over 123 pairs) — and
-// it is the end that answers the shipping question, since a change that helps
-// only while rivals lack it is denial and does not ship. The k=1 end is both
-// the noisiest column and the one that flatters a candidate; screening there
-// is how you end up confirming noise. The confirm stage measures the whole
-// curve, so nothing is lost — it is just not bought first.
+// THE SCREEN MEASURES EVERY ADOPTION LEVEL because the criterion averages over
+// them: a gain when 1 of 4 managers has the tweak counts exactly as much as a
+// gain when 3 of 4 do (Skylar, 2026-11-12). You cannot average over something
+// you did not measure, so the two stages now differ only in depth.
+//
+// It used to screen on the LAST HOLDOUT alone — the 3-of-4 reading — on the
+// argument that it is the precise end of the curve and the one that answers
+// the shipping question. The first half was true and the second was not, and
+// it let a change ship that was worth nothing: at 3 of 4 there is still one
+// manager without the tweak, so there is still somebody to take cards from.
 const STAGE = args.stage ?? null;
 if (STAGE && !["screen", "confirm"].includes(STAGE)) {
   console.error(`cpu-lab: --stage is screen or confirm, not "${STAGE}"`);
   process.exit(1);
 }
-const STAGE_MODE = { screen: "far", confirm: "dose" };
+const STAGE_MODE = { screen: "dose", confirm: "dose" };
 const STAGE_BATCHES = { screen: 1, confirm: 4 };
 
 const LEAGUES = Number(args.leagues ?? 24);
@@ -1171,74 +1172,109 @@ function bracket() {
 // table. A candidate ships by clearing the confirm stage — the whole adoption
 // curve, four batches, both wide boards — and then reading the same way on
 // --holdout seeds that had no hand in choosing it.
+// THE AVERAGE BOOST — what a manager carrying the tweak gains, averaged over
+// every room on the grid AND over every number of rivals who also have it.
+//
+// Skylar's rule, 2026-11-12: a gain when 1 of 4 managers has the tweak counts
+// exactly as much as a gain when 3 of 4 do. So each (room, adoption level) is
+// one observation of equal weight, and the answer is their plain average.
+//
+// WHY NOT POOL THE LEAGUES. Pooling every league together would weight a room
+// by how many measurements it happens to produce, and a room with eight
+// managers produces seven (one for each number of rivals who could have the
+// tweak) where a two-manager room produces one. That would quietly make the
+// answer a statement about big rooms. Averaging the per-measurement means
+// instead gives every room-and-adoption-level the same say, which is what was
+// asked for.
+//
+// THE INTERVAL IS TAKEN ACROSS THOSE MEANS, not within them. That is the
+// conservative choice and the honest one: it carries the spread BETWEEN rooms,
+// not just the luck inside each, so a tweak that helps in half the rooms and
+// hurts in the other half reads as unsettled rather than as a confident zero.
+function averageBoost(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.cell}|${row.mode}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(...row.edges);
+  }
+  const means = [...groups.values()].map((edges) => mean(edges));
+  if (!means.length) return { n: 0, mean: 0, ci: 0, spots: 0, leagues: 0 };
+  const m = mean(means);
+  const leagues = [...groups.values()].reduce((sum, e) => sum + e.length, 0);
+  if (means.length < 2) return { n: means.length, mean: m, ci: Infinity, spots: 1, leagues };
+  const sd = Math.sqrt(means.reduce((a, b) => a + (b - m) * (b - m), 0) / (means.length - 1));
+  return { n: means.length, mean: m, ci: 1.96 * sd / Math.sqrt(means.length), spots: means.length, leagues };
+}
+
 function screenReport(rows) {
   const tags = new Set(screenCells.map((cell) => cell.tag));
   const far = rows.filter((row) => (row.versus ?? "defaults") === VERSUS
     && (row.holdout ?? "") === HOLDOUT && row.persona === PERSONA
     && baselineOf(row) === BASELINE
-    && tags.has(row.cell) && row.mode === `dose-${cellByTag(row.cell).teams - 1}`);
+    && tags.has(row.cell) && row.mode.startsWith("dose-"));
   if (!far.length) {
-    console.log(`cpu-lab screen — nothing screened yet (${OUT}).\n  node scripts/cpu-lab.mjs run --stage screen`);
+    console.log(`cpu-lab screen — nothing measured yet (${OUT}).\n  node scripts/cpu-lab.mjs run --stage screen`);
     return;
   }
   const ids = [...new Set(far.map((row) => row.tweak))];
   const scored = ids.map((id) => {
     const mine = far.filter((row) => row.tweak === id);
-    const all = pooled(mine);
+    const all = averageBoost(mine);
+    // Each room on its own, averaged over that room's adoption levels, so a
+    // candidate that helps in one shape and hurts in another is visible rather
+    // than averaged into nothing.
     const cells = [...new Set(mine.map((row) => row.cell))].map((tag) => {
-      const stat = pooled(mine.filter((row) => row.cell === tag));
-      return { tag, ...stat, z: stat.ci ? Math.abs(stat.mean) / (stat.ci / 1.96) : 0 };
-    }).sort((a, b) => b.z - a.z);
-    const z = all.ci ? Math.abs(all.mean) / (all.ci / 1.96) : 0;
+      const stat = averageBoost(mine.filter((row) => row.cell === tag));
+      return { tag, ...stat, z: stat.ci && Number.isFinite(stat.ci) ? Math.abs(stat.mean) / (stat.ci / 1.96) : 0 };
+    }).sort((a, b) => b.mean - a.mean);
+    const z = all.ci && Number.isFinite(all.ci) ? Math.abs(all.mean) / (all.ci / 1.96) : 0;
     const tweak = TWEAKS.find((t) => t.id === id);
-    return { id, fixture: !!tweak?.fixture, note: tweak?.note ?? "", all, z, cells, top: cells[0] };
-  }).sort((a, b) => Math.max(b.z, b.top.z) - Math.max(a.z, a.top.z));
+    return { id, fixture: !!tweak?.fixture, note: tweak?.note ?? "", all, z, cells,
+      best: cells[0], worst: cells[cells.length - 1] };
+  }).sort((a, b) => b.all.mean - a.all.mean);
 
   const verdict = (s) => {
     if (s.fixture) return "fixture";
     const answered = TWEAKS.find((t) => t.id === s.id)?.settled;
     if (answered) return `settled — ${answered}`;
-    if (s.z >= 2 && s.all.mean > 0) return "PROMOTE — helps with all but one chair on it, pooled";
-    if (s.z >= 2) return "REJECT — costs win points pooled across the grid";
-    // THE PER-CELL ARM ONLY EVER FIRES ON A CELL THAT HELPS. It is here for a
-    // knob that is good on narrow boards and bad on wide ones, which pools to
-    // nothing and is worth the expensive stage anyway — and that case always
-    // has a POSITIVE cell in it. Tested on |z| alone it also fired on a
-    // candidate that is mildly unhelpful everywhere and merely noisiest in one
-    // place, which sent uniformly negative knobs to a five-hour confirm with
-    // "PROMOTE ... -1.64" printed beside them. A cell that is clearly negative
-    // is evidence AGAINST a candidate; it is never a reason to buy more of it.
-    const best = s.cells.filter((cell) => cell.mean > 0).sort((a, b) => b.z - a.z)[0];
-    if (best && best.z >= 3) {
-      const against = s.cells.find((cell) => cell.mean < 0 && cell.z >= 3);
-      return against
-        ? `PROMOTE — ${best.tag} ${signed(best.mean)} against ${against.tag} ${signed(against.mean)}; the boards disagree`
-        : `PROMOTE — ${best.tag} alone, ${signed(best.mean)}; check the width story`;
+    if (s.all.ci >= Math.abs(s.all.mean)) {
+      // Not separated from zero. Say whether the rooms at least agree, because
+      // "every room says a small plus" and "half say plus, half say minus" are
+      // different kinds of nothing and only one of them is worth more batches.
+      const up = s.cells.filter((cell) => cell.mean > 0).length;
+      return up === s.cells.length ? "unsettled — every room leans up, none of it clear"
+        : up === 0 ? "unsettled — every room leans down"
+        : `unsettled — ${up} of ${s.cells.length} rooms lean up, the rest down`;
     }
-    const worst = s.cells.find((cell) => cell.mean < 0 && cell.z >= 3);
-    if (worst) return `park — nothing anywhere, and ${worst.tag} reads ${signed(worst.mean)} against it`;
-    return "park — nothing at the far dose anywhere";
+    if (s.all.mean < 0) return `REJECT — costs ${signed(s.all.mean)} on average`;
+    return `PROMOTE — worth ${signed(s.all.mean)} on average across the grid`;
   };
 
-  console.log(`cpu-lab screen — the far dose (last holdout) over ${tags.size} cheap cells, ${VERSUS} controls`);
-  console.log(`  what a candidate is worth once all but one chair has it. Promote on pooled |z|>=2 or any cell |z|>=3.\n`);
-  console.log(`  ${"candidate".padEnd(24)} ${"pooled".padStart(14)}   ${"z".padStart(4)}  cells  ${"best cell".padStart(22)}   verdict`);
+  console.log(`cpu-lab screen — the AVERAGE BOOST: what a manager carrying the tweak gains,`);
+  console.log(`  averaged over every room and every number of rivals who also have it.`);
+  console.log(`  A gain with 1 of 4 managers on it counts the same as one with 3 of 4.`);
+  console.log(`  ${tags.size} rooms, ${VERSUS} controls. The interval is the spread BETWEEN rooms, so it is wide`);
+  console.log(`  on purpose: a tweak that helps in half of them and hurts in the rest reads unsettled.\n`);
+  console.log(`  ${"candidate".padEnd(26)} ${"average".padStart(14)}  ${"rooms".padStart(5)}  `
+    + `${"best room".padStart(20)}  ${"worst room".padStart(20)}   verdict`);
   for (const s of scored) {
-    console.log(`  ${s.id.padEnd(24)} ${(signed(s.all.mean) + " ±" + s.all.ci.toFixed(2)).padStart(14)}   `
-      + `${s.z.toFixed(1).padStart(4)}  ${String(s.cells.length).padStart(5)}  `
-      + `${(s.top.tag + " " + signed(s.top.mean) + " z" + s.top.z.toFixed(1)).padStart(22)}   ${verdict(s)}`);
+    const room = (cell) => cell ? `${cell.tag} ${signed(cell.mean)}` : "—";
+    console.log(`  ${s.id.padEnd(26)} ${(signed(s.all.mean) + " ±" + (Number.isFinite(s.all.ci) ? s.all.ci.toFixed(2) : "?")).padStart(14)}  `
+      + `${String(s.cells.length).padStart(5)}  ${room(s.best).padStart(20)}  ${room(s.worst).padStart(20)}   ${verdict(s)}`);
   }
-  const live = scored.filter((s) => !s.fixture);
+  const live = scored.filter((s) => !s.fixture && !TWEAKS.find((t) => t.id === s.id)?.settled);
   const promoted = live.filter((s) => verdict(s).startsWith("PROMOTE"));
-  const expected = (live.length * 0.0455 + live.length * tags.size * 0.0027).toFixed(1);
-  console.log(`\n  ${promoted.length} of ${live.length} candidates promoted. At this bar, ~${expected} would promote `
-    + `from noise alone,\n  so the confirm stage is where a promotion is earned, not here.`);
-  const missing = live.filter((s) => s.cells.length < tags.size);
+  console.log(`\n  ${promoted.length} of ${live.length} candidates are clear of zero and positive. At this bar about `
+    + `${(live.length * 0.025).toFixed(1)} would be\n  from luck alone, so a promotion buys a deeper measurement rather than a change to the bidder.`);
+  const spots = tags.size && live.length ? Math.max(...live.map((s) => s.all.spots)) : 0;
+  const missing = live.filter((s) => s.all.spots < spots);
   if (missing.length) {
-    console.log(`\n  thinner than the full screen (inert in a cell, or not yet run):`);
-    for (const s of missing.slice(0, 8)) console.log(`    ${s.id.padEnd(24)} ${s.cells.length}/${tags.size} cells`);
+    console.log(`\n  measured in fewer places than the fullest candidate (${spots} room-and-adoption-levels):`);
+    for (const s of missing.slice(0, 8)) console.log(`    ${s.id.padEnd(26)} ${s.all.spots}`);
   }
   if (promoted.length) {
     console.log(`\n  node scripts/cpu-lab.mjs run --stage confirm --tweak ${promoted.map((s) => s.id).join(",")}`);
   }
+
 }
