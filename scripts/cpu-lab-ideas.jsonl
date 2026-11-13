@@ -97,3 +97,23 @@
 // snakeBalanceBonus 60 moves 40 (31 to a starter, 9 to a reliever, 0 to a bat),
 // 140 moves 105 but 60 go to the pen, 0 moves 46 all to a bat, snakeNeedSpan=0
 // moves 61 (36 SP / 22 RP / 3 bat), snakeNeedBonus=0 still moves 0 OF 240.
+// CORRECTION, 2026-11-13, room peachy-wolf-field, on the WHY fields of
+// "arm-balance-parity" and "need-span-flat" above. THOSE WHY FIELDS OVERSELL
+// THE STANDINGS EVIDENCE AND SHOULD BE READ WITH THIS LINE. Eight finished
+// snake rooms, 26 seats, 18 of them computers, each roster simulated 3000
+// seasons: first-starter turn against rotation quality is r = +0.735, but
+// first-starter turn against WIN% is only r = -0.239, and rotation runsPerPa
+// against win% r = -0.322 (computers only; every seat reads +0.743 / -0.298 /
+// -0.304). So the MECHANISM is confirmed and the PAYOFF is not. Waiting
+// reliably buys worse arms -- pooled, 0.0047 runs per PA per turn of delay over
+// 51 turns -- and that does not reliably buy fewer wins. peachy-wolf-field is
+// the sharpest case: the balanced seat took its first starter on own turn 9,
+// finished with the WORST rotation in the room (0.0597) and WON at 53.8, while
+// the slugger reached on turn 3, had the better rotation, and came last at 43.9
+// on the room's worst offence (RF/g 4.36 against 4.91). This is the exact shape
+// of pitching-spend-is-an-outcome, where seven rooms gave corr($pitching,win%)
+// = +0.65 and lifting starter bids still read -0.02 ABSOLUTE. So do not read
+// these two ideas as pre-confirmed. What justifies measuring them is not the
+// standings but the inconsistency: positionBonus pays a bat 60 and
+// snakeBalanceBonus pays an arm 35 for the identical structural fact, and
+// nobody chose that gap. A null here is a perfectly good answer.

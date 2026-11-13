@@ -442,25 +442,67 @@ function runMixed(cell, params, seedOf) {
 // carries the tweak exactly k/N of the time and no chair or nomination slot can
 // carry the result.
 // THE NO-TWEAK RUN OF THE SAME ROOM, which is what every seat is measured
-// against. Drafted and simulated once per (room, seed) and reused by every
-// adoption level, since none of them change it.
+// against: the same room and seed with nobody carrying the tweak, so a seat's
+// own luck is the same number on both sides and cancels.
 //
-// Bounded, for the reason the valuation cache had to be: a run walks thousands
-// of seeds and would otherwise hold every room it ever built.
+// IT DOES NOT DEPEND ON THE TWEAK. Only on the room, the seed, who the control
+// chairs are, and how the games are played — so it is byte-identical for every
+// candidate the bench will ever measure, and worth keeping.
+//
+// It was in-memory only and capped at 64, while a pass needs 936 (39 rooms x 24
+// leagues). A room's 24 fit, so the adoption levels WITHIN a room shared them
+// and then eviction threw them away — which meant every candidate rebuilt all
+// 936, every pass, forever. That is 30% of the room-building work
+// (936 control against 2,232 treated) spent re-deriving the same rooms.
+//
+// Kept on disk now, so the first run that needs one pays and nothing ever pays
+// again: across candidates, across the three parallel processes, across
+// restarts. Append-only one line each, a few hundred KB in all, and reloaded
+// when another process has written since — the entries are deterministic, so a
+// race costs one wasted rebuild and never a wrong answer.
 const CONTROL_RUNS = new Map();
-const CONTROL_RUNS_MAX = 64;
+const CONTROL_STORE = path.join(path.dirname(OUT), "controls.jsonl");
+let controlStoreAt = -1;
+
+// Everything the control room depends on. The tweak is deliberately absent.
+const controlKeyFor = (cell, seed) =>
+  `${cell.tag}:${cellShape(cell)}:${seed}:${BASELINE}:${VERSUS}:${PERSONA}:${PERTURB ?? "shipped"}:${RUNS}`;
+
+function loadControlStore() {
+  let at = 0;
+  try { at = fs.statSync(CONTROL_STORE).mtimeMs; } catch { return; }
+  if (at === controlStoreAt) return;
+  controlStoreAt = at;
+  try {
+    for (const line of fs.readFileSync(CONTROL_STORE, "utf8").split("\n")) {
+      if (!line) continue;
+      try {
+        const saved = JSON.parse(line);
+        if (saved?.k && Array.isArray(saved.w)) CONTROL_RUNS.set(saved.k, saved.w);
+      } catch { /* a line half-written by another process; it will be reread */ }
+    }
+  } catch { /* gone between the stat and the read */ }
+}
 
 function controlRun(cell, seed) {
-  const key = `${cell.tag}|${seed}`;
+  const key = controlKeyFor(cell, seed);
   let found = CONTROL_RUNS.get(key);
+  if (!found) {
+    loadControlStore();                       // another process may have it
+    found = CONTROL_RUNS.get(key);
+  }
   if (!found) {
     const draft = driveRoom(cell, seed, () => CONTROL, personaFor);
     const teams = draft.managers.map((manager) => buildTeam(manager, { optimize: true }));
     const win = new Map(simulateBatch(teams, { runs: RUNS, seed: `${seed}-sim` })
       .teams.map((row) => [row.team, row.winPct]));
     found = draft.managers.map((manager) => win.get(manager.name) ?? 0);
-    if (CONTROL_RUNS.size >= CONTROL_RUNS_MAX) CONTROL_RUNS.delete(CONTROL_RUNS.keys().next().value);
     CONTROL_RUNS.set(key, found);
+    try {
+      fs.mkdirSync(path.dirname(CONTROL_STORE), { recursive: true });
+      fs.appendFileSync(CONTROL_STORE, `${JSON.stringify({ k: key, w: found })}\n`);
+      controlStoreAt = fs.statSync(CONTROL_STORE).mtimeMs;   // our own write, not news
+    } catch { /* unwritable: the run still works, it just pays again next time */ }
   }
   return found;
 }
