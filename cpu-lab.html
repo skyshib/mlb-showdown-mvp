@@ -337,6 +337,24 @@
   .run-fill { height: 100%; border-radius: 3px; background: var(--pos); transition: width 0.4s ease; }
 
   .empty { color: var(--text-muted); }
+  /* THE THRONE. The page's first answer to "what is shipping and what is
+     challenging it", which used to be answerable only by reading four panels
+     and the room-control dropdown together. */
+  #throne-card { border-color: rgb(var(--pos-rgb) / 0.35); }
+  .throne-now { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .throne-now .name { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .throne-note { color: var(--text-secondary); font-size: 13px; margin: 0 0 18px; }
+  .throne-group { margin-top: 18px; }
+  .throne-group > h3 {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-muted); margin: 0 0 6px;
+  }
+  .throne-group > p.empty { color: var(--text-muted); font-size: 13px; margin: 0; }
+  .throne-step { font-variant-numeric: normal; }
+  .throne-step .won { color: var(--text-secondary); font-size: 13px; }
+  tr.is-reverted td { opacity: 0.55; }
+  tr.is-reverted td:first-child { text-decoration: line-through; text-decoration-thickness: 1px; }
+  .throne-rival { color: var(--text-muted); font-size: 12px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -358,6 +376,20 @@
     <button class="toggle" id="auto" aria-pressed="true" type="button">Auto-refresh on</button>
     <button class="toggle" id="refresh" type="button">Refresh now</button>
   </div>
+
+  <section class="card" id="throne-card" hidden>
+    <div class="chart-head">
+      <h2>The throne</h2>
+      <p class="hint">
+        What ships today, how it got there, and what is trying to take it. A candidate is
+        <strong>accepted</strong> when the stopping rule puts the average above zero at 99%; it is
+        <strong>in place</strong> once its value has been written into the bidder and crowned as a
+        generation. Everything below is measured against the reigning bidder — earlier rounds are
+        hidden until you ask for them in the room controls.
+      </p>
+    </div>
+    <div id="throne"></div>
+  </section>
 
   <section id="running" class="card" hidden>
     <div class="chart-head">
@@ -727,6 +759,189 @@ function verdictOf(id, lone, crowd) {
 // and then runs. The fetched data is already in `data`; only the redraw waits.
 let pendingRender = false;
 
+// ---- the throne -------------------------------------------------------------
+// THE LINEAGE, read off the generations themselves. Each generation is a frozen
+// knob set, so the difference between two consecutive ones IS a ship: which knob
+// moved, from what to what. Matching that move back to the candidate whose
+// params hold the new value names the winner, and a step whose value is no
+// longer the live default was either reverted or superseded.
+//
+// Derived, never written down twice. The alternative — a hand-kept list of
+// "what we shipped" — is the thing most likely to drift from the bidder it
+// claims to describe, and this panel exists precisely to be trusted.
+function throneLineage() {
+  const width = Object.keys(data.defaults ?? {}).length;
+  // Full knob sets only: `naive` is a partial override set, not a generation
+  // the bidder ever sat on.
+  const full = (data.generations ?? []).filter((generation) => generation.knobs
+    && Object.keys(generation.knobs).length === width);
+  const origin = full.find((generation) => generation.name === "tuned-2026-11-10")
+    ?? full[full.length - 1];
+  if (!origin) return [];
+  // A POSITION IS A (KNOB, VALUE) THE BIDDER WAS CROWNED HOLDING, measured
+  // against the generation the lab was built on — NOT the difference between
+  // neighbouring generations. Walking neighbours needs them in chronological
+  // order, and they are declared in whatever order somebody inserted them: it
+  // read the reverted step backwards and invented a snakeNeedSpan step that
+  // never happened.
+  //
+  // Ordering, where it is still needed: by date, then by how many positions a
+  // generation holds. A lineage that adds holds a superset of its predecessor,
+  // so two ships on the same day sort correctly, which no date alone can do.
+  const ordered = [...full].sort((a, b) => String(a.at).localeCompare(String(b.at))
+    || Object.keys(a.knobs).filter((knob) =>
+      JSON.stringify(a.knobs[knob]) !== JSON.stringify(origin.knobs[knob])).length
+     - Object.keys(b.knobs).filter((knob) =>
+      JSON.stringify(b.knobs[knob]) !== JSON.stringify(origin.knobs[knob])).length);
+  const seen = new Map();
+  for (const generation of ordered) {
+    if (generation.name === origin.name) continue;
+    for (const knob of Object.keys(generation.knobs)) {
+      if (JSON.stringify(generation.knobs[knob]) === JSON.stringify(origin.knobs[knob])) continue;
+      // The EARLIEST generation holding a value is the one that won it; a later
+      // generation carrying it forward is not a second crowning.
+      const key = `${knob}|${JSON.stringify(generation.knobs[knob])}`;
+      if (seen.has(key)) continue;
+      const winner = (data.tweaks ?? []).find((tweak) => tweak.params
+        && JSON.stringify(tweak.params[knob]) === JSON.stringify(generation.knobs[knob]));
+      seen.set(key, {
+        knob,
+        from: origin.knobs[knob],
+        to: generation.knobs[knob],
+        generation: generation.name,
+        at: generation.at,
+        reverted: generation.reverted ?? null,
+        inPlace: JSON.stringify(data.defaults?.[knob]) === JSON.stringify(generation.knobs[knob]),
+        winner: winner?.id ?? null,
+        settled: winner?.settled ?? null
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+// WHAT IS CURRENTLY TRYING TO TAKE IT. Only readings against the reigning
+// bidder count here — a candidate's record against an earlier throne says
+// nothing about whether it beats this one.
+function throneContenders() {
+  const live = `balanced|shipped|defaults||${data.baseline ?? ""}|${data.method ?? "seat-paired"}`;
+  const positions = new Set(throneLineage().filter((step) => step.inPlace).map((step) => step.knob));
+  return (data.tweaks ?? [])
+    .filter((tweak) => !tweak.fixture && !tweak.settled)
+    .map((tweak) => {
+      const readings = data.rows.filter((row) => row.tweak === tweak.id
+        && row.mode.startsWith("dose-") && controlKey(row) === live);
+      const levels = new Map();
+      for (const row of readings) {
+        const key = `${row.cell}|${row.mode}`;
+        if (!levels.has(key)) levels.set(key, []);
+        levels.get(key).push(...row.edges);
+      }
+      const each = [...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length);
+      const rooms = new Set(readings.map((row) => row.cell));
+      const sizes = new Set(readings.map((row) =>
+        data.cells.find((cell) => cell.tag === row.cell)?.teams).filter(Boolean)).size;
+      const mean = each.length ? each.reduce((a, b) => a + b, 0) / each.length : 0;
+      const sd = each.length > 1
+        ? Math.sqrt(each.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (each.length - 1)) : 0;
+      return {
+        id: tweak.id,
+        params: tweak.params,
+        n: each.length,
+        rooms: rooms.size,
+        mean,
+        ci: each.length > 1 ? 1.96 * sd / Math.sqrt(each.length) : Infinity,
+        odds: chances(each),
+        called: verdictSoFar(each, RULE, sizes),
+        // Would it OVERWRITE a position the throne holds, or add another?
+        rival: Object.keys(tweak.params ?? {}).some((knob) => positions.has(knob))
+      };
+    })
+    .sort((a, b) => (b.n > 0) - (a.n > 0) || b.mean - a.mean);
+}
+
+function renderThrone() {
+  const card = document.getElementById("throne-card");
+  const host = document.getElementById("throne");
+  if (!data || !data.baseline) { card.hidden = true; return; }
+  card.hidden = false;
+  const steps = throneLineage();
+  const inPlace = steps.filter((step) => step.inPlace);
+  const past = steps.filter((step) => !step.inPlace);
+  const contenders = throneContenders();
+  // MEASURED AGAINST THIS BIDDER vs MERELY QUEUED. Listing all 28 together
+  // buried the three that are actually contesting the throne under 25 rows of
+  // "not measured yet", which is the opposite of what this panel is for.
+  const running = contenders.filter((c) => c.n > 0);
+  const waiting = contenders.filter((c) => c.n === 0);
+  const current = (data.generations ?? []).find((generation) => generation.isLive);
+
+  const stepRow = (step) => `<tr class="${step.inPlace ? "" : "is-reverted"}">`
+    + `<td class="throne-step"><strong>${step.knob}</strong> `
+    + `<span class="muted">${show(step.from)} → ${show(step.to)}</span></td>`
+    + `<td class="throne-step"><span class="won">${step.winner ?? "—"}</span></td>`
+    + `<td class="throne-step"><span class="won">${step.generation} · ${step.at}</span></td>`
+    + `<td class="throne-step"><span class="won">${step.reverted
+      ? `reverted — ${step.reverted}`
+      : step.settled ? step.settled.replace(/^SHIPPED [^—]*— /, "") : ""}</span></td></tr>`;
+
+  const verdictCell = (c) => {
+    if (!c.n) return `<span class="muted">not measured against this bidder yet</span>`;
+    if (c.called?.call === "accept") {
+      return `<span class="badge badge-win">accepted</span> <span class="muted">`
+        + `${(100 * c.called.above).toFixed(0)}% above zero — ready to crown</span>`;
+    }
+    if (c.called?.call === "kill") {
+      return `<span class="badge badge-dead">killed</span> <span class="muted">`
+        + `${(100 * c.called.below).toFixed(0)}% below zero</span>`;
+    }
+    const up = c.odds ? 100 * c.odds.above : 50;
+    return `<span class="muted">measuring · ${up.toFixed(0)}% above zero, `
+      + `accepted at ${(100 * RULE.accept).toFixed(0)}%</span>`;
+  };
+
+  host.innerHTML = `
+    <div class="throne-now">
+      <span class="name">${data.baseline}</span>
+      <span class="muted">${inPlace.length} position${inPlace.length === 1 ? "" : "s"} in place`
+    + `${current?.at ? ` · crowned ${current.at}` : ""}</span>
+    </div>
+    <p class="throne-note">${current?.note ?? ""}</p>
+
+    <div class="throne-group">
+      <h3>In place — won, and written into the bidder</h3>
+      ${inPlace.length ? `<table><thead><tr><th>knob</th><th>won by</th><th>crowned as</th>`
+        + `<th>what it bought</th></tr></thead><tbody>`
+        + inPlace.map(stepRow).join("") + `</tbody></table>`
+      : `<p class="empty">Nothing yet — the bidder still holds every value it started with.</p>`}
+    </div>
+
+    ${past.length ? `<div class="throne-group">
+      <h3>No longer in place — crowned, then taken back or superseded</h3>
+      <table><thead><tr><th>knob</th><th>won by</th><th>crowned as</th><th>what happened</th></tr></thead>
+      <tbody>${past.map(stepRow).join("")}</tbody></table>
+    </div>` : ""}
+
+    <div class="throne-group">
+      <h3>Up for competition — measured against ${data.baseline}</h3>
+      ${running.length ? `<table><thead><tr><th>candidate</th><th>reading</th>`
+        + `<th>rooms</th><th>where it stands</th></tr></thead><tbody>`
+        + running.map((c) => `<tr><td class="throne-step"><strong>${c.id}</strong>`
+          + `${c.rival ? ` <span class="throne-rival">· rival for a position the throne holds</span>` : ""}`
+          + `<br><span class="muted">${knobLine(c.params)}</span></td>`
+          + `<td>${signed(c.mean)} <span class="muted">±${c.ci.toFixed(2)}</span></td>`
+          + `<td><span class="muted">${c.rooms} rooms · ${c.n} readings</span></td>`
+          + `<td class="throne-step">${verdictCell(c)}</td></tr>`).join("")
+        + `</tbody></table>`
+      : `<p class="empty">Nothing has been measured against this bidder yet.</p>`}
+      ${waiting.length ? `<p class="empty" style="margin-top:10px">`
+        + `${waiting.length} further candidate${waiting.length === 1 ? "" : "s"} queued and not yet `
+        + `measured against ${data.baseline} — they are in the queue table at the foot of the page. `
+        + `A ship re-bases the record, so a candidate measured against an earlier bidder starts again.`
+        + `</p>` : ""}
+    </div>`;
+}
+
 function render() {
   if (!data) return;
   if (tipFor) { pendingRender = true; return; }
@@ -780,13 +995,30 @@ function renderControls() {
   }
   const control = document.getElementById("control");
   const live = `balanced|shipped|defaults||${data.baseline ?? ""}|${data.method ?? "seat-paired"}`;
-  const keys = [...new Set(data.rows.map(controlKey))].sort();
+  // NO HEAD-TO-HEAD VIEWS IN THE ROOM CONTROLS. A row with a frozen generation
+  // in the control chairs answers a different question from every panel on this
+  // page — the panels are all within-room adoption curves — and offering it
+  // beside them invited reading one as the other. The rows stay in the record
+  // and the bench still reports them; they are simply not a view here.
+  // CURRENT WAVE FIRST, then older rounds newest-first. Sorted alphabetically
+  // the reigning bidder landed in the middle of the list, which is a strange
+  // place for the thing the page is about.
+  const byRound = (a, b) => {
+    const ab = a.split("|")[4] ?? "";
+    const bb = b.split("|")[4] ?? "";
+    const current = (key) => key === (data.baseline ?? "");
+    if (current(ab) !== current(bb)) return current(ab) ? -1 : 1;
+    return bb.localeCompare(ab) || a.localeCompare(b);
+  };
+  const keys = [...new Set(data.rows
+    .filter((row) => (row.versus ?? "defaults") === "defaults")
+    .map(controlKey))].sort(byRound);
   // THE CURRENT WAVE IS ALWAYS ON THE LIST, even with nothing in it yet. The
   // morning after a ship there are no rows against the new bidder at all, and
   // without this the page would quietly open on an old round — which is how it
   // came to show the 0.8 numbers under a 0.5 bidder.
   if (!keys.includes(live)) keys.push(live);
-  keys.sort();
+  keys.sort(byRound);
   if (!state.controlPinned || !keys.includes(state.control)) {
     // Default to the plain room measured against the bidder that is SHIPPED
     // RIGHT NOW: archetypes off, shipped wobble, live defaults in the control
@@ -819,6 +1051,10 @@ function renderControls() {
   // confidently wrong about the one thing it exists to get right. So the
   // server reports the commit it booted on, and a mismatch is said out loud
   // BEFORE any claim about which bidder is which.
+  // THE THRONE GOES UP FIRST, and it is the one panel that does not depend on
+  // which view is selected: it always describes the bidder that ships today.
+  renderThrone();
+
   const banner = document.getElementById("stale-baseline");
   if (data.serverGit && data.diskGit && data.serverGit !== data.diskGit) {
     banner.hidden = false;

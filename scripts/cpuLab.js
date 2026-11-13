@@ -124,6 +124,9 @@ export function readCpuLab(root) {
       fingerprint: generation.fingerprint,
       note: generation.note,
       knobs: generation.knobs,
+      // A generation that WAS crowned and then taken back. The page shows the
+      // lineage, and a throne's history is not honest without its reversals.
+      reverted: generation.reverted ?? null,
       isLive: cpuTunables(generation.knobs).key === ""
     })),
     defaults: CPU_TUNABLE_DEFAULTS,
