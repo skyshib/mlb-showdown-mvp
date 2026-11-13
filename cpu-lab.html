@@ -443,17 +443,15 @@
           </select>
         </label>
         <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--neg)"></span> lost</span>
-        <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--gridline)"></span> nothing</span>
+        <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--gridline)"></span> inside its own interval</span>
         <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--pos)"></span> won</span>
       </div>
     </div>
     <div class="scroll"><table class="matrix" id="matrix"></table></div>
     <p class="note">
-      The <b>jiggle</b> row is the yardstick. It re-draws the bid wobble from the same
-      distribution — the shipped bidder in a different auction — so whatever it reads in a room is
-      what this bench pays for a change worth nothing. Any reading inside its own room's band is
-      printed but not painted, whoever it belongs to. (<b>null</b> changes nothing at all and now
-      reads exactly zero everywhere, which makes it a plumbing check rather than a ruler.)
+      A cell is painted only where the reading clears its own 95% interval — everything that
+      varies is already in that interval, so a number inside it is printed but not coloured. Hover
+      any cell for the interval and the leagues behind it.
       The table size IS the pool size — the deck is dealt to the room — so the columns run from a
       two-seat duel to a wide eight-seat board. A knob that is right at one width and wrong at
       another shows up here and nowhere else.
@@ -1310,22 +1308,18 @@ function renderMatrix(rows, summary) {
     return { n, mean: m, ci: 1.96 * sd / Math.sqrt(each.length) };
   };
 
-  // THE YARDSTICK IS THE PLACEBO, NOT THE NULL. `null` changes nothing at all,
-  // and since each seat is now measured against itself in a no-tweak room it
-  // reads EXACTLY zero everywhere — which makes it a perfect plumbing check and
-  // a useless ruler, because a band of zero greys out nothing.
+  // A CELL IS PAINTED ONLY IF IT CLEARS ITS OWN INTERVAL. That interval already
+  // carries everything that varies — the leagues, the rosters, the games — so
+  // it is the right ruler and it needs no fixture behind it.
   //
-  // `jiggle` is the right source: it re-draws the per-card bid wobble from the
-  // same distribution, so it is the shipped bidder in a different auction. Its
-  // rosters really do differ, so whatever it reads is what this bench pays for
-  // a change worth nothing — which is exactly the bar a candidate has to clear.
-  // Anything inside the band is printed but not painted, whoever it belongs to.
-  const noiseIn = (tag) => {
-    const mine = rows.filter((row) => row.tweak === "jiggle" && row.cell === tag && wanted(row));
-    if (!mine.length) return 0;
-    const all = mine.flatMap((row) => row.edges);
-    return Math.max(Math.abs(ci95(all)), ...mine.map((row) => Math.abs(row.edges.reduce((a, b) => a + b, 0) / row.edges.length)));
-  };
+  // This used to grey against the `jiggle` fixture's band, which was a mistake
+  // built on a mistake. jiggle re-rolls a manager's private per-card bid
+  // wobble, and since EVERY manager already carries their own independent
+  // wobble, re-rolling one does not make them any more different from the rest
+  // than they already were: it swaps one arbitrary draw for another, which is
+  // zero by symmetry. That is a narrow check on the harness, never a yardstick
+  // for candidates. It is also auction-only, so it had nothing to say about the
+  // nineteen snake rooms it was supposedly measuring.
   // A row with nothing in it under this reading says nothing. It belongs in the
   // queue table below, which is where a reader goes to see what is still owed.
   const present = summary.filter((entry) => cells.some((cell) => valueOf(entry.id, cell.tag)));
@@ -1350,8 +1344,7 @@ function renderMatrix(rows, summary) {
       // top so nothing here is colour-only. The weight is a share of the
       // theme's own ceiling (--fill-max) rather than an absolute alpha, so the
       // strongest cell stops where its number is still readable in both modes.
-      const noise = noiseIn(cell.tag);
-      const quiet = noise > 0 && Math.abs(stat.mean) <= noise;
+      const quiet = stat.ci > 0 && Math.abs(stat.mean) <= stat.ci;
       const weight = quiet ? 0 : Math.min(1, 0.14 + 0.86 * Math.abs(stat.mean) / span);
       return `<td class="cell${quiet ? " quiet" : ""}" data-sign="${stat.mean >= 0 ? "pos" : "neg"}" style="--weight:${weight.toFixed(3)}"
         tabindex="0" ${tipAttrs({
