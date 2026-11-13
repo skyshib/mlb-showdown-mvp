@@ -224,6 +224,27 @@ const QUEUED = [
     params: { poolPremiumThreshold: 0.6 }
   },
   {
+    id: "snake-balance-bonus-65",
+    note: "the staff-hole bonus at 65, the lower neighbour of the 70 that had just won",
+    // REJECTED 2026-11-13: -0.08 +-0.11 against a table on 70, 91% below zero.
+    settled: "REJECTED — -0.08 +-0.11 against the 70 bidder",
+    params: { snakeBalanceBonus: 65 }
+  },
+  {
+    id: "snake-balance-bonus-75",
+    note: "the staff-hole bonus at 75, the upper neighbour of the 70 that had just won",
+    // REJECTED 2026-11-13: -0.23 +-0.25 against a table on 70, 96% below zero —
+    // though on 5 readings in one table size, since killing deliberately does not
+    // wait for breadth.
+    //
+    // WITH 65 THIS CLOSES THE KNOB. snakeBalanceBonus has now been read at 50,
+    // 60, 65, 70 and 75, and 70 beats all four: the bisection converged rather
+    // than running to its 2% floor. The staff-hole bonus wants to sit just above
+    // parity with the lineup-hole bonus (60) and not far above it.
+    settled: "REJECTED — -0.23 +-0.25 against the 70 bidder; with 65 this settles the knob at 70",
+    params: { snakeBalanceBonus: 75 }
+  },
+  {
     id: "snake-balance-bonus-70",
     note: "the staff-hole bonus past parity at 70, the upper neighbour of the 60 that had just won",
     // SHIPPED 2026-11-13 (tuned-2026-11-13d). THE FIRST POSITION WON BY A
