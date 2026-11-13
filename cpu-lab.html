@@ -290,6 +290,10 @@
      badge that picked it up stretched to fill its whole column. */
   .badge.badge-now { color: var(--pos); }
   .badge.badge-win { color: var(--ok); }
+  .badge.badge-dead { color: var(--neg); }
+  /* A candidate the rule has finished with. Dimmed, not hidden: the reading is
+     still the reading, and a reader should be able to see what was decided. */
+  .panel.decided { opacity: 0.68; }
   tr.live-row { background: rgb(var(--pos-rgb) / 0.07); }
   .panel.live-panel { border-color: rgb(var(--pos-rgb) / 0.45); }
 
@@ -495,7 +499,7 @@
 // candidate is to being accepted or killed, and the bench decides it — a
 // second copy of either the thresholds or the arithmetic is how those two came
 // to disagree about the positive control earlier today.
-import { RULE, chances } from "./scripts/cpu-lab-rule.mjs";
+import { RULE, chances, verdictSoFar } from "./scripts/cpu-lab-rule.mjs";
 const token = new URLSearchParams(location.search).get("token");
 const api = `/api/cpu-lab${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 
@@ -1026,11 +1030,25 @@ function renderStandings(summary) {
     const mid = at(mean);
     const lo = at(mean - ci);
     const hi = at(mean + ci);
-    const why = !clear
-      ? `inside its own interval — nothing established yet`
-      : mean > 0
-        ? `holds up with all but one chair on it`
-        : `costs win points once the table has it`;
+    // SAY WHEN THE RULE HAS ALREADY CALLED IT, rather than describing a live
+    // candidate. Without this a killed one sat here reading like something
+    // still in contention.
+    const readings = data.rows.filter((row) => row.tweak === entry.id
+      && row.mode.startsWith("dose-") && controlKey(row) === state.control);
+    const levels = new Map();
+    for (const row of readings) {
+      const key = `${row.cell}|${row.mode}`;
+      if (!levels.has(key)) levels.set(key, []);
+      levels.get(key).push(...row.edges);
+    }
+    const called = verdictSoFar([...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length));
+    const why = called
+      ? `${called.call === "kill" ? "killed" : "accepted"} after ${called.n} readings`
+      : !clear
+        ? `inside its own interval — nothing established yet`
+        : mean > 0
+          ? `holds up with all but one chair on it`
+          : `costs win points once the table has it`;
     return `<div class="leader">
       <div>
         <div class="leader-name">${escape(entry.id)}${
@@ -1049,7 +1067,7 @@ function renderStandings(summary) {
         <span class="ci" style="left:${lo.toFixed(2)}%; width:${Math.max(0.5, hi - lo).toFixed(2)}%"></span>
         <span class="fill ${sign}" style="left:${Math.min(50, mid).toFixed(2)}%; width:${Math.abs(mid - 50).toFixed(2)}%"></span>
       </div>
-      <div class="leader-why">${escape(why)}${
+      <div class="leader-why${called ? " muted" : ""}">${escape(why)}${
         entry.where === "lone adopter only" ? " — lone adopter only, the noisiest reading there is" : ""}</div>
     </div>`;
   }).join("");
@@ -1332,6 +1350,7 @@ function renderDose(rows, summary) {
     }).join("");
     const queued = data.tweaks.find((tweak) => tweak.id === line.id);
     const isLive = liveIds.has(line.id);
+    const isFixture = Boolean(data.tweaks.find((t) => t.id === line.id)?.fixture);
     // THE HEADLINE, on the chart itself: the average across every room and
     // every adoption level, with its interval. The curve shows the shape; this
     // is the one number that shape adds up to, and reading it off the picture
@@ -1353,19 +1372,32 @@ function renderDose(rows, summary) {
     // so a reader can see a candidate approaching its call rather than only
     // learning it happened. Whichever side it is leaning, with the bar it has
     // to reach.
+    // AND WHETHER THE CALL HAS ALREADY BEEN MADE. Showing only the probability
+    // and the bar made a decided candidate look exactly like a live one: a
+    // reader saw "92% below zero · killed at 90%" and reasonably asked why it
+    // was still going, when in fact it had been killed twenty minutes earlier
+    // and the page simply never said so. The verdict comes from the same
+    // module the bench stops on.
     const odds = chances(each);
+    const called = verdictSoFar(each);
     const toGo = !odds ? ""
-      : odds.below >= odds.above
-        ? `<span class="panel-odds"><b>${(100 * odds.below).toFixed(0)}%</b> below zero`
-          + `<span class="muted"> · killed at ${(100 * RULE.kill).toFixed(0)}%</span></span>`
-        : `<span class="panel-odds"><b>${(100 * odds.above).toFixed(0)}%</b> above zero`
-          + `<span class="muted"> · accepted at ${(100 * RULE.accept).toFixed(0)}%</span></span>`;
+      : called
+        ? `<span class="panel-odds"><span class="badge ${called.call === "kill" ? "badge-dead" : "badge-win"}">`
+          + `${called.call === "kill" ? (isFixture ? "confirmed" : "killed") : "accepted"}</span>`
+          + `<span class="muted"> at ${called.n} readings · `
+          + `${(100 * (called.call === "kill" ? called.below : called.above)).toFixed(0)}% `
+          + `${called.call === "kill" ? "below" : "above"} zero</span></span>`
+        : odds.below >= odds.above
+          ? `<span class="panel-odds"><b>${(100 * odds.below).toFixed(0)}%</b> below zero`
+            + `<span class="muted"> · killed at ${(100 * RULE.kill).toFixed(0)}%</span></span>`
+          : `<span class="panel-odds"><b>${(100 * odds.above).toFixed(0)}%</b> above zero`
+            + `<span class="muted"> · accepted at ${(100 * RULE.accept).toFixed(0)}%</span></span>`;
     const headline = `<span class="panel-avg ${clear ? (avg > 0 ? "num pos" : "num neg") : "muted"}">`
       + `${signed(avg)}${band != null ? ` ±${band.toFixed(2)}` : ""}</span>`
       + `<span class="panel-avg-note">${each.length} reading${each.length > 1 ? "s" : ""} `
       + `across ${line.points.length} room${line.points.length > 1 ? "s" : ""}</span>`
       + toGo;
-    return `<div class="panel${isLive ? " live-panel" : ""}">
+    return `<div class="panel${isLive ? " live-panel" : ""}${called ? " decided" : ""}">
       <p class="panel-name">${escape(line.id)}${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
       <p class="panel-headline">${headline}</p>
       <p class="panel-note">${escape(queued ? knobLine(queued.params) : "")}</p>
