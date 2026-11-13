@@ -1130,10 +1130,32 @@ if (command === "list") {
       for (const tag of cellTags) plan.push([id, tag, pass]);
     }
   }
-  // What each candidate has read so far in THIS run, one number per
-  // room-and-adoption-level, and who has been given up on.
+  // What each candidate has read, one number per room-and-adoption-level, and
+  // who has been called.
+  //
+  // PRIMED FROM WHAT IS ALREADY BANKED, not just what this process measures. A
+  // run resumes: rooms already at the asked-for depth are skipped, so a fresh
+  // process would otherwise judge only the handful it happened to measure
+  // itself. That is exactly what went wrong with the positive control — 63 of
+  // its 73 readings were on disk from an earlier process, the page showed it
+  // at 91% against a 90% bar, and the bench sat on ten readings and never
+  // fired. The decision has to use every reading that exists under these
+  // controls, not the ones this process has personally seen.
   const seenSoFar = new Map();
   const abandoned = new Map();
+  for (const id of order) {
+    const tweak = tweakById(id);
+    const already = [];
+    for (const tag of cellTags) {
+      const cell = cellByTag(tag);
+      for (const mode of modesFor(cell, tweak)) {
+        if (!mode.startsWith("dose-")) continue;
+        const banked = rows.filter((row) => rowMatches(row, tweak, cell, mode));
+        if (banked.length) already.push(pooled(banked).mean);
+      }
+    }
+    if (already.length) seenSoFar.set(id, already);
+  }
   outer:
   {
     for (const [id, tag, want] of plan) {
