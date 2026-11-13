@@ -112,21 +112,25 @@ const QUEUED = [
   {
     id: "closer-cooler",
     note: "the best reliever at 2.0x a starter's point rather than 2.5x",
+    settled: "REJECTED — -0.20 +-0.21; the 2.5x top-reliever rate stands, as it did in 2026-10",
     params: { relieverTopRate: 2 }
   },
   {
     id: "pen-depth-dearer",
     note: "the arms behind the closer at 1.0x instead of 0.7x",
+    settled: "REJECTED — -0.25 +-0.35 over 18 readings; pen depth is priced right",
     params: { relieverDepthRate: 1 }
   },
   {
     id: "urgency-earlier",
     note: "start reaching for a hole at a third of the men left, not half",
+    settled: "REJECTED — -0.72 +-0.83; reaching sooner costs, and urgency is near-inert anyway",
     params: { urgencyPatient: 0.33 }
   },
   {
     id: "urgency-harder",
     note: "a desperate manager pays 2.5x a card's worth, not 2x",
+    settled: "REJECTED — -1.56 +-1.38, the second-worst reading in the pass",
     params: { urgencyWeight: 1.5 }
   },
   {
@@ -137,11 +141,13 @@ const QUEUED = [
   {
     id: "bench-cheaper",
     note: "bid a bench card at half its worth instead of 0.7",
+    settled: "REJECTED — -0.15 +-0.11 on 5 readings in 3 rooms; the bench damp is already right",
     params: { depthDamp: 0.5 }
   },
   {
     id: "pace-looser",
     note: "let a flush manager carry a bigger share into one lot",
+    settled: "REJECTED — -0.04 +-0.07 against the four-position bidder; the spend-down ceiling is not a lever",
     params: { roundsCeiling: 3 }
   },
   {
@@ -174,6 +180,7 @@ const QUEUED = [
   {
     id: "depth-spread-wide",
     note: "a full roster spreads its leftover money over five slots instead of three",
+    settled: "REJECTED — -0.08 +-0.11, and it only ever bit 5 rooms",
     params: { depthSlots: 5 }
   },
   {
@@ -222,6 +229,53 @@ const QUEUED = [
     // `identical` is the only one that does not, and no dose substitutes for it.
     settled: "REVERTED — +1.48 mixed but -0.04 identical; denial, and the far dose could not see it",
     params: { poolPremiumThreshold: 0.6 }
+  },
+  {
+    id: "arm-balance-off",
+    note: "no staff-hole bonus at all — snakeBalanceBonus 0",
+    // REJECTED 2026-11-13: -0.94 +-0.83 over 17 readings, 96% below zero. The
+    // proposal argued the bonus double-pays a needed arm, since needBonus already
+    // fires on the same condition. The bench says the opposite at every dose: 0 is
+    // the worst value tried, 35 reads -0.37, and 70 is the best of five. Whatever
+    // the double-count argument describes, the staff hole is underpaid and not
+    // overpaid.
+    settled: "REJECTED — -0.94 +-0.83, the worst value of this knob; the staff hole is underpaid, not double-paid",
+    params: { snakeBalanceBonus: 0 }
+  },
+  {
+    id: "pen-floor-by-room",
+    note: "price the pen over the first arm the room's seats do not reach, not the worst arm dealt",
+    // REJECTED 2026-11-13: -0.21 +-0.30 over 15 readings in 12 rooms. A real
+    // correctness argument — penPricedValue anchors on the worst reliever on the
+    // board, which is an auction fact, and a snake room leaves most arms
+    // undrafted — that nonetheless measures negative. Keep the argument on file;
+    // the number says the floor it replaces is not what is hurting anyone.
+    settled: "REJECTED — -0.21 +-0.30; a sound correctness argument that measures negative",
+    params: { relieverFloorByRoom: 1 }
+  },
+  {
+    id: "snake-need-span-120",
+    note: "the full reversal: put the whole snake need span back at 120",
+    // THE REVERSAL CONFIRMED, 2026-11-13: -0.23 +-0.30 over 34 readings in 19
+    // rooms. need-span-flat won the forward move (120 -> 0) at +0.38, and putting
+    // it back reads negative, so the bench is measuring the KNOB and not whatever
+    // it happened to be compared against. The magnitude is smaller than the
+    // forward move but -0.38 sits inside this interval, so the two are not
+    // distinguishable from a clean mirror.
+    settled: "REVERSAL CONFIRMED — -0.23 +-0.30 against the +0.38 forward move; the sign flips as it must",
+    params: { snakeNeedSpan: 120 }
+  },
+  {
+    id: "snake-balance-bonus-35",
+    note: "the full reversal: the staff-hole bonus back at its original 35",
+    // THE REVERSAL CONFIRMED, 2026-11-13: -0.37 +-0.49 over 13 readings. Two
+    // accepts took this knob 35 -> 60 -> 70 for about +0.66 between them, and
+    // going back to 35 reads negative with -0.66 inside the interval. With
+    // arm-balance-off at -0.94 the knob now has a monotone shape across 0, 35, 60,
+    // 65, 70 and 75, peaking at 70 — which is what a real effect looks like and
+    // what an artefact of one comparison does not.
+    settled: "REVERSAL CONFIRMED — -0.37 +-0.49 against about +0.66 of forward moves",
+    params: { snakeBalanceBonus: 35 }
   },
   {
     id: "snake-need-span-30",
@@ -399,6 +453,7 @@ const QUEUED = [
   {
     id: "snake-scarcity-sharper",
     note: "snake only: a position cliff moves a pick by the WHOLE drop to the next man, not 0.8 of it",
+    settled: "REJECTED — -0.28 +-0.28; paying the WHOLE cliff is worse than 0.8 of it",
     params: { snakeScarcityRate: 1 }
   }
 ];
