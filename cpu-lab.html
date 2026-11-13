@@ -458,6 +458,7 @@
       </div>
     </div>
     <div class="scroll"><table class="matrix" id="matrix"></table></div>
+    <p class="hint" id="queue-rejects"></p>
     <p class="note">
       A cell is painted only where the reading clears its own 95% interval — everything that
       varies is already in that interval, so a number inside it is printed but not coloured. Hover
@@ -468,19 +469,6 @@
     </p>
   </section>
 
-  <section class="card">
-    <div class="chart-head">
-      <h2>The queue</h2>
-      <p class="hint">
-        Everything in <code>scripts/cpu-lab-tweaks.mjs</code>, measured or not, plus anything filed
-        to the ideas inbox, <code>scripts/cpu-lab-ideas.jsonl</code>. What each one CHANGES — the
-        knobs it moves, the shipped values it moves from, what those knobs do, and the room and
-        observation behind a filed proposal — is on the candidate's name in the table above.
-      </p>
-    </div>
-    <div class="scroll"><table id="queue"></table></div>
-    <p class="hint" id="queue-rejects"></p>
-  </section>
 
   <section class="card">
     <div class="chart-head">
@@ -723,7 +711,7 @@ function render() {
   renderDose(rows, shown);
   renderMatrix(rows, shown);
   renderTable(shown);
-  renderQueue(rows);
+  renderRejects();
   renderCoverage(rows, summary);
 }
 
@@ -1431,7 +1419,16 @@ function renderMatrix(rows, summary) {
   // nineteen snake rooms it was supposedly measuring.
   // A row with nothing in it under this reading says nothing. It belongs in the
   // queue table below, which is where a reader goes to see what is still owed.
-  const present = summary.filter((entry) => cells.some((cell) => valueOf(entry.id, cell.tag)));
+  // EVERY QUEUED CANDIDATE GETS A ROW, measured or not. One that has nothing
+  // yet shows a row of dashes, which is the honest thing: it says the question
+  // was asked and is still open. They used to be exiled to a second table
+  // below, so "what is queued" and "what is measured" were two places.
+  const measured = summary.filter((entry) => cells.some((cell) => valueOf(entry.id, cell.tag)));
+  const waiting = data.tweaks
+    .filter((tweak) => !measured.some((entry) => entry.id === tweak.id))
+    .filter((tweak) => !(state.hideFixtures && tweak.fixture))
+    .map((tweak) => ({ id: tweak.id, fixture: Boolean(tweak.fixture), note: tweak.note, params: tweak.params }));
+  const present = [...measured, ...waiting];
   document.getElementById("matrix-card").hidden = present.length === 0;
   if (!present.length) return;
 
@@ -1525,56 +1522,15 @@ function renderTable(summary) {
 // Where a proposal came from. The measurement can say whether the number is
 // better; it can never say why anyone thought to try it, and in a month that is
 // the part that decides what to do next — so it travels with the candidate.
-function provenance(tweak) {
-  if (!tweak.idea) return "";
-  const who = [tweak.by, tweak.room ? `from ${tweak.room}` : null].filter(Boolean).join(", ");
-  return `<div class="from-room">${who ? `${escape(who)}` : "proposed"}`
-    + `${tweak.why ? `<br>${escape(tweak.why)}` : ""}</div>`;
-}
 
 // What the bench decided, where a candidate has been decided about. A sweep
 // stops measuring these, so without this line the row would simply stop
 // growing and look like something had gone wrong.
-function answer(tweak) {
-  if (!tweak.settled) return "";
-  return `<div class="answered"><b>answered</b> — ${escape(tweak.settled)}</div>`;
-}
 
-function renderQueue(rows) {
-  const measured = new Map();
-  for (const row of rows) {
-    measured.set(row.tweak, (measured.get(row.tweak) ?? 0) + (row.edges?.length ?? 0));
-  }
-  // WHAT IS QUEUED AND HOW FAR IT HAS GOT. The knobs, the shipped values and
-  // what each knob does moved onto the candidate's name in the matrix above —
-  // a reader looking at a row of numbers should not have to scroll past it to
-  // learn what the row is about. What is left here is the one thing the matrix
-  // cannot show: the candidates with NOTHING measured yet, which have no row up
-  // there at all.
-  const body = data.tweaks.map((tweak) => {
-    const leagues = measured.get(tweak.id) ?? 0;
-    const knobs = knobChanges(tweak.params);
-    return `<tr${tweak.settled ? ' class="settled"' : ""}>
-      <td tabindex="0" ${tipAttrs({
-        value: tweak.id,
-        sign: "",
-        label: tweak.note ?? "",
-        sub: (knobs.length
-          ? knobs.map((c) => `${c.knob}: ${c.from} → ${c.to}${c.note ? `\n    ${c.note}` : ""}`).join("\n")
-          : "changes nothing — a fixture")
-          + (tweak.idea ? `\n\nproposed by ${tweak.by ?? "an agent"}`
-            + `${tweak.room ? `, from ${tweak.room}` : ""}${tweak.why ? `\n${tweak.why}` : ""}` : "")
-      })}>${escape(tweak.id)}${tweak.fixture ? ' <span class="muted">*</span>' : ""}
-        <div class="params">${escape(tweak.note)}</div>${answer(tweak)}</td>
-      <td class="knob">${escape(knobs.map((c) => c.knob).join(", ") || "—")}</td>
-      <td>${leagues ? `${leagues} leagues` : '<span class="muted">not measured</span>'}</td>
-    </tr>`;
-  }).join("");
-  document.getElementById("queue").innerHTML =
-    `<thead><tr><th>candidate</th><th>knobs it moves</th><th>measured</th></tr></thead>`
-    + `<tbody>${body}</tbody>`;
-  // A proposal the inbox could not use is skipped rather than measured. If that
-  // were not said anywhere, an agent's typo would simply vanish.
+// A PROPOSAL THE INBOX COULD NOT USE is skipped rather than measured. If that
+// were not said anywhere, an agent's typo would simply vanish — written to the
+// inbox, never queued, never measured, and never explained.
+function renderRejects() {
   const bad = data.rejects ?? [];
   document.getElementById("queue-rejects").innerHTML = bad.length
     ? `<span class="refused">${bad.length} proposal${bad.length > 1 ? "s" : ""} in the ideas inbox could `
@@ -1582,7 +1538,6 @@ function renderQueue(rows) {
       + bad.map((reject) => `line ${reject.line}, ${escape(reject.id ?? "no id")} — ${escape(reject.reason)}`).join("; ")
     : "";
 }
-
 function renderCoverage(rows, summary) {
   const measured = new Set(rows.map((row) => `${row.tweak}|${row.cell}|${row.mode}`)).size;
   // Every dose of every candidate on every board: a board with N chairs has
