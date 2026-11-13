@@ -136,9 +136,13 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
               team plays 1500 games in a two-manager room, 750 in a four and
               372 in an eight. Averaging over more seats makes up most of the
               difference, but a wide room is not giving each team more data.
-  --batches   how deep each (tweak, cell, mode) should be measured (default 1).
-              A pair that is already that deep is skipped, so re-running fills
-              gaps and raising this is how you add precision.
+  --batches   how deep each FIXTURE is measured (default 1).
+  --passes    how many times a candidate may sweep the whole grid before giving
+              up on deciding (default 4). A pass covers every room once before
+              any room is measured twice, so the stopping rule sees breadth
+              first. One pass settles a real +0.3 about 21% of the time, four
+              about 66%, eight about 85%; the kill rate stays near 9% whatever
+              you choose, so waiting costs time and not accuracy.
   --minutes   stop starting new work after this long. Finished rows are kept.
   --accept    stop and accept once the average is above zero with at least
               this confidence (default 0.99 — which gives a 5% false-accept
@@ -1170,14 +1174,34 @@ if (command === "list") {
   // fairness: a candidate has to accumulate its own evidence in one run before
   // the rule can act on it, and the rooms are ordered cheapest-first so the
   // verdict arrives before the expensive rooms are bought.
+  // PASSES. One sweep of the grid is 93 readings, and at the spread those
+  // readings actually have, 93 is not enough to settle a tweak worth +0.3 —
+  // simulated, one pass accepts a real +0.3 only 21% of the time and leaves 71%
+  // undecided. Four passes take it to 66%, eight to 85%. Nothing is lost by
+  // waiting: the KILL rate stays flat at about 9% however long a candidate
+  // runs, so the asymmetry holds — obvious losers still die in the first
+  // fifteen readings, and only the ones still alive cost more.
+  //
+  // What does creep is the false accepts on a true null, 5.0% at one pass and
+  // 7.2% at four, because every extra look is another chance to cross the bar
+  // by luck. Four is the default on that basis.
+  //
+  // BREADTH BEFORE DEPTH. A pass covers every room once before any room is
+  // measured twice. Asking for the depth with --batches instead measures one
+  // room four times and then moves on, which is the wrong order for a rule
+  // meant to decide early: it would spend its whole budget in the two-seat
+  // rooms before seeing a four-seat one.
+  const PASSES = Number(args.passes ?? 4);
   const plan = [];
   for (const id of order) {
     if (!tweakById(id).fixture) continue;
-    for (const tag of cellTags) plan.push([id, tag]);
+    for (const tag of cellTags) plan.push([id, tag, BATCHES]);
   }
   for (const id of order) {
     if (tweakById(id).fixture) continue;
-    for (const tag of cellTags) plan.push([id, tag]);
+    for (let pass = 1; pass <= PASSES; pass += 1) {
+      for (const tag of cellTags) plan.push([id, tag, pass]);
+    }
   }
   // What each candidate has read so far in THIS run, one number per
   // room-and-adoption-level, and who has been given up on.
@@ -1185,7 +1209,7 @@ if (command === "list") {
   const abandoned = new Map();
   outer:
   {
-    for (const [id, tag] of plan) {
+    for (const [id, tag, want] of plan) {
       const tweak = tweakById(id);
       if (args["no-fixtures"] != null && tweak.fixture) continue;
       // A candidate that has been ANSWERED is not measured again by a sweep.
@@ -1197,7 +1221,7 @@ if (command === "list") {
       if (abandoned.has(id)) continue;
       const cell = cellByTag(tag);
       const owed = modesFor(cell, tweak).filter((mode) =>
-        rows.filter((row) => rowMatches(row, tweak, cell, mode)).length < BATCHES);
+        rows.filter((row) => rowMatches(row, tweak, cell, mode)).length < want);
       // Work the queue: a pair already measured to the asked-for depth is left
       // alone, so re-running fills the gaps first and `--batches 3` is how you
       // deepen. Nothing is ever redone, and nothing is ever rewritten.
@@ -1216,7 +1240,7 @@ if (command === "list") {
       }
       for (const mode of owed) {
         let have = rows.filter((row) => rowMatches(row, tweak, cell, mode)).length;
-        while (have < BATCHES) {
+        while (have < want) {
           if (Date.now() > deadline) {
             console.log(`\n  time budget reached — ${ran} measurements banked`);
             stopped = true;

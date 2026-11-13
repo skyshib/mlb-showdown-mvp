@@ -1181,9 +1181,12 @@ function renderDose(rows, summary) {
     return;
   }
 
+  // Scale to the DOTS. It used to allow for each point's interval too, which
+  // with wide intervals pushed the axis out to ±12 and squashed every reading
+  // into a band round the middle. The intervals are not drawn any more.
   let span = 0.5;
   for (const line of series) {
-    for (const point of line.points) span = Math.max(span, Math.abs(point.mean) + point.ci);
+    for (const point of line.points) span = Math.max(span, Math.abs(point.mean) * 1.15);
   }
   span = niceSpan(span);
 
@@ -1236,8 +1239,11 @@ function renderDose(rows, summary) {
       const stroke = own.map((point, index) =>
         `${index ? "L" : "M"}${point.at.toFixed(1)} ${y(point.mean).toFixed(1)}`).join(" ");
       const end = own[own.length - 1];
+      // Label only a board with a line to label. One-point boards were each
+      // getting a name tag, which on this grid is a drift of thirty labels over
+      // a chart with thirty dots. Hovering any dot names its room.
       return `<path d="${stroke}" fill="none" stroke="var(--baseline)" stroke-width="2" />`
-        + (boards.length > 1
+        + (boards.length > 1 && own.length > 1
           ? `<text x="${(end.at + 7).toFixed(1)}" y="${y(end.mean) + 3}">${escape(cell.split("-")[0])}</text>`
           : "");
     }).join("");
@@ -1247,8 +1253,12 @@ function renderDose(rows, summary) {
       const mid = y(point.mean);
       // The hit circle is last so it sits on top of its own mark, and it is
       // r=13 against a 4px dot: a reader aims at a point, not at four pixels.
+      // DOTS ONLY. An interval on every point put thirty whiskers in a panel
+      // the width of a postcard and buried the shape they were meant to
+      // qualify. Each point's interval is on its hover, and the one that
+      // decides anything — the interval on the average across all of them — is
+      // printed above the chart.
       return `<g class="point">
-        <line class="whisker" x1="${at}" y1="${y(point.mean - point.ci)}" x2="${at}" y2="${y(point.mean + point.ci)}" stroke="${colour}" />
         <circle class="mark" cx="${at}" cy="${mid}" r="4" fill="${colour}" stroke="var(--surface-1)" stroke-width="2" />
         <circle class="hit" cx="${at}" cy="${mid}" r="13" tabindex="0" role="img" ${tipAttrs({
           value: `${signed(point.mean)} ±${point.ci.toFixed(2)}`,
