@@ -72,7 +72,7 @@ import { IDEA_REJECTS, TWEAKS, tweakById } from "./cpu-lab-tweaks.mjs";
 import { appendIdea, ideasFile, knobKey } from "./cpu-lab-ideas.mjs";
 // The grid lives in its own module: the room server reads it too, and importing
 // this file for it would run the CLI.
-import { CELLS } from "./cpu-lab-cells.mjs";
+import { CELLS, cellShape } from "./cpu-lab-cells.mjs";
 
 export { CELLS };
 
@@ -524,6 +524,7 @@ const rowMatches = (row, tweak, cell, mode) => row.tweak === tweak.id
   && row.persona === PERSONA && row.perturb === (PERTURB == null ? "shipped" : PERTURB)
   && (row.versus ?? "defaults") === VERSUS && (row.holdout ?? "") === HOLDOUT
   && baselineOf(row) === BASELINE
+  && (row.shape == null || row.shape === cellShape(cell))
   && row.runs === RUNS;
 
 function measure(tweak, cell, mode, rows) {
@@ -551,6 +552,9 @@ function measure(tweak, cell, mode, rows) {
     at: new Date().toISOString(),
     git: GIT,
     baseline: BASELINE,
+    // What the cell's tag MEANT when this was measured. A tag is a name, not a
+    // definition; editing the grid can point it at a different room.
+    shape: cellShape(cell),
     tweak: tweak.id,
     note: tweak.note,
     params: paramKey(tweak.params),
@@ -917,7 +921,7 @@ if (command === "list") {
     process.exitCode = 1;
   }
   console.log(`\n  reach (what each tweak moves, two seeds a cell)`);
-  console.log(`    ${"tweak".padEnd(30)}${"cell".padEnd(13)}${"rosters".padStart(10)}${"prices".padStart(10)}${"mean $".padStart(9)}`);
+  console.log(`    ${"tweak".padEnd(32)}${"cell".padEnd(13)}${"rosters".padStart(10)}${"prices".padStart(10)}${"mean $".padStart(9)}`);
   for (const id of tweakIds) {
     const tweak = tweakById(id);
     // `null` changes nothing against the live defaults, so there is nothing to
@@ -927,7 +931,7 @@ if (command === "list") {
     if (id === "null" && VERSUS === "defaults") continue;
     for (const tag of cellTags) {
       const touch = reach(cellByTag(tag), tweak.params);
-      console.log(`    ${id.padEnd(30)}${tag.padEnd(13)}`
+      console.log(`    ${id.padEnd(32)}${tag.padEnd(13)}`
         + `${`${touch.seatsMoved}/${touch.seats}`.padStart(10)}`
         + `${`${touch.lotsMoved}/${touch.lots}`.padStart(10)}`
         + `${touch.dollars.toFixed(1).padStart(9)}`
@@ -1005,7 +1009,7 @@ if (command === "list") {
         heartbeat({ tweak: tweak.id, cell: cell.tag, mode: "reach", league: 0, leagues: 0 });
         const touch = reach(cell, tweak.params);
         if (!touch.moves) {
-          console.log(`  ${id.padEnd(30)} ${tag.padEnd(12)} INERT — no roster and no price moved, skipped`);
+          console.log(`  ${id.padEnd(32)} ${tag.padEnd(12)} INERT — no roster and no price moved, skipped`);
           continue;
         }
       }
@@ -1021,7 +1025,7 @@ if (command === "list") {
           const stat = pooled([row]);
           have += 1;
           ran += 1;
-          console.log(`  ${id.padEnd(30)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
+          console.log(`  ${id.padEnd(32)} ${tag.padEnd(12)} ${mode.padEnd(10)} b${row.batch} `
             + `${signed(stat.mean).padStart(7)} ±${stat.ci.toFixed(2).padStart(5)}  ${row.seconds}s`);
         }
       }
