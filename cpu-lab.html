@@ -257,6 +257,7 @@
   .panel { border: 1px solid transparent; border-radius: 8px; padding: 8px; margin: -8px; }
   .panel-name { font-size: 13px; color: var(--text-primary); margin: 0 0 2px; }
   .panel-note { font-size: 11px; color: var(--text-muted); margin: 0 0 6px; }
+  .panel-note.narrow { color: var(--neg); opacity: 0.85; }
   /* The number the curve adds up to, said out loud above the curve. */
   .panel-headline { margin: 2px 0 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .panel-avg { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
@@ -1295,6 +1296,19 @@ function renderDose(rows, summary) {
       : up === 0 ? `down in all ${down} rooms`
       : down === 0 ? `up in all ${up} rooms`
       : `up in ${up} room${up > 1 ? "s" : ""}, down in ${down}`;
+    // A KNOB THE GRID CANNOT REACH. Some tweaks only bite where a precondition
+    // holds — an uncapped bullpen, a long roster, a snake board — and the grid
+    // is built from the rooms people actually play, where those conditions are
+    // rare. `check` skips a room the knob moves nothing in rather than banking
+    // a meaningless zero, so such a candidate quietly runs out of grid and sits
+    // undecided forever. That is worth saying: it is a different statement from
+    // "we measured it and could not tell", and only one of them is about the
+    // knob.
+    const roomsTotal = (data.cells ?? []).length;
+    const narrow = roomsTotal > 0 && line.points.length <= Math.max(3, roomsTotal * 0.12)
+      ? `<p class="panel-note narrow">only bites in ${line.points.length} of the ${roomsTotal} rooms — `
+        + `the rest have nothing for it to change</p>`
+      : "";
     // One stroke per BOARD, not one through the lot: a three-seat room and a
     // six-seat one are different boards as well as different doses, and joining
     // them would draw a trend that nothing measured. The strokes are all the
@@ -1411,7 +1425,7 @@ function renderDose(rows, summary) {
       <p class="panel-name">${escape(line.id)}${isLive ? ' <span class="badge badge-now">measuring</span>' : ""}</p>
       <p class="panel-headline">${headline}</p>
       <p class="panel-note">${escape(queued ? knobLine(queued.params) : "")}</p>
-      <p class="panel-note">${escape(reading)}</p>
+      <p class="panel-note">${escape(reading)}</p>${narrow}
       <!-- role="group", NOT role="img". role="img" tells the browser the whole
            subtree is one image, which is what suppressed every tooltip in here
            and hid each point from a screen reader as well. -->

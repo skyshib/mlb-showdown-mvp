@@ -1530,6 +1530,10 @@ function screenReport(rows) {
     if (s.fixture) return "fixture";
     const answered = TWEAKS.find((t) => t.id === s.id)?.settled;
     if (answered) return `settled — ${answered}`;
+    // A knob the grid barely reaches cannot be settled by measuring harder.
+    if (s.cells.length && s.cells.length <= Math.max(3, CELLS.length * 0.12)) {
+      return `only bites in ${s.cells.length} of ${CELLS.length} rooms — the grid cannot settle it`;
+    }
     if (s.all.ci >= Math.abs(s.all.mean)) {
       // Not separated from zero. Say whether the rooms at least agree, because
       // "every room says a small plus" and "half say plus, half say minus" are
