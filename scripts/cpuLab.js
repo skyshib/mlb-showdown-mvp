@@ -12,7 +12,9 @@
 // append-only.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { execSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CPU_KNOB_GENERATIONS, CPU_TUNABLE_DEFAULTS, CPU_TUNABLE_NOTES, cpuTunables, baselineKey } from "../src/rules/cpuTunables.js";
 import { CELLS } from "./cpu-lab-cells.mjs";
 import { IDEA_REJECTS, TWEAKS } from "./cpu-lab-tweaks.mjs";
@@ -20,6 +22,7 @@ import { IDEA_REJECTS, TWEAKS } from "./cpu-lab-tweaks.mjs";
 // A process that has not touched its heartbeat in this long is gone — killed,
 // crashed, or the machine slept. It is not "running" on anybody's screen.
 const STALE_MS = 120_000;
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function cpuLabDir(root) {
   return process.env.CPU_LAB_DIR ?? join(root, "data", "cpu-lab");
@@ -63,6 +66,21 @@ function readRunning(dir) {
   }
   return live.sort((a, b) => String(a.startedAt ?? "").localeCompare(String(b.startedAt ?? "")));
 }
+
+// WHAT COMMIT THIS SERVER IS RUNNING, captured once, because that is exactly
+// what node module caching freezes. Everything this file serves — the shipped
+// knob values, which bidder is current, the list of rooms — is read from
+// modules imported at start-up, so an edit on disk does not reach a running
+// server. That is not cosmetic here: the page's job is to say WHICH bidder a
+// number was measured against, and after a revert it went on naming the
+// reverted one and telling the reader to switch to it.
+//
+// So the page is given both commits and can say when it is looking at a ghost.
+function gitOnDisk() {
+  try { return execSync("git rev-parse --short HEAD", { encoding: "utf8", cwd: ROOT }).trim(); } catch { return null; }
+}
+
+const STARTED_AT_GIT = gitOnDisk();
 
 export function readCpuLab(root) {
   const dir = cpuLabDir(root);
@@ -109,6 +127,9 @@ export function readCpuLab(root) {
       isLive: cpuTunables(generation.knobs).key === ""
     })),
     defaults: CPU_TUNABLE_DEFAULTS,
+    // Both commits, so the page can tell the reader its numbers are a ghost.
+    serverGit: STARTED_AT_GIT,
+    diskGit: gitOnDisk(),
     // WHO THE CONTROL CHAIRS ARE RIGHT NOW. The page needs this to tell a
     // current reading from one taken against a bidder that has since been
     // changed — ship a knob and every earlier row answers a question about an

@@ -755,9 +755,24 @@ function renderControls() {
   // standings, the curves, the "shipped value" each knob is moving FROM — is
   // then describing an opponent that no longer exists, and the numbers look
   // exactly as authoritative as the current ones.
+  // THE SERVER ITSELF CAN BE THE STALE THING. Node caches modules at import,
+  // so the shipped knob values, the room list and the name of the current
+  // bidder are all frozen at start-up. After a revert this page went on naming
+  // the reverted bidder as current and telling the reader to switch TO it —
+  // confidently wrong about the one thing it exists to get right. So the
+  // server reports the commit it booted on, and a mismatch is said out loud
+  // BEFORE any claim about which bidder is which.
+  const banner = document.getElementById("stale-baseline");
+  if (data.serverGit && data.diskGit && data.serverGit !== data.diskGit) {
+    banner.hidden = false;
+    banner.textContent = `This page is being served by a process started at commit ${data.serverGit}, `
+      + `and the code on disk is now ${data.diskGit}. Everything below — which bidder is current, `
+      + `the shipped value of every knob, the list of rooms — is what was true at ${data.serverGit}. `
+      + `Restart the server (npm run serve) before trusting any of it.`;
+    return;
+  }
   const viewing = state.control.split("|")[4] ?? "";
   const stale = Boolean(data.baseline) && viewing !== data.baseline;
-  const banner = document.getElementById("stale-baseline");
   banner.hidden = !stale;
   if (stale) {
     banner.textContent = `You are reading measurements taken against ${viewing}. `
