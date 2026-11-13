@@ -426,8 +426,9 @@
     <p class="note" id="dose-omitted"></p>
     <p class="note">
       Tables of different sizes share an axis here, so it reads as the share of the room that has
-      the tweak rather than a raw count: 1 of 3 and 2 of 6 sit in the same place. Hover a point for
-      the exact k.
+      the tweak rather than a raw count: 1 of 3 and 2 of 6 sit in the same place. Rooms landing on the
+      same share are nudged a few pixels apart so they can be told apart and hovered — always by less
+      than the gap between real adoption levels. Hover a point for the exact k and the room.
     </p>
   </section>
 
@@ -1210,20 +1211,39 @@ function renderDose(rows, summary) {
     // them would draw a trend that nothing measured. The strokes are all the
     // same recessive grey and the board is named at the end of each, so the
     // identity is in the label rather than in a colour.
+    // NUDGE APART THE ROOMS THAT SHARE AN X. Adoption share is the axis, so
+    // every two-manager room sits at exactly one-half and every reading in
+    // them lands on the same pixel — seven rooms drawn as one dot. The offset
+    // is applied per point from here on, so the marks, the whiskers, the
+    // strokes, the end labels and the hit targets all agree. It is
+    // deliberately smaller than the gap between genuine adoption levels: it
+    // separates, it never moves a point to a share it was not measured at.
+    const atShare = new Map();
+    for (const point of line.points) {
+      const share = (point.k / point.teams).toFixed(4);
+      if (!atShare.has(share)) atShare.set(share, []);
+      atShare.get(share).push(point);
+    }
+    const NUDGE = 5;
+    for (const [, together] of atShare) {
+      together.forEach((point, index) => {
+        point.at = x(point.k / point.teams) + (index - (together.length - 1) / 2) * NUDGE;
+      });
+    }
     const boards = [...new Set(line.points.map((point) => point.cell))];
     const path = boards.map((cell) => {
       const own = line.points.filter((point) => point.cell === cell);
       const stroke = own.map((point, index) =>
-        `${index ? "L" : "M"}${x(point.k / point.teams).toFixed(1)} ${y(point.mean).toFixed(1)}`).join(" ");
+        `${index ? "L" : "M"}${point.at.toFixed(1)} ${y(point.mean).toFixed(1)}`).join(" ");
       const end = own[own.length - 1];
       return `<path d="${stroke}" fill="none" stroke="var(--baseline)" stroke-width="2" />`
         + (boards.length > 1
-          ? `<text x="${x(end.k / end.teams) + 7}" y="${y(end.mean) + 3}">${escape(cell.split("-")[0])}</text>`
+          ? `<text x="${(end.at + 7).toFixed(1)}" y="${y(end.mean) + 3}">${escape(cell.split("-")[0])}</text>`
           : "");
     }).join("");
     const marks = line.points.map((point) => {
       const colour = point.mean >= 0 ? "var(--pos)" : "var(--neg)";
-      const at = x(point.k / point.teams);
+      const at = point.at;
       const mid = y(point.mean);
       // The hit circle is last so it sits on top of its own mark, and it is
       // r=13 against a 4px dot: a reader aims at a point, not at four pixels.
