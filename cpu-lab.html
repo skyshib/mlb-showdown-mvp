@@ -223,6 +223,9 @@
   /* The matrix is a real table: the fill is the quick read and the number in
      the cell is the actual one, so nothing here is colour-only. */
   .matrix td:first-child { white-space: nowrap; padding-right: 14px; }
+  /* Inside the room's own noise band, measured off the null fixture. Printed,
+     because the number is still the number, but never painted as a result. */
+  .matrix td.cell.quiet { color: var(--text-muted); }
   .matrix td.cell { text-align: center; font-size: 12px; min-width: 62px; }
   .matrix td.cell[data-sign="pos"] { background: rgb(var(--pos-rgb) / calc(var(--weight) * var(--fill-max))); }
   .matrix td.cell[data-sign="neg"] { background: rgb(var(--neg-rgb) / calc(var(--weight) * var(--fill-max))); }
@@ -430,8 +433,9 @@
       <div class="legend">
         <label class="key">reading
           <select id="matrix-mode">
-            <option value="dose-crowd">last holdout</option>
-            <option value="dose-lone">lone adopter</option>
+            <option value="dose-avg">average over adoption</option>
+            <option value="dose-crowd">all but one manager has it</option>
+            <option value="dose-lone">one manager has it</option>
           </select>
         </label>
         <span class="key"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--neg)"></span> lost</span>
@@ -441,8 +445,12 @@
     </div>
     <div class="scroll"><table class="matrix" id="matrix"></table></div>
     <p class="note">
+      The <b>null</b> row is the yardstick. It carries no tweak, so whatever it reads in a room is
+      that room's noise — and at two seats, where one chair's luck is measured against one other
+      chair's, that noise is large. Any reading inside its own room's band is printed but not
+      painted, whoever it belongs to.
       The table size IS the pool size — the deck is dealt to the room — so the columns run from a
-      thin three-seat board to a wide eight-seat one. A knob that is right at one width and wrong at
+      two-seat duel to a wide eight-seat board. A knob that is right at one width and wrong at
       another shows up here and nowhere else.
     </p>
   </section>
@@ -488,7 +496,7 @@ const state = {
   sort: "crowd",
   chosen: false,
   hideFixtures: false,
-  matrixMode: "dose-crowd",
+  matrixMode: "dose-avg",
   auto: true
 };
 let data = null;
@@ -720,7 +728,7 @@ function renderControls() {
   // readers with a screen of dashes.
   if (!state.chosen) {
     const dosed = data.rows.some((row) => row.mode.startsWith("dose-"));
-    state.matrixMode = dosed ? "dose-crowd" : "identical";
+    state.matrixMode = dosed ? "dose-avg" : "identical";
     state.sort = dosed ? "crowd" : "identical";
     document.getElementById("matrix-mode").value = state.matrixMode;
     document.getElementById("sort").value = state.sort;
@@ -1247,13 +1255,41 @@ function renderMatrix(rows, summary) {
   const table = document.getElementById("matrix");
   const cells = state.cell === "all" ? data.cells : data.cells.filter((cell) => cell.tag === state.cell);
   const wanted = (row) => {
+    if (state.matrixMode === "dose-avg") return Boolean(row.k);
     if (state.matrixMode === "dose-lone") return (row.k ?? 0) === 1;
     if (state.matrixMode === "dose-crowd") return row.k && row.k === (row.teams ?? 0) - 1;
     return row.mode === state.matrixMode;
   };
   const valueOf = (id, tag) => {
     const mine = rows.filter((row) => row.tweak === id && row.cell === tag && wanted(row));
-    return mine.length ? pool(mine) : null;
+    if (!mine.length) return null;
+    // Averaging over adoption levels weights each level equally rather than by
+    // how many games it happened to run — the same rule the CLI applies.
+    if (state.matrixMode !== "dose-avg") return pool(mine);
+    const levels = new Map();
+    for (const row of mine) {
+      if (!levels.has(row.k)) levels.set(row.k, []);
+      levels.get(row.k).push(...row.edges);
+    }
+    const each = [...levels.values()].map((edges) => edges.reduce((a, b) => a + b, 0) / edges.length);
+    const m = each.reduce((a, b) => a + b, 0) / each.length;
+    const n = mine.reduce((sum, row) => sum + row.edges.length, 0);
+    if (each.length < 2) return { ...pool(mine), mean: m };
+    const sd = Math.sqrt(each.reduce((a, b) => a + (b - m) * (b - m), 0) / (each.length - 1));
+    return { n, mean: m, ci: 1.96 * sd / Math.sqrt(each.length) };
+  };
+
+  // THE YARDSTICK. The `null` fixture changes nothing, so whatever it reads in
+  // a room is that room's noise — and at two seats, where one chair's luck is
+  // measured against one other chair's, that noise is LARGE. Before this, the
+  // matrix painted null's own +3.14 at s2-fiction in full "won" blue, which is
+  // the page confidently reporting a result for a tweak that does not exist.
+  // Anything inside the band is drawn as nothing, whoever it belongs to.
+  const noiseIn = (tag) => {
+    const mine = rows.filter((row) => row.tweak === "null" && row.cell === tag && wanted(row));
+    if (!mine.length) return 0;
+    const all = mine.flatMap((row) => row.edges);
+    return Math.max(Math.abs(ci95(all)), ...mine.map((row) => Math.abs(row.edges.reduce((a, b) => a + b, 0) / row.edges.length)));
   };
   // A row with nothing in it under this reading says nothing. It belongs in the
   // queue table below, which is where a reader goes to see what is still owed.
@@ -1279,8 +1315,10 @@ function renderMatrix(rows, summary) {
       // top so nothing here is colour-only. The weight is a share of the
       // theme's own ceiling (--fill-max) rather than an absolute alpha, so the
       // strongest cell stops where its number is still readable in both modes.
-      const weight = Math.min(1, 0.14 + 0.86 * Math.abs(stat.mean) / span);
-      return `<td class="cell" data-sign="${stat.mean >= 0 ? "pos" : "neg"}" style="--weight:${weight.toFixed(3)}"
+      const noise = noiseIn(cell.tag);
+      const quiet = noise > 0 && Math.abs(stat.mean) <= noise;
+      const weight = quiet ? 0 : Math.min(1, 0.14 + 0.86 * Math.abs(stat.mean) / span);
+      return `<td class="cell${quiet ? " quiet" : ""}" data-sign="${stat.mean >= 0 ? "pos" : "neg"}" style="--weight:${weight.toFixed(3)}"
         tabindex="0" ${tipAttrs({
           value: `${signed(stat.mean)} ±${stat.ci.toFixed(2)}`,
           sign: stat.mean >= 0 ? "pos" : "neg",
