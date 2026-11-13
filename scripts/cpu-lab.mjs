@@ -1224,6 +1224,12 @@ if (command === "list") {
       const cb = pretenders.get(b);
       if (Boolean(ca) !== Boolean(cb)) return Number(Boolean(cb)) - Number(Boolean(ca));
       if (ca && cb) return cb.mean - ca.mean;
+      // THEN THE BRACKETS OF WHATEVER WAS ACCEPTED. A neighbour of a value that
+      // just won is the most informative thing left in the queue: it is the only
+      // candidate that can say the shipped number is the wrong one.
+      const ba = Boolean(tweakById(a).bracketOf);
+      const bb = Boolean(tweakById(b).bracketOf);
+      if (ba !== bb) return Number(bb) - Number(ba);
       return 0;
     });
   console.log(`cpu-lab ${command} — ${LEAGUES} leagues x ${RUNS} games a batch, persona=${PERSONA}, `
@@ -1238,6 +1244,7 @@ if (command === "list") {
     console.log(`\n  THE THRONE is ${BASELINE}`
       + `${THRONE_KNOBS.size ? ` — last ship moved ${[...THRONE_KNOBS].join(", ")}` : ""}.`);
     console.log(`  ${claiming.length} challenger(s) measured first, strongest claim first:`);
+
     for (const id of claiming) {
       const claim = pretenders.get(id);
       console.log(`    ${id.padEnd(30)} ${signed(claim.mean).padStart(6)} over ${String(claim.n).padStart(3)} readings`
@@ -1246,6 +1253,16 @@ if (command === "list") {
     }
     console.log("");
   } else {
+    console.log("");
+  }
+  const brackets = order.filter((id) => tweakById(id).bracketOf && !pretenders.has(id));
+  if (brackets.length) {
+    console.log(`  ${brackets.length} bracket(s) of an accepted value, measured next:`);
+    for (const id of brackets) {
+      const tweak = tweakById(id);
+      console.log(`    ${id.padEnd(30)} ${Object.entries(tweak.params)
+        .map(([k, v]) => `${k}=${v}`).join(" ")} — a neighbour of ${tweak.bracketOf}`);
+    }
     console.log("");
   }
   let ran = 0;
@@ -1523,6 +1540,35 @@ if (command === "list") {
 // the effect was never a property of the knob; it was a property of the
 // comparison, and every number this bench has produced is worth less than it
 // looks. Nothing else here checks that.
+// A STEP EITHER SIDE, SIZED TO THE KNOB and then rounded to a number a person
+// would have chosen. These range from 0.05 to 1000, so the step has to be
+// proportional — but a raw 17% of 60 is 10.2 and queues 49.8 and 70.2, which
+// are not values anybody is asking about. Rounding the STEP to the nearest
+// 1, 2 or 5 times a power of ten gives 10, and so 50 and 70.
+// A KNOB SHIPPED AT ZERO HAS NO PROPORTIONAL NEIGHBOURS, and switching a term
+// off is exactly the kind of change that wins here — snakeNeedSpan is 0 as of
+// today. Scale those off the largest value the knob has ever held instead, so
+// "off" can still be bracketed against "a bit of it" rather than only against
+// the full reversal.
+function neighboursOf(shipped, scale = 0) {
+  const basis = Math.abs(shipped) || Math.abs(scale);
+  const rough = basis * 0.17;
+  if (!(rough > 0)) return [];
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 5, 10]
+    .map((multiple) => multiple * magnitude)
+    .reduce((best, candidate) =>
+      Math.abs(candidate - rough) < Math.abs(best - rough) ? candidate : best);
+  // Float noise: 0.5 - 0.1 is 0.39999999999999997, and that is the id as well
+  // as the value.
+  const clean = (value) => Number(value.toFixed(Math.max(0, -Math.floor(Math.log10(step)) + 1)));
+  return [clean(shipped - step), clean(shipped + step)]
+    .filter((value) => value !== shipped)
+    // A knob at zero is a term switched OFF; negative is not a smaller dose of
+    // it, it is the term pointing the other way, which is a different claim.
+    .filter((value) => shipped !== 0 || value > 0);
+}
+
 function bracket() {
   const knob = rawFlag("knob");
   if (!knob || !(knob in CPU_TUNABLE_DEFAULTS)) {
@@ -1543,13 +1589,10 @@ function bracket() {
     .map(([, value]) => value))];
 
   const asked = rawFlag("values");
-  // Default neighbours: a step either side, sized to the knob rather than to a
-  // fixed number, because these range from 0.05 to 1000.
-  const step = Math.abs(shipped) * 0.17;
-  const round = (value) => Number(value.toPrecision(3));
   const values = [...new Set((asked
     ? asked.split(",").map((text) => Number(text.trim()))
-    : [round(shipped - step), round(shipped + step), ...reversals])
+    : [...neighboursOf(shipped, Math.max(0, ...Object.values(CPU_KNOB_GENERATIONS)
+        .map((generation) => Math.abs(Number(generation.knobs?.[knob]) || 0)))), ...reversals])
     .filter((value) => Number.isFinite(value) && value !== shipped))];
 
   if (!values.length) {
@@ -1615,6 +1658,56 @@ function pickTheKnob(winner, called, abandoned, seenSoFar) {
     abandoned.set(other.id, { call: "parked", n: (seenSoFar.get(other.id)?.size ?? 0) });
     console.log(`  ${other.id.padEnd(32)} PARKED — ${winner} was accepted first on the same knob; `
       + `re-open it with --tweak if the chosen value disappoints`);
+  }
+  queueTheNeighbours(winner, called);
+}
+
+// ACCEPTING A VALUE QUEUES ITS NEIGHBOURS (Skylar, 2026-11-13). A candidate that
+// wins has been shown to MATTER, not to be RIGHT: the bench compared one value
+// against one other value, and the winner is the first number anybody happened
+// to try. So an accept immediately asks "and is a smaller or larger dose better
+// still" — snakeBalanceBonus accepted at 60 queues 50 and 70 — and those go to
+// the FRONT, because the cheapest moment to learn that 50 beats 60 is before 60
+// has been shipped and built on.
+//
+// This runs inside the run loop rather than waiting for somebody to type
+// `bracket`, which is the whole point: by the time a human reads the result the
+// value is usually already in the bidder.
+function queueTheNeighbours(winner, called) {
+  const tweak = tweakById(winner);
+  const spokenFor = new Map();
+  for (const other of TWEAKS) {
+    spokenFor.set(`id:${other.id}`, other.fixture ? "a fixture"
+      : (other.idea ? "in the inbox" : "a queued candidate"));
+    if (Object.keys(other.params ?? {}).length) {
+      spokenFor.set(`knobs:${knobKey(other.params)}`, other.id);
+    }
+  }
+  const slug = (knob) => knob.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+  const tag = (value) => String(value).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
+  for (const [knob, won] of Object.entries(tweak.params ?? {})) {
+    if (typeof won !== "number") continue;
+    const scale = Math.max(0, ...Object.values(CPU_KNOB_GENERATIONS)
+      .map((generation) => Math.abs(Number(generation.knobs?.[knob]) || 0)));
+    for (const value of neighboursOf(won, scale)) {
+      const outcome = appendIdea({
+        id: `${slug(knob)}-${tag(value)}`,
+        knobs: { [knob]: value },
+        note: `bracket off an accepted value: ${knob} at ${value} rather than the ${won} that just won`,
+        why: `${winner} was accepted at ${knob}=${won} (${signed(called?.centre ?? 0)} on `
+          + `${called?.n ?? 0} readings). That says the knob matters and that ${won} beats what it was `
+          + `compared against — not that ${won} is the right number. The shape either side of it is `
+          + `unmeasured, and the first value tried is a bad place to stop.`,
+        by: "cpu-lab accept",
+        bracketOf: winner
+      }, spokenFor);
+      if (outcome.ok) {
+        spokenFor.set(`id:${outcome.record.id}`, "in the inbox");
+        spokenFor.set(`knobs:${knobKey(outcome.record.knobs)}`, outcome.record.id);
+        console.log(`  ${outcome.record.id.padEnd(32)} QUEUED AT THE FRONT — a neighbour of the `
+          + `${knob}=${won} that just won`);
+      }
+    }
   }
 }
 

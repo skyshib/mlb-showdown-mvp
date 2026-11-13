@@ -119,7 +119,12 @@ export function readIdeas(taken = new Map()) {
       room: typeof parsed.room === "string" ? parsed.room : null,
       why: typeof parsed.why === "string" ? parsed.why : null,
       by: typeof parsed.by === "string" ? parsed.by : null,
-      at: typeof parsed.at === "string" ? parsed.at : null
+      at: typeof parsed.at === "string" ? parsed.at : null,
+      // THE ACCEPTED CANDIDATE THIS ONE BRACKETS. A value that just won is the
+      // first value anybody happened to try, not the best one, so accepting it
+      // queues its neighbours — and they go near the front, because the cheapest
+      // moment to find out that 50 beats 60 is before 60 has been built on.
+      bracketOf: typeof parsed.bracketOf === "string" ? parsed.bracketOf : null
     });
   });
   return { ideas, rejected };
@@ -143,6 +148,7 @@ export function appendIdea(idea, taken = new Map()) {
     ...(idea.room ? { room: idea.room } : {}),
     ...(idea.why ? { why: idea.why } : {}),
     ...(idea.by ? { by: idea.by } : {}),
+    ...(idea.bracketOf ? { bracketOf: idea.bracketOf } : {}),
     at: idea.at ?? new Date().toISOString().slice(0, 10)
   };
   appendFileSync(ideasFile(), `${JSON.stringify(record)}\n`);

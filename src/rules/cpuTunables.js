@@ -106,7 +106,18 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
   // because forcedNeed holds the roster shape and every legal candidate
   // collects the same 80 — so there is nothing to gain by touching it.
   snakeNeedSpan: 0, // and more as the holes crowd the turns left
-  snakeBalanceBonus: 35, // an arm when the staff is short
+  // 35 -> 60 on 2026-11-13, the parity value. A bat who fills a missing lineup
+  // spot was paid hitterPositionBonus 60 while the same structural fact in the
+  // staff paid 35, so before any opinion about any card entered, the board
+  // handed a bat 212 and a starter 147 — and the only thing that ever overturned
+  // it was the ace persona's armLean. 60 is parity with the hitter bonus rather
+  // than a fishing dose, and the ladder confirms it is the targeted one:
+  // replayed over 180 computer turns, 60 moves 26 and 20 of them buy a STARTER,
+  // where 140 moves 77 but 47 buy a RELIEVER because the bonus is role-blind
+  // and the pen is the cheaper staff hole. Accepted at +0.33 +-0.25 over 28
+  // readings in 17 rooms and three table sizes, ON TOP OF the two positions
+  // already held.
+  snakeBalanceBonus: 60, // an arm when the staff is short
   snakeArmLean: 140, // how far an archetype's pitcher bias moves an arm
   snakeForcedNeed: 1000, // the override that stops a roster stranding a slot
   snakeScarcityRate: 0.8, // of the dropoff to the next man at the spot
@@ -236,6 +247,60 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
       snakeScarcityCap: 120
     })
   }),
+  "tuned-2026-11-13c": Object.freeze({
+    at: "2026-11-13",
+    git: "9e9782b",
+    fingerprint: "cef65dcfdc89",
+    // THE THIRD SHIP OF THE DAY and three positions deep. Each was accepted
+    // against the generation before it — the threshold against
+    // tuned-2026-11-10, the need span against tuned-2026-11-13, the balance
+    // bonus against tuned-2026-11-13b — so the stack is measured at every step
+    // and no two of them rest on trust about each other.
+    //
+    // The same gap as its two predecessors: no holdout seeds and NO HEAD TO
+    // HEAD at any of these values. Every position here was won on within-room
+    // adoption curves, which is the reading that pays for denial. If the stack
+    // turns out not to beat a table without it, tuned-2026-11-10 is the revert
+    // for all three at once.
+    note: "three positions: the 50th-percentile lift, no snake need span, and the staff bonus at parity",
+    knobs: Object.freeze({
+      perturbation: 0.25,
+      hitterWeights: null,
+      pitcherWeights: null,
+      starterDiscount: 0.65,
+      starterNarrowSpread: 0.04,
+      starterWideSpread: 0.05,
+      relieverSpacingShare: 0.3,
+      relieverTopRate: 2.5,
+      relieverDepthRate: 0.7,
+      penDepthTarget: 5,
+      relieverFloorByRoom: 0,
+      slotTiebreak: 0.05,
+      urgencyPatient: 0.5,
+      urgencyDesperate: 1,
+      urgencyWeight: 1,
+      depthSlots: 3,
+      depthDamp: 0.7,
+      shareExponent: 1.1,
+      poolPremiumStrength: 0.7,
+      poolPremiumThreshold: 0.5,
+      aggressionFloor: 0.86,
+      wobbleSalt: "",
+      aggressionSpan: 0.28,
+      paceFloor: 0.75,
+      paceCeiling: 1.8,
+      roundsFloor: 0.7,
+      roundsCeiling: 2.2,
+      roundsBudgetDivisor: 25,
+      snakeNeedBonus: 80,
+      snakeNeedSpan: 0,
+      snakeBalanceBonus: 60,
+      snakeArmLean: 140,
+      snakeForcedNeed: 1000,
+      snakeScarcityRate: 0.8,
+      snakeScarcityCap: 120
+    })
+  }),
   "tuned-2026-11-13b": Object.freeze({
     at: "2026-11-13",
     git: "b142255",
@@ -249,7 +314,7 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     // the 0.5 threshold rather than instead of it — so this generation is the
     // two of them together and neither reading has to be taken on trust about
     // the other. Its head to head is NOT measured; see tuned-2026-11-13.
-    note: "the 50th-percentile top-of-deck lift, plus the snake need span switched off",
+    note: "the 50th-percentile top-of-deck lift, plus the snake need span switched off — superseded the same day by tuned-2026-11-13c",
     knobs: Object.freeze({
       perturbation: 0.25,
       hitterWeights: null,

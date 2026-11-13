@@ -224,6 +224,54 @@ const QUEUED = [
     params: { poolPremiumThreshold: 0.6 }
   },
   {
+    id: "arm-balance-parity",
+    note: "pay an arm who fills a staff hole the same 60 a bat who fills a lineup hole gets, "
+      + "instead of 35",
+    // SHIPPED 2026-11-13 (tuned-2026-11-13c), the third position and the second
+    // one accepted ON TOP OF the ones before it: +0.33 +-0.25 over 28 readings
+    // in 17 rooms and three table sizes, measured with the 0.5 threshold and the
+    // dead need span already in the chairs.
+    //
+    // 60 is parity with hitterPositionBonus, not a fishing dose, and the ladder
+    // behind the proposal is why it was the value to read first: over 180
+    // computer turns, 60 moves 26 and 20 of them buy a STARTER, where 140 moves
+    // 77 but 47 buy a RELIEVER because the bonus is role-blind and the pen is
+    // the cheaper staff hole. Every flip at every dose is bat-to-arm.
+    //
+    // SHIPPED WITHOUT THE GATE, like the two before it.
+    settled: "SHIPPED tuned-2026-11-13c — +0.33 +-0.25 accepted; holdout and head-to-head still outstanding",
+    params: { snakeBalanceBonus: 60 }
+  },
+  {
+    id: "pool-premium-threshold-0-7",
+    note: "the top-of-deck lift starts at the 70th percentile instead of the 50th",
+    // KILLED 2026-11-13 against tuned-2026-11-13b: -0.32 +-0.41 over 48 readings,
+    // 92% of the posterior below zero. This is the bracket working. It read
+    // +0.41 against the OLD 0.8 norm, where it meant "0.7 beats 0.8"; against a
+    // 0.5 bidder the same candidate asks the opposite question, and the answer
+    // is that 0.7 does NOT beat 0.5. So the threshold did not overshoot, and the
+    // only remaining doubt about 0.5 is the head to head nobody has run.
+    settled: "KILLED — -0.32 +-0.41 against the 0.5 bidder; 0.5 did not overshoot",
+    params: { poolPremiumThreshold: 0.7 }
+  },
+  {
+    id: "scarcity-off",
+    note: "delete the snake positional scarcity term the auction deliberately does not have",
+    // KILLED 2026-11-13 against tuned-2026-11-13b: -0.22 +-0.28 over 17 readings,
+    // 93% below zero — AND IT FLIPPED when the throne moved. It read +0.19
+    // against tuned-2026-11-10 and +0.21 against the 0.5 bidder, then went
+    // negative once snakeNeedSpan was switched off.
+    //
+    // Which is close to what the proposal itself warned about: scarcity is the
+    // only counterweight the ace has to its own armLean, and the need span was
+    // the other thing tilting picks toward bats. Remove the span and the
+    // scarcity term is no longer correcting an excess. A tweak measured against
+    // one bidder genuinely can reverse against the next; this is the first time
+    // the bench has caught one doing it.
+    settled: "KILLED — +0.21 against the 0.5 bidder but -0.22 once the need span went; it was correcting an excess that no longer exists",
+    params: { snakeScarcityRate: 0 }
+  },
+  {
     id: "need-span-flat",
     note: "stop scaling a snake pick's need bonus by how many holes of that TYPE are "
       + "left, so a rotation hole counts like a lineup hole",

@@ -828,35 +828,16 @@ function throneContenders() {
   const positions = new Set(throneLineage().filter((step) => step.inPlace).map((step) => step.knob));
   return (data.tweaks ?? [])
     .filter((tweak) => !tweak.fixture && !tweak.settled)
-    .map((tweak) => {
-      const readings = data.rows.filter((row) => row.tweak === tweak.id
-        && row.mode.startsWith("dose-") && controlKey(row) === live);
-      const levels = new Map();
-      for (const row of readings) {
-        const key = `${row.cell}|${row.mode}`;
-        if (!levels.has(key)) levels.set(key, []);
-        levels.get(key).push(...row.edges);
-      }
-      const each = [...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length);
-      const rooms = new Set(readings.map((row) => row.cell));
-      const sizes = new Set(readings.map((row) =>
-        data.cells.find((cell) => cell.tag === row.cell)?.teams).filter(Boolean)).size;
-      const mean = each.length ? each.reduce((a, b) => a + b, 0) / each.length : 0;
-      const sd = each.length > 1
-        ? Math.sqrt(each.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (each.length - 1)) : 0;
-      return {
-        id: tweak.id,
-        params: tweak.params,
-        n: each.length,
-        rooms: rooms.size,
-        mean,
-        ci: each.length > 1 ? 1.96 * sd / Math.sqrt(each.length) : Infinity,
-        odds: chances(each),
-        called: verdictSoFar(each, RULE, sizes),
-        // Would it OVERWRITE a position the throne holds, or add another?
-        rival: Object.keys(tweak.params ?? {}).some((knob) => positions.has(knob))
-      };
-    })
+    .map((tweak) => ({
+      id: tweak.id,
+      params: tweak.params,
+      bracketOf: tweak.bracketOf ?? null,
+      // Same statistic as every other panel, from the same function — pinned to
+      // the live view, whatever the reader has selected.
+      ...boostFor(tweak.id, live),
+      // Would it OVERWRITE a position the throne holds, or add another?
+      rival: Object.keys(tweak.params ?? {}).some((knob) => positions.has(knob))
+    }))
     .sort((a, b) => (b.n > 0) - (a.n > 0) || b.mean - a.mean);
 }
 
@@ -1284,16 +1265,62 @@ function niceSpan(value) {
 // end of the curve and the end that answers the shipping question. A candidate
 // that has only ever been measured at the lone-adopter end is shown with its
 // reading labelled as such, not quietly mixed in with the others.
+// THE DECISION STATISTIC, in one place, for every panel that shows a number
+// beside a verdict. The average boost over every (room, adoption level) in the
+// current view — which is what scripts/cpu-lab-rule.mjs decides on.
+//
+// WHY THIS IS A FUNCTION AND NOT THREE COPIES. "What is paying off" used to
+// headline the LAST HOLDOUT dose while badging it with the rule's call, so
+// pool-premium-threshold-0-7 read "+0.24, killed after 48 readings" — a positive
+// number wearing a negative verdict, and the room-by-room panel beside it said
+// -0.32 for the same 48 readings. Both were right about their own statistic and
+// the page was incoherent. Anything that shows a verdict now shows the number
+// that verdict was computed from.
+// `view` defaults to whatever the reader is looking at. The throne panel passes
+// the LIVE key explicitly: it always describes the bidder that ships today, so
+// toggling back to an old round must not quietly repoint it at old numbers while
+// its heading still says "measured against <the reigning bidder>".
+function boostFor(id, view = state.control) {
+  const readings = data.rows.filter((row) => row.tweak === id
+    && row.mode.startsWith("dose-") && controlKey(row) === view);
+  const levels = new Map();
+  for (const row of readings) {
+    const key = `${row.cell}|${row.mode}`;
+    if (!levels.has(key)) levels.set(key, []);
+    levels.get(key).push(...row.edges);
+  }
+  const each = [...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length);
+  const mean = each.length ? each.reduce((a, b) => a + b, 0) / each.length : 0;
+  const sd = each.length > 1
+    ? Math.sqrt(each.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (each.length - 1)) : 0;
+  const sizes = new Set(readings.map((row) =>
+    data.cells.find((cell) => cell.tag === row.cell)?.teams).filter(Boolean)).size;
+  return {
+    each,
+    mean,
+    ci: each.length > 1 ? 1.96 * sd / Math.sqrt(each.length) : Infinity,
+    n: each.length,
+    rooms: new Set(readings.map((row) => row.cell)).size,
+    sizes,
+    called: verdictSoFar(each, RULE, sizes),
+    odds: chances(each)
+  };
+}
+
 function renderStandings(summary) {
   const live = summary.filter((entry) => !entry.fixture && !entry.retired
     && !data.tweaks.find((tweak) => tweak.id === entry.id)?.settled);
   const scored = live.map((entry) => {
-    const read = entry.crowd.n ? { stat: entry.crowd, where: "last holdout" }
+    const boost = boostFor(entry.id);
+    // No dose readings in this view at all: fall back to whatever single mode
+    // was measured, and say which, rather than dropping the row.
+    const read = boost.n ? { stat: boost, where: "every room and adoption level" }
+      : entry.crowd.n ? { stat: entry.crowd, where: "last holdout" }
       : entry.lone.n ? { stat: entry.lone, where: "lone adopter only" }
       : null;
     if (!read) return null;
     const se = read.stat.ci / 1.96;
-    return { ...entry, ...read, z: se ? Math.abs(read.stat.mean) / se : 0 };
+    return { ...entry, ...read, boost, z: se && Number.isFinite(se) ? Math.abs(read.stat.mean) / se : 0 };
   }).filter(Boolean).sort((a, b) => b.z - a.z);
 
   const card = document.getElementById("leaders-card");
@@ -1313,19 +1340,7 @@ function renderStandings(summary) {
     // SAY WHEN THE RULE HAS ALREADY CALLED IT, rather than describing a live
     // candidate. Without this a killed one sat here reading like something
     // still in contention.
-    const readings = data.rows.filter((row) => row.tweak === entry.id
-      && row.mode.startsWith("dose-") && controlKey(row) === state.control);
-    const levels = new Map();
-    for (const row of readings) {
-      const key = `${row.cell}|${row.mode}`;
-      if (!levels.has(key)) levels.set(key, []);
-      levels.get(key).push(...row.edges);
-    }
-    const called = verdictSoFar(
-      [...levels.values()].map((e) => e.reduce((a, b) => a + b, 0) / e.length),
-      RULE,
-      new Set(readings.map((row) => data.cells.find((cell) => cell.tag === row.cell)?.teams)
-        .filter(Boolean)).size);
+    const called = entry.boost.n ? entry.boost.called : null;
     const why = called
       ? `${called.call === "kill" ? "killed" : "accepted"} after ${called.n} readings`
       : !clear
