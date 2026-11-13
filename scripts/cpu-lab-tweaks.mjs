@@ -224,6 +224,30 @@ const QUEUED = [
     params: { poolPremiumThreshold: 0.6 }
   },
   {
+    id: "snake-need-span-30",
+    note: "put a third of the snake need span back: 30 rather than the 0 that is in place",
+    // REJECTED 2026-11-13: -0.13 +-0.16 over 33 readings in 18 rooms, 94% below
+    // zero. ZERO REALLY IS RIGHT. need-span-flat won by switching the term off,
+    // which only showed 120 was too much; this asked whether a small dose beats
+    // none, and it does not. The term is not mis-scaled, it is counting the
+    // wrong thing — holes of a type rather than supply at that type — so no
+    // setting of it helps.
+    settled: "REJECTED — -0.13 +-0.16; a small dose does not beat none, so the term is wrong and not mis-scaled",
+    params: { snakeNeedSpan: 30 }
+  },
+  {
+    id: "pool-premium-threshold-0-4",
+    note: "the top-of-deck lift starts at the 40th percentile instead of the 50th",
+    // REJECTED 2026-11-13: -1.24 +-1.09 over 10 readings, 93% below zero, and the
+    // largest loss any bracket on this knob has read. 0.5 IS THE BOTTOM OF THE
+    // RUN. The threshold had won every step downward (0.8 -> 0.6 -> 0.5) with 0.7
+    // losing to 0.5, so the open question was how far it kept going; this is where
+    // it stops. Below the median the "top of the deck" is half the deck and the
+    // lift stops picking out studs at all.
+    settled: "REJECTED — -1.24 +-1.09, the worst reading on this knob; 0.5 is the bottom of the downward run",
+    params: { poolPremiumThreshold: 0.4 }
+  },
+  {
     id: "snake-balance-bonus-65",
     note: "the staff-hole bonus at 65, the lower neighbour of the 70 that had just won",
     // REJECTED 2026-11-13: -0.08 +-0.11 against a table on 70, 91% below zero.
