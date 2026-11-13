@@ -140,15 +140,16 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
               A pair that is already that deep is skipped, so re-running fills
               gaps and raising this is how you add precision.
   --minutes   stop starting new work after this long. Finished rows are kept.
-  --worth     the smallest average gain worth shipping, in win points
-              (default 0.2). A candidate is abandoned once the readings so far
-              make it unlikely to clear this.
-  --give-up   abandon at this probability of being worth it (default 0.03).
-              --give-up 0 measures everything, whatever it looks like.
+  --accept    stop and accept once the average is above zero with at least
+              this confidence (default 0.975). Accepting means "measure this
+              one properly", never "ship it".
+  --kill      stop and kill once this much of the posterior sits below zero
+              (default 0.80). --kill 0 measures everything regardless.
+  --accept-above  the value the average must beat to be accepted (default 0).
   --prior     how big effects are expected to be before measuring anything
               (default 0.5 win points). Centred on zero, because nearly all
               tweaks are worth nothing.
-  --min-looks don't abandon before this many readings (default 6).
+  --min-looks don't call it before this many readings (default 3).
   --persona   the archetype every seat wears (default balanced), or "rotate".
   --perturb   the seeded wobble on a manager's weights (default 0.25, the
               shipped value; 0 makes every seat of an archetype think alike).
@@ -877,25 +878,42 @@ function verdict(mixed, abs, id, dose = { lone: { n: 0 }, crowd: { n: 0 } }) {
 // average effect. Take those observations as normal around the truth with a
 // spread estimated from themselves, and put a prior on the truth centred at
 // zero — because the overwhelming majority of tweaks ARE zero, and a prior
-// that pretends otherwise is how a bench talks itself into noise. WORTH is the
-// smallest effect anybody would ship for; the posterior says how likely the
-// truth is to clear it.
+// that pretends otherwise is how a bench talks itself into noise.
 //
-// Abandoned when that probability falls below GIVE_UP. This is a SCREENING
-// decision, not a verdict: it says the candidate stopped looking promising in
-// the rooms measured so far, and those are the small ones. A candidate cut this
-// way keeps its rows and can be re-opened by naming it with --tweak.
-const PRIOR_SD = Number(args.prior ?? 0.5);   // most tweaks land inside ±0.5 win points
-const WORTH = Number(args.worth ?? 0.2);      // the smallest gain worth shipping
-const GIVE_UP = Number(args["give-up"] ?? 0.03);
-const SURE = Number(args.sure ?? 0.9);
-const MIN_LOOKS = Number(args["min-looks"] ?? 6);
-// An OBVIOUSLY bad candidate should not have to wait for the full count. Three
-// readings cannot settle a close call, but they can settle a hopeless one, so a
-// candidate whose chance of being worth it has fallen below a tenth of the
-// ordinary bar goes immediately. The point of the whole rule is not spending an
-// hour on something that announced itself in the first three minutes.
-const SURE_LOOKS = 3;
+// Either call is a SCREENING decision, not a verdict: it is made on the rooms
+// measured so far, and those are the small ones. A candidate called either way
+// keeps its rows and is re-opened by naming it with --tweak.
+//
+// THE RULE (Skylar's, 2026-11-13). A candidate keeps being measured until the
+// readings so far say one of two things:
+//
+//   ACCEPT  the average is above zero with 97.5% confidence
+//   KILL    80% of the posterior sits below zero
+//
+// Deliberately asymmetric. Accepting only means "keep measuring this one
+// properly", so a wrong accept costs time; killing ends the run, so it wants
+// to be the easier call for a candidate that is going nowhere.
+//
+// SIMULATED AGAINST THE ALTERNATIVES before it was built, at the measured
+// spread of 0.9 a reading. Against the rule it replaced (kill when the chance
+// of clearing +0.2 falls under 3%) it decides two to three times faster — a
+// true -0.5 dies in 4 readings against 6, a true null in 7 against 22 — and it
+// finds real gains far better, accepting a true +0.3 in 81% of runs against
+// 59%.
+//
+// IT COSTS A 21% FALSE-ACCEPT RATE ON A TRUE NULL, against 7%, and that is
+// repeated looking doing what repeated looking does: test "above zero at
+// 97.5%" ninety-three times and it will come up by chance. Tolerable only
+// because accepting buys measurement rather than a change to the bidder.
+//
+// The accept bar is ABOVE ZERO and not above --worth, which was tried: at
+// +0.2 the false accepts drop to 6%, but a genuine +0.3 then runs the whole
+// grid without deciding 64% of the time, which is worse than being wrong.
+const PRIOR_SD = Number(args.prior ?? 0.5);        // most tweaks land inside ±0.5 win points
+const ACCEPT_ABOVE = Number(args["accept-above"] ?? 0);
+const ACCEPT_AT = Number(args.accept ?? 0.975);
+const KILL_AT = Number(args.kill ?? 0.80);
+const MIN_LOOKS = Number(args["min-looks"] ?? 3);
 
 // Φ, good to about 1e-7 — plenty for a stopping rule.
 function normalCdf(z) {
@@ -917,7 +935,18 @@ function chances(samples) {
   const post = 1 / (1 / (PRIOR_SD * PRIOR_SD) + n / (s * s));
   const centre = post * (n * m / (s * s));
   const sd = Math.sqrt(post);
-  return { n, mean: m, centre, sd, worthIt: 1 - normalCdf((WORTH - centre) / sd) };
+  const above = 1 - normalCdf((ACCEPT_ABOVE - centre) / sd);
+  return { n, mean: m, centre, sd, above, below: normalCdf((0 - centre) / sd) };
+}
+
+// Accept, kill, or keep going.
+function verdictSoFar(samples) {
+  if (!samples || samples.length < Math.max(2, MIN_LOOKS)) return null;
+  const odds = chances(samples);
+  if (!odds) return null;
+  if (odds.above > ACCEPT_AT) return { ...odds, call: "accept" };
+  if (odds.below > KILL_AT) return { ...odds, call: "kill" };
+  return null;
 }
 
 // ---- commands ---------------------------------------------------------------
@@ -1179,21 +1208,23 @@ if (command === "list") {
       // ENOUGH? Asked after each room, because the grid runs cheapest first
       // and the point is to decide before the eight-seat rooms are bought.
       const soFar = seenSoFar.get(id);
-      const looksEnough = soFar && (soFar.length >= MIN_LOOKS
-        || (soFar.length >= SURE_LOOKS && (chances(soFar)?.worthIt ?? 1) < GIVE_UP / 10));
-      if (!tweak.fixture && GIVE_UP > 0 && looksEnough) {
-        const odds = chances(soFar);
-        if (odds && odds.worthIt < GIVE_UP) {
-          abandoned.set(id, odds);
-          console.log(`  ${id.padEnd(32)} GIVEN UP after ${odds.n} readings — `
-            + `${signed(odds.mean)} so far, ${(100 * odds.worthIt).toFixed(1)}% chance of clearing ${signed(WORTH)}`);
+      if (!tweak.fixture && KILL_AT > 0) {
+        const called = verdictSoFar(soFar);
+        if (called) {
+          abandoned.set(id, called);
+          const why = called.call === "accept"
+            ? `${(100 * called.above).toFixed(1)}% above ${signed(ACCEPT_ABOVE)}`
+            : `${(100 * called.below).toFixed(1)}% below zero`;
+          console.log(`  ${id.padEnd(32)} ${called.call === "accept" ? "ACCEPTED" : "KILLED  "} after `
+            + `${called.n} readings — ${signed(called.mean)} so far, ${why}`);
         }
       }
     }
   }
   if (abandoned.size) {
-    console.log(`\n  ${abandoned.size} candidate(s) abandoned early. They keep their rows and are measured`);
-    console.log(`  again whenever named with --tweak; --give-up 0 turns this off.`);
+    const killed = [...abandoned.values()].filter((v) => v.call === "kill").length;
+    console.log(`\n  ${killed} killed, ${abandoned.size - killed} accepted early. Both keep their rows and`);
+    console.log(`  are measured again whenever named with --tweak; --kill 0 turns the rule off.`);
   }
   console.log(ran || stopped ? "" : "\n  nothing owed — every pair already has its batches. --batches N to deepen.\n");
   reportFor(order, cellTags, readRows());
