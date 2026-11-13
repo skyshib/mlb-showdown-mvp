@@ -1,10 +1,10 @@
-  auc-c4-rand    9a722642d46c  102 lines
-  auc-c4-man     49f752fea7de  64 lines
-  auc-c4-first   580f63a24d88  96 lines
-  auc-c8-rand    d5bf05239a9c  188 lines
-  auc-f3-rand    155ffd5d8371  67 lines
-  auc-h4-man     29ce8fe044ea  64 lines
+  auc-c4-rand    48cbec7c14a4  102 lines
+  auc-c4-man     670d4665c21c  64 lines
+  auc-c4-first   12929455b716  97 lines
+  auc-c8-rand    76b8989a8263  186 lines
+  auc-f3-rand    2ed164fa5098  67 lines
+  auc-h4-man     e41ef19f79fa  64 lines
   snk-c4         2009f90062d5  4 lines
   snk-f6         d29fb47da850  6 lines
   snk-h4         1abd7efa39af  4 lines
-  ALL            83837f8dfcb8  595 lines
+  ALL            09988098f715  594 lines

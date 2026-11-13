@@ -66,9 +66,10 @@ export const CPU_TUNABLE_DEFAULTS = Object.freeze({
   depthDamp: 0.7, // how much softer a bench card is bid
   shareExponent: 1.1, // how hard the bankroll concentrates on the best men left
   poolPremiumStrength: 0.7, // the lift on a card at the very top of the deck
-  // 0.8 until 2026-11-11, when the lab measured the band between. See the
-  // tuned-2026-11-11 generation below for what it bought and what it did not.
-  poolPremiumThreshold: 0.6, // the percentile the lift starts at
+  // Moved to 0.6 on 2026-11-11 and PUT BACK on 2026-11-12. It reads +1.48
+  // +-0.25 against a table still on 0.8 and -0.04 +-0.16 head to head, which is
+  // denial and nothing else — see the tuned-2026-11-11 generation below.
+  poolPremiumThreshold: 0.8, // the percentile the lift starts at
   aggressionFloor: 0.86, // the seeded per-card wobble: floor and width
   aggressionSpan: 0.28,
   // The salt on that wobble's seed. It is the one knob here that is NOT a
@@ -171,7 +172,14 @@ export const CPU_KNOB_GENERATIONS = Object.freeze({
     at: "2026-11-11",
     git: "ef55c02",
     fingerprint: "a99689d3874c",
-    note: "the top-of-deck lift widened to the 60th percentile — the first knob the CPU lab moved",
+    // SHIPPED 2026-11-11, REVERTED 2026-11-12. Kept because it happened and
+    // because the next person to think 0.6 looks good should find the answer
+    // here rather than measuring it again: it is worth +1.48 +-0.25 against a
+    // table that does not have it and -0.04 +-0.16 against a table that does.
+    // The live defaults no longer match this generation; tuned-2026-11-10 is
+    // what ships, and the two differ only in this knob.
+    reverted: "2026-11-12 — pure denial: +1.48 mixed, -0.04 identical",
+    note: "the top-of-deck lift widened to the 60th percentile — shipped for a day, then reverted",
     knobs: Object.freeze({
       perturbation: 0.25,
       hitterWeights: null,

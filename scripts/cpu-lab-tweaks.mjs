@@ -208,7 +208,19 @@ const QUEUED = [
     // which is the right number only for a room holding exactly one computer
     // (about 3 in 8 of the rooms that have one at all) and even then is
     // measured against computers, never against humans.
-    settled: "SHIPPED — +0.42 +-0.12 pooled at the last holdout, +0.40 on holdout seeds",
+    // REVERTED 2026-11-12, one day after shipping, by the absolute read that
+    // should have been taken first. `bench --versus tuned-2026-11-10` says the
+    // change is worth +1.48 +-0.25 MIXED and -0.04 +-0.16 IDENTICAL: it beats a
+    // table that does not have it and gains nothing against a table that does.
+    // Pure denial, which is what league-duels-measure-denial says must not ship.
+    //
+    // THE LESSON IS ABOUT THE FAR DOSE, NOT ABOUT THIS KNOB. It shipped on
+    // +0.42 at the last holdout, on the reasoning that k=N-1 is where denial has
+    // run out. It has not: at k=N-1 there is still ONE untweaked chair, so the
+    // tweaked chairs still beat the room's par by taking from it. Every dose is
+    // a within-room reading and every within-room reading pays for denial.
+    // `identical` is the only one that does not, and no dose substitutes for it.
+    settled: "REVERTED — +1.48 mixed but -0.04 identical; denial, and the far dose could not see it",
     params: { poolPremiumThreshold: 0.6 }
   },
   {
