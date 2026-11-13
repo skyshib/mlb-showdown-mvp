@@ -6791,6 +6791,25 @@ function renderBatch() {
       litIds.add(row.id);
       litIds.add(row.best.id);
     }
+    // What a lit dot's click should pin: the two faces the arrow compares. A dot
+    // at the tail speaks for its own pick. A dot at the head is a card that was
+    // still sitting there, and more than one manager can have passed it — that
+    // card answers with every pick it beat. A card that is both ends of two
+    // different arrows speaks for its own pick, which is the one it cost
+    // somebody money.
+    const ownRow = new Map(spotlightRows.map((row) => [row.id, row]));
+    const passedBy = new Map();
+    for (const row of spotlightRows) {
+      if (ownRow.has(row.best.id)) continue;
+      if (!passedBy.has(row.best.id)) passedBy.set(row.best.id, []);
+      passedBy.get(row.best.id).push(row.id);
+    }
+    const swapOf = (cardId) => {
+      const own = ownRow.get(cardId);
+      if (own) return { took: [own.id], left: own.best.id };
+      const takens = passedBy.get(cardId);
+      return takens?.length ? { took: takens, left: cardId } : null;
+    };
     const shown = chartManager
       ? chartRecords.filter((rec) => rec.team === chartManager || litIds.has(rec.cardId))
       : chartRecords;
@@ -6805,6 +6824,7 @@ function renderBatch() {
         manager: rec.team,
         slot: rec.slot,
         muted: spotlight && !litIds.has(rec.cardId),
+        swap: swapOf(rec.cardId),
         shape: rec.unplayed ? "x" : null,
         cardId: rec.cardId,
         tipTitle: rec.name,
@@ -6867,7 +6887,7 @@ function renderBatch() {
     : xMode === "manager"
       ? (chartManager ? `Every card ${chartManager} bid on, at what they bid — dots in another manager's colour are ones they lost.` : "Pick a manager in the legend to see only their bids; showing each card's top bid until then.")
       : spotlight
-        ? `Only the picks that were beaten on the board keep their colour. Each arrow runs from the card a manager took to the card at the same slot that was still ${auctionDraft ? "unsold, and went for no more money" : "sitting there, and went later"} and finished at least as good. Everything else is grey. Hover an arrow for the comparison, or a dot for the line.`
+        ? `Only the picks that were beaten on the board keep their colour. Each arrow runs from the card a manager took to the card at the same slot that was still ${auctionDraft ? "unsold, and went for no more money" : "sitting there, and went later"} and finished at least as good. Everything else is grey. Hover an arrow for the comparison, or a dot for the line \u2014 click either end of an arrow to pin both cards side by side.`
         : `Each dot is a drafted player who logged a stat, colored by manager.${chartRecords.some((rec) => rec.unplayed) ? ` A cross is a card that never made the lineup${yMode === "points" ? "" : ", sitting at zero for what it cost"}.` : ""} Hover for the line, click for the card, or filter by manager in the legend.`;
   const positionNote = chartPosition === "all" ? "" : ` Showing ${escapeHtml(chartPosition)} only.`;
   // The best-fit line's slope needs units to mean anything. A step of one dollar
@@ -8356,7 +8376,18 @@ function bindBatchActions() {
     // and the dots are too small to hover precisely anyway.
     const cardDot = event.target.closest("[data-card-id]");
     if (cardDot) {
-      const player = draftedPlayersById().get(cardDot.dataset.cardId);
+      const drafted = draftedPlayersById();
+      // A dot the swap spotlight has lit is one end of an arrow, and the whole
+      // point of the arrow is the comparison — so it pins both faces, the pick
+      // beside the card that was still there, whichever end was clicked.
+      const tookIds = (cardDot.dataset.swapTook ?? "").split(" ").filter(Boolean);
+      const took = tookIds.map((id) => drafted.get(id)).filter(Boolean);
+      const left = cardDot.dataset.swapLeft ? drafted.get(cardDot.dataset.swapLeft) : null;
+      if (took.length && left) {
+        presentCard(previewSwapPair(took, left), `swap-${tookIds.join("-")}-${left.id}`, event.clientX, event.clientY, { faces: took.length + 1 });
+        return;
+      }
+      const player = drafted.get(cardDot.dataset.cardId);
       if (player) presentCard(previewCard(player), `dot-${player.id}`, event.clientX, event.clientY);
       return;
     }
@@ -8667,8 +8698,15 @@ function syncDockPreviewIndicator(row) {
 
 // Drop a rendered player card into the shared preview element and place it near
 // the cursor. Used both by the table hover cards and by clicking a chart dot.
-function presentCard(cardHtml, previewId, clientX, clientY) {
+function presentCard(cardHtml, previewId, clientX, clientY, { faces = 1 } = {}) {
   if (!cardHtml) return;
+  // More than one face needs more than one card's width, and the box is what
+  // sizes the cards inside it. Still capped at the window, where the row wraps.
+  const CARD_WIDTH = 260;
+  const PAIR_GAP = 14;
+  cardPreview.style.width = faces > 1
+    ? `min(${faces * CARD_WIDTH + (faces - 1) * PAIR_GAP}px, calc(100vw - 32px))`
+    : "";
   if (cardPreview.dataset.previewId !== previewId) {
     cardPreview.innerHTML = cardHtml;
     // The face renders with an empty photo window; the cascade fills it (and
@@ -9590,6 +9628,19 @@ function pointsHidden() {
 // appears — over the board, the dock, a roster slot.
 function previewCard(player) {
   return renderPlayerCard(player, { hidePoints: pointsHidden() });
+}
+
+// Both ends of a swap, pinned together: the card (or cards) a manager took
+// beside the one that was still on the board and finished at least as good.
+// Captioned, because faces side by side say nothing about which was the
+// mistake.
+function previewSwapPair(took, left) {
+  const face = (player, label) => `<figure class="preview-pair-card">
+    <figcaption>${escapeHtml(label)}</figcaption>
+    ${previewCard(player)}
+  </figure>`;
+  const picks = took.map((player) => face(player, "Took")).join("");
+  return `<div class="preview-pair">${picks}${face(left, "Still on the board")}</div>`;
 }
 
 function renderRoster(manager, draft) {

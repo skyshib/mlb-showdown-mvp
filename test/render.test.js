@@ -434,6 +434,28 @@ test("the spotlight greys the cloud and points an arrow from the pick to the car
   assert.ok(!html.includes('fill="#0000aa"'), "the muted dot is grey, not its manager colour");
 });
 
+test("both ends of a spotlight arrow name the pair, so either dot can pin the faces", () => {
+  const points = [
+    { x: 4, y: 1, color: "#aa0000", cardId: "took", swap: { took: ["took"], left: "left" }, tipTitle: "Took", tipLines: ["Took"] },
+    // The card still on the board was passed by two managers, so its dot names
+    // both of them — one click, three faces.
+    { x: 30, y: 6, color: "#00aa00", cardId: "left", swap: { took: ["took", "also"], left: "left" }, tipTitle: "Left", tipLines: ["Left"] },
+    { x: 18, y: 2, color: "#0000aa", cardId: "other", muted: true, tipTitle: "Other", tipLines: ["Other"] }
+  ];
+  const html = renderDraftScatter({ points, xLabel: "Pick number", yLabel: "WPAR / 162 games" });
+  assert.ok(html.includes('data-swap-took="took" data-swap-left="left"'));
+  assert.ok(html.includes('data-swap-took="took also" data-swap-left="left"'));
+  // The cloud around them says nothing about swaps.
+  assert.ok(!html.includes('data-card-id="other" data-swap'));
+  // And without a pair no dot claims one.
+  const plain = renderDraftScatter({
+    points: points.map(({ swap: _swap, ...rest }) => rest),
+    xLabel: "Pick number",
+    yLabel: "WPAR / 162 games"
+  });
+  assert.ok(!plain.includes("data-swap-took"));
+});
+
 test("an arrow between two points at the same spot is dropped rather than drawn with no direction", () => {
   const points = [{ x: 5, y: 2, color: "#aa0000", cardId: "a", tipTitle: "A", tipLines: ["A"] }];
   const html = renderDraftScatter({

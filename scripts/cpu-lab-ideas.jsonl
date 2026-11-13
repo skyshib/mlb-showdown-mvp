@@ -117,3 +117,29 @@
 // standings but the inconsistency: positionBonus pays a bat 60 and
 // snakeBalanceBonus pays an arm 35 for the identical structural fact, and
 // nobody chose that gap. A null here is a perfectly good answer.
+// PREDICTION ON THE RECORD, 2026-11-13, room wild-moose-valley, on
+// "arm-balance-parity" and "need-span-flat" above. I NOW EXPECT BOTH TO READ
+// ZERO OR NEGATIVE, and that is a reversal of the WHY fields written two days
+// ago. wild-moose-valley is the within-persona experiment the earlier rooms
+// could not supply: BOTH computers drew `balanced`, same board, same two
+// rivals, only the seeded weight wobble between them -- and they split hard on
+// the very thing these ideas move. Kasey reached on own-turn 3 (Warren Spahn
+// '04, the board's best arm) and finished with a rotation 0.0203 runsPerPa
+// better; Scott waited until turn 10 and filled it with arms his own model
+// ranked 29th, 31st, 31st and 32nd. Five sim seeds, 20000 seasons each:
+//   Scott  waited to turn 10, rotation 0.0361, 47.21 +-0.38
+//   Kasey  reached on turn  3, rotation 0.0158, 45.86 +-0.67
+// Reaching cost 1.35 win points at roughly 2 sigma. The exchange is visible in
+// the box score: Kasey bought 0.34 RA/g of prevention and handed back 0.29 RF/g
+// of offence, which is run-prevention-wins-snake's null bat/arm exchange rate
+// showing up in one room. Pooled over nine rooms and 20 computer seats, the
+// mechanism correlation is unmoved at r = +0.734 (first-starter turn against
+// rotation quality) while the payoff correlation keeps shrinking as rooms
+// arrive: -0.239 at eight rooms, -0.183 now. CAVEATS: one room, one pair, and
+// perturbation moves all their weights, not only their arm appetite, so this is
+// the best natural experiment available and not a controlled swap; it is also a
+// within-league read, so it ranks these two rosters against each other and a
+// shared human rival rather than measuring either absolutely. STILL WORTH THE
+// RUN: the 60-against-35 inconsistency is real and unchosen, the dose curve is
+// what settles it, and a clean null that agrees with this prediction is a
+// result worth having written down.

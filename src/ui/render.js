@@ -931,7 +931,13 @@ export function renderDraftScatter({ points = [], connectors = [], arrows = [], 
       // hovering a manager in the legend or a position in the picker can light
       // the dots that filter would keep, before anybody commits to the click.
       const filterKeys = `${point.manager ? ` data-manager="${escapeHtml(point.manager)}"` : ""}${point.slot ? ` data-pos="${escapeHtml(point.slot)}"` : ""}`;
-      const handles = `${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""}${filterKeys} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}"`;
+      // Both ends of a spotlight arrow name the pair they belong to, so a click
+      // on either one can pin the two faces side by side without the handler
+      // having to know anything about the swap table.
+      const swapKeys = point.swap?.took?.length && point.swap?.left
+        ? ` data-swap-took="${escapeHtml(point.swap.took.join(" "))}" data-swap-left="${escapeHtml(point.swap.left)}"`
+        : "";
+      const handles = `${point.cardId ? `data-card-id="${escapeHtml(point.cardId)}"` : ""}${filterKeys}${swapKeys} ${pointTipAttrs({ title: point.tipTitle, color: point.tipColor ?? point.color, lines: point.tipLines })} tabindex="0" role="img" aria-label="${escapeHtml(point.tipTitle ?? "")}"`;
       if (point.shape === "x") {
         const arm = 3.5;
         const d = `M${(cx - arm).toFixed(1)} ${(cy - arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy + arm).toFixed(1)}M${(cx - arm).toFixed(1)} ${(cy + arm).toFixed(1)}L${(cx + arm).toFixed(1)} ${(cy - arm).toFixed(1)}`;

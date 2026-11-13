@@ -5311,6 +5311,36 @@ button.interesting-game-card:focus-visible {
   transform: translateY(0) scale(1);
 }
 
+/* The swap spotlight pins more than one face at once — the pick beside the card
+   that was still on the board. The box is widened to suit by whoever fills it;
+   here the faces are laid out as a row, which wraps into a column on a screen
+   too narrow to hold it, and each face sizes itself off its own column. */
+.hover-card-preview .preview-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.hover-card-preview .preview-pair-card {
+  flex: 1 1 240px;
+  min-width: 0;
+  margin: 0;
+}
+
+.hover-card-preview .preview-pair-card figcaption {
+  margin-bottom: 5px;
+  color: var(--sheet);
+  background: var(--navy);
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
 .dock-preview-position {
   position: absolute;
   top: 8px;
