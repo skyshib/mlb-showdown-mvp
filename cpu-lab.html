@@ -182,6 +182,9 @@
   #tip .tip-sub { color: var(--text-muted); font-size: 12px; margin-top: 3px; white-space: pre-line; }
   #tip { max-width: 420px; }
   .matrix td.who { cursor: help; }
+  /* The candidate's one number, ahead of the rooms that make it up. */
+  .matrix td.overall { font-weight: 600; font-variant-numeric: tabular-nums; border-right: 1px solid var(--border); }
+  .matrix td.overall .band { font-weight: 400; color: var(--text-muted); font-size: 12px; }
   .matrix td.who:hover, .matrix td.who:focus-visible { color: var(--pos); outline: none; }
   @media (prefers-reduced-motion: reduce) { #tip, .mark { transition: none; } }
 
@@ -1154,11 +1157,21 @@ function tipAttrs({ value, sign, label, sub, aria }) {
     + `aria-label="${escape(aria ?? `${label}: ${value}. ${sub}`)}"`;
 }
 
-// WHERE A ROOM SITS, the same in every panel: its alphabetical rank among all
-// the grid's rooms, as a 0..1 share of the axis. Fixed by the grid, not by
-// which rooms a candidate happens to have reached, so columns line up.
+// THE ORDER THE ROOMS SIT IN, left to right: table size first, then name. Size
+// is the axis a knob is most likely to vary along — a thing that is right at
+// two managers and wrong at eight shows up as a slope rather than as scatter —
+// and within a size the name keeps it stable and findable.
+//
+// Fixed by the GRID, not by which rooms a candidate has reached, so every panel
+// puts a room in the same place and a column can be read down the page.
+function roomOrder() {
+  return [...(data.cells ?? [])]
+    .sort((a, b) => a.teams - b.teams || a.tag.localeCompare(b.tag))
+    .map((cell) => cell.tag);
+}
+
 function roomSlot(tag) {
-  const tags = (data.cells ?? []).map((cell) => cell.tag).sort();
+  const tags = roomOrder();
   const index = tags.indexOf(tag);
   if (index < 0 || tags.length < 2) return 0.5;
   return index / (tags.length - 1);
@@ -1205,7 +1218,8 @@ function renderDose(rows, summary) {
           : ci95(all)
       };
     });
-    points.sort((a, b) => a.cell.localeCompare(b.cell));
+    const order = roomOrder();
+    points.sort((a, b) => order.indexOf(a.cell) - order.indexOf(b.cell));
     if (points.length) series.push({ id: entry.id, points });
   }
   // DRAW ANYTHING WITH TWO READINGS, from any rooms. This used to demand that
@@ -1366,9 +1380,9 @@ function renderDose(rows, summary) {
         <text x="${pad.left - 6}" y="${y(span) + 4}" text-anchor="end">${signed(span, 1)}</text>
         <text x="${pad.left - 6}" y="${y(0) + 4}" text-anchor="end">0</text>
         <text x="${pad.left - 6}" y="${y(-span) + 4}" text-anchor="end">${signed(-span, 1)}</text>
-        <text x="${x(0)}" y="${height - 14}" text-anchor="start">${escape([...(data.cells ?? [])].map((c) => c.tag).sort()[0] ?? "")}</text>
-        <text x="${x(1)}" y="${height - 14}" text-anchor="end">${escape([...(data.cells ?? [])].map((c) => c.tag).sort().at(-1) ?? "")}</text>
-        <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">the ${(data.cells ?? []).length} rooms, alphabetical</text>
+        <text x="${x(0)}" y="${height - 14}" text-anchor="start">${escape(roomOrder()[0] ?? "")}</text>
+        <text x="${x(1)}" y="${height - 14}" text-anchor="end">${escape(roomOrder().at(-1) ?? "")}</text>
+        <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">the ${(data.cells ?? []).length} rooms, smallest table first</text>
         ${path}
         ${marks}
       </svg>
@@ -1379,7 +1393,11 @@ function renderDose(rows, summary) {
 // ---- candidate by board -----------------------------------------------------
 function renderMatrix(rows, summary) {
   const table = document.getElementById("matrix");
-  const cells = state.cell === "all" ? data.cells : data.cells.filter((cell) => cell.tag === state.cell);
+  // Same order as the dot panels — table size first, then name — so a room is
+  // in the same place wherever it appears on the page.
+  const order = roomOrder();
+  const cells = (state.cell === "all" ? [...data.cells] : data.cells.filter((cell) => cell.tag === state.cell))
+    .sort((a, b) => order.indexOf(a.tag) - order.indexOf(b.tag));
   const wanted = (row) => {
     if (state.matrixMode === "dose-avg") return Boolean(row.k);
     if (state.matrixMode === "dose-lone") return (row.k ?? 0) === 1;
@@ -1439,7 +1457,13 @@ function renderMatrix(rows, summary) {
       if (stat) span = Math.max(span, Math.abs(stat.mean));
     }
   }
-  const head = `<thead><tr><th>candidate</th>${cells.map((cell) =>
+  // THE HEADLINE FIRST. A reader scanning this table wants the candidate's
+  // one number before the thirty-nine that make it up, and it is the number
+  // every verdict on the page is actually about.
+  const overall = (id) => averageOfRows(rows.filter((row) => row.tweak === id
+    && row.mode.startsWith("dose-") && controlKey(row) === state.control));
+  const head = `<thead><tr><th>candidate</th><th class="cell-head">average`
+    + `<span>every room, every adoption level</span></th>${cells.map((cell) =>
     `<th class="cell-head">${cell.tag}<span>${cellNote(cell)}</span></th>`).join("")}</tr></thead>`;
   // WHAT THE TWEAK ACTUALLY IS, on the name. Every knob it moves, the shipped
   // value it moves from, what that knob does, and — for anything filed to the
@@ -1466,6 +1490,13 @@ function renderMatrix(rows, summary) {
   };
   const body = present.map((entry) => `<tr>
     <td class="who" tabindex="0" ${whatItIs(entry)}>${escape(entry.id)}${entry.fixture ? ' <span class="muted">*</span>' : ""}</td>
+    ${(() => {
+      const all = overall(entry.id);
+      if (!all.n) return `<td class="cell empty">—</td>`;
+      const clear = Number.isFinite(all.ci) && Math.abs(all.mean) > all.ci;
+      return `<td class="overall ${clear ? (all.mean >= 0 ? "num pos" : "num neg") : "muted"}">`
+        + `${signed(all.mean)}<span class="band"> ±${Number.isFinite(all.ci) ? all.ci.toFixed(2) : "?"}</span></td>`;
+    })()}
     ${cells.map((cell) => {
       const stat = valueOf(entry.id, cell.tag);
       if (!stat) return `<td class="cell empty" title="not measured">—</td>`;
