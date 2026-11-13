@@ -1215,6 +1215,7 @@ if (command === "list") {
   // the new control, and it gets measured first because it is the only thing in
   // the queue with a claim.
   const pretenders = command === "bench" ? new Map() : challengerRank(rows);
+  const cooking = command === "bench" ? new Map() : alreadyCooking(rows);
   const order = command === "bench"
     ? ["null"]
     : [...tweakIds].sort((a, b) => {
@@ -1230,6 +1231,12 @@ if (command === "list") {
       const ba = Boolean(tweakById(a).bracketOf);
       const bb = Boolean(tweakById(b).bracketOf);
       if (ba !== bb) return Number(bb) - Number(ba);
+      // THEN WHATEVER WAS ALREADY COOKING, best reading first, ahead of the
+      // candidates nobody has touched.
+      const ka = cooking.get(a);
+      const kb = cooking.get(b);
+      if (Boolean(ka) !== Boolean(kb)) return Number(Boolean(kb)) - Number(Boolean(ka));
+      if (ka && kb) return kb.mean - ka.mean;
       return 0;
     });
   console.log(`cpu-lab ${command} — ${LEAGUES} leagues x ${RUNS} games a batch, persona=${PERSONA}, `
@@ -1262,6 +1269,17 @@ if (command === "list") {
       const tweak = tweakById(id);
       console.log(`    ${id.padEnd(30)} ${Object.entries(tweak.params)
         .map(([k, v]) => `${k}=${v}`).join(" ")} — a neighbour of ${tweak.bracketOf}`);
+    }
+    console.log("");
+  }
+  const warm = order.filter((id) => cooking.has(id) && !pretenders.has(id) && !tweakById(id).bracketOf);
+  if (warm.length) {
+    console.log(`  ${warm.length} already cooking against this bidder or the one before it, `
+      + `best reading first, ahead of the untouched queue:`);
+    for (const id of warm) {
+      const claim = cooking.get(id);
+      console.log(`    ${id.padEnd(30)} ${signed(claim.mean).padStart(6)} over `
+        + `${String(claim.n).padStart(3)} readings`);
     }
     console.log("");
   }
@@ -1946,6 +1964,50 @@ function shipCheck(id) {
 // conservative choice and the honest one: it carries the spread BETWEEN rooms,
 // not just the luck inside each, so a tweak that helps in half the rooms and
 // hurts in the other half reads as unsettled rather than as a confident zero.
+// WHAT WAS ALREADY COOKING. A ship strands every reading taken against the
+// bidder it replaced, so the morning after one the queue looks uniform — 20-odd
+// candidates all at zero readings — and the ones that were halfway to an answer
+// sort level with the ones nobody has ever touched.
+//
+// That is the wrong order. A candidate with a promising partial reading against
+// the bidder that just fell is the best guess available about what will do well
+// against the new one; a candidate at zero readings is a guess about nothing. So
+// they go ahead of the untouched queue, ordered best-first, and behind the
+// brackets — the bracket still outranks them because it is the only thing that
+// can say the value just shipped is the wrong one.
+//
+// Scoped to the PREVIOUS throne, not to any older one: a candidate measured
+// three thrones ago has been passed over repeatedly and has no claim on the
+// front of the queue.
+function alreadyCooking(rows) {
+  const gens = Object.entries(CPU_KNOB_GENERATIONS)
+    .filter(([, g]) => g.knobs && Number.isFinite(g.seq))
+    .sort((a, b) => a[1].seq - b[1].seq);
+  const at = gens.findIndex(([, g]) => cpuTunables(g.knobs).key === "");
+  const recent = new Set([BASELINE, ...(at > 0 ? [gens[at - 1][0]] : [])]);
+  const out = new Map();
+  for (const tweak of TWEAKS) {
+    if (tweak.fixture || tweak.settled) continue;
+    const mine = rows.filter((row) => row.tweak === tweak.id
+      && row.params === paramKey(tweak.params)
+      && row.mode.startsWith("dose-")
+      && recent.has(baselineOf(row))
+      && row.persona === PERSONA && row.perturb === (PERTURB == null ? "shipped" : PERTURB)
+      && (row.versus ?? "defaults") === "defaults" && (row.holdout ?? "") === ""
+      && methodOf(row) === METHOD);
+    if (!mine.length) continue;
+    const levels = new Map();
+    for (const row of mine) {
+      const key = `${row.cell}|${row.mode}`;
+      if (!levels.has(key)) levels.set(key, []);
+      levels.get(key).push(...row.edges);
+    }
+    const each = [...levels.values()].map((edges) => mean(edges));
+    out.set(tweak.id, { mean: mean(each), n: each.length });
+  }
+  return out;
+}
+
 // ---- the throne ------------------------------------------------------------
 // WHO IS CHALLENGING, and why "accepted" is not a resting place.
 //
