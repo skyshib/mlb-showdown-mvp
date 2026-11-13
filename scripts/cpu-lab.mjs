@@ -141,10 +141,12 @@ const USAGE = `cpu-lab — a standing bench for CPU draft tweaks
               gaps and raising this is how you add precision.
   --minutes   stop starting new work after this long. Finished rows are kept.
   --accept    stop and accept once the average is above zero with at least
-              this confidence (default 0.975). Accepting means "measure this
-              one properly", never "ship it".
+              this confidence (default 0.999 — which gives a 3.7% false-accept
+              rate in practice, not 0.1%, because the question is asked after
+              every reading). Accepting means "measure this one properly",
+              never "ship it".
   --kill      stop and kill once this much of the posterior sits below zero
-              (default 0.80). --kill 0 measures everything regardless.
+              (default 0.75). --kill 0 measures everything regardless.
   --accept-above  the value the average must beat to be accepted (default 0).
   --prior     how big effects are expected to be before measuring anything
               (default 0.5 win points). Centred on zero, because nearly all
@@ -887,33 +889,43 @@ function verdict(mixed, abs, id, dose = { lone: { n: 0 }, crowd: { n: 0 } }) {
 // THE RULE (Skylar's, 2026-11-13). A candidate keeps being measured until the
 // readings so far say one of two things:
 //
-//   ACCEPT  the average is above zero with 97.5% confidence
-//   KILL    80% of the posterior sits below zero
+//   ACCEPT  the average is above zero with 99.9% confidence
+//   KILL    75% of the posterior sits below zero
 //
 // Deliberately asymmetric. Accepting only means "keep measuring this one
 // properly", so a wrong accept costs time; killing ends the run, so it wants
 // to be the easier call for a candidate that is going nowhere.
 //
-// SIMULATED AGAINST THE ALTERNATIVES before it was built, at the measured
-// spread of 0.9 a reading. Against the rule it replaced (kill when the chance
-// of clearing +0.2 falls under 3%) it decides two to three times faster — a
-// true -0.5 dies in 4 readings against 6, a true null in 7 against 22 — and it
-// finds real gains far better, accepting a true +0.3 in 81% of runs against
-// 59%.
+// THE NUMBERS ARE FITTED, not chosen by taste. Skylar asked for at most a 5%
+// false-accept rate on a true null and at most 20% of genuine gains killed;
+// 120 combinations were simulated against the measured spread of 0.9 a reading,
+// 600 runs each, and 49 of them qualify. These are the ones that do it while
+// still killing fast:
 //
-// IT COSTS A 21% FALSE-ACCEPT RATE ON A TRUE NULL, against 7%, and that is
-// repeated looking doing what repeated looking does: test "above zero at
-// 97.5%" ninety-three times and it will come up by chance. Tolerable only
-// because accepting buys measurement rather than a change to the bidder.
+//                        accept kill min | false-acc  kills a real +0.3 | kills -1.0 in
+//   0.999  0.75  5          <- this       3.7%          14.5%             5 readings
+//   0.975  0.70  8                        5.0%          13.3%             8 readings
+//   0.99   0.70  5                        4.7%          18.5%             5 readings
 //
-// The accept bar is ABOVE ZERO and not above --worth, which was tried: at
-// +0.2 the false accepts drop to 6%, but a genuine +0.3 then runs the whole
-// grid without deciding 64% of the time, which is worse than being wrong.
+// 99.9% LOOKS ABSURDLY STRICT AND IS NOT. Testing "is the average above zero"
+// after every one of ninety-three readings gives ninety-three chances to be
+// wrong, so a nominal 0.1% bar yields a 3.7% rate in practice. The previous
+// setting of 97.5% was, for the same reason, really giving 21.7%. Any nominal
+// figure here has to be read as far looser than it sounds.
+//
+// The accept bar is ABOVE ZERO rather than above some worth-shipping figure,
+// which was tried: at +0.2 the false accepts fall to 6%, but a genuine +0.3
+// then runs the whole grid without deciding 64% of the time, and failing to
+// decide is worse than occasionally deciding wrong.
+//
+// A candidate that is neither accepted nor killed is NOT lost — it runs the
+// full grid and lands in the report with its number. The early accept is a
+// shortcut, so a lower accept rate costs time rather than discoveries.
 const PRIOR_SD = Number(args.prior ?? 0.5);        // most tweaks land inside ±0.5 win points
 const ACCEPT_ABOVE = Number(args["accept-above"] ?? 0);
-const ACCEPT_AT = Number(args.accept ?? 0.975);
-const KILL_AT = Number(args.kill ?? 0.80);
-const MIN_LOOKS = Number(args["min-looks"] ?? 3);
+const ACCEPT_AT = Number(args.accept ?? 0.999);
+const KILL_AT = Number(args.kill ?? 0.75);
+const MIN_LOOKS = Number(args["min-looks"] ?? 5);
 
 // Φ, good to about 1e-7 — plenty for a stopping rule.
 function normalCdf(z) {
