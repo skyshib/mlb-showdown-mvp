@@ -1524,18 +1524,36 @@ function shipCheck(id) {
   (roomsHit >= MIN_ROOMS ? ok : no).push(
     `it moves something in ${roomsHit} of ${CELLS.length} rooms`);
 
-  // 3. Is another promoted candidate fighting it for the same knob?
-  const rivals = TWEAKS.filter((other) => other.id !== id && !other.fixture && !other.settled
+  // 3. OTHER VALUES OF THE SAME KNOB. Usually not a conflict but a BRACKET: a
+  // knob that measured as real gets its neighbours queued, and several of them
+  // reading positive is that working. The question then is not "which of these
+  // competing candidates" but "how far does this knob want to move", and the
+  // answer is the best of them rather than whichever crossed the bar first —
+  // which would be picked by noise.
+  const family = TWEAKS.filter((other) => other.id !== id && !other.fixture && !other.settled
     && Object.keys(other.params ?? {}).some((knob) => knobs.includes(knob)))
-    .filter((other) => {
-      const theirs = averageBoost(rows.filter((row) => sameRoom(row) && row.tweak === other.id
-        && row.mode.startsWith("dose-")));
-      return theirs.n > 1 && theirs.mean > 0 && Math.abs(theirs.mean) > theirs.ci;
-    });
-  (rivals.length ? no : ok).push(rivals.length
-    ? `${rivals.length} other promoted candidate(s) move the same knob — only one can ship: `
-      + rivals.map((other) => other.id).join(", ")
-    : "no other promoted candidate moves these knobs");
+    .map((other) => ({
+      other,
+      stat: averageBoost(rows.filter((row) => sameRoom(row) && row.tweak === other.id
+        && row.mode.startsWith("dose-")))
+    }))
+    .filter((kin) => kin.stat.n > 1);
+  const better = family.filter((kin) => kin.stat.mean > boost.mean
+    && Math.abs(kin.stat.mean) > kin.stat.ci);
+  const unsettled = family.filter((kin) => kin.stat.n > 1 && Math.abs(kin.stat.mean) <= kin.stat.ci);
+  if (!family.length) {
+    ok.push("no other candidate moves these knobs");
+  } else if (better.length) {
+    no.push(`a better value of the same knob is on the board: `
+      + better.map((kin) => `${kin.other.id} at ${signed(kin.stat.mean)}`).join(", ")
+      + ` against this one's ${signed(boost.mean)} — ship the best of a bracket, not the first past the bar`);
+  } else if (unsettled.length) {
+    no.push(`${unsettled.length} other value(s) of the same knob are still undecided — `
+      + `finish the bracket before picking: ${unsettled.map((kin) => kin.other.id).join(", ")}`);
+  } else {
+    ok.push(`the best of ${family.length + 1} values tried on this knob`
+      + ` (${[...family.map((kin) => `${kin.other.id} ${signed(kin.stat.mean)}`), `this one ${signed(boost.mean)}`].join(", ")})`);
+  }
 
   // 4. Does it hold on seeds that had no hand in choosing it?
   const held = rows.filter((row) => row.tweak === id && (row.holdout ?? "") === "-holdout"
