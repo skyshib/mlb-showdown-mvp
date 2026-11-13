@@ -1266,20 +1266,12 @@ function renderDose(rows, summary) {
         point.at = x(point.k / point.teams) + (index - (together.length - 1) / 2) * NUDGE;
       });
     }
-    const boards = [...new Set(line.points.map((point) => point.cell))];
-    const path = boards.map((cell) => {
-      const own = line.points.filter((point) => point.cell === cell);
-      const stroke = own.map((point, index) =>
-        `${index ? "L" : "M"}${point.at.toFixed(1)} ${y(point.mean).toFixed(1)}`).join(" ");
-      const end = own[own.length - 1];
-      // Label only a board with a line to label. One-point boards were each
-      // getting a name tag, which on this grid is a drift of thirty labels over
-      // a chart with thirty dots. Hovering any dot names its room.
-      return `<path d="${stroke}" fill="none" stroke="var(--baseline)" stroke-width="2" />`
-        + (boards.length > 1 && own.length > 1
-          ? `<text x="${(end.at + 7).toFixed(1)}" y="${y(end.mean) + 3}">${escape(cell.split("-")[0])}</text>`
-          : "");
-    }).join("");
+    // NO STROKES BETWEEN THE DOTS. A line joining a board's readings looked
+    // like a trend and was not one: on this grid most boards have a single
+    // point, the rest have two or three, and at panel size the strokes were a
+    // grey tangle behind the only thing worth reading. The dots carry it. The
+    // board's name is on each dot's hover.
+    const path = "";
     const marks = line.points.map((point) => {
       const colour = point.mean >= 0 ? "var(--pos)" : "var(--neg)";
       const at = point.at;
