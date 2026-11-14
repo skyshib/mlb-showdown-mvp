@@ -77,7 +77,15 @@ test("a finished draft reads as settings, rosters, and what each card cost", () 
   const first = skylar.roster[0];
   assert.equal(first.pick, 1, "the roster keeps the order it was filled in");
   assert.equal(first.round, 1);
-  assert.ok(first.name && first.pos && first.kind);
+  // A PITCHER HAS NO FIELDING POSITION, so `pos` is "" for him by design —
+  // positionsLabel lists the spots a card can field and a pitcher fields none.
+  // This asserted `first.pos` outright and passed only while the first pick
+  // happened to be a bat; it started failing the moment the snake tuning moved
+  // the opening pick to an arm, which is the change working rather than breaking.
+  assert.ok(first.name && first.kind, "every card files a name and a kind");
+  if (first.kind === "hitter") {
+    assert.ok(first.pos, "a hitter files the positions he can field");
+  }
   assert.equal(typeof first.pts, "number");
 });
 
