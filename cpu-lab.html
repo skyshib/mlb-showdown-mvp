@@ -142,6 +142,9 @@
   .plot .row-name { fill: var(--text-primary); font-size: 12px; }
   .plot .value { fill: var(--text-secondary); font-size: 11px; }
   .plot .zero { stroke: var(--baseline); stroke-width: 1; }
+  /* The auction/snake boundary. Quiet enough to read past, present enough that
+     a knob live in one format and dead in the other is obvious at a glance. */
+  .plot .split { stroke: var(--gridline); stroke-width: 1; stroke-dasharray: 2 3; }
   .plot .grid { stroke: var(--gridline); stroke-width: 1; }
   .plot .whisker { stroke-width: 2; stroke-linecap: round; }
   /* ---- the hover layer ----
@@ -1083,11 +1086,16 @@ function renderControls() {
   }
 
   const cells = document.getElementById("cell-filter");
-  const tags = data.cells.map((cell) => cell.tag);
+  // Same order as the charts. `data.cells` arrives in the GRID's own order,
+  // which is cheapest-room-first because the stopping rule depends on deciding
+  // before the expensive rooms are bought — meaningful to the bench, and nothing
+  // to a reader scanning for a room they just saw on an axis.
+  const byTag = new Map(data.cells.map((cell) => [cell.tag, cell]));
+  const tags = roomOrder();
   if (cells.dataset.tags !== tags.join(",")) {
     cells.dataset.tags = tags.join(",");
     cells.innerHTML = `<option value="all">every board</option>`
-      + data.cells.map((cell) => `<option value="${cell.tag}">${cell.tag} — ${cellNote(cell)}</option>`).join("");
+      + tags.map((tag) => `<option value="${tag}">${tag} — ${cellNote(byTag.get(tag))}</option>`).join("");
   }
   cells.value = state.cell;
 }
@@ -1516,16 +1524,40 @@ function whatItIs(entry) {
   });
 }
 
-// THE ORDER THE ROOMS SIT IN, left to right: table size first, then name. Size
-// is the axis a knob is most likely to vary along — a thing that is right at
-// two managers and wrong at eight shows up as a slope rather than as scatter —
-// and within a size the name keeps it stable and findable.
+// WHERE THE AUCTION ENDS AND THE SNAKE BEGINS. A rule rather than a longer
+// caption: most knobs are live in one format and inert in the other, so the eye
+// needs to know which half it is reading, and the panels are too narrow to say
+// it in words — the sentence that said it ran across its neighbours.
+function formatSplit(x, pad, height) {
+  const order = roomOrder();
+  const byTag = new Map((data.cells ?? []).map((cell) => [cell.tag, cell]));
+  const at = order.findIndex((tag) => byTag.get(tag)?.type === "snake");
+  if (at <= 0 || at >= order.length) return "";
+  // Between the last auction room and the first snake one, in the same
+  // coordinates the dots use.
+  const where = x((at - 0.5) / (order.length - 1));
+  return `<line class="split" x1="${where}" y1="${pad.top}" x2="${where}" y2="${height - pad.bottom}" />`;
+}
+
+// THE ORDER THE ROOMS SIT IN, left to right: AUCTION then SNAKE, then table
+// size, then name.
+//
+// Draft format leads because it is the sharpest split a knob can fall along —
+// most of them are live in one format and inert in the other, and several of the
+// day's results were auction-only or snake-only. Grouping the two means a
+// format-specific knob reads as one solid half and one empty half rather than as
+// a comb. Size is the next axis, because a thing that is right at two managers
+// and wrong at eight shows up as a slope within its group; the name is last and
+// only keeps the order stable and findable.
 //
 // Fixed by the GRID, not by which rooms a candidate has reached, so every panel
 // puts a room in the same place and a column can be read down the page.
+const FORMAT_RANK = (cell) => (cell.type === "snake" ? 1 : 0);
 function roomOrder() {
   return [...(data.cells ?? [])]
-    .sort((a, b) => a.teams - b.teams || a.tag.localeCompare(b.tag))
+    .sort((a, b) => FORMAT_RANK(a) - FORMAT_RANK(b)
+      || a.teams - b.teams
+      || a.tag.localeCompare(b.tag))
     .map((cell) => cell.tag);
 }
 
@@ -1775,7 +1807,9 @@ function renderDose(rows, summary) {
         <text x="${pad.left - 6}" y="${y(-span) + 4}" text-anchor="end">${signed(-span, 1)}</text>
         <text x="${x(0)}" y="${height - 14}" text-anchor="start">${escape(roomOrder()[0] ?? "")}</text>
         <text x="${x(1)}" y="${height - 14}" text-anchor="end">${escape(roomOrder().at(-1) ?? "")}</text>
-        <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">the ${(data.cells ?? []).length} rooms, smallest table first</text>
+        <text x="${x(0.5)}" y="${height - 2}" text-anchor="middle">`
+          + `${(data.cells ?? []).length} rooms · auction, then snake</text>
+        ${formatSplit(x, pad, height)}
         ${path}
         ${marks}
       </svg>
